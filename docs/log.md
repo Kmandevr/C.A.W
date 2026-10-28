@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner settled the visual details: calm neon, custom themes, a bundled mono font, a density switch, and a mode badge with key hints and toasts ([UI design](ui.md)). Still waiting for the go.
+
 - 2026-10-28: Owner asked for Vim-style control across the app (modes, counts, `:` commands, `.` and recorded macros, optional Vim in the code editor); added to the [actions](actions.md) draft. Still waiting for the go.
 
 - 2026-10-28: Owner asked for Reaper-style customisable keys and macros; drafted the action catalogue with default keys in [actions](actions.md) for review. Still waiting for the go.

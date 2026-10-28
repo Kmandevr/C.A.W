@@ -8,6 +8,17 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Visual details (owner)
+
+- Calm neon stays.
+- Custom themes, with an in-app editor and a theme file.
+- System font plus one bundled monospace font.
+- A switch between comfortable and compact density.
+- A mode badge next to the BPM, key hints and toasts.
+- A `:` bar only while typing a command, with no status line.
+
+Details in [UI design](ui.md).
+
 ## 2026-10-28: Vim-style control across the app (owner)
 
 - **Vim ideas everywhere a keyboard is connected:** modes, counts, a `:` command line, `.` repeat and recorded macros.

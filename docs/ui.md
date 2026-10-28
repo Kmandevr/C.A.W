@@ -13,6 +13,18 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
 - **Phone orientation:** portrait and landscape matter equally, so every screen gets a proper layout for both.
 - **Mix view:** the session grid (layers × scenes).
 - **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
+- **Look details** (owner, 2026-10-28):
+  - **Calm neon** stays: near-black, thin neon lines, and glow only on what's active (playhead, selected notes, meters).
+  - **Themes:** custom themes, with an in-app theme editor and live preview. It saves a readable theme file you can export, share or let an agent edit. Calm neon is the default, with a couple of starter themes.
+  - **Fonts:** the system font for the UI, plus one bundled monospace font for code and numbers, so they look the same on phone and PC. The proposal is JetBrains Mono:
+    - **[Fact]** licence: SIL Open Font License 1.1; the licence file and copyright must ship with the font. Seen in mirrors of its licence ([JetBrains Mono licence](https://maxibestof.one/fonts/coding/jetbrains-mono-LICENSE.txt)), 2026-10-28. Check the official repo before adding it and recording it in [decisions](decisions.md).
+    - **[Assumption]** size: about 300 KB.
+  - **Density:** a setting to switch between comfortable (48 dp targets, the default on phones) and compact (more bars and layers on screen).
+  - **Keyboard feedback:**
+    - **Mode badge:** a small tag next to the BPM shows the Vim mode (NORMAL green, INSERT yellow, VISUAL pink), with a red dot while a macro records.
+    - **Command line:** `:` opens a one-line bar only while you type a command. There is no permanent status line.
+    - **Key hints:** after a prefix key, a small popup lists the keys that can follow.
+    - **Toasts:** a brief label says what an action did ("Quantize 1/16").
 - **Audience:** built for the owner first. It should be fast for someone who knows it, with tooltips and tips but no onboarding tour yet.
 - **PC:** mouse and keyboard, and **everything must also be reachable with the keyboard alone**. Shortcuts follow Reaper's where they overlap.
 - **Library:** folders (matching the library repo) plus tags and search across them, with favourites pinned.
