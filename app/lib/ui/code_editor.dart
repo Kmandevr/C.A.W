@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
-const _keywords = {'let', 'param', 'in', 'global', 'export', 'fn', 'on', 'off'};
+const _keywords = {'let', 'param', 'in', 'global', 'export', 'fn', 'on', 'off', 'slide', 'prob', 'ratchet'};
 const _vars = {'t', 'sr', 'rate', 'bpm', 'beat', 'bar', 'step', 'pos', 'phase', 'time', 'seed', 'pi'};
 const _builtins = {
   'sin', 'cos', 'tan', 'abs', 'floor', 'ceil', 'round', 'trunc', 'sqrt', 'exp', 'log', 'tanh', 'sign', 'fract', //

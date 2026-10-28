@@ -1,0 +1,21 @@
+---
+caw: 1
+kind: pattern
+name: Acid line
+summary: One bar of A minor acid with two slides, a ratchet and a note that plays half the time
+length: 16
+---
+// at = start in 16ths, len = length in 16ths, vel = 0..1
+// extras: slide (glide into the next note), ratchet N (repeat N times), prob P (chance it plays)
+// at  note  len  vel  extras
+0      A1    2    1
+2      A2    1    0.7
+3      A1    1    0.8  slide
+4      C2    2    0.9
+6      A1    1    0.6  prob 0.5
+8      E2    2    1    ratchet 2
+10     G1    1    0.7
+11     A1    1    0.8  slide
+12     A2    2    0.9
+14     G2    1    0.6
+15     E2    1    0.8

@@ -8,6 +8,7 @@
 
 #include "compile.h"
 #include "engine.h"
+#include "pattern.h"
 #include "vm.h"
 
 namespace caw {
@@ -48,6 +49,15 @@ std::vector<LibrarySource> projectLibraries(const ProjectSpec& p) {
 // Every module a render uses must compile, so an export never silently drops a broken one.
 bool checkModules(const ProjectSpec& p, std::string& err) {
     const std::vector<LibrarySource> libs = projectLibraries(p);
+    for (const LayerSpec& l : p.layers) {
+        if (l.pattern.empty()) continue;
+        const ModuleSpec* m = p.module(l.pattern);
+        PatternResult pr = m ? parsePattern(m->source) : PatternResult{};
+        if (!pr.pattern) {
+            err = "layer '" + l.name + "': " + (m ? "pattern '" + l.pattern + "': " + pr.error : "no pattern '" + l.pattern + "'");
+            return false;
+        }
+    }
     for (const LayerSpec& l : p.layers)
         for (const std::string& id : l.chain) {
             const ModuleSpec* m = p.module(id);
@@ -131,8 +141,13 @@ bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult&
     std::vector<double> table(static_cast<size_t>(out.frames), 0.0);
 
     // One frame is one cycle: t and n run 0..2047, phase and pos 0..1, and sr is 2048, so sine(1) is one cycle.
-    double tb[kBlock], ph[kBlock], zero[kBlock], srb[kBlock], bpmb[kBlock], seedb[kBlock];
+    double tb[kBlock], ph[kBlock], zero[kBlock], srb[kBlock], bpmb[kBlock], seedb[kBlock], ones[kBlock], first[kBlock],
+        c4[kBlock];
     std::fill_n(zero, kBlock, 0.0);
+    std::fill_n(ones, kBlock, 1.0);
+    std::fill_n(first, kBlock, 0.0);
+    first[0] = 1.0;
+    std::fill_n(c4, kBlock, 60.0);
     std::fill_n(srb, kBlock, static_cast<double>(kWavetableFrame));
     std::fill_n(bpmb, kBlock, p.bpm);
     std::fill_n(seedb, kBlock, static_cast<double>(p.seed));
@@ -175,6 +190,14 @@ bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult&
             ctx.vars[static_cast<int>(Var::Step)] = zero;
             ctx.vars[static_cast<int>(Var::Beat)] = zero;
             ctx.vars[static_cast<int>(Var::Bar)] = zero;
+            // One held note whose frequency is one cycle per frame, so sine(freq) is a single cycle.
+            ctx.vars[static_cast<int>(Var::Trig)] = b == 0 ? first : zero;
+            ctx.vars[static_cast<int>(Var::Gate)] = ones;
+            ctx.vars[static_cast<int>(Var::Note)] = c4;
+            ctx.vars[static_cast<int>(Var::Freq)] = ones;
+            ctx.vars[static_cast<int>(Var::Vel)] = ones;
+            ctx.vars[static_cast<int>(Var::Rel)] = zero;
+            ctx.vars[static_cast<int>(Var::Bend)] = zero;
             const double* y = inst.process(ctx);
             for (int i = 0; i < kBlock; ++i) table[static_cast<size_t>(f) * kWavetableFrame + b + i] = y[i];
         }
@@ -231,7 +254,11 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             only.mute = false;
             only.solo = false;
             int64_t len;
-            if (only.lengthSteps > 0) {
+            if (!only.pattern.empty()) {
+                // A pattern sets the layer's length.
+                p.loopBars = 64;
+                len = loopFrames(p, sr, parsePattern(p.module(only.pattern)->source).pattern->steps(p.beatsPerBar));
+            } else if (only.lengthSteps > 0) {
                 p.loopBars = 64;  // long enough that the project loop never cuts the layer short
                 len = loopFrames(p, sr, only.lengthSteps);
             } else {

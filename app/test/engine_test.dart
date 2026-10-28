@@ -60,6 +60,34 @@ void main() {
     await dir.delete(recursive: true);
   }, skip: skip);
 
+  test('a generator plays the notes of a pattern', () async {
+    final templates = Engine.templates();
+    final synth = templates.firstWhere((t) => t.file == 'acid-synth.caw');
+    final line = templates.firstWhere((t) => t.file == 'acid-line.caw');
+    final info = Engine.check(line.source);
+    expect(info.ok, isTrue);
+    expect(info.isPattern, isTrue);
+    expect(info.noteCount, 11);
+    expect(Engine.check('---\nkind: pattern\n---\n0 H2 1').line, 4);
+    final p = ProjectDoc(id: 'p', name: 'T', modules: [
+      ModuleDoc(id: 's', name: 'Acid', source: synth.source),
+      ModuleDoc(id: 'n', name: 'Line', source: line.source),
+    ], layers: [
+      LayerDoc(id: 'l', name: 'Acid', color: 0, generatorId: 's', patternId: 'n'),
+    ]);
+    final e = Engine.create();
+    final result = await e.setProject(p.toEngineJson());
+    expect(result['n']!.ok, isTrue);
+    expect(result['s']!.warnings, isEmpty);
+    e.dispose();
+    final dir = await Directory.systemTemp.createTemp('caw');
+    final out = '${dir.path}/acid.wav';
+    final job = RenderJob.start(RenderRequest(projectJson: p.toEngineJson(), kind: ExportKind.loop, outPath: out));
+    expect(await job.result, isNull);
+    expect(await File(out).length(), greaterThan(100000));
+    await dir.delete(recursive: true);
+  }, skip: skip);
+
   test('the function library and library modules come through the C API', () {
     final lib = Library.builtIn;
     final adsr = lib.find('env.adsr')!;

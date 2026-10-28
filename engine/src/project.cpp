@@ -84,6 +84,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             if (spec.id.empty()) continue;
             spec.chain = idList(l.get("chain"));
             spec.lengthSteps = clampi(l.number("length_steps", 0), 0, 64 * 16 * 16);
+            spec.pattern = l.string("pattern");
             spec.volume = clampd(l.number("volume", 0.8), 0, 1);
             spec.pan = clampd(l.number("pan", 0), -1, 1);
             spec.mute = l.boolean("mute", false);
@@ -97,6 +98,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     if (const Json* a = root.get("audition"); a && a->type == Json::Type::Object) {
         out.auditionChain = idList(a->get("chain"));
         out.auditionSteps = clampi(a->number("length_steps", 0), 0, 64 * 16 * 16);
+        out.auditionPattern = a->string("pattern");
     }
     out.auditionOnly = root.boolean("audition_only", false) && !out.auditionChain.empty();
     return true;

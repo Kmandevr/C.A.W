@@ -11,6 +11,7 @@
 #include "compile.h"
 #include "docs.h"
 #include "json.h"
+#include "pattern.h"
 #include "render.h"
 #include "wav.h"
 
@@ -42,6 +43,13 @@ const char* const kOutOfMemory = "out of memory: the project is too big for this
 
 char* caw_check(const char* source) try {
     using namespace caw;
+    if (moduleKindOf(source ? source : "") == ModuleKind::Pattern) {
+        PatternResult pr = parsePattern(source);
+        if (!pr.pattern)
+            return dup("{\"ok\":false,\"kind\":\"pattern\",\"error\":\"" + jsonEscape(pr.error) +
+                       "\",\"line\":" + std::to_string(pr.line) + ",\"col\":" + std::to_string(pr.col) + "}");
+        return dup("{\"ok\":true," + describePattern(*pr.pattern) + "}");
+    }
     CompileResult r = compileModule(source ? source : "");
     if (!r.program)
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(r.error) + "\",\"line\":" + std::to_string(r.line) +

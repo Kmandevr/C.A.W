@@ -102,8 +102,12 @@ class AppState extends ChangeNotifier {
     final crush = add('bitcrush.caw');
     add('glitch-fx.caw');
     add('fold.caw');
+    final acid = add('acid-synth.caw');
+    final line = add('acid-line.caw');
+    add('chords.caw');
     var c = 0;
-    void layer(String name, ModuleDoc? gen, int steps, double vol, [List<ModuleDoc?> fx = const []]) {
+    void layer(String name, ModuleDoc? gen, int steps, double vol,
+        [List<ModuleDoc?> fx = const [], ModuleDoc? pattern, bool mute = false]) {
       if (gen == null) return;
       p.layers.add(LayerDoc(
           id: newId('l'),
@@ -111,39 +115,48 @@ class AppState extends ChangeNotifier {
           color: c++ % 4,
           generatorId: gen.id,
           effectIds: [for (final f in fx) if (f != null) f.id],
+          patternId: pattern?.id,
           lengthSteps: steps,
-          volume: vol));
+          volume: vol,
+          mute: mute));
     }
 
     layer('Kick', kick, 16, 0.9);
     layer('Bass', bass, 16, 0.7);
     layer('Hats', hats, 16, 0.5);
     layer('Byte lead', byte, 48, 0.35, [crush]);
+    // Muted to start with: unmute it to hear a sound played from a pattern's notes.
+    layer('Acid', acid, 0, 0.6, const [], line, true);
     return p;
   }
 
   // ---------- engine sync and saving ----------
 
-  List<String>? get previewChain {
+  /// What Solo preview plays for the selected module: a generator alone, an effect after a generator that uses it,
+  /// or a pattern through the sound of a layer that plays it. Each plays the pattern of its layer, if it has one.
+  ({List<String> chain, String? pattern})? get preview {
     final m = project.module(selectedModuleId);
-    if (m == null) return null;
-    if (isLibrary(m.id)) return null;
-    if (!isEffect(m.id)) return [m.id];
-    String? gen;
-    for (final l in project.layers) {
-      if (l.effectIds.contains(m.id) && l.generatorId != null) gen = l.generatorId;
+    if (m == null || isLibrary(m.id)) return null;
+    String? firstGenerator() => project.modules.where((x) => isGenerator(x.id)).map((x) => x.id).firstOrNull;
+    if (isPattern(m.id)) {
+      final layer = project.layers.where((l) => l.patternId == m.id && l.generatorId != null).firstOrNull;
+      final gen = layer?.generatorId ?? firstGenerator();
+      return gen == null ? null : (chain: layer?.chain ?? [gen], pattern: m.id);
     }
-    gen ??= project.modules
-        .where((x) => isGenerator(x.id))
-        .map((x) => x.id)
-        .firstOrNull;
-    return [?gen, m.id];
+    if (!isEffect(m.id)) {
+      final layer = project.layers.where((l) => l.generatorId == m.id).firstOrNull;
+      return (chain: [m.id], pattern: layer?.patternId);
+    }
+    final layer = project.layers.where((l) => l.effectIds.contains(m.id) && l.generatorId != null).lastOrNull;
+    final gen = layer?.generatorId ?? firstGenerator();
+    return (chain: [?gen, m.id], pattern: layer?.patternId);
   }
 
   Future<void> _syncNow() async {
     final e = engine;
     if (e == null) return;
-    final json = project.toEngineJson(audition: previewOnly ? previewChain : null, auditionOnly: previewOnly);
+    final pv = previewOnly ? preview : null;
+    final json = project.toEngineJson(audition: pv?.chain, auditionPattern: pv?.pattern, auditionOnly: previewOnly);
     try {
       info = await e.setProject(json);
     } catch (err) {
@@ -260,6 +273,7 @@ class AppState extends ChangeNotifier {
     project.modules.removeWhere((m) => m.id == id);
     for (final l in project.layers) {
       if (l.generatorId == id) l.generatorId = null;
+      if (l.patternId == id) l.patternId = null;
       l.effectIds.remove(id);
     }
     if (selectedModuleId == id) selectedModuleId = project.modules.isEmpty ? null : project.modules.first.id;
@@ -308,7 +322,8 @@ class AppState extends ChangeNotifier {
 
   bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
   bool isLibrary(String moduleId) => kindOf(moduleId) == 'library';
-  bool isGenerator(String moduleId) => !isEffect(moduleId) && !isLibrary(moduleId);
+  bool isPattern(String moduleId) => kindOf(moduleId) == 'pattern';
+  bool isGenerator(String moduleId) => kindOf(moduleId) == 'generator';
 
   // ---------- layers (Arranger) ----------
 

@@ -72,6 +72,7 @@ class ModuleInfo {
     this.warnings = const [],
     this.namespace = '',
     this.functions = const [],
+    this.noteCount = 0,
   });
   final bool ok;
   final String error;
@@ -80,6 +81,7 @@ class ModuleInfo {
   final String kind;
   bool get isEffect => kind == 'effect';
   bool get isLibrary => kind == 'library';
+  bool get isPattern => kind == 'pattern';
   final String name, summary;
   final List<ParamInfo> params;
 
@@ -92,6 +94,9 @@ class ModuleInfo {
   /// A library module's namespace and its functions (named `namespace.fn`).
   final String namespace;
   final List<LibraryFn> functions;
+
+  /// A pattern module's number of notes.
+  final int noteCount;
 
   static ModuleInfo fromJson(Map<String, dynamic> j) => ModuleInfo(
         ok: j['ok'] == true,
@@ -111,6 +116,7 @@ class ModuleInfo {
         imports: ((j['imports'] as List?) ?? const []).cast<String>(),
         warnings: ((j['warnings'] as List?) ?? const []).cast<String>(),
         namespace: (j['namespace'] as String?) ?? '',
+        noteCount: (j['notes'] as num?)?.toInt() ?? 0,
         functions: [
           for (final f in (j['functions'] as List?) ?? const [])
             LibraryFn.fromJson(f as Map<String, dynamic>, namespace: (j['namespace'] as String?) ?? ''),

@@ -39,6 +39,7 @@ class LayerDoc {
     required this.color,
     this.generatorId,
     List<String>? effectIds,
+    this.patternId,
     this.lengthSteps = 0,
     this.volume = 0.8,
     this.pan = 0,
@@ -51,6 +52,7 @@ class LayerDoc {
   int color;
   String? generatorId;
   List<String> effectIds;
+  String? patternId; // a pattern module whose notes play the generator; it sets the layer's length
   int lengthSteps; // 16ths; 0 follows the project loop
   double volume, pan;
   bool mute, solo;
@@ -63,6 +65,7 @@ class LayerDoc {
         'color': color,
         'generator': generatorId,
         'effects': effectIds,
+        'pattern': patternId,
         'length_steps': lengthSteps,
         'volume': volume,
         'pan': pan,
@@ -76,6 +79,7 @@ class LayerDoc {
         color: (j['color'] as num?)?.toInt() ?? 0,
         generatorId: j['generator'] as String?,
         effectIds: ((j['effects'] as List?) ?? const []).cast<String>().toList(),
+        patternId: j['pattern'] as String?,
         lengthSteps: (j['length_steps'] as num?)?.toInt() ?? 0,
         volume: (j['volume'] as num?)?.toDouble() ?? 0.8,
         pan: (j['pan'] as num?)?.toDouble() ?? 0,
@@ -141,7 +145,7 @@ class ProjectDoc {
   }
 
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
-  String toEngineJson({List<String>? audition, bool auditionOnly = false}) => jsonEncode({
+  String toEngineJson({List<String>? audition, String? auditionPattern, bool auditionOnly = false}) => jsonEncode({
         'caw_project': 1,
         'name': name,
         'bpm': bpm,
@@ -161,6 +165,7 @@ class ProjectDoc {
               'id': l.id,
               'name': l.name,
               'chain': l.chain,
+              'pattern': ?l.patternId,
               'length_steps': l.lengthSteps,
               'volume': l.volume,
               'pan': l.pan,
@@ -168,7 +173,7 @@ class ProjectDoc {
               'solo': l.solo,
             },
         ],
-        if (audition != null) 'audition': {'chain': audition},
+        if (audition != null) 'audition': {'chain': audition, 'pattern': ?auditionPattern},
         'audition_only': auditionOnly && audition != null,
       });
 

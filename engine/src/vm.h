@@ -16,6 +16,7 @@ public:
     explicit Instance(std::shared_ptr<const Program> p);
 
     const Program& program() const { return *prog_; }
+    const std::shared_ptr<const Program>& programPtr() const { return prog_; }
 
     // Back to the state right after creation (audio-thread safe: no allocation).
     void reset() noexcept;

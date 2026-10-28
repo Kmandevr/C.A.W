@@ -81,4 +81,4 @@ Only the owner can settle these. Never build one as settled; ask.
 | iOS: sell through the App Store as the one exception to AutoStacc-only, or skip iOS ([architecture](architecture.md#6-biggest-risks-and-simplest-mitigations)) | iOS release | Open |
 | Licence for the sound library's modules (e.g. CC0 or MIT) | Stage 3 (sharing modules) | Open |
 | How a purchase on AutoStacc unlocks or delivers the app (plain download, account check, licence key) | Stage 5 | Open |
-| Should echo and reverb tails carry over when a layer's loop restarts? Today every effect starts silent on each loop, so loops repeat exactly but tails are cut at the restart ([engine](engine.md#built-ins-and-libraries)) | Nothing yet; changes how effects sound | Open |
+| Should echo and reverb tails carry over when a layer's loop restarts? Layers with a pattern already keep their tails; layers without one start every effect silent on each loop, so they repeat exactly but cut tails at the restart ([engine](engine.md#playback)) | Nothing yet; changes how effects sound | Open |

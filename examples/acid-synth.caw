@@ -1,0 +1,18 @@
+---
+caw: 1
+kind: generator
+name: Acid synth
+summary: Squelchy saw synth that plays a pattern's notes; pick Acid line as its layer's pattern
+mode: float
+---
+// Notes come from the layer's pattern: freq is the note's pitch in Hz, trig starts each note,
+// gate stays 1 while it's held and vel is how hard it's played. Without a pattern it holds C4.
+// --- Filter ---
+param cutoff = 500 in 100..4000 step 10 "Brightness before each note opens the filter"
+param res = 7 in 0.5..12 "Resonance: higher values squelch"
+param sweep = 2500 in 0..6000 step 10 "How far each note opens the filter"
+// --- Shape ---
+param decay = 0.2 in 0.02..1 "Seconds the filter and level take to fall after a note starts"
+let amp = env.adsr(gate, 0.002, decay, 0.5, 0.04)
+let open = ad(trig, 0.001, decay)
+lpf(saw(freq), cutoff + sweep * open * vel, res) * amp * (0.4 + 0.6 * vel) * 0.45

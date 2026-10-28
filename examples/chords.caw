@@ -1,0 +1,14 @@
+---
+caw: 1
+kind: pattern
+name: Chords
+summary: Four bars of A minor, F, C and G chords for any synth to play
+length: 4 bars
+---
+// A chord is several notes joined by commas; each note gets its own voice.
+// at  notes      len  vel
+0      A3,C4,E4   16   0.8
+16     F3,A3,C4   16   0.75
+32     C3,E3,G3   16   0.8
+48     G3,B3,D4   14   0.7
+62     G3,B3,D4   1/2  0.5  ratchet 2

@@ -23,6 +23,7 @@ struct LayerSpec {
     std::string id, name;
     std::vector<std::string> chain;  // module ids: generator first, then effects
     int lengthSteps = 0;             // 16th notes per loop; 0 loops with the project
+    std::string pattern;             // a pattern module whose notes play the generator; it sets the loop length
     double volume = 0.8, pan = 0.0;
     bool mute = false, solo = false;
 };
@@ -42,6 +43,7 @@ struct ProjectSpec {
     std::vector<LayerSpec> layers;
     std::vector<std::string> auditionChain;  // the Builder's preview, if any
     int auditionSteps = 0;
+    std::string auditionPattern;
     bool auditionOnly = false;
 
     int loopSteps() const { return loopBars * beatsPerBar * 4; }

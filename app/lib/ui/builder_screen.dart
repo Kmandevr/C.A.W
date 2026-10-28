@@ -11,10 +11,15 @@ import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Generators are green, effects pink and libraries blue.
-Color kindColor(String kind) => switch (kind) { 'effect' => Neon.pink, 'library' => Neon.blue, _ => Neon.green };
-IconData kindIcon(String kind) =>
-    switch (kind) { 'effect' => Icons.tune, 'library' => Icons.menu_book, _ => Icons.graphic_eq };
+/// Generators are green, effects pink, libraries blue and patterns yellow.
+Color kindColor(String kind) =>
+    switch (kind) { 'effect' => Neon.pink, 'library' => Neon.blue, 'pattern' => Neon.yellow, _ => Neon.green };
+IconData kindIcon(String kind) => switch (kind) {
+  'effect' => Icons.tune,
+  'library' => Icons.menu_book,
+  'pattern' => Icons.piano,
+  _ => Icons.graphic_eq,
+};
 
 class BuilderScreen extends StatefulWidget {
   const BuilderScreen({super.key, required this.state});
@@ -339,11 +344,20 @@ class _Params extends StatelessWidget {
   final ModuleDoc module;
   final ModuleInfo? info;
 
+  String _patternUse(ModuleInfo i) {
+    final users = [for (final l in state.project.layers) if (l.patternId == module.id) l.name];
+    final notes = '${i.noteCount} note${i.noteCount == 1 ? '' : 's'}';
+    return users.isEmpty
+        ? 'A pattern of $notes. To hear it, pick it as a layer\'s pattern in the Arranger, or use Solo preview.'
+        : 'A pattern of $notes, played by ${users.join(', ')}.';
+  }
+
   @override
   Widget build(BuildContext context) {
     final params = info?.params ?? const <ParamInfo>[];
     if (params.isEmpty &&
         !(info?.isLibrary ?? false) &&
+        !(info?.isPattern ?? false) &&
         (info?.exports.isEmpty ?? true) &&
         (info?.warnings.isEmpty ?? true)) {
       return const Padding(
@@ -361,6 +375,11 @@ class _Params extends StatelessWidget {
         valueOf: (p) => p.global ? state.globalValue(p) : (module.params[p.name] ?? p.defaultValue),
         onChanged: (p, v) => p.global ? state.setGlobal(p.name, v) : state.setParam(module.id, p.name, v),
       ),
+      if (i != null && i.isPattern)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text(_patternUse(i), style: Neon.code(size: 13, color: Neon.yellow)),
+        ),
       if (i != null && i.isLibrary)
         Padding(
           padding: const EdgeInsets.only(top: 10),

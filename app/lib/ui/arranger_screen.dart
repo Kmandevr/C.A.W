@@ -260,6 +260,7 @@ class _LayerCard extends StatelessWidget {
     final color = Neon.layer(layer.color);
     final generators = p.modules.where((m) => state.isGenerator(m.id)).toList();
     final effects = p.modules.where((m) => state.isEffect(m.id)).toList();
+    final patterns = p.modules.where((m) => state.isPattern(m.id)).toList();
     final lengths = lengthChoices(p.stepsPerBar);
     if (!lengths.any((c) => c.$1 == layer.lengthSteps)) lengths.add((layer.lengthSteps, '${layer.lengthSteps} 16ths'));
     final dim = layer.mute || (p.layers.any((l) => l.solo) && !layer.solo);
@@ -337,11 +338,34 @@ class _LayerCard extends StatelessWidget {
               items: [for (final g in generators) DropdownMenuItem(value: g.id, child: Text(g.name))],
               onChanged: (v) => state.editLayer(layer, (l) => l.generatorId = v),
             ),
-            DropdownButton<int>(
-              value: layer.lengthSteps,
-              items: [for (final c in lengths) DropdownMenuItem(value: c.$1, child: Text(c.$2))],
-              onChanged: (v) => state.editLayer(layer, (l) => l.lengthSteps = v!),
+            Tooltip(
+              message: 'Notes for the generator to play (make one in Builder: New, then a pattern)',
+              child: DropdownButton<String?>(
+                value: patterns.any((m) => m.id == layer.patternId) ? layer.patternId : null,
+                hint: const Text('No pattern'),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('No pattern')),
+                  for (final m in patterns)
+                    DropdownMenuItem<String?>(
+                      value: m.id,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.piano, size: 16, color: Neon.yellow),
+                        const SizedBox(width: 6),
+                        Text(m.name),
+                      ]),
+                    ),
+                ],
+                onChanged: (v) => state.editLayer(layer, (l) => l.patternId = v),
+              ),
             ),
+            if (layer.patternId == null)
+              DropdownButton<int>(
+                value: layer.lengthSteps,
+                items: [for (final c in lengths) DropdownMenuItem(value: c.$1, child: Text(c.$2))],
+                onChanged: (v) => state.editLayer(layer, (l) => l.lengthSteps = v!),
+              )
+            else
+              const Text('Length: the pattern\'s', style: TextStyle(color: Neon.dim, fontSize: 13)),
           ]),
           Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
             for (final id in layer.effectIds)

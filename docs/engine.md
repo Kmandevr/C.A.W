@@ -13,7 +13,7 @@ The engine in `engine/` as built. The reasons behind it are in [architecture](ar
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath`, `engine` (mixer), `project`, `render` (exports), `docs` (generated reference), `wav`, `json`, `capi` |
+| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath`, `pattern` (note patterns), `engine` (mixer and voices), `project`, `render` (exports), `docs` (generated reference), `wav`, `json`, `capi` |
 | `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
 | `engine/include/caw.h` | The C API, version 1 |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
@@ -36,7 +36,7 @@ A module is one text file: an optional header between `---` lines, then code.
 ```
 ---
 caw: 1               # module format version (only 1 exists)
-kind: generator      # generator (makes sound), effect (changes `in`) or library (functions only)
+kind: generator      # generator (makes sound), effect (changes `in`), library (functions only) or pattern (notes)
 name: Bass
 summary: Filtered saw bass playing an A minor pattern
 mode: float          # byte or float; default byte for generators, float for effects
@@ -103,7 +103,44 @@ Bitwise operators convert their inputs the JavaScript way: they drop the fractio
 | `pos`, `phase` | 0→1 through the layer's loop. In wavetable export they go 0→1 through one frame |
 | `time` | Seconds since the layer's loop start |
 | `in` | The incoming sound, for effects (0 in a generator) |
+| `trig`, `gate` | The note: `trig` is 1 on its first sample, `gate` is 1 while it's held |
+| `note`, `freq`, `vel` | The note's pitch as a MIDI number (fractions allowed) and in Hz, and its velocity 0–1 |
+| `rel` | Samples since the note was released (0 while held) |
+| `bend` | Reserved for pitch curves; 0 for now |
 | `pi` | π |
+
+- **Note variables** come from the layer's [pattern](#patterns). Each note runs the generator as its own voice, and inside a voice `t`, `time` and `phase` count from the note's start: `phase` goes 0→1 once per cycle at `freq`, and in byte mode `t` runs at `rate` when the note is C4, twice as fast an octave up. `step`, `beat`, `bar` and `pos` still follow the layer.
+- Without a pattern, the note variables describe one C4 note held through each layer loop: `trig` is 1 on the loop's first sample, `gate` and `vel` are 1. In a wavetable export `freq` is 1, so `sine(freq)` is one cycle.
+- They are soft names: a `let` or function argument called `note`, `gate`, `trig` and so on hides them, so older modules keep working.
+
+### Patterns
+
+A module with `kind: pattern` holds notes, not code. A layer picks one as its pattern, and the layer's generator plays its notes. Patterns are plain text, so a person or an AI agent can write one:
+
+```
+---
+kind: pattern
+name: Acid line
+length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars its notes need
+---
+// at   note(s)    len   vel   extras
+0       A1         2     1
+3       A1         1     0.8   slide
+4.5     C3,E3,G3   1/2   0.9   ratchet 2
+13/3    E2         1     0.6   prob 0.5
+```
+
+- **Columns:** `at` and `len` are in 16ths and may be decimals or fractions (`13/3` lands exactly on a triplet). Notes are names (`A1`, `F#3`) or MIDI numbers, with fractions for microtones; commas make a chord. `vel` is 0–1 and optional (default 1).
+- **Extras:**
+  - `prob P`: the note plays with chance P. The choice comes from the project seed, the note and which repeat of the pattern this is, so every project loop plays the same way and exports match playback.
+  - `ratchet N`: the note is split into N equal repeats (2–8).
+  - `slide`: the next note starting exactly where this one ends takes over its voice. No new `trig`; the pitch glides over half a step. In a chord, sliding notes pair with the next chord's notes in written order.
+- **Playback:**
+  - The pattern sets the layer's loop length; a note running past the end is released there.
+  - A layer with a pattern plays up to 8 voices at once and steals the oldest when a ninth note starts.
+  - A released voice ends after 0.1 s below −90 dB, or 10 s after release. Effects in the chain run once on the sum of the voices.
+  - An `export let` in a voiced generator shares the newest voice's value.
+- **Limits:** 4096 notes, 4096 steps, ratchets up to 8. Errors give a line and column. Kit rows (`[kick]` lines) are reserved for kit patterns and are an error for now.
 
 ### Built-ins and libraries
 
@@ -164,7 +201,8 @@ Errors give a line and column, counting the header lines, for example `line 5, c
 ## Playback
 
 - **Project:** BPM, beats per bar, loop length in bars, seed and master volume. The project loop is `round(steps × 60 × sr / (bpm × 4))` samples, and every layer restarts when it wraps.
-- **Layers:** up to 64. Each layer is a generator followed by up to 8 effects. A layer loops at its own length in 16ths; 0 means it follows the project loop. Each loop start falls at `round(k × length)`, so a 3-bar layer against a 4-bar loop stays in time.
+- **Layers:** up to 64. Each layer is a generator followed by up to 8 effects. A layer loops at its own length in 16ths, or its pattern's length; 0 means it follows the project loop. Each loop start falls at `round(k × length)`, so a 3-bar layer against a 4-bar loop stays in time.
+- **Pattern layers:** notes start and end on the exact sample (`round(at × samples per 16th)`). At a pattern restart, held notes are released, but voices and effects carry on, so tails ring across it and there's no seam crossfade. Editing a pattern swaps it in at the next block without rebuilding the sound; editing the generator's code restarts the held notes in the new code.
 - **Seams:** when a layer restarts, the end of its previous pass crossfades into the new one over 3 ms. This can be turned off per project with `seam_crossfade`.
 - **Hot swap:** changed code replaces the old program with a 20 ms crossfade, without stopping. Code that fails to compile reports an error and leaves the old program playing.
 - **Mix:** each layer has volume, constant-power pan, mute and solo, smoothed over 5 ms. The master chain is master volume, then a 5 Hz DC blocker, then a safety limiter with a ceiling of −0.2 dBFS, always last.
@@ -186,14 +224,15 @@ The app, the CLI and exports share one format:
 { "caw_project": 1, "name": "Night Glitch", "bpm": 140, "beats_per_bar": 4, "loop_bars": 4,
   "seed": 7, "master": 0.7, "seam_crossfade": true, "key_root": 9, "key_scale": 1, "globals": { "swing": 0.1 },
   "modules": [ { "id": "m1", "name": "Kick", "source": "...the .caw text...", "params": { "shift": 6 } } ],
-  "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"], "length_steps": 48,
+  "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"], "pattern": "p1", "length_steps": 48,
                 "volume": 0.8, "pan": 0, "mute": false, "solo": false } ],
-  "audition": { "chain": ["m1"], "length_steps": 0 }, "audition_only": false }
+  "audition": { "chain": ["m1"], "pattern": "p1", "length_steps": 0 }, "audition_only": false }
 ```
 
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
-- `audition` is the Builder's preview. With `audition_only`, only that chain is heard.
+- A layer's `pattern` names a pattern module; its notes play the generator, and its length replaces `length_steps`. A missing or broken pattern leaves the layer playing without one, with a warning (a broken pattern keeps its last good version playing).
+- `audition` is the Builder's preview, with an optional pattern. With `audition_only`, only that chain is heard.
 - Values outside their range are clamped:
   - BPM 20–400
   - 1–64 bars
@@ -206,11 +245,11 @@ The app, the CLI and exports share one format:
 | --- | --- |
 | Loop | One exact project loop. The engine renders two loops and keeps the second, so the file starts with the seam crossfades it has when it repeats. Includes a `smpl` loop chunk over the whole file. Bit-identical to the second loop of live playback |
 | Free | Any length from 0.1 to 600 seconds, from the start |
-| One-shot | One pass of one layer (its own length, or the project loop if it follows it), at most 30 s. The end is trimmed to 5 ms after the last sound above −80 dB |
+| One-shot | One pass of one layer (its own or its pattern's length, or the project loop if it follows it), at most 30 s. The end is trimmed to 5 ms after the last sound above −80 dB |
 | Wavetable | 1–256 frames of 2048 samples from one module, sweeping one param from its min to its max. In a frame, `t` runs 0–2047, `phase` 0–1 and `sr` is 2048, so `sine(1)` is one cycle. Each frame's DC is removed, and the table is normalized to peak 1. Written as 32-bit float mono |
 
 - Files are WAV at 44.1 or 48 kHz, as 24-bit PCM or 32-bit float.
-- An export refuses to run if any module it uses fails to compile.
+- An export refuses to run if any module or pattern it uses has an error.
 - **[Assumption]** Serum may want an extra `clm ` chunk to recognise 2048-sample frames. This isn't written yet; check before relying on Serum.
 
 ## C API (`engine/include/caw.h`)
@@ -218,6 +257,7 @@ The app, the CLI and exports share one format:
 - **Checking a module:** `caw_check(source)` returns JSON: ok, error, line, col, kind, mode, name, summary, and:
   - `params`: each with name, default, min, max, step, kind (`number`, `toggle` or `choice`), choices, tip, header, doc and global
   - `exports` (name and doc), `imports`, and `functions` (name, args and doc)
+  - for a pattern: kind `pattern`, name, summary, `notes` (how many), `length_steps`, `length_bars` and `last_end`
 - **Engine:** `caw_engine_create(sample_rate)` creates one.
   - `caw_engine_set_project(json)` returns the same description per module, plus `ref` (its name for exports) and `warnings`.
   - Live controls: `caw_engine_set_param`, `caw_engine_set_global`, `caw_engine_set_layer_mix`, `caw_engine_play`, `caw_engine_stop`, `caw_engine_clear_overload`.
@@ -234,21 +274,22 @@ The app, the CLI and exports share one format:
 ```
 caw check FILE.caw...
 caw render INPUT.caw|INPUT.json -o OUT.wav [--loop | --seconds S | --oneshot LAYER | --wavetable MODULE --param P --frames N]
-           [--rate 44100|48000] [--float] [--bpm B --bars N --steps N]
+           [--rate 44100|48000] [--float] [--bpm B --bars N --steps N --pattern FILE]
 caw templates
 caw docs [--check] [--dir DIR]
 ```
 
-- For a single `.caw` file, `render` builds a one-layer project: `--bpm` and `--bars` set the loop, and `--steps` sets the layer's length.
+- For a single `.caw` file, `render` builds a one-layer project: `--bpm` and `--bars` set the loop, `--steps` sets the layer's length, and `--pattern FILE` plays it from a pattern's notes. `caw check` checks patterns too.
 - It prints frames, length, peak and RMS, and flags `SILENT` or `CLIPPING`, so an agent can check its work without listening.
 - `caw docs` writes [library.md](library.md) and [agent-guide.md](agent-guide.md) into `docs/` from the engine's own docs. It fails if a function lacks a description, an argument description or an example, or if an example doesn't compile or is silent. `--check` only compares, and CI runs it, so the notes can't drift from the code.
 
 ## Tests
 
-`engine/build/caw_tests` runs 51 tests:
+`engine/build/caw_tests` runs 62 tests:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
+- **Patterns:** the note format and its errors, sample-exact note starts and ends, chords and voice stealing, the note variables, ratchets, slides, repeatable probability, pattern length, byte-mode pitch, the default note without a pattern, and exports checking patterns.
 - **Mixer:** block-size independence, layer lengths, seams, hot swap, broken code, mute, solo and pan, overload, stop and removal, effects, params and the limiter.
 - **Exports:** loop lengths, export equal to playback, free-length renders and cancel, one-shots, wavetables, broken modules and WAV bytes.
 - **Golden renders:** one hash per template in `engine/tests/golden.txt`. A hash changes only with an intended sound change; then run `caw_tests --update-golden` and say why in the commit.

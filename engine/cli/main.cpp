@@ -11,6 +11,7 @@
 #include "capi_internal.h"
 #include "compile.h"
 #include "docs.h"
+#include "pattern.h"
 #include "project.h"
 #include "render.h"
 #include "wav.h"
@@ -26,6 +27,7 @@ const char* kUsage =
     "      --rate 44100|48000   --float (32-bit float; default 24-bit)\n"
     "      --bpm B --bars N  tempo and loop length when rendering a single module (default 120, 4)\n"
     "      --steps N         a single module's layer length in 16ths (default: the whole loop)\n"
+    "      --pattern FILE    play a single module from a pattern's notes\n"
     "  caw templates                         list the bundled starter templates\n"
     "  caw docs [--check] [--dir DIR]        write DIR/library.md and DIR/agent-guide.md (default DIR: docs);\n"
     "                                        --check fails if they're stale, a function is undocumented, or an\n"
@@ -52,6 +54,17 @@ int check(int argc, char** argv) {
         if (!readFile(argv[i], src)) {
             std::printf("%s: can't read the file\n", argv[i]);
             ++failed;
+            continue;
+        }
+        if (caw::moduleKindOf(src) == caw::ModuleKind::Pattern) {
+            caw::PatternResult pr = caw::parsePattern(src);
+            if (pr.pattern) {
+                std::printf("%s: ok (pattern, %zu notes, %d steps in 4/4)\n", argv[i], pr.pattern->notes.size(),
+                            pr.pattern->steps(4));
+            } else {
+                std::printf("%s: %s\n", argv[i], pr.error.c_str());
+                ++failed;
+            }
             continue;
         }
         caw::CompileResult r = caw::compileModule(src);
@@ -86,6 +99,7 @@ int render(int argc, char** argv) {
     double bpm = 120;
     int bars = 4;
     int steps = 0;
+    std::string patternFile;
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
         auto val = [&](const char* name) -> std::string {
@@ -113,6 +127,7 @@ int render(int argc, char** argv) {
         else if (a == "--bpm") bpm = std::atof(val("--bpm").c_str());
         else if (a == "--bars") bars = std::atoi(val("--bars").c_str());
         else if (a == "--steps") steps = std::atoi(val("--steps").c_str());
+        else if (a == "--pattern") patternFile = val("--pattern");
         else {
             std::fprintf(stderr, "unknown option %s\n%s", a.c_str(), kUsage);
             return 2;
@@ -137,6 +152,15 @@ int render(int argc, char** argv) {
     } else {
         p = caw::singleModuleProject(text, bpm, bars);
         p.layers[0].lengthSteps = steps;
+        if (!patternFile.empty()) {
+            std::string pat;
+            if (!readFile(patternFile, pat)) {
+                std::fprintf(stderr, "%s: can't read the file\n", patternFile.c_str());
+                return 1;
+            }
+            p.modules.push_back({"pattern", pat, {}});
+            p.layers[0].pattern = "pattern";
+        }
         if (o.kind == caw::ExportKind::Wavetable || o.kind == caw::ExportKind::OneShot)
             o.target = o.kind == caw::ExportKind::Wavetable ? "m" : "l";
     }

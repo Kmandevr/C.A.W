@@ -164,7 +164,14 @@ export let env = ad(trig, 0.001, 0.3)                  a signal other modules re
   - A cycle, where two modules read each other, is broken by reading the other side's previous block, 64 samples late. This is reported as a warning, not an error.
   - Exports stay inside the sandbox: they are only numbers passed between modules.
 
-**Patterns** are modules of `kind: pattern` in the same `.caw` format, so they diff cleanly in git and an AI agent can write them. Details set by the owner on 2026-10-28 ([decisions](decisions.md)):
+**Patterns** are modules of `kind: pattern` in the same `.caw` format, so they diff cleanly in git and an AI agent can write them. Details set by the owner on 2026-10-28 ([decisions](decisions.md)).
+
+**[Fact]** Built in v2 step 3a (the owner's first priority: a sound you make plays the notes you make), reference in [engine](engine.md#patterns):
+- single-sound text patterns with fractions for off-grid notes and triplets, chords, probability, ratchets and slide
+- the note variables, and voices (8 per layer, oldest stolen)
+- a Pattern picker per layer, and Solo preview through a layer's pattern
+
+The audio thread asks a pattern for the notes in a stretch of time, so procedural patterns can answer the same question later. Patterns reach the audio thread apart from the sound's code, so editing one doesn't restart the sound, and scenes can swap them. Notes keep room for a kit row and curves, and `bend` is reserved. Not built yet: kit patterns, procedural code, custom values and curves, swing, the editor, scenes and automation.
 - **Two shapes:**
   - A **single-sound pattern** drives one layer.
   - A **kit pattern** has named rows (kick, snare, hats …), and each row is routed to a layer, so one pattern can drive a whole kit.
@@ -189,11 +196,11 @@ export let env = ad(trig, 0.001, 0.3)                  a signal other modules re
   - chord stamping in the project's key
   - generator buttons that write notes you can edit: Euclid, random in key, arpeggiate, humanize
   - no recording in v2: notes are drawn or generated
-- **Playing a pattern:** drag a pattern onto a layer and that layer's generator plays it through new variables:
+- **Playing a pattern:** pick (later: drag) a pattern onto a layer and that layer's generator plays it through new variables:
   - `trig` (1 on the first sample of a note), `gate`, `note`, `freq`, `vel` and `rel`
   - the current value of each note curve: `bend` for pitch, and custom values by name
 
-  Polyphony (chords) uses the voice pool from the house synth's voice mode ([Instruments, wavetables and samples](#instruments-wavetables-and-samples)), each voice with its own curves. The templates switch from `step % 4 == 0` to `trig`, with a built-in default pattern, so a layer without a pattern still plays.
+  Polyphony (chords) uses the voice pool from the house synth's voice mode ([Instruments, wavetables and samples](#instruments-wavetables-and-samples)), each voice with its own curves. The built-in default pattern, for a layer without one, is one C4 note held through each layer loop (`trig` on its first sample), so templates written with `step % 4 == 0` keep working unchanged. **[Proposal]** Slide becomes a generated pitch curve once note curves exist, so there's one glide mechanism.
 - **Scenes** (owner, moved from Stage 5 into v2): a scene is a saved set of which pattern each layer plays, plus global values. Switching scenes happens at the next loop boundary, so it stays in time.
 - **MIDI files** are not a priority (owner: no DAW export yet), but the plan stays open for them:
   - import of `.mid` into a drawn pattern

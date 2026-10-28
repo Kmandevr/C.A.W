@@ -218,7 +218,8 @@ private:
     std::vector<Comment> comments_;
 };
 
-// A note name such as C4, F#2 or Bb0 gives its MIDI note number (C4 = 60).
+}  // namespace
+
 bool noteNumber(const std::string& s, double& out) {
     if (s.size() < 2 || s[0] < 'A' || s[0] > 'G') return false;
     static const int base[] = {9, 11, 0, 2, 4, 5, 7};  // A..G
@@ -237,10 +238,14 @@ bool noteNumber(const std::string& s, double& out) {
     return true;
 }
 
+namespace {
+
 const std::pair<const char*, Var> kVars[] = {
     {"t", Var::T},       {"sr", Var::Sr},     {"rate", Var::Rate}, {"bpm", Var::Bpm},
     {"beat", Var::Beat}, {"bar", Var::Bar},   {"step", Var::Step}, {"pos", Var::Pos},
     {"phase", Var::Phase}, {"time", Var::Time}, {"in", Var::In},   {"seed", Var::Seed},
+    {"trig", Var::Trig},   {"gate", Var::Gate}, {"note", Var::Note}, {"freq", Var::Freq},
+    {"vel", Var::Vel},     {"rel", Var::Rel},   {"bend", Var::Bend},
 };
 
 bool findVar(const std::string& name, Var& out) {
@@ -271,7 +276,9 @@ constexpr int kMaxFnCalls = 4096;  // calls expanded in one compile; nested call
 class Compiler {
 public:
     Compiler(const std::vector<Token>& toks, const std::vector<Comment>& comments, Program& p)
-        : t_(&toks), comments_(&comments), p_(p) {}
+        : t_(&toks), comments_(&comments), p_(p) {
+        std::fill(std::begin(varRegs_), std::end(varRegs_), -1);
+    }
 
     // Loads a library's functions under its namespace (`drum` makes `fn kick` callable as drum.kick).
     void loadLibrary(const std::string& ns, const std::vector<Token>& toks, const std::vector<Comment>& comments) {
@@ -391,7 +398,8 @@ private:
         Var v;
         double note;
         if (name.find('.') != std::string::npos) fail(tok, "names can't contain '.'");
-        if (reserved(name) || findVar(name, v) || findBuiltin(name.c_str()) >= 0 || noteNumber(name, note))
+        const bool hardVar = findVar(name, v) && v < Var::Trig;  // note variables can be hidden by a name
+        if (reserved(name) || hardVar || findBuiltin(name.c_str()) >= 0 || noteNumber(name, note))
             fail(tok, "'" + name + "' is a built-in name; pick another");
         if (names_.count(name) || fns_.count(name)) fail(tok, "'" + name + "' is already defined");
         next();
@@ -1048,7 +1056,8 @@ private:
     std::map<std::string, int> importRegs_;
     std::map<std::string, Val> names_;
     std::unordered_map<uint64_t, int> consts_;
-    int varRegs_[static_cast<int>(Var::Count)] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    // -1: not loaded yet. Filled in the constructor so it stays right when variables are added.
+    int varRegs_[static_cast<int>(Var::Count)];
     int depth_ = 0;
     uint32_t sites_ = 0;
 };
@@ -1098,7 +1107,8 @@ size_t parseHeader(std::string_view src, Program& p, int& codeLine) {
             if (value == "generator") p.kind = ModuleKind::Generator;
             else if (value == "effect") p.kind = ModuleKind::Effect;
             else if (value == "library") p.kind = ModuleKind::Library;
-            else throw CompileError(lineNo, 1, "kind must be 'generator', 'effect' or 'library'");
+            else if (value == "pattern") p.kind = ModuleKind::Pattern;
+            else throw CompileError(lineNo, 1, "kind must be 'generator', 'effect', 'library' or 'pattern'");
         } else if (key == "name") {
             p.name = value;
         } else if (key == "summary") {
@@ -1202,6 +1212,8 @@ CompileResult compileModule(std::string_view source, const std::vector<LibrarySo
         int codeLine = 1;
         const size_t start = parseHeader(source, *prog, codeLine);
         if (prog->kind == ModuleKind::Library) validNamespace(prog->ns);
+        if (prog->kind == ModuleKind::Pattern)
+            throw CompileError(1, 1, "a pattern holds notes, not code: pick it as a layer's pattern to play it");
         Lexer lex(source.substr(start), codeLine);
         std::vector<Token> toks = lex.run();
         Compiler c(toks, lex.comments(), *prog);

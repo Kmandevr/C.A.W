@@ -17,7 +17,7 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
   - BPM, beat and CPU readouts
   - Play/Stop (the space bar on desktop)
 - **Builder** (`lib/ui/builder_screen.dart`):
-  - a row of module chips (generators green, effects pink, libraries blue), and **New** to start from a template
+  - a row of module chips (generators green, effects pink, libraries blue, patterns yellow), and **New** to start from a template, including the Acid synth and the Acid line and Chords patterns
   - a code editor with highlighting and the symbol key row
   - **completion chips** above the key row: typing two or more letters offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
   - **Library** (the book button, or F1): every function from the engine's `caw_library()` plus the project's own library modules, grouped by category and searchable from the word at the cursor. Each shows its signature, description, arguments and example, with **Insert call** and **Insert example**
@@ -29,11 +29,12 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
     - a "Shares" line naming the module's exports (`kick.env`), and warnings in yellow
     - for a library module, the functions other modules can call
   - **Run** (Ctrl+Enter) sends the code and hot-swaps it. Code that fails keeps the old sound and puts the cursor on the error
-  - **Solo preview** plays only this module. An effect is heard through the generator of a layer that uses it, or the project's first generator
+  - **Solo preview** plays only this module. An effect is heard through the generator of a layer that uses it, or the project's first generator. A generator plays the pattern of a layer that uses it, and a pattern plays through the sound of a layer that plays it (or the first generator)
+  - a pattern is edited as text for now (the piano roll comes later); its panel says how many notes it has and which layers play it
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - project settings: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, hex seed, master volume and the seam crossfade switch
   - **Project controls:** one control per `global` declared by any module. Its value is saved with the project and sent to the engine without recompiling.
-  - the loop stack, where each layer has a colour, name, generator, length (from 1 beat to 16 bars, or following the project), an effect chain, volume, pan, M/S, a progress bar and a peak meter
+  - the loop stack, where each layer has a colour, name, generator, **pattern** (or none), length (from 1 beat to 16 bars, or following the project; a pattern sets it instead), an effect chain, volume, pan, M/S, a progress bar and a peak meter
   - a banner when the engine muted layers to keep audio clean, with Unmute
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - the four exports from [engine](engine.md#exports), at 44.1 or 48 kHz, 24-bit or 32-bit float
@@ -41,7 +42,7 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
   - then the system file picker saves the file
 - **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail, and the Builder shows code and params side by side. Ctrl+1/2/3 switch areas.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
-- **Library modules** make no sound: layers, the Exporter and Solo preview leave them out.
+- **Library and pattern modules** make no sound of their own: layers, the Exporter and Solo preview don't use them as generators.
 
 ## How it works
 
@@ -54,7 +55,7 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
   - The app's file format adds colours, the key and per-layer generator and effect fields to the engine's project JSON.
 - **Storage:** projects are JSON files in the app's private support folder, under `projects/`. They're written 0.5 s after each change, and right away when the app goes to the background or quits. The app reopens the last project.
 - **Audio:** the device opens at start-up (48 kHz stereo, low-latency profile). When the app goes to the background while stopped, it closes the device, and it reopens it on return. Playing on in the background (an Android foreground service) is not in v1.
-- **First run:** the app creates "First loop" from the templates. It has Kick, Bass and Hats layers of 1 bar each and a 3-bar Byte lead with Bitcrush over a 4-bar loop at 140 BPM.
+- **First run:** the app creates "First loop" from the templates. It has Kick, Bass and Hats layers of 1 bar each and a 3-bar Byte lead with Bitcrush over a 4-bar loop at 140 BPM, plus a muted Acid layer that plays the Acid synth from the Acid line pattern.
 
 ## Build
 

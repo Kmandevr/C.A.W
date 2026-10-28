@@ -20,7 +20,9 @@ constexpr int kMaxCallArgs = 6;
 constexpr int kMaxParams = 32;
 
 // Built-in variables a module can read.
-enum class Var : uint8_t { T, Sr, Rate, Bpm, Beat, Bar, Step, Pos, Phase, Time, In, Seed, Count };
+// Trig and after are the note variables a pattern drives. They are "soft": a `let` or argument of the same name
+// hides them, so code written before patterns existed keeps working.
+enum class Var : uint8_t { T, Sr, Rate, Bpm, Beat, Bar, Step, Pos, Phase, Time, In, Seed, Trig, Gate, Note, Freq, Vel, Rel, Bend, Count };
 
 enum class OpCode : uint8_t { Const, Var, Param, Bin, Un, Select, Call, Import };
 
@@ -44,7 +46,7 @@ struct Op {
     double k;        // constant value
 };
 
-enum class ModuleKind : uint8_t { Generator, Effect, Library };
+enum class ModuleKind : uint8_t { Generator, Effect, Library, Pattern };
 enum class OutputMode : uint8_t { Byte, Float };
 
 constexpr int kMaxExports = 16;  // per layer, across its chain

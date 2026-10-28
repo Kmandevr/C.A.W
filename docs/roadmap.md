@@ -91,6 +91,7 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - **[Fact]** Built (step 1): params, globals, exports and functions, with the app's Controls and Project controls panels.
 - **Automation lanes** for globals.
 - **Pattern builder:**
+  - **[Fact]** Built first (step 3a, the owner's priority): text patterns that any generator plays through voices, with chords, off-grid notes, probability, ratchets and slide ([engine](engine.md#patterns)).
   - single-sound and kit patterns, 1 step to 64 bars long
   - a drum grid and a piano roll, with snap (1/16, 1/32, triplets) or free timing
   - notes with probability, ratchets, slide and custom values

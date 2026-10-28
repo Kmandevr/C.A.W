@@ -9,6 +9,7 @@ ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'s
       ModuleDoc(id: 'fx', name: 'Crush', source: '---\nkind: effect\n---\nin'),
     ], layers: [
       LayerDoc(id: 'l1', name: 'Lead', color: 2, generatorId: 'm1', effectIds: ['fx'], lengthSteps: 48, volume: 0.5, pan: -0.3, solo: true),
+      LayerDoc(id: 'l2', name: 'Notes', color: 1, generatorId: 'm1', patternId: 'pat'),
     ]);
 
 void main() {
@@ -27,6 +28,8 @@ void main() {
     final layer = (j['layers'] as List).first as Map<String, dynamic>;
     expect(layer['chain'], ['m1', 'fx']);
     expect(layer['length_steps'], 48);
+    expect(layer.containsKey('pattern'), isFalse);
+    expect((j['layers'] as List)[1]['pattern'], 'pat');
     expect(j['audition_only'], false);
     expect(j['globals'], {'swing': 0.2});
     expect((j['modules'] as List).first['name'], 'Lead');
@@ -37,6 +40,8 @@ void main() {
     expect((sample()..key = 'Bb major').keyNumbers, (10, 0));
     final a = jsonDecode(sample().toEngineJson(audition: ['m1'], auditionOnly: true)) as Map<String, dynamic>;
     expect(a['audition'], {'chain': ['m1']});
+    final ap = jsonDecode(sample().toEngineJson(audition: ['m1'], auditionPattern: 'pat')) as Map<String, dynamic>;
+    expect(ap['audition'], {'chain': ['m1'], 'pattern': 'pat'});
     expect(a['audition_only'], true);
   });
 

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "pattern.h"
 #include "program.h"
 #include "project.h"
 #include "spsc.h"
@@ -19,6 +20,7 @@ namespace caw {
 constexpr int kSlots = kMaxLayers + 1;  // the last slot is the Builder's audition
 constexpr int kAuditionSlot = kMaxLayers;
 constexpr int kScopeSize = 1024;
+constexpr int kVoices = 8;  // notes a pattern layer plays at once; the oldest is stolen when all are busy
 
 struct Meters {
     float cpu = 0, peakL = 0, peakR = 0;
@@ -71,11 +73,15 @@ private:
     void drainRetired();
     void send(const Cmd& c);
     void applyCommands() noexcept;
-    void retire(Chain* c, int freedSlot) noexcept;
+    void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr) noexcept;
     void processChunk(float* l, float* r, int m) noexcept;
     void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
-    void runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, Slot* exportTo, int offset) noexcept;
+    void runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, Slot* exportTo, int offset,
+                  const Pattern* pat, int64_t repeat) noexcept;
+    void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
+                   int offset, const BlockCtx& base) noexcept;
+    void noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
     void pickOverloadVictim() noexcept;
@@ -127,6 +133,7 @@ private:
         std::string ref;     // the name other modules use for its exports
         std::string libSig;  // the project libraries it was compiled with
         std::shared_ptr<const Program> program;  // last program that compiled
+        std::shared_ptr<const Pattern> pattern;  // pattern modules: the last version that parsed
         std::string error;
         int line = 0, col = 0;
         std::map<std::string, double> params;
@@ -137,6 +144,8 @@ private:
         std::vector<const Program*> sig;
         std::vector<const double*> wiring;  // where each import of the chain reads from
         int steps = -1;
+        bool voiced = false;                     // plays a pattern through a pool of voices
+        std::shared_ptr<const Pattern> pattern;  // what the audio thread was last sent
         double volume = -1, pan = 0;
         bool mute = false, solo = false;
     };
@@ -148,7 +157,7 @@ private:
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
 
-    Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring);
+    Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced);
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();

@@ -32,6 +32,9 @@ CompileResult compileModule(std::string_view source, const std::vector<LibrarySo
 // library whose function names clash is left out (and shows its own error) instead of breaking every module.
 std::vector<LibrarySource> projectLibraries(const std::vector<std::string_view>& sources);
 
+// A note name such as C4, F#2 or Bb0 gives its MIDI note number (C4 = 60).
+bool noteNumber(const std::string& s, double& out);
+
 // The module's kind from its header alone (no compile), so libraries can be found before other modules.
 ModuleKind moduleKindOf(std::string_view source);
 

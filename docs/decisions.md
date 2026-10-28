@@ -8,6 +8,16 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Notes before the piano roll (owner); how patterns play (Claude, after an architect review)
+
+- **Owner:** before the UI and piano roll, a sound you make must play from the notes you make.
+- **Text patterns first:** `kind: pattern` files with one line per note, so agents can write them and the piano roll can edit the same data later. Times accept fractions (`13/3`) so triplets are exact.
+- **Voices:** a layer with a pattern runs its generator once per note (8 voices, oldest stolen), with `trig`, `gate`, `note`, `freq`, `vel` and `rel`. These names are soft, so existing modules using `let note` keep working.
+- **The pattern sets the layer's length**, so it is never cut short by the layer; pattern layers keep voices and effects running across their restart (no seam crossfade), and notes are released at the pattern end.
+- **Patterns travel apart from the code** to the audio thread, which asks for the notes in a stretch of time. Pattern edits don't restart the sound, and scenes and procedural patterns can use the same path.
+- **Without a pattern**, the note variables describe one C4 note held through each layer loop: that is the built-in default pattern.
+- **Exports from a voiced generator** share the newest voice's value (a sum would push envelopes above 1).
+
 ## 2026-10-28: How the standard library is built (Claude, v2 step 2)
 
 - **Library modules instead of `use` imports:** a module with `kind: library` and a `namespace:` puts its functions in every other module of the project as `namespace.fn`. Nothing to import, and the same file format serves the built-in libraries (`engine/lib/*.caw`) and the owner's own.

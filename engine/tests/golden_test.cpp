@@ -56,6 +56,7 @@ TEST(templates_compile_and_match_golden_renders) {
     CHECK(kTemplateCount >= 7);
     for (int i = 0; i < kTemplateCount; ++i) {
         const std::string name = kTemplateFiles[i];
+        if (moduleKindOf(kTemplateSources[i]) == ModuleKind::Pattern) continue;  // notes, checked in pattern_test
         CompileResult cr = compileModule(kTemplateSources[i]);
         if (!cr.program) {
             cawtest::fail(__FILE__, __LINE__, name + ": " + cr.error);
