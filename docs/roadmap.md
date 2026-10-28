@@ -50,9 +50,9 @@ Modules, parameters, GitHub sync, sequencer, spectrum display, audio import.
 4. UI: editor, transport, errors, scope.
 5. Files and WAV export.
 
-## Stage 2 — Modular sound library
+## Stage 2 — Modular sound library, synth and exports
 
-Module format v1 (header + code), `param` declarations that generate sliders, `use` imports, stateful DSP built-ins (envelopes, filters, delay, noise, waveshaper, bitcrush), procedural instruments (e.g. a kick built from pitch decay, sine body, distortion and a noise click), and hot reload. Includes a 1-day NKIDO/Cedar spike.
+Voice mode (play any sound as a synth from an on-screen keyboard or MIDI), wavetable export, and one-shot, loop and multisample export (see [architecture](architecture.md#instruments-wavetables-and-samples)). Module format v1 (header + code), `param` declarations that generate sliders, `use` imports, stateful DSP built-ins (envelopes, filters, delay, noise, waveshaper, bitcrush), procedural instruments (e.g. a kick built from pitch decay, sine body, distortion and a noise click), and hot reload. Includes a 1-day NKIDO/Cedar spike.
 
 ## Stage 3 — GitHub integration
 

@@ -8,6 +8,11 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Every sound can be a synth, a wavetable or a sample (owner)
+
+- **Owner requirement:** any sound code can be played as a synth, exported as a waveform or wavetable for other synths, or exported as a sample (one-shot, loop, multisample).
+- **How (proposal):** it's the same code run three ways. A fixed voice pool gives polyphony, with pitch-scaled `t`, plus `phase`, `freq`, `note`, `vel` and `gate`. Wavetables are 2048-sample single-cycle frames, samples are WAV with `smpl` loop points, and multisamples are WAV plus SFZ. Lands in Stage 2. The engine's core interface already plans MIDI input, so it stays as designed ([architecture](architecture.md#instruments-wavetables-and-samples)).
+
 ## 2026-10-28: Flutter confirmed; bit-exact, repeatable chaos (owner)
 
 - **Flutter for the UI** on every platform (owner confirmed the proposal below).

@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner added synth, wavetable and sample output as a core capability ([decisions](decisions.md)); architecture gained voice mode and the export formats, roadmap Stage 2 includes them.
+
 - 2026-10-28: Flutter confirmed and the bit-exact, repeatable-chaos rules added to the architecture ([decisions](decisions.md)); the Flutter open question closed.
 
 - 2026-10-28: Owner chose C++20 for the engine, a possible VST3/CLAP plugin and fully standalone builds; C.A.W is independent of AutoStacc ([decisions](decisions.md)). Architecture gained the one-core-three-hosts engine shape and the ready-made building blocks table.

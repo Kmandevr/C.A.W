@@ -102,6 +102,20 @@ The owner's requirement: code works directly on the bits, so sounds come out cha
 - **Randomness is seeded, never live:** `hash(x)` and `noise(seed, t)` are counter-based hash functions (no hidden state, so jumping to any `t` gives the same value), and a project-level `seed` changes all of them at once. There's no clock or system randomness anywhere in the language.
 - **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits.
 
+### Instruments, wavetables and samples **[Proposal]**
+
+The owner's requirement: any sound code can become a **playable synth**, a **waveform for other synths** or a **sample**. All of them come from the same code and the same deterministic VM, so they're simply different ways of running it.
+
+- **Voice mode (playable synth):** the program runs once per note, from a fixed pool of pre-allocated voices (no allocation on note-on; the oldest voice is stolen when the pool is full). Each voice sees:
+  - `t`: samples since note-on, scaled so pitch follows the note. Classic bytebeat runs at its formula rate when the note is the module's base note (default C4), and an octave up doubles the rate.
+  - `phase`: 0–1 through one cycle at the note's frequency, for waveform-style code.
+  - `freq`, `note`, `vel`, `gate` (1 while held, 0 after release), `rel` (samples since release).
+
+  A voice ends after it has been silent for a while following release, or when the code's envelope reaches zero. Notes come from the on-screen keyboard, MIDI on the device, or the host when it runs as a plugin.
+- **Waveform export (wavetables for other synths):** render single cycles of 2048 samples. Sweeping a parameter, the seed or a "frame" variable over 1–256 frames makes a morphing wavetable, saved as one WAV of back-to-back frames. **[Assumption: Serum and Vital read this layout, and Serum wants an extra `clm ` chunk marking 2048-sample frames. Verify before building.]**
+- **Sample export:** one-shots and loops as WAV (24-bit or 32-bit float). Loops get loop points in a `smpl` chunk, set at exactly repeating lengths where the code repeats. Multisample sets render a range of notes and velocities, plus an SFZ mapping file (an open text format).
+- **Aliasing is a choice:** bit-twiddled waveforms alias when pitched up, which is part of their sound. Voice mode and export offer optional oversampling (2× or 4×) for a cleaner result.
+
 ### Language direction **[Proposal]**
 
 - Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
