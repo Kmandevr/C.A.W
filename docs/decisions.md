@@ -17,7 +17,14 @@ Newest first. A later entry wins over an earlier one on the same topic.
   - one gesture vocabulary, undo/redo always on screen, and 48 dp targets
   - a piano roll with a mode bar and two-finger navigation
   - grids drawn by painters, and meters that sleep when stopped
-- **Still to confirm:** the owner hasn't confirmed this layout yet.
+- **Owner's answers:**
+  - portrait and landscape equally
+  - the session grid for Mix
+  - a calm neon look
+  - built for the owner first, with tooltips but no tour
+  - on PC, mouse and keyboard, with everything reachable by keyboard alone, and Reaper-like shortcuts
+  - a library with folders plus tags and search
+  - sounds open on their controls, with the code one tap away
 
 ## 2026-10-28: Variables and patterns for v2 (owner, answering Claude's questions)
 

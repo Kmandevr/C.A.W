@@ -8,6 +8,16 @@ updated: 2026-10-28
 
 The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use on a phone and a PC. It should stay light on CPU and RAM, and leave out recording and other hard features for now. Everything here is a **[Proposal]** for v2 unless it is marked otherwise. It builds on the v1 app ([app](app.md)) and the v2 features ([architecture](architecture.md#variables-and-patterns-proposal)).
 
+## Owner's choices (2026-10-28)
+
+- **Phone orientation:** portrait and landscape matter equally, so every screen gets a proper layout for both.
+- **Mix view:** the session grid (layers × scenes).
+- **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
+- **Audience:** built for the owner first. It should be fast for someone who knows it, with tooltips and tips but no onboarding tour yet.
+- **PC:** mouse and keyboard, and **everything must also be reachable with the keyboard alone**. Shortcuts follow Reaper's where they overlap.
+- **Library:** folders (matching the library repo) plus tags and search across them, with favourites pinned.
+- **Opening a sound** shows its controls (the inspector) first. The code editor is one tap away.
+
 ## What other apps teach
 
 - **Stay in flow.**
@@ -45,6 +55,8 @@ The same pieces fit both screens. On a phone they stack and slide in; on a wide 
 └──────────────────────────────┘
 ```
 
+**Phone (landscape):** two-handed, like a groovebox. The tabs move to a narrow side rail. The main view gets the full width, which suits the grid and the piano roll. The inspector opens as a side panel instead of a bottom sheet.
+
 **Desktop / wide (≥ 900 px):**
 
 ```
@@ -61,7 +73,7 @@ The same pieces fit both screens. On a phone they stack and slide in; on a wide 
   - Tapping a cell's big area plays it. A scene is launched from the narrow strip on its left edge only (the Griid lesson).
   - Launches are queued to the next loop boundary, so they're always in time.
   - "Commit" copies the current scene into a new one to try a variation (the EP-133 lesson).
-- **Library:** sounds and patterns are cards you drag onto a layer or a grid cell.
+- **Library:** sounds and patterns are cards you drag onto a layer or a grid cell. They're organised in folders, matching the library repo's layout, with tags and a search box across all folders and favourites pinned at the top.
   - On a phone the library is a tray that slides up from the bottom. Long-press a card to pick it up.
   - On desktop the library is a side column, and `.mid` or `.caw` files can be dropped onto the window.
 - **Inspector:** the Unity-style panel for whatever is selected: a module's params, a layer's mix or a note's extras.
@@ -102,7 +114,16 @@ The same meaning everywhere, so nothing has to be learned twice:
   - **Feedback:** moving a note plays it, and moving a chord plays the chord.
   - **Snap:** follows the grid setting, with a magnet toggle for free timing.
   - **Curve mode:** draw on a note freehand, and it smooths into points and handles. Pitch bends show as a bent note. Other value curves are lines in a lane under the roll.
-- **Sound editor:** v1's Builder, with the inspector replacing the plain params list.
+- **Sound editor:** opens on the inspector (sliders, toggles, tips). The code editor from v1's Builder is a tab or drawer one tap away, for changing the sound itself.
+
+## Keyboard (PC)
+
+- **Everything without a mouse:**
+  - Tab and arrow keys move focus between panels and inside grids, with a visible neon focus ring.
+  - Enter opens or plays. The Menu key or Shift+F10 opens the same options as a long-press.
+  - Every control can be adjusted from the keyboard: arrows for steps, Shift+arrows for fine steps, typing a number to set it.
+- **Shortcuts like Reaper's where they overlap:** Space for play/stop, Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
+- **Shortcut overlay:** `?` shows every shortcut for the current screen.
 
 ## Light on CPU and RAM
 
@@ -114,7 +135,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 - **Draw grids, not widgets:** the session grid, drum grid and piano roll are each one painter that draws only the visible area, not one widget per cell. Lists are built lazily.
 - **No heavy assets:**
   - system fonts and no images; icons come from the built-in icon font
-  - animations limited to short state changes
+  - animations limited to short state changes, with glow used sparingly (the owner's "neon, calm")
 - **Compact data:** patterns are flat arrays of note events in the engine. A layer's memory is fixed when it is set up, never while playing.
 - **Budgets (targets to measure, not facts yet):**
   - near 0% CPU from the UI when stopped
