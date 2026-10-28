@@ -13,6 +13,10 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
 - **Phone orientation:** portrait and landscape matter equally, so every screen gets a proper layout for both.
 - **Mix view:** the session grid (layers × scenes).
 - **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
+- **New files and startup** (owner, 2026-10-28):
+  - **New modules:** a new sound, effect, pattern or library starts as an empty file. A faint hint (not part of the file) shows an example header and first line until you start typing. Templates stay one choice away in the same New menu.
+  - **Startup:** on launch, a small screen offers to continue the last project, start a new blank project, or start from a template project (such as today's "First loop"). It replaces opening the last project directly and the first-run demo project.
+  - With no header, an empty file is a byte-mode generator. That is how the language already works ([engine](engine.md#module-files-caw)).
 - **Look details** (owner, 2026-10-28):
   - **Calm neon** stays: near-black, thin neon lines, and glow only on what's active (playhead, selected notes, meters).
   - **Themes:** custom themes, with an in-app theme editor and live preview. It saves a readable theme file you can export, share or let an agent edit. Calm neon is the default, with a couple of starter themes.

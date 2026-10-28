@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner asked for blank new files (with a faint hint, and templates optional) and a startup choice: continue, blank or template ([UI design](ui.md)). Still waiting for the go.
+
 - 2026-10-28: Owner confirmed the adaptive grid reading, and asked for live editing while playing: code auto-update with a delay you can set and an off switch, swap timing you can choose, pattern edits from a note's next play, and sound state carried across code swaps ([architecture](architecture.md#live-editing-while-playing-proposal)). Still waiting for the go.
 
 - 2026-10-28: Owner set the adaptive grid: the chosen resolution (1 down to 1/128, or off) is its finest level and the snap, Shift-drag ignores it, and tapping keeps 48 dp cells ([UI design](ui.md#editors)). Still waiting for the go.

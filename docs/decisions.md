@@ -8,6 +8,13 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Blank files and a startup choice (owner)
+
+- New modules start empty, with a faint hint, and templates stay optional.
+- On launch, the app asks: continue the last project, start a new blank project, or start from a template.
+
+See [UI design](ui.md).
+
 ## 2026-10-28: Live editing while playing (owner)
 
 - **Code auto-update:** code swaps in by itself after a delay you can set, and auto-update can be switched off.
