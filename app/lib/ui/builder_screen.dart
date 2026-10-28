@@ -8,6 +8,7 @@ import '../model/project.dart';
 import 'code_editor.dart';
 import 'library_sheet.dart';
 import 'param_control.dart';
+import 'pattern_editor.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -30,6 +31,7 @@ class BuilderScreen extends StatefulWidget {
 }
 
 class _BuilderScreenState extends State<BuilderScreen> {
+  bool _showCode = false; // pattern modules open in the piano roll; this shows their text instead
   final CodeController _code = CodeController();
   final FocusNode _focus = FocusNode();
   String? _shownId;
@@ -171,6 +173,16 @@ class _BuilderScreenState extends State<BuilderScreen> {
       // An empty module shows the kind picked for it until its header says otherwise.
       final kind = s.hintKindOf(m.id) ?? s.kindOf(m.id);
       final color = kindColor(kind);
+      final roll = s.isPattern(m.id) && !_showCode ? PatternEditor(key: ValueKey(m.id), state: s, module: m) : null;
+      final rollToggle = s.isPattern(m.id)
+          ? Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => setState(() => _showCode = !_showCode),
+                child: Text(_showCode ? 'Piano roll' : 'Text'),
+              ),
+            )
+          : const SizedBox();
       final editor = CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _run(m),
@@ -267,7 +279,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
                     const SizedBox(height: 8),
                     status,
                     const SizedBox(height: 6),
-                    Expanded(child: SingleChildScrollView(child: editor)),
+                    rollToggle,
+                    Expanded(child: roll ?? SingleChildScrollView(child: editor)),
                   ]),
                 ),
                 const SizedBox(width: 12),
@@ -288,7 +301,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
             const SizedBox(height: 8),
             status,
             const SizedBox(height: 6),
-            editor,
+            rollToggle,
+            roll == null ? editor : SizedBox(height: 440, child: roll),
             params,
             const SizedBox(height: 12),
           ]),
