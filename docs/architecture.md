@@ -141,10 +141,102 @@ The owner's requirement: proper synthesis and MIDI, and helpers that make musica
 
   Beginners can start from a template and a few sliders, and every helper is still plain code that can be edited.
 
+### Variables and patterns **[Proposal]**
+
+The owner's requirement (2026-10-28): Unity-style variables (local, global and readable elsewhere, with sliders and tooltips), and a pattern builder whose patterns any sound can play, drawn or procedural. All of it ships in v2 ([roadmap](roadmap.md)).
+
+**Variables**, like Unity's Inspector:
+
+```
+// --- Tone ---                                        a header groups the controls below it
+param cutoff = 900 in 100..4000 step 10 "How bright"   slider with step and tooltip
+param wave = saw in [saw, square, tri]                 dropdown
+param filter = on                                      toggle
+global swing = 0.1 in 0..0.5 "Swing for every layer"   one project-wide control
+export let env = ad(trig, 0.001, 0.3)                  a signal other modules read
+```
+
+- **Local** `param`s gain a step, a tooltip, dropdowns (`in [a, b, c]`), toggles (`on`/`off`) and headers (`// --- Name ---`). The Builder lays them out like an inspector.
+- **Global** `global`s live on the project. A Project Controls panel shows each one once, and every module that declares the same name reads the same value. Changing one doesn't recompile anything; it's a parameter write.
+  - **Automation lanes** (owner) let a global move across the loop, for example a filter that opens over 4 bars. The lane is part of the project, so playback and export follow it exactly. A global with no lane stays where it is set.
+- **Exports:** `export let` makes a value readable as `module.name`, for example `bass * (1 - kick.env)` for sidechain ducking.
+  - The mixer runs layers in dependency order, so a reader hears the current block.
+  - A cycle, where two modules read each other, is broken by reading the other side's previous block, 64 samples late. This is reported as a warning, not an error.
+  - Exports stay inside the sandbox: they are only numbers passed between modules.
+
+**Patterns** are modules of `kind: pattern` in the same `.caw` format, so they diff cleanly in git and an AI agent can write them. Details set by the owner on 2026-10-28 ([decisions](decisions.md)):
+- **Two shapes:**
+  - A **single-sound pattern** drives one layer.
+  - A **kit pattern** has named rows (kick, snare, hats …), and each row is routed to a layer, so one pattern can drive a whole kit.
+- **Length:** 1 step to 64 bars, independent of the layer's length.
+- **Timing:** notes snap to 1/16 by default, can switch to 1/32 or triplets, or go anywhere with snap off. Swing comes from a global.
+- **Notes:** each note has a start, length, pitch and velocity, plus:
+  - **probability**, repeatable by seed
+  - **ratchets**: 2–4 repeats inside the note
+  - **slide** into the next note
+  - **custom values** that the playing module reads by name (for example `timbre`, `crush`)
+- **Curves on notes:** any note can carry curves over its length, for pitch (bends and slides) and for any value.
+  - The piano roll draws the note itself bent along its pitch curve, so a slide is visible as a curved note.
+  - Value curves show as lines under the note.
+  - You draw freehand with a finger, and it smooths into a curve with points and handles you can then drag.
+- **Note model:** stored the MIDI 2.0 way: per-note pitch and per-note controllers at high resolution, not 7-bit channel messages. The owner chose MIDI 2.0 for the project's own data.
+- **Procedural patterns:** code in the module language, run once per step, deciding whether a note starts and its pitch, velocity, length and extras.
+  - New built-ins: `euclid(hits, steps, step)`, `scale(name, degree)`, `chord(name, root)`, `key`, and `loop` (how many times the pattern has repeated).
+  - `hash`/`noise` with the seed make every repeat identical. A pattern can use `loop` to vary between repeats; playback and export still agree because it is deterministic.
+  - "Freeze" turns the code's output into an editable drawn pattern.
+- **Editor:**
+  - a drum grid (rows, steps, a velocity lane) and a piano roll (pitch × time, note lengths and curves), switchable on any pattern
+  - chord stamping in the project's key
+  - generator buttons that write notes you can edit: Euclid, random in key, arpeggiate, humanize
+  - no recording in v2: notes are drawn or generated
+- **Playing a pattern:** drag a pattern onto a layer and that layer's generator plays it through new variables:
+  - `trig` (1 on the first sample of a note), `gate`, `note`, `freq`, `vel` and `rel`
+  - the current value of each note curve: `bend` for pitch, and custom values by name
+
+  Polyphony (chords) uses the voice pool from the house synth's voice mode ([Instruments, wavetables and samples](#instruments-wavetables-and-samples)), each voice with its own curves. The templates switch from `step % 4 == 0` to `trig`, with a built-in default pattern, so a layer without a pattern still plays.
+- **Scenes** (owner, moved from Stage 5 into v2): a scene is a saved set of which pattern each layer plays, plus global values. Switching scenes happens at the next loop boundary, so it stays in time.
+- **MIDI files** are not a priority (owner: no DAW export yet), but the plan stays open for them:
+  - import of `.mid` into a drawn pattern
+  - export as **MPE**, one channel per note, so per-note curves survive
+  - **[Assumption]** MIDI 2.0 clip files (SMF2) would carry the note model directly, but DAW support for them, Reaper included, is unverified. Check before choosing the export format.
+  - On desktop, dropping a `.mid` file onto the app needs a drag-and-drop package with a permissive licence: **[Assumption]** check one before choosing it.
+
+### Standard library and connectors **[Proposal]**
+
+The owner's requirement (2026-10-28): a built-in library of documented building blocks for the hard audio jobs, such as envelopes, connectors and MIDI input. A person or an AI agent should be able to see what each one does and how it works.
+
+- **Two layers, one namespace style** (`env.adsr(…)`, `midi.cc(74)`):
+  - **Built-ins in C++** for speed and exact repeatability (like v1's `ad`, `lpf` and `sine`).
+  - **Library modules in the C.A.W language**, built from those, so anyone can open one and see how it works.
+- **Categories in v2** (owner chose all four):
+  - **Envelopes and LFOs:** `env.adsr`, `env.ar`, multi-stage envelopes, `lfo.sine/tri/saw/square/random` synced to the tempo, `slew` and smoothing.
+  - **Filters and effects:** more filter types, `fx.delay` (tempo-synced), a reverb, distortion and saturation, a compressor, `fx.crush`.
+  - **MIDI and music theory:**
+    - MIDI in: `midi.note`, `midi.vel`, `midi.cc(n)`, `midi.bend`, `midi.clock`
+    - `scale`, `chord`, `arp`, `euclid`, `quantize(note, key)`
+  - **Glitch and bit tools:** `glitch.stutter`, `glitch.fold`, sample-and-hold, bit masks, and seeded random helpers built on `hash`.
+- **Your own functions** (owner: "yes, but simpler"):
+  - `fn name(args) = expression` in library files works like the built-ins and can be shared through the library repo.
+  - Only the app's own library gets generated reference pages and in-app help.
+  - A user function's doc comment still shows as its tooltip.
+- **Documentation from one source.** Each library function carries a doc comment: what it does, each argument with its unit and range, the output, and a short example. The build turns that into:
+  - **a reference page** in `docs/`
+  - **an agent guide**: a compact list of every function with its signature and one line on what it does, for any AI agent
+  - **in-app help**: autocomplete in the code editor, and a long-press (hover on desktop) on a name to show its docs and play its example
+  - **inspector tips**: the sliders a function's arguments become carry the argument's description as their tooltip
+- **CI checks the docs:** `caw docs --check` fails when a library function has no doc comment or an argument isn't described. Every example must compile and render non-silent audio (golden-hashed), so the docs can't drift from the code.
+- **Connectors.** The owner wants every kind of connector eventually.
+  - **v2 builds what is already in scope:**
+    - **Sidechain** between layers, through `export` signals ([Variables and patterns](#variables-and-patterns-proposal)).
+    - **Modulation links:** connect an LFO, envelope or pattern curve to any `param` or `global` with an amount, like Bitwig's modulators. You drag from the source onto a slider; in code, it's `mod(target, source, amount)`.
+    - **MIDI ports:** USB and Bluetooth MIDI devices feed `midi.*`, and MIDI clock can drive the tempo.
+  - **Later:** sends, returns and buses (Stage 5), and free module patching like a modular synth, beyond the fixed generator → effects chain.
+
 ### Language direction **[Proposal]**
 
 - Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
-- Then add, in this order: `let` bindings, user functions, `param` declarations (these generate UI sliders), `use` imports of library modules, and stateful built-ins (delay lines, filters, envelopes, noise).
+- **[Fact]** v1 has `let`, `param` and the stateful built-ins (envelope, filter, oscillators, noise).
+- Next (v2): user functions (`fn`), `use` imports of library modules, and the standard library ([above](#standard-library-and-connectors-proposal)).
 - Add a sequencing mini-language in Stage 5, designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
 
 ### NKIDO evaluation

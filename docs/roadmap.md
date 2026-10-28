@@ -80,9 +80,35 @@ Neon on near-black: neon green, pink, yellow and blue (owner), each layer in one
 
 CI runs the engine tests and golden renders, and checks the acceptance test's timing claims (layer lengths at 140 BPM, exact loop length, export matching playback). Steps 1, 2 and 5 of the acceptance test, and how exports load in Reaper and a wavetable synth, need the owner on the S22+ and on Windows. The engine is described in [engine](engine.md), and the app in [app](app.md).
 
-## v2 — House synth and MIDI
+## v2 — Variables, patterns, house synth and MIDI
 
-The house-built synth: play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Also:
+Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is in [architecture](architecture.md#variables-and-patterns-proposal).
+
+- **Unity-style variables:**
+  - local `param`s with steps, tooltips, dropdowns, toggles and headers
+  - project `global`s in a Project Controls panel
+  - `export`ed signals other modules read (sidechain)
+- **Automation lanes** for globals.
+- **Pattern builder:**
+  - single-sound and kit patterns, 1 step to 64 bars long
+  - a drum grid and a piano roll, with snap (1/16, 1/32, triplets) or free timing
+  - notes with probability, ratchets, slide and custom values
+  - curves on notes, drawn freehand and then refined with handles: bent pitch shows as a curved note
+  - chord stamping, and generator buttons (Euclid, random in key, arpeggiate, humanize)
+  - procedural pattern code with optional per-repeat variation, and Freeze
+  - drag a pattern onto any layer
+- **Scenes:** sets of patterns and global values per layer, switched in time with the loop.
+- **Standard library** ([architecture](architecture.md#standard-library-and-connectors-proposal)):
+  - envelopes and LFOs, filters and effects, MIDI and music theory, glitch and bit tools
+  - user `fn` functions
+  - docs generated into `docs/`, an agent guide, in-app help and inspector tips, checked in CI
+- **Connectors:** sidechain, modulation links (LFOs and envelopes onto any param), and MIDI ports.
+- **A UI for a light halfway DAW** ([UI design](ui.md)):
+  - a session grid (layers × scenes), a library you drag from, and an inspector sheet
+  - one gesture vocabulary on both phone and desktop, and undo/redo
+  - painted grids, with the CPU and RAM budgets
+- **Notes stored the MIDI 2.0 way.** `.mid` import and MPE export come later; DAW export isn't a priority yet.
+- **The house-built synth:** play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Its voice pool also plays chords from patterns.
 - on-screen keys
 - USB/Bluetooth MIDI: notes, CC learn, clock, MIDI file import and export
 - note and scale helpers
@@ -104,10 +130,11 @@ macOS and Linux desktop apps, then iOS once its distribution question is settled
 
 ## Stage 5 — Advanced instrument
 
-- scenes and a timeline arranger
+- a timeline arranger
 - the sequencing mini-language
 - audio import with nondestructive byte/bit mangling chains (originals are never modified)
 - sends and buses
+- free module patching (modular-style)
 - spectrum display
 - performance work
 - preparing to sell through AutoStacc: signed release builds, privacy policy, install steps, and how a purchase unlocks the app

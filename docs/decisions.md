@@ -8,6 +8,56 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Standard library and connectors (owner, answering Claude's questions)
+
+- **Library categories, all four:** envelopes and LFOs; filters and effects; MIDI and music theory; glitch and bit tools.
+- **Your own functions:** "yes, but simpler". Users and agents write `fn` functions and share them, but only the app's library gets generated reference pages and in-app help.
+- **Documentation in four places:** a reference in `docs/`, an agent guide, in-app help, and inspector tips. All of it is generated from doc comments and checked in CI.
+- **Connectors:** all kinds are wanted eventually, with only what's in scope built now.
+  - **v2:** sidechain, modulation links and MIDI ports.
+  - **Later:** sends and buses (Stage 5), and free module patching.
+
+## 2026-10-28: A light halfway DAW (owner); UI proposal (Claude)
+
+- **Owner:** C.A.W becomes a halfway DAW, without recording or other hard features yet. It must be easy to understand and use on phone and PC, and light on CPU and RAM.
+- **Claude's proposal, based on how other apps solve this** ([UI design](ui.md)):
+  - a session grid of layers × scenes, with launches queued to the loop
+  - a drag-from library, and a Unity-style inspector as a bottom sheet
+  - one gesture vocabulary, undo/redo always on screen, and 48 dp targets
+  - a piano roll with a mode bar and two-finger navigation
+  - grids drawn by painters, and meters that sleep when stopped
+- **Owner's answers:**
+  - portrait and landscape equally
+  - the session grid for Mix
+  - a calm neon look
+  - built for the owner first, with tooltips but no tour
+  - on PC, mouse and keyboard, with everything reachable by keyboard alone, and Reaper-like shortcuts
+  - a library with folders plus tags and search
+  - sounds open on their controls, with the code one tap away
+
+## 2026-10-28: Variables and patterns for v2 (owner, answering Claude's questions)
+
+- **Variables:** all three kinds, like Unity's Inspector:
+  - local `param`s with tooltips, headers, dropdowns and toggles
+  - project-wide `global`s
+  - `export`ed signals that other modules read
+- **Pattern editor:** a drum grid and a piano roll, switchable per pattern.
+- **Procedural patterns:**
+  - pattern code in the module language, plus generator buttons that write notes you can edit
+  - code can be frozen into a drawn pattern
+- **Release:** both features ship in v2 with the house synth, because chord patterns need its voice engine.
+- **Details, from a second round of questions:**
+  - Patterns come in two shapes, single-sound and kit (rows routed to layers), and can be 1 step to 64 bars long.
+  - Notes carry probability, ratchets, slide and custom values.
+  - Any note can carry curves for pitch and for any value. The piano roll draws a bent note as a curve, drawn freehand and then refined with points and handles.
+  - Notes snap to a grid (1/16, 1/32 or triplets) or are placed off-grid.
+  - Procedural patterns may vary between loop repeats, deterministically.
+  - Globals get automation lanes.
+  - No note recording in v2: patterns are drawn or generated.
+  - **Scenes move from Stage 5 into v2.**
+  - **MIDI 2.0 is the project's own note model.** MPE export stays possible, but exporting MIDI to a DAW isn't a priority yet.
+- **Status:** planning only. Nothing is built until the owner says so ([architecture](architecture.md#variables-and-patterns-proposal), [roadmap](roadmap.md)).
+
 ## 2026-10-28: How v1 was built (Claude's defaults, open to change)
 
 The owner asked for v1 to be built. These are the choices made while building it; each can be changed.
