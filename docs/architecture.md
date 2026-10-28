@@ -141,6 +141,44 @@ The owner's requirement: proper synthesis and MIDI, and helpers that make musica
 
   Beginners can start from a template and a few sliders, and every helper is still plain code that can be edited.
 
+### Variables and patterns **[Proposal]**
+
+The owner's requirement (2026-10-28): Unity-style variables (local, global and readable elsewhere, with sliders and tooltips), and a pattern builder whose patterns any sound can play, drawn or procedural. All of it ships in v2 ([roadmap](roadmap.md)).
+
+**Variables**, like Unity's Inspector:
+
+```
+// --- Tone ---                                        a header groups the controls below it
+param cutoff = 900 in 100..4000 step 10 "How bright"   slider with step and tooltip
+param wave = saw in [saw, square, tri]                 dropdown
+param filter = on                                      toggle
+global swing = 0.1 in 0..0.5 "Swing for every layer"   one project-wide control
+export let env = ad(trig, 0.001, 0.3)                  a signal other modules read
+```
+
+- **Local** `param`s gain a step, a tooltip, dropdowns (`in [a, b, c]`), toggles (`on`/`off`) and headers (`// --- Name ---`). The Builder lays them out like an inspector.
+- **Global** `global`s live on the project. A Project Controls panel shows each one once, and every module that declares the same name reads the same value. Changing one doesn't recompile anything; it's a parameter write.
+- **Exports:** `export let` makes a value readable as `module.name`, for example `bass * (1 - kick.env)` for sidechain ducking.
+  - The mixer runs layers in dependency order, so a reader hears the current block.
+  - A cycle, where two modules read each other, is broken by reading the other side's previous block, 64 samples late. This is reported as a warning, not an error.
+  - Exports stay inside the sandbox: they are only numbers passed between modules.
+
+**Patterns** are modules of `kind: pattern` in the same `.caw` format, so they diff cleanly in git and an AI agent can write them.
+- **Drawn patterns** hold note events in the file body, one per line: step, length, pitch, velocity. A pattern has its own length in steps.
+- **Procedural patterns** are code in the module language, run once per step, deciding whether a note starts and its pitch, velocity and length:
+  - new built-ins: `euclid(hits, steps, step)`, `scale(name, degree)`, `chord(name, root)`, `key`
+  - `hash`/`noise` with the seed, so a pattern repeats exactly
+  - "Freeze" turns the code's output into an editable drawn pattern.
+- **Editor:** a drum grid (rows = sounds or pitches, cells = steps, a velocity lane) and a piano roll (pitch × time, with note lengths). You can switch between them on any pattern. Chord stamping places a chosen chord type in the project's key. Generator buttons write notes you can then edit by hand: Euclid, random in key, arpeggiate, humanize.
+- **Playing a pattern:** drag a pattern onto a layer and that layer's generator plays it through new variables:
+  - `trig` (1 on the first sample of a note)
+  - `gate`
+  - `note`, `freq` and `vel`
+  - `rel` (samples since release)
+  
+  Polyphony (chords) uses the voice pool from the house synth's voice mode ([Instruments, wavetables and samples](#instruments-wavetables-and-samples)). The templates switch from `step % 4 == 0` to `trig`, with a built-in default pattern, so a layer without a pattern still plays.
+- **MIDI files:** import a `.mid` into a drawn pattern and export any pattern (procedural ones once frozen) as `.mid` for Reaper. On desktop, dropping a `.mid` file onto the app imports it. **[Assumption]** That needs a drag-and-drop package for Flutter desktop with a permissive licence; check one before choosing it.
+
 ### Language direction **[Proposal]**
 
 - Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.

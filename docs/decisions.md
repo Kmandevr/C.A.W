@@ -8,6 +8,19 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Variables and patterns for v2 (owner, answering Claude's questions)
+
+- **Variables:** all three kinds, like Unity's Inspector:
+  - local `param`s with tooltips, headers, dropdowns and toggles
+  - project-wide `global`s
+  - `export`ed signals that other modules read
+- **Pattern editor:** a drum grid and a piano roll, switchable per pattern.
+- **Procedural patterns:**
+  - pattern code in the module language, plus generator buttons that write notes you can edit
+  - code can be frozen into a drawn pattern
+- **Release:** both features ship in v2 with the house synth, because chord patterns need its voice engine.
+- **Status:** planning only. Nothing is built until the owner says so ([architecture](architecture.md#variables-and-patterns-proposal), [roadmap](roadmap.md)).
+
 ## 2026-10-28: How v1 was built (Claude's defaults, open to change)
 
 The owner asked for v1 to be built. These are the choices made while building it; each can be changed.

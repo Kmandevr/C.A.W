@@ -80,9 +80,21 @@ Neon on near-black: neon green, pink, yellow and blue (owner), each layer in one
 
 CI runs the engine tests and golden renders, and checks the acceptance test's timing claims (layer lengths at 140 BPM, exact loop length, export matching playback). Steps 1, 2 and 5 of the acceptance test, and how exports load in Reaper and a wavetable synth, need the owner on the S22+ and on Windows. The engine is described in [engine](engine.md), and the app in [app](app.md).
 
-## v2 — House synth and MIDI
+## v2 — Variables, patterns, house synth and MIDI
 
-The house-built synth: play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Also:
+Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is in [architecture](architecture.md#variables-and-patterns-proposal).
+
+- **Unity-style variables:**
+  - local `param`s with steps, tooltips, dropdowns, toggles and headers
+  - project `global`s in a Project Controls panel
+  - `export`ed signals other modules read (sidechain)
+- **Pattern builder:**
+  - pattern files with a drum grid and a piano roll
+  - chord stamping, and generator buttons (Euclid, random in key, arpeggiate, humanize)
+  - procedural pattern code with Freeze
+  - drag a pattern onto any layer
+  - `.mid` import and export
+- **The house-built synth:** play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Its voice pool also plays chords from patterns.
 - on-screen keys
 - USB/Bluetooth MIDI: notes, CC learn, clock, MIDI file import and export
 - note and scale helpers
