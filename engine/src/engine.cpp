@@ -62,7 +62,7 @@ struct Engine::Cmd {
     Chain* chain = nullptr;
     int steps = 0, order = 0;
     double bpm = 120, master = 0.7;
-    int beatsPerBar = 4, loopSteps = 64;
+    int beatsPerBar = 4, loopSteps = 64, keyRoot = 9, keyScale = 1;
     uint32_t seed = 0;
     bool seamXf = true, flag = false;
 };
@@ -229,11 +229,24 @@ std::string Engine::setProject(const ProjectSpec& p) {
     t.seed = p.seed;
     t.master = p.master;
     t.seamXf = p.seamCrossfade;
+    t.keyRoot = p.keyRoot;
+    t.keyScale = p.keyScale;
     send(t);
     const double stepLen = 60.0 * ctlSr_ / (p.bpm * 4.0);
     ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
 
     globals_ = p.globals;
+
+    // Project libraries (kind: library) compile first; every other module can call their functions.
+    std::vector<LibrarySource> libs;
+    std::string libSig;
+    for (const ModuleSpec& m : p.modules) {
+        if (moduleKindOf(m.source) != ModuleKind::Library) continue;
+        CompileResult r = compileModule(m.source);
+        if (!r.program) continue;
+        libs.push_back({r.program->ns, m.source});
+        libSig += r.program->ns + "\x1f" + m.source + "\x1e";
+    }
 
     // Compile changed modules. A module that fails keeps its last good program, so the old sound plays on.
     bool allOk = true;
@@ -242,8 +255,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
         ModuleState st;
         auto it = modules_.find(m.id);
         if (it != modules_.end()) st = it->second;
-        if (it == modules_.end() || st.source != m.source || (!st.program && st.error.empty())) {
-            CompileResult r = compileModule(m.source);
+        const bool isLib = moduleKindOf(m.source) == ModuleKind::Library;
+        const std::string sig = isLib ? std::string() : libSig;
+        if (it == modules_.end() || st.source != m.source || st.libSig != sig || (!st.program && st.error.empty())) {
+            CompileResult r = compileModule(m.source, isLib ? std::vector<LibrarySource>{} : libs);
+            st.libSig = sig;
             st.source = m.source;
             if (r.program) {
                 st.program = r.program;
@@ -294,7 +310,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         Planned pl{w, {}, {}, {}};
         for (const std::string& id : w.chain) {
             auto it = modules_.find(id);
-            if (it == modules_.end() || !it->second.program) continue;
+            if (it == modules_.end() || !it->second.program || it->second.program->kind == ModuleKind::Library) continue;
             pl.ids.push_back(id);
             pl.sig.push_back(it->second.program.get());
         }
@@ -641,6 +657,8 @@ void Engine::applyCommands() noexcept {
                 seed_ = c.seed;
                 master_ = c.master;
                 seamXf_ = c.seamXf;
+                keyRoot_ = c.keyRoot;
+                keyScale_ = c.keyScale;
                 updateTiming();
                 if (g_ >= loopLen_) g_ = 0;
                 loopLenFlag_.store(loopLen_, std::memory_order_relaxed);
@@ -713,6 +731,8 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, S
     ctx.sr = sr_;
     ctx.bpm = bpm_;
     ctx.seed = seed_;
+    ctx.keyRoot = keyRoot_;
+    ctx.keyScale = keyScale_;
     const uint32_t u = c.used;
     auto uses = [u](Var v) { return (u >> static_cast<int>(v)) & 1u; };
     for (int i = 0; i < len; ++i) c.nb[i] = static_cast<double>(n0 + i);

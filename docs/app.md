@@ -17,14 +17,17 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
   - BPM, beat and CPU readouts
   - Play/Stop (the space bar on desktop)
 - **Builder** (`lib/ui/builder_screen.dart`):
-  - a row of module chips, and **New** to start from a template
+  - a row of module chips (generators green, effects pink, libraries blue), and **New** to start from a template
   - a code editor with highlighting and the symbol key row
+  - **completion chips** above the key row: typing two or more letters offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
+  - **Library** (the book button, or F1): every function from the engine's `caw_library()` plus the project's own library modules, grouped by category and searchable from the word at the cursor. Each shows its signature, description, arguments and example, with **Insert call** and **Insert example**
   - a one-line status: the error (tap it to jump to the spot), "edited, tap Run", or the module's summary
   - a scope, and a Controls panel built from the module's `param`s and `global`s:
     - sliders (with steps), toggles, and dropdowns (buttons when there are 4 or fewer choices)
     - grouped under `// --- Headers ---`, with tips and doc comments on long-press or hover
     - a double-tap on a value resets it
     - a "Shares" line naming the module's exports (`kick.env`), and warnings in yellow
+    - for a library module, the functions other modules can call
   - **Run** (Ctrl+Enter) sends the code and hot-swaps it. Code that fails keeps the old sound and puts the cursor on the error
   - **Solo preview** plays only this module. An effect is heard through the generator of a layer that uses it, or the project's first generator
 - **Arranger** (`lib/ui/arranger_screen.dart`):
@@ -37,7 +40,8 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
   - progress and cancel while it renders
   - then the system file picker saves the file
 - **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail, and the Builder shows code and params side by side. Ctrl+1/2/3 switch areas.
-- **Key:** stored and shown with the project. In v1 nothing uses it yet; note helpers that follow it are v2.
+- **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
+- **Library modules** make no sound: layers, the Exporter and Solo preview leave them out.
 
 ## How it works
 
@@ -72,5 +76,5 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
 
 `flutter test`:
 - model round-trips and the engine JSON
-- highlighting and editor helpers
-- an integration test through `dart:ffi`: templates, checks, a project sync and a loop export. It runs when `CAW_LIB` points at a built engine library; CI sets it.
+- highlighting, editor helpers and completion
+- integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.

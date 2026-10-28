@@ -13,7 +13,8 @@ The engine in `engine/` as built. The reasons behind it are in [architecture](ar
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath`, `engine` (mixer), `project`, `render` (exports), `wav`, `json`, `capi` |
+| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath`, `engine` (mixer), `project`, `render` (exports), `docs` (generated reference), `wav`, `json`, `capi` |
+| `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
 | `engine/include/caw.h` | The C API, version 1 |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
 | `engine/cli/` | The `caw` tool |
@@ -35,7 +36,7 @@ A module is one text file: an optional header between `---` lines, then code.
 ```
 ---
 caw: 1               # module format version (only 1 exists)
-kind: generator      # generator (makes sound) or effect (changes `in`)
+kind: generator      # generator (makes sound), effect (changes `in`) or library (functions only)
 name: Bass
 summary: Filtered saw bass playing an A minor pattern
 mode: float          # byte or float; default byte for generators, float for effects
@@ -104,16 +105,42 @@ Bitwise operators convert their inputs the JavaScript way: they drop the fractio
 | `in` | The incoming sound, for effects (0 in a generator) |
 | `pi` | π |
 
-### Built-ins
+### Built-ins and libraries
 
-- **Maths:** `sin cos tan abs floor ceil round trunc sqrt exp log tanh sign fract min max pow clamp(x,lo,hi) mix(a,b,x) mtof(note)`. `log` and `sqrt` of values ≤ 0 give 0.
-- **Bits:** `rotl(x,n) rotr(x,n) popcount clz ctz bitrev bswap`, `bits(x)` (the bits of a 32-bit float as an integer) and `float(i)` (the reverse).
-- **Seeded randomness:** `hash(x)` scrambles x into a 32-bit number. `noise()` is white noise from `t`, and `noise(x)` is noise from x. Both change with the project seed, never with the clock.
-- **Oscillators:** `sine(freq) saw(freq) square(freq, width=0.5) tri(freq)`. Saw and square are band-limited (PolyBLEP).
-- **Envelope:** `ad(trigger, attack=0.005, decay=0.3)` starts each time `trigger` rises above 0. The attack is linear and the decay reaches −60 dB after `decay` seconds.
-- **Filter:** `lpf(x, cutoff, q=0.707)`, `hpf`, `bpf`: a state-variable filter.
+Every function, with its arguments and an example, is in the generated [function library](library.md); this is the overview.
 
-Each call to an oscillator, `ad`, a filter or `noise` has its own state. The state returns to its start at every loop start, so every loop repeats exactly.
+- **Built-in functions** (C++, `engine/src/builtins.cpp`), by category:
+  - Maths, Bits and Random (`hash`, `noise`, `rand`, `randi`, `chance`)
+  - Oscillators (band-limited `saw` and `square`) and Envelopes (`ad`, `env.adsr`, `env.ar`)
+  - LFOs (`lfo.*`, in beats, so they follow the tempo)
+  - Filters (`lpf`, `hpf`, `bpf`, `notch`, `lp1`, `hp1`, `slew`)
+  - Effects (`fx.*`: delay, reverb, drive, crush and more) and Glitch (`glitch.*`: stutter, hold, mask, wrap and more)
+  - Music: `scale`, `quantize`, `chord`, `arp`, `euclid`, `beats`
+- **Constants:** `scale.*`, `chord.*` and `arp.*` name the scales, chords and arpeggio modes the music functions take.
+- **The project key:** `scale`, `chord` and `arp` default to the key in the project file (`key_root`, `key_scale`); A minor when it has none.
+- **Built-in libraries** (`engine/lib/*.caw`), written in the module language so anyone can read how they work: `drum.*` (kick, snare, hat, clap), `synth.*` (supersaw, pluck, acid, pad, fm) and `util.*` (duck, gate, trem).
+- Each call to a function with state (oscillators, envelopes, filters, effects) has its own state. The state returns to its start at every loop start, so every loop repeats exactly.
+- A param passed straight to a documented argument borrows that argument's description as its tip, unless it has its own.
+
+### Library modules
+
+A module with `kind: library` and `namespace: name` holds only documented `fn` functions. Every other module in the project can call them as `name.fn(…)`; the library itself makes no sound and is skipped in layers.
+
+```
+---
+kind: library
+namespace: mine
+name: My tools
+---
+/// Folds a signal back into -1..1.
+/// x: the signal
+/// amount: 1 = none, higher folds more
+/// example: mine.fold(sine(110), 3) * 0.5
+fn fold(x, amount) = sin(x * amount)
+```
+
+- The `///` lines document the function: a summary, then one `arg: meaning` line per argument and an `example:` line. The app's Library sheet and completion show them.
+- The namespace is letters, digits and `_`, starting with a letter. A function whose name is already taken (a built-in or another library's) is an error.
 
 ### Output
 
@@ -129,7 +156,7 @@ The language has no I/O, loops or recursion, so a program's cost is fixed when i
 - 32 params and globals
 - 16 exports and 32 imports
 - functions nested 32 calls deep
-- 8192 numbers of oscillator, envelope and filter state
+- 1,048,576 numbers (8 MB) of state for oscillators, envelopes, filters, delays and reverbs
 
 Errors give a line and column, counting the header lines, for example `line 5, col 5: unknown name 'nope'`.
 
@@ -156,7 +183,7 @@ The app, the CLI and exports share one format:
 
 ```json
 { "caw_project": 1, "name": "Night Glitch", "bpm": 140, "beats_per_bar": 4, "loop_bars": 4,
-  "seed": 7, "master": 0.7, "seam_crossfade": true, "globals": { "swing": 0.1 },
+  "seed": 7, "master": 0.7, "seam_crossfade": true, "key_root": 9, "key_scale": 1, "globals": { "swing": 0.1 },
   "modules": [ { "id": "m1", "name": "Kick", "source": "...the .caw text...", "params": { "shift": 6 } } ],
   "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"], "length_steps": 48,
                 "volume": 0.8, "pan": 0, "mute": false, "solo": false } ],
@@ -164,6 +191,7 @@ The app, the CLI and exports share one format:
 ```
 
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
+- `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
 - `audition` is the Builder's preview. With `audition_only`, only that chain is heard.
 - Values outside their range are clamped:
   - BPM 20–400
@@ -196,6 +224,7 @@ The app, the CLI and exports share one format:
 - **Hosts and devices:** `caw_engine_process(left, right, frames)` lets hosts such as a plugin drive the audio. `caw_audio_start` and `caw_audio_stop` open the device through miniaudio: AAudio or OpenSL ES on Android, WASAPI on Windows, Core Audio, and ALSA or PulseAudio.
 - **Exports:** `caw_render(project_json, options, path, progress, cancel, …)` writes a WAV. Progress counts 0–1000, and a non-zero cancel stops it.
 - **Templates:** `caw_template_count`, `caw_template_file` and `caw_template_source`.
+- **Function library:** `caw_library()` returns JSON: `functions` (name, category, signature, doc, example and args with name, doc and optional) and `constants`. The app's Library sheet reads it.
 - Strings the engine returns are freed with `caw_free`. Only `caw_*` symbols are exported.
 
 ## The `caw` CLI
@@ -205,16 +234,19 @@ caw check FILE.caw...
 caw render INPUT.caw|INPUT.json -o OUT.wav [--loop | --seconds S | --oneshot LAYER | --wavetable MODULE --param P --frames N]
            [--rate 44100|48000] [--float] [--bpm B --bars N --steps N]
 caw templates
+caw docs [--check] [--dir DIR]
 ```
 
 - For a single `.caw` file, `render` builds a one-layer project: `--bpm` and `--bars` set the loop, and `--steps` sets the layer's length.
 - It prints frames, length, peak and RMS, and flags `SILENT` or `CLIPPING`, so an agent can check its work without listening.
+- `caw docs` writes [library.md](library.md) and [agent-guide.md](agent-guide.md) into `docs/` from the engine's own docs. It fails if a function lacks a description, an argument description or an example, or if an example doesn't compile or is silent. `--check` only compares, and CI runs it, so the notes can't drift from the code.
 
 ## Tests
 
-`engine/build/caw_tests` runs 38 tests:
+`engine/build/caw_tests` runs 46 tests:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
+- **Library:** envelopes, LFOs, the music helpers, delay, effects and glitch tools, project libraries, borrowed tips, and that every function is documented with an example that plays.
 - **Mixer:** block-size independence, layer lengths, seams, hot swap, broken code, mute, solo and pan, overload, stop and removal, effects, params and the limiter.
 - **Exports:** loop lengths, export equal to playback, free-length renders and cancel, one-shots, wavetables, broken modules and WAV bytes.
 - **Golden renders:** one hash per template in `engine/tests/golden.txt`. A hash changes only with an intended sound change; then run `caw_tests --update-golden` and say why in the commit.

@@ -66,6 +66,35 @@ class CodeController extends TextEditingController {
     value = TextEditingValue(text: next, selection: TextSelection.collapsed(offset: sel.start + s.length));
   }
 
+  static final _wordChar = RegExp(r'[A-Za-z0-9_.]');
+
+  /// Where the name being typed before the cursor starts (letters, digits, `_` and `.`).
+  int _wordStart() {
+    var i = selection.isValid ? selection.start : text.length;
+    while (i > 0 && _wordChar.hasMatch(text[i - 1])) {
+      i--;
+    }
+    return i;
+  }
+
+  /// The name being typed before the cursor, e.g. `env.ad` (empty when there is none).
+  String get wordAtCursor =>
+      selection.isValid && selection.isCollapsed ? text.substring(_wordStart(), selection.start) : '';
+
+  /// Replaces the name being typed with [s]. A call's placeholder arguments come out selected, ready to type over.
+  void completeWord(String s) {
+    final start = _wordStart();
+    final end = selection.isValid ? selection.end : text.length;
+    final open = s.indexOf('(');
+    final close = s.lastIndexOf(')');
+    value = TextEditingValue(
+      text: text.replaceRange(start, end, s),
+      selection: open < 0 || close <= open + 1
+          ? TextSelection.collapsed(offset: start + (open >= 0 && close == open + 1 ? close + 1 : s.length))
+          : TextSelection(baseOffset: start + open + 1, extentOffset: start + close),
+    );
+  }
+
   /// Puts the cursor at a 1-based line and column (from an error message).
   void jumpTo(int line, int col) {
     var offset = 0;

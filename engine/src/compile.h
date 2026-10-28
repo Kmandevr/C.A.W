@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "program.h"
 
@@ -15,7 +16,23 @@ struct CompileResult {
     int line = 0, col = 0;
 };
 
-CompileResult compileModule(std::string_view source);
+// A library of fn functions: built in (engine/lib) or a project module of kind library.
+struct LibrarySource {
+    std::string ns;      // namespace; empty takes the header's `namespace:`
+    std::string source;
+};
+
+// The built-in libraries (engine/lib/*.caw), always available to every module.
+const std::vector<LibrarySource>& standardLibraries();
+
+// Compiles a module. The built-in libraries and `libs` are loaded first, so their functions can be called.
+CompileResult compileModule(std::string_view source, const std::vector<LibrarySource>& libs = {});
+
+// The module's kind from its header alone (no compile), so libraries can be found before other modules.
+ModuleKind moduleKindOf(std::string_view source);
+
+// The documented functions of one library, with their full names (drum.kick), for the reference.
+std::vector<FnDoc> libraryDocs(const LibrarySource& lib);
 
 // JSON fields (without braces) describing a compiled module for the app: kind, mode, name, summary, params (with
 // step, kind, choices, tip, header, doc, global), exports, imports and functions.

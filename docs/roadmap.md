@@ -103,6 +103,7 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - envelopes and LFOs, filters and effects, MIDI and music theory, glitch and bit tools
   - user `fn` functions
   - docs generated into `docs/`, an agent guide, in-app help and inspector tips, checked in CI
+  - **[Fact]** Built (step 2): 69 documented built-in functions in ten categories, 12 more in the `drum`, `synth` and `util` libraries, project library modules, the [function library](library.md) and [agent guide](agent-guide.md) checked in CI, and the app's Library sheet (F1) and completion. MIDI functions come with MIDI ports.
 - **Connectors:** sidechain, modulation links (LFOs and envelopes onto any param), and MIDI ports.
 - **A UI for a light halfway DAW** ([UI design](ui.md)):
   - a session grid (layers × scenes), a library you drag from, and an inspector sheet

@@ -127,13 +127,14 @@ class AppState extends ChangeNotifier {
   List<String>? get previewChain {
     final m = project.module(selectedModuleId);
     if (m == null) return null;
-    if (!(info[m.id]?.isEffect ?? headerValue(m.runSource, 'kind') == 'effect')) return [m.id];
+    if (isLibrary(m.id)) return null;
+    if (!isEffect(m.id)) return [m.id];
     String? gen;
     for (final l in project.layers) {
       if (l.effectIds.contains(m.id) && l.generatorId != null) gen = l.generatorId;
     }
     gen ??= project.modules
-        .where((x) => !(info[x.id]?.isEffect ?? headerValue(x.runSource, 'kind') == 'effect'))
+        .where((x) => isGenerator(x.id))
         .map((x) => x.id)
         .firstOrNull;
     return [?gen, m.id];
@@ -298,16 +299,21 @@ class AppState extends ChangeNotifier {
     _changed(engine: true);
   }
 
-  bool isEffect(String moduleId) {
+  /// generator, effect or library: from the last check, or the header before the module has compiled.
+  String kindOf(String moduleId) {
     final m = project.module(moduleId);
-    if (m == null) return false;
-    return info[moduleId]?.isEffect ?? headerValue(m.runSource, 'kind') == 'effect';
+    if (m == null) return 'generator';
+    return info[moduleId]?.kind ?? headerValue(m.runSource, 'kind') ?? 'generator';
   }
+
+  bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
+  bool isLibrary(String moduleId) => kindOf(moduleId) == 'library';
+  bool isGenerator(String moduleId) => !isEffect(moduleId) && !isLibrary(moduleId);
 
   // ---------- layers (Arranger) ----------
 
   void addLayer() {
-    final gen = project.modules.where((m) => !isEffect(m.id)).firstOrNull;
+    final gen = project.modules.where((m) => isGenerator(m.id)).firstOrNull;
     project.layers.add(LayerDoc(
       id: newId('l'),
       name: gen?.name ?? 'Layer ${project.layers.length + 1}',

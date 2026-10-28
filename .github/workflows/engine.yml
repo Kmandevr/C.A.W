@@ -33,6 +33,7 @@ jobs:
         if: matrix.name == 'Linux x64'
         run: |
           engine/build/caw check examples/*.caw
+          engine/build/caw docs --check --dir docs
           mkdir -p renders
           for f in examples/*.caw; do engine/build/caw render "$f" -o "renders/$(basename "$f" .caw).wav" --bpm 140; done
       - name: Upload example renders

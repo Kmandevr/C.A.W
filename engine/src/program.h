@@ -13,7 +13,8 @@ constexpr int kBlock = 64;  // samples per VM block
 constexpr size_t kMaxSourceBytes = 64 * 1024;
 constexpr int kMaxDepth = 128;
 constexpr int kMaxRegisters = 1024;
-constexpr int kMaxStateDoubles = 8192;
+constexpr int kMaxStateDoubles = 1 << 20;  // 8 MB: room for a few delay lines and reverbs
+constexpr int kMaxCallArgs = 6;
 constexpr int kMaxParams = 32;
 
 // Built-in variables a module can read.
@@ -35,12 +36,13 @@ struct Op {
     uint8_t sub;     // BinOp, UnOp, Var, or argument count for Call
     uint16_t dst;
     uint16_t a, b, c;
+    uint16_t args[kMaxCallArgs];  // Call arguments
     uint32_t index;  // param index, built-in id or import index
     uint32_t state;  // state offset for stateful built-ins
     double k;        // constant value
 };
 
-enum class ModuleKind : uint8_t { Generator, Effect };
+enum class ModuleKind : uint8_t { Generator, Effect, Library };
 enum class OutputMode : uint8_t { Byte, Float };
 
 constexpr int kMaxExports = 16;  // per layer, across its chain
@@ -66,8 +68,10 @@ struct ExportDef {
 };
 
 struct FnDoc {
-    std::string name, doc;
+    std::string name, doc;               // doc: the summary line(s)
     std::vector<std::string> args;
+    std::vector<std::string> argDocs;    // one per argument ("" when undocumented)
+    std::string example;
 };
 
 struct StateInit {
@@ -80,6 +84,7 @@ struct Program {
     OutputMode mode = OutputMode::Byte;
     double rate = 8000.0;  // formula rate of t in byte mode
     std::string name, summary;
+    std::string ns;  // libraries: the namespace their functions are called under
     std::vector<ParamDef> params;      // params and globals, in declaration order
     std::vector<ExportDef> exports;
     std::vector<std::string> imports;  // "module.name" values read from other modules
@@ -99,6 +104,8 @@ struct BlockCtx {
     double sr = 48000.0;
     double bpm = 120.0;
     uint32_t seed = 0;
+    int keyRoot = 9;   // project key: 0 = C … 11 = B (A by default)
+    int keyScale = 1;  // scale id (scale.minor by default)
     const double* vars[static_cast<int>(Var::Count)] = {};
     const double* const* imports = nullptr;  // one pointer per Program::imports entry (null reads 0)
     int importOffset = 0;                     // where this block starts inside those buffers

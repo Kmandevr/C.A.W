@@ -8,6 +8,7 @@
 #include "caw.h"
 #include "capi_internal.h"
 #include "compile.h"
+#include "docs.h"
 #include "json.h"
 #include "render.h"
 #include "wav.h"
@@ -158,6 +159,8 @@ int32_t caw_render(const char* project_json, const CawRenderOptions* o, const ch
     }
     return 0;
 }
+
+char* caw_library(void) { return dup(caw::libraryJson()); }
 
 int32_t caw_template_count(void) { return caw::kTemplateCount; }
 

@@ -258,7 +258,7 @@ class _LayerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = state.project;
     final color = Neon.layer(layer.color);
-    final generators = p.modules.where((m) => !state.isEffect(m.id)).toList();
+    final generators = p.modules.where((m) => state.isGenerator(m.id)).toList();
     final effects = p.modules.where((m) => state.isEffect(m.id)).toList();
     final lengths = lengthChoices(p.stepsPerBar);
     if (!lengths.any((c) => c.$1 == layer.lengthSteps)) lengths.add((layer.lengthSteps, '${layer.lengthSteps} 16ths'));

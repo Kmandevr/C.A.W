@@ -85,6 +85,11 @@ CAW_API void caw_audio_stop(CawEngine* e);
 CAW_API int32_t caw_render(const char* project_json, const CawRenderOptions* options, const char* out_path,
                            int32_t* progress, int32_t* cancel, char* error, int32_t error_len);
 
+/* Every built-in and library function with its docs, arguments and example, plus the named constants, as JSON
+   ({"functions":[{"name","category","signature","doc","example","args":[{"name","doc","optional"}]}],
+   "constants":[...]}). Free with caw_free. */
+CAW_API char* caw_library(void);
+
 /* Starter templates bundled with the engine (the files in examples/). Strings are static; don't free them. */
 CAW_API int32_t caw_template_count(void);
 CAW_API const char* caw_template_file(int32_t index);

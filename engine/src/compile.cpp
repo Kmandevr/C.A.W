@@ -269,8 +269,48 @@ constexpr int kMaxFnDepth = 32;
 
 class Compiler {
 public:
-    Compiler(std::vector<Token> toks, const std::vector<Comment>& comments, Program& p)
-        : t_(std::move(toks)), comments_(comments), p_(p) {}
+    Compiler(const std::vector<Token>& toks, const std::vector<Comment>& comments, Program& p)
+        : t_(&toks), comments_(&comments), p_(p) {}
+
+    // Loads a library's functions under its namespace (`drum` makes `fn kick` callable as drum.kick).
+    void loadLibrary(const std::string& ns, const std::vector<Token>& toks, const std::vector<Comment>& comments) {
+        const std::vector<Token>* savedT = t_;
+        const std::vector<Comment>* savedC = comments_;
+        const size_t savedPos = pos_;
+        std::map<std::string, Val> savedNames = std::move(names_);
+        names_.clear();
+        t_ = &toks;
+        comments_ = &comments;
+        pos_ = 0;
+        prefix_ = ns + ".";
+        while (true) {
+            skipNewlines();
+            if (peek().kind == Tok::End) break;
+            if (!(peek().kind == Tok::Ident && peek().text == "fn")) fail(peek(), "a library holds only fn functions");
+            next();
+            fnStatement();
+            endStatement();
+        }
+        prefix_.clear();
+        t_ = savedT;
+        comments_ = savedC;
+        pos_ = savedPos;
+        names_ = std::move(savedNames);
+    }
+
+    // A library module on its own: only functions, named ns.fn as other modules call them; no output.
+    void runLibrary() {
+        prefix_ = p_.ns + ".";
+        ownLibrary_ = true;
+        while (true) {
+            skipNewlines();
+            if (peek().kind == Tok::End) break;
+            if (!(peek().kind == Tok::Ident && peek().text == "fn")) fail(peek(), "a library holds only fn functions");
+            next();
+            fnStatement();
+            endStatement();
+        }
+    }
 
     void run() {
         bool haveOutput = false;
@@ -316,8 +356,8 @@ public:
     }
 
 private:
-    const Token& peek() const { return t_[pos_]; }
-    const Token& next() { return t_[pos_ < t_.size() - 1 ? pos_++ : pos_]; }
+    const Token& peek() const { return (*t_)[pos_]; }
+    const Token& next() { return (*t_)[pos_ < t_->size() - 1 ? pos_++ : pos_]; }
     bool isOp(const char* op) const { return peek().kind == Tok::Op && peek().text == op; }
 
     void skipNewlines() {
@@ -358,22 +398,51 @@ private:
     }
 
     // `///` lines directly above a declaration are its documentation.
-    std::string docFor(int line) const {
+    std::vector<std::string> docLines(int line) const {
         std::vector<std::string> lines;
         for (int l = line - 1;; --l) {
             const Comment* c = commentAt(l);
             if (!c || c->text.empty() || c->text[0] != '/') break;
-            lines.push_back(trimmed(c->text.substr(1)));
+            lines.insert(lines.begin(), trimmed(c->text.substr(1)));
         }
+        return lines;
+    }
+
+    std::string docFor(int line) const {
         std::string doc;
-        for (auto it = lines.rbegin(); it != lines.rend(); ++it) doc += (doc.empty() ? "" : " ") + *it;
+        for (const std::string& l : docLines(line)) doc += (doc.empty() ? "" : " ") + l;
         return doc;
+    }
+
+    // A function's doc: summary lines, then `arg: meaning` lines and an `example: code` line.
+    FnDoc fnDoc(const std::string& name, const std::vector<std::string>& args, int line) const {
+        FnDoc d;
+        d.name = name;
+        d.args = args;
+        d.argDocs.assign(args.size(), "");
+        for (const std::string& l : docLines(line)) {
+            const size_t colon = l.find(':');
+            const std::string key = colon == std::string::npos ? "" : trimmed(l.substr(0, colon));
+            const std::string rest = colon == std::string::npos ? "" : trimmed(l.substr(colon + 1));
+            bool used = false;
+            if (key == "example") {
+                d.example = rest;
+                used = true;
+            }
+            for (size_t i = 0; i < args.size() && !used; ++i)
+                if (key == args[i]) {
+                    d.argDocs[i] = rest;
+                    used = true;
+                }
+            if (!used) d.doc += (d.doc.empty() ? "" : " ") + l;
+        }
+        return d;
     }
 
     // The last `// --- Name ---` comment above a line groups the controls that follow it.
     std::string headerFor(int line) const {
         std::string header;
-        for (const Comment& c : comments_) {
+        for (const Comment& c : *comments_) {
             if (c.line >= line) break;
             const std::string t = trimmed(c.text);
             if (t.size() >= 3 && t.compare(0, 3, "---") == 0) {
@@ -387,7 +456,7 @@ private:
     }
 
     const Comment* commentAt(int line) const {
-        for (const Comment& c : comments_)
+        for (const Comment& c : *comments_)
             if (c.line == line) return &c;
         return nullptr;
     }
@@ -526,7 +595,9 @@ private:
     // fn name(a, b) = expression. Each call expands the body in place, so oscillators and filters inside a function
     // get their own state per call. The body is compiled once here to report its errors, then rolled back.
     struct FnDef {
+        const std::vector<Token>* toks = nullptr;  // the module's or a library's tokens
         std::vector<std::string> args;
+        std::vector<std::string> argDocs;
         size_t bodyStart = 0, bodyEnd = 0;
         std::map<std::string, Val> scope;  // names visible where the function was defined
     };
@@ -563,8 +634,16 @@ private:
 
     void fnStatement() {
         const Token at = peek();
-        const std::string name = newName();
+        const std::string name = prefix_ + newName();
+        // A library function must not hide a built-in or another library's function.
+        double constant;
+        if (!prefix_.empty()) {
+            if (findBuiltin(name.c_str()) >= 0 || findConstant(name.c_str(), constant))
+                fail(at, "'" + name + "' is a built-in name; pick another");
+            if (fns_.count(name)) fail(at, "'" + name + "' is already defined");
+        }
         FnDef f;
+        f.toks = t_;
         expectOp("(");
         if (!isOp(")")) {
             while (true) {
@@ -599,8 +678,11 @@ private:
         f.bodyEnd = pos_;
         names_ = std::move(saved);
         restore(sn);
+        FnDoc doc = fnDoc(name, f.args, at.line);
+        f.argDocs = doc.argDocs;
         fns_[name] = std::move(f);
-        p_.functions.push_back({name, docFor(at.line), fns_[name].args});
+        if (prefix_.empty() || ownLibrary_) p_.functions.push_back(std::move(doc));
+        else libDocs_.push_back(std::move(doc));
     }
 
     Val callUser(const Token& nameTok, const FnDef& f, const std::vector<Val>& args) {
@@ -610,17 +692,32 @@ private:
         for (const std::string& e : expanding_)
             if (e == nameTok.text) fail(nameTok, "functions can't call themselves");
         if (static_cast<int>(expanding_.size()) >= kMaxFnDepth) fail(nameTok, "functions are nested too deeply");
+        for (size_t i = 0; i < args.size() && i < f.argDocs.size(); ++i) inheritTip(args[i], f.argDocs[i]);
         std::map<std::string, Val> saved = std::move(names_);
         names_ = f.scope;
         for (size_t i = 0; i < args.size(); ++i) names_[f.args[i]] = args[i];
         const size_t savedPos = pos_;
+        const std::vector<Token>* savedT = t_;
+        t_ = f.toks;
         pos_ = f.bodyStart;
         expanding_.push_back(nameTok.text);
         Val v = expression(0);
         expanding_.pop_back();
+        t_ = savedT;
         pos_ = savedPos;
         names_ = std::move(saved);
         return v;
+    }
+
+    // A param passed straight into a documented argument, without a tip of its own, shows that argument's doc.
+    void inheritTip(const Val& v, const std::string& doc) {
+        if (v.isConst || doc.empty()) return;
+        for (const Op& op : p_.ops)
+            if (op.code == OpCode::Param && op.dst == v.reg) {
+                ParamDef& d = p_.params[op.index];
+                if (d.tip.empty() && d.doc.empty()) d.tip = doc;
+                return;
+            }
     }
 
     int newReg(const Token& at) {
@@ -816,6 +913,10 @@ private:
             return v;
         }
         if (findBuiltin(tok.text.c_str()) >= 0) fail(tok, "'" + tok.text + "' is a function; call it like " + tok.text + "(x)");
+        if (findConstant(tok.text.c_str(), v.k)) {
+            v.isConst = true;
+            return v;
+        }
         const size_t dot = tok.text.find('.');
         if (dot != std::string::npos && dot > 0 && tok.text.find('.', dot + 1) == std::string::npos)
             return importVal(tok);
@@ -894,12 +995,15 @@ private:
                 d.k = b.defaults[i];
                 args.push_back(d);
             }
+        for (int i = 0; i < given; ++i) {
+            const char* doc = b.args[i] ? std::strchr(b.args[i], ':') : nullptr;
+            if (doc) inheritTip(args[static_cast<size_t>(i)], trimmed(doc + 1));
+        }
         Op op{};
         op.code = OpCode::Call;
         op.sub = static_cast<uint8_t>(args.size());
         op.index = static_cast<uint32_t>(id);
-        uint16_t* slots[3] = {&op.a, &op.b, &op.c};
-        for (size_t i = 0; i < args.size(); ++i) *slots[i] = static_cast<uint16_t>(toReg(args[i], name.line, name.col));
+        for (size_t i = 0; i < args.size(); ++i) op.args[i] = static_cast<uint16_t>(toReg(args[i], name.line, name.col));
         if (b.needs != Var::Count) varVal(b.needs, name);
         if (b.stateSize > 0) {
             if (p_.stateSize + b.stateSize > kMaxStateDoubles) fail(name, "too many oscillators, envelopes and filters");
@@ -918,8 +1022,14 @@ private:
         return r;
     }
 
-    std::vector<Token> t_;
-    const std::vector<Comment>& comments_;
+public:
+    std::vector<FnDoc> libDocs_;  // functions loaded from libraries, for the reference
+
+private:
+    const std::vector<Token>* t_;
+    const std::vector<Comment>* comments_;
+    std::string prefix_;  // namespace while loading a library
+    bool ownLibrary_ = false;  // compiling a library module itself: its functions go in p_.functions
     size_t pos_ = 0;
     Program& p_;
     std::map<std::string, FnDef> fns_;
@@ -976,11 +1086,14 @@ size_t parseHeader(std::string_view src, Program& p, int& codeLine) {
         } else if (key == "kind") {
             if (value == "generator") p.kind = ModuleKind::Generator;
             else if (value == "effect") p.kind = ModuleKind::Effect;
-            else throw CompileError(lineNo, 1, "kind must be 'generator' or 'effect'");
+            else if (value == "library") p.kind = ModuleKind::Library;
+            else throw CompileError(lineNo, 1, "kind must be 'generator', 'effect' or 'library'");
         } else if (key == "name") {
             p.name = value;
         } else if (key == "summary") {
             p.summary = value;
+        } else if (key == "namespace") {
+            p.ns = value;
         } else if (key == "mode") {
             if (value == "byte") p.mode = OutputMode::Byte;
             else if (value == "float") p.mode = OutputMode::Float;
@@ -1007,7 +1120,9 @@ std::string describeProgram(const Program& p) {
         std::snprintf(buf, sizeof buf, "%.17g", v);
         return std::string(buf);
     };
-    std::string o = "\"kind\":" + str(p.kind == ModuleKind::Effect ? "effect" : "generator") +
+    std::string o = "\"kind\":" +
+                    str(p.kind == ModuleKind::Effect ? "effect" : p.kind == ModuleKind::Library ? "library" : "generator") +
+                    ",\"namespace\":" + str(p.ns) +
                     ",\"mode\":" + str(p.mode == OutputMode::Byte ? "byte" : "float") + ",\"name\":" + str(p.name) +
                     ",\"summary\":" + str(p.summary) + ",\"params\":[";
     for (size_t i = 0; i < p.params.size(); ++i) {
@@ -1028,31 +1143,104 @@ std::string describeProgram(const Program& p) {
     o += "],\"functions\":[";
     for (size_t i = 0; i < p.functions.size(); ++i) {
         const FnDoc& f = p.functions[i];
-        o += std::string(i ? "," : "") + "{\"name\":" + str(f.name) + ",\"doc\":" + str(f.doc) + ",\"args\":[";
-        for (size_t a = 0; a < f.args.size(); ++a) o += (a ? "," : "") + str(f.args[a]);
+        o += std::string(i ? "," : "") + "{\"name\":" + str(f.name) + ",\"doc\":" + str(f.doc) +
+             ",\"example\":" + str(f.example) + ",\"args\":[";
+        for (size_t a = 0; a < f.args.size(); ++a)
+            o += std::string(a ? "," : "") + "{\"name\":" + str(f.args[a]) + ",\"doc\":" +
+                 str(a < f.argDocs.size() ? f.argDocs[a] : std::string()) + "}";
         o += "]}";
     }
     return o + "]";
 }
 
-CompileResult compileModule(std::string_view source) {
+namespace {
+
+struct LoadedLibrary {
+    std::string ns;
+    std::vector<Token> toks;
+    std::vector<Comment> comments;
+};
+
+// Lexes a library's code (after its header); its namespace comes from `namespace:` unless given.
+LoadedLibrary lexLibrary(const LibrarySource& lib) {
+    Program hdr;
+    int codeLine = 1;
+    const size_t start = parseHeader(lib.source, hdr, codeLine);
+    LoadedLibrary out;
+    out.ns = !lib.ns.empty() ? lib.ns : hdr.ns;
+    Lexer lex(std::string_view(lib.source).substr(start), codeLine);
+    out.toks = lex.run();
+    out.comments = lex.comments();
+    return out;
+}
+
+void validNamespace(const std::string& ns) {
+    bool ok = !ns.empty() && std::isalpha(static_cast<unsigned char>(ns[0]));
+    for (const char ch : ns) ok = ok && (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_');
+    if (!ok) throw CompileError(1, 1, "a library needs a 'namespace:' made of letters, digits and _");
+}
+
+}  // namespace
+
+CompileResult compileModule(std::string_view source, const std::vector<LibrarySource>& libs) {
     CompileResult r;
+    std::string where;
     try {
         if (source.size() > kMaxSourceBytes) throw CompileError(1, 1, "module is longer than 64 KB");
         auto prog = std::make_shared<Program>();
         int codeLine = 1;
         const size_t start = parseHeader(source, *prog, codeLine);
+        if (prog->kind == ModuleKind::Library) validNamespace(prog->ns);
         Lexer lex(source.substr(start), codeLine);
         std::vector<Token> toks = lex.run();
-        Compiler c(std::move(toks), lex.comments(), *prog);
-        c.run();
+        Compiler c(toks, lex.comments(), *prog);
+        // Libraries: the built-in ones, then the project's. Their tokens must outlive the compile.
+        std::vector<std::unique_ptr<LoadedLibrary>> loaded;
+        auto load = [&](const LibrarySource& l) {
+            loaded.push_back(std::make_unique<LoadedLibrary>(lexLibrary(l)));
+            where = "library '" + loaded.back()->ns + "', ";
+            c.loadLibrary(loaded.back()->ns, loaded.back()->toks, loaded.back()->comments);
+            where.clear();
+        };
+        // A library compiling on its own doesn't load itself.
+        const bool self = prog->kind == ModuleKind::Library;
+        for (const LibrarySource& l : standardLibraries())
+            if (!self || l.source != source) load(l);
+        for (const LibrarySource& l : libs)
+            if (!self || l.ns != prog->ns) load(l);
+        if (prog->kind == ModuleKind::Library) c.runLibrary();
+        else c.run();
         r.program = std::move(prog);
     } catch (const CompileError& e) {
         r.line = e.line;
         r.col = e.col;
-        r.error = "line " + std::to_string(e.line) + ", col " + std::to_string(e.col) + ": " + e.what();
+        r.error = where + "line " + std::to_string(e.line) + ", col " + std::to_string(e.col) + ": " + e.what();
     }
     return r;
+}
+
+ModuleKind moduleKindOf(std::string_view source) {
+    Program p;
+    int line = 1;
+    try {
+        parseHeader(source, p, line);
+    } catch (const CompileError&) {
+    }
+    return p.kind;
+}
+
+std::vector<FnDoc> libraryDocs(const LibrarySource& lib) {
+    Program p;
+    LoadedLibrary l = lexLibrary(lib);
+    std::vector<Token> none{Token{Tok::End, {}, 0, 1, 1}};
+    std::vector<Comment> noComments;
+    Compiler c(none, noComments, p);
+    try {
+        c.loadLibrary(l.ns, l.toks, l.comments);
+    } catch (const CompileError&) {
+        return {};
+    }
+    return c.libDocs_;
 }
 
 }  // namespace caw

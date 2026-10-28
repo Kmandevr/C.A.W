@@ -1,0 +1,40 @@
+---
+caw: 1
+kind: library
+namespace: synth
+name: Synths
+summary: Ready-made synth voices: supersaw, pluck, acid, pad and FM
+---
+/// Five detuned saws: a wide, bright lead or chord sound.
+/// freq: Hz
+/// detune: spread between the saws, 0..0.05
+/// example: synth.supersaw(mtof(A3), 0.012) * 0.4
+fn supersaw(freq, detune) = (saw(freq) + saw(freq * (1 + detune)) + saw(freq * (1 - detune)) + saw(freq * (1 + detune * 2)) + saw(freq * (1 - detune * 2))) * 0.25
+
+/// Plucked string: a bright attack that darkens as it fades.
+/// trig: starts a note when it rises above 0
+/// freq: Hz
+/// decay: seconds until it fades out
+/// example: synth.pluck(step % 2 == 0, mtof(scale(step % 8)), 0.4) * 0.6
+fn pluck(trig, freq, decay) = lpf(saw(freq), 300 + 6000 * ad(trig, 0.001, decay * 0.5), 1) * ad(trig, 0.001, decay)
+
+/// Acid bass: a resonant filtered saw that slides between notes.
+/// gate: above 0 while the note is held
+/// freq: Hz (slides when it changes)
+/// cutoff: Hz, 100..4000
+/// res: resonance, 1..20
+/// example: synth.acid(step % 2 == 0, mtof(scale(step % 5) - 24), 700, 12) * 0.5
+fn acid(gate, freq, cutoff, res) = lpf(saw(slew(freq, 0.03)), cutoff * (0.4 + 2 * env.adsr(gate, 0.001, 0.15, 0.2, 0.05)), res) * env.adsr(gate, 0.002, 0.2, 0.6, 0.05)
+
+/// Soft pad: a filtered supersaw.
+/// freq: Hz
+/// bright: 0 = dark .. 1 = bright
+/// example: synth.pad(mtof(chord(chord.min7, step % 4, 57)), 0.4) * 0.5
+fn pad(freq, bright) = lpf(synth.supersaw(freq, 0.01), 400 + bright * 4000, 0.8) * 0.6
+
+/// Two-operator FM: a sine whose pitch is wobbled by another sine.
+/// freq: Hz
+/// ratio: modulator frequency as a multiple of freq (try 1, 2, 3.5)
+/// index: how hard it wobbles, 0..10 (more is brighter)
+/// example: synth.fm(mtof(A2), 2, 3 * ad(step % 4 == 0, 0.001, 0.3)) * 0.5
+fn fm(freq, ratio, index) = sine(freq + sine(freq * ratio) * index * freq)

@@ -205,6 +205,8 @@ export let env = ad(trig, 0.001, 0.3)                  a signal other modules re
 
 The owner's requirement (2026-10-28): a built-in library of documented building blocks for the hard audio jobs, such as envelopes, connectors and MIDI input. A person or an AI agent should be able to see what each one does and how it works.
 
+**[Fact]** Built in v2 step 2: the two layers, every category below except MIDI in (step 5) and multi-stage envelopes, library modules (`kind: library`, called as `namespace.fn`, instead of a `use` import), the generated reference and agent guide checked in CI, borrowed tips, and in-app help as a Library sheet plus completion chips. Playing an example from the help, and golden hashes for examples (they're checked to compile and make sound), aren't built. What exists is in [engine](engine.md#built-ins-and-libraries) and the [function library](library.md).
+
 - **Two layers, one namespace style** (`env.adsr(…)`, `midi.cc(74)`):
   - **Built-ins in C++** for speed and exact repeatability (like v1's `ad`, `lpf` and `sine`).
   - **Library modules in the C.A.W language**, built from those, so anyone can open one and see how it works.
@@ -236,7 +238,7 @@ The owner's requirement (2026-10-28): a built-in library of documented building 
 
 - Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
 - **[Fact]** v1 has `let`, `param` and the stateful built-ins (envelope, filter, oscillators, noise).
-- Next (v2): user functions (`fn`), `use` imports of library modules, and the standard library ([above](#standard-library-and-connectors-proposal)).
+- **[Fact]** v2 adds user functions (`fn`), library modules and the standard library ([above](#standard-library-and-connectors-proposal)).
 - Add a sequencing mini-language in Stage 5, designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
 
 ### NKIDO evaluation

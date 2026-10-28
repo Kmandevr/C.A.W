@@ -94,6 +94,7 @@ class Bindings {
                 Pointer<Int32>, Pointer<Utf8>, Int32),
             int Function(Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, Pointer<Int32>, Pointer<Int32>,
                 Pointer<Utf8>, int)>('caw_render'),
+        library = lib.lookupFunction<Pointer<Utf8> Function(), Pointer<Utf8> Function()>('caw_library'),
         templateCount = lib.lookupFunction<Int32 Function(), int Function()>('caw_template_count'),
         templateFile =
             lib.lookupFunction<Pointer<Utf8> Function(Int32), Pointer<Utf8> Function(int)>('caw_template_file'),
@@ -108,6 +109,7 @@ class Bindings {
   final int Function() apiVersion;
   final void Function(Pointer<Utf8>) free;
   final Pointer<Utf8> Function(Pointer<Utf8>) check;
+  final Pointer<Utf8> Function() library;
   final Pointer<Void> Function(int) create;
   final void Function(Pointer<Void>) destroy;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) setProject;

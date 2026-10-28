@@ -1,0 +1,32 @@
+---
+caw: 1
+kind: library
+namespace: drum
+name: Drums
+summary: Drum voices built from oscillators, noise and envelopes
+---
+/// Kick drum: a sine whose pitch drops fast at the start of each hit.
+/// trig: starts a hit when it rises above 0, e.g. step % 4 == 0
+/// tune: lowest pitch in Hz, 35..80
+/// decay: seconds until it fades out
+/// example: drum.kick(step % 4 == 0, 48, 0.35)
+fn kick(trig, tune, decay) = sine(tune + tune * 6 * ad(trig, 0.0005, 0.06) ** 2) * ad(trig, 0.001, decay)
+
+/// Snare: a short tone body plus filtered noise.
+/// trig: starts a hit when it rises above 0
+/// tone: lowest noise frequency in Hz, 1000..6000 (higher is thinner)
+/// decay: seconds the noise rings, 0.05..0.4
+/// example: drum.snare(step % 8 == 4, 2500, 0.18)
+fn snare(trig, tone, decay) = (tri(185) * ad(trig, 0.001, 0.07) * 0.6 + hpf(noise(), tone) * ad(trig, 0.001, decay)) * 0.8
+
+/// Hi-hat: high-passed noise, short when closed, ringing when open.
+/// trig: starts a hit when it rises above 0
+/// open: 0 = closed, 1 = open
+/// example: drum.hat(step % 2 == 0, step % 8 == 6)
+fn hat(trig, open) = hpf(noise(), 8000, 1.2) * ad(trig, 0.0005, open ? 0.25 : 0.04) * 0.6
+
+/// Clap: band-passed noise with a soft attack.
+/// trig: starts a hit when it rises above 0
+/// decay: seconds until it fades out, 0.05..0.5
+/// example: drum.clap(step % 8 == 4, 0.15)
+fn clap(trig, decay) = bpf(noise(), 1200, 1.5) * ad(trig, 0.004, decay) * 1.6

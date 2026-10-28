@@ -94,6 +94,7 @@ private:
     uint32_t seed_ = 0;
     double master_ = 0.7;
     bool seamXf_ = true;
+    int keyRoot_ = 9, keyScale_ = 1;
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note
     int64_t loopLen_ = 0; // samples per project loop
@@ -123,7 +124,8 @@ private:
     std::mutex ctl_;
     struct ModuleState {
         std::string source;
-        std::string ref;  // the name other modules use for its exports
+        std::string ref;     // the name other modules use for its exports
+        std::string libSig;  // the project libraries it was compiled with
         std::shared_ptr<const Program> program;  // last program that compiled
         std::string error;
         int line = 0, col = 0;

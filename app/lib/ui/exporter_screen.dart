@@ -132,9 +132,9 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final p = s.project;
     final layers = p.layers.where((l) => l.generatorId != null).toList();
     if (_layerId == null || !layers.any((l) => l.id == _layerId)) _layerId = layers.firstOrNull?.id;
-    final modules = p.modules.where((m) => s.info[m.id]?.ok ?? false).toList();
+    final modules = p.modules.where((m) => (s.info[m.id]?.ok ?? false) && !s.isLibrary(m.id)).toList();
     if (_moduleId == null || !modules.any((m) => m.id == _moduleId)) {
-      _moduleId = (modules.where((m) => !s.isEffect(m.id)).firstOrNull ?? modules.firstOrNull)?.id;
+      _moduleId = (modules.where((m) => s.isGenerator(m.id)).firstOrNull ?? modules.firstOrNull)?.id;
     }
     final params = s.info[_moduleId]?.params ?? const <ParamInfo>[];
     if (_param != null && !params.any((x) => x.name == _param)) _param = null;

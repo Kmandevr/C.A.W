@@ -121,6 +121,18 @@ class ProjectDoc {
   int get loopSteps => loopBars * stepsPerBar;
   double get loopSeconds => loopSteps * 15.0 / bpm;
 
+  /// The key as the engine's numbers: root 0..11 from C, scale 0 = major or 1 = minor (scale.* order).
+  /// Null for "None", so the engine uses its default (A minor).
+  (int, int)? get keyNumbers {
+    const names = {'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, //
+      'G#': 8, 'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11};
+    final parts = key.split(' ');
+    if (parts.length != 2) return null;
+    final root = names[parts[0]];
+    final scale = switch (parts[1]) { 'major' => 0, 'minor' => 1, _ => null };
+    return root == null || scale == null ? null : (root, scale);
+  }
+
   ModuleDoc? module(String? id) {
     for (final m in modules) {
       if (m.id == id) return m;
@@ -138,6 +150,7 @@ class ProjectDoc {
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
+        if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
         'globals': globals,
         'modules': [
           for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},

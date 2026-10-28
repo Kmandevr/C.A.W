@@ -24,40 +24,79 @@ if(CAW_SANITIZE AND NOT MSVC)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
-# Starter templates: examples/*.caw become string constants inside the engine.
-file(GLOB CAW_TEMPLATES CONFIGURE_DEPENDS "${CAW_ROOT}/examples/*.caw")
-list(SORT CAW_TEMPLATES)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CAW_TEMPLATES})
-set(CAW_TEMPLATES_CPP "${CMAKE_CURRENT_BINARY_DIR}/caw_templates.cpp")
-set(_tpl "// Generated from examples/*.caw by engine/CMakeLists.txt; do not edit.\n#include \"capi_internal.h\"\nnamespace caw {\n")
-set(_files "")
-set(_srcs "")
-list(LENGTH CAW_TEMPLATES _count)
-foreach(f IN LISTS CAW_TEMPLATES)
-  get_filename_component(_name "${f}" NAME)
-  file(READ "${f}" _body)
-  string(APPEND _files "\"${_name}\",\n")
-  string(APPEND _srcs "R\"caw_tpl(${_body})caw_tpl\",\n")
-endforeach()
-if(_count EQUAL 0)
-  set(_files "nullptr,\n")
-  set(_srcs "nullptr,\n")
+# Embedded .caw files: starter templates (examples/*.caw) and the built-in libraries (engine/lib/*.caw) become
+# string constants inside the engine.
+function(caw_read_dir dir out_files out_srcs out_count)
+  file(GLOB _list CONFIGURE_DEPENDS "${dir}/*.caw")
+  list(SORT _list)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_list})
+  set(_files "")
+  set(_srcs "")
+  foreach(f IN LISTS _list)
+    get_filename_component(_name "${f}" NAME)
+    file(READ "${f}" _body)
+    string(APPEND _files "\"${_name}\",\n")
+    string(APPEND _srcs "R\"caw_tpl(${_body})caw_tpl\",\n")
+  endforeach()
+  list(LENGTH _list _count)
+  set(${out_files} "${_files}" PARENT_SCOPE)
+  set(${out_srcs} "${_srcs}" PARENT_SCOPE)
+  set(${out_count} ${_count} PARENT_SCOPE)
+endfunction()
+
+function(caw_write_if_changed path content)
+  file(WRITE "${path}.tmp" "${content}")
+  file(COPY_FILE "${path}.tmp" "${path}" ONLY_IF_DIFFERENT)
+endfunction()
+
+caw_read_dir("${CAW_ROOT}/examples" _tfiles _tsrcs _tcount)
+if(_tcount EQUAL 0)
+  set(_tfiles "nullptr,\n")
+  set(_tsrcs "nullptr,\n")
 endif()
-string(APPEND _tpl "const int kTemplateCount = ${_count};\nconst char* const kTemplateFiles[] = {\n${_files}};\nconst char* const kTemplateSources[] = {\n${_srcs}};\n}  // namespace caw\n")
-file(WRITE "${CAW_TEMPLATES_CPP}.tmp" "${_tpl}")
-file(COPY_FILE "${CAW_TEMPLATES_CPP}.tmp" "${CAW_TEMPLATES_CPP}" ONLY_IF_DIFFERENT)
+set(CAW_TEMPLATES_CPP "${CMAKE_CURRENT_BINARY_DIR}/caw_templates.cpp")
+caw_write_if_changed("${CAW_TEMPLATES_CPP}" "// Generated from examples/*.caw by engine/CMakeLists.txt; do not edit.
+#include \"capi_internal.h\"
+namespace caw {
+const int kTemplateCount = ${_tcount};
+const char* const kTemplateFiles[] = {
+${_tfiles}};
+const char* const kTemplateSources[] = {
+${_tsrcs}};
+}  // namespace caw
+")
+
+caw_read_dir("${CMAKE_CURRENT_SOURCE_DIR}/lib" _lfiles _lsrcs _lcount)
+set(CAW_STDLIB_CPP "${CMAKE_CURRENT_BINARY_DIR}/caw_stdlib.cpp")
+caw_write_if_changed("${CAW_STDLIB_CPP}" "// Generated from engine/lib/*.caw by engine/CMakeLists.txt; do not edit.
+#include \"compile.h\"
+namespace caw {
+const std::vector<LibrarySource>& standardLibraries() {
+    static const char* const sources[] = {
+${_lsrcs}nullptr};
+    static const std::vector<LibrarySource> libs = [] {
+        std::vector<LibrarySource> v;
+        for (const char* const* s = sources; *s; ++s) v.push_back({std::string(), std::string(*s)});
+        return v;
+    }();
+    return libs;
+}
+}  // namespace caw
+")
 
 add_library(caw_core STATIC
   src/builtins.cpp
   src/compile.cpp
   src/detmath.cpp
+  src/docs.cpp
   src/engine.cpp
   src/json.cpp
   src/project.cpp
   src/render.cpp
   src/vm.cpp
   src/wav.cpp
-  "${CAW_TEMPLATES_CPP}")
+  "${CAW_TEMPLATES_CPP}"
+  "${CAW_STDLIB_CPP}")
 target_include_directories(caw_core PUBLIC include src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
 find_package(Threads REQUIRED)
@@ -90,7 +129,7 @@ if(CAW_TOOLS)
   target_link_libraries(caw_cli PRIVATE caw_core)
 
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
-                           tests/golden_test.cpp tests/variables_test.cpp src/capi.cpp platform/audio_none.cpp)
+                           tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp src/capi.cpp platform/audio_none.cpp)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_tests PRIVATE caw_core)

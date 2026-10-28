@@ -53,6 +53,8 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
     out.master = clampd(root.number("master", 0.7), 0, 1);
     out.seamCrossfade = root.boolean("seam_crossfade", true);
+    out.keyRoot = clampi(root.number("key_root", 9), 0, 11);
+    out.keyScale = clampi(root.number("key_scale", 1), 0, 13);
 
     if (const Json* mods = root.get("modules"); mods && mods->type == Json::Type::Array) {
         for (const Json& m : mods->arr) {

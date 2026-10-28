@@ -36,6 +36,8 @@ struct ProjectSpec {
     double master = 0.7;
     bool seamCrossfade = true;
     std::map<std::string, double> globals;  // project-wide control values by name
+    int keyRoot = 9;                        // 0 = C … 11 = B; scale() and chord() default to this key
+    int keyScale = 1;                       // a scale.* id (1 = minor)
     std::vector<ModuleSpec> modules;
     std::vector<LayerSpec> layers;
     std::vector<std::string> auditionChain;  // the Builder's preview, if any

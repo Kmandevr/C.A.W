@@ -62,7 +62,7 @@ class ModuleInfo {
     this.error = '',
     this.line = 0,
     this.col = 0,
-    this.isEffect = false,
+    this.kind = 'generator',
     this.name = '',
     this.summary = '',
     this.params = const [],
@@ -70,11 +70,16 @@ class ModuleInfo {
     this.exports = const [],
     this.imports = const [],
     this.warnings = const [],
+    this.namespace = '',
+    this.functions = const [],
   });
   final bool ok;
   final String error;
   final int line, col;
-  final bool isEffect;
+  /// generator, effect or library.
+  final String kind;
+  bool get isEffect => kind == 'effect';
+  bool get isLibrary => kind == 'library';
   final String name, summary;
   final List<ParamInfo> params;
 
@@ -84,12 +89,16 @@ class ModuleInfo {
   final List<String> imports;
   final List<String> warnings;
 
+  /// A library module's namespace and its functions (named `namespace.fn`).
+  final String namespace;
+  final List<LibraryFn> functions;
+
   static ModuleInfo fromJson(Map<String, dynamic> j) => ModuleInfo(
         ok: j['ok'] == true,
         error: (j['error'] as String?) ?? '',
         line: (j['line'] as num?)?.toInt() ?? 0,
         col: (j['col'] as num?)?.toInt() ?? 0,
-        isEffect: j['kind'] == 'effect',
+        kind: (j['kind'] as String?) ?? 'generator',
         name: (j['name'] as String?) ?? '',
         summary: (j['summary'] as String?) ?? '',
         params: ((j['params'] as List?) ?? const [])
@@ -101,7 +110,90 @@ class ModuleInfo {
             .toList(),
         imports: ((j['imports'] as List?) ?? const []).cast<String>(),
         warnings: ((j['warnings'] as List?) ?? const []).cast<String>(),
+        namespace: (j['namespace'] as String?) ?? '',
+        functions: [
+          for (final f in (j['functions'] as List?) ?? const [])
+            LibraryFn.fromJson(f as Map<String, dynamic>, namespace: (j['namespace'] as String?) ?? ''),
+        ],
       );
+}
+
+/// One documented function: a built-in, a built-in library's, or one from a project library.
+class LibraryFn {
+  const LibraryFn({required this.name, this.category = '', this.doc = '', this.example = '', this.args = const []});
+  final String name, category, doc, example;
+  final List<({String name, String doc, bool optional})> args;
+
+  /// `name(a, b, c?)`, optional arguments marked `?`.
+  String get signature => '$name(${[for (final a in args) a.optional ? '${a.name}?' : a.name].join(', ')})';
+
+  /// What to type for a call: the required arguments' names as placeholders.
+  String get callText => '$name(${[for (final a in args) if (!a.optional) a.name].join(', ')})';
+
+  /// [namespace] prefixes names that don't have one yet (a project library's own functions).
+  static LibraryFn fromJson(Map<String, dynamic> j, {String namespace = ''}) {
+    final name = j['name'] as String;
+    return LibraryFn(
+      name: namespace.isNotEmpty && !name.contains('.') ? '$namespace.$name' : name,
+      category: (j['category'] as String?) ?? '',
+      doc: (j['doc'] as String?) ?? '',
+      example: (j['example'] as String?) ?? '',
+      args: [
+        for (final a in (j['args'] as List?) ?? const [])
+          (name: (a as Map)['name'] as String, doc: (a['doc'] as String?) ?? '', optional: a['optional'] == true),
+      ],
+    );
+  }
+}
+
+/// Everything the module language offers, from `caw_library()`: functions and constants (`scale.minor`).
+class Library {
+  const Library(this.functions, this.constants);
+  final List<LibraryFn> functions;
+  final List<String> constants;
+
+  static Library? _cached;
+
+  /// Loaded once; the engine's library is fixed for a build.
+  static Library get builtIn {
+    final c = _cached;
+    if (c != null) return c;
+    final b = Bindings.instance;
+    final r = b.library();
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    b.free(r);
+    return _cached = Library(
+      [for (final f in j['functions'] as List) LibraryFn.fromJson(f as Map<String, dynamic>)],
+      (j['constants'] as List).cast<String>(),
+    );
+  }
+
+  /// Adds a project's own library functions, filed under their module's name.
+  Library withProject(Iterable<ModuleInfo> modules) {
+    final extra = [
+      for (final m in modules)
+        if (m.isLibrary)
+          for (final f in m.functions)
+            LibraryFn(
+                name: f.name,
+                category: m.name.isEmpty ? m.namespace : m.name,
+                doc: f.doc,
+                example: f.example,
+                args: f.args),
+    ];
+    return extra.isEmpty ? this : Library([...functions, ...extra], constants);
+  }
+
+  /// Functions and constants that complete [prefix], best first; the part after a dot matches too (`adsr`).
+  List<String> complete(String prefix, {int limit = 8}) {
+    if (prefix.length < 2) return const [];
+    final names = [for (final f in functions) f.name, ...constants];
+    final starts = names.where((n) => n.startsWith(prefix) && n != prefix);
+    final parts = names.where((n) => !n.startsWith(prefix) && n.contains('.') && n.split('.').last.startsWith(prefix));
+    return [...starts, ...parts].take(limit).toList();
+  }
+
+  LibraryFn? find(String name) => functions.where((f) => f.name == name).firstOrNull;
 }
 
 class EngineMeters {

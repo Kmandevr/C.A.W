@@ -75,8 +75,7 @@ const double* Instance::process(const BlockCtx& ctx) noexcept {
             }
             case OpCode::Call: {
                 CallArgs args{};
-                const uint16_t in[3] = {op.a, op.b, op.c};
-                for (int i = 0; i < op.sub; ++i) args.a[i] = reg(in[i]);
+                for (int i = 0; i < op.sub; ++i) args.a[i] = reg(op.args[i]);
                 args.out = d;
                 args.n = n;
                 args.state = builtin(static_cast<int>(op.index)).stateSize > 0 ? state_.data() + op.state : nullptr;

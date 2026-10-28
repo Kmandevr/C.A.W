@@ -6,9 +6,15 @@ import '../engine/engine.dart';
 import '../model/app_state.dart';
 import '../model/project.dart';
 import 'code_editor.dart';
+import 'library_sheet.dart';
 import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
+
+/// Generators are green, effects pink and libraries blue.
+Color kindColor(String kind) => switch (kind) { 'effect' => Neon.pink, 'library' => Neon.blue, _ => Neon.green };
+IconData kindIcon(String kind) =>
+    switch (kind) { 'effect' => Icons.tune, 'library' => Icons.menu_book, _ => Icons.graphic_eq };
 
 class BuilderScreen extends StatefulWidget {
   const BuilderScreen({super.key, required this.state});
@@ -36,6 +42,27 @@ class _BuilderScreenState extends State<BuilderScreen> {
     if (m?.id == _shownId) return;
     _shownId = m?.id;
     _code.text = m?.source ?? '';
+  }
+
+  /// The built-in functions plus the project's own libraries; null if the engine library can't load.
+  Library? get _library {
+    try {
+      return Library.builtIn.withProject(s.info.values);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _type(ModuleDoc m, String text, {bool completing = false}) {
+    completing ? _code.completeWord(text) : _code.insert(text);
+    s.editSource(m.id, _code.text);
+    _focus.requestFocus();
+  }
+
+  void _openLibrary(ModuleDoc m) {
+    final lib = _library;
+    if (lib == null) return;
+    showLibrarySheet(context, library: lib, query: _code.wordAtCursor, onInsert: (t) => _type(m, t, completing: true));
   }
 
   Future<void> _run(ModuleDoc m) async {
@@ -114,11 +141,12 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ]);
       }
       final info = s.info[m.id];
-      final color = s.isEffect(m.id) ? Neon.pink : Neon.green;
+      final color = kindColor(s.kindOf(m.id));
       final editor = CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _run(m),
           const SingleActivator(LogicalKeyboardKey.enter, meta: true): () => _run(m),
+          const SingleActivator(LogicalKeyboardKey.f1): () => _openLibrary(m),
         },
         child: CodeField(controller: _code, focus: _focus, onChanged: (v) => s.editSource(m.id, v)),
       );
@@ -127,7 +155,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(border: Border.all(color: color), borderRadius: BorderRadius.circular(6)),
-          child: Text(s.isEffect(m.id) ? 'EFFECT' : 'GENERATOR',
+          child: Text(s.kindOf(m.id).toUpperCase(),
               style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
         ),
         const SizedBox(width: 10),
@@ -162,13 +190,23 @@ class _BuilderScreenState extends State<BuilderScreen> {
             state: s, index: s.previewOnly ? Engine.auditionIndex : Engine.masterIndex, color: color, height: wide ? 140 : 88),
       );
       final params = _Params(state: s, module: m, info: info);
+      final library = _library;
+      final completion = library == null
+          ? const SizedBox.shrink()
+          : ListenableBuilder(
+              listenable: _code,
+              builder: (context, _) => CompletionChips(
+                  library: library, word: _code.wordAtCursor, onPick: (t) => _type(m, t, completing: true)),
+            );
       final runBar = Row(children: [
-        Expanded(child: SymbolRow(onInsert: (t) {
-          _code.insert(t);
-          s.editSource(m.id, _code.text);
-          _focus.requestFocus();
-        })),
-        const SizedBox(width: 8),
+        Expanded(child: SymbolRow(onInsert: (t) => _type(m, t))),
+        const SizedBox(width: 4),
+        IconButton(
+          tooltip: 'Function library (F1)',
+          onPressed: library == null ? null : () => _openLibrary(m),
+          icon: const Icon(Icons.menu_book, color: Neon.blue),
+        ),
+        const SizedBox(width: 4),
         FilledButton.icon(
           style: FilledButton.styleFrom(
             backgroundColor: m.edited ? Neon.green : Neon.panelHi,
@@ -203,7 +241,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
               ]),
             ),
           ),
-          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), child: runBar),
+          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), child: Column(children: [completion, runBar])),
         ]);
       }
       return Column(children: [
@@ -221,7 +259,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
             const SizedBox(height: 12),
           ]),
         ),
-        Padding(padding: const EdgeInsets.fromLTRB(12, 6, 12, 10), child: runBar),
+        Padding(padding: const EdgeInsets.fromLTRB(12, 6, 12, 10), child: Column(children: [completion, runBar])),
       ]);
     });
   }
@@ -247,12 +285,11 @@ class _ModulePicker extends StatelessWidget {
             for (final m in state.project.modules) ...[
               const SizedBox(width: 6),
               ChoiceChip(
-                avatar: Icon(state.isEffect(m.id) ? Icons.tune : Icons.graphic_eq,
-                    size: 16, color: state.isEffect(m.id) ? Neon.pink : Neon.green),
+                avatar: Icon(kindIcon(state.kindOf(m.id)), size: 16, color: kindColor(state.kindOf(m.id))),
                 label: Text(m.name + (m.edited ? ' •' : '')),
                 selected: m.id == state.selectedModuleId,
                 onSelected: (_) => state.selectModule(m.id),
-                selectedColor: (state.isEffect(m.id) ? Neon.pink : Neon.green).withValues(alpha: 0.2),
+                selectedColor: kindColor(state.kindOf(m.id)).withValues(alpha: 0.2),
                 labelStyle: const TextStyle(color: Neon.text, fontWeight: FontWeight.w600),
                 showCheckmark: false,
               ),
@@ -305,13 +342,16 @@ class _Params extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final params = info?.params ?? const <ParamInfo>[];
-    if (params.isEmpty && (info?.exports.isEmpty ?? true) && (info?.warnings.isEmpty ?? true)) {
+    if (params.isEmpty &&
+        !(info?.isLibrary ?? false) &&
+        (info?.exports.isEmpty ?? true) &&
+        (info?.warnings.isEmpty ?? true)) {
       return const Padding(
         padding: EdgeInsets.only(top: 12),
         child: Text('Add `param name = 0.5 in 0..1` to get a slider.', style: TextStyle(color: Neon.dim, fontSize: 13)),
       );
     }
-    final color = state.isEffect(module.id) ? Neon.pink : Neon.green;
+    final color = kindColor(state.kindOf(module.id));
     final i = info;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Heading('Controls'),
@@ -321,6 +361,15 @@ class _Params extends StatelessWidget {
         valueOf: (p) => p.global ? state.globalValue(p) : (module.params[p.name] ?? p.defaultValue),
         onChanged: (p, v) => p.global ? state.setGlobal(p.name, v) : state.setParam(module.id, p.name, v),
       ),
+      if (i != null && i.isLibrary)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text(
+              i.functions.isEmpty
+                  ? 'A library: add `fn name(a) = …` and other modules can call ${i.namespace}.name.'
+                  : 'Other modules can call: ${i.functions.map((f) => f.signature).join(', ')}',
+              style: Neon.code(size: 13, color: Neon.blue)),
+        ),
       if (i != null && i.exports.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 10),

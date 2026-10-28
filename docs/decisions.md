@@ -8,6 +8,13 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: How the standard library is built (Claude, v2 step 2)
+
+- **Library modules instead of `use` imports:** a module with `kind: library` and a `namespace:` puts its functions in every other module of the project as `namespace.fn`. Nothing to import, and the same file format serves the built-in libraries (`engine/lib/*.caw`) and the owner's own.
+- **No hiding built-ins:** a library function can't take the name of a built-in, a constant or another library's function, so `env.adsr` always means the documented one.
+- **Docs are generated and checked, not golden-hashed:** each example must compile and make sound (peak above −60 dBFS); a golden hash per example would break the docs on every intended DSP change.
+- **State budget raised to 8 MB per module** (from 8192 numbers) to fit delays (up to 4 s at 48 kHz) and a reverb. Memory is only taken for the state a module actually uses.
+
 ## 2026-10-28: Standard library and connectors (owner, answering Claude's questions)
 
 - **Library categories, all four:** envelopes and LFOs; filters and effects; MIDI and music theory; glitch and bit tools.

@@ -38,8 +38,20 @@ void setProgress(int32_t* p, double fraction) {
 
 bool cancelled(int32_t* c) { return c && atomicLoad(c) != 0; }
 
+// The project's own libraries (modules of kind library that compile), as the engine loads them.
+std::vector<LibrarySource> projectLibraries(const ProjectSpec& p) {
+    std::vector<LibrarySource> libs;
+    for (const ModuleSpec& m : p.modules) {
+        if (moduleKindOf(m.source) != ModuleKind::Library) continue;
+        CompileResult r = compileModule(m.source);
+        if (r.program) libs.push_back({r.program->ns, m.source});
+    }
+    return libs;
+}
+
 // Every module a render uses must compile, so an export never silently drops a broken one.
 bool checkModules(const ProjectSpec& p, std::string& err) {
+    const std::vector<LibrarySource> libs = projectLibraries(p);
     for (const LayerSpec& l : p.layers)
         for (const std::string& id : l.chain) {
             const ModuleSpec* m = p.module(id);
@@ -47,7 +59,8 @@ bool checkModules(const ProjectSpec& p, std::string& err) {
                 err = "layer '" + l.name + "' uses a missing module '" + id + "'";
                 return false;
             }
-            CompileResult r = compileModule(m->source);
+            if (moduleKindOf(m->source) == ModuleKind::Library) continue;  // libraries don't play
+            CompileResult r = compileModule(m->source, libs);
             if (!r.program) {
                 err = "module '" + id + "': " + r.error;
                 return false;
@@ -101,9 +114,9 @@ bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult&
         out.error = "no module '" + o.target + "' to make a wavetable from";
         return false;
     }
-    CompileResult cr = compileModule(m->source);
-    if (!cr.program) {
-        out.error = "module '" + o.target + "': " + cr.error;
+    CompileResult cr = compileModule(m->source, projectLibraries(p));
+    if (!cr.program || cr.program->kind == ModuleKind::Library) {
+        out.error = "module '" + o.target + "': " + (cr.program ? std::string("a library doesn't make sound") : cr.error);
         return false;
     }
     const Program& prog = *cr.program;
@@ -143,6 +156,8 @@ bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult&
             inst.setParam(paramIdx, v);
         }
         BlockCtx ctx;
+        ctx.keyRoot = p.keyRoot;
+        ctx.keyScale = p.keyScale;
         ctx.sr = kWavetableFrame;
         ctx.bpm = p.bpm;
         ctx.seed = p.seed;

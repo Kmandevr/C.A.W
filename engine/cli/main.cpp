@@ -1,4 +1,5 @@
 // The caw command-line tool: check modules and render modules or projects to WAV (used by CI and AI agents).
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -9,6 +10,7 @@
 
 #include "capi_internal.h"
 #include "compile.h"
+#include "docs.h"
 #include "project.h"
 #include "render.h"
 #include "wav.h"
@@ -24,7 +26,10 @@ const char* kUsage =
     "      --rate 44100|48000   --float (32-bit float; default 24-bit)\n"
     "      --bpm B --bars N  tempo and loop length when rendering a single module (default 120, 4)\n"
     "      --steps N         a single module's layer length in 16ths (default: the whole loop)\n"
-    "  caw templates                         list the bundled starter templates\n";
+    "  caw templates                         list the bundled starter templates\n"
+    "  caw docs [--check] [--dir DIR]        write DIR/library.md and DIR/agent-guide.md (default DIR: docs);\n"
+    "                                        --check fails if they're stale, a function is undocumented, or an\n"
+    "                                        example doesn't compile or is silent\n";
 
 bool readFile(const std::string& path, std::string& out) {
     std::ifstream f(path, std::ios::binary);
@@ -51,9 +56,13 @@ int check(int argc, char** argv) {
         }
         caw::CompileResult r = caw::compileModule(src);
         if (r.program) {
-            std::printf("%s: ok (%s, %zu params)\n", argv[i],
-                        r.program->kind == caw::ModuleKind::Effect ? "effect" : "generator",
-                        r.program->params.size());
+            if (r.program->kind == caw::ModuleKind::Library)
+                std::printf("%s: ok (library %s, %zu functions)\n", argv[i], r.program->ns.c_str(),
+                            r.program->functions.size());
+            else
+                std::printf("%s: ok (%s, %zu params)\n", argv[i],
+                            r.program->kind == caw::ModuleKind::Effect ? "effect" : "generator",
+                            r.program->params.size());
         } else {
             std::printf("%s: %s\n", argv[i], r.error.c_str());
             ++failed;
@@ -160,6 +169,68 @@ int render(int argc, char** argv) {
 
 }  // namespace
 
+std::string today() {
+    const auto days = std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now());
+    const std::chrono::year_month_day ymd{days};
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "%04d-%02u-%02u", static_cast<int>(ymd.year()), static_cast<unsigned>(ymd.month()),
+                  static_cast<unsigned>(ymd.day()));
+    return buf;
+}
+
+// A generated note keeps its `updated:` date unless its content changes.
+std::string updatedOf(const std::string& text) {
+    const size_t p = text.find("\nupdated: ");
+    return p == std::string::npos ? "" : text.substr(p + 10, 10);
+}
+
+int docs(int argc, char** argv) {
+    bool check = false;
+    std::string dir = "docs";
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--check") check = true;
+        else if (a == "--dir" && i + 1 < argc) dir = argv[++i];
+        else {
+            std::fputs(kUsage, stderr);
+            return 2;
+        }
+    }
+    int bad = 0;
+    for (const std::string& problem : caw::checkLibrary()) {
+        std::printf("FAIL %s\n", problem.c_str());
+        ++bad;
+    }
+    struct Out {
+        const char* file;
+        std::string (*make)(const std::string&);
+    };
+    for (const Out& out : {Out{"library.md", caw::libraryReference}, Out{"agent-guide.md", caw::agentGuide}}) {
+        const std::string path = dir + "/" + out.file;
+        std::string old;
+        readFile(path, old);
+        const std::string keep = updatedOf(old);
+        const bool same = !keep.empty() && out.make(keep) == old;
+        if (same) {
+            std::printf("ok   %s is up to date\n", path.c_str());
+            continue;
+        }
+        if (check) {
+            std::printf("FAIL %s is stale: run caw docs and commit it\n", path.c_str());
+            ++bad;
+            continue;
+        }
+        std::string err;
+        const std::string text = out.make(today());
+        if (!caw::writeFile(path, std::vector<uint8_t>(text.begin(), text.end()), err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 1;
+        }
+        std::printf("wrote %s\n", path.c_str());
+    }
+    return bad ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fputs(kUsage, stderr);
@@ -168,6 +239,7 @@ int main(int argc, char** argv) {
     const std::string cmd = argv[1];
     if (cmd == "check") return check(argc, argv);
     if (cmd == "render") return render(argc, argv);
+    if (cmd == "docs") return docs(argc, argv);
     if (cmd == "templates") {
         for (int i = 0; i < caw::kTemplateCount; ++i) std::printf("%s\n", caw::kTemplateFiles[i]);
         return 0;

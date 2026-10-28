@@ -9,7 +9,7 @@ An experimental, code-driven glitch-sound instrument for Android, iOS, Windows, 
 
 | Path | What it is |
 | --- | --- |
-| `engine/` | The C++20 sound engine: module language, mixer, WAV exports, C API, the `caw` CLI and tests ([reference](docs/engine.md)) |
+| `engine/` | The C++20 sound engine: module language, standard library, mixer, WAV exports, C API, the `caw` CLI and tests ([reference](docs/engine.md), [functions](docs/library.md), [agent guide](docs/agent-guide.md)) |
 | `app/` | The Flutter app for Android and Windows: Builder, Arranger and Exporter ([app](docs/app.md)) |
 | `examples/` | Starter sound modules (`.caw`), built into the engine as templates |
 | `docs/` | The plan and project memory (an Obsidian vault): [vision](docs/vision.md), [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), [decisions](docs/decisions.md), [log](docs/log.md) |
@@ -21,7 +21,7 @@ An experimental, code-driven glitch-sound instrument for Android, iOS, Windows, 
 Workflows:
 - `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push and pull request.
 - `.github/workflows/app.yml`: Dart checks and tests, then the Android APK (`caw-android-apk`) and the Windows app (`caw-windows`) as downloadable artifacts.
-- `.github/workflows/engine.yml`: builds the engine and runs its tests and golden renders on Linux (x64 and Arm64) and Windows, plus a sanitizer run.
+- `.github/workflows/engine.yml`: builds the engine and runs its tests and golden renders on Linux (x64 and Arm64) and Windows, plus a sanitizer run, and checks that the generated function docs are current.
 - `.github/workflows/clear-status-on-close.yml`: removes `status:` labels when an issue closes.
 
 ## Working on it

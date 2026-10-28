@@ -30,6 +30,11 @@ void main() {
     expect(j['audition_only'], false);
     expect(j['globals'], {'swing': 0.2});
     expect((j['modules'] as List).first['name'], 'Lead');
+    expect([j['key_root'], j['key_scale']], [9, 1]);  // A minor
+    final none = jsonDecode((sample()..key = 'None').toEngineJson()) as Map<String, dynamic>;
+    expect(none.containsKey('key_root'), isFalse);
+    expect((sample()..key = 'C# minor').keyNumbers, (1, 1));
+    expect((sample()..key = 'Bb major').keyNumbers, (10, 0));
     final a = jsonDecode(sample().toEngineJson(audition: ['m1'], auditionOnly: true)) as Map<String, dynamic>;
     expect(a['audition'], {'chain': ['m1']});
     expect(a['audition_only'], true);

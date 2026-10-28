@@ -59,4 +59,18 @@ void main() {
     expect(String.fromCharCodes(bytes.sublist(0, 4)), 'RIFF');
     await dir.delete(recursive: true);
   }, skip: skip);
+
+  test('the function library and library modules come through the C API', () {
+    final lib = Library.builtIn;
+    final adsr = lib.find('env.adsr')!;
+    expect(adsr.category, 'Envelopes');
+    expect(adsr.args.first.name, 'gate');
+    expect(lib.find('drum.kick'), isNotNull);
+    expect(lib.constants, contains('scale.minor'));
+    final mine = Engine.check('---\nkind: library\nnamespace: mine\nname: Mine\n---\n/// Doubles.\n/// x: anything\nfn twice(x) = x * 2');
+    expect(mine.ok, isTrue);
+    expect(mine.isLibrary, isTrue);
+    expect(mine.functions.single.name, 'mine.twice');
+    expect(lib.withProject([mine]).find('mine.twice')!.category, 'Mine');
+  }, skip: skip);
 }
