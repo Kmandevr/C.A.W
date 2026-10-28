@@ -214,6 +214,26 @@ The audio thread asks a pattern for the notes in a stretch of time, so procedura
   - **[Assumption]** The S22+ supports USB MIDI 2.0 because it runs Android 13 or later. Test it on the phone.
   - **[Assumption]** `flutter_midi_command` documents only MIDI 1.0, so MIDI 2.0 would go through the C++ engine (Android's AMidi, Windows MIDI Services). Unverified.
 
+### Live editing while playing **[Proposal]**
+
+The owner's requirement (2026-10-28): edit notes and code while the music plays, with changes heard as soon as reasonably possible.
+
+- **[Fact]** Built already:
+  - Run hot-swaps code with a 20 ms crossfade, and code that fails keeps the old sound.
+  - Params and globals change without recompiling.
+  - A pattern edit reaches the audio thread without rebuilding the sound ([engine](engine.md#playback)).
+- **Auto-update for code** (owner):
+  - When you stop typing for a delay you can set, code that compiles swaps in by itself. Code with an error is skipped, so the music never breaks.
+  - A switch turns auto-update off, leaving Run and Ctrl+Enter only.
+- **When a swap lands** (owner: choosable): immediately, at the next beat, or at the next bar. The engine already finds beat and bar positions sample-exactly, so a swap waits for that sample.
+- **Pattern edits** (owner): a note that is sounding finishes as it was, and the edit is heard the next time that note comes round.
+  - Today, a pattern change releases held notes. That changes to: held voices keep playing until their own note-off, matched to the old pattern's note.
+  - New and changed notes take effect from their next start.
+- **Keeping sound continuous across code swaps** (owner: "keep where possible"):
+  - The new program takes over the running state of each stateful call that is still the same in the new code: oscillator phases, envelope positions, filter memory, delay and reverb buffers. So changing one number doesn't restart notes or echoes.
+  - Calls are matched by function and position in the code, including inside `fn` and library calls. A call that is new or changed starts fresh, and the 20 ms crossfade covers what can't be carried over.
+  - **[Assumption]** Matching by function and order is enough for typical edits. Test it on real edits: a reordered or renamed line may not match.
+
 ### Standard library and connectors **[Proposal]**
 
 The owner's requirement (2026-10-28): a built-in library of documented building blocks for the hard audio jobs, such as envelopes, connectors and MIDI input. A person or an AI agent should be able to see what each one does and how it works.

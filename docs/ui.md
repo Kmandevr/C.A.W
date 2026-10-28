@@ -131,7 +131,7 @@ The same meaning everywhere, so nothing has to be learned twice:
     - Ableton works the same way. It also has a fixed mode ([Live shortcuts](https://www.ableton.com/en/manual/live-keyboard-shortcuts)).
     - **Resolution:** you choose one, from 1 (a whole note) through 1/2, 1/4 and so on down to 1/128, or off. It's the finest the grid ever goes: with 1/8 chosen, zooming in stops adding lines at 1/8.
     - **Snapping:** moving notes and changing their length snap to the resolution. Holding Shift while dragging a length ignores the grid.
-    - **Spacing:** tapping to place a note uses cells at least 48 dp wide, so on the phone a tap lands on the finest level that is still that wide. Dragging a length can use finer lines that are closer together, down to the chosen resolution. **[Assumption]** This is Claude's reading of the owner's answer; confirm it.
+    - **Spacing:** tapping to place a note uses cells at least 48 dp wide, so on the phone a tap lands on the finest level that is still that wide. Dragging a length can use finer lines that are closer together, down to the chosen resolution. The owner confirmed this reading (2026-10-28).
     - **Fixed:** a switch fixes the grid at its current size, so zooming no longer changes it.
   - **Look:** notes glow in their layer's colour, and louder notes glow brighter. Selected notes get a white outline, and notes with extras get a dot.
   - **Keys on the roll** work the same on PC and with a keyboard on the phone. When no keyboard is connected, the phone shows its touch tools.

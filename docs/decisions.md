@@ -8,6 +8,15 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Live editing while playing (owner)
+
+- **Code auto-update:** code swaps in by itself after a delay you can set, and auto-update can be switched off.
+- **Swap timing:** choose immediately, next beat or next bar.
+- **Pattern edits:** a sounding note finishes as it was, and edits apply from the next time it plays.
+- **Code swaps:** keep running sound state (phases, envelopes, delays) wherever the code is unchanged.
+
+See [architecture](architecture.md#live-editing-while-playing-proposal).
+
 ## 2026-10-28: Adaptive grid (owner)
 
 - **Adaptive:** the grid adds and removes lines as you zoom.

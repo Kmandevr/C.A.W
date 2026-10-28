@@ -96,6 +96,8 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Action | Default keys |
 | --- | --- |
 | Run (compile and hot-swap) | Ctrl+Enter (already built) |
+| Live auto-update on / off (and its delay, in settings or `:live 400ms`) | Alt+L |
+| When swaps land: now, next beat, next bar (`:swap bar`) | — |
 | Function library | F1 (already built) |
 | Complete the word at the cursor | Ctrl+Space |
 | Jump to the error | F8 |
