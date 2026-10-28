@@ -8,6 +8,13 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: JetBrains Mono for code and numbers (Claude, per the owner's font choice)
+
+- The font is JetBrains Mono 2.304, Regular and Bold only. Its licence is the SIL Open Font License 1.1, with copyright "2020 The JetBrains Mono Project Authors".
+- Checked 2026-10-28 in the official repository's `OFL.txt` and in the fonts' own name tables.
+- The files came from the repository at tag `v2.304`, because the release download was blocked from the build machine. **[Assumption]** v2.304 is the latest release.
+- The OFL ships next to the fonts and shows in the app's licences. It's the only new dependency, and it adds about 550 KB.
+
 ## 2026-10-28: Must run on low-end devices (owner)
 
 The app must run as light as possible, on very low-end devices. This is a limit on every feature. See [UI design](ui.md#light-on-cpu-and-ram) for the measures and a proposed Light mode.

@@ -19,6 +19,7 @@ The engine in `engine/` as built. The reasons behind it are in [architecture](ar
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
 | `engine/cli/` | The `caw` tool |
 | `engine/tests/` | Unit tests and golden renders (`golden.txt`) |
+| `engine/bench/` | `caw_bench`, which times the engine like a phone's audio callback ([performance](performance.md)) |
 | `engine/third_party/miniaudio/` | miniaudio 0.11.25 (2026-03-04), unmodified, public domain or MIT-0 |
 | `examples/` | Starter modules. CMake builds them into the engine, and the app offers them as templates |
 
@@ -126,8 +127,8 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
 // at   note(s)    len   vel   extras
 0       A1         2     1
 3       A1         1     0.8   slide
-4.5     C3,E3,G3   1/2   0.9   ratchet 2
 13/3    E2         1     0.6   prob 0.5
+4.5     C3,E3,G3   1/2   0.9   ratchet 2
 ```
 
 - **Columns:** `at` and `len` are in 16ths and may be decimals or fractions (`13/3` lands exactly on a triplet). Notes are names (`A1`, `F#3`) or MIDI numbers, with fractions for microtones; commas make a chord. `vel` is 0–1 and optional (default 1).
@@ -144,6 +145,26 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
   - Notes that start at or after the pattern's length never play, and the project result warns about them.
   - An `export let` in a voiced generator shares the newest voice's value.
 - **Limits:** 4096 notes, 4096 steps, ratchets up to 8. Errors give a line and column. Kit rows (`[kick]` lines) are reserved for kit patterns and are an error for now.
+
+### MIDI files
+
+A pattern can be imported from, and exported to, MIDI files for use in Reaper and other DAWs (code in `engine/src/midifile.cpp`).
+
+- **Import:** `caw midi import IN.mid -o OUT.caw [--track N] [--channel C] [--name NAME] [--no-bend] [--no-slides]`, or `caw_pattern_from_midi(data, size)`, which returns `{"ok","error","pattern"}`.
+  - It reads Standard MIDI Files (format 0 and 1) and MIDI 2.0 Clip Files (`.midi2`). All tracks and channels are merged unless one is chosen.
+  - Times come from ticks, so tempo changes don't move notes. Whole steps are written as numbers, small fractions exactly (`13/3`), and anything else to 1/1000 step.
+  - Notes with the same start, length and velocity become one chord line. Velocity is vel/127, or vel/65535 for a clip file.
+  - The pattern is the whole bars of the file's first time signature (4/4 without one).
+  - A pitch bend sounding at a note's start becomes a microtonal pitch, assuming ±2 semitones.
+  - A note that overlaps the next one by at most 1/8 step becomes a `slide`, so ordinary legato playing comes in as slides. `--no-slides` turns that off.
+  - Limits: 16 MB, 65536 events, 4096 notes and 4096 steps. Format 2, SMPTE-timed and malformed files give an error.
+- **Export:** `caw midi export PATTERN.caw -o OUT.mid|OUT.midi2 [--bpm B] [--beats N] [--clip]`, or `caw_pattern_export(source, bpm, beats_per_bar, CAW_MIDI_SMF|CAW_MIDI_CLIP, path, error, len)`.
+  - Both formats use 960 ticks per quarter and carry the tempo, the meter and the pattern's name.
+  - Ratchets are written as their repeats, every note is written whatever its `prob`, and a slide is a legato overlap of 1/16 step. Notes are cut at the pattern's length, as in playback.
+  - `.mid` is a format 1 file. Microtonal notes round to the nearest note and play on a channel of their own (2–9, 11–16) with a pitch bend; RPN 0 sets the bend range to ±2 semitones.
+  - `.midi2` follows the MIDI Clip File specification (M2-116-U, read 2026-10-28): MIDI 2.0 notes with 16-bit velocity, and microtones through the Note On Pitch 7.9 attribute.
+    - **[Assumption]** Some layout choices aren't fixed by the spec. Everything is on group 0, channel 1. Tempo, time signature and clip name sit right after Start of Clip. Note Off has velocity 0x8000.
+    - **[Assumption]** Which DAWs read clip files is unverified ([architecture](architecture.md#variables-and-patterns-proposal)).
 
 ### Built-ins and libraries
 
@@ -272,6 +293,7 @@ The app, the CLI and exports share one format:
 - **Hosts and devices:** `caw_engine_process(left, right, frames)` lets hosts such as a plugin drive the audio. `caw_audio_start` and `caw_audio_stop` open the device through miniaudio: AAudio or OpenSL ES on Android, WASAPI on Windows, Core Audio, and ALSA or PulseAudio.
 - **Exports:** `caw_render(project_json, options, path, progress, cancel, …)` writes a WAV. Progress counts 0–1000, and a non-zero cancel stops it.
 - **Templates:** `caw_template_count`, `caw_template_file` and `caw_template_source`.
+- **MIDI files:** `caw_pattern_from_midi` and `caw_pattern_export` (see [MIDI files](#midi-files)).
 - **Function library:** `caw_library()` returns JSON: `functions` (name, category, signature, doc, example and args with name, doc and optional) and `constants`. The app's Library sheet reads it.
 - Strings the engine returns are freed with `caw_free`. Only `caw_*` symbols are exported.
 - Nothing throws across the API: running out of memory comes back as an error.
@@ -284,6 +306,7 @@ caw render INPUT.caw|INPUT.json -o OUT.wav [--loop | --seconds S | --oneshot LAY
            [--rate 44100|48000] [--float] [--bpm B --bars N --steps N --pattern FILE]
 caw templates
 caw docs [--check] [--dir DIR]
+caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--clip]
 ```
 
 - For a single `.caw` file, `render` builds a one-layer project: `--bpm` and `--bars` set the loop, `--steps` sets the layer's length, and `--pattern FILE` plays it from a pattern's notes. `caw check` checks patterns too.
@@ -292,10 +315,11 @@ caw docs [--check] [--dir DIR]
 
 ## Tests
 
-`engine/build/caw_tests` runs 70 tests:
+`engine/build/caw_tests` runs 78 tests:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
+- **MIDI files:** round trips of the templates through `.mid` and `.midi2`, chords, fractions, microtones, exact clip and SMF bytes, hand-built files with running status and tempo changes, and thousands of truncated or corrupted files that must give errors without crashing.
 - **Patterns:** the note format and its errors, sample-exact note starts and ends, chords and voice stealing without clicks, the note variables, ratchets, slides, repeatable probability, pattern length, byte-mode pitch, the engine's release fade, notes released by seed and tempo changes, packed patterns, late-note warnings, pattern edits letting sounding notes finish, code edits keeping held notes, the default note without a pattern, and exports checking patterns.
 - **Mixer:** block-size independence, layer lengths, seams, hot swap (calls keeping their state, swaps waiting for the bar), broken code, mute, solo and pan, overload, stop and removal, effects, params and the limiter.
 - **Exports:** loop lengths, export equal to playback, free-length renders and cancel, one-shots, wavetables, broken modules and WAV bytes.

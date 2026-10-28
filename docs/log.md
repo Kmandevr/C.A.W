@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner's performance audit, engine part. `caw_bench` plus callgrind found the bitwise and `%` conversions and a per-layer solo scan; exact fast paths cut 10–20% of instructions with output unchanged ([performance](performance.md)). Merged MIDI file import/export, the app's pattern model, the actions/keys/Vim core, and themes, fonts, density, settings, the startup screen and blank modules.
+
 - 2026-10-28: Building the go'd plan. Engine live editing done: code swaps keep the running state of unchanged calls, can wait for the next beat or bar, and pattern edits let sounding notes finish ([engine](engine.md#playback)).
 
 - 2026-10-28: Owner asked for blank new files (with a faint hint, and templates optional) and a startup choice: continue, blank or template ([UI design](ui.md)). Still waiting for the go.

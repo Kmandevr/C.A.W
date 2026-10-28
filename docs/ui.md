@@ -22,7 +22,7 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
   - **Themes:** custom themes, with an in-app theme editor and live preview. It saves a readable theme file you can export, share or let an agent edit. Calm neon is the default, with a couple of starter themes.
   - **Fonts:** the system font for the UI, plus one bundled monospace font for code and numbers, so they look the same on phone and PC. The proposal is JetBrains Mono:
     - **[Fact]** licence: SIL Open Font License 1.1; the licence file and copyright must ship with the font. Seen in mirrors of its licence ([JetBrains Mono licence](https://maxibestof.one/fonts/coding/jetbrains-mono-LICENSE.txt)), 2026-10-28. Check the official repo before adding it and recording it in [decisions](decisions.md).
-    - **[Assumption]** size: about 300 KB.
+    - Size: about 550 KB for Regular and Bold ([decisions](decisions.md)).
   - **Density:** a setting to switch between comfortable (48 dp targets, the default on phones) and compact (more bars and layers on screen).
   - **Keyboard feedback:**
     - **Mode badge:** a small tag next to the BPM shows the Vim mode (NORMAL green, INSERT yellow, VISUAL pink), with a red dot while a macro records.

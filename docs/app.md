@@ -13,11 +13,14 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
 
 - **Top bar:**
   - the crow mark
-  - the project name, which opens the project menu: rename, new, duplicate, open and delete
+  - the project name, which opens the project menu: rename, new blank project, new from a template, duplicate, open, delete and **Settings…**
   - BPM, beat and CPU readouts
   - Play/Stop (the space bar on desktop)
 - **Builder** (`lib/ui/builder_screen.dart`):
-  - a row of module chips (generators green, effects pink, libraries blue, patterns yellow), and **New** to start from a template, including the Acid synth and the Acid line and Chords patterns
+  - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)
+  - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth and the Acid line and Chords patterns)
+    - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
+    - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
   - a code editor with highlighting and the symbol key row
   - **completion chips** above the key row: typing two or more letters offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
   - **Library** (the book button, or F1): every function from the engine's `caw_library()` plus the project's own library modules, grouped by category and searchable from the word at the cursor. Each shows its signature, description, arguments and example, with **Insert call** and **Insert example**
@@ -55,7 +58,16 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
   - The app's file format adds colours, the key and per-layer generator and effect fields to the engine's project JSON.
 - **Storage:** projects are JSON files in the app's private support folder, under `projects/`. They're written 0.5 s after each change, and right away when the app goes to the background or quits. The app reopens the last project.
 - **Audio:** the device opens at start-up (48 kHz stereo, low-latency profile). When the app goes to the background while stopped, it closes the device, and it reopens it on return. Playing on in the background (an Android foreground service) is not in v1.
-- **First run:** the app creates "First loop" from the templates. It has Kick, Bass and Hats layers of 1 bar each and a 3-bar Byte lead with Bitcrush over a 4-bar loop at 140 BPM, plus a muted Acid layer that plays the Acid synth from the Acid line pattern.
+- **Startup screen** (`lib/ui/startup_screen.dart`): continue the last project, start a new blank project, start from the "First loop" template, or open another saved project.
+  - It works from the keyboard: the first choice has focus, and Tab and Enter move and pick.
+  - "First loop" has Kick, Bass and Hats layers of 1 bar each and a 3-bar Byte lead with Bitcrush over a 4-bar loop at 140 BPM, plus a muted Acid layer that plays the Acid synth from the Acid line pattern.
+- **Settings** (`lib/model/settings.dart`, `lib/ui/theme_editor.dart`): saved as `settings.json` next to `projects/`.
+  - **Theme**, with a theme editor: each colour can be set with hue, saturation and brightness sliders or as hex, with a live preview and a glow switch. Themes can be saved, duplicated, imported and exported.
+    - The built-in themes are Calm neon (the default), Night (dimmer, no glow) and Amber terminal.
+    - Custom themes are `kind: theme` text files in `themes/`.
+  - **Density:** comfortable or compact.
+  - **Live coding:** auto-update on or off, its delay (100–2000 ms) and swap timing (now, beat or bar). These are stored, but the app doesn't use them yet.
+- **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
 ## Build
 
@@ -64,6 +76,7 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
   - `ffi` 2.2.0 (BSD-3-Clause)
   - `path_provider` 2.1.6 (BSD-3-Clause)
   - `file_picker` 13.1.0 (MIT)
+  - JetBrains Mono 2.304 (SIL Open Font License 1.1), the font files in `assets/fonts/` with `OFL.txt`
 - **Android:** `android/app/build.gradle.kts` builds `engine/CMakeLists.txt` into `libcaw.so` for arm64-v8a and x86_64, with `minSdk` 26.
   - The application id is `com.kmandevr.caw`. It becomes permanent once a release is installed, because updates only install over the same id and key.
 - **Windows and Linux:** `windows/CMakeLists.txt` and `linux/CMakeLists.txt` add the engine and bundle `caw.dll` or `libcaw.so` next to the app. The Linux folder is for local testing; it isn't shipped in v1.
@@ -78,4 +91,7 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
 `flutter test`:
 - model round-trips and the engine JSON
 - highlighting, editor helpers and completion
+- the pattern model (`lib/model/pattern_doc.dart`): exact step fractions, parsing with the engine's errors, comment-keeping write-back and every note edit
+- the actions core (`lib/actions/`): keymap files, conflicts, macros with their recursion guard, counts, `:` commands, `.` repeat and recording
+- settings, theme files and the startup choices
 - integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.
