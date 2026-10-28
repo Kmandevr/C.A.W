@@ -14,6 +14,8 @@ A cross-platform app that works as an experimental sound-design instrument: byte
 
 **Platforms (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, and more where practical. Android comes first: the owner's phone is a Galaxy S22+.
 
+**Plugins (owner, 2026-10-28):** it may also ship as a VST3 or CLAP plugin. **Standalone (owner):** every build runs fully on its own and offline.
+
 **Business direction (owner, 2026-10-28):** closed and commercial, sold only through AutoStacc, the owner's own store. Until then, it's the owner's tool for making samples to sell on AutoStacc, so getting sound out as WAV comes before polish for other users.
 
 ## Principles (established direction)

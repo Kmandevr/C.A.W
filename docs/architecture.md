@@ -23,7 +23,7 @@ Labels used below:
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| Sound engine | **Custom C++ core** (C++20), no platform dependencies | Real-time safe and sandboxed by design. The same code runs on every target, in a Linux CLI for CI and AI agents, and later as WASM for the web |
+| Sound engine | **Custom C++20 core** (owner, 2026-10-28), no platform dependencies | Real-time safe and sandboxed by design. The same code runs on every target, in a Linux CLI for CI and AI agents, and later as WASM for the web |
 | Audio I/O | **miniaudio**, behind a small `engine/platform/` interface | One C library for every target: AAudio on Android, Core Audio on iOS and macOS, WASAPI on Windows, ALSA/PulseAudio on Linux. Public domain or MIT-0 |
 | UI | **Flutter** [Proposal, owner to confirm] | One UI codebase for all five targets. One bridge to the engine everywhere (`dart:ffi`). Dart never touches audio samples, so its garbage collector can't cause dropouts |
 | Bridge | Thin C API over the engine, called through `dart:ffi` | Only control messages cross it (play, stop, swap program, set parameter, read meters). No audio data, no per-sample calls |
@@ -34,6 +34,35 @@ Labels used below:
 - **[Fact]** The Galaxy S22+ runs Android 16 (One UI 8), its last major update. ([mezha.media](https://mezha.media/en/news/one-ui-8-for-galaxy-s22-305386))
 - **[Proposal]** Android `minSdk 26` (Android 8.0): every device gets AAudio, and Flutter's floor is lower anyway.
 - **[Proposal]** Android is the only platform where Oboe would matter. Keep miniaudio unless latency tests on the S22+ fall short. If they do, add an Oboe backend behind the same `engine/platform/` interface. Oboe is Apache-2.0, [github.com/google/oboe](https://github.com/google/oboe).
+
+### Engine shape: one core, three hosts
+
+The owner may also ship C.A.W as a VST3/CLAP plugin. So the core is plugin-shaped from day one and knows nothing about who drives it:
+
+- **Hosts:** miniaudio in the standalone app; a DAW such as Reaper through the plugin; the CLI for checks and offline WAV renders.
+- **Interface:** `prepare(sampleRate, maxBlock)`, `process(block, events)`, automatable parameters, MIDI note input, the host's tempo and transport (so the sequencer follows the DAW), and state save/load (the sound code plus parameter values).
+- **Fully standalone (owner):** every build runs on its own and offline. No server, account or network is needed to make sound; GitHub sync is optional.
+- **Plugin UI:** later. Flutter doesn't embed in plugin windows, so a plugin starts with the host's generic parameter controls.
+
+### Ready-made building blocks
+
+The language, compiler and VM are ours, because they are the product and the sandbox. Everything around them comes from permissive, maintained libraries. All facts checked 2026-10-28.
+
+| Job | Library | Licence | When |
+| --- | --- | --- | --- |
+| Audio output on every platform | [miniaudio](https://github.com/mackron/miniaudio) | Public domain / MIT-0 | Milestone 1 |
+| WAV (and FLAC) writing, lock-free FIFOs, sinc interpolation | [CHOC](https://github.com/Tracktion/choc) | ISC | Milestone 1 |
+| Catching allocations and locks on the audio thread | Clang [RealtimeSanitizer](https://clang.llvm.org/docs/RealtimeSanitizer.html) (`[[clang::nonblocking]]`, `-fsanitize=realtime`) in CI | Part of LLVM | Milestone 1 |
+| Crash-hunting the parser and compiler | libFuzzer with AddressSanitizer and UBSan in CI | Part of LLVM | Milestone 1 |
+| Dart bindings to the engine's C API | `ffigen` (generates them from the C header) | **[Assumption: check licence]** | Milestone 1 |
+| Filters, delays, FFT, envelopes, spectral tools | [Signalsmith DSP](https://github.com/Signalsmith-Audio/dsp) | MIT | Stage 2 |
+| Oscillators, filters, effects, synthesized drum voices | [DaisySP](https://github.com/electro-smith/DaisySP) (the MIT library only, never DaisySP-LGPL) | MIT | Stage 2 |
+| Reference DSP algorithms | [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (archived January 2024: read and port, don't depend on it) | MIT | Stage 2 |
+| Plugin format | [CLAP](https://cleveraudio.org/) | MIT | Stage 4b |
+| VST3, AUv2, AUv3 (macOS and iOS) and standalone builds from one CLAP plugin | [clap-wrapper](https://github.com/free-audio/clap-wrapper) | MIT (skip its AAX and ASIO options: GPL or commercial) | Stage 4b |
+| VST3 itself | VST 3 SDK, MIT since version 3.8 ([Steinberg, October 2025](https://sonicstate.com/news/2025/10/30/vst-3-now-available-under-mit-license)) | MIT | Stage 4b |
+
+Avoid: JUCE (revenue-capped free tier), Tracktion Engine (GPL or commercial, needs JUCE), DaisySP-LGPL, and Cmajor (**[Assumption: GPL or commercial; check before reconsidering]**).
 
 ### Rejected alternatives
 

@@ -8,6 +8,14 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: C++20 engine, plugin-shaped, fully standalone (owner)
+
+- **C++20 for the engine** (owner, choosing between C++ and Rust). Plugin formats are C and C++ natively, every platform's own compiler supports it, and the audio libraries are C or C++. Memory safety while parsing untrusted code is covered by a small parser, fuzzing, sanitizers and hard limits.
+- **C.A.W is independent of AutoStacc** (owner): a different engine with a different goal. AutoStacc is only where it will be sold, and where the agent setup came from.
+- **Possible VST3/CLAP plugin** (owner), so the core is plugin-shaped (prepare, process blocks with events, parameters, MIDI, host transport, state) and driven by three hosts: the app, a DAW, the CLI.
+- **Every build is fully standalone and offline** (owner).
+- **Building blocks:** miniaudio, CHOC, RealtimeSanitizer, fuzzing, then Signalsmith DSP and DaisySP, and later CLAP with clap-wrapper. The language, compiler and VM stay our own ([architecture](architecture.md#ready-made-building-blocks)).
+
 ## 2026-10-28: Every platform; Flutter + miniaudio proposed (owner: platforms; Claude: stack, owner to confirm)
 
 - **Targets:** Android, iOS, Windows, macOS and Linux (owner). Android first, on the owner's Galaxy S22+ (Android 16).

@@ -62,9 +62,9 @@ GitHub App with device-flow sign-in, a library repo template, tree-diff sync, at
 
 `AGENTS.md` language guide in the library repo, library CI running `caw check` / `caw render` with preview WAVs on PRs, and in-app preview, merge and revert.
 
-## Stage 4b — More platforms
+## Stage 4b — More platforms and plugins
 
-Windows and macOS desktop builds (handy beside Reaper), then iOS once its distribution question is settled. The engine and UI are shared, so the work is packaging, signing, file access and per-platform audio testing.
+Windows and macOS desktop builds (handy beside Reaper), then iOS once its distribution question is settled. The engine and UI are shared, so the work is packaging, signing, file access and per-platform audio testing. A CLAP plugin of the engine, wrapped into VST3 and AU by clap-wrapper, follows the desktop builds.
 
 ## Stage 5 — Advanced instrument
 
