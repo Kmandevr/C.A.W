@@ -128,6 +128,8 @@ double ms(Clock::time_point a) { return std::chrono::duration<double, std::milli
 
 int main(int argc, char** argv) {
     const double secs = argc > 1 ? std::atof(argv[1]) : 10.0;
+    // `caw_bench SECONDS N` plays only playback scenario N (1-6), for exact instruction counts under callgrind.
+    const int only = argc > 2 ? std::atoi(argv[2]) : 0;
     std::printf("callback %d frames at %d Hz (budget %.0f us); %.0f s per scenario\n", kCallback, kRate,
                 1e6 * kCallback / kRate, secs);
     {
@@ -145,6 +147,14 @@ int main(int argc, char** argv) {
                                {"64 layers", manyLayers(64)},
                                {"pattern layers (acid + chords)", patterns()},
                                {"starter + delay + reverb each", effects()}};
+    if (only > 0) {
+        Case& c = cases[static_cast<size_t>(std::min<int>(only, static_cast<int>(cases.size())) - 1)];
+        Engine e(kRate);
+        e.setProject(c.p);
+        e.play();
+        report(c.name, play(e, secs));
+        return 0;
+    }
     for (Case& c : cases) {
         Engine e(kRate);
         const auto t0 = Clock::now();

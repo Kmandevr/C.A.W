@@ -77,6 +77,7 @@ private:
     void processChunk(float* l, float* r, int m) noexcept;
     void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
+    void updateSolo() noexcept;
     void runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, Slot* exportTo, int offset,
                   const Pattern* pat, int64_t repeat) noexcept;
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
@@ -102,6 +103,7 @@ private:
     bool seamXf_ = true;
     int keyRoot_ = 9, keyScale_ = 1;
     int swapMode_ = 0;  // 0 at once, 1 next beat, 2 next bar
+    bool anySolo_ = false;  // some layer is soloed (refreshed each callback)
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note
     int64_t loopLen_ = 0; // samples per project loop

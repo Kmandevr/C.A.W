@@ -9,6 +9,8 @@ namespace caw {
 
 // JavaScript ToUint32: NaN and infinities give 0, otherwise truncate and wrap modulo 2^32.
 inline uint32_t toUint32(double d) {
+    // Fast path for the common case (bytebeat values well inside int32): truncation then wrap, the same bits as below.
+    if (d > -2147483648.0 && d < 2147483648.0) return static_cast<uint32_t>(static_cast<int32_t>(d));
     if (!std::isfinite(d)) return 0;
     d = std::trunc(d);
     if (d >= 0.0 && d < 4294967296.0) return static_cast<uint32_t>(d);
@@ -26,6 +28,15 @@ inline double jsDiv(double a, double b) { return b == 0.0 ? 0.0 : a / b; }
 inline double jsMod(double a, double b) {
     if (b == 0.0 || !std::isfinite(a)) return 0.0;
     if (!std::isfinite(b)) return a;
+    // Fast path for whole numbers (step % 4, t % 256): integer remainder, exactly what fmod gives, including the
+    // sign of a zero result.
+    if (a > -9007199254740992.0 && a < 9007199254740992.0 && b > -9007199254740992.0 && b < 9007199254740992.0) {
+        const int64_t ia = static_cast<int64_t>(a), ib = static_cast<int64_t>(b);
+        if (static_cast<double>(ia) == a && static_cast<double>(ib) == b) {
+            const double r = static_cast<double>(ia % ib);
+            return r == 0.0 ? std::copysign(0.0, a) : r;
+        }
+    }
     return std::fmod(a, b);
 }
 

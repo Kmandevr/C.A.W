@@ -852,6 +852,7 @@ void Engine::applyCommands() noexcept {
                     s.overloadFlag.store(false, std::memory_order_relaxed);
                     s.k = -1;
                     s.epoch = -1;
+                    updateSolo();
                     s.gain = slotTarget(s);
                 } else if (swapMode_ > 0 && playing_ && stopFade_ == 0) {
                     // Wait for the next beat or bar; newer code replaces code still waiting.
@@ -939,6 +940,7 @@ void Engine::applyCommands() noexcept {
                     s.contiguous = false;
                     s.k = -1;
                     s.epoch = -1;
+                    updateSolo();
                     s.gain = slotTarget(s);
                 }
                 break;
@@ -969,11 +971,15 @@ double Engine::slotTarget(const Slot& s) const noexcept {
     if (auditionOnly_) return idx == kAuditionSlot ? bitsToDouble(s.vol.load(std::memory_order_relaxed)) : 0.0;
     if (idx == kAuditionSlot) return 0.0;
     if (s.mute.load(std::memory_order_relaxed)) return 0.0;
-    bool anySolo = false;
-    for (int i = 0; i < kMaxLayers && !anySolo; ++i)
-        anySolo = slots_[i].active && !slots_[i].removing && slots_[i].solo.load(std::memory_order_relaxed);
-    if (anySolo && !s.solo.load(std::memory_order_relaxed)) return 0.0;
+    if (anySolo_ && !s.solo.load(std::memory_order_relaxed)) return 0.0;
     return bitsToDouble(s.vol.load(std::memory_order_relaxed));
+}
+
+void Engine::updateSolo() noexcept {
+    bool any = false;
+    for (int i = 0; i < kMaxLayers && !any; ++i)
+        any = slots_[i].active && !slots_[i].removing && slots_[i].solo.load(std::memory_order_relaxed);
+    anySolo_ = any;
 }
 
 int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
@@ -1440,7 +1446,10 @@ void Engine::pickOverloadVictim() noexcept {
 }
 
 void Engine::process(float* left, float* right, int frames) noexcept {
+    // Whether any layer is soloed, worked out once per callback rather than once per layer and block.
+    updateSolo();
     applyCommands();
+    updateSolo();
     if (overloadPending_) {
         overloadPending_ = false;
         pickOverloadVictim();
