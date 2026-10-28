@@ -254,3 +254,41 @@ TEST(packed_patterns_stay_cheap_and_late_notes_warn) {
     CHECK(has(res, "1 note starts after the pattern's length and never plays"));
 }
 
+TEST(a_pattern_edit_lets_sounding_notes_finish) {
+    // An 8-step note is shortened to 2 steps while it plays: it still ends where it was going to (step 8), and the
+    // next pass plays the short version.
+    ProjectSpec p = voicedProject("gate", "---\nkind: pattern\nlength: 16\n---\n0 C4 8\n");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    run(e, 6016);
+    p.modules[1].source = "---\nkind: pattern\nlength: 16\n---\n0 C4 2\n";
+    e.setProject(p);
+    std::vector<double> y = run(e, 120000);
+    const size_t at = 6016;  // samples already played
+    CHECK(y[30000 - at] > 0.5);
+    CHECK(y[47990 - at] > 0.5);
+    CHECK_NEAR(y[48100 - at], 0.0, 1e-9);
+    CHECK(y[96000 + 100 - at] > 0.5);
+    CHECK_NEAR(y[96000 + 13000 - at], 0.0, 1e-9);
+}
+
+TEST(editing_a_synth_does_not_restart_its_held_notes) {
+    // trig fires once per note; changing the code while the note is held carries the voice over without a new trig.
+    ProjectSpec p = voicedProject("trig + gate * 0.1", "0 C4 8\n");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    std::vector<double> a = run(e, 6016);
+    p.modules[0].source = std::string(kFloat) + "trig + gate * 0.2";
+    e.setProject(p);
+    std::vector<double> b = run(e, 20000);
+    int trigs = 0;
+    for (double v : a) trigs += v > 0.9;
+    for (double v : b) trigs += v > 0.9;
+    CHECK(trigs == 1);
+    CHECK_NEAR(b[5000], 0.2, 1e-6);
+}
+

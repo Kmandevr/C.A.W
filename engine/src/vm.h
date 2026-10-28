@@ -1,6 +1,7 @@
 // A running copy of a Program: its registers, state and parameter values, processed one block at a time.
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <bit>
 #include <cstdint>
@@ -29,6 +30,12 @@ public:
     const double* reg(int r) const noexcept { return regs_.data() + static_cast<size_t>(r) * kBlock; }
     // The output expression's value before the output mode maps it (tests and tools).
     const double* rawOutput() const noexcept { return regs_.data() + static_cast<size_t>(prog_->outReg) * kBlock; }
+
+    // Copies `count` numbers of another instance's state into this one (audio-thread safe: no allocation).
+    void copyStateRange(const Instance& from, uint32_t fromOffset, uint32_t toOffset, uint32_t count) noexcept {
+        if (fromOffset + count <= from.state_.size() && toOffset + count <= state_.size())
+            std::copy_n(from.state_.data() + fromOffset, count, state_.data() + toOffset);
+    }
 
     // Parameter values may be set from any thread.
     void setParam(int i, double v) noexcept { params_[i].store(std::bit_cast<uint64_t>(v), std::memory_order_relaxed); }

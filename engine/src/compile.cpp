@@ -612,7 +612,7 @@ private:
     };
 
     struct Snapshot {
-        size_t ops, constOps, stateInit, imports;
+        size_t ops, constOps, stateInit, imports, stateSites;
         int numRegs, stateSize;
         uint32_t usedVars, sites;
         std::unordered_map<uint64_t, int> consts;
@@ -622,8 +622,9 @@ private:
     };
 
     Snapshot save() const {
-        Snapshot sn{p_.ops.size(), p_.constOps.size(), p_.stateInit.size(), p_.imports.size(), p_.numRegs,
-                    p_.stateSize, p_.usedVars, sites_, consts_, importRegs_, {}, p_.resetRanges};
+        Snapshot sn{p_.ops.size(), p_.constOps.size(), p_.stateInit.size(), p_.imports.size(), p_.stateSites.size(),
+                    p_.numRegs,    p_.stateSize,       p_.usedVars,         sites_,           consts_,
+                    importRegs_,   {},                 p_.resetRanges};
         std::copy(std::begin(varRegs_), std::end(varRegs_), sn.varRegs);
         return sn;
     }
@@ -633,6 +634,7 @@ private:
         p_.constOps.resize(sn.constOps);
         p_.stateInit.resize(sn.stateInit);
         p_.imports.resize(sn.imports);
+        p_.stateSites.resize(sn.stateSites);
         p_.numRegs = sn.numRegs;
         p_.stateSize = sn.stateSize;
         p_.resetRanges = sn.resetRanges;
@@ -1027,6 +1029,13 @@ private:
                 p_.resetRanges.back().second += clear;
             else
                 p_.resetRanges.push_back({op.state, clear});
+            // Name the call by where it sits (the functions it's inside) and how many like it came before there.
+            std::string key;
+            for (const std::string& f : expanding_) key += f + "/";
+            key += std::string(b.name) + ":";
+            int same = 0;
+            for (const StateSite& site : p_.stateSites) same += site.key.compare(0, key.size(), key) == 0;
+            p_.stateSites.push_back({key + "#" + std::to_string(same), op.state, static_cast<uint32_t>(b.stateSize)});
             // Record the initial state so a reset is a plain copy.
             std::vector<double> init(static_cast<size_t>(b.stateSize), 0.0);
             b.init(init.data(), ++sites_);

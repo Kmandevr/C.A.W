@@ -218,6 +218,8 @@ The audio thread asks a pattern for the notes in a stretch of time, so procedura
 
 The owner's requirement (2026-10-28): edit notes and code while the music plays, with changes heard as soon as reasonably possible.
 
+**[Fact]** The engine side is built: swap timing, pattern edits that let sounding notes finish, and state carried across code swaps ([engine](engine.md#playback)). Auto-update in the app comes with the editor work.
+
 - **[Fact]** Built already:
   - Run hot-swaps code with a 20 ms crossfade, and code that fails keeps the old sound.
   - Params and globals change without recompiling.

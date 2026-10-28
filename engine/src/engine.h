@@ -101,6 +101,7 @@ private:
     double master_ = 0.7;
     bool seamXf_ = true;
     int keyRoot_ = 9, keyScale_ = 1;
+    int swapMode_ = 0;  // 0 at once, 1 next beat, 2 next bar
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note
     int64_t loopLen_ = 0; // samples per project loop
@@ -157,7 +158,9 @@ private:
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
 
-    Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced);
+    Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced,
+                      const Chain* prev);
+    void swapIn(Slot& s, Chain* c) noexcept;  // hot swap with a crossfade, keeping what can keep playing
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();

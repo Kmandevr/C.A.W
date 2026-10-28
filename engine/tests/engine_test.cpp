@@ -249,3 +249,39 @@ TEST(limiter_keeps_output_below_full_scale) {
     CHECK(peak <= 0.978f);
     CHECK(peak > 0.5f);
 }
+
+TEST(unchanged_calls_keep_playing_across_a_code_swap) {
+    // Only the volume changes: the sine keeps its phase, so after the 20 ms crossfade the output is exactly the
+    // new volume times the same running sine, with no restart.
+    ProjectSpec p = project({{"m", std::string(kFloat) + "sine(220) * 0.5"}});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    run(e, 9000);
+    p.modules[0].source = std::string(kFloat) + "sine(220) * 0.25";
+    e.setProject(p);
+    std::vector<float> y = run(e, 4000);
+    const double g = std::cos(kPi / 4.0);
+    for (int i = 2000; i < 4000; i += 37) {
+        const double n = 9000.0 + i;
+        CHECK_NEAR(y[static_cast<size_t>(i)] / g, 0.25 * detSin(kTwoPi * 220.0 * n / 48000.0), 1e-4);
+    }
+}
+
+TEST(code_swaps_can_wait_for_the_next_bar) {
+    ProjectSpec p = project({{"m", std::string(kFloat) + "0.1"}}, 2);
+    p.swapMode = 2;  // next bar: 96000 samples at 120 BPM
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    run(e, 1024);
+    p.modules[0].source = std::string(kFloat) + "0.2";
+    e.setProject(p);
+    std::vector<float> y = run(e, 100000 - 1024);
+    const double g = std::cos(kPi / 4.0);
+    CHECK_NEAR(y[50000] / g, 0.1, 1e-6);
+    CHECK_NEAR(y[96000 - 1024 - 1] / g, 0.1, 1e-6);
+    CHECK_NEAR(y[96000 - 1024 + 2000] / g, 0.2, 1e-6);
+}

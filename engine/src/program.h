@@ -83,6 +83,13 @@ struct StateInit {
     double value;
 };
 
+// One stateful call's state, named so a new version of the code can take it over when the call is unchanged:
+// "fn/fn2:sine#1" is the second sine inside fn2 called from fn.
+struct StateSite {
+    std::string key;
+    uint32_t offset = 0, size = 0;
+};
+
 struct Program {
     ModuleKind kind = ModuleKind::Generator;
     OutputMode mode = OutputMode::Byte;
@@ -99,6 +106,7 @@ struct Program {
     int outReg = 0;
     int stateSize = 0;
     std::vector<StateInit> stateInit;  // values that are not 0 after reset
+    std::vector<StateSite> stateSites; // every stateful call, in code order
     std::vector<std::pair<uint32_t, uint32_t>> resetRanges;  // (offset, count) of state a reset clears
     uint32_t usedVars = 0;             // bit per Var
 };

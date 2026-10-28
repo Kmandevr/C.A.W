@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Building the go'd plan. Engine live editing done: code swaps keep the running state of unchanged calls, can wait for the next beat or bar, and pattern edits let sounding notes finish ([engine](engine.md#playback)).
+
 - 2026-10-28: Owner asked for blank new files (with a faint hint, and templates optional) and a startup choice: continue, blank or template ([UI design](ui.md)). Still waiting for the go.
 
 - 2026-10-28: Owner confirmed the adaptive grid reading, and asked for live editing while playing: code auto-update with a delay you can set and an off switch, swap timing you can choose, pattern edits from a note's next play, and sound state carried across code swaps ([architecture](architecture.md#live-editing-while-playing-proposal)). Still waiting for the go.

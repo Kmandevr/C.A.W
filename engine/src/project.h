@@ -36,6 +36,7 @@ struct ProjectSpec {
     uint32_t seed = 0;
     double master = 0.7;
     bool seamCrossfade = true;
+    int swapMode = 0;  // when new code is heard while playing: 0 at once, 1 at the next beat, 2 at the next bar
     std::map<std::string, double> globals;  // project-wide control values by name
     int keyRoot = 9;                        // 0 = C … 11 = B; scale() and chord() default to this key
     int keyScale = 1;                       // a scale.* id (1 = minor)
