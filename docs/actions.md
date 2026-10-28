@@ -45,6 +45,27 @@ macro "Run of four"
 ```
 
 - **Phone without a keyboard:** the default toolbar holds the most-used actions, and you swap in your own.
+
+## Vim-style control
+
+The owner wants the whole app, code editor included, to work like Vim (2026-10-28). It's for whenever a keyboard is connected, on PC or the phone. Touch stays a complete way to use the app on the phone, and nothing requires the Vim style.
+
+- **Modes:**
+  - **Normal** (the default): single keys run actions, using the keymap above, with WASD for movement.
+  - **Insert:** keys type text, in the code editor, name fields and the command line.
+  - **Visual:** movement keys extend the selection: a time × pitch rectangle in the roll, cells in the grid, layers in the Arranger.
+  - Esc always returns to Normal, and the mode shows in the status bar.
+- **Counts:** a number before a command repeats it. `3E` copies the selection three times after itself, `12W` moves notes up an octave, and `4]` makes a layer four steps longer. That's why the grid sizes moved from 1–4 to Alt+1–4.
+- **Command line:** `:` opens it, with completion. Every action is a command by its name (`:quantize`, `:export loop`), and some take values: `:bpm 140`, `:grid 1/16`, `:key A minor`, `:len 4 bars`, `:vel 80%`.
+- **Repeat:** `.` repeats the last change. With a count, `5.` repeats it five times.
+- **Recording macros:**
+  - Alt+Q starts recording into a named slot, and Alt+Q again stops. (Vim uses `q`, but Q inserts a note in the owner's scheme.)
+  - `@` then the slot's name replays it, and `3@a` replays it three times.
+  - A recording is saved as an ordinary macro, a list of actions, so it can be edited, bound to a key or put on a toolbar like the others.
+- **Code editor:**
+  - A setting turns Vim editing on in the code editor (owner: available, but never needed to use the app). It's off by default, so typing on the phone stays normal.
+  - With it on, the editor has Normal, Insert and Visual modes and Vim's text commands: `dd`, `yy`, `p`, `cw`, `ciw`, `u`, `/` search, `n`, counts and `.`.
+  - **[Proposal]** In the code editor, Vim's own movement (`h j k l`, `w b e`) applies, because `w` and `b` move by words there. WASD stays the movement everywhere else. To confirm with the owner.
 - **Defaults and reset:** C.A.W ships with the keymap below. "Reset to defaults" works per area or for everything.
 - **[Assumption]** Where the defaults say "like Reaper", they still need checking against Reaper's current action list. Reaper's own keys couldn't be confirmed from a reliable source on 2026-10-28.
 
@@ -120,8 +141,8 @@ Grid and view:
 
 | Action | Default keys |
 | --- | --- |
-| Grid 1/4, 1/8, 1/16, 1/32 | 1, 2, 3, 4 |
-| Triplets on / off | 0 |
+| Grid 1/4, 1/8, 1/16, 1/32 | Alt+1, Alt+2, Alt+3, Alt+4 (plain digits are counts, see [Vim-style control](#vim-style-control)) |
+| Triplets on / off | Alt+0 |
 | Snap (magnet) on / off | N |
 | Tools: draw, select, curve, erase | B, V, C, X |
 | Switch piano roll / drum grid | G |
@@ -160,6 +181,8 @@ Generators (buttons; no default keys):
 
 ## Open points for the owner
 
+- Code editor in Vim mode: Vim's own movement (`h j k l`, `w b e`), or WASD as everywhere else? `w` and `b` move by words in Vim.
+- Macro recording on Alt+Q, since Q inserts a note: is that all right?
 - Ctrl+W A S D in the roll: move one grid step or one note, or jump to the next note in that direction? Both were mentioned.
 - Is Space for play/stop right on the phone with a keyboard, too?
 - Which actions belong on the phone's default toolbar?

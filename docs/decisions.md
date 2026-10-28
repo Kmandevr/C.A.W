@@ -8,6 +8,16 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Vim-style control across the app (owner)
+
+- **Vim ideas everywhere a keyboard is connected:** modes, counts, a `:` command line, `.` repeat and recorded macros.
+- **Movement:** WASD stays.
+- **Code editor:** has an optional Vim mode, off by default and never required.
+- **Phone:** touch stays fully usable without a keyboard.
+- **Draft details:** in [actions](actions.md#vim-style-control):
+  - grid sizes moved to Alt+digits, because digits are counts
+  - macro recording goes on Alt+Q, because Q inserts a note
+
 ## 2026-10-28: Customisable keys and macros like Reaper (owner)
 
 - **Actions:** every command is an action. Keys can be changed per area.

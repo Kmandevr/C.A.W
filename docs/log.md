@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner asked for Vim-style control across the app (modes, counts, `:` commands, `.` and recorded macros, optional Vim in the code editor); added to the [actions](actions.md) draft. Still waiting for the go.
+
 - 2026-10-28: Owner asked for Reaper-style customisable keys and macros; drafted the action catalogue with default keys in [actions](actions.md) for review. Still waiting for the go.
 
 - 2026-10-28: Owner set the roll's keys (WASD, Q/E, Shift and Ctrl), the note look and the MIDI 2.0 scope (internal plus files). Checked platform MIDI 2.0 support ([architecture](architecture.md#variables-and-patterns-proposal)). Still waiting for the go.
