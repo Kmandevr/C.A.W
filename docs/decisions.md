@@ -8,6 +8,16 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Customisable keys and macros like Reaper (owner)
+
+- **Actions:** every command is an action. Keys can be changed per area.
+- **Macros:** chains of actions, where any step can repeat N times. No scripting for now.
+- **Triggers:**
+  - keys, on-screen toolbars and the long-press menu
+  - later, a MIDI controller
+- **Saving:** an app keymap file that can be exported and imported, and projects can carry their own macros.
+- **The action list:** Claude drafts the full catalogue with default keys, and the owner reviews it before anything is built. See [actions](actions.md).
+
 ## 2026-10-28: Roll keys, note look and MIDI 2.0 scope (owner); still waiting for the go
 
 - **Keys:**

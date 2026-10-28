@@ -141,6 +141,7 @@ The same meaning everywhere, so nothing has to be learned twice:
   - Every control can be adjusted from the keyboard: arrows for steps, Shift+arrows for fine steps, typing a number to set it.
 - **Shortcuts like Reaper's where they overlap:** Space for play/stop, Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
 - **Shortcut overlay:** `?` shows every shortcut for the current screen.
+- **Customisable, like Reaper** (owner, 2026-10-28): every command is an action with keys you can change per area, plus macros and your own toolbars. The draft is in [actions](actions.md).
 
 ## Light on CPU and RAM
 
