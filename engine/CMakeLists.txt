@@ -90,7 +90,7 @@ if(CAW_TOOLS)
   target_link_libraries(caw_cli PRIVATE caw_core)
 
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
-                           tests/golden_test.cpp src/capi.cpp platform/audio_none.cpp)
+                           tests/golden_test.cpp tests/variables_test.cpp src/capi.cpp platform/audio_none.cpp)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_tests PRIVATE caw_core)

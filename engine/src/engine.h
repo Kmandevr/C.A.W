@@ -45,6 +45,7 @@ public:
     std::string setProject(const ProjectSpec& p);  // result JSON: per-module ok/error and params
     std::string setProjectJson(std::string_view json);
     void setParam(const std::string& moduleId, const std::string& name, double value);
+    void setGlobal(const std::string& name, double value);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     void play();
     void stop();
@@ -74,7 +75,7 @@ private:
     void processChunk(float* l, float* r, int m) noexcept;
     void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
-    void runChain(Chain& c, bool shadow, int64_t n0, int len, double* out) noexcept;
+    void runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, Slot* exportTo, int offset) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
     void pickOverloadVictim() noexcept;
@@ -100,6 +101,9 @@ private:
     double loadAvg_ = 0;
     int overCount_ = 0, overCooldown_ = 0;
     bool overloadPending_ = false;
+    int processOrder_[kSlots] = {};  // slots in dependency order (exporters before readers)
+    int processCount_ = 0;
+    int64_t chunkId_ = 0;
     Retired* pending_ = nullptr;  // retired chains waiting for room in the queue
     int pendingCount_ = 0;
     double mixL_[kBlock], mixR_[kBlock], tmp_[kBlock], tmp2_[kBlock];
@@ -119,6 +123,7 @@ private:
     std::mutex ctl_;
     struct ModuleState {
         std::string source;
+        std::string ref;  // the name other modules use for its exports
         std::shared_ptr<const Program> program;  // last program that compiled
         std::string error;
         int line = 0, col = 0;
@@ -128,6 +133,7 @@ private:
         int slot = -1;
         Chain* chain = nullptr;
         std::vector<const Program*> sig;
+        std::vector<const double*> wiring;  // where each import of the chain reads from
         int steps = -1;
         double volume = -1, pan = 0;
         bool mute = false, solo = false;
@@ -135,11 +141,12 @@ private:
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
     std::vector<std::string> order_;  // layer ids in project order, for meters
+    std::map<std::string, double> globals_;
     bool slotBusy_[kSlots] = {};
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
 
-    Chain* buildChain(const std::vector<std::string>& ids);
+    Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring);
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();

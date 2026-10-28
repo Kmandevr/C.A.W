@@ -273,6 +273,26 @@ class AppState extends ChangeNotifier {
     _changed(engine: false);
   }
 
+  /// Every `global` declared by the project's modules, once each (the first declaration wins).
+  List<ParamInfo> get globalDefs {
+    final seen = <String>{};
+    final out = <ParamInfo>[];
+    for (final m in project.modules) {
+      for (final p in info[m.id]?.params ?? const <ParamInfo>[]) {
+        if (p.global && seen.add(p.name)) out.add(p);
+      }
+    }
+    return out;
+  }
+
+  double globalValue(ParamInfo p) => project.globals[p.name] ?? p.defaultValue;
+
+  void setGlobal(String name, double value) {
+    project.globals[name] = value;
+    engine?.setGlobal(name, value);
+    _changed(engine: false);
+  }
+
   void setPreviewOnly(bool on) {
     previewOnly = on;
     _changed(engine: true);

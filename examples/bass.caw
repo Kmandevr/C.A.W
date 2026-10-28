@@ -5,8 +5,9 @@ name: Bass
 summary: Filtered saw bass playing an A minor 16th-note pattern
 mode: float
 ---
-param cutoff = 900 in 100..4000
-param res = 4 in 0.5..12
+// --- Filter ---
+param cutoff = 900 in 100..4000 step 10 "Brightness of the bass"
+param res = 4 in 0.5..12 "Resonance: higher values whistle at the cutoff"
 let pick = (step * 3 ^ step >> 2) & 7
 let note = pick == 0 ? A1 : pick == 1 ? C2 : pick == 2 ? E2 : pick == 3 ? G1 : pick == 5 ? A2 : A1
 let gate = (0x9B5D >> (step & 15)) & 1

@@ -4,5 +4,5 @@ kind: effect
 name: Fold
 summary: Wavefolder; more drive folds the sound back on itself
 ---
-param drive = 3 in 1..12
+param drive = 3 in 1..12 "How many times the sound folds back on itself"
 sin(in * drive * pi / 2)

@@ -4,12 +4,14 @@
 #include <bit>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <stdexcept>
 #include <unordered_map>
 
 #include "builtins.h"
+#include "json.h"
 #include "ops.h"
 
 namespace caw {
@@ -21,7 +23,7 @@ struct CompileError : std::runtime_error {
     CompileError(int l, int c, const std::string& m) : std::runtime_error(m), line(l), col(c) {}
 };
 
-enum class Tok { Num, Ident, Op, Newline, End };
+enum class Tok { Num, Ident, Str, Op, Newline, End };
 
 struct Token {
     Tok kind;
@@ -32,11 +34,19 @@ struct Token {
 
 const char* const kOps[] = {">>>", "===", "!==", "**", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "..",
                             "+",   "-",   "*",   "/",  "%",  "&",  "|",  "^",  "~",  "!",  "<",  ">",  "?",
-                            ":",   "(",   ")",   ",",  "=",  ";"};
+                            ":",   "(",   ")",   ",",  "=",  ";",  "[",  "]"};
+
+// A `//` comment and the line it sits on; doc comments (`///`) and headers (`// --- Tone ---`) come from these.
+struct Comment {
+    int line;
+    std::string text;  // after the leading "//"
+};
 
 class Lexer {
 public:
     Lexer(std::string_view src, int firstLine) : s_(src), line_(firstLine) {}
+
+    const std::vector<Comment>& comments() const { return comments_; }
 
     std::vector<Token> run() {
         std::vector<Token> out;
@@ -59,12 +69,26 @@ public:
             } else if (std::isalpha(static_cast<unsigned char>(ch)) || ch == '_' || ch == '#') {
                 t.kind = Tok::Ident;
                 size_t start = i_;
-                // '#' only appears inside note names such as C#4.
-                while (i_ < s_.size() && (std::isalnum(static_cast<unsigned char>(s_[i_])) || s_[i_] == '_' ||
-                                          (s_[i_] == '#' && i_ > start)))
+                // '#' only appears inside note names such as C#4. A '.' followed by a letter joins dotted names
+                // such as kick.env or wave.square.
+                while (i_ < s_.size() &&
+                       (std::isalnum(static_cast<unsigned char>(s_[i_])) || s_[i_] == '_' ||
+                        (s_[i_] == '#' && i_ > start) ||
+                        (s_[i_] == '.' && i_ > start && i_ + 1 < s_.size() &&
+                         (std::isalpha(static_cast<unsigned char>(s_[i_ + 1])) || s_[i_ + 1] == '_'))))
                     advance();
                 if (i_ == start) throw CompileError(t.line, t.col, "unexpected '#'");
                 t.text = std::string(s_.substr(start, i_ - start));
+            } else if (ch == '"') {
+                t.kind = Tok::Str;
+                advance();
+                while (i_ < s_.size() && s_[i_] != '"' && s_[i_] != '\n') {
+                    if (s_[i_] == '\\' && i_ + 1 < s_.size() && (s_[i_ + 1] == '"' || s_[i_ + 1] == '\\')) advance();
+                    t.text += s_[i_];
+                    advance();
+                }
+                if (i_ >= s_.size() || s_[i_] != '"') throw CompileError(t.line, t.col, "text in quotes is never closed");
+                advance();
             } else {
                 t.kind = Tok::Op;
                 for (const char* op : kOps) {
@@ -111,7 +135,14 @@ private:
             } else if (ch == ' ' || ch == '\t' || ch == '\r') {
                 advance();
             } else if (ch == '/' && i_ + 1 < s_.size() && s_[i_ + 1] == '/') {
-                while (i_ < s_.size() && s_[i_] != '\n') advance();
+                Comment c{line_, {}};
+                advance();
+                advance();
+                while (i_ < s_.size() && s_[i_] != '\n') {
+                    c.text += s_[i_];
+                    advance();
+                }
+                comments_.push_back(std::move(c));
             } else if (ch == '/' && i_ + 1 < s_.size() && s_[i_ + 1] == '*') {
                 const int l = line_, c = col_;
                 advance();
@@ -184,6 +215,7 @@ private:
     std::string_view s_;
     size_t i_ = 0;
     int line_, col_ = 1;
+    std::vector<Comment> comments_;
 };
 
 // A note name such as C4, F#2 or Bb0 gives its MIDI note number (C4 = 60).
@@ -226,9 +258,19 @@ struct Val {
     int reg = -1;
 };
 
+std::string trimmed(const std::string& s) {
+    size_t a = 0, b = s.size();
+    while (a < b && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
+    while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
+    return s.substr(a, b - a);
+}
+
+constexpr int kMaxFnDepth = 32;
+
 class Compiler {
 public:
-    Compiler(std::vector<Token> toks, Program& p) : t_(std::move(toks)), p_(p) {}
+    Compiler(std::vector<Token> toks, const std::vector<Comment>& comments, Program& p)
+        : t_(std::move(toks)), comments_(comments), p_(p) {}
 
     void run() {
         bool haveOutput = false;
@@ -240,12 +282,24 @@ public:
             if (haveOutput)
                 throw CompileError(outLine, outCol, "only the last line can be the output; use 'let' to name a value");
             const Token& head = peek();
-            if (head.kind == Tok::Ident && head.text == "let") {
+            const bool word = head.kind == Tok::Ident;
+            if (word && head.text == "let") {
                 next();
-                letStatement();
-            } else if (head.kind == Tok::Ident && head.text == "param") {
+                letStatement(false);
+            } else if (word && head.text == "export") {
                 next();
-                paramStatement();
+                if (!(peek().kind == Tok::Ident && peek().text == "let")) fail(peek(), "write 'export let name = ...'");
+                next();
+                letStatement(true);
+            } else if (word && head.text == "param") {
+                next();
+                paramStatement(false);
+            } else if (word && head.text == "global") {
+                next();
+                paramStatement(true);
+            } else if (word && head.text == "fn") {
+                next();
+                fnStatement();
             } else {
                 outLine = head.line;
                 outCol = head.col;
@@ -282,27 +336,76 @@ private:
         next();
     }
 
+    static bool reserved(const std::string& name) {
+        static const char* const words[] = {"let", "param", "global", "export", "fn", "pi", "on", "off"};
+        for (const char* w : words)
+            if (name == w) return true;
+        return false;
+    }
+
     std::string newName() {
         const Token& tok = peek();
         if (tok.kind != Tok::Ident) fail(tok, "expected a name");
         std::string name = tok.text;
         Var v;
         double note;
-        if (name == "let" || name == "param" || name == "pi" || findVar(name, v) || findBuiltin(name.c_str()) >= 0 ||
-            noteNumber(name, note))
+        if (name.find('.') != std::string::npos) fail(tok, "names can't contain '.'");
+        if (reserved(name) || findVar(name, v) || findBuiltin(name.c_str()) >= 0 || noteNumber(name, note))
             fail(tok, "'" + name + "' is a built-in name; pick another");
-        if (names_.count(name)) fail(tok, "'" + name + "' is already defined");
+        if (names_.count(name) || fns_.count(name)) fail(tok, "'" + name + "' is already defined");
         next();
         return name;
     }
 
-    void letStatement() {
+    // `///` lines directly above a declaration are its documentation.
+    std::string docFor(int line) const {
+        std::vector<std::string> lines;
+        for (int l = line - 1;; --l) {
+            const Comment* c = commentAt(l);
+            if (!c || c->text.empty() || c->text[0] != '/') break;
+            lines.push_back(trimmed(c->text.substr(1)));
+        }
+        std::string doc;
+        for (auto it = lines.rbegin(); it != lines.rend(); ++it) doc += (doc.empty() ? "" : " ") + *it;
+        return doc;
+    }
+
+    // The last `// --- Name ---` comment above a line groups the controls that follow it.
+    std::string headerFor(int line) const {
+        std::string header;
+        for (const Comment& c : comments_) {
+            if (c.line >= line) break;
+            const std::string t = trimmed(c.text);
+            if (t.size() >= 3 && t.compare(0, 3, "---") == 0) {
+                size_t a = 0, b = t.size();
+                while (a < b && (t[a] == '-' || t[a] == ' ')) ++a;
+                while (b > a && (t[b - 1] == '-' || t[b - 1] == ' ')) --b;
+                header = t.substr(a, b - a);
+            }
+        }
+        return header;
+    }
+
+    const Comment* commentAt(int line) const {
+        for (const Comment& c : comments_)
+            if (c.line == line) return &c;
+        return nullptr;
+    }
+
+    void letStatement(bool exported) {
         const Token at = peek();
         const std::string name = newName();
         expectOp("=");
         Val v = expression(0);
         names_[name] = v;
-        (void)at;
+        if (exported) {
+            if (p_.exports.size() >= static_cast<size_t>(kMaxExports)) fail(at, "too many exports");
+            ExportDef e;
+            e.name = name;
+            e.doc = docFor(at.line);
+            e.reg = static_cast<uint16_t>(toReg(v, at.line, at.col));
+            p_.exports.push_back(e);
+        }
     }
 
     double signedNumber() {
@@ -316,25 +419,96 @@ private:
         return neg ? -v : v;
     }
 
-    void paramStatement() {
+    void paramStatement(bool global) {
         const Token at = peek();
         const std::string name = newName();
         expectOp("=");
         ParamDef d;
         d.name = name;
-        d.def = signedNumber();
-        if (peek().kind == Tok::Ident && peek().text == "in") {
-            next();
-            d.min = signedNumber();
-            expectOp("..");
-            d.max = signedNumber();
-            if (!(d.min < d.max)) fail(at, "param range must go from low to high");
-        } else if (d.def >= 0.0 && d.def <= 1.0) {
-            d.min = 0.0;
-            d.max = 1.0;
+        d.global = global;
+        d.doc = docFor(at.line);
+        d.header = headerFor(at.line);
+        std::string defLabel;
+        bool haveRange = false;
+        if (peek().kind == Tok::Ident) {
+            defLabel = next().text;
+            if (defLabel == "on" || defLabel == "off") {
+                d.kind = ParamKind::Toggle;
+                d.def = defLabel == "on" ? 1.0 : 0.0;
+                d.min = 0;
+                d.max = 1;
+                d.step = 1;
+                defLabel.clear();
+            }
         } else {
-            d.min = std::fmin(0.0, d.def * 2.0);
-            d.max = std::fmax(1.0, d.def * 2.0);
+            d.def = signedNumber();
+        }
+        // Options in any order: `in low..high` or `in [a, b, c]`, `step s`, "tooltip".
+        while (true) {
+            if (peek().kind == Tok::Ident && peek().text == "in") {
+                next();
+                if (isOp("[")) {
+                    next();
+                    while (true) {
+                        skipLineBreaks();
+                        if (peek().kind != Tok::Ident || peek().text.find('.') != std::string::npos)
+                            fail(peek(), "dropdown choices are plain names, e.g. [saw, square, tri]");
+                        const std::string label = next().text;
+                        for (const std::string& c : d.choices)
+                            if (c == label) fail(at, "'" + label + "' is listed twice");
+                        d.choices.push_back(label);
+                        skipLineBreaks();
+                        if (isOp(",")) {
+                            next();
+                            continue;
+                        }
+                        break;
+                    }
+                    expectOp("]");
+                    if (d.choices.size() > 64) fail(at, "a dropdown holds at most 64 choices");
+                    d.kind = ParamKind::Choice;
+                } else {
+                    d.min = signedNumber();
+                    expectOp("..");
+                    d.max = signedNumber();
+                    if (!(d.min < d.max)) fail(at, "param range must go from low to high");
+                    haveRange = true;
+                }
+            } else if (peek().kind == Tok::Ident && peek().text == "step") {
+                next();
+                d.step = signedNumber();
+                if (!(d.step > 0)) fail(at, "step must be above 0");
+            } else if (peek().kind == Tok::Str) {
+                d.tip = next().text;
+            } else {
+                break;
+            }
+        }
+        if (d.kind == ParamKind::Choice) {
+            int idx = -1;
+            for (size_t i = 0; i < d.choices.size(); ++i)
+                if (d.choices[i] == defLabel) idx = static_cast<int>(i);
+            if (idx < 0) fail(at, "a dropdown's default must be one of its choices");
+            d.def = idx;
+            d.min = 0;
+            d.max = static_cast<double>(d.choices.size() - 1);
+            d.step = 1;
+            for (size_t i = 0; i < d.choices.size(); ++i) {
+                Val c;
+                c.isConst = true;
+                c.k = static_cast<double>(i);
+                names_[name + "." + d.choices[i]] = c;
+            }
+        } else if (!defLabel.empty()) {
+            fail(at, "'" + defLabel + "' isn't a number; for a dropdown add in [" + defLabel + ", ...]");
+        } else if (d.kind == ParamKind::Number && !haveRange) {
+            if (d.def >= 0.0 && d.def <= 1.0) {
+                d.min = 0.0;
+                d.max = 1.0;
+            } else {
+                d.min = std::fmin(0.0, d.def * 2.0);
+                d.max = std::fmax(1.0, d.def * 2.0);
+            }
         }
         if (d.def < d.min || d.def > d.max) fail(at, "param default is outside its range");
         if (p_.params.size() >= static_cast<size_t>(kMaxParams)) fail(at, "too many params");
@@ -347,6 +521,106 @@ private:
         Val v;
         v.reg = op.dst;
         names_[name] = v;
+    }
+
+    // fn name(a, b) = expression. Each call expands the body in place, so oscillators and filters inside a function
+    // get their own state per call. The body is compiled once here to report its errors, then rolled back.
+    struct FnDef {
+        std::vector<std::string> args;
+        size_t bodyStart = 0, bodyEnd = 0;
+        std::map<std::string, Val> scope;  // names visible where the function was defined
+    };
+
+    struct Snapshot {
+        size_t ops, constOps, stateInit, imports;
+        int numRegs, stateSize;
+        uint32_t usedVars, sites;
+        std::unordered_map<uint64_t, int> consts;
+        std::map<std::string, int> importRegs;
+        int varRegs[static_cast<int>(Var::Count)];
+    };
+
+    Snapshot save() const {
+        Snapshot sn{p_.ops.size(), p_.constOps.size(), p_.stateInit.size(), p_.imports.size(), p_.numRegs,
+                    p_.stateSize, p_.usedVars, sites_, consts_, importRegs_, {}};
+        std::copy(std::begin(varRegs_), std::end(varRegs_), sn.varRegs);
+        return sn;
+    }
+
+    void restore(const Snapshot& sn) {
+        p_.ops.resize(sn.ops);
+        p_.constOps.resize(sn.constOps);
+        p_.stateInit.resize(sn.stateInit);
+        p_.imports.resize(sn.imports);
+        p_.numRegs = sn.numRegs;
+        p_.stateSize = sn.stateSize;
+        p_.usedVars = sn.usedVars;
+        sites_ = sn.sites;
+        consts_ = sn.consts;
+        importRegs_ = sn.importRegs;
+        std::copy(std::begin(sn.varRegs), std::end(sn.varRegs), varRegs_);
+    }
+
+    void fnStatement() {
+        const Token at = peek();
+        const std::string name = newName();
+        FnDef f;
+        expectOp("(");
+        if (!isOp(")")) {
+            while (true) {
+                const Token argTok = peek();
+                const std::string arg = newName();
+                for (const std::string& a : f.args)
+                    if (a == arg) fail(argTok, "'" + arg + "' is listed twice");
+                f.args.push_back(arg);
+                if (isOp(",")) {
+                    next();
+                    continue;
+                }
+                break;
+            }
+        }
+        expectOp(")");
+        expectOp("=");
+        f.scope = names_;
+        f.bodyStart = pos_;
+        // Compile once with stand-in arguments to find the body's end and report errors now.
+        const Snapshot sn = save();
+        std::map<std::string, Val> saved = names_;
+        names_ = f.scope;
+        for (const std::string& a : f.args) {
+            Val v;
+            v.reg = newReg(at);
+            names_[a] = v;
+        }
+        expanding_.push_back(name);
+        expression(0);
+        expanding_.pop_back();
+        f.bodyEnd = pos_;
+        names_ = std::move(saved);
+        restore(sn);
+        fns_[name] = std::move(f);
+        p_.functions.push_back({name, docFor(at.line), fns_[name].args});
+    }
+
+    Val callUser(const Token& nameTok, const FnDef& f, const std::vector<Val>& args) {
+        if (args.size() != f.args.size())
+            fail(nameTok, nameTok.text + "() takes " + std::to_string(f.args.size()) + " argument" +
+                              (f.args.size() == 1 ? "" : "s"));
+        for (const std::string& e : expanding_)
+            if (e == nameTok.text) fail(nameTok, "functions can't call themselves");
+        if (static_cast<int>(expanding_.size()) >= kMaxFnDepth) fail(nameTok, "functions are nested too deeply");
+        std::map<std::string, Val> saved = std::move(names_);
+        names_ = f.scope;
+        for (size_t i = 0; i < args.size(); ++i) names_[f.args[i]] = args[i];
+        const size_t savedPos = pos_;
+        pos_ = f.bodyStart;
+        expanding_.push_back(nameTok.text);
+        Val v = expression(0);
+        expanding_.pop_back();
+        pos_ = savedPos;
+        names_ = std::move(saved);
+        return v;
     }
 
     int newReg(const Token& at) {
@@ -528,6 +802,7 @@ private:
         if (isOp("(")) return call(tok);
         auto it = names_.find(tok.text);
         if (it != names_.end()) return it->second;
+        if (fns_.count(tok.text)) fail(tok, "'" + tok.text + "' is a function; call it like " + tok.text + "(...)");
         Var var;
         if (findVar(tok.text, var)) return varVal(var, tok);
         Val v;
@@ -541,6 +816,9 @@ private:
             return v;
         }
         if (findBuiltin(tok.text.c_str()) >= 0) fail(tok, "'" + tok.text + "' is a function; call it like " + tok.text + "(x)");
+        const size_t dot = tok.text.find('.');
+        if (dot != std::string::npos && dot > 0 && tok.text.find('.', dot + 1) == std::string::npos)
+            return importVal(tok);
         fail(tok, "unknown name '" + tok.text + "'");
     }
 
@@ -560,10 +838,30 @@ private:
         return v;
     }
 
+    // module.name: a value another module exports. The engine connects it when the project is set.
+    Val importVal(const Token& tok) {
+        auto it = importRegs_.find(tok.text);
+        if (it == importRegs_.end()) {
+            if (p_.imports.size() >= static_cast<size_t>(kMaxImports)) fail(tok, "too many shared values read");
+            Op op{};
+            op.code = OpCode::Import;
+            op.index = static_cast<uint32_t>(p_.imports.size());
+            op.dst = static_cast<uint16_t>(newReg(tok));
+            p_.ops.push_back(op);
+            p_.imports.push_back(tok.text);
+            it = importRegs_.emplace(tok.text, op.dst).first;
+        }
+        Val v;
+        v.reg = it->second;
+        return v;
+    }
+
     Val call(const Token& name) {
-        const int id = findBuiltin(name.text.c_str());
-        if (id < 0) fail(name, "unknown function '" + name.text + "'");
-        const Builtin& b = builtin(id);
+        for (const std::string& e : expanding_)
+            if (e == name.text) fail(name, "functions can't call themselves");
+        auto user = fns_.find(name.text);
+        const int id = user == fns_.end() ? findBuiltin(name.text.c_str()) : -1;
+        if (user == fns_.end() && id < 0) fail(name, "unknown function '" + name.text + "'");
         expectOp("(");
         std::vector<Val> args;
         skipLineBreaks();
@@ -580,6 +878,8 @@ private:
             }
         }
         expectOp(")");
+        if (user != fns_.end()) return callUser(name, user->second, args);
+        const Builtin& b = builtin(id);
         const int given = static_cast<int>(args.size());
         if (given < b.minArgs || given > b.maxArgs) {
             const std::string want = b.minArgs == b.maxArgs ? std::to_string(b.minArgs)
@@ -619,8 +919,12 @@ private:
     }
 
     std::vector<Token> t_;
+    const std::vector<Comment>& comments_;
     size_t pos_ = 0;
     Program& p_;
+    std::map<std::string, FnDef> fns_;
+    std::vector<std::string> expanding_;
+    std::map<std::string, int> importRegs_;
     std::map<std::string, Val> names_;
     std::unordered_map<uint64_t, int> consts_;
     int varRegs_[static_cast<int>(Var::Count)] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
@@ -696,6 +1000,41 @@ size_t parseHeader(std::string_view src, Program& p, int& codeLine) {
 
 }  // namespace
 
+std::string describeProgram(const Program& p) {
+    auto str = [](const std::string& v) { return "\"" + jsonEscape(v) + "\""; };
+    auto num = [](double v) {
+        char buf[40];
+        std::snprintf(buf, sizeof buf, "%.17g", v);
+        return std::string(buf);
+    };
+    std::string o = "\"kind\":" + str(p.kind == ModuleKind::Effect ? "effect" : "generator") +
+                    ",\"mode\":" + str(p.mode == OutputMode::Byte ? "byte" : "float") + ",\"name\":" + str(p.name) +
+                    ",\"summary\":" + str(p.summary) + ",\"params\":[";
+    for (size_t i = 0; i < p.params.size(); ++i) {
+        const ParamDef& d = p.params[i];
+        o += std::string(i ? "," : "") + "{\"name\":" + str(d.name) + ",\"default\":" + num(d.def) +
+             ",\"min\":" + num(d.min) + ",\"max\":" + num(d.max) + ",\"step\":" + num(d.step) + ",\"kind\":" +
+             str(d.kind == ParamKind::Toggle ? "toggle" : d.kind == ParamKind::Choice ? "choice" : "number") +
+             ",\"choices\":[";
+        for (size_t c = 0; c < d.choices.size(); ++c) o += (c ? "," : "") + str(d.choices[c]);
+        o += "],\"tip\":" + str(d.tip) + ",\"header\":" + str(d.header) + ",\"doc\":" + str(d.doc) +
+             ",\"global\":" + (d.global ? "true" : "false") + "}";
+    }
+    o += "],\"exports\":[";
+    for (size_t i = 0; i < p.exports.size(); ++i)
+        o += std::string(i ? "," : "") + "{\"name\":" + str(p.exports[i].name) + ",\"doc\":" + str(p.exports[i].doc) + "}";
+    o += "],\"imports\":[";
+    for (size_t i = 0; i < p.imports.size(); ++i) o += (i ? "," : "") + str(p.imports[i]);
+    o += "],\"functions\":[";
+    for (size_t i = 0; i < p.functions.size(); ++i) {
+        const FnDoc& f = p.functions[i];
+        o += std::string(i ? "," : "") + "{\"name\":" + str(f.name) + ",\"doc\":" + str(f.doc) + ",\"args\":[";
+        for (size_t a = 0; a < f.args.size(); ++a) o += (a ? "," : "") + str(f.args[a]);
+        o += "]}";
+    }
+    return o + "]";
+}
+
 CompileResult compileModule(std::string_view source) {
     CompileResult r;
     try {
@@ -704,7 +1043,8 @@ CompileResult compileModule(std::string_view source) {
         int codeLine = 1;
         const size_t start = parseHeader(source, *prog, codeLine);
         Lexer lex(source.substr(start), codeLine);
-        Compiler c(lex.run(), *prog);
+        std::vector<Token> toks = lex.run();
+        Compiler c(std::move(toks), lex.comments(), *prog);
         c.run();
         r.program = std::move(prog);
     } catch (const CompileError& e) {

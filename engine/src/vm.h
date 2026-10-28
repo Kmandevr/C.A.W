@@ -24,6 +24,8 @@ public:
 
     // Runs the program over ctx.n samples; returns the output register (mapped by the module's output mode).
     const double* process(const BlockCtx& ctx) noexcept;
+    // A register's latest block (exports are read from here).
+    const double* reg(int r) const noexcept { return regs_.data() + static_cast<size_t>(r) * kBlock; }
     // The output expression's value before the output mode maps it (tests and tools).
     const double* rawOutput() const noexcept { return regs_.data() + static_cast<size_t>(prog_->outReg) * kBlock; }
 

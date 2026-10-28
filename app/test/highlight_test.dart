@@ -13,6 +13,8 @@ void main() {
     expect(tokenColor('C#4'), Neon.yellow);
     expect(tokenColor('// hi'), Neon.dim);
     expect(tokenColor('myName'), isNull);
+    expect(tokenColor('global'), Neon.pink);
+    expect(tokenColor('"a tip"'), isNotNull);
   });
 
   test('insert replaces the selection and jumpTo finds line and column', () {

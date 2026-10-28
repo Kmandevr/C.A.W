@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
 import '../model/project.dart';
+import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -18,6 +19,18 @@ class ArrangerScreen extends StatelessWidget {
       children: [
         if (state.meters.overloaded > 0) _OverloadBanner(state: state),
         _ProjectSettings(state: state),
+        if (state.globalDefs.isNotEmpty) ...[
+          const Heading('Project controls'),
+          NeonPanel(
+            color: Neon.blue,
+            child: ParamGroups(
+              params: state.globalDefs,
+              color: Neon.blue,
+              valueOf: state.globalValue,
+              onChanged: (p, v) => state.setGlobal(p.name, v),
+            ),
+          ),
+        ],
         Heading('Layers (${p.layers.length})',
             trailing: TextButton.icon(
               onPressed: p.layers.length >= 64 ? null : state.addLayer,

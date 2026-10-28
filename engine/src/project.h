@@ -16,6 +16,7 @@ struct ModuleSpec {
     std::string id;
     std::string source;
     std::map<std::string, double> params;
+    std::string name = {};  // how other modules refer to this one (module.export); falls back to the header name
 };
 
 struct LayerSpec {
@@ -34,6 +35,7 @@ struct ProjectSpec {
     uint32_t seed = 0;
     double master = 0.7;
     bool seamCrossfade = true;
+    std::map<std::string, double> globals;  // project-wide control values by name
     std::vector<ModuleSpec> modules;
     std::vector<LayerSpec> layers;
     std::vector<std::string> auditionChain;  // the Builder's preview, if any
@@ -46,6 +48,10 @@ struct ProjectSpec {
 
 // Parses the project JSON format (docs/architecture.md, "Project file").
 bool parseProject(std::string_view json, ProjectSpec& out, std::string& error);
+
+// The name modules use to read another module's exports: lower case, other characters become '_'
+// ("Kick" -> kick, "Bytebeat loop" -> bytebeat_loop).
+std::string refName(const std::string& name);
 
 // Wraps one module's source in a one-layer project, for the CLI and quick renders.
 ProjectSpec singleModuleProject(const std::string& source, double bpm, int bars);

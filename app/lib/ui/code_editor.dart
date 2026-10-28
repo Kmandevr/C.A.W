@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
-const _keywords = {'let', 'param', 'in'};
+const _keywords = {'let', 'param', 'in', 'global', 'export', 'fn', 'on', 'off'};
 const _vars = {'t', 'sr', 'rate', 'bpm', 'beat', 'bar', 'step', 'pos', 'phase', 'time', 'seed', 'pi'};
 const _builtins = {
   'sin', 'cos', 'tan', 'abs', 'floor', 'ceil', 'round', 'trunc', 'sqrt', 'exp', 'log', 'tanh', 'sign', 'fract', //
@@ -11,13 +11,14 @@ const _builtins = {
   'clamp', 'mix', 'hash', 'noise', 'sine', 'saw', 'square', 'tri', 'ad', 'lpf', 'hpf', 'bpf',
 };
 
-final _token = RegExp(r'//[^\n]*|/\*[\s\S]*?\*/|0[xX][0-9a-fA-F]+|0[bB][01]+|\d*\.?\d+(?:[eE][+-]?\d+)?|'
+final _token = RegExp(r'//[^\n]*|/\*[\s\S]*?\*/|"[^"\n]*"?|0[xX][0-9a-fA-F]+|0[bB][01]+|\d*\.?\d+(?:[eE][+-]?\d+)?|'
     r'[A-G][#b]?\d\b|[A-Za-z_][A-Za-z0-9_]*|>>>|<<|>>|[-+*/%&|^~!<>=?:]+');
 final _note = RegExp(r'^[A-G][#b]?\d$');
 
 /// Colours one token of module code.
 Color? tokenColor(String tok) {
   if (tok.startsWith('//') || tok.startsWith('/*')) return Neon.dim;
+  if (tok.startsWith('"')) return const Color(0xFFFF9EE8); // tooltips in quotes: soft pink
   if (RegExp(r'^[0-9.]').hasMatch(tok)) return Neon.yellow;
   if (_keywords.contains(tok)) return Neon.pink;
   if (_vars.contains(tok)) return Neon.blue;

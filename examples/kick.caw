@@ -5,9 +5,11 @@ name: Kick
 summary: Sine kick on every beat with a fast pitch drop
 mode: float
 ---
-param punch = 0.6 in 0..1
-param decay = 0.35 in 0.05..1.5
+// --- Kick ---
+param punch = 0.6 in 0..1 "How hard the pitch drops at the start"
+param decay = 0.35 in 0.05..1.5 step 0.01 "Seconds until the kick fades out"
 let beat1 = step % 4 == 0
-let hit = ad(beat1, 0.001, decay)
+/// The kick's volume envelope, for sidechain ducking: other modules read it as kick.env.
+export let env = ad(beat1, 0.001, decay)
 let drop = ad(beat1, 0.0005, 0.04 + punch * 0.08)
-sine(45 + 320 * drop * drop) * hit
+sine(45 + 320 * drop * drop) * env

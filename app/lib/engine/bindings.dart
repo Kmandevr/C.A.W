@@ -70,6 +70,8 @@ class Bindings {
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>)>('caw_engine_set_project'),
         setParam = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Double),
             void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double)>('caw_engine_set_param'),
+        setGlobal = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double),
+            void Function(Pointer<Void>, Pointer<Utf8>, double)>('caw_engine_set_global'),
         setLayerMix = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double, Double, Int32, Int32),
             void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int)>('caw_engine_set_layer_mix'),
         play = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_play'),
@@ -110,6 +112,7 @@ class Bindings {
   final void Function(Pointer<Void>) destroy;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) setProject;
   final void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setParam;
+  final void Function(Pointer<Void>, Pointer<Utf8>, double) setGlobal;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
   final void Function(Pointer<Void>) play;
   final void Function(Pointer<Void>) stop;

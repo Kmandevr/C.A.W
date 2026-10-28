@@ -145,7 +145,7 @@ The owner's requirement: proper synthesis and MIDI, and helpers that make musica
 
 The owner's requirement (2026-10-28): Unity-style variables (local, global and readable elsewhere, with sliders and tooltips), and a pattern builder whose patterns any sound can play, drawn or procedural. All of it ships in v2 ([roadmap](roadmap.md)).
 
-**Variables**, like Unity's Inspector:
+**Variables**, like Unity's Inspector. **[Fact]** Built in v2 step 1 (2026-10-28), except automation lanes; reference in [engine](engine.md#statements):
 
 ```
 // --- Tone ---                                        a header groups the controls below it

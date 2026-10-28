@@ -17,4 +17,8 @@ struct CompileResult {
 
 CompileResult compileModule(std::string_view source);
 
+// JSON fields (without braces) describing a compiled module for the app: kind, mode, name, summary, params (with
+// step, kind, choices, tip, header, doc, global), exports, imports and functions.
+std::string describeProgram(const Program& p);
+
 }  // namespace caw

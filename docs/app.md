@@ -20,11 +20,16 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
   - a row of module chips, and **New** to start from a template
   - a code editor with highlighting and the symbol key row
   - a one-line status: the error (tap it to jump to the spot), "edited, tap Run", or the module's summary
-  - a scope and a slider for every `param`
+  - a scope, and a Controls panel built from the module's `param`s and `global`s:
+    - sliders (with steps), toggles, and dropdowns (buttons when there are 4 or fewer choices)
+    - grouped under `// --- Headers ---`, with tips and doc comments on long-press or hover
+    - a double-tap on a value resets it
+    - a "Shares" line naming the module's exports (`kick.env`), and warnings in yellow
   - **Run** (Ctrl+Enter) sends the code and hot-swaps it. Code that fails keeps the old sound and puts the cursor on the error
   - **Solo preview** plays only this module. An effect is heard through the generator of a layer that uses it, or the project's first generator
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - project settings: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, hex seed, master volume and the seam crossfade switch
+  - **Project controls:** one control per `global` declared by any module. Its value is saved with the project and sent to the engine without recompiling.
   - the loop stack, where each layer has a colour, name, generator, length (from 1 beat to 16 bars, or following the project), an effect chain, volume, pan, M/S, a progress bar and a peak meter
   - a banner when the engine muted layers to keep audio clean, with Unmute
 - **Exporter** (`lib/ui/exporter_screen.dart`):
