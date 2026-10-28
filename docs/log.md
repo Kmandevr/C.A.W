@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner named C.A.W "Code Auditioning Workspace", with a crow logo ([decisions](decisions.md)); name question closed.
+
 - 2026-10-28: Owner set the v1 scope in a round of questions ([decisions](decisions.md)); roadmap rewritten around v1 (Builder, Arranger, Exporter; Android and Windows) and v2 (house synth, MIDI); vision gained the layout and neon look; architecture stages renamed to match.
 
 - 2026-10-28: Owner asked for synthesis, MIDI and user-friendly musical helpers ([decisions](decisions.md)); architecture gained the section, Milestone 1 gained exact-length musical loops, Stage 2 gained synthesis and MIDI.

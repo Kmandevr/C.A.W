@@ -8,6 +8,10 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Name and logo (owner)
+
+- C.A.W stands for **Code Auditioning Workspace**, and the logo is a crow. The name question is closed.
+
 ## 2026-10-28: v1 scope (owner, answering Claude's questions)
 
 - **Areas:** three of them. A **Builder** makes modules: generators, and effects that process an incoming signal. An **Arranger** uses them in a loop stack. An **Exporter** writes the files.

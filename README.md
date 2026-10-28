@@ -1,5 +1,5 @@
 <!-- covers: [scripts/, .github/] -->
-# C.A.W
+# C.A.W — Code Auditioning Workspace
 
 An experimental, code-driven glitch-sound instrument for Android, iOS, Windows, macOS and Linux: bytebeat, procedural synthesis, raw byte and audio mangling, and compact sequencing. Code is the source of truth, audio renders locally on the phone, and WAV export feeds Reaper.
 

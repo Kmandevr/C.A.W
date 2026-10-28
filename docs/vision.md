@@ -10,6 +10,8 @@ The owner's brief (2026-10-28), condensed. Where this note and the code disagree
 
 ## What it is
 
+**Name (owner, 2026-10-28):** C.A.W stands for **Code Auditioning Workspace**. The logo is a crow.
+
 A cross-platform app that works as an experimental sound-design instrument: bytebeat, mathematical sound, procedural synthesis, raw audio manipulation and glitch music. It has the immediacy of an instrument and the flexibility of a programming environment. It isn't a DAW, a generic code editor or just a bytebeat player. It complements Reaper by making unusual sounds, instruments, effects and samples to export.
 
 **Platforms (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, and more where practical. Android comes first: the owner's phone is a Galaxy S22+.
@@ -70,5 +72,4 @@ Only the owner can settle these. Never build one as settled; ask.
 | --- | --- | --- |
 | iOS: sell through the App Store as the one exception to AutoStacc-only, or skip iOS ([architecture](architecture.md#6-biggest-risks-and-simplest-mitigations)) | iOS release | Open |
 | Licence for the sound library's modules (e.g. CC0 or MIT) | Stage 3 (sharing modules) | Open |
-| Keep "C.A.W" as the name? | AutoStacc listing | Open |
 | How a purchase on AutoStacc unlocks or delivers the app (plain download, account check, licence key) | Stage 5 | Open |
