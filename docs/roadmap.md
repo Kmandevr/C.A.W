@@ -1,71 +1,113 @@
 ---
 title: Roadmap
-summary: Staged plan from the first phone-testable bytebeat instrument to commercial release, with Milestone 1's scope and acceptance test.
+summary: Staged plan from the bare-bones v1 (build sounds, stack them into loops, export) to commercial release, with v1's scope, acceptance test and build order.
 updated: 2026-10-28
 ---
 
 # Roadmap
 
-How the plan in [architecture](architecture.md) gets built. Each stage ends with something you can install and use. Stages are provisional.
+How the plan in [architecture](architecture.md) gets built. Each stage ends with something you can install and use. Scope set by the owner on 2026-10-28 ([decisions](decisions.md)).
 
-## Milestone 1 — "Bytebeat pocket instrument" (Stage 1)
+## v1 — Build, arrange, export
 
-**Goal:** type a formula on the phone, hear it right away, and export a WAV that drops into Reaper.
+**Goal:** build sounds and effects in code, stack any number of them into a loop at your BPM, and export loops, one-shots and wavetables that drop straight into Reaper.
 
-### In scope
+### Platforms
 
-- APK built by GitHub Actions. You install it from the run's artifact, with no PC needed.
-- One screen:
-  - Code editor (monospace, basic highlighting, symbol key row)
-  - **Play / Stop / Restart (t=0)**
-  - Formula rate (8k / 11k / 22k / 32k / 44.1k)
-  - Byte or float output mode
-  - Volume
-  - One-line error display
-  - Simple oscilloscope
-- C++ engine: bytebeat expression compiler + VM, played through Oboe. **Hot-swaps on Run without stopping audio**, with a short crossfade.
-- Safety limiter, NaN guard, cost guard.
-- Save / load / duplicate `.caw` files in app storage, plus 5–10 bundled original examples.
-- **Export WAV:** choose a length, 44.1 or 48 kHz, 24-bit or 32-bit float. You choose where it's saved through the Android file picker (e.g. Drive or Downloads).
-- `caw render` Linux CLI. CI renders every example and checks that the output hasn't changed.
+The Android app for the S22+, and a Windows app beside Reaper. Both are Flutter apps around the same C++ engine, and both are built by GitHub Actions. CI also builds the engine CLI on Linux for tests.
 
-### Not in scope yet
+### Three areas
 
-Modules, parameters, GitHub sync, sequencer, spectrum display, audio import.
+1. **Builder: make modules.** A module is a file of code, either a **generator** (makes sound) or an **effect** (processes the sound coming into it). The screen has:
+   - code editor with highlighting, the symbol key row and a one-line error display
+   - scope
+   - auto-generated sliders for each `param`
+   - Run, which hot-swaps the module without stopping audio
+   - starter templates: bytebeat loop, kick, bass, hats, glitch fx, and bit-crush and fold effects
+2. **Arranger: use modules (loop stack).** Any number of layers, each one a generator followed by a chain of effects.
+   - Each layer loops at **its own length** in steps or bars against the shared BPM, so polyrhythms come free.
+   - Per layer: volume, pan, mute and solo. A master safety limiter sits on the output.
+   - Project settings: BPM (with tap), time signature, project loop length, key, and seed.
+   - A CPU meter. When the phone runs out of headroom, the newest layer is flagged instead of letting audio glitch.
+3. **Exporter:**
+   - **loop WAV:** exact length at the BPM, with loop points
+   - **free-length WAV:** any number of seconds
+   - **one-shot WAV:** one layer until it goes silent, end trimmed
+   - **wavetable:** 2048-sample single-cycle frames, sweeping a `param`, for Serum/Vital-style synths
 
-### Acceptance test on your phone
+   Everything exports at 44.1 or 48 kHz, 24-bit or 32-bit float. You pick where files are saved through the system file picker.
 
-1. Install the APK from CI. Open it, tap Play on an example, and sound starts with no audible delay.
-2. Edit the formula and tap Run. The sound changes without a click or dropout.
-3. Type a broken formula. You get a clear error, and the previous sound keeps playing.
-4. Type something absurdly expensive. The app fades out and warns you instead of crashing or stuttering.
-5. Export 30 s to WAV. It opens in Reaper and sounds identical to playback.
-6. Close the app, reopen it, and your saved file is still there.
+### Language in v1
 
-### Build order (each step is one reviewable PR)
+- bytebeat semantics and bit tools ([architecture](architecture.md#bits-and-determinism))
+- `let`, `param`, and `bpm`, `beat`, `bar`, `step`, `pos`
+- synth basics: sine, saw, square and triangle oscillators, noise, one envelope, one multimode filter
+- `in`, the incoming signal, so a module can work as an effect
 
-1. Project skeleton: Gradle + CMake, CI that builds an APK artifact. (Repository tooling, docs and agent setup are done.)
-2. Engine core and CLI: lexer → parser → compiler → VM, WAV writer, golden tests (Linux only).
-3. Android audio: JNI bridge, Oboe stream, program hot-swap, limiter.
-4. UI: editor, transport, errors, scope.
-5. Files and WAV export.
+### Look
 
-## Stage 2 — Modular sound library
+Neon on near-black: neon green, pink, yellow and blue (owner), each layer in one neon colour.
 
-Module format v1 (header + code), `param` declarations that generate sliders, `use` imports, stateful DSP built-ins (envelopes, filters, delay, noise, waveshaper, bitcrush), procedural instruments (e.g. a kick built from pitch decay, sine body, distortion and a noise click), and hot reload. Includes a 1-day NKIDO/Cedar spike.
+### Not in v1
+
+- the house-built synth, notes, on-screen keys and MIDI (the next version)
+- multisamples, stems and MIDI export
+- GitHub sync and AI library editing
+- the plugin and other platforms
+- audio import
+- sends and buses
+
+### Acceptance test
+
+1. Install both apps from CI. Open a template and tap Play: sound starts with no audible delay.
+2. Edit code and tap Run. The sound changes without a click or dropout. Broken code gives a clear error and the old sound keeps playing.
+3. Stack layers at different lengths (for example a 3-bar layer against a 4-bar one). They stay in time at 140 BPM.
+4. Add a bit-crush effect module to one layer. Only that layer changes.
+5. Pile on layers until the phone runs out of headroom. You get a warning, not stuttering or a crash.
+6. Export a 4-bar loop at 140 BPM. It lines up with Reaper's grid, loops without a click, and matches playback bit for bit. A one-shot ends cleanly. A wavetable loads into a wavetable synth.
+7. Close and reopen the app: the project, modules and settings are all there.
+
+### Status
+
+**[Fact]** All seven build steps are done (2026-10-28):
+1. skeleton and CI
+2. engine core and CLI
+3. synth basics, effects and the mixer
+4. audio output and hot swap
+5. Builder
+6. Arranger
+7. Exporter and project files
+
+CI runs the engine tests and golden renders, and checks the acceptance test's timing claims (layer lengths at 140 BPM, exact loop length, export matching playback). Steps 1, 2 and 5 of the acceptance test, and how exports load in Reaper and a wavetable synth, need the owner on the S22+ and on Windows. The engine is described in [engine](engine.md), and the app in [app](app.md).
+
+## v2 — House synth and MIDI
+
+The house-built synth: play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Also:
+- on-screen keys
+- USB/Bluetooth MIDI: notes, CC learn, clock, MIDI file import and export
+- note and scale helpers
+- multisample (WAV + SFZ) and stems export
+- more synthesis built-ins ([architecture](architecture.md#synthesis-midi-and-musical-helpers))
+- a 1-day NKIDO/Cedar spike
 
 ## Stage 3 — GitHub integration
 
-GitHub App with device-flow sign-in, a library repo template, tree-diff sync, atomic commits, conflict branches, and branch/PR source picker.
+GitHub App with device-flow sign-in, a library repo template, tree-diff sync, atomic commits, conflict branches, and a branch/PR source picker.
 
 ## Stage 4 — AI-assisted editing
 
 `AGENTS.md` language guide in the library repo, library CI running `caw check` / `caw render` with preview WAVs on PRs, and in-app preview, merge and revert.
 
+## Stage 4b — More platforms and plugins
+
+macOS and Linux desktop apps, then iOS once its distribution question is settled. A CLAP plugin of the engine, wrapped into VST3 and AU by clap-wrapper.
+
 ## Stage 5 — Advanced instrument
 
-Sequencing mini-language with a shared clock and polyrhythms, audio import with nondestructive byte/bit mangling chains (originals are never modified), spectrum display, performance work, and commercial release preparation (licensing, privacy policy, Play Store compliance).
-
-## Before Milestone 1 starts
-
-The owner answers the open questions in [vision](vision.md#open-questions) that block step 1: phone and Android version, and licence direction.
+- scenes and a timeline arranger
+- the sequencing mini-language
+- audio import with nondestructive byte/bit mangling chains (originals are never modified)
+- sends and buses
+- spectrum display
+- performance work
+- preparing to sell through AutoStacc: signed release builds, privacy policy, install steps, and how a purchase unlocks the app

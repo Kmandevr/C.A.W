@@ -1,0 +1,13 @@
+---
+caw: 1
+kind: generator
+name: Bytebeat loop
+summary: Shifting bytebeat riff; slide shift to change the rhythm
+mode: byte
+rate: 8000
+---
+// t counts at 8000 per second; every value is cut to its low 8 bits.
+param shift = 6 in 1..12
+let melody = t * (2 + ((t >> 11) & 3)) >> ((t >> 13) & 1)
+let rhythm = (t >> shift) & (t >> 3)
+(melody & 160) + (rhythm & 63)

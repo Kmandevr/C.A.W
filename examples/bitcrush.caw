@@ -1,0 +1,9 @@
+---
+caw: 1
+kind: effect
+name: Bitcrush
+summary: Rounds the incoming sound to fewer bits
+---
+param depth = 6 in 1..16
+let q = 2 ** (floor(depth) - 1)
+floor(in * q + 0.5) / q

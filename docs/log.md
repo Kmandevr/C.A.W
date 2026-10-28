@@ -8,5 +8,25 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: v1 built: the C++ engine (`engine/`, [engine](engine.md)), the Flutter app for Android and Windows (`app/`, [app](app.md)), seven starter modules (`examples/`), and CI for engine tests (Linux x64 and Arm64, Windows, sanitizers) and app builds (APK, Windows). Build choices are in [decisions](decisions.md); architecture and roadmap now say what is built.
+
+- 2026-10-28: Owner is making the repository public for free CI with the licence unchanged ([decisions](decisions.md)); proprietary `LICENSE` added and named in the README.
+
+- 2026-10-28: Owner named C.A.W "Code Auditioning Workspace", with a crow logo ([decisions](decisions.md)); name question closed.
+
+- 2026-10-28: Owner set the v1 scope in a round of questions ([decisions](decisions.md)); roadmap rewritten around v1 (Builder, Arranger, Exporter; Android and Windows) and v2 (house synth, MIDI); vision gained the layout and neon look; architecture stages renamed to match.
+
+- 2026-10-28: Owner asked for synthesis, MIDI and user-friendly musical helpers ([decisions](decisions.md)); architecture gained the section, Milestone 1 gained exact-length musical loops, Stage 2 gained synthesis and MIDI.
+
+- 2026-10-28: Owner added synth, wavetable and sample output as a core capability ([decisions](decisions.md)); architecture gained voice mode and the export formats, roadmap Stage 2 includes them.
+
+- 2026-10-28: Flutter confirmed and the bit-exact, repeatable-chaos rules added to the architecture ([decisions](decisions.md)); the Flutter open question closed.
+
+- 2026-10-28: Owner chose C++20 for the engine, a possible VST3/CLAP plugin and fully standalone builds; C.A.W is independent of AutoStacc ([decisions](decisions.md)). Architecture gained the one-core-three-hosts engine shape and the ready-made building blocks table.
+
+- 2026-10-28: Owner set the targets: every platform, Android first on a Galaxy S22+ ([decisions](decisions.md)). Architecture, roadmap and vision rewritten for Flutter + miniaudio + the portable engine (Flutter awaits confirmation). iOS distribution added as an open question. Rules, agents and skills made platform-neutral (`android.md` rule became `app.md`).
+
+- 2026-10-28: Owner decided the app is sold only through AutoStacc and is a sample-making tool until then ([decisions](decisions.md)); licence question closed, Play Store items replaced with AutoStacc-only selling, purchase delivery added as an open question. `main` branch pushed.
+
 - 2026-10-28: Repository set up for agent work, adapted from AutoStacc ([decisions](decisions.md)): `CLAUDE.md`, `.claude/` (tools, hooks, rules, skills, agents, workflow), Serena and Graphify config, `scripts/docs-test.js`, GitHub issue and PR templates, CODEOWNERS, Dependabot and the docs CI. Docs moved into a vault with frontmatter and an index; the owner's brief became [vision](vision.md); open questions moved to its register.
 - 2026-10-28: First assessment written: [architecture](architecture.md) and [roadmap](roadmap.md). The repository was empty.

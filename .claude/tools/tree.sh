@@ -13,7 +13,7 @@ SKIP='(^|/)\.|^(CLAUDE|README|SECURITY)\.md$|^LICENSE$|package-lock\.json$|gradl
 purpose() {
   case "$1" in
     *package.json) sed -n 's|^ *"description": *"\(.*\)",*$|\1|p' "$1" | head -1 ;;
-    *.js|*.cjs|*.mjs|*.ts|*.json|*.jsonc|*.rs|*.kt|*.kts|*.java|*.c|*.cc|*.cpp|*.h|*.hpp) sed -n '1s|^//!* *||p' "$1" ;;
+    *.js|*.cjs|*.mjs|*.ts|*.json|*.jsonc|*.rs|*.dart|*.kt|*.kts|*.java|*.c|*.cc|*.cpp|*.h|*.hpp) sed -n '1s|^//!* *||p' "$1" ;;
     *.sql)  sed -n '1s|^-- *||p' "$1" ;;
     *.toml|*.yml|*.yaml|*.sh|*.cmake|*CMakeLists.txt|*.properties|*Dockerfile|.gitignore|.graphifyignore) sed -n '1{/^#!/d;}; s|^# *||p' "$1" | head -1 ;;
     *.caw)  sed -n 's|^summary: *||p' "$1" | head -1 ;;

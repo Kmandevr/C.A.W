@@ -1,6 +1,6 @@
 ---
 title: Architecture
-summary: Technical plan: stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks.
+summary: Technical plan for every target platform: stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks.
 updated: 2026-10-28
 ---
 
@@ -15,26 +15,61 @@ Labels used below:
 
 ## 0. Current state
 
-- **[Fact]** As of 2026-10-28 there is no application code. The repository holds this plan in `docs/`, the docs guard in `scripts/`, CI in `.github/` and the agent setup in `.claude/`. The `engine/`, `android/` and `examples/` folders below are planned, not built.
+- **[Fact]** As of 2026-10-28, v1 is built: the C++ engine (`engine/`, described in [engine](engine.md)), the Flutter app for Android and Windows (`app/`) and the starter modules (`examples/`). CI builds and tests all of it. The plugin, GitHub sync, AI library editing and the v2 synth are still plans.
 
 ## 1. Technology stack
 
+**Targets (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, with the web as a later extra. Android comes first, because the owner's phone (a Galaxy S22+) is the test device.
+
 | Layer | Choice | Why |
 | --- | --- | --- |
-| UI | **Kotlin + Jetpack Compose** | Native Android, current Google standard, good for compact, panel-based touch UIs |
-| Audio I/O | **Oboe** (C++, via NDK) | Low-latency standard on Android. Picks AAudio or OpenSL ES per device |
-| Sound engine | **Custom C++ core** (C++20), no Android dependencies | Real-time safe, sandboxed by design, and the same core builds for Android, a Linux CLI (CI/AI validation) and later WASM |
-| Bridge | Thin JNI layer | Only control messages cross it. No audio data and no per-sample calls |
-| Build | Gradle + CMake, **built in GitHub Actions** | You work from a phone: CI builds the APK and you install it from the artifact |
+| Sound engine | **Custom C++20 core** (owner, 2026-10-28), no platform dependencies | Real-time safe and sandboxed by design. The same code runs on every target, in a Linux CLI for CI and AI agents, and later as WASM for the web |
+| Audio I/O | **miniaudio**, behind a small `engine/platform/` interface | One C library for every target: AAudio on Android, Core Audio on iOS and macOS, WASAPI on Windows, ALSA/PulseAudio on Linux. Public domain or MIT-0 |
+| UI | **Flutter** (owner, 2026-10-28) | One UI codebase for all five targets. One bridge to the engine everywhere (`dart:ffi`). Dart never touches audio samples, so its garbage collector can't cause dropouts |
+| Bridge | Thin C API over the engine, called through `dart:ffi` | Only control messages cross it (play, stop, swap program, set parameter, read meters). No audio data, no per-sample calls |
+| Build | CMake for the engine, Flutter for the app, **all built in GitHub Actions** | The owner works from a phone, so CI builds every installable and the owner downloads it |
 
-- **[Fact]** Oboe is Apache-2.0, supports API 16+, and uses AAudio on API 27+. ([github.com/google/oboe](https://github.com/google/oboe))
-- **[Proposal]** `minSdk 27` (Android 8.1) so that every device gets AAudio. This keeps the audio path simpler.
+- **[Fact]** miniaudio is public domain or MIT-0 (your choice). Its backends are AAudio (Android 8.0+) and OpenSL ES on Android, Core Audio on macOS and iOS, WASAPI on Windows, and ALSA on Linux. ([github.com/mackron/miniaudio](https://github.com/mackron/miniaudio), 2026-10-28)
+- **[Fact]** Flutter 3.47 supports Android API 24–37, iOS 15+, Windows 10/11, macOS 12+, Debian 10+ and Ubuntu 20.04+ on x64 and Arm64, plus the web. ([docs.flutter.dev](https://docs.flutter.dev/reference/supported-platforms), 2026-10-28)
+- **[Fact]** The Galaxy S22+ runs Android 16 (One UI 8), its last major update. ([mezha.media](https://mezha.media/en/news/one-ui-8-for-galaxy-s22-305386))
+- **[Proposal]** Android `minSdk 26` (Android 8.0): every device gets AAudio, and Flutter's floor is lower anyway.
+- **[Proposal]** Android is the only platform where Oboe would matter. Keep miniaudio unless latency tests on the S22+ fall short. If they do, add an Oboe backend behind the same `engine/platform/` interface. Oboe is Apache-2.0, [github.com/google/oboe](https://github.com/google/oboe).
+
+### Engine shape: one core, three hosts
+
+The owner may also ship C.A.W as a VST3/CLAP plugin. So the core is plugin-shaped from day one and knows nothing about who drives it:
+
+- **Hosts:** miniaudio in the standalone app; a DAW such as Reaper through the plugin; the CLI for checks and offline WAV renders.
+- **Interface:** `prepare(sampleRate, maxBlock)`, `process(block, events)`, automatable parameters, MIDI note input, the host's tempo and transport (so the sequencer follows the DAW), and state save/load (the sound code plus parameter values).
+- **Fully standalone (owner):** every build runs on its own and offline. No server, account or network is needed to make sound; GitHub sync is optional.
+- **Plugin UI:** later. Flutter doesn't embed in plugin windows, so a plugin starts with the host's generic parameter controls.
+
+### Ready-made building blocks
+
+The language, compiler and VM are ours, because they are the product and the sandbox. Everything around them comes from permissive, maintained libraries. All facts checked 2026-10-28.
+
+| Job | Library | Licence | When |
+| --- | --- | --- | --- |
+| Audio output on every platform | [miniaudio](https://github.com/mackron/miniaudio) | Public domain / MIT-0 | v1 |
+| FLAC writing, sinc interpolation, if needed | [CHOC](https://github.com/Tracktion/choc) | ISC | Later (v1 writes WAV and passes messages with its own small code) |
+| Catching allocations and locks on the audio thread | Clang [RealtimeSanitizer](https://clang.llvm.org/docs/RealtimeSanitizer.html) (`[[clang::nonblocking]]`, `-fsanitize=realtime`) in CI | Part of LLVM | v2 (v1 CI runs AddressSanitizer and UBSan) |
+| Crash-hunting the parser and compiler | libFuzzer with AddressSanitizer and UBSan in CI | Part of LLVM | v2 |
+| Filters, delays, FFT, envelopes, spectral tools | [Signalsmith DSP](https://github.com/Signalsmith-Audio/dsp) | MIT | v2 (v1's filter and envelope are our own, for exact repeatability) |
+| Oscillators, filters, effects, synthesized drum voices | [DaisySP](https://github.com/electro-smith/DaisySP) (the MIT library only, never DaisySP-LGPL) | MIT | v2 |
+| Reference DSP algorithms | [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (archived January 2024: read and port, don't depend on it) | MIT | v1 onward |
+| Plugin format | [CLAP](https://cleveraudio.org/) | MIT | Stage 4b |
+| VST3, AUv2, AUv3 (macOS and iOS) and standalone builds from one CLAP plugin | [clap-wrapper](https://github.com/free-audio/clap-wrapper) | MIT (skip its AAX and ASIO options: GPL or commercial) | Stage 4b |
+| VST3 itself | VST 3 SDK, MIT since version 3.8 ([Steinberg, October 2025](https://sonicstate.com/news/2025/10/30/vst-3-now-available-under-mit-license)) | MIT | Stage 4b |
+
+Avoid: JUCE (revenue-capped free tier), Tracktion Engine (GPL or commercial, needs JUCE), DaisySP-LGPL, and Cmajor (**[Assumption: GPL or commercial; check before reconsidering]**).
 
 ### Rejected alternatives
 
-- **WebView + Web Audio:** fastest to prototype, but latency on Android WebView is higher and less predictable, and JS garbage collection causes audio dropouts. Not good enough for an instrument.
-- **Embedded JS or Lua (QuickJS, LuaJIT) running user code:** both have garbage collection, unbounded loops and a large attack surface. They can't run safely on the audio thread. Rendering ahead into a buffer adds latency and still glitches.
-- **Flutter / React Native:** these add a second runtime on top of the native audio code they still need. That's extra complexity for no gain here.
+- **Compose Multiplatform:** stable on Android, iOS and desktop, with the web in beta ([kotlinlang.org](https://kotlinlang.org/docs/multiplatform/supported-platforms.html), 2026-10-28). It's the strongest alternative to Flutter, but it needs two engine bridges (JNI on Android and desktop, cinterop on iOS) and ships a JVM on desktop.
+- **JUCE:** built for audio apps on every platform, but its free Starter tier only covers up to $20,000 a year in revenue ([JUCE forum](https://forum.juce.com/t/important-changes-to-the-juce-end-user-licence-agreement-for-juce-8/61265)). Its touch text editing is weak, and the code editor is the heart of this app.
+- **Qt:** LGPL or commercial. LGPL obligations are awkward for a closed app on iOS.
+- **WebView or browser-only app:** latency is higher and less predictable, and garbage collection sits on the audio path. The web stays a later extra (engine as WASM in an AudioWorklet), not the main app.
+- **Embedded JS or Lua running user code:** both have garbage collection, unbounded loops and a large attack surface. They can't run safely on the audio thread.
 
 ## 2. Audio and code execution
 
@@ -43,47 +78,98 @@ The central decision: **user code is compiled into bytecode for our own small VM
 ```
  source text ──► parser/compiler (worker thread) ──► Program (bytecode + constants)
                                                         │ atomic pointer swap
- Oboe callback (audio thread) ◄── VM runs Program ◄─────┘   (+ short crossfade)
+ audio callback (audio thread) ◄── VM runs Program ◄─────┘   (+ short crossfade)
 ```
 
 - **The sandbox comes from what the language can't do.** It has no I/O, no filesystem, no network and no system calls. Memory is fixed-size and allocated before playback. Loops are bounded and the call depth is capped. Downloaded modules are therefore no more dangerous than local ones.
-- **Audio-thread rules:** no allocation, no locks, no JNI and no logging inside the callback. Programs are handed over through a single-slot atomic swap, and old programs are freed off the audio thread.
+- **Audio-thread rules:** no allocation, no locks, no calls into the UI layer and no logging inside the callback. Programs are handed over through a single-slot atomic swap, and old programs are freed off the audio thread.
 - **Block processing:** the VM runs each opcode over a block of samples (for example 64) rather than one sample at a time. This cuts interpreter overhead a lot.
 - **Cost guard:** the engine measures time spent per callback. If it overruns repeatedly, it fades out and reports "too expensive" instead of stuttering.
 - **Ear and speaker safety:** NaN/Inf values are replaced with 0, DC is blocked, and a hard safety limiter runs last. Default output gain is low. Glitch audio can go to full-scale noise instantly.
-- **Defined arithmetic:** bitwise operations use int32 with wraparound, division or modulo by 0 returns 0, and other math uses float. Output has two modes: *byte* (`v & 255` mapped to −1…1, classic bytebeat) and *float* (clamped to −1…1). This makes renders deterministic and portable across devices.
+- **Defined arithmetic:** every operation has one defined result on every device (see [Bits and determinism](#bits-and-determinism)). Output has two modes: *byte* (`v & 255` mapped to −1…1, classic bytebeat) and *float* (clamped to −1…1).
 - **Sample rates:** a bytebeat `t` counts at the *formula rate* (8 kHz by default, user-selectable). The engine upsamples to the device rate with zero-order hold, which keeps the crunch. Procedural instruments run at the device rate. WAV export runs at 44.1 or 48 kHz.
 - **Offline render = same VM.** WAV export runs the identical program on a worker thread, faster than real time, so the export matches what you heard.
-- **Background playback:** use a foreground service with the `mediaPlayback` type, which Android 14+ requires. Device changes such as headphones being unplugged trigger a stream restart.
+- **Background playback:** each platform has its own rule. Android needs a foreground service with the `mediaPlayback` type (required on Android 14+), and iOS needs the audio background mode. Desktop has no restriction. Device changes such as headphones being unplugged trigger a stream restart.
+
+### Bits and determinism
+
+The owner's requirement: code works directly on the bits, so sounds come out chaotic and noise-like, yet **exactly repeatable**, the way `t>>6<<5%t` is. The same code, seed and settings give the same samples, bit for bit, on every platform, in playback, in the plugin and in WAV export.
+
+- **[Fact]** **JavaScript's number semantics**, so pasted formulas sound identical: values are 64-bit floats, and bitwise operators work on 32-bit wrapping integers. Shift counts are masked to 0–31. `>>` is arithmetic and `>>>` logical. `%` keeps the sign of the left side, and `x/0` and `x%0` give 0. Operator precedence follows C and JavaScript, so `t>>6<<5%t` reads as `(t>>6) << (5%t)`. The full reference is in [engine](engine.md).
+- **No undefined behaviour inside:** bit operations convert through unsigned 32-bit values, so C++'s signed-overflow and oversized-shift traps can't leak into the sound.
+- **Bit tools as built-ins**, using C++20's `<bit>`: rotate (`rotl`, `rotr`), `popcount`, count leading/trailing zeros, bit reverse, byte swap, and reinterpreting a float's bits as an integer and back (`bits(x)`, `float(i)`). Later, the same tools work on the bytes of imported audio (Stage 5).
+- **Randomness is seeded, never live:** `hash(x)` and `noise(seed, t)` are counter-based hash functions (no hidden state, so jumping to any `t` gives the same value), and a project-level `seed` changes all of them at once. There's no clock or system randomness anywhere in the language.
+- **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits.
+
+### Instruments, wavetables and samples **[Proposal]**
+
+The owner's requirement: any sound code can become a **playable synth**, a **waveform for other synths** or a **sample**. All of them come from the same code and the same deterministic VM, so they're simply different ways of running it.
+
+- **Voice mode (playable synth):** the program runs once per note, from a fixed pool of pre-allocated voices (no allocation on note-on; the oldest voice is stolen when the pool is full). Each voice sees:
+  - `t`: samples since note-on, scaled so pitch follows the note. Classic bytebeat runs at its formula rate when the note is the module's base note (default C4), and an octave up doubles the rate.
+  - `phase`: 0–1 through one cycle at the note's frequency, for waveform-style code.
+  - `freq`, `note`, `vel`, `gate` (1 while held, 0 after release), `rel` (samples since release).
+
+  A voice ends after it has been silent for a while following release, or when the code's envelope reaches zero. Notes come from the on-screen keyboard, MIDI on the device, or the host when it runs as a plugin.
+- **Waveform export (wavetables for other synths):** render single cycles of 2048 samples. Sweeping a parameter, the seed or a "frame" variable over 1–256 frames makes a morphing wavetable, saved as one WAV of back-to-back frames. **[Assumption: Serum and Vital read this layout, and Serum wants an extra `clm ` chunk marking 2048-sample frames. Verify before building.]**
+- **Sample export:** one-shots and loops as WAV (24-bit or 32-bit float). Loops get loop points in a `smpl` chunk, set at exactly repeating lengths where the code repeats. Multisample sets render a range of notes and velocities, plus an SFZ mapping file (an open text format).
+- **Aliasing is a choice:** bit-twiddled waveforms alias when pitched up, which is part of their sound. Voice mode and export offer optional oversampling (2× or 4×) for a cleaner result.
+
+### Synthesis, MIDI and musical helpers **[Proposal]**
+
+The owner's requirement: proper synthesis and MIDI, and helpers that make musical results (such as a loop that fits a beat) easy, without taking away raw bit code.
+
+- **Synthesis built-ins** (basics in v1, the rest in v2, on top of Signalsmith DSP and DaisySP):
+  - oscillators: sine, saw, square, triangle, band-limited and raw
+  - noise, filters, envelopes (ADSR, decay) and LFOs
+  - FM and phase modulation, additive partials, wavetable playback of our own exported tables, and later granular
+
+  They mix freely with bytebeat expressions: `saw(freq) * (t>>8 & 1)` is valid code.
+- **MIDI:**
+  - notes in from the on-screen keyboard, USB/Bluetooth MIDI devices or the plugin host, driving voice mode
+  - CC and pitch bend mapped to `param`s ("MIDI learn")
+  - MIDI clock in, so the tempo follows external gear
+  - MIDI files imported to play a sound, and the sequencer's patterns exported as MIDI files for Reaper
+  - MPE later
+- **Musical time is built in:** `bpm` (project setting, or the host's when it's a plugin), `beat`, `bar`, `step` (16ths), and `pos` (0–1 through the loop). Code can say `(beat & 1) ? kick : 0` instead of working out sample counts.
+- **Loops that repeat cleanly:** a project has a loop length in bars at its BPM. Playback wraps at exactly that length, the waveform shows the loop, and export cuts at exactly that length, with loop points set. A bytebeat formula that doesn't repeat on its own gets a short crossfade at the seam, which can be turned off. For classic formulas the engine can also *find* their natural repeat length (powers of two of `t`) and offer it.
+- **Notes and scales:** note names (`C4`, `A#2`) and `mtof()`, plus `scale("minor", i)` and `chord("m7", i)` helpers. Quantizing a pitch to the project's key is one call.
+- **Approachable defaults in the app:**
+  - starter templates (a bytebeat loop, a kick, a bass synth, a pad, a glitch fx)
+  - auto-generated sliders for every `param`
+  - BPM tap, a bar-length picker, and one-tap "export this loop"
+
+  Beginners can start from a template and a few sliders, and every helper is still plain code that can be edited.
 
 ### Language direction **[Proposal]**
 
-- Accept the **JS-style bytebeat expression subset** first (`t`, `>> << & | ^ % * / + -`, ternary, `sin`, `floor`…), so formulas from the community paste in and work.
+- Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
 - Then add, in this order: `let` bindings, user functions, `param` declarations (these generate UI sliders), `use` imports of library modules, and stateful built-ins (delay lines, filters, envelopes, noise).
 - Add a sequencing mini-language in Stage 5, designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
 
 ### NKIDO evaluation
 
 - **[Fact]** As of 2026-10-28: [mlaass/nkido](https://github.com/mlaass/nkido) is MIT-licensed, C++20/CMake, and pairs a stack-based bytecode synthesis VM ("Cedar") with a Tidal-style language ("Akkado"). It supports hot-swap with crossfade and runs natively and in the browser via WASM. The project is small: 8 stars and essentially one developer.
-- **[Assumption]** Unverified: an Android/NDK build, a stable embedding API, and long-term maintenance.
-- **[Proposal]** Don't depend on it for Stage 1. A bytebeat VM is small enough to own. NKIDO uses the same architecture recommended here, which supports the design. At Stage 2, do a 1-day spike to judge whether Cedar could serve as the graph/DSP layer. Keep our engine behind an interface (`compile(source) → Program`, `process(Program, buffer)`) so we can swap the backend either way.
+- **[Assumption]** Unverified: Android and iOS builds, a stable embedding API, and long-term maintenance.
+- **[Proposal]** Don't depend on it for v1. A bytebeat VM is small enough to own. NKIDO uses the same architecture recommended here, which supports the design. In v2, do a 1-day spike to judge whether Cedar could serve as the graph/DSP layer. Keep our engine behind an interface (`compile(source) → Program`, `process(Program, buffer)`) so we can swap the backend either way.
 
 ## 3. Source and module structure
 
-### This repo (Repository A — app) **[Proposal]**
+### This repo (Repository A — app)
 
-Already in place: `docs/`, `scripts/`, `.github/`, `.claude/`. Planned:
+**[Fact]** Built as of v1:
 
 ```
-engine/        C++ core: lexer, parser, compiler, VM, DSP built-ins, WAV writer (no Android deps)
-engine/cli/    Linux/macOS CLI: `caw check`, `caw render` (used by CI and AI agents)
-engine/tests/  Golden-render tests (hash of rendered output per example)
-android/       Gradle project: Compose UI, JNI bridge, Oboe stream, storage, sync
-docs/          These notes + language reference (exists)
-examples/      Bundled starter sounds in the module format (later mirrored to the library)
+engine/src/      C++ core: compiler, VM, built-ins, mixer, exports, WAV writer, C API (no platform deps)
+engine/platform/ Audio output (miniaudio)
+engine/cli/      Desktop CLI: `caw check`, `caw render` (used by CI and AI agents)
+engine/tests/    Unit tests and golden renders (hash of rendered output per template)
+app/             Flutter app: lib/ (engine bindings, model, screens), android/, windows/, linux/ (local testing)
+docs/            These notes and the language reference
+examples/        Bundled starter sounds in the module format (later mirrored to the library)
 ```
 
-### Sound library (Repository B, created in Stage 2/3)
+### Sound library (Repository B, created in Stage 3)
 
 ```
 caw-library.json       library name, module format version
@@ -96,23 +182,13 @@ projects/     full pieces that reference modules
 AGENTS.md     language + format guide for any AI agent
 ```
 
-### Module file **[Proposal]**
+### Module file
 
 One plain-text file per module: a small metadata header followed by code. Single files are easy for AI agents to edit and produce clean git diffs.
 
-```
----
-caw: 1                 # module format version
-kind: effect           # instrument | effect | function | pattern | project
-name: bitcrush
-params:
-  bits: { default: 6, min: 1, max: 16, step: 1 }
----
-<code>
-```
-
-- Modules are referenced by path (`use effects/bitcrush`). Projects pin the library to a **commit SHA**, so an old project always sounds the same.
-- The app declares which format versions it supports. It lists incompatible modules but never loads them.
+- **[Fact]** Built in v1: the header holds `caw: 1`, `kind` (`generator` or `effect`), `name`, `summary`, `mode` and `rate`. Sliders come from `param` lines in the code, so a module's whole interface lives in one place. Format and language: [engine](engine.md).
+- **[Proposal]** Later kinds (`function`, `pattern`, `project`), referencing modules by path (`use effects/bitcrush`), and projects that pin the library to a **commit SHA**, so an old project always sounds the same.
+- The engine reads only format version 1 and rejects others with a clear error, so incompatible modules are listed but never played.
 
 ## 4. GitHub sync
 
@@ -125,7 +201,7 @@ GitHub stores and versions files. It never executes audio code.
 - **Write:** the Git Data API (blobs → tree → commit → non-force ref update) gives **one atomic commit per save batch**. No git client is bundled.
 - **Conflicts:** if the ref update fails because the remote moved, the app re-fetches and merges files that only one side changed. When both sides changed a file, the app pushes local work to a branch (`caw/conflict-<timestamp>`) and shows a "pick one" choice. Nothing is lost silently.
 - **Offline-first:** the local copy is the working copy. Playback never waits on the network.
-- **Separate updates:** APK updates come from releases or the Play Store. Library updates come from git. Neither requires the other.
+- **Separate updates:** App updates come from release builds (later delivered through AutoStacc). Library updates come from git. Neither requires the other.
 
 ## 5. AI-assisted editing (no phone UI control)
 
@@ -144,14 +220,19 @@ Any agent that can edit files in git works with this setup. There's no provider-
 | Malicious or broken downloaded modules | No I/O by design; limits on source size, AST depth, program size and memory; failures mute only that module |
 | Hearing or speaker damage from harsh output | Safety limiter, NaN guard, low default gain, fade on start/stop |
 | Language scope creep | Ship the bytebeat expression subset first and grow it one feature per milestone |
-| Developing from a phone (no Android Studio) | GitHub Actions builds signed debug APKs (fixed keystore in CI secrets so updates install over each other). The engine is tested on Linux in CI |
-| Device audio differences | Oboe, float output, restart on disconnect, early testing on your actual phone |
-| Touch code editing is clumsy | Symbol row (`t >> << & \| ^ ( ) ? :`), short files, live error line, Compose `BasicTextField` with lightweight highlighting |
-| Token leakage or over-broad access | Device flow, GitHub App limited to selected repos, Keystore storage, no shipped secrets |
-| Licensing | Use only permissive dependencies (Oboe Apache-2.0, any NKIDO use MIT), avoid GPL. Don't bundle community bytebeat formulas without permission. Choose the app license and library license (e.g. CC0/MIT for modules) **before** accepting outside contributions |
-| Play Store policy | Foreground-service type declarations, target SDK deadlines and a privacy policy (the app stores GitHub tokens) |
+| Developing from a phone (no PC or IDE) | GitHub Actions builds every target. Android debug APKs are signed with a fixed keystore in CI secrets so updates install over each other. The engine is tested on Linux in CI |
+| Apple builds | iOS and macOS builds need macOS runners. The repository is public, so standard GitHub-hosted runners cost nothing; check this if it goes private again **[Assumption: check current GitHub pricing]**. Distributing them needs a paid Apple Developer membership. Build Apple targets only on release branches or on demand |
+| Device audio differences | miniaudio's per-platform backends, float output, restart on disconnect, early testing on the S22+ and each new platform; Oboe as an Android fallback |
+| Touch code editing is clumsy | Symbol row (`t >> << & \| ^ ( ) ? :`), short files, live error line, a Flutter code editor with lightweight highlighting (pick a permissively licensed package, or write a small one) |
+| Token leakage or over-broad access | Device flow, GitHub App limited to selected repos, platform secure storage (Android Keystore, Apple Keychain, Windows Credential Manager, Linux Secret Service), no shipped secrets |
+| Licensing | Use only permissive dependencies (miniaudio public domain/MIT-0, Flutter BSD-3, any NKIDO use MIT), avoid GPL. Don't bundle community bytebeat formulas without permission. Choose the app license and library license (e.g. CC0/MIT for modules) **before** accepting outside contributions |
+| Selling only through AutoStacc (owner) | **[Proposal]** Android: one release signing key kept for good in repository secrets (every update must be signed with it), plus clear install steps on the AutoStacc page. Windows: code-sign installers so SmartScreen doesn't block them. macOS: sign and notarize with an Apple Developer account. A privacy policy is needed everywhere (the app stores GitHub tokens) |
+| iOS can't be sold only through AutoStacc | **[Fact]** Outside the App Store, iOS apps can only be distributed through alternative marketplaces in the EU (and now Japan). That requires Apple's approval, notarization and an organization account ([Apple](https://developer.apple.com/support/alternative-app-marketplace-in-the-eu), 2026-10-28). iOS realistically means the App Store, so it's an open question in [vision](vision.md#open-questions) |
 
 ## Sources
 
-- Oboe: https://github.com/google/oboe
+- miniaudio: https://github.com/mackron/miniaudio
+- Flutter platforms: https://docs.flutter.dev/reference/supported-platforms
+- Compose Multiplatform stability: https://kotlinlang.org/docs/multiplatform/supported-platforms.html
+- Oboe (Android fallback): https://github.com/google/oboe
 - NKIDO: https://github.com/mlaass/nkido · [ADC Japan 2026 talk listing](https://adcjapan26.sched.com/event/2KCfA)

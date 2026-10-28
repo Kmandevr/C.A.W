@@ -6,7 +6,7 @@ CLAUDE.md	The audio callback never allocates
 CLAUDE.md	modules are untrusted
 CLAUDE.md	Never ship a GitHub token
 CLAUDE.md	permissive licences
-CLAUDE.md	every build, test and APK comes from GitHub Actions
+CLAUDE.md	every build, test and installable comes from GitHub Actions
 CLAUDE.md	Record decisions and new facts
 CLAUDE.md	rewrite superseded text
 CLAUDE.md	never re-read
@@ -16,6 +16,6 @@ CLAUDE.md	Closes #N
 .claude/rules/docs.md	One home per fact.
 .claude/rules/engine.md	no allocation, no locks
 .claude/rules/engine.md	fail closed
-.claude/rules/android.md	No secrets in the APK.
+.claude/rules/app.md	No secrets in any build.
 .claude/rules/ci.md	Never commit a keystore.
 .claude/rules/modules.md	Never paste community bytebeat formulas

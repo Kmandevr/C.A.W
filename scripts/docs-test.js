@@ -114,7 +114,7 @@ if (NOTES.includes("docs/index.md")) {
 const allCovers = Object.values(covers).flat();
 const covered = (f) => allCovers.some((p) => matches(p, f));
 const AREAS = [...new Set(FILES.flatMap((f) => {
-  const m = f.match(/^(engine|android|library)\/([^/]+)\//);
+  const m = f.match(/^(engine|app|library)\/([^/]+)\//);
   if (m) return [`${m[1]}/${m[2]}/`];
   if (path.basename(f).startsWith(".")) return [];
   return /^scripts\/[^/]+$|^\.github\/workflows\//.test(f) ? [f] : [];

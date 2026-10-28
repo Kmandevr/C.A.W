@@ -1,0 +1,8 @@
+---
+caw: 1
+kind: effect
+name: Fold
+summary: Wavefolder; more drive folds the sound back on itself
+---
+param drive = 3 in 1..12
+sin(in * drive * pi / 2)

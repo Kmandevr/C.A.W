@@ -36,7 +36,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Only what matters, e.g. phone model, Android version, app build or commit, headphones or speaker.
+      description: Only what matters, e.g. device and OS version, app build or commit, headphones or speaker.
   - type: textarea
     id: evidence
     attributes:

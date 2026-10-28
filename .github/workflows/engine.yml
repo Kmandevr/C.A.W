@@ -1,0 +1,44 @@
+# Engine tests on every push and pull request: Linux x64 and Arm64, Windows, and a sanitizer build. Same golden hashes everywhere.
+name: Engine
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Tests (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x64, os: ubuntu-24.04, flags: "" }
+          - { name: Linux Arm64, os: ubuntu-24.04-arm, flags: "" }
+          - { name: Windows x64, os: windows-2025, flags: "" }
+          - { name: Linux sanitizers, os: ubuntu-24.04, flags: "-DCAW_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }}
+      - name: Build
+        run: cmake --build engine/build --config Release --parallel
+      - name: Test
+        shell: bash
+        run: |
+          bin=engine/build/caw_tests
+          [ -f engine/build/Release/caw_tests.exe ] && bin=engine/build/Release/caw_tests.exe
+          "$bin"
+      - name: Check and render the examples
+        if: matrix.name == 'Linux x64'
+        run: |
+          engine/build/caw check examples/*.caw
+          mkdir -p renders
+          for f in examples/*.caw; do engine/build/caw render "$f" -o "renders/$(basename "$f" .caw).wav" --bpm 140; done
+      - name: Upload example renders
+        if: matrix.name == 'Linux x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-renders
+          path: renders/
+          retention-days: 14

@@ -1,0 +1,309 @@
+// Dart wrapper over the engine: compiles off the UI isolate, in order, and reads meters and scopes for the screens.
+import 'dart:async';
+import 'dart:convert';
+import 'dart:ffi';
+import 'dart:isolate';
+import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
+
+import 'bindings.dart';
+
+class ParamInfo {
+  const ParamInfo(this.name, this.defaultValue, this.min, this.max);
+  final String name;
+  final double defaultValue, min, max;
+
+  static ParamInfo fromJson(Map<String, dynamic> j) => ParamInfo(j['name'] as String,
+      (j['default'] as num).toDouble(), (j['min'] as num).toDouble(), (j['max'] as num).toDouble());
+}
+
+/// What the engine said about one module after compiling it.
+class ModuleInfo {
+  const ModuleInfo({
+    required this.ok,
+    this.error = '',
+    this.line = 0,
+    this.col = 0,
+    this.isEffect = false,
+    this.name = '',
+    this.summary = '',
+    this.params = const [],
+  });
+  final bool ok;
+  final String error;
+  final int line, col;
+  final bool isEffect;
+  final String name, summary;
+  final List<ParamInfo> params;
+
+  static ModuleInfo fromJson(Map<String, dynamic> j) => ModuleInfo(
+        ok: j['ok'] == true,
+        error: (j['error'] as String?) ?? '',
+        line: (j['line'] as num?)?.toInt() ?? 0,
+        col: (j['col'] as num?)?.toInt() ?? 0,
+        isEffect: j['kind'] == 'effect',
+        name: (j['name'] as String?) ?? '',
+        summary: (j['summary'] as String?) ?? '',
+        params: ((j['params'] as List?) ?? const [])
+            .map((p) => ParamInfo.fromJson(p as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class EngineMeters {
+  const EngineMeters({
+    this.cpu = 0,
+    this.peakL = 0,
+    this.peakR = 0,
+    this.playing = false,
+    this.overloaded = 0,
+    this.position = 0,
+    this.loopLength = 1,
+  });
+  final double cpu, peakL, peakR;
+  final bool playing;
+  final int overloaded, position, loopLength;
+}
+
+class LayerMeterValue {
+  const LayerMeterValue({this.peak = 0, this.progress = 0, this.active = false, this.overloaded = false});
+  final double peak, progress;
+  final bool active, overloaded;
+}
+
+class Template {
+  const Template(this.file, this.source);
+  final String file, source;
+}
+
+enum ExportKind { loop, free, oneShot, wavetable }
+
+class RenderRequest {
+  const RenderRequest({
+    required this.projectJson,
+    required this.kind,
+    required this.outPath,
+    this.sampleRate = 48000,
+    this.float32 = false,
+    this.seconds = 8,
+    this.target = '',
+    this.param = '',
+    this.frames = 64,
+  });
+  final String projectJson, outPath, target, param;
+  final ExportKind kind;
+  final int sampleRate, frames;
+  final bool float32;
+  final double seconds;
+}
+
+/// Live engine plus its audio device. One per app.
+class Engine {
+  Engine._(this._b, this._handle);
+
+  static const int sampleRate = 48000;
+  static const int auditionIndex = 64;
+  static const int masterIndex = -1;
+
+  final Bindings _b;
+  final Pointer<Void> _handle;
+  Future<void> _queue = Future.value();
+  final Pointer<CawMetersStruct> _meters = calloc<CawMetersStruct>();
+  final Pointer<CawLayerMeterStruct> _layer = calloc<CawLayerMeterStruct>();
+  final Pointer<Float> _scope = calloc<Float>(1024);
+  bool _audioOn = false;
+
+  static Engine create() {
+    final b = Bindings.instance;
+    if (b.apiVersion() != cawApiVersion) {
+      throw StateError('engine library is API ${b.apiVersion()}, the app needs $cawApiVersion');
+    }
+    final h = b.create(sampleRate);
+    if (h == nullptr) throw StateError('could not create the engine');
+    return Engine._(b, h);
+  }
+
+  /// Sends a whole project. Calls run one at a time on a worker isolate, so compiling never blocks the UI.
+  Future<Map<String, ModuleInfo>> setProject(String json) {
+    final address = _handle.address;
+    final done = Completer<Map<String, ModuleInfo>>();
+    _queue = _queue.then((_) async {
+      try {
+        final result = await _spawnSetProject(address, json);
+        final j = jsonDecode(result) as Map<String, dynamic>;
+        final mods = (j['modules'] as Map<String, dynamic>? ?? {})
+            .map((k, v) => MapEntry(k, ModuleInfo.fromJson(v as Map<String, dynamic>)));
+        done.complete(mods);
+      } catch (e, st) {
+        done.completeError(e, st);
+      }
+    });
+    return done.future;
+  }
+
+  void setParam(String moduleId, String name, double value) {
+    final m = moduleId.toNativeUtf8(), n = name.toNativeUtf8();
+    _b.setParam(_handle, m, n, value);
+    calloc.free(m);
+    calloc.free(n);
+  }
+
+  void setLayerMix(String layerId, double volume, double pan, bool mute, bool solo) {
+    final id = layerId.toNativeUtf8();
+    _b.setLayerMix(_handle, id, volume, pan, mute ? 1 : 0, solo ? 1 : 0);
+    calloc.free(id);
+  }
+
+  void play() => _b.play(_handle);
+  void stop() => _b.stop(_handle);
+  void clearOverload() => _b.clearOverload(_handle);
+
+  EngineMeters meters() {
+    _b.meters(_handle, _meters);
+    final m = _meters.ref;
+    return EngineMeters(
+      cpu: m.cpu,
+      peakL: m.peakL,
+      peakR: m.peakR,
+      playing: m.playing != 0,
+      overloaded: m.overloaded,
+      position: m.position,
+      loopLength: m.loopLength <= 0 ? 1 : m.loopLength,
+    );
+  }
+
+  LayerMeterValue layerMeter(int index) {
+    _b.layerMeter(_handle, index, _layer);
+    final m = _layer.ref;
+    return LayerMeterValue(
+        peak: m.peak, progress: m.progress, active: m.active != 0, overloaded: m.overloaded != 0);
+  }
+
+  /// Copies the latest samples of a layer (project index), the audition or the master into [out].
+  void scope(int index, Float32List out) {
+    final n = out.length > 1024 ? 1024 : out.length;
+    _b.scope(_handle, index, _scope, n);
+    out.setRange(0, n, _scope.asTypedList(n));
+  }
+
+  /// Opens the audio device; returns an error message, or null when sound is running.
+  String? startAudio() {
+    if (_audioOn) return null;
+    final err = calloc<Uint8>(256).cast<Utf8>();
+    final r = _b.audioStart(_handle, err, 256);
+    final msg = r == 0 ? null : err.toDartString();
+    calloc.free(err);
+    _audioOn = r == 0;
+    return msg;
+  }
+
+  void stopAudio() {
+    if (!_audioOn) return;
+    _b.audioStop(_handle);
+    _audioOn = false;
+  }
+
+  bool get audioOn => _audioOn;
+
+  void dispose() {
+    stopAudio();
+    _b.destroy(_handle);
+    calloc.free(_meters);
+    calloc.free(_layer);
+    calloc.free(_scope);
+  }
+
+  static List<Template> templates() {
+    final b = Bindings.instance;
+    return [
+      for (var i = 0; i < b.templateCount(); i++)
+        Template(b.templateFile(i).toDartString(), b.templateSource(i).toDartString()),
+    ];
+  }
+
+  static ModuleInfo check(String source) {
+    final b = Bindings.instance;
+    final s = source.toNativeUtf8();
+    final r = b.check(s);
+    calloc.free(s);
+    final text = r.toDartString();
+    b.free(r);
+    return ModuleInfo.fromJson(jsonDecode(text) as Map<String, dynamic>);
+  }
+}
+
+/// A running export. Poll [progress] (0..1); [cancel] stops it.
+class RenderJob {
+  RenderJob._(this._progress, this._cancel, this.result);
+
+  final Pointer<Int32> _progress, _cancel;
+  bool _done = false;
+
+  /// Completes with null on success, or the error message.
+  final Future<String?> result;
+
+  double get progress => _done ? 1.0 : _progress.value / 1000.0;
+  void cancel() {
+    if (!_done) _cancel.value = 1;
+  }
+
+  static RenderJob start(RenderRequest req) {
+    final progress = calloc<Int32>();
+    final cancel = calloc<Int32>();
+    final pa = progress.address, ca = cancel.address;
+    final future = _spawnRender(req, pa, ca);
+    final job = RenderJob._(progress, cancel, future);
+    // The flags stay allocated until the worker is done with them.
+    future.whenComplete(() {
+      job._done = true;
+      calloc.free(progress);
+      calloc.free(cancel);
+    }).ignore();
+    return job;
+  }
+}
+
+// Isolate entry points are top-level, and each closure is made in its own small function, so it captures only
+// plain values (a closure made inside a method would carry that method's other variables to the worker).
+
+Future<String> _spawnSetProject(int address, String json) => Isolate.run(() => _setProjectOnWorker(address, json));
+
+Future<String?> _spawnRender(RenderRequest req, int progress, int cancel) =>
+    Isolate.run(() => _renderOnWorker(req, progress, cancel));
+
+String _setProjectOnWorker(int address, String json) {
+  final b = Bindings.instance;
+  final s = json.toNativeUtf8();
+  final r = b.setProject(Pointer<Void>.fromAddress(address), s);
+  calloc.free(s);
+  final text = r.toDartString();
+  b.free(r);
+  return text;
+}
+
+String? _renderOnWorker(RenderRequest req, int progressAddress, int cancelAddress) {
+  final b = Bindings.instance;
+  final opts = calloc<CawRenderOptionsStruct>();
+  final json = req.projectJson.toNativeUtf8();
+  final path = req.outPath.toNativeUtf8();
+  final target = req.target.toNativeUtf8();
+  final param = req.param.toNativeUtf8();
+  final err = calloc<Uint8>(512).cast<Utf8>();
+  opts.ref
+    ..kind = req.kind.index
+    ..sampleRate = req.sampleRate
+    ..float32 = req.float32 ? 1 : 0
+    ..frames = req.frames
+    ..seconds = req.seconds
+    ..target = target
+    ..param = req.param.isEmpty ? nullptr : param;
+  final r = b.render(json, opts, path, Pointer<Int32>.fromAddress(progressAddress),
+      Pointer<Int32>.fromAddress(cancelAddress), err, 512);
+  final msg = r == 0 ? null : err.toDartString();
+  for (final p in [json, path, target, param, err]) {
+    calloc.free(p);
+  }
+  calloc.free(opts);
+  return msg;
+}

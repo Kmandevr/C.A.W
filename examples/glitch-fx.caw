@@ -1,0 +1,10 @@
+---
+caw: 1
+kind: effect
+name: Glitch
+summary: Flips bits of the incoming sound on the last 16th of each beat
+---
+param mask = 240 in 0..4095
+let q = floor(in * 32767)
+let hit = step % 4 == 3
+(hit ? q ^ mask : q) / 32767
