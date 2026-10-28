@@ -142,9 +142,11 @@ Grid and view:
 
 | Action | Default keys |
 | --- | --- |
-| Grid 1/4, 1/8, 1/16, 1/32 | Alt+1, Alt+2, Alt+3, Alt+4 (plain digits are counts, see [Vim-style control](#vim-style-control)) |
+| Grid resolution 1, 1/2, 1/4, 1/8, 1/16, 1/32, 1/64, 1/128 (the finest the adaptive grid goes) | Alt+1 to Alt+8 (plain digits are counts, see [Vim-style control](#vim-style-control)) |
 | Triplets on / off | Alt+0 |
-| Snap (magnet) on / off | N |
+| Snap (magnet) on / off (grid off) | N |
+| Adaptive / fixed grid | Alt+F |
+| Drag a length without snapping | hold Shift while dragging |
 | Tools: draw, select, curve, erase | B, V, C, X |
 | Switch piano roll / drum grid | G |
 | Zoom in / out / fit the pattern | Ctrl+= / Ctrl+- / F |

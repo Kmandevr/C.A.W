@@ -8,6 +8,16 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Adaptive grid (owner)
+
+- **Adaptive:** the grid adds and removes lines as you zoom.
+- **Resolution:** you choose it, from 1 down to 1/128, or off. It's the finest the grid goes, and moves and resizes snap to it.
+- **Shift-drag:** changes a length without snapping.
+- **Tap targets:** placing a note by tapping keeps 48 dp cells, while dragging can use finer lines.
+- **Fixed mode:** a switch keeps the grid size fixed.
+
+See [UI design](ui.md#editors).
+
 ## 2026-10-28: Remaining key questions (owner)
 
 - **Code editor in Vim mode:** uses WASD too.

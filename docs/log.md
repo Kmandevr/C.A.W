@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner set the adaptive grid: the chosen resolution (1 down to 1/128, or off) is its finest level and the snap, Shift-drag ignores it, and tapping keeps 48 dp cells ([UI design](ui.md#editors)). Still waiting for the go.
+
 - 2026-10-28: Owner answered the remaining key questions (WASD in the code editor's Vim mode, Alt+Q to record, Ctrl+1/2/3 for areas, the cursor keys, the phone toolbar); updated [actions](actions.md). Still waiting for the go.
 
 - 2026-10-28: Owner settled the visual details: calm neon, custom themes, a bundled mono font, a density switch, and a mode badge with key hints and toasts ([UI design](ui.md)). Still waiting for the go.
