@@ -14,11 +14,29 @@ namespace caw {
 
 namespace {
 
-void setProgress(int32_t* p, double fraction) {
-    if (p) std::atomic_ref<int32_t>(*p).store(static_cast<int32_t>(std::clamp(fraction, 0.0, 1.0) * 1000.0));
+// The flags are plain ints shared with another thread (the app polls them). std::atomic_ref is missing from some
+// standard libraries (the Android NDK's), so those use the compiler's atomic built-ins instead.
+void atomicStore(int32_t* p, int32_t v) {
+#if defined(__cpp_lib_atomic_ref)
+    std::atomic_ref<int32_t>(*p).store(v);
+#else
+    __atomic_store_n(p, v, __ATOMIC_SEQ_CST);
+#endif
 }
 
-bool cancelled(int32_t* c) { return c && std::atomic_ref<int32_t>(*c).load() != 0; }
+int32_t atomicLoad(int32_t* p) {
+#if defined(__cpp_lib_atomic_ref)
+    return std::atomic_ref<int32_t>(*p).load();
+#else
+    return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+#endif
+}
+
+void setProgress(int32_t* p, double fraction) {
+    if (p) atomicStore(p, static_cast<int32_t>(std::clamp(fraction, 0.0, 1.0) * 1000.0));
+}
+
+bool cancelled(int32_t* c) { return c && atomicLoad(c) != 0; }
 
 // Every module a render uses must compile, so an export never silently drops a broken one.
 bool checkModules(const ProjectSpec& p, std::string& err) {
