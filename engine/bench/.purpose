@@ -1,0 +1,1 @@
+Benchmarks: caw_bench times the engine like a phone's audio callback (release builds only; not run in CI).

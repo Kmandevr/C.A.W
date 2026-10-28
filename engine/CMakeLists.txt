@@ -136,4 +136,9 @@ if(CAW_TOOLS)
   target_link_libraries(caw_tests PRIVATE caw_core)
   enable_testing()
   add_test(NAME caw_tests COMMAND caw_tests)
+
+  # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
+  add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
+  target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
+  target_link_libraries(caw_bench PRIVATE caw_core)
 endif()
