@@ -8,6 +8,17 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: A light halfway DAW (owner); UI proposal (Claude)
+
+- **Owner:** C.A.W becomes a halfway DAW, without recording or other hard features yet. It must be easy to understand and use on phone and PC, and light on CPU and RAM.
+- **Claude's proposal, based on how other apps solve this** ([UI design](ui.md)):
+  - a session grid of layers × scenes, with launches queued to the loop
+  - a drag-from library, and a Unity-style inspector as a bottom sheet
+  - one gesture vocabulary, undo/redo always on screen, and 48 dp targets
+  - a piano roll with a mode bar and two-finger navigation
+  - grids drawn by painters, and meters that sleep when stopped
+- **Still to confirm:** the owner hasn't confirmed this layout yet.
+
 ## 2026-10-28: Variables and patterns for v2 (owner, answering Claude's questions)
 
 - **Variables:** all three kinds, like Unity's Inspector:

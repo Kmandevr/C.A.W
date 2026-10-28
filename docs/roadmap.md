@@ -98,6 +98,10 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - procedural pattern code with optional per-repeat variation, and Freeze
   - drag a pattern onto any layer
 - **Scenes:** sets of patterns and global values per layer, switched in time with the loop.
+- **A UI for a light halfway DAW** ([UI design](ui.md)):
+  - a session grid (layers × scenes), a library you drag from, and an inspector sheet
+  - one gesture vocabulary on both phone and desktop, and undo/redo
+  - painted grids, with the CPU and RAM budgets
 - **Notes stored the MIDI 2.0 way.** `.mid` import and MPE export come later; DAW export isn't a priority yet.
 - **The house-built synth:** play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Its voice pool also plays chords from patterns.
 - on-screen keys

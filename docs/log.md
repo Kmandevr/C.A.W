@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner set the direction: a light, easy halfway DAW without recording. Researched layouts and interactions; proposal in the new [UI design](ui.md) note.
+
 - 2026-10-28: Owner asked for Unity-style variables and a pattern (MIDI) builder, planned for v2 with the house synth ([decisions](decisions.md)); vision, architecture and roadmap updated. PR #2 (v1) merged to `main`. A second round of answers settled the pattern details: kit routing, note extras, curved notes, MIDI 2.0 note model, scenes in v2.
 
 - 2026-10-28: v1 built: the C++ engine (`engine/`, [engine](engine.md)), the Flutter app for Android and Windows (`app/`, [app](app.md)), seven starter modules (`examples/`), and CI for engine tests (Linux x64 and Arm64, Windows, sanitizers) and app builds (APK, Windows). Build choices are in [decisions](decisions.md); architecture and roadmap now say what is built.

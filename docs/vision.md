@@ -28,6 +28,8 @@ A cross-platform app that works as an experimental sound-design instrument: byte
 - **Unity-style variables:** modules expose their variables as controls with sliders, tooltips and the like. Variables can be local to a module or global to the project, and other modules can use them.
 - **A pattern (MIDI) builder:** make chord, drum and melody patterns that any sound plays (kick, hats, everything). Patterns are files, like modules, that you drag onto a layer. They can be drawn or generated procedurally.
 
+**A light halfway DAW (owner, 2026-10-28):** C.A.W is aiming at a halfway DAW, without recording or other hard features yet. The UI must be easy to understand and use on phone and PC, and the app must run light on CPU and RAM ([UI design](ui.md)).
+
 **Plugins (owner, 2026-10-28):** it may also ship as a VST3 or CLAP plugin. **Standalone (owner):** every build runs fully on its own and offline.
 
 **Business direction (owner, 2026-10-28):** closed and commercial, sold only through AutoStacc, the owner's own store. The repository is public so CI is free, but the licence stays proprietary: the code is visible, not licensed for others to use (`LICENSE`). Until then, it's the owner's tool for making samples to sell on AutoStacc, so getting sound out as WAV comes before polish for other users.
