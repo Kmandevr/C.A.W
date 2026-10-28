@@ -8,6 +8,15 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Standard library and connectors (owner, answering Claude's questions)
+
+- **Library categories, all four:** envelopes and LFOs; filters and effects; MIDI and music theory; glitch and bit tools.
+- **Your own functions:** "yes, but simpler". Users and agents write `fn` functions and share them, but only the app's library gets generated reference pages and in-app help.
+- **Documentation in four places:** a reference in `docs/`, an agent guide, in-app help, and inspector tips. All of it is generated from doc comments and checked in CI.
+- **Connectors:** all kinds are wanted eventually, with only what's in scope built now.
+  - **v2:** sidechain, modulation links and MIDI ports.
+  - **Later:** sends and buses (Stage 5), and free module patching.
+
 ## 2026-10-28: A light halfway DAW (owner); UI proposal (Claude)
 
 - **Owner:** C.A.W becomes a halfway DAW, without recording or other hard features yet. It must be easy to understand and use on phone and PC, and light on CPU and RAM.

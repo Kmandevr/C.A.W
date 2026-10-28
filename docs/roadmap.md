@@ -98,6 +98,11 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - procedural pattern code with optional per-repeat variation, and Freeze
   - drag a pattern onto any layer
 - **Scenes:** sets of patterns and global values per layer, switched in time with the loop.
+- **Standard library** ([architecture](architecture.md#standard-library-and-connectors-proposal)):
+  - envelopes and LFOs, filters and effects, MIDI and music theory, glitch and bit tools
+  - user `fn` functions
+  - docs generated into `docs/`, an agent guide, in-app help and inspector tips, checked in CI
+- **Connectors:** sidechain, modulation links (LFOs and envelopes onto any param), and MIDI ports.
 - **A UI for a light halfway DAW** ([UI design](ui.md)):
   - a session grid (layers × scenes), a library you drag from, and an inspector sheet
   - one gesture vocabulary on both phone and desktop, and undo/redo
@@ -129,6 +134,7 @@ macOS and Linux desktop apps, then iOS once its distribution question is settled
 - the sequencing mini-language
 - audio import with nondestructive byte/bit mangling chains (originals are never modified)
 - sends and buses
+- free module patching (modular-style)
 - spectrum display
 - performance work
 - preparing to sell through AutoStacc: signed release builds, privacy policy, install steps, and how a purchase unlocks the app

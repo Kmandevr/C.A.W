@@ -201,10 +201,42 @@ export let env = ad(trig, 0.001, 0.3)                  a signal other modules re
   - **[Assumption]** MIDI 2.0 clip files (SMF2) would carry the note model directly, but DAW support for them, Reaper included, is unverified. Check before choosing the export format.
   - On desktop, dropping a `.mid` file onto the app needs a drag-and-drop package with a permissive licence: **[Assumption]** check one before choosing it.
 
+### Standard library and connectors **[Proposal]**
+
+The owner's requirement (2026-10-28): a built-in library of documented building blocks for the hard audio jobs, such as envelopes, connectors and MIDI input. A person or an AI agent should be able to see what each one does and how it works.
+
+- **Two layers, one namespace style** (`env.adsr(…)`, `midi.cc(74)`):
+  - **Built-ins in C++** for speed and exact repeatability (like v1's `ad`, `lpf` and `sine`).
+  - **Library modules in the C.A.W language**, built from those, so anyone can open one and see how it works.
+- **Categories in v2** (owner chose all four):
+  - **Envelopes and LFOs:** `env.adsr`, `env.ar`, multi-stage envelopes, `lfo.sine/tri/saw/square/random` synced to the tempo, `slew` and smoothing.
+  - **Filters and effects:** more filter types, `fx.delay` (tempo-synced), a reverb, distortion and saturation, a compressor, `fx.crush`.
+  - **MIDI and music theory:**
+    - MIDI in: `midi.note`, `midi.vel`, `midi.cc(n)`, `midi.bend`, `midi.clock`
+    - `scale`, `chord`, `arp`, `euclid`, `quantize(note, key)`
+  - **Glitch and bit tools:** `glitch.stutter`, `glitch.fold`, sample-and-hold, bit masks, and seeded random helpers built on `hash`.
+- **Your own functions** (owner: "yes, but simpler"):
+  - `fn name(args) = expression` in library files works like the built-ins and can be shared through the library repo.
+  - Only the app's own library gets generated reference pages and in-app help.
+  - A user function's doc comment still shows as its tooltip.
+- **Documentation from one source.** Each library function carries a doc comment: what it does, each argument with its unit and range, the output, and a short example. The build turns that into:
+  - **a reference page** in `docs/`
+  - **an agent guide**: a compact list of every function with its signature and one line on what it does, for any AI agent
+  - **in-app help**: autocomplete in the code editor, and a long-press (hover on desktop) on a name to show its docs and play its example
+  - **inspector tips**: the sliders a function's arguments become carry the argument's description as their tooltip
+- **CI checks the docs:** `caw docs --check` fails when a library function has no doc comment or an argument isn't described. Every example must compile and render non-silent audio (golden-hashed), so the docs can't drift from the code.
+- **Connectors.** The owner wants every kind of connector eventually.
+  - **v2 builds what is already in scope:**
+    - **Sidechain** between layers, through `export` signals ([Variables and patterns](#variables-and-patterns-proposal)).
+    - **Modulation links:** connect an LFO, envelope or pattern curve to any `param` or `global` with an amount, like Bitwig's modulators. You drag from the source onto a slider; in code, it's `mod(target, source, amount)`.
+    - **MIDI ports:** USB and Bluetooth MIDI devices feed `midi.*`, and MIDI clock can drive the tempo.
+  - **Later:** sends, returns and buses (Stage 5), and free module patching like a modular synth, beyond the fixed generator → effects chain.
+
 ### Language direction **[Proposal]**
 
 - Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
-- Then add, in this order: `let` bindings, user functions, `param` declarations (these generate UI sliders), `use` imports of library modules, and stateful built-ins (delay lines, filters, envelopes, noise).
+- **[Fact]** v1 has `let`, `param` and the stateful built-ins (envelope, filter, oscillators, noise).
+- Next (v2): user functions (`fn`), `use` imports of library modules, and the standard library ([above](#standard-library-and-connectors-proposal)).
 - Add a sequencing mini-language in Stage 5, designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
 
 ### NKIDO evaluation
