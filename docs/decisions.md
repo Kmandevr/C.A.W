@@ -8,6 +8,12 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Public repository, proprietary licence (owner)
+
+- **The repository goes public** (owner) so GitHub Actions minutes are free. This replaces "the repository stays private" in the entry below.
+- **The licence stays the same** (owner): proprietary, all rights reserved. `LICENSE` says so explicitly, because a public repository with no licence file leaves visitors guessing.
+- **What public means in practice:** anyone can read the code and the issues. Secrets, signing keys and unfixed security problems never go in the repository, issues or logs (`.claude/rules/ci.md`, the `tasks` skill, `SECURITY.md`), and fork pull requests never get secrets.
+
 ## 2026-10-28: Name and logo (owner)
 
 - C.A.W stands for **Code Auditioning Workspace**, and the logo is a crow. The name question is closed.

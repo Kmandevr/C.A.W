@@ -22,3 +22,7 @@ Workflows:
 ## Working on it
 
 Tasks and bugs are GitHub Issues. Security problems: [SECURITY.md](SECURITY.md).
+
+## Licence
+
+Proprietary: the source is visible, but all rights are reserved ([LICENSE](LICENSE)).

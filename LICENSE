@@ -1,0 +1,9 @@
+Copyright (c) 2026 Kmandevr. All rights reserved.
+
+C.A.W (Code Auditioning Workspace) is proprietary software. The source code is
+publicly visible, but no licence is granted: you may not copy, modify, distribute,
+sublicense or sell it, or use it to build other software, without the copyright
+holder's written permission.
+
+Third-party libraries used by C.A.W keep their own licences, listed in
+docs/architecture.md.

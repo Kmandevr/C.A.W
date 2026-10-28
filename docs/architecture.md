@@ -232,7 +232,7 @@ Any agent that can edit files in git works with this setup. There's no provider-
 | Hearing or speaker damage from harsh output | Safety limiter, NaN guard, low default gain, fade on start/stop |
 | Language scope creep | Ship the bytebeat expression subset first and grow it one feature per milestone |
 | Developing from a phone (no PC or IDE) | GitHub Actions builds every target. Android debug APKs are signed with a fixed keystore in CI secrets so updates install over each other. The engine is tested on Linux in CI |
-| Apple builds | iOS and macOS builds need macOS runners, which bill private repositories at a higher per-minute rate **[Assumption: check current GitHub pricing]**. Distributing them needs a paid Apple Developer membership. Build Apple targets only on release branches or on demand |
+| Apple builds | iOS and macOS builds need macOS runners. The repository is public, so standard GitHub-hosted runners cost nothing; check this if it goes private again **[Assumption: check current GitHub pricing]**. Distributing them needs a paid Apple Developer membership. Build Apple targets only on release branches or on demand |
 | Device audio differences | miniaudio's per-platform backends, float output, restart on disconnect, early testing on the S22+ and each new platform; Oboe as an Android fallback |
 | Touch code editing is clumsy | Symbol row (`t >> << & \| ^ ( ) ? :`), short files, live error line, a Flutter code editor with lightweight highlighting (pick a permissively licensed package, or write a small one) |
 | Token leakage or over-broad access | Device flow, GitHub App limited to selected repos, platform secure storage (Android Keystore, Apple Keychain, Windows Credential Manager, Linux Secret Service), no shipped secrets |
