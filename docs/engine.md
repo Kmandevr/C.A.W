@@ -138,7 +138,10 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
 - **Playback:**
   - The pattern sets the layer's loop length; a note running past the end is released there.
   - A layer with a pattern plays up to 8 voices at once and steals the oldest when a ninth note starts.
-  - A released voice ends after 0.1 s below −90 dB, or 10 s after release. Effects in the chain run once on the sum of the voices.
+  - A released voice ends after 0.1 s below −90 dB, or 10 s after release. Code that reads `gate` or `rel` shapes its own release and code that reads `trig` rings on like a one-shot; anything else (a plain bytebeat) is faded out by the engine over 10 ms at note-off.
+  - A stolen or ended voice that is still sounding is smoothed over (its last value fades in about 2 ms), so it doesn't click. Effects in the chain run once on the sum of the voices.
+  - A tempo change releases held notes. At most 16 note changes split one 64-sample block; further ones in that block start together (at most 1.3 ms early).
+  - Notes that start at or after the pattern's length never play, and the project result warns about them.
   - An `export let` in a voiced generator shares the newest voice's value.
 - **Limits:** 4096 notes, 4096 steps, ratchets up to 8. Errors give a line and column. Kit rows (`[kick]` lines) are reserved for kit patterns and are an error for now.
 
@@ -285,11 +288,11 @@ caw docs [--check] [--dir DIR]
 
 ## Tests
 
-`engine/build/caw_tests` runs 62 tests:
+`engine/build/caw_tests` runs 66 tests:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
-- **Patterns:** the note format and its errors, sample-exact note starts and ends, chords and voice stealing, the note variables, ratchets, slides, repeatable probability, pattern length, byte-mode pitch, the default note without a pattern, and exports checking patterns.
+- **Patterns:** the note format and its errors, sample-exact note starts and ends, chords and voice stealing without clicks, the note variables, ratchets, slides, repeatable probability, pattern length, byte-mode pitch, the engine's release fade, notes released by seed and tempo changes, packed patterns, late-note warnings, the default note without a pattern, and exports checking patterns.
 - **Mixer:** block-size independence, layer lengths, seams, hot swap, broken code, mute, solo and pan, overload, stop and removal, effects, params and the limiter.
 - **Exports:** loop lengths, export equal to playback, free-length renders and cancel, one-shots, wavetables, broken modules and WAV bytes.
 - **Golden renders:** one hash per template in `engine/tests/golden.txt`. A hash changes only with an intended sound change; then run `caw_tests --update-golden` and say why in the commit.

@@ -8,7 +8,7 @@ updated: 2026-10-28
 
 Newest first.
 
-- 2026-10-28: v2 step 3a built (owner's priority): text note patterns that any generator plays through 8 voices, with chords, off-grid notes, probability, ratchets and slide; a Pattern picker per layer; new Acid synth, Acid line and Chords templates ([engine](engine.md#patterns), [app](app.md)).
+- 2026-10-28: v2 step 3a built (owner's priority): text note patterns that any generator plays through 8 voices, with chords, off-grid notes, probability, ratchets and slide; a Pattern picker per layer; new Acid synth, Acid line and Chords templates ([engine](engine.md#patterns), [app](app.md)). After the audio review: release fades for code that ignores gate, click-free voice stealing, no stuck notes on seed or tempo changes, a cap on block splits, and late-note warnings.
 
 - 2026-10-28: v2 step 2 built: the standard library (69 documented built-ins, `drum`/`synth`/`util` libraries in the module language, project library modules, project key for music helpers), `caw docs` generating [library](library.md) and [agent guide](agent-guide.md) checked in CI, and the app's Library sheet and completion ([engine](engine.md#built-ins-and-libraries), [app](app.md)). After review: budgets for function expansion and project memory, lazy clearing of effect buffers, NaN-safe music helpers, and a clashing library now fails alone.
 

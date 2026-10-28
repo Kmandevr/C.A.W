@@ -24,7 +24,7 @@ std::string patternError(const std::string& body) { return parsePattern(kHead + 
 
 // Plays `gen` from `notes` for `frames` samples at 120 BPM (6000 samples per step at 48 kHz); returns the left channel
 // divided by the centre-pan gain, so it equals the generator's output.
-std::vector<double> play(const std::string& gen, const std::string& notes, int64_t frames, int loopBars = 4) {
+ProjectSpec voicedProject(const std::string& gen, const std::string& notes, int loopBars = 4) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = loopBars;
@@ -38,17 +38,26 @@ std::vector<double> play(const std::string& gen, const std::string& notes, int64
     l.pattern = "p";
     l.volume = 1.0;
     p.layers = {l};
-    Engine e(48000);
-    e.setMasterBypass(true);
-    const std::string res = e.setProject(p);
-    if (!has(res, "\"ok\":true")) cawtest::fail(__FILE__, __LINE__, "project failed: " + res);
-    e.play();
+    return p;
+}
+
+// Runs `frames` more samples and returns the generator's output (left channel without the centre-pan gain).
+std::vector<double> run(Engine& e, int64_t frames) {
     std::vector<float> lf(static_cast<size_t>(frames)), rf(static_cast<size_t>(frames));
     for (int64_t i = 0; i < frames; i += 64)
         e.process(lf.data() + i, rf.data() + i, static_cast<int>(std::min<int64_t>(64, frames - i)));
     std::vector<double> out(lf.size());
     for (size_t i = 0; i < lf.size(); ++i) out[i] = lf[i] / kPanGain;
     return out;
+}
+
+std::vector<double> play(const std::string& gen, const std::string& notes, int64_t frames, int loopBars = 4) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    const std::string res = e.setProject(voicedProject(gen, notes, loopBars));
+    if (!has(res, "\"ok\":true")) cawtest::fail(__FILE__, __LINE__, "project failed: " + res);
+    e.play();
+    return run(e, frames);
 }
 
 }  // namespace
@@ -184,3 +193,64 @@ TEST(exports_check_a_layers_pattern) {
     p.layers[0].pattern = "nope";
     CHECK(!renderExport(p, ExportOptions{}, out) && has(out.error, "no pattern 'nope'"));
 }
+
+TEST(code_that_ignores_gate_fades_out_at_note_off) {
+    // A constant ignores gate, rel and trig: the engine fades it over 10 ms (480 samples) after the note ends.
+    std::vector<double> y = play("0.5", "0 C4 1\n", 8000);
+    CHECK_NEAR(y[5999], 0.5, 1e-6);
+    CHECK_NEAR(y[6000 + 240], 0.25, 1e-3);
+    CHECK_NEAR(y[6000 + 600], 0.0, 1e-6);
+    // Code that reads gate shapes its own release, untouched.
+    std::vector<double> g = play("0.5 * (gate + (1 - gate) * 0.5)", "0 C4 1\n", 8000);
+    CHECK_NEAR(g[6000 + 600], 0.25, 1e-6);
+}
+
+TEST(a_stolen_voice_does_not_click) {
+    // Nine overlapping notes: the ninth steals the first (vel 0.1). Its sound fades over about 2 ms instead of
+    // vanishing, so the output only jumps by the new note's own level (0.9).
+    std::vector<double> y = play("vel", "0 C3 8 0.1\n1 D3 8 0.1\n1 E3 8 0.1\n1 F3 8 0.1\n1 G3 8 0.1\n1 A3 8 0.1\n"
+                                        "1 B3 8 0.1\n1 C4 8 0.1\n2 D4 4 0.9\n", 13000);
+    CHECK_NEAR(y[11999], 0.8, 1e-6);
+    CHECK_NEAR(y[12000], 1.7, 1e-6);   // 0.8 + 0.9, with the stolen 0.1 still there
+    CHECK_NEAR(y[12900], 1.6, 1e-4);   // and gone a few ms later
+}
+
+TEST(held_notes_are_released_by_seed_and_tempo_changes) {
+    // A 50% note that plays with seed 3 must still end when the seed changes while it's held.
+    ProjectSpec p = voicedProject("gate", "---\nkind: pattern\nlength: 16\n---\n0 C4 2 1 prob 0.5\n");
+    PatternResult pat = parsePattern(p.modules[1].source);
+    uint32_t playSeed = 0, quietSeed = 0;
+    for (uint32_t sd = 1; sd < 100 && (!playSeed || !quietSeed); ++sd)
+        (notePlays(pat.pattern->notes[0], 0, 0, sd) ? playSeed : quietSeed) = sd;
+    p.seed = playSeed;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    CHECK(run(e, 6000)[100] > 0.5);
+    p.seed = quietSeed;
+    e.setProject(p);
+    CHECK_NEAR(run(e, 12000)[11000], 0.0, 1e-9);
+    // A tempo change while a note is held lets it go instead of leaving it hanging.
+    ProjectSpec q = voicedProject("gate", "0 C4 8\n");
+    Engine f(48000);
+    f.setMasterBypass(true);
+    f.setProject(q);
+    f.play();
+    CHECK(run(f, 3000)[2000] > 0.5);
+    q.bpm = 90;
+    f.setProject(q);
+    CHECK_NEAR(run(f, 3000)[2000], 0.0, 1e-9);
+}
+
+TEST(packed_patterns_stay_cheap_and_late_notes_warn) {
+    // 40 notes three samples apart: past 16 splits in a block the rest start together, and all still play.
+    std::string notes;
+    for (int k = 0; k < 40; ++k) notes += std::to_string(k) + "/2000 C4 1 0.01\n";
+    std::vector<double> y = play("vel", notes, 6000);
+    CHECK(y[1000] > 0.07);  // eight voices hold notes of 0.01
+    Engine e(48000);
+    std::string res = e.setProject(voicedProject("gate", "---\nkind: pattern\nlength: 8\n---\n0 C4 1\n9 C4 1\n"));
+    CHECK(has(res, "1 note starts after the pattern's length and never plays"));
+}
+

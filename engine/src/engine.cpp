@@ -56,6 +56,7 @@ struct Voice {
     double pitch = 60, target = 60, glideStep = 0, freq = 261.6255653005986;
     int glideLeft = 0;
     double vel = 1, tacc = 0, phase = 0;
+    double lastY = 0;     // last output sample, so a voice cut short can be smoothed over
 };
 
 // One layer's modules: the main instances plus shadow copies that play the loop's tail across a seam. A layer
@@ -66,6 +67,7 @@ struct Engine::Chain {
     std::vector<std::unique_ptr<Instance>> extraVoices;
     Voice voices[kVoices];
     int64_t noteCount = 0;
+    double declick = 0;  // what voices cut short (stolen or ended) were playing; decays over about 2 ms
     double vtb[kBlock], vtime[kBlock], vphase[kBlock], vtrig[kBlock], vgate[kBlock], vnote[kBlock], vfreq[kBlock];
     double vvel[kBlock], vrel[kBlock], vout[kBlock], gen[kBlock];
     double dtrig[kBlock], ones[kBlock], dnote[kBlock], dfreq[kBlock];
@@ -109,6 +111,9 @@ constexpr int kPendingMax = 256;
 constexpr double kVoiceQuietSeconds = 0.1;   // a released voice ends after this long below -90 dB
 constexpr double kVoiceMaxRelease = 10.0;    // or this long after release, whatever its level
 constexpr double kQuietLevel = 3.1622776601683795e-5;  // -90 dB
+constexpr double kReleaseFade = 0.01;        // code that ignores gate and rel fades out this fast at note-off
+constexpr double kDeclickSeconds = 0.002;
+constexpr int kMaxSplits = 16;               // note changes that split one block; more start together
 constexpr double kC4 = 261.6255653005986;
 
 double mtof(double note) { return 440.0 * detPow(2.0, (note - 69.0) / 12.0); }
@@ -385,6 +390,15 @@ std::string Engine::setProject(const ProjectSpec& p) {
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
+    for (const auto& [id, st] : modules_) {
+        if (!st.pattern) continue;
+        const int steps = st.pattern->steps(p.beatsPerBar);
+        int late = 0;
+        for (const PatternNote& n : st.pattern->notes) late += n.at >= steps;
+        if (late > 0)
+            warnings[id].push_back(std::to_string(late) + " note" + (late == 1 ? " starts" : "s start") +
+                                   " after the pattern's length and never play" + (late == 1 ? "s" : ""));
+    }
     int64_t projectState = 0;
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}, nullptr};
@@ -791,6 +805,12 @@ void Engine::applyCommands() noexcept {
                 slots_[c.slot].removing = true;
                 break;
             case Cmd::Transport:
+                // A tempo change moves every note in time: let held notes go so none is left hanging.
+                if (c.bpm != bpm_)
+                    for (int i = 0; i < kSlots; ++i) {
+                        if (slots_[i].cur && slots_[i].cur->voiced) releaseVoices(slots_[i].cur->voices);
+                        if (slots_[i].old && slots_[i].old->voiced) releaseVoices(slots_[i].old->voices);
+                    }
                 bpm_ = c.bpm;
                 beatsPerBar_ = c.beatsPerBar;
                 loopSteps_ = c.loopSteps;
@@ -946,7 +966,8 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, S
 
 void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept {
     const PatternNote& n = pat.notes[e.note];
-    if (!notePlays(n, e.note, repeat, seed_)) return;
+    // A note-off just releases whichever voice holds the note; only note-ons ask whether the note plays.
+    if (e.on && !notePlays(n, e.note, repeat, seed_)) return;
     if (!e.on) {
         for (Voice& v : c.voices)
             if (v.active && v.gate && v.note == e.note && v.sub == e.sub) {
@@ -981,6 +1002,8 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
         for (Voice& v : c.voices)
             if ((pass == 1 || !v.gate) && (!pick || v.started < pick->started)) pick = &v;
     Voice& v = *pick;
+    if (v.active) c.declick += v.lastY;  // stealing a sounding voice: smooth over the jump
+    v.lastY = 0;
     v.inst->reset();
     v.active = v.gate = v.trig = true;
     v.note = e.note;
@@ -1009,10 +1032,21 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
     std::fill_n(c.rateb, len, byteMode ? prog.rate : sr_);
     const int64_t quietMax = static_cast<int64_t>(kVoiceQuietSeconds * sr_);
     const int64_t relMax = static_cast<int64_t>(kVoiceMaxRelease * sr_);
+    // Code that reads gate or rel shapes its own release, and code that reads trig rings on like a one-shot.
+    // Anything else (a plain bytebeat, say) would sound forever, so the engine fades it out at note-off.
+    const uint32_t uses = prog.usedVars;
+    auto reads = [uses](Var v) { return ((uses >> static_cast<int>(v)) & 1u) != 0; };
+    const bool engineFade = !reads(Var::Gate) && !reads(Var::Rel) && !reads(Var::Trig);
+    const double fadeLen = std::max(1.0, kReleaseFade * sr_);
+    const double declickCoef = detExp(-1.0 / (kDeclickSeconds * sr_));
     int64_t pos = n0;
     const int64_t end = n0 + len;
+    int splits = 0;
     while (pos < end) {
         while (e < ne && sampleOf(ev[e].step) <= pos) noteEvent(c, *pat, ev[e++], repeat);
+        // A pattern packed with notes can't split a block into slivers: past kMaxSplits they start together.
+        if (++splits >= kMaxSplits)
+            while (e < ne && sampleOf(ev[e].step) < end) noteEvent(c, *pat, ev[e++], repeat);
         const int64_t next = e < ne ? std::min(end, sampleOf(ev[e].step)) : end;
         const int n = static_cast<int>(next - pos), o = static_cast<int>(pos - n0);
         int newest = -1;
@@ -1062,12 +1096,23 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
             }
             const double* y = v.inst->process(ctx);
             for (int i = 0; i < n; ++i) {
-                out[o + i] += y[i];
-                if (!v.gate) v.quiet = std::fabs(y[i]) < kQuietLevel ? v.quiet + 1 : 0;
+                double s = y[i];
+                if (engineFade && !v.gate) s *= std::max(0.0, 1.0 - c.vrel[i] / fadeLen);
+                out[o + i] += s;
+                v.lastY = s;
+                if (!v.gate) v.quiet = std::fabs(s) < kQuietLevel ? v.quiet + 1 : 0;
             }
             if (exportTo && vi == newest)
                 for (const auto& [reg, buf] : c.exportMap[0]) std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf] + offset + o);
-            if (!v.gate && (v.quiet >= quietMax || v.rel >= relMax)) v.active = false;
+            if (!v.gate && (v.quiet >= quietMax || v.rel >= relMax || (engineFade && v.rel >= fadeLen))) {
+                c.declick += v.lastY;  // ending a voice that is still sounding: smooth over the jump
+                v.active = false;
+            }
+        }
+        for (int i = 0; i < n && c.declick != 0.0; ++i) {
+            out[o + i] += c.declick;
+            c.declick *= declickCoef;
+            if (std::fabs(c.declick) < 1e-12) c.declick = 0.0;
         }
         pos = next;
     }
