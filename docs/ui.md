@@ -32,7 +32,8 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
 - **Audience:** built for the owner first. It should be fast for someone who knows it, with tooltips and tips but no onboarding tour yet.
 - **PC:** mouse and keyboard, and **everything must also be reachable with the keyboard alone**. Shortcuts follow Reaper's where they overlap.
 - **Library:** folders (matching the library repo) plus tags and search across them, with favourites pinned.
-- **Opening a sound** shows its controls (the inspector) first. The code editor is one tap away.
+- **Opening a sound** shows its controls (the inspector) first. The code editor is one tap away. **[Fact]** built 2026-10-28 ([app](app.md)).
+- **Track-first layout** (owner, 2026-10-28): the Builder and Arranger felt cluttered; the owner wants the app more visual and less cluttered. Chosen: the areas become **Sounds**, **Tracks** and **Export**; Tracks is a list of big visual track cards, and a tap opens one panel with the track's sound (and its sliders), notes, effects and mix; project settings fold into a sheet. Scenes and the session grid come later. **[Fact]** built 2026-10-28 ([app](app.md)).
 
 ## What other apps teach
 

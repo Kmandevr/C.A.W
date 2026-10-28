@@ -82,7 +82,7 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
-| Go to Builder / Arranger / Exporter | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built) |
+| Go to Sounds / Tracks / Export (the Builder, Arranger and Exporter areas) | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built) |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |
 | Tap tempo | T |
 | Tempo up / down 1 BPM (Shift: 0.1) | Ctrl+= / Ctrl+- |

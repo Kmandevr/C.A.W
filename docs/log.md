@@ -8,6 +8,7 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Friendlier layout (owner's choice: track-first, more visual, less cluttered; scenes later): areas renamed Sounds, Tracks and Export; Tracks has a project strip, visual track cards and a track panel; Sounds opens on controls with the code one tap away ([app](app.md)).
 - 2026-10-28: Light mode (owner OK), auto-update while typing, the key router (keymaps, Vim, counts, macros, action list, code-editor Vim), roll extras panel, lanes, triplets and MIDI import/export buttons; engine `voices` limit ([app](app.md)).
 - 2026-10-28: Piano roll and drum grid built for pattern modules: adaptive grid, key rows, velocity lane, draw/select/erase, the owner's WASD/Q/E keys ([app](app.md)).
 - 2026-10-28: Performance audit, app part. Each keystroke or slider step rebuilt about 3,520 widgets; now 10 and 169 (measured). The meter poll ran every frame even when stopped; now nothing runs when stopped or hidden, and the audio device closes after 30 s idle ([performance](performance.md)).

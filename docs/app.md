@@ -1,6 +1,6 @@
 ---
 title: App
-summary: The built Flutter app: its three areas, how it talks to the engine, where projects are saved, and how CI builds and signs it.
+summary: The built Flutter app: its three areas (Sounds, Tracks, Export), how it talks to the engine, where projects are saved, and how CI builds and signs it.
 covers: [app/]
 updated: 2026-10-28
 ---
@@ -16,11 +16,13 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - the project name, which opens the project menu: rename, new blank project, new from a template, duplicate, open, delete and **Settings…**
   - BPM, beat and CPU readouts
   - Play/Stop (the space bar on desktop)
-- **Builder** (`lib/ui/builder_screen.dart`):
+- **Sounds** (the Builder area, `lib/ui/builder_screen.dart`):
   - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)
   - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth and the Acid line and Chords patterns)
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
+  - **Controls | Code** (a pattern: **Notes | Text**): on a phone a module opens on its controls (a pattern on its piano roll), and the code is one tap away. A blank module, one that doesn't compile, or one with no controls opens on its code; the choice is remembered per module while the app runs. A tap on an error opens the code at it. On a wide screen code and controls sit side by side, so only patterns get the switch.
+  - the headphones button is **Solo preview** (below)
   - a code editor with highlighting and the symbol key row
   - **completion chips** above the key row: typing two or more letters offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
   - **Library** (the book button, or F1): every function from the engine's `caw_library()` plus the project's own library modules, grouped by category and searchable from the word at the cursor. Each shows its signature, description, arguments and example, with **Insert call** and **Insert example**
@@ -43,18 +45,19 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - triplets (Alt+0) make every grid size 2/3 as long
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
     - the curve tool and the `roll.gen.*` generators (euclid, random, arpeggiate, humanize, chord stamp, reverse) are not built yet
-- **Arranger** (`lib/ui/arranger_screen.dart`):
-  - project settings: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, hex seed, master volume and the seam crossfade switch
-  - **Project controls:** one control per `global` declared by any module. Its value is saved with the project and sent to the engine without recompiling.
-  - the loop stack, where each layer has a colour, name, generator, **pattern** (or none), length (from 1 beat to 16 bars, or following the project; a pattern sets it instead), an effect chain, volume, pan, M/S, a progress bar and a peak meter
-  - a banner when the engine muted layers to keep audio clean, with Unmute
-- **Exporter** (`lib/ui/exporter_screen.dart`):
+- **Tracks** (the Arranger area, `lib/ui/arranger_screen.dart`; a track is a layer):
+  - a **project strip**: big BPM, time signature, loop length and key pills, and the master meter. A tap opens the project sheet: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, master volume, and under **More** the hex seed and the seam crossfade switch. **Project controls** (one per `global` declared by any module, saved with the project and sent to the engine without recompiling) are in the same sheet.
+  - a **card per track**: its colour, name, sound (when the name doesn't already say it), pattern, cycle length and effect count, M and S, a peak meter, and a lane picturing one cycle: the pattern's notes, or a block per bar for a sound with no pattern, with the playhead while playing
+  - a tap on a card opens the **track panel**: colour, rename, move and delete; **Sound** (pick one, with that sound's sliders right there); **Notes** (none or a pattern, and the length when there's no pattern); **Effects** (tap one to edit it, × to remove, + to add); **Mix** (volume, pan). **Edit** opens the sound or pattern in Sounds.
+  - **Add track** (the last card) starts from a sound in the project, a new sound from a template, or an empty track
+  - a banner when the engine muted tracks to keep audio clean, with Unmute
+- **Export** (the Exporter area, `lib/ui/exporter_screen.dart`):
   - the four exports from [engine](engine.md#exports), at 44.1 or 48 kHz, 24-bit or 32-bit float
   - progress and cancel while it renders
   - then the system file picker saves the file
-- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail, and the Builder shows code and params side by side. Ctrl+1/2/3 switch areas.
+- **Layout:** phones get a bottom navigation bar (Sounds, Tracks, Export; Tracks opens first). Screens at least 900 px wide get a side rail, and Sounds shows code and controls side by side. Ctrl+1/2/3 switch areas. The code, keymaps and actions still name the areas `builder`, `arranger` and `exporter`.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
-- **Library and pattern modules** make no sound of their own: layers, the Exporter and Solo preview don't use them as generators.
+- **Library and pattern modules** make no sound of their own: tracks, Export and Solo preview don't use them as generators.
 
 ## How it works
 
@@ -118,4 +121,5 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 - the pattern model (`lib/model/pattern_doc.dart`): exact step fractions, parsing with the engine's errors, comment-keeping write-back and every note edit
 - the actions core (`lib/actions/`): keymap files, conflicts, macros with their recursion guard, counts, `:` commands, `.` repeat and recording
 - settings, theme files and the startup choices
+- the Tracks area on a phone: cards, the track panel and Edit opening the sound in Sounds (with `CAW_LIB`)
 - integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.
