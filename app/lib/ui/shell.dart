@@ -8,8 +8,13 @@ import '../model/app_state.dart';
 import 'arranger_screen.dart';
 import 'builder_screen.dart';
 import 'exporter_screen.dart';
+import 'startup_screen.dart';
 import 'theme.dart';
+import 'theme_editor.dart';
 import 'widgets.dart';
+
+/// The open area, kept when the shell is rebuilt after a theme change.
+int _lastTab = 1;
 
 class Shell extends StatefulWidget {
   const Shell({super.key, required this.state});
@@ -20,7 +25,7 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
-  int _tab = 1;
+  int _tab = _lastTab;
   late final AppLifecycleListener _life;
 
   AppState get s => widget.state;
@@ -42,6 +47,12 @@ class _ShellState extends State<Shell> {
   void dispose() {
     _life.dispose();
     super.dispose();
+  }
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _lastTab = _tab;
   }
 
   bool _editingText() {
@@ -75,6 +86,7 @@ class _ShellState extends State<Shell> {
         listenable: s,
         builder: (context, _) {
           if (!s.ready) return const Scaffold(body: Center(child: CrowLogo(size: 64)));
+          if (s.starting) return StartupScreen(state: s);
           final screens = [
             BuilderScreen(state: s),
             ArrangerScreen(state: s),
@@ -116,7 +128,7 @@ class _ShellState extends State<Shell> {
                 bottomNavigationBar: wide
                     ? null
                     : NavigationBar(
-                        height: 64,
+                        height: Neon.compact(context) ? 52 : 64,
                         selectedIndex: _tab,
                         onDestinationSelected: (i) => setState(() => _tab = i),
                         destinations: [for (final d in _dest) NavigationDestination(icon: Icon(d.$1), label: d.$2)],
@@ -137,7 +149,7 @@ class _TransportBar extends StatelessWidget {
     final p = state.project;
     final playing = state.meters.playing;
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      padding: EdgeInsets.fromLTRB(10, Neon.compact(context) ? 3 : 6, 10, Neon.compact(context) ? 3 : 6),
       decoration: const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
       child: Row(children: [
         const CrowLogo(size: 30),
@@ -229,10 +241,19 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
           ),
           ListTile(
             leading: const Icon(Icons.add, color: Neon.green),
-            title: const Text('New project'),
+            title: const Text('New blank project'),
             onTap: () {
               Navigator.pop(context);
               s.newProject();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.auto_awesome_mosaic, color: Neon.green),
+            title: const Text('New from template'),
+            subtitle: const Text('First loop: drums, bass, a byte lead and an acid line', style: TextStyle(color: Neon.dim)),
+            onTap: () {
+              Navigator.pop(context);
+              s.newProjectFromTemplate();
             },
           ),
           ListTile(
@@ -241,6 +262,17 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () {
               Navigator.pop(context);
               s.duplicateProject();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings, color: Neon.dim),
+            title: const Text('Settings…'),
+            subtitle: const Text('Theme, density, live coding', style: TextStyle(color: Neon.dim)),
+            onTap: () async {
+              final nav = Navigator.of(context);
+              nav.pop();
+              await nav.push(MaterialPageRoute<void>(builder: (_) => SettingsPage(settings: s.settings)));
+              s.settings.commitLook();
             },
           ),
           const Heading('Open'),
