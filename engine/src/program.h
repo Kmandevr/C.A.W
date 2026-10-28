@@ -14,6 +14,8 @@ constexpr size_t kMaxSourceBytes = 64 * 1024;
 constexpr int kMaxDepth = 128;
 constexpr int kMaxRegisters = 1024;
 constexpr int kMaxStateDoubles = 1 << 20;  // 8 MB: room for a few delay lines and reverbs
+// All playing modules together (each also has a seam copy, so twice this in memory). Layers past it stay silent.
+constexpr int64_t kMaxProjectStateDoubles = int64_t{1} << 23;  // 64 MB
 constexpr int kMaxCallArgs = 6;
 constexpr int kMaxParams = 32;
 
@@ -95,6 +97,7 @@ struct Program {
     int outReg = 0;
     int stateSize = 0;
     std::vector<StateInit> stateInit;  // values that are not 0 after reset
+    std::vector<std::pair<uint32_t, uint32_t>> resetRanges;  // (offset, count) of state a reset clears
     uint32_t usedVars = 0;             // bit per Var
 };
 

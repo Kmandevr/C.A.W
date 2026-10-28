@@ -119,7 +119,7 @@ Every function, with its arguments and an example, is in the generated [function
 - **Constants:** `scale.*`, `chord.*` and `arp.*` name the scales, chords and arpeggio modes the music functions take.
 - **The project key:** `scale`, `chord` and `arp` default to the key in the project file (`key_root`, `key_scale`); A minor when it has none.
 - **Built-in libraries** (`engine/lib/*.caw`), written in the module language so anyone can read how they work: `drum.*` (kick, snare, hat, clap), `synth.*` (supersaw, pluck, acid, pad, fm) and `util.*` (duck, gate, trem).
-- Each call to a function with state (oscillators, envelopes, filters, effects) has its own state. The state returns to its start at every loop start, so every loop repeats exactly.
+- Each call to a function with state (oscillators, envelopes, filters, effects) has its own state. The state returns to its start at every loop start, so every loop repeats exactly, and echo and reverb tails stop at the restart (after the seam crossfade). Delay, reverb and stutter buffers aren't cleared at the restart; they count what they've written since and read unwritten samples as 0, so a restart costs the audio thread almost nothing.
 - A param passed straight to a documented argument borrows that argument's description as its tip, unless it has its own.
 
 ### Library modules
@@ -140,7 +140,7 @@ fn fold(x, amount) = sin(x * amount)
 ```
 
 - The `///` lines document the function: a summary, then one `arg: meaning` line per argument and an `example:` line. The app's Library sheet and completion show them.
-- The namespace is letters, digits and `_`, starting with a letter. A function whose name is already taken (a built-in or another library's) is an error.
+- The namespace is letters, digits and `_`, starting with a letter. A function whose name is already taken (a built-in, a constant or an earlier library's) is an error on that library alone: it is left out, and the other modules keep working.
 
 ### Output
 
@@ -155,8 +155,9 @@ The language has no I/O, loops or recursion, so a program's cost is fixed when i
 - 1024 values (registers)
 - 32 params and globals
 - 16 exports and 32 imports
-- functions nested 32 calls deep
+- functions nested 32 calls deep, and 4096 function calls expanded in all (each call is copied in place, so nested calls multiply)
 - 1,048,576 numbers (8 MB) of state for oscillators, envelopes, filters, delays and reverbs
+- across the whole project, 64 MB of such state (each module also keeps a copy for seams). A layer that would pass it stays silent, with a warning
 
 Errors give a line and column, counting the header lines, for example `line 5, col 5: unknown name 'nope'`.
 
@@ -226,6 +227,7 @@ The app, the CLI and exports share one format:
 - **Templates:** `caw_template_count`, `caw_template_file` and `caw_template_source`.
 - **Function library:** `caw_library()` returns JSON: `functions` (name, category, signature, doc, example and args with name, doc and optional) and `constants`. The app's Library sheet reads it.
 - Strings the engine returns are freed with `caw_free`. Only `caw_*` symbols are exported.
+- Nothing throws across the API: running out of memory comes back as an error.
 
 ## The `caw` CLI
 
@@ -243,10 +245,10 @@ caw docs [--check] [--dir DIR]
 
 ## Tests
 
-`engine/build/caw_tests` runs 46 tests:
+`engine/build/caw_tests` runs 51 tests:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
-- **Library:** envelopes, LFOs, the music helpers, delay, effects and glitch tools, project libraries, borrowed tips, and that every function is documented with an example that plays.
+- **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
 - **Mixer:** block-size independence, layer lengths, seams, hot swap, broken code, mute, solo and pan, overload, stop and removal, effects, params and the limiter.
 - **Exports:** loop lengths, export equal to playback, free-length renders and cancel, one-shots, wavetables, broken modules and WAV bytes.
 - **Golden renders:** one hash per template in `engine/tests/golden.txt`. A hash changes only with an intended sound change; then run `caw_tests --update-golden` and say why in the commit.

@@ -21,12 +21,12 @@ Instance::Instance(std::shared_ptr<const Program> p)
 }
 
 void Instance::reset() noexcept {
-    std::fill(state_.begin(), state_.end(), 0.0);
+    for (const auto& [offset, count] : prog_->resetRanges) std::fill_n(state_.data() + offset, count, 0.0);
     for (const StateInit& s : prog_->stateInit) state_[s.offset] = s.value;
 }
 
-void Instance::copyStateFrom(const Instance& other) noexcept {
-    if (other.prog_ == prog_) std::copy(other.state_.begin(), other.state_.end(), state_.begin());
+void Instance::swapState(Instance& other) noexcept {
+    if (other.prog_ == prog_) state_.swap(other.state_);
 }
 
 const double* Instance::process(const BlockCtx& ctx) noexcept {

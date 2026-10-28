@@ -266,6 +266,7 @@ std::string trimmed(const std::string& s) {
 }
 
 constexpr int kMaxFnDepth = 32;
+constexpr int kMaxFnCalls = 4096;  // calls expanded in one compile; nested calls multiply, so this caps the work
 
 class Compiler {
 public:
@@ -609,11 +610,12 @@ private:
         std::unordered_map<uint64_t, int> consts;
         std::map<std::string, int> importRegs;
         int varRegs[static_cast<int>(Var::Count)];
+        std::vector<std::pair<uint32_t, uint32_t>> resetRanges;
     };
 
     Snapshot save() const {
         Snapshot sn{p_.ops.size(), p_.constOps.size(), p_.stateInit.size(), p_.imports.size(), p_.numRegs,
-                    p_.stateSize, p_.usedVars, sites_, consts_, importRegs_, {}};
+                    p_.stateSize, p_.usedVars, sites_, consts_, importRegs_, {}, p_.resetRanges};
         std::copy(std::begin(varRegs_), std::end(varRegs_), sn.varRegs);
         return sn;
     }
@@ -625,6 +627,7 @@ private:
         p_.imports.resize(sn.imports);
         p_.numRegs = sn.numRegs;
         p_.stateSize = sn.stateSize;
+        p_.resetRanges = sn.resetRanges;
         p_.usedVars = sn.usedVars;
         sites_ = sn.sites;
         consts_ = sn.consts;
@@ -692,6 +695,8 @@ private:
         for (const std::string& e : expanding_)
             if (e == nameTok.text) fail(nameTok, "functions can't call themselves");
         if (static_cast<int>(expanding_.size()) >= kMaxFnDepth) fail(nameTok, "functions are nested too deeply");
+        if (++fnCalls_ > kMaxFnCalls)
+            fail(nameTok, "functions expand to too much code (over " + std::to_string(kMaxFnCalls) + " calls)");
         for (size_t i = 0; i < args.size() && i < f.argDocs.size(); ++i) inheritTip(args[i], f.argDocs[i]);
         std::map<std::string, Val> saved = std::move(names_);
         names_ = f.scope;
@@ -1009,6 +1014,11 @@ private:
             if (p_.stateSize + b.stateSize > kMaxStateDoubles) fail(name, "too many oscillators, envelopes and filters");
             op.state = static_cast<uint32_t>(p_.stateSize);
             p_.stateSize += b.stateSize;
+            const uint32_t clear = static_cast<uint32_t>(b.resetSize > 0 ? b.resetSize : b.stateSize);
+            if (!p_.resetRanges.empty() && p_.resetRanges.back().first + p_.resetRanges.back().second == op.state)
+                p_.resetRanges.back().second += clear;
+            else
+                p_.resetRanges.push_back({op.state, clear});
             // Record the initial state so a reset is a plain copy.
             std::vector<double> init(static_cast<size_t>(b.stateSize), 0.0);
             b.init(init.data(), ++sites_);
@@ -1029,7 +1039,8 @@ private:
     const std::vector<Token>* t_;
     const std::vector<Comment>* comments_;
     std::string prefix_;  // namespace while loading a library
-    bool ownLibrary_ = false;  // compiling a library module itself: its functions go in p_.functions
+    bool ownLibrary_ = false;
+    int fnCalls_ = 0;  // function calls expanded so far, including trial compiles of bodies  // compiling a library module itself: its functions go in p_.functions
     size_t pos_ = 0;
     Program& p_;
     std::map<std::string, FnDef> fns_;
@@ -1207,7 +1218,7 @@ CompileResult compileModule(std::string_view source, const std::vector<LibrarySo
         for (const LibrarySource& l : standardLibraries())
             if (!self || l.source != source) load(l);
         for (const LibrarySource& l : libs)
-            if (!self || l.ns != prog->ns) load(l);
+            if (!self || l.source != source) load(l);
         if (prog->kind == ModuleKind::Library) c.runLibrary();
         else c.run();
         r.program = std::move(prog);
@@ -1217,6 +1228,16 @@ CompileResult compileModule(std::string_view source, const std::vector<LibrarySo
         r.error = where + "line " + std::to_string(e.line) + ", col " + std::to_string(e.col) + ": " + e.what();
     }
     return r;
+}
+
+std::vector<LibrarySource> projectLibraries(const std::vector<std::string_view>& sources) {
+    std::vector<LibrarySource> libs;
+    for (std::string_view s : sources) {
+        if (moduleKindOf(s) != ModuleKind::Library) continue;
+        CompileResult r = compileModule(s, libs);
+        if (r.program) libs.push_back({r.program->ns, std::string(s)});
+    }
+    return libs;
 }
 
 ModuleKind moduleKindOf(std::string_view source) {

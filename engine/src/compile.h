@@ -28,6 +28,10 @@ const std::vector<LibrarySource>& standardLibraries();
 // Compiles a module. The built-in libraries and `libs` are loaded first, so their functions can be called.
 CompileResult compileModule(std::string_view source, const std::vector<LibrarySource>& libs = {});
 
+// The project's library modules that compile, in order. Each is checked against the ones before it, so a
+// library whose function names clash is left out (and shows its own error) instead of breaking every module.
+std::vector<LibrarySource> projectLibraries(const std::vector<std::string_view>& sources);
+
 // The module's kind from its header alone (no compile), so libraries can be found before other modules.
 ModuleKind moduleKindOf(std::string_view source);
 

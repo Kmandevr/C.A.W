@@ -38,15 +38,11 @@ void setProgress(int32_t* p, double fraction) {
 
 bool cancelled(int32_t* c) { return c && atomicLoad(c) != 0; }
 
-// The project's own libraries (modules of kind library that compile), as the engine loads them.
+// The project's own libraries, as the engine loads them.
 std::vector<LibrarySource> projectLibraries(const ProjectSpec& p) {
-    std::vector<LibrarySource> libs;
-    for (const ModuleSpec& m : p.modules) {
-        if (moduleKindOf(m.source) != ModuleKind::Library) continue;
-        CompileResult r = compileModule(m.source);
-        if (r.program) libs.push_back({r.program->ns, m.source});
-    }
-    return libs;
+    std::vector<std::string_view> sources;
+    for (const ModuleSpec& m : p.modules) sources.push_back(m.source);
+    return caw::projectLibraries(sources);
 }
 
 // Every module a render uses must compile, so an export never silently drops a broken one.

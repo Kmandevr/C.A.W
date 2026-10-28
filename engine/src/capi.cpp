@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 
 #include "caw.h"
@@ -36,13 +37,18 @@ int32_t caw_api_version(void) { return CAW_API_VERSION; }
 
 void caw_free(char* s) { std::free(s); }
 
-char* caw_check(const char* source) {
+// Nothing may throw across the C API: running out of memory becomes an error the host can show.
+const char* const kOutOfMemory = "out of memory: the project is too big for this device";
+
+char* caw_check(const char* source) try {
     using namespace caw;
     CompileResult r = compileModule(source ? source : "");
     if (!r.program)
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(r.error) + "\",\"line\":" + std::to_string(r.line) +
                    ",\"col\":" + std::to_string(r.col) + "}");
     return dup("{\"ok\":true," + describeProgram(*r.program) + "}");
+} catch (const std::bad_alloc&) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"line\":0,\"col\":0}");
 }
 
 CawEngine* caw_engine_create(int32_t sample_rate) {
@@ -58,9 +64,11 @@ void caw_engine_destroy(CawEngine* e) {
     delete e;
 }
 
-char* caw_engine_set_project(CawEngine* e, const char* json) {
+char* caw_engine_set_project(CawEngine* e, const char* json) try {
     if (!e || !json) return dup("{\"ok\":false,\"error\":\"no engine\",\"modules\":{}}");
     return dup(e->engine->setProjectJson(json));
+} catch (const std::bad_alloc&) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"modules\":{}}");
 }
 
 void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value) {
@@ -121,7 +129,7 @@ void caw_engine_process(CawEngine* e, float* left, float* right, int32_t frames)
 }
 
 int32_t caw_render(const char* project_json, const CawRenderOptions* o, const char* out_path, int32_t* progress,
-                   int32_t* cancel, char* error, int32_t error_len) {
+                   int32_t* cancel, char* error, int32_t error_len) try {
     using namespace caw;
     if (!project_json || !o || !out_path) {
         copyError("missing argument", error, error_len);
@@ -158,6 +166,9 @@ int32_t caw_render(const char* project_json, const CawRenderOptions* o, const ch
         return 1;
     }
     return 0;
+} catch (const std::bad_alloc&) {
+    copyError(kOutOfMemory, error, error_len);
+    return 1;
 }
 
 char* caw_library(void) { return dup(caw::libraryJson()); }

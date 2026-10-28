@@ -19,8 +19,8 @@ public:
 
     // Back to the state right after creation (audio-thread safe: no allocation).
     void reset() noexcept;
-    // Copies another instance's state of the same program (audio-thread safe).
-    void copyStateFrom(const Instance& other) noexcept;
+    // Swaps state with another instance of the same program (audio-thread safe, no copying).
+    void swapState(Instance& other) noexcept;
 
     // Runs the program over ctx.n samples; returns the output register (mapped by the module's output mode).
     const double* process(const BlockCtx& ctx) noexcept;

@@ -235,7 +235,7 @@ void runAdsr(const CallArgs& c) {
                 s[AsStage] = 3.0;
             }
         } else if (s[AsStage] == 3.0) {
-            lv = sus;
+            lv = sus + (lv - sus) * dc;  // a moving sustain glides instead of clicking
         } else if (s[AsStage] == 4.0) {
             lv *= rc;
             if (lv < 1e-6) {
@@ -370,11 +370,14 @@ double fCrush(double x, double bits) {
 double fFoldFx(double x, double drive) { return detSin(finiteOr0(x) * drive * (kPi / 2.0)); }
 
 // fx.delay(x, time, feedback, mix): up to 2 seconds at 96 kHz (1 s at 192 kHz), with linear interpolation.
+// Only the header is cleared at a loop start; a slot not written since then reads as 0, as if the buffer were
+// cleared, so the audio thread never has to clear 1.5 MB at once.
 constexpr int kDelayMax = 192000;
-enum { DlPos, DlSize = 1 + kDelayMax };
+enum { DlPos, DlCount, DlHeader, DlSize = DlHeader + kDelayMax };
 void runDelay(const CallArgs& c) {
-    double* buf = c.state + 1;
+    double* buf = c.state + DlHeader;
     int pos = static_cast<int>(c.state[DlPos]);
+    int written = static_cast<int>(c.state[DlCount]);
     for (int i = 0; i < c.n; ++i) {
         const double x = finiteOr0(c.a[0][i]);
         const double d = clampd(finiteOr0(c.a[1][i]) * c.ctx->sr, 1.0, kDelayMax - 2.0);
@@ -386,25 +389,30 @@ void runDelay(const CallArgs& c) {
         if (r0 < 0) r0 += kDelayMax;
         int r1 = r0 - 1;
         if (r1 < 0) r1 += kDelayMax;
-        const double y = buf[r0] + (buf[r1] - buf[r0]) * frac;
+        const double y0 = di <= written ? buf[r0] : 0.0;
+        const double y1 = di + 1 <= written ? buf[r1] : 0.0;
+        const double y = y0 + (y1 - y0) * frac;
         buf[pos] = x + y * fb;
         if (++pos >= kDelayMax) pos = 0;
+        if (written < kDelayMax) ++written;
         c.out[i] = x * (1.0 - mix) + y * mix;
     }
     c.state[DlPos] = pos;
+    c.state[DlCount] = written;
 }
 
 // fx.reverb(x, size, damp, mix): a mono Freeverb (8 combs, 4 allpasses), tunings scaled from 44.1 kHz.
 constexpr int kCombLen[8] = {1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617};
 constexpr int kApLen[4] = {556, 441, 341, 225};
-constexpr double kRvMaxScale = 96000.0 / 44100.0;
+constexpr double kRvMaxScale = 192000.0 / 44100.0;
 constexpr int rvCap(int len) { return static_cast<int>(len * kRvMaxScale) + 2; }
 constexpr int kRvBufTotal = rvCap(1116) + rvCap(1188) + rvCap(1277) + rvCap(1356) + rvCap(1422) + rvCap(1491) +
                             rvCap(1557) + rvCap(1617) + rvCap(556) + rvCap(441) + rvCap(341) + rvCap(225);
-enum { RvPos = 0, RvStore = 12, RvBuf = 20, RvSize = RvBuf + kRvBufTotal };
+// Like the delay, only the header is cleared at a loop start: each buffer is read only once it has wrapped.
+enum { RvPos = 0, RvStore = 12, RvCount = 20, RvBuf = 21, RvSize = RvBuf + kRvBufTotal };
 void runReverb(const CallArgs& c) {
     double* s = c.state;
-    const double scale = clampd(c.ctx->sr, 8000.0, 96000.0) / 44100.0;
+    const double scale = clampd(c.ctx->sr, 8000.0, 192000.0) / 44100.0;
     int lens[12];
     double* bufs[12];
     double* p = s + RvBuf;
@@ -424,11 +432,12 @@ void runReverb(const CallArgs& c) {
         const double damp = 0.4 * clampd(finiteOr0(c.a[2][i]), 0.0, 1.0);
         const double mix = clampd(finiteOr0(c.a[3][i]), 0.0, 1.0);
         const double in = x * 0.015;
+        const double count = s[RvCount];
         double out = 0.0;
         for (int k = 0; k < 8; ++k) {
             int pos = static_cast<int>(s[RvPos + k]);
             if (pos >= lens[k]) pos = 0;
-            const double y = bufs[k][pos];
+            const double y = count >= lens[k] ? bufs[k][pos] : 0.0;
             s[RvStore + k] = y * (1.0 - damp) + s[RvStore + k] * damp;
             bufs[k][pos] = in + s[RvStore + k] * fb;
             out += y;
@@ -437,12 +446,13 @@ void runReverb(const CallArgs& c) {
         for (int k = 8; k < 12; ++k) {
             int pos = static_cast<int>(s[RvPos + k]);
             if (pos >= lens[k]) pos = 0;
-            const double b = bufs[k][pos];
+            const double b = count >= lens[k] ? bufs[k][pos] : 0.0;
             const double y = b - out;
             bufs[k][pos] = out + b * 0.5;
             out = y;
             s[RvPos + k] = pos + 1 >= lens[k] ? 0 : pos + 1;
         }
+        if (count < 1e9) s[RvCount] = count + 1;
         c.out[i] = x * (1.0 - mix) + out * mix;
     }
 }
@@ -487,6 +497,7 @@ void runHold(const CallArgs& c) {
 }
 
 // glitch.stutter(x, on, length): while `on` is above 0, repeats the first `length` seconds heard after it rose.
+// It only plays back what it recorded since `on` rose, so a loop start needs to clear only the header.
 constexpr int kStutterMax = 96000;
 enum { StPrev, StRec, StLen, StPos, StSize = 4 + kStutterMax };
 void runStutter(const CallArgs& c) {
@@ -564,11 +575,16 @@ const char* const kArpModes[] = {"up", "down", "updown", "random"};
 
 int floorDiv(long a, long b) { return static_cast<int>(a >= 0 ? a / b : -((-a + b - 1) / b)); }
 
+// NaN and huge values are cleaned before any cast to int, so every platform picks the same scale.
 int scaleId(double v, const BlockCtx& ctx) {
-    const int id = v < 0 ? ctx.keyScale : static_cast<int>(v);
-    return id >= 0 && id < kScaleCount ? id : 1;
+    v = finiteOr0(v);
+    if (v < 0) return ctx.keyScale;
+    return v < kScaleCount ? static_cast<int>(v) : 1;
 }
-double rootNote(double v, const BlockCtx& ctx) { return v < 0 ? 60.0 + ctx.keyRoot : std::floor(v); }
+double rootNote(double v, const BlockCtx& ctx) {
+    v = finiteOr0(v);
+    return v < 0 ? 60.0 + ctx.keyRoot : std::floor(std::fmin(v, 1000.0));
+}
 
 // scale(degree, scale, root): the MIDI note of a scale degree; degrees past the end continue into the next octave.
 void runScale(const CallArgs& c) {
@@ -607,8 +623,8 @@ int chordTone(const ChordDef& ch, long index) {
 }
 
 int chordId(double v) {
-    const int id = static_cast<int>(finiteOr0(v));
-    return id >= 0 && id < kChordCount ? id : 0;
+    v = finiteOr0(v);
+    return v >= 0 && v < kChordCount ? static_cast<int>(v) : 0;
 }
 
 // chord(type, index, root): the index-th note of a chord; indexes past the end climb octaves.
@@ -721,12 +737,12 @@ const Builtin kBuiltins[] = {
     {"fx.drive", 2, 2, {}, 0, kNone, noInit, binary<fDrive>, "Effects", "Warm saturation (tanh), level-matched so full scale stays full scale.", {"x: input", "amount: 1 = clean, 10 = heavy"}, "fx.drive(sine(55), 8) * 0.5"},
     {"fx.crush", 2, 2, {}, 0, kNone, noInit, binary<fCrush>, "Effects", "Bit crusher: rounds the sound to fewer bits.", {"x: input", "bits: 1..24"}, "fx.crush(sine(110), 3) * 0.5"},
     {"fx.fold", 2, 2, {}, 0, kNone, noInit, binary<fFoldFx>, "Effects", "Wavefolder: more drive folds the wave back on itself.", {"x: input", "drive: 1..12"}, "fx.fold(sine(110), 4) * 0.5"},
-    {"fx.delay", 2, 4, {0, 0.25, 0.4, 0.5}, DlSize, kNone, noInit, runDelay, "Effects", "Echo with feedback, up to 2 s (at 96 kHz).", {"x: input", "time: seconds (try beats(0.75))", "feedback: 0..0.98 (default 0.4)", "mix: dry 0 .. wet 1 (default 0.5)"}, "fx.delay(saw(220) * ad(step % 8 == 0, 0.001, 0.08), beats(0.5), 0.6, 0.5)"},
-    {"fx.reverb", 1, 4, {0, 0.7, 0.3, 0.3}, RvSize, kNone, noInit, runReverb, "Effects", "Room reverb (mono Freeverb).", {"x: input", "size: 0..1 (default 0.7)", "damp: high-frequency damping 0..1 (default 0.3)", "mix: dry 0 .. wet 1 (default 0.3)"}, "fx.reverb(noise() * ad(step % 8 == 0, 0.001, 0.05), 0.8, 0.3, 0.5)"},
+    {"fx.delay", 2, 4, {0, 0.25, 0.4, 0.5}, DlSize, kNone, noInit, runDelay, "Effects", "Echo with feedback, up to 2 s (at 96 kHz).", {"x: input", "time: seconds (try beats(0.75))", "feedback: 0..0.98 (default 0.4)", "mix: dry 0 .. wet 1 (default 0.5)"}, "fx.delay(saw(220) * ad(step % 8 == 0, 0.001, 0.08), beats(0.5), 0.6, 0.5)", DlHeader},
+    {"fx.reverb", 1, 4, {0, 0.7, 0.3, 0.3}, RvSize, kNone, noInit, runReverb, "Effects", "Room reverb (mono Freeverb).", {"x: input", "size: 0..1 (default 0.7)", "damp: high-frequency damping 0..1 (default 0.3)", "mix: dry 0 .. wet 1 (default 0.3)"}, "fx.reverb(noise() * ad(step % 8 == 0, 0.001, 0.05), 0.8, 0.3, 0.5)", RvBuf},
     {"fx.comp", 1, 5, {0, -18, 4, 0.005, 0.1}, CpSize, kNone, compInit, runComp, "Effects", "Compressor: turns down whatever goes above the threshold.", {"x: input", "threshold: dB, -60..0 (default -18)", "ratio: 1..40 (default 4)", "attack: seconds (default 0.005)", "release: seconds (default 0.1)"}, "fx.comp(saw(55) * ad(step % 4 == 0, 0.001, 0.4), -24, 8) * 1.5"},
     // Glitch
     {"glitch.hold", 2, 2, {}, ShSize, kNone, noInit, runHold, "Glitch", "Sample and hold: grabs a new value `rate` times a second and holds it.", {"x: input", "rate: holds per second"}, "glitch.hold(sine(220), 2000) * 0.5"},
-    {"glitch.stutter", 3, 3, {}, StSize, kNone, noInit, runStutter, "Glitch", "While `on` is above 0, repeats the first `length` seconds heard after it rose (up to 1 s at 96 kHz).", {"x: input", "on: above 0 while stuttering", "length: seconds to repeat"}, "glitch.stutter(saw(110 + step * 20) * 0.4, step % 16 >= 12, beats(0.125))"},
+    {"glitch.stutter", 3, 3, {}, StSize, kNone, noInit, runStutter, "Glitch", "While `on` is above 0, repeats the first `length` seconds heard after it rose (up to 1 s at 96 kHz).", {"x: input", "on: above 0 while stuttering", "length: seconds to repeat"}, "glitch.stutter(saw(110 + step * 20) * 0.4, step % 16 >= 12, beats(0.125))", 4},
     {"glitch.mask", 2, 2, {}, 0, kNone, noInit, binary<fMask>, "Glitch", "Flips bits of the sound read as 16-bit numbers.", {"x: input", "mask: bits to flip, 0..65535"}, "glitch.mask(sine(110) * 0.5, 0x0F00)"},
     {"glitch.wrap", 2, 2, {}, 0, kNone, noInit, binary<fWrap>, "Glitch", "Pushes the sound past full scale and wraps it around to the other side.", {"x: input", "amount: 1 = clean, more = wilder"}, "glitch.wrap(sine(110), 3) * 0.5"},
     // Music

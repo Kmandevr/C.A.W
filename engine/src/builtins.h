@@ -27,6 +27,8 @@ struct Builtin {
     const char* doc;                // what it does, one or two sentences
     const char* args[kMaxCallArgs]; // "name: meaning (unit, range)"; optional ones say their default
     const char* example;            // a whole module body that makes sound with it
+    int resetSize = 0;              // leading state numbers a loop start clears (0 = all); the rest are buffers
+                                    // the built-in guards itself, so a reset never clears megabytes
 };
 
 // Returns the built-in's id, or -1 if there is none with this name.

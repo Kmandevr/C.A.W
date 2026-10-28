@@ -180,3 +180,68 @@ TEST(every_function_is_documented_and_its_example_plays) {
     CHECK(json.find("\"name\":\"drum.kick\"") != std::string::npos);
     CHECK(json.find("\"scale.minor\"") != std::string::npos);
 }
+
+TEST(nested_function_calls_hit_a_budget_instead_of_hanging) {
+    // Each level calls the one below twice: 2^22 expansions without a budget.
+    std::string src = "fn f0(x) = x\n";
+    for (int k = 1; k <= 22; ++k)
+        src += "fn f" + std::to_string(k) + "(x) = f" + std::to_string(k - 1) + "(0) + f" + std::to_string(k - 1) + "(0)\n";
+    src += "f22(1)\n";
+    CHECK(compileModule(src).error.find("functions expand to too much code") != std::string::npos);
+}
+
+TEST(effect_buffers_start_silent_on_every_loop) {
+    // A long, loud echo tail would leak into the next loop if the delay weren't cleared at the loop start.
+    const std::string src = "---\nmode: float\n---\nfx.delay(saw(110) * ad(t == 0, 0.001, 0.05), 0.4, 0.9, 1) * 0.5\n";
+    ProjectSpec p = singleModuleProject(src, 120, 1);
+    p.seamCrossfade = false;
+    ExportOptions free;
+    free.kind = ExportKind::Free;
+    free.seconds = 4.0;  // two loops of 2 s
+    RenderResult out;
+    CHECK(renderExport(p, free, out));
+    const size_t half = out.samples.size() / 2;
+    double diff = 0, peak = 0;
+    for (size_t i = 0; i < half; ++i) {
+        diff = std::fmax(diff, std::fabs(out.samples[i] - out.samples[half + i]));
+        peak = std::fmax(peak, std::fabs(out.samples[i]));
+    }
+    CHECK(peak > 0.05);
+    CHECK(diff < 1e-6);  // only the master DC blocker carries over; a leaking echo would differ by about 0.1
+}
+
+TEST(projects_have_a_memory_budget) {
+    // Each module holds five delay lines (about 7.3 MB); nine such layers pass the 64 MB budget.
+    std::string body = "---\nmode: float\n---\nlet x = saw(110) * 0.1\n";
+    for (int k = 0; k < 5; ++k) body += "let d" + std::to_string(k) + " = fx.delay(x, 0.1)\n";
+    body += "(d0 + d1 + d2 + d3 + d4) * 0.1\n";
+    ProjectSpec p;
+    for (int k = 0; k < 9; ++k) {
+        const std::string id = "m" + std::to_string(k);
+        p.modules.push_back({id, body, {}});
+        LayerSpec l;
+        l.id = "l" + std::to_string(k);
+        l.chain = {id};
+        p.layers.push_back(l);
+    }
+    Engine e(48000);
+    const std::string res = e.setProject(p);
+    CHECK(res.find("layer left silent") != std::string::npos);
+    CHECK(res.find("\"m7\":{\"ok\":true") == std::string::npos || res.find("layer left silent") > res.find("\"m7\""));
+}
+
+TEST(music_helpers_treat_nan_the_same_everywhere) {
+    // inf - inf is NaN: it picks the major scale on every platform (degree 2 of C major is E).
+    CHECK_EQ(one("scale(2, exp(1000) - exp(1000), 60)"), 64.0);
+    CHECK_EQ(one("chord(exp(1000) - exp(1000), 1, 60)"), 64.0);
+    CHECK_EQ(one("scale(0, scale.major, exp(1000))"), 1000.0);
+}
+
+TEST(a_clashing_project_library_fails_alone) {
+    const std::string good = "---\nkind: library\nnamespace: mine\n---\nfn twice(x) = x * 2\n";
+    const std::string clash = "---\nkind: library\nnamespace: mine\n---\nfn twice(x) = x * 3\n";
+    const std::vector<LibrarySource> libs = projectLibraries(std::vector<std::string_view>{good, clash});
+    CHECK(libs.size() == 1);
+    CHECK(compileModule("mine.twice(1)", libs).program != nullptr);
+    CHECK(compileModule(clash, libs).error.find("already defined") != std::string::npos);
+}

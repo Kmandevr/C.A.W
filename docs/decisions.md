@@ -13,7 +13,9 @@ Newest first. A later entry wins over an earlier one on the same topic.
 - **Library modules instead of `use` imports:** a module with `kind: library` and a `namespace:` puts its functions in every other module of the project as `namespace.fn`. Nothing to import, and the same file format serves the built-in libraries (`engine/lib/*.caw`) and the owner's own.
 - **No hiding built-ins:** a library function can't take the name of a built-in, a constant or another library's function, so `env.adsr` always means the documented one.
 - **Docs are generated and checked, not golden-hashed:** each example must compile and make sound (peak above −60 dBFS); a golden hash per example would break the docs on every intended DSP change.
-- **State budget raised to 8 MB per module** (from 8192 numbers) to fit delays (up to 4 s at 48 kHz) and a reverb. Memory is only taken for the state a module actually uses.
+- **State budget raised to 8 MB per module** (from 8192 numbers) to fit delays (up to 4 s at 48 kHz) and a reverb, with **64 MB for the whole project**. Memory is only taken for the state a module actually uses. Review found that clearing that much at every loop start would stall audio, so effect buffers clear lazily (they read unwritten samples as 0) and seams swap state instead of copying it.
+- **A compile expands at most 4096 function calls**, because nested calls multiply: a hostile library could otherwise take hours to compile.
+- **Open for the owner:** whether echo and reverb tails should carry over loop restarts ([vision](vision.md#open-questions)).
 
 ## 2026-10-28: Standard library and connectors (owner, answering Claude's questions)
 

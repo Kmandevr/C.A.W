@@ -238,15 +238,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
     globals_ = p.globals;
 
     // Project libraries (kind: library) compile first; every other module can call their functions.
-    std::vector<LibrarySource> libs;
+    std::vector<std::string_view> moduleSources;
+    for (const ModuleSpec& m : p.modules) moduleSources.push_back(m.source);
+    const std::vector<LibrarySource> libs = projectLibraries(moduleSources);
     std::string libSig;
-    for (const ModuleSpec& m : p.modules) {
-        if (moduleKindOf(m.source) != ModuleKind::Library) continue;
-        CompileResult r = compileModule(m.source);
-        if (!r.program) continue;
-        libs.push_back({r.program->ns, m.source});
-        libSig += r.program->ns + "\x1f" + m.source + "\x1e";
-    }
+    for (const LibrarySource& l : libs) libSig += l.ns + "\x1f" + l.source + "\x1e";
 
     // Compile changed modules. A module that fails keeps its last good program, so the old sound plays on.
     bool allOk = true;
@@ -255,11 +251,9 @@ std::string Engine::setProject(const ProjectSpec& p) {
         ModuleState st;
         auto it = modules_.find(m.id);
         if (it != modules_.end()) st = it->second;
-        const bool isLib = moduleKindOf(m.source) == ModuleKind::Library;
-        const std::string sig = isLib ? std::string() : libSig;
-        if (it == modules_.end() || st.source != m.source || st.libSig != sig || (!st.program && st.error.empty())) {
-            CompileResult r = compileModule(m.source, isLib ? std::vector<LibrarySource>{} : libs);
-            st.libSig = sig;
+        if (it == modules_.end() || st.source != m.source || st.libSig != libSig || (!st.program && st.error.empty())) {
+            CompileResult r = compileModule(m.source, libs);
+            st.libSig = libSig;
             st.source = m.source;
             if (r.program) {
                 st.program = r.program;
@@ -306,14 +300,25 @@ std::string Engine::setProject(const ProjectSpec& p) {
         std::vector<const Program*> sig;
     };
     std::vector<Planned> plan;
+    std::map<std::string, std::vector<std::string>> warnings;
+    int64_t projectState = 0;
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}};
+        int64_t layerState = 0;
         for (const std::string& id : w.chain) {
             auto it = modules_.find(id);
             if (it == modules_.end() || !it->second.program || it->second.program->kind == ModuleKind::Library) continue;
             pl.ids.push_back(id);
             pl.sig.push_back(it->second.program.get());
+            layerState += it->second.program->stateSize;
         }
+        // Memory is bounded for the whole project: a layer that would pass the budget stays silent.
+        if (!pl.ids.empty() && projectState + layerState > kMaxProjectStateDoubles) {
+            warnings[pl.ids.front()].push_back("layer left silent: the project's delays, reverbs and other effects need more than 64 MB");
+            pl.ids.clear();
+            pl.sig.clear();
+        }
+        projectState += layerState * !pl.ids.empty();
         auto it = layers_.find(w.id);
         if (it != layers_.end()) {
             pl.ls = it->second;
@@ -362,7 +367,6 @@ std::string Engine::setProject(const ProjectSpec& p) {
     }
 
     // Pass 3: wire imports, install changed chains, and order layers so exporters run before their readers.
-    std::map<std::string, std::vector<std::string>> warnings;
     std::vector<std::vector<int>> readsFrom(kSlots);
     std::map<std::string, LayerState> nextLayers;
     std::vector<int> projectOrder;
@@ -816,7 +820,8 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
             if (!s.fresh) {
                 const bool cont = s.contiguous && s.expectG == gg;
                 if (seamXf_ && cont && !s.old && s.cur) {
-                    for (size_t i = 0; i < s.cur->main.size(); ++i) s.cur->shadow[i]->copyStateFrom(*s.cur->main[i]);
+                    // The shadow takes over the old pass's state; main is reset just below.
+                    for (size_t i = 0; i < s.cur->main.size(); ++i) s.cur->shadow[i]->swapState(*s.cur->main[i]);
                     s.shadowN = s.lastN + 1;
                     s.seamLeft = seamLen;
                 } else {
