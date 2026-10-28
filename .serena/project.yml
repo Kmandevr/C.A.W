@@ -61,6 +61,7 @@ ignore_all_files_in_gitignore: true
 #     - "**/obj/**"
 # Note: global ignored_paths from serena_config.yml are also applied additively.
 ignored_paths:
+- "engine/third_party/**"
 - "graphify-out/**"
 - ".claude/worktrees/**"
 - "**/build/**"
