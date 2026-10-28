@@ -11,6 +11,7 @@
 #include "compile.h"
 #include "docs.h"
 #include "json.h"
+#include "midifile.h"
 #include "pattern.h"
 #include "render.h"
 #include "wav.h"
@@ -170,6 +171,48 @@ int32_t caw_render(const char* project_json, const CawRenderOptions* o, const ch
     spec.float32 = opts.kind == ExportKind::Wavetable || o->float32 != 0;
     spec.loop = r.loop;
     if (!writeFile(out_path, encodeWav(spec, r.samples.data(), r.frames), err)) {
+        copyError(err, error, error_len);
+        return 1;
+    }
+    return 0;
+} catch (const std::bad_alloc&) {
+    copyError(kOutOfMemory, error, error_len);
+    return 1;
+}
+
+char* caw_pattern_from_midi(const uint8_t* data, int32_t size) try {
+    if (!data || size <= 0) return dup("{\"ok\":false,\"error\":\"the file is empty\",\"pattern\":\"\"}");
+    std::string err;
+    const std::string text = caw::patternFromMidi(data, static_cast<size_t>(size), caw::MidiImportOptions{}, err);
+    if (text.empty())
+        return dup("{\"ok\":false,\"error\":\"" + caw::jsonEscape(err) + "\",\"pattern\":\"\"}");
+    return dup("{\"ok\":true,\"error\":\"\",\"pattern\":\"" + caw::jsonEscape(text) + "\"}");
+} catch (const std::bad_alloc&) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"pattern\":\"\"}");
+}
+
+int32_t caw_pattern_export(const char* pattern_source, double bpm, int32_t beats_per_bar, int32_t format,
+                           const char* out_path, char* error, int32_t error_len) try {
+    using namespace caw;
+    if (!pattern_source || !out_path) {
+        copyError("missing argument", error, error_len);
+        return 1;
+    }
+    if (!(bpm >= 20 && bpm <= 400) || beats_per_bar < 1 || beats_per_bar > 16 ||
+        (format != CAW_MIDI_SMF && format != CAW_MIDI_CLIP)) {
+        copyError("bpm must be 20 to 400, beats per bar 1 to 16 and format 0 (.mid) or 1 (MIDI 2.0 clip)", error,
+                  error_len);
+        return 1;
+    }
+    PatternResult pr = parsePattern(pattern_source);
+    if (!pr.pattern) {
+        copyError(pr.error, error, error_len);
+        return 1;
+    }
+    const std::vector<uint8_t> bytes = format == CAW_MIDI_CLIP ? patternToMidiClip(*pr.pattern, bpm, beats_per_bar)
+                                                               : patternToSmf(*pr.pattern, bpm, beats_per_bar);
+    std::string err;
+    if (!writeFile(out_path, bytes, err)) {
         copyError(err, error, error_len);
         return 1;
     }
