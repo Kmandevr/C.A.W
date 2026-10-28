@@ -8,6 +8,20 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Roll keys, note look and MIDI 2.0 scope (owner); still waiting for the go
+
+- **Keys:**
+  - W A S D move the selected notes, and Ctrl + W A S D moves the cursor, Reaper or Ableton style.
+  - Q inserts a note at the cursor. E copies the selection to just after it.
+  - Shift + A / D changes length. Shift + W / S inverts chords.
+  - The same keys work on the phone with a keyboard.
+- **Look:** notes in the layer colour, brighter when louder.
+- **MIDI 2.0 scope:**
+  - first the internal note model, plus MIDI files: import `.mid`, export both `.mid` and a MIDI 2.0 clip file
+  - device connections later
+
+Details are in [UI design](ui.md#editors) and [architecture](architecture.md#variables-and-patterns-proposal).
+
 ## 2026-10-28: Pattern editor answers (owner); building waits for more input
 
 The owner chose to build the piano roll next, inside today's app, together with the drum grid. Rows in the key are highlighted, with no lock to the key. Velocity goes in a lane under the roll. New notes take the last length used, or a dragged length. Extras go both in a long-press panel and in optional lanes. Saving keeps comments. The editor sits in Builder, with full screen as an option. Details in [UI design](ui.md#editors). The owner has more input to give, so building waits for the owner's go.

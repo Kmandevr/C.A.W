@@ -114,6 +114,14 @@ The same meaning everywhere, so nothing has to be learned twice:
   - **Extras** (probability, ratchet, slide): both a long-press panel (right-click or the Menu key on PC) and lanes you can switch on under the roll. Notes with extras show a dot.
   - **Saving:** the editor rewrites the pattern's text but keeps the header and comment lines; note lines are rewritten in time order, and a comment at the end of a note line stays with that note.
   - **Where:** selecting a pattern in Builder shows the roll or grid in place of the code, with the text one tap away, plus a button to go full screen.
+  - **Look:** notes glow in their layer's colour, and louder notes glow brighter. Selected notes get a white outline, and notes with extras get a dot.
+  - **Keys on the roll** work the same on PC and with a keyboard on the phone. When no keyboard is connected, the phone shows its touch tools.
+    - **W A S D** move the selected notes: A/D one grid step earlier or later, W/S one semitone up or down. The arrow keys do the same.
+    - **Ctrl + W A S D** moves the cursor instead, like Reaper's or Ableton's: one grid step in time or one note in pitch. The note it lands on is selected. **[Assumption]** The owner also mentioned jumping to the next note in that direction; confirm which one they mean.
+    - **Q** inserts a note at the cursor, with the last length used.
+    - **E** copies the selected note or chord to start right where the selection ends, and selects the copy, so pressing E again keeps extending the line.
+    - **Shift + A / D** shortens or lengthens the selected notes by one grid step.
+    - **Shift + W / S** inverts a selected chord: W moves the lowest note up an octave above the highest, and S moves the highest note down an octave below the lowest. **[Proposal]** On a single note, Shift + W / S moves it an octave.
 - **Drum grid:**
   - cells at least 48 dp, scrolling one bar at a time, with a velocity lane under the steps
   - notes with extras (probability, ratchets, custom values) show a small dot, like Elektron's blinking locked steps

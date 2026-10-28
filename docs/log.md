@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner set the roll's keys (WASD, Q/E, Shift and Ctrl), the note look and the MIDI 2.0 scope (internal plus files). Checked platform MIDI 2.0 support ([architecture](architecture.md#variables-and-patterns-proposal)). Still waiting for the go.
+
 - 2026-10-28: Owner answered the pattern editor questions (piano roll and drum grid next, in today's app); recorded in [UI design](ui.md#editors). Building waits for the owner's go.
 
 - 2026-10-28: v2 step 3a built (owner's priority): text note patterns that any generator plays through 8 voices, with chords, off-grid notes, probability, ratchets and slide; a Pattern picker per layer; new Acid synth, Acid line and Chords templates ([engine](engine.md#patterns), [app](app.md)). After the audio review: release fades for code that ignores gate, click-free voice stealing, no stuck notes on seed or tempo changes, a cap on block splits, and late-note warnings.

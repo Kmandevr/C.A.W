@@ -202,11 +202,17 @@ The audio thread asks a pattern for the notes in a stretch of time, so procedura
 
   Polyphony (chords) uses the voice pool from the house synth's voice mode ([Instruments, wavetables and samples](#instruments-wavetables-and-samples)), each voice with its own curves. The built-in default pattern, for a layer without one, is one C4 note held through each layer loop (`trig` on its first sample), so templates written with `step % 4 == 0` keep working unchanged. **[Proposal]** Slide becomes a generated pitch curve once note curves exist, so there's one glide mechanism.
 - **Scenes** (owner, moved from Stage 5 into v2): a scene is a saved set of which pattern each layer plays, plus global values. Switching scenes happens at the next loop boundary, so it stays in time.
-- **MIDI files** are not a priority (owner: no DAW export yet), but the plan stays open for them:
-  - import of `.mid` into a drawn pattern
-  - export as **MPE**, one channel per note, so per-note curves survive
-  - **[Assumption]** MIDI 2.0 clip files (SMF2) would carry the note model directly, but DAW support for them, Reaper included, is unverified. Check before choosing the export format.
+- **MIDI 2.0 scope** (owner, 2026-10-28): MIDI 2.0 is how C.A.W stores notes, plus MIDI files. Connecting MIDI devices (controllers in, notes out) comes later.
+- **MIDI files** (owner chose them over device connections):
+  - import of ordinary `.mid` files into patterns
+  - export of both a standard `.mid` (MIDI 1.0, which every DAW opens; fine pitch and curves become pitch bends or are rounded) and a MIDI 2.0 clip file that keeps full detail
+  - **[Assumption]** which DAWs, Reaper included, read MIDI 2.0 clip files is unverified. Check before relying on it.
   - On desktop, dropping a `.mid` file onto the app needs a drag-and-drop package with a permissive licence: **[Assumption]** check one before choosing it.
+- **MIDI 2.0 on the platforms, for when devices come:**
+  - **[Fact]** Android: MIDI 2.0 over USB host mode since Android 13, and over virtual (app-to-app) ports since Android 15. Bluetooth MIDI is MIDI 1.0 ([Android source docs](https://source.android.com/docs/core/audio/midi), checked 2026-10-28).
+  - **[Fact]** Windows: Windows MIDI Services brings MIDI 2.0 into Windows 11, rolling out from February 2026, officially on 24H2 and 25H2. The SDK apps need for MIDI 2.0 features is a separate install, still in preview ([Microsoft](https://blogs.windows.com/windowsexperience/2026/02/17/making-music-with-midi-just-got-a-real-boost-in-windows-11/), [heise](https://heise.de/-11181074), checked 2026-10-28).
+  - **[Assumption]** The S22+ supports USB MIDI 2.0 because it runs Android 13 or later. Test it on the phone.
+  - **[Assumption]** `flutter_midi_command` documents only MIDI 1.0, so MIDI 2.0 would go through the C++ engine (Android's AMidi, Windows MIDI Services). Unverified.
 
 ### Standard library and connectors **[Proposal]**
 
