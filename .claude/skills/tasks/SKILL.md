@@ -30,7 +30,7 @@ Issues, PRs, commit messages and Actions logs are public. Never put in them an u
 | Status | `status: ready` `status: in progress` `status: review` `status: blocked` | No status label = backlog. Closed = done |
 | Priority | `P0` `P1` `P2` `P3` | No priority label = P2 |
 | Type | `bug` `feature` `improvement` `refactor` `documentation` `chore` | |
-| Area | `area: engine` `area: android` `area: library` `area: sync` `area: ci` `area: docs` | Only where useful |
+| Area | `area: engine` `area: app` `area: library` `area: sync` `area: ci` `area: docs` | Only where useful |
 
 ## Session start (only when the task isn't already given)
 

@@ -1,6 +1,6 @@
 ---
 title: Vision and principles
-summary: The owner's brief, condensed: what C.A.W is, its principles, the sound-engine approaches, the interface and the AI workflow, plus the open-questions register. Guides decisions; not a spec.
+summary: The owner's brief, condensed: what C.A.W is, its platforms, its principles, the sound-engine approaches, the interface and the AI workflow, plus the open-questions register. Guides decisions; not a spec.
 updated: 2026-10-28
 ---
 
@@ -10,7 +10,9 @@ The owner's brief (2026-10-28), condensed. Where this note and the code disagree
 
 ## What it is
 
-An Android app that works as an experimental sound-design instrument: bytebeat, mathematical sound, procedural synthesis, raw audio manipulation and glitch music. It has the immediacy of an instrument and the flexibility of a programming environment. It isn't a DAW, a generic code editor or just a bytebeat player. It complements Reaper by making unusual sounds, instruments, effects and samples to export.
+A cross-platform app that works as an experimental sound-design instrument: bytebeat, mathematical sound, procedural synthesis, raw audio manipulation and glitch music. It has the immediacy of an instrument and the flexibility of a programming environment. It isn't a DAW, a generic code editor or just a bytebeat player. It complements Reaper by making unusual sounds, instruments, effects and samples to export.
+
+**Platforms (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, and more where practical. Android comes first: the owner's phone is a Galaxy S22+.
 
 **Business direction (owner, 2026-10-28):** closed and commercial, sold only through AutoStacc, the owner's own store. Until then, it's the owner's tool for making samples to sell on AutoStacc, so getting sound out as WAV comes before polish for other users.
 
@@ -48,7 +50,7 @@ GitHub stores and versions files; it never runs audio code. Downloaded code is u
 
 ## How the owner works
 
-From an Android phone, relying on AI-assisted development. Keep complexity, AI usage and manual steps low. Inspect before assuming, reuse what exists, separate facts from proposals, prefer a small working prototype over a large unfinished architecture, and present a short plan before large or irreversible changes.
+From an Android phone (Galaxy S22+), relying on AI-assisted development. Keep complexity, AI usage and manual steps low. Inspect before assuming, reuse what exists, separate facts from proposals, prefer a small working prototype over a large unfinished architecture, and present a short plan before large or irreversible changes.
 
 ## Open questions
 
@@ -56,7 +58,8 @@ Only the owner can settle these. Never build one as settled; ask.
 
 | Question | Blocks | Status |
 | --- | --- | --- |
-| Phone model and Android version (main test device, confirms `minSdk 27`) | Milestone 1, step 1 | Open |
+| Confirm Flutter for the UI on every platform ([architecture](architecture.md#1-technology-stack)) | Milestone 1, step 1 | Open |
+| iOS: sell through the App Store as the one exception to AutoStacc-only, or skip iOS ([architecture](architecture.md#6-biggest-risks-and-simplest-mitigations)) | iOS release | Open |
 | Licence for the sound library's modules (e.g. CC0 or MIT) | Stage 2 | Open |
 | Keep "C.A.W" as the name? | AutoStacc listing | Open |
-| How a purchase on AutoStacc unlocks or delivers the app (plain APK download, account check, licence key) | Stage 5 | Open |
+| How a purchase on AutoStacc unlocks or delivers the app (plain download, account check, licence key) | Stage 5 | Open |

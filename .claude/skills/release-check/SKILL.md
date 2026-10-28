@@ -20,6 +20,6 @@ for n in "docs-test $e1" "hygiene $e2" "diff-scope $e3"; do set -- $n; echo "== 
 2. **Repo hygiene:** `.claude/skills/release-check/check.sh`: purpose lines for the repo map, note frontmatter, generated folders or secrets that would be committed, uncommitted changes, and the context check (`.claude/skills/handoff/check.sh`).
 3. **Diff scope:** flag files that don't belong to the stated change.
 4. **Reviewers:** `audio-reviewer` for `engine/` or the audio path, `security-reviewer` for module loading, sync, auth, permissions or `.github/`, `code-reviewer` for other code, `architect` for structural changes. Brief each with the diff range, changed files and check results already in hand.
-5. **Engine and app checks:** none yet. When `engine/` and `android/` land, their test commands are added here and to `CLAUDE.md` ("Checking changes").
+5. **Engine and app checks:** none yet. When `engine/` and `app/` land, their test commands are added here and to `CLAUDE.md` ("Checking changes").
 
 Report `PASS|WARN|FAIL <check> - <detail> (<file>)` lines and one verdict line: READY, READY WITH WARNINGS or NOT READY.

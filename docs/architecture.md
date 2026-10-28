@@ -1,6 +1,6 @@
 ---
 title: Architecture
-summary: Technical plan: stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks.
+summary: Technical plan for every target platform: stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks.
 updated: 2026-10-28
 ---
 
@@ -15,26 +15,33 @@ Labels used below:
 
 ## 0. Current state
 
-- **[Fact]** As of 2026-10-28 there is no application code. The repository holds this plan in `docs/`, the docs guard in `scripts/`, CI in `.github/` and the agent setup in `.claude/`. The `engine/`, `android/` and `examples/` folders below are planned, not built.
+- **[Fact]** As of 2026-10-28 there is no application code. The repository holds this plan in `docs/`, the docs guard in `scripts/`, CI in `.github/` and the agent setup in `.claude/`. The `engine/`, `app/` and `examples/` folders below are planned, not built.
 
 ## 1. Technology stack
 
+**Targets (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, with the web as a later extra. Android comes first, because the owner's phone (a Galaxy S22+) is the test device.
+
 | Layer | Choice | Why |
 | --- | --- | --- |
-| UI | **Kotlin + Jetpack Compose** | Native Android, current Google standard, good for compact, panel-based touch UIs |
-| Audio I/O | **Oboe** (C++, via NDK) | Low-latency standard on Android. Picks AAudio or OpenSL ES per device |
-| Sound engine | **Custom C++ core** (C++20), no Android dependencies | Real-time safe, sandboxed by design, and the same core builds for Android, a Linux CLI (CI/AI validation) and later WASM |
-| Bridge | Thin JNI layer | Only control messages cross it. No audio data and no per-sample calls |
-| Build | Gradle + CMake, **built in GitHub Actions** | You work from a phone: CI builds the APK and you install it from the artifact |
+| Sound engine | **Custom C++ core** (C++20), no platform dependencies | Real-time safe and sandboxed by design. The same code runs on every target, in a Linux CLI for CI and AI agents, and later as WASM for the web |
+| Audio I/O | **miniaudio**, behind a small `engine/platform/` interface | One C library for every target: AAudio on Android, Core Audio on iOS and macOS, WASAPI on Windows, ALSA/PulseAudio on Linux. Public domain or MIT-0 |
+| UI | **Flutter** [Proposal, owner to confirm] | One UI codebase for all five targets. One bridge to the engine everywhere (`dart:ffi`). Dart never touches audio samples, so its garbage collector can't cause dropouts |
+| Bridge | Thin C API over the engine, called through `dart:ffi` | Only control messages cross it (play, stop, swap program, set parameter, read meters). No audio data, no per-sample calls |
+| Build | CMake for the engine, Flutter for the app, **all built in GitHub Actions** | The owner works from a phone, so CI builds every installable and the owner downloads it |
 
-- **[Fact]** Oboe is Apache-2.0, supports API 16+, and uses AAudio on API 27+. ([github.com/google/oboe](https://github.com/google/oboe))
-- **[Proposal]** `minSdk 27` (Android 8.1) so that every device gets AAudio. This keeps the audio path simpler.
+- **[Fact]** miniaudio is public domain or MIT-0 (your choice). Its backends are AAudio (Android 8.0+) and OpenSL ES on Android, Core Audio on macOS and iOS, WASAPI on Windows, and ALSA on Linux. ([github.com/mackron/miniaudio](https://github.com/mackron/miniaudio), 2026-10-28)
+- **[Fact]** Flutter 3.47 supports Android API 24–37, iOS 15+, Windows 10/11, macOS 12+, Debian 10+ and Ubuntu 20.04+ on x64 and Arm64, plus the web. ([docs.flutter.dev](https://docs.flutter.dev/reference/supported-platforms), 2026-10-28)
+- **[Fact]** The Galaxy S22+ runs Android 16 (One UI 8), its last major update. ([mezha.media](https://mezha.media/en/news/one-ui-8-for-galaxy-s22-305386))
+- **[Proposal]** Android `minSdk 26` (Android 8.0): every device gets AAudio, and Flutter's floor is lower anyway.
+- **[Proposal]** Android is the only platform where Oboe would matter. Keep miniaudio unless latency tests on the S22+ fall short. If they do, add an Oboe backend behind the same `engine/platform/` interface. Oboe is Apache-2.0, [github.com/google/oboe](https://github.com/google/oboe).
 
 ### Rejected alternatives
 
-- **WebView + Web Audio:** fastest to prototype, but latency on Android WebView is higher and less predictable, and JS garbage collection causes audio dropouts. Not good enough for an instrument.
-- **Embedded JS or Lua (QuickJS, LuaJIT) running user code:** both have garbage collection, unbounded loops and a large attack surface. They can't run safely on the audio thread. Rendering ahead into a buffer adds latency and still glitches.
-- **Flutter / React Native:** these add a second runtime on top of the native audio code they still need. That's extra complexity for no gain here.
+- **Compose Multiplatform:** stable on Android, iOS and desktop, with the web in beta ([kotlinlang.org](https://kotlinlang.org/docs/multiplatform/supported-platforms.html), 2026-10-28). It's the strongest alternative to Flutter, but it needs two engine bridges (JNI on Android and desktop, cinterop on iOS) and ships a JVM on desktop.
+- **JUCE:** built for audio apps on every platform, but its free Starter tier only covers up to $20,000 a year in revenue ([JUCE forum](https://forum.juce.com/t/important-changes-to-the-juce-end-user-licence-agreement-for-juce-8/61265)). Its touch text editing is weak, and the code editor is the heart of this app.
+- **Qt:** LGPL or commercial. LGPL obligations are awkward for a closed app on iOS.
+- **WebView or browser-only app:** latency is higher and less predictable, and garbage collection sits on the audio path. The web stays a later extra (engine as WASM in an AudioWorklet), not the main app.
+- **Embedded JS or Lua running user code:** both have garbage collection, unbounded loops and a large attack surface. They can't run safely on the audio thread.
 
 ## 2. Audio and code execution
 
@@ -43,18 +50,18 @@ The central decision: **user code is compiled into bytecode for our own small VM
 ```
  source text ──► parser/compiler (worker thread) ──► Program (bytecode + constants)
                                                         │ atomic pointer swap
- Oboe callback (audio thread) ◄── VM runs Program ◄─────┘   (+ short crossfade)
+ audio callback (audio thread) ◄── VM runs Program ◄─────┘   (+ short crossfade)
 ```
 
 - **The sandbox comes from what the language can't do.** It has no I/O, no filesystem, no network and no system calls. Memory is fixed-size and allocated before playback. Loops are bounded and the call depth is capped. Downloaded modules are therefore no more dangerous than local ones.
-- **Audio-thread rules:** no allocation, no locks, no JNI and no logging inside the callback. Programs are handed over through a single-slot atomic swap, and old programs are freed off the audio thread.
+- **Audio-thread rules:** no allocation, no locks, no calls into the UI layer and no logging inside the callback. Programs are handed over through a single-slot atomic swap, and old programs are freed off the audio thread.
 - **Block processing:** the VM runs each opcode over a block of samples (for example 64) rather than one sample at a time. This cuts interpreter overhead a lot.
 - **Cost guard:** the engine measures time spent per callback. If it overruns repeatedly, it fades out and reports "too expensive" instead of stuttering.
 - **Ear and speaker safety:** NaN/Inf values are replaced with 0, DC is blocked, and a hard safety limiter runs last. Default output gain is low. Glitch audio can go to full-scale noise instantly.
 - **Defined arithmetic:** bitwise operations use int32 with wraparound, division or modulo by 0 returns 0, and other math uses float. Output has two modes: *byte* (`v & 255` mapped to −1…1, classic bytebeat) and *float* (clamped to −1…1). This makes renders deterministic and portable across devices.
 - **Sample rates:** a bytebeat `t` counts at the *formula rate* (8 kHz by default, user-selectable). The engine upsamples to the device rate with zero-order hold, which keeps the crunch. Procedural instruments run at the device rate. WAV export runs at 44.1 or 48 kHz.
 - **Offline render = same VM.** WAV export runs the identical program on a worker thread, faster than real time, so the export matches what you heard.
-- **Background playback:** use a foreground service with the `mediaPlayback` type, which Android 14+ requires. Device changes such as headphones being unplugged trigger a stream restart.
+- **Background playback:** each platform has its own rule. Android needs a foreground service with the `mediaPlayback` type (required on Android 14+), and iOS needs the audio background mode. Desktop has no restriction. Device changes such as headphones being unplugged trigger a stream restart.
 
 ### Language direction **[Proposal]**
 
@@ -65,7 +72,7 @@ The central decision: **user code is compiled into bytecode for our own small VM
 ### NKIDO evaluation
 
 - **[Fact]** As of 2026-10-28: [mlaass/nkido](https://github.com/mlaass/nkido) is MIT-licensed, C++20/CMake, and pairs a stack-based bytecode synthesis VM ("Cedar") with a Tidal-style language ("Akkado"). It supports hot-swap with crossfade and runs natively and in the browser via WASM. The project is small: 8 stars and essentially one developer.
-- **[Assumption]** Unverified: an Android/NDK build, a stable embedding API, and long-term maintenance.
+- **[Assumption]** Unverified: Android and iOS builds, a stable embedding API, and long-term maintenance.
 - **[Proposal]** Don't depend on it for Stage 1. A bytebeat VM is small enough to own. NKIDO uses the same architecture recommended here, which supports the design. At Stage 2, do a 1-day spike to judge whether Cedar could serve as the graph/DSP layer. Keep our engine behind an interface (`compile(source) → Program`, `process(Program, buffer)`) so we can swap the backend either way.
 
 ## 3. Source and module structure
@@ -75,10 +82,11 @@ The central decision: **user code is compiled into bytecode for our own small VM
 Already in place: `docs/`, `scripts/`, `.github/`, `.claude/`. Planned:
 
 ```
-engine/        C++ core: lexer, parser, compiler, VM, DSP built-ins, WAV writer (no Android deps)
-engine/cli/    Linux/macOS CLI: `caw check`, `caw render` (used by CI and AI agents)
-engine/tests/  Golden-render tests (hash of rendered output per example)
-android/       Gradle project: Compose UI, JNI bridge, Oboe stream, storage, sync
+engine/          C++ core: lexer, parser, compiler, VM, DSP built-ins, WAV writer (no platform deps)
+engine/platform/ Audio output (miniaudio) and the C API the app calls
+engine/cli/      Desktop CLI: `caw check`, `caw render` (used by CI and AI agents)
+engine/tests/    Golden-render tests (hash of rendered output per example)
+app/             Flutter app for every target: UI, editor, files, sync; per-platform folders inside
 docs/          These notes + language reference (exists)
 examples/      Bundled starter sounds in the module format (later mirrored to the library)
 ```
@@ -125,7 +133,7 @@ GitHub stores and versions files. It never executes audio code.
 - **Write:** the Git Data API (blobs → tree → commit → non-force ref update) gives **one atomic commit per save batch**. No git client is bundled.
 - **Conflicts:** if the ref update fails because the remote moved, the app re-fetches and merges files that only one side changed. When both sides changed a file, the app pushes local work to a branch (`caw/conflict-<timestamp>`) and shows a "pick one" choice. Nothing is lost silently.
 - **Offline-first:** the local copy is the working copy. Playback never waits on the network.
-- **Separate updates:** APK updates come from release builds (later delivered through AutoStacc). Library updates come from git. Neither requires the other.
+- **Separate updates:** App updates come from release builds (later delivered through AutoStacc). Library updates come from git. Neither requires the other.
 
 ## 5. AI-assisted editing (no phone UI control)
 
@@ -144,14 +152,19 @@ Any agent that can edit files in git works with this setup. There's no provider-
 | Malicious or broken downloaded modules | No I/O by design; limits on source size, AST depth, program size and memory; failures mute only that module |
 | Hearing or speaker damage from harsh output | Safety limiter, NaN guard, low default gain, fade on start/stop |
 | Language scope creep | Ship the bytebeat expression subset first and grow it one feature per milestone |
-| Developing from a phone (no Android Studio) | GitHub Actions builds signed debug APKs (fixed keystore in CI secrets so updates install over each other). The engine is tested on Linux in CI |
-| Device audio differences | Oboe, float output, restart on disconnect, early testing on your actual phone |
-| Touch code editing is clumsy | Symbol row (`t >> << & \| ^ ( ) ? :`), short files, live error line, Compose `BasicTextField` with lightweight highlighting |
-| Token leakage or over-broad access | Device flow, GitHub App limited to selected repos, Keystore storage, no shipped secrets |
-| Licensing | Use only permissive dependencies (Oboe Apache-2.0, any NKIDO use MIT), avoid GPL. Don't bundle community bytebeat formulas without permission. Choose the app license and library license (e.g. CC0/MIT for modules) **before** accepting outside contributions |
-| Selling outside the Play Store (owner: AutoStacc only) | **[Proposal]** One release signing key kept for good in repository secrets, since every update must be signed with it. Buyers enable installing from their browser, so give clear install steps on the AutoStacc page. A privacy policy is still needed (the app stores GitHub tokens). Foreground-service and target-SDK rules still apply on the device |
+| Developing from a phone (no PC or IDE) | GitHub Actions builds every target. Android debug APKs are signed with a fixed keystore in CI secrets so updates install over each other. The engine is tested on Linux in CI |
+| Apple builds | iOS and macOS builds need macOS runners, which bill private repositories at a higher per-minute rate **[Assumption: check current GitHub pricing]**. Distributing them needs a paid Apple Developer membership. Build Apple targets only on release branches or on demand |
+| Device audio differences | miniaudio's per-platform backends, float output, restart on disconnect, early testing on the S22+ and each new platform; Oboe as an Android fallback |
+| Touch code editing is clumsy | Symbol row (`t >> << & \| ^ ( ) ? :`), short files, live error line, a Flutter code editor with lightweight highlighting (pick a permissively licensed package, or write a small one) |
+| Token leakage or over-broad access | Device flow, GitHub App limited to selected repos, platform secure storage (Android Keystore, Apple Keychain, Windows Credential Manager, Linux Secret Service), no shipped secrets |
+| Licensing | Use only permissive dependencies (miniaudio public domain/MIT-0, Flutter BSD-3, any NKIDO use MIT), avoid GPL. Don't bundle community bytebeat formulas without permission. Choose the app license and library license (e.g. CC0/MIT for modules) **before** accepting outside contributions |
+| Selling only through AutoStacc (owner) | **[Proposal]** Android: one release signing key kept for good in repository secrets (every update must be signed with it), plus clear install steps on the AutoStacc page. Windows: code-sign installers so SmartScreen doesn't block them. macOS: sign and notarize with an Apple Developer account. A privacy policy is needed everywhere (the app stores GitHub tokens) |
+| iOS can't be sold only through AutoStacc | **[Fact]** Outside the App Store, iOS apps can only be distributed through alternative marketplaces in the EU (and now Japan). That requires Apple's approval, notarization and an organization account ([Apple](https://developer.apple.com/support/alternative-app-marketplace-in-the-eu), 2026-10-28). iOS realistically means the App Store, so it's an open question in [vision](vision.md#open-questions) |
 
 ## Sources
 
-- Oboe: https://github.com/google/oboe
+- miniaudio: https://github.com/mackron/miniaudio
+- Flutter platforms: https://docs.flutter.dev/reference/supported-platforms
+- Compose Multiplatform stability: https://kotlinlang.org/docs/multiplatform/supported-platforms.html
+- Oboe (Android fallback): https://github.com/google/oboe
 - NKIDO: https://github.com/mlaass/nkido · [ADC Japan 2026 talk listing](https://adcjapan26.sched.com/event/2KCfA)

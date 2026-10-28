@@ -14,7 +14,7 @@ How the plan in [architecture](architecture.md) gets built. Each stage ends with
 
 ### In scope
 
-- APK built by GitHub Actions. You install it from the run's artifact, with no PC needed.
+- Android APK built by GitHub Actions (Flutter app plus the C++ engine). You install it on the S22+ from the run's artifact, with no PC needed. CI also builds the Linux desktop app, which costs little and proves the cross-platform setup from day one.
 - One screen:
   - Code editor (monospace, basic highlighting, symbol key row)
   - **Play / Stop / Restart (t=0)**
@@ -23,10 +23,10 @@ How the plan in [architecture](architecture.md) gets built. Each stage ends with
   - Volume
   - One-line error display
   - Simple oscilloscope
-- C++ engine: bytebeat expression compiler + VM, played through Oboe. **Hot-swaps on Run without stopping audio**, with a short crossfade.
+- C++ engine: bytebeat expression compiler + VM, played through miniaudio. **Hot-swaps on Run without stopping audio**, with a short crossfade.
 - Safety limiter, NaN guard, cost guard.
 - Save / load / duplicate `.caw` files in app storage, plus 5–10 bundled original examples.
-- **Export WAV:** choose a length, 44.1 or 48 kHz, 24-bit or 32-bit float. You choose where it's saved through the Android file picker (e.g. Drive or Downloads).
+- **Export WAV:** choose a length, 44.1 or 48 kHz, 24-bit or 32-bit float. You choose where it's saved through the system file picker (e.g. Drive or Downloads).
 - `caw render` Linux CLI. CI renders every example and checks that the output hasn't changed.
 
 ### Not in scope yet
@@ -44,9 +44,9 @@ Modules, parameters, GitHub sync, sequencer, spectrum display, audio import.
 
 ### Build order (each step is one reviewable PR)
 
-1. Project skeleton: Gradle + CMake, CI that builds an APK artifact. (Repository tooling, docs and agent setup are done.)
+1. Project skeleton: Flutter app and CMake engine, CI that builds the Android APK and the Linux app. (Repository tooling, docs and agent setup are done.)
 2. Engine core and CLI: lexer → parser → compiler → VM, WAV writer, golden tests (Linux only).
-3. Android audio: JNI bridge, Oboe stream, program hot-swap, limiter.
+3. Audio output: the engine's C API over `dart:ffi`, a miniaudio stream, program hot-swap, limiter.
 4. UI: editor, transport, errors, scope.
 5. Files and WAV export.
 
@@ -62,10 +62,14 @@ GitHub App with device-flow sign-in, a library repo template, tree-diff sync, at
 
 `AGENTS.md` language guide in the library repo, library CI running `caw check` / `caw render` with preview WAVs on PRs, and in-app preview, merge and revert.
 
+## Stage 4b — More platforms
+
+Windows and macOS desktop builds (handy beside Reaper), then iOS once its distribution question is settled. The engine and UI are shared, so the work is packaging, signing, file access and per-platform audio testing.
+
 ## Stage 5 — Advanced instrument
 
 Sequencing mini-language with a shared clock and polyrhythms, audio import with nondestructive byte/bit mangling chains (originals are never modified), spectrum display, performance work, and preparing to sell through AutoStacc (signed release builds, privacy policy, install steps, how a purchase unlocks the app).
 
 ## Before Milestone 1 starts
 
-The owner answers the open questions in [vision](vision.md#open-questions) that block step 1: phone and Android version.
+The owner confirms Flutter (the open question in [vision](vision.md#open-questions) that blocks step 1).

@@ -8,6 +8,14 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Every platform; Flutter + miniaudio proposed (owner: platforms; Claude: stack, owner to confirm)
+
+- **Targets:** Android, iOS, Windows, macOS and Linux (owner). Android first, on the owner's Galaxy S22+ (Android 16).
+- **Replaces the Android-only stack below:** Kotlin + Compose and Oboe are dropped. The portable C++ engine stays, since it was built for this.
+- **miniaudio for audio output on every platform:** one public-domain/MIT-0 C library with AAudio, Core Audio, WASAPI and ALSA backends. Oboe stays a fallback for Android if latency tests on the S22+ fall short.
+- **Flutter proposed for the UI:** one codebase for all five targets and one `dart:ffi` bridge to the engine. Compose Multiplatform is the runner-up (two bridges, a JVM on desktop). JUCE was rejected for revenue-capped licensing and weak touch text editing, Qt for LGPL on iOS.
+- **iOS conflicts with AutoStacc-only selling:** outside the EU and Japan, iOS apps can only be sold through the App Store. Left to the owner.
+
 ## 2026-10-28: Sold only through AutoStacc; samples first (owner)
 
 - **Closed and commercial, sold only through AutoStacc**, not the Play Store or other stores. The repository stays private. Permissive dependencies remain the rule, since the app's own source isn't published.

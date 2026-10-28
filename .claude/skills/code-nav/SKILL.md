@@ -1,6 +1,6 @@
 ---
 name: code-nav
-description: Find your way around C.A.W's code with Graphify (files, dependencies, blast radius) and Serena (Kotlin and C++ symbols, references, symbol edits) instead of reading whole files. Use before changing code you haven't seen this session, and run its self-test when either tool seems broken.
+description: Find your way around C.A.W's code with Graphify (files, dependencies, blast radius) and Serena (Dart and C++ symbols, references, symbol edits) instead of reading whole files. Use before changing code you haven't seen this session, and run its self-test when either tool seems broken.
 ---
 
 # Navigate code with Graphify and Serena
@@ -19,7 +19,7 @@ These are layers 3 and 4 of "Read in layers" in `CLAUDE.md`. What each tool cove
 ## Known gaps
 
 - `explain` and `affected` need an exact label. On "No node matching", run `query` with the bare name and copy the label.
-- Serena's C++ support needs a `compile_commands.json` (CMake writes it with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`); Kotlin support needs a JDK. Until `engine/` and `android/` exist there are no symbols.
+- Serena's C++ support needs a `compile_commands.json` (CMake writes it with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`); Dart support needs the Dart or Flutter SDK. Until `engine/` and `app/` exist there are no symbols.
 - Serena's tools come from the MCP server in `.mcp.json`. If they're missing from the session, run the self-test, then restart the session.
 
 ## Self-test
