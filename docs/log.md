@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Flutter confirmed and the bit-exact, repeatable-chaos rules added to the architecture ([decisions](decisions.md)); the Flutter open question closed.
+
 - 2026-10-28: Owner chose C++20 for the engine, a possible VST3/CLAP plugin and fully standalone builds; C.A.W is independent of AutoStacc ([decisions](decisions.md)). Architecture gained the one-core-three-hosts engine shape and the ready-made building blocks table.
 
 - 2026-10-28: Owner set the targets: every platform, Android first on a Galaxy S22+ ([decisions](decisions.md)). Architecture, roadmap and vision rewritten for Flutter + miniaudio + the portable engine (Flutter awaits confirmation). iOS distribution added as an open question. Rules, agents and skills made platform-neutral (`android.md` rule became `app.md`).

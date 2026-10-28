@@ -25,7 +25,7 @@ Labels used below:
 | --- | --- | --- |
 | Sound engine | **Custom C++20 core** (owner, 2026-10-28), no platform dependencies | Real-time safe and sandboxed by design. The same code runs on every target, in a Linux CLI for CI and AI agents, and later as WASM for the web |
 | Audio I/O | **miniaudio**, behind a small `engine/platform/` interface | One C library for every target: AAudio on Android, Core Audio on iOS and macOS, WASAPI on Windows, ALSA/PulseAudio on Linux. Public domain or MIT-0 |
-| UI | **Flutter** [Proposal, owner to confirm] | One UI codebase for all five targets. One bridge to the engine everywhere (`dart:ffi`). Dart never touches audio samples, so its garbage collector can't cause dropouts |
+| UI | **Flutter** (owner, 2026-10-28) | One UI codebase for all five targets. One bridge to the engine everywhere (`dart:ffi`). Dart never touches audio samples, so its garbage collector can't cause dropouts |
 | Bridge | Thin C API over the engine, called through `dart:ffi` | Only control messages cross it (play, stop, swap program, set parameter, read meters). No audio data, no per-sample calls |
 | Build | CMake for the engine, Flutter for the app, **all built in GitHub Actions** | The owner works from a phone, so CI builds every installable and the owner downloads it |
 
@@ -87,14 +87,24 @@ The central decision: **user code is compiled into bytecode for our own small VM
 - **Block processing:** the VM runs each opcode over a block of samples (for example 64) rather than one sample at a time. This cuts interpreter overhead a lot.
 - **Cost guard:** the engine measures time spent per callback. If it overruns repeatedly, it fades out and reports "too expensive" instead of stuttering.
 - **Ear and speaker safety:** NaN/Inf values are replaced with 0, DC is blocked, and a hard safety limiter runs last. Default output gain is low. Glitch audio can go to full-scale noise instantly.
-- **Defined arithmetic:** bitwise operations use int32 with wraparound, division or modulo by 0 returns 0, and other math uses float. Output has two modes: *byte* (`v & 255` mapped to −1…1, classic bytebeat) and *float* (clamped to −1…1). This makes renders deterministic and portable across devices.
+- **Defined arithmetic:** every operation has one defined result on every device (see [Bits and determinism](#bits-and-determinism)). Output has two modes: *byte* (`v & 255` mapped to −1…1, classic bytebeat) and *float* (clamped to −1…1).
 - **Sample rates:** a bytebeat `t` counts at the *formula rate* (8 kHz by default, user-selectable). The engine upsamples to the device rate with zero-order hold, which keeps the crunch. Procedural instruments run at the device rate. WAV export runs at 44.1 or 48 kHz.
 - **Offline render = same VM.** WAV export runs the identical program on a worker thread, faster than real time, so the export matches what you heard.
 - **Background playback:** each platform has its own rule. Android needs a foreground service with the `mediaPlayback` type (required on Android 14+), and iOS needs the audio background mode. Desktop has no restriction. Device changes such as headphones being unplugged trigger a stream restart.
 
+### Bits and determinism
+
+The owner's requirement: code works directly on the bits, so sounds come out chaotic and noise-like, yet **exactly repeatable**, the way `t>>6<<5%t` is. The same code, seed and settings give the same samples, bit for bit, on every platform, in playback, in the plugin and in WAV export.
+
+- **Integers are 32-bit, wrapping**, with JavaScript's bytebeat semantics, so pasted formulas sound identical. Shift counts are masked to 0–31. `>>` is arithmetic and `>>>` logical. `%` keeps the sign of the left side, and `x/0` and `x%0` give 0. Operator precedence follows C and JavaScript, so `t>>6<<5%t` reads as `(t>>6) << (5%t)`.
+- **No undefined behaviour inside:** the VM computes on unsigned 32-bit values and converts, so C++'s signed-overflow and oversized-shift traps can't leak into the sound.
+- **Bit tools as built-ins**, using C++20's `<bit>`: rotate (`rotl`, `rotr`), `popcount`, count leading/trailing zeros, bit reverse, byte swap, and reinterpreting a float's bits as an integer and back (`bits(x)`, `float(i)`). Later, the same tools work on the bytes of imported audio (Stage 5).
+- **Randomness is seeded, never live:** `hash(x)` and `noise(seed, t)` are counter-based hash functions (no hidden state, so jumping to any `t` gives the same value), and a project-level `seed` changes all of them at once. There's no clock or system randomness anywhere in the language.
+- **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits.
+
 ### Language direction **[Proposal]**
 
-- Accept the **JS-style bytebeat expression subset** first (`t`, `>> << & | ^ % * / + -`, ternary, `sin`, `floor`…), so formulas from the community paste in and work.
+- Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
 - Then add, in this order: `let` bindings, user functions, `param` declarations (these generate UI sliders), `use` imports of library modules, and stateful built-ins (delay lines, filters, envelopes, noise).
 - Add a sequencing mini-language in Stage 5, designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
 

@@ -72,4 +72,4 @@ Sequencing mini-language with a shared clock and polyrhythms, audio import with 
 
 ## Before Milestone 1 starts
 
-The owner confirms Flutter (the open question in [vision](vision.md#open-questions) that blocks step 1).
+Nothing in the plan blocks step 1. GitHub Actions must run on the owner's account, though, because every build comes from CI.

@@ -14,6 +14,8 @@ A cross-platform app that works as an experimental sound-design instrument: byte
 
 **Platforms (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, and more where practical. Android comes first: the owner's phone is a Galaxy S22+.
 
+**Bits (owner, 2026-10-28):** code works directly on the bits, so sounds can be chaotic and random-sounding yet exactly repeatable, like `t>>6<<5%t`.
+
 **Plugins (owner, 2026-10-28):** it may also ship as a VST3 or CLAP plugin. **Standalone (owner):** every build runs fully on its own and offline.
 
 **Business direction (owner, 2026-10-28):** closed and commercial, sold only through AutoStacc, the owner's own store. Until then, it's the owner's tool for making samples to sell on AutoStacc, so getting sound out as WAV comes before polish for other users.
@@ -60,7 +62,6 @@ Only the owner can settle these. Never build one as settled; ask.
 
 | Question | Blocks | Status |
 | --- | --- | --- |
-| Confirm Flutter for the UI on every platform ([architecture](architecture.md#1-technology-stack)) | Milestone 1, step 1 | Open |
 | iOS: sell through the App Store as the one exception to AutoStacc-only, or skip iOS ([architecture](architecture.md#6-biggest-risks-and-simplest-mitigations)) | iOS release | Open |
 | Licence for the sound library's modules (e.g. CC0 or MIT) | Stage 2 | Open |
 | Keep "C.A.W" as the name? | AutoStacc listing | Open |

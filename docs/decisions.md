@@ -8,6 +8,11 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Flutter confirmed; bit-exact, repeatable chaos (owner)
+
+- **Flutter for the UI** on every platform (owner confirmed the proposal below).
+- **The language works on raw bits and is exactly repeatable** (owner): 32-bit wrapping integers with JavaScript bytebeat semantics, bit built-ins, seeded counter-based randomness only, and floats kept repeatable (no fast-math, the engine's own maths functions). Same code and seed give the same samples on every platform and in export ([architecture](architecture.md#bits-and-determinism)).
+
 ## 2026-10-28: C++20 engine, plugin-shaped, fully standalone (owner)
 
 - **C++20 for the engine** (owner, choosing between C++ and Rust). Plugin formats are C and C++ natively, every platform's own compiler supports it, and the audio libraries are C or C++. Memory safety while parsing untrusted code is covered by a small parser, fuzzing, sanitizers and hard limits.
