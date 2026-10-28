@@ -8,6 +8,16 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Remaining key questions (owner)
+
+- **Code editor in Vim mode:** uses WASD too.
+- **Macro recording:** Alt+Q.
+- **Ctrl+1/2/3:** always switch areas. The lanes move to Alt+V and Alt+X.
+- **Cursor:** Ctrl+WASD moves it one step, and Ctrl+Shift+WASD jumps to the next note.
+- **Phone toolbar** in the roll: the tools, undo and redo, and grid and snap.
+
+See [actions](actions.md).
+
 ## 2026-10-28: Visual details (owner)
 
 - Calm neon stays.

@@ -59,13 +59,13 @@ The owner wants the whole app, code editor included, to work like Vim (2026-10-2
 - **Command line:** `:` opens it, with completion. Every action is a command by its name (`:quantize`, `:export loop`), and some take values: `:bpm 140`, `:grid 1/16`, `:key A minor`, `:len 4 bars`, `:vel 80%`.
 - **Repeat:** `.` repeats the last change. With a count, `5.` repeats it five times.
 - **Recording macros:**
-  - Alt+Q starts recording into a named slot, and Alt+Q again stops. (Vim uses `q`, but Q inserts a note in the owner's scheme.)
+  - Alt+Q starts recording into a named slot, and Alt+Q again stops (owner agreed). Vim uses `q`, but Q inserts a note in the owner's scheme.
   - `@` then the slot's name replays it, and `3@a` replays it three times.
   - A recording is saved as an ordinary macro, a list of actions, so it can be edited, bound to a key or put on a toolbar like the others.
 - **Code editor:**
   - A setting turns Vim editing on in the code editor (owner: available, but never needed to use the app). It's off by default, so typing on the phone stays normal.
   - With it on, the editor has Normal, Insert and Visual modes and Vim's text commands: `dd`, `yy`, `p`, `cw`, `ciw`, `u`, `/` search, `n`, counts and `.`.
-  - **[Proposal]** In the code editor, Vim's own movement (`h j k l`, `w b e`) applies, because `w` and `b` move by words there. WASD stays the movement everywhere else. To confirm with the owner.
+  - **Movement uses WASD here too** (owner): W A S D move the text cursor in Normal mode. **[Proposal]** Word jumps move to Shift+A / Shift+D, and line start and end to Home and End. `i`, `a` and `o` still enter Insert mode. Shift+W / Shift+S move half a screen.
 - **Defaults and reset:** C.A.W ships with the keymap below. "Reset to defaults" works per area or for everything.
 - **[Assumption]** Where the defaults say "like Reaper", they still need checking against Reaper's current action list. Reaper's own keys couldn't be confirmed from a reliable source on 2026-10-28.
 
@@ -113,7 +113,8 @@ Notes:
 | --- | --- |
 | Move selected notes later / earlier one grid step | D / A, also → / ← † |
 | Move selected notes up / down a semitone | W / S, also ↑ / ↓ † |
-| Move the cursor (selects the note it lands on) | Ctrl+W / A / S / D, also Ctrl+arrows † |
+| Move the cursor one grid step or one semitone (selects the note it lands on) | Ctrl+W / A / S / D, also Ctrl+arrows † |
+| Jump the cursor to the next note in that direction | Ctrl+Shift+W / A / S / D † |
 | Insert a note at the cursor (last length used) | Q † |
 | Copy the selection to just after it, and select the copy | E † |
 | Shorter / longer by one grid step | Shift+A / Shift+D † |
@@ -147,7 +148,7 @@ Grid and view:
 | Tools: draw, select, curve, erase | B, V, C, X |
 | Switch piano roll / drum grid | G |
 | Zoom in / out / fit the pattern | Ctrl+= / Ctrl+- / F |
-| Show velocity lane / extras lanes | Ctrl+1 / Ctrl+2 (in the editor these replace the area switch; Ctrl+Alt+1–3 still switch areas) |
+| Show velocity lane / extras lanes | Alt+V / Alt+X (Ctrl+1/2/3 always switch areas, owner) |
 
 Generators (buttons; no default keys):
 
@@ -181,8 +182,14 @@ Generators (buttons; no default keys):
 
 ## Open points for the owner
 
-- Code editor in Vim mode: Vim's own movement (`h j k l`, `w b e`), or WASD as everywhere else? `w` and `b` move by words in Vim.
-- Macro recording on Alt+Q, since Q inserts a note: is that all right?
-- Ctrl+W A S D in the roll: move one grid step or one note, or jump to the next note in that direction? Both were mentioned.
 - Is Space for play/stop right on the phone with a keyboard, too?
-- Which actions belong on the phone's default toolbar?
+- The word-jump and half-screen keys proposed for the code editor's Vim mode.
+
+## Phone toolbar
+
+The piano roll's default toolbar (owner, 2026-10-28) holds:
+- the tools: Draw, Select, Curve and Erase
+- undo and redo
+- grid size and the snap magnet
+
+You can add your own actions and macros or remove any of these.
