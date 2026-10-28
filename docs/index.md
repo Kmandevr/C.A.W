@@ -12,6 +12,6 @@ Project memory for C.A.W. Open this `docs/` folder as a vault in Obsidian, or re
 
 - [Vision](vision.md): the owner's brief, condensed, and the open-questions register; read before planning a feature
 - [Architecture](architecture.md): stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks
-- [Roadmap](roadmap.md): stages and Milestone 1's scope and acceptance test
+- [Roadmap](roadmap.md): v1 (build, arrange, export) and later stages, with v1's acceptance test and build order
 - [Decisions](decisions.md): what was chosen and why
 - [Log](log.md): dated history of changes

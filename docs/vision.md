@@ -20,6 +20,8 @@ A cross-platform app that works as an experimental sound-design instrument: byte
 
 **Synthesis, MIDI, ease of use (owner, 2026-10-28):** proper synthesis and MIDI support, and user-friendly helpers so musical results, such as a loop that fits the beat, are easy to make.
 
+**Layout and look (owner, 2026-10-28):** three areas: a **Builder** for making modules (sounds and effects), an **Arranger** for using them, and an **Exporter**. What you build can later be played in a **house-built synth**. Neon on black: green, pink, yellow and blue.
+
 **Plugins (owner, 2026-10-28):** it may also ship as a VST3 or CLAP plugin. **Standalone (owner):** every build runs fully on its own and offline.
 
 **Business direction (owner, 2026-10-28):** closed and commercial, sold only through AutoStacc, the owner's own store. Until then, it's the owner's tool for making samples to sell on AutoStacc, so getting sound out as WAV comes before polish for other users.
@@ -67,6 +69,6 @@ Only the owner can settle these. Never build one as settled; ask.
 | Question | Blocks | Status |
 | --- | --- | --- |
 | iOS: sell through the App Store as the one exception to AutoStacc-only, or skip iOS ([architecture](architecture.md#6-biggest-risks-and-simplest-mitigations)) | iOS release | Open |
-| Licence for the sound library's modules (e.g. CC0 or MIT) | Stage 2 | Open |
+| Licence for the sound library's modules (e.g. CC0 or MIT) | Stage 3 (sharing modules) | Open |
 | Keep "C.A.W" as the name? | AutoStacc listing | Open |
 | How a purchase on AutoStacc unlocks or delivers the app (plain download, account check, licence key) | Stage 5 | Open |

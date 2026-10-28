@@ -8,6 +8,18 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: v1 scope (owner, answering Claude's questions)
+
+- **Areas:** three of them. A **Builder** makes modules: generators, and effects that process an incoming signal. An **Arranger** uses them in a loop stack. An **Exporter** writes the files.
+- **Layers:** unlimited, each looping at its own length against the shared BPM. Mixing is volume, pan, mute and solo, plus a master limiter.
+- **Language:** bytebeat plus `param`, the time variables and synth basics (oscillators, noise, one envelope, one filter).
+- **Exports:** loop WAV, free-length WAV, one-shot WAV and wavetable.
+- **Platforms:** the Android app and a Windows app (the owner runs Reaper on Windows).
+- **Look:** neon on black (green, pink, yellow, blue).
+- **Later:** the house-built synth with notes and MIDI comes right after v1, in v2. Scenes and a timeline arranger, sends and buses come later still.
+- **Claude's default, open to change:** effects attach to a layer as an ordered chain (generator → effect → effect).
+- **Superseded:** this replaces the earlier single-sound "Milestone 1". The roadmap is rewritten around v1 and v2 ([roadmap](roadmap.md)).
+
 ## 2026-10-28: Synthesis, MIDI and musical helpers (owner)
 
 - **Owner requirement:** proper synthesis and MIDI, and user-friendly helpers so things like a loop that fits the beat are easy.

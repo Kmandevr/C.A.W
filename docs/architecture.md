@@ -50,14 +50,14 @@ The language, compiler and VM are ours, because they are the product and the san
 
 | Job | Library | Licence | When |
 | --- | --- | --- | --- |
-| Audio output on every platform | [miniaudio](https://github.com/mackron/miniaudio) | Public domain / MIT-0 | Milestone 1 |
-| WAV (and FLAC) writing, lock-free FIFOs, sinc interpolation | [CHOC](https://github.com/Tracktion/choc) | ISC | Milestone 1 |
-| Catching allocations and locks on the audio thread | Clang [RealtimeSanitizer](https://clang.llvm.org/docs/RealtimeSanitizer.html) (`[[clang::nonblocking]]`, `-fsanitize=realtime`) in CI | Part of LLVM | Milestone 1 |
-| Crash-hunting the parser and compiler | libFuzzer with AddressSanitizer and UBSan in CI | Part of LLVM | Milestone 1 |
-| Dart bindings to the engine's C API | `ffigen` (generates them from the C header) | **[Assumption: check licence]** | Milestone 1 |
-| Filters, delays, FFT, envelopes, spectral tools | [Signalsmith DSP](https://github.com/Signalsmith-Audio/dsp) | MIT | Stage 2 |
-| Oscillators, filters, effects, synthesized drum voices | [DaisySP](https://github.com/electro-smith/DaisySP) (the MIT library only, never DaisySP-LGPL) | MIT | Stage 2 |
-| Reference DSP algorithms | [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (archived January 2024: read and port, don't depend on it) | MIT | Stage 2 |
+| Audio output on every platform | [miniaudio](https://github.com/mackron/miniaudio) | Public domain / MIT-0 | v1 |
+| WAV (and FLAC) writing, lock-free FIFOs, sinc interpolation | [CHOC](https://github.com/Tracktion/choc) | ISC | v1 |
+| Catching allocations and locks on the audio thread | Clang [RealtimeSanitizer](https://clang.llvm.org/docs/RealtimeSanitizer.html) (`[[clang::nonblocking]]`, `-fsanitize=realtime`) in CI | Part of LLVM | v1 |
+| Crash-hunting the parser and compiler | libFuzzer with AddressSanitizer and UBSan in CI | Part of LLVM | v1 |
+| Dart bindings to the engine's C API | `ffigen` (generates them from the C header) | **[Assumption: check licence]** | v1 |
+| Filters, delays, FFT, envelopes, spectral tools | [Signalsmith DSP](https://github.com/Signalsmith-Audio/dsp) | MIT | v1 (basics), v2 |
+| Oscillators, filters, effects, synthesized drum voices | [DaisySP](https://github.com/electro-smith/DaisySP) (the MIT library only, never DaisySP-LGPL) | MIT | v1 (basics), v2 |
+| Reference DSP algorithms | [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (archived January 2024: read and port, don't depend on it) | MIT | v1 onward |
 | Plugin format | [CLAP](https://cleveraudio.org/) | MIT | Stage 4b |
 | VST3, AUv2, AUv3 (macOS and iOS) and standalone builds from one CLAP plugin | [clap-wrapper](https://github.com/free-audio/clap-wrapper) | MIT (skip its AAX and ASIO options: GPL or commercial) | Stage 4b |
 | VST3 itself | VST 3 SDK, MIT since version 3.8 ([Steinberg, October 2025](https://sonicstate.com/news/2025/10/30/vst-3-now-available-under-mit-license)) | MIT | Stage 4b |
@@ -120,7 +120,7 @@ The owner's requirement: any sound code can become a **playable synth**, a **wav
 
 The owner's requirement: proper synthesis and MIDI, and helpers that make musical results (such as a loop that fits a beat) easy, without taking away raw bit code.
 
-- **Synthesis built-ins** (Stage 2, on top of Signalsmith DSP and DaisySP):
+- **Synthesis built-ins** (basics in v1, the rest in v2, on top of Signalsmith DSP and DaisySP):
   - oscillators: sine, saw, square, triangle, band-limited and raw
   - noise, filters, envelopes (ADSR, decay) and LFOs
   - FM and phase modulation, additive partials, wavetable playback of our own exported tables, and later granular
@@ -152,7 +152,7 @@ The owner's requirement: proper synthesis and MIDI, and helpers that make musica
 
 - **[Fact]** As of 2026-10-28: [mlaass/nkido](https://github.com/mlaass/nkido) is MIT-licensed, C++20/CMake, and pairs a stack-based bytecode synthesis VM ("Cedar") with a Tidal-style language ("Akkado"). It supports hot-swap with crossfade and runs natively and in the browser via WASM. The project is small: 8 stars and essentially one developer.
 - **[Assumption]** Unverified: Android and iOS builds, a stable embedding API, and long-term maintenance.
-- **[Proposal]** Don't depend on it for Stage 1. A bytebeat VM is small enough to own. NKIDO uses the same architecture recommended here, which supports the design. At Stage 2, do a 1-day spike to judge whether Cedar could serve as the graph/DSP layer. Keep our engine behind an interface (`compile(source) → Program`, `process(Program, buffer)`) so we can swap the backend either way.
+- **[Proposal]** Don't depend on it for v1. A bytebeat VM is small enough to own. NKIDO uses the same architecture recommended here, which supports the design. In v2, do a 1-day spike to judge whether Cedar could serve as the graph/DSP layer. Keep our engine behind an interface (`compile(source) → Program`, `process(Program, buffer)`) so we can swap the backend either way.
 
 ## 3. Source and module structure
 
@@ -170,7 +170,7 @@ docs/          These notes + language reference (exists)
 examples/      Bundled starter sounds in the module format (later mirrored to the library)
 ```
 
-### Sound library (Repository B, created in Stage 2/3)
+### Sound library (Repository B, created in Stage 3)
 
 ```
 caw-library.json       library name, module format version

@@ -3,7 +3,7 @@
 
 An experimental, code-driven glitch-sound instrument for Android, iOS, Windows, macOS and Linux: bytebeat, procedural synthesis, raw byte and audio mangling, and compact sequencing. Code is the source of truth, audio renders locally on the phone, and WAV export feeds Reaper.
 
-**Status:** planning and repository setup. There's no application code yet; Milestone 1 is in [docs/roadmap.md](docs/roadmap.md).
+**Status:** planning and repository setup. There's no application code yet; v1 is defined in [docs/roadmap.md](docs/roadmap.md).
 
 ## Where things are
 
