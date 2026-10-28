@@ -7,7 +7,7 @@ updated: 2026-10-28
 
 # App
 
-The Flutter app in `app/`, as built for v1. The engine it drives is described in [engine](engine.md), and v1's scope is in [roadmap](roadmap.md). Everything here is **[Fact]**, checked in the code and by its tests.
+The Flutter app in `app/`. The engine it drives is described in [engine](engine.md), and v1's scope is in [roadmap](roadmap.md). Everything here is **[Fact]**, checked in the code and by its tests.
 
 ## Areas
 
@@ -38,7 +38,11 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
     - the grid adapts to zoom, down to the resolution; rows in the project's key are lit; velocity lane underneath; layer colour, brighter when louder
     - keys: WASD move the selection, Ctrl+WASD the cursor, Ctrl+Shift+WASD jump to the next note; Q inserts at the cursor, E copies the selection after itself; Shift+A/D length, Shift+W/S invert; +/- velocity; P, R, L cycle chance, ratchet, slide
     - one finger edits, two fingers zoom and scroll; edits reach the text and the engine after 150 ms (one write per pause, light on slow phones); saving keeps comments
-    - **Not built yet:** the long-press extras panel, extra lanes (Alt+V/X), triplets (Alt+0), macros and Vim mode wiring, MIDI import/export buttons
+    - holding a note (or I, or the ⋮ menu) opens its extras: velocity, chance, ratchet 1–8 and slide, as one undo step
+    - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
+    - triplets (Alt+0) make every grid size 2/3 as long
+    - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
+    - the curve tool and the `roll.gen.*` generators (euclid, random, arpeggiate, humanize, chord stamp, reverse) are not built yet
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - project settings: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, hex seed, master volume and the seam crossfade switch
   - **Project controls:** one control per `global` declared by any module. Its value is saved with the project and sent to the engine without recompiling.
@@ -72,7 +76,21 @@ The Flutter app in `app/`, as built for v1. The engine it drives is described in
     - The built-in themes are Calm neon (the default), Night (dimmer, no glow) and Amber terminal.
     - Custom themes are `kind: theme` text files in `themes/`.
   - **Density:** comfortable or compact.
-  - **Live coding:** auto-update on or off, its delay (100–2000 ms) and swap timing (now, beat or bar). These are stored, but the app doesn't use them yet.
+  - **Light mode** for slow devices (owner OK, 2026-10-28). It:
+    - turns glow and the Builder's scope off
+    - reads meters 15 times a second instead of 30
+    - plays 4 voices per pattern layer instead of 8 (the project's `voices`)
+    - stops auto-update while playing
+    - Unless that switch is off, it turns itself on the first time the engine reports an overload, and the Arranger's overload banner says so.
+  - **Live coding:** auto-update (on by default) runs code that compiles the set pause (100–2000 ms) after the last edit. Code with an error waits for the next edit. Swaps land at the swap timing: now, the next beat or the next bar.
+  - **Vim keys in the code editor:** off by default.
+- **Keys** (`lib/ui/key_router.dart`): with a keyboard, every key goes through the action system in [actions](actions.md): per-area keymaps, Vim modes, counts, `:` commands, `.` and macros.
+  - A badge at the bottom right shows the mode, a recording macro, pending keys, key hints and short toasts.
+  - `?` opens the action list: search, keys and run.
+  - Recorded macros are saved in `keys.txt` next to `settings.json`; a user `keys.txt` is merged over the default keys.
+  - Text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X.
+  - The roll, the Builder and the code editor's Vim mode each run their area's actions; the Arranger's actions work on a keyboard-selected layer.
+  - **Not built yet:** editing keys in the action list, custom toolbars and the long-press menu entries from the keymap.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
 ## Build

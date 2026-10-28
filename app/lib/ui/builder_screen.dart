@@ -2,10 +2,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../actions/actions.dart';
 import '../engine/engine.dart';
 import '../model/app_state.dart';
 import '../model/project.dart';
 import 'code_editor.dart';
+import 'key_router.dart';
 import 'library_sheet.dart';
 import 'param_control.dart';
 import 'pattern_editor.dart';
@@ -38,8 +40,186 @@ class _BuilderScreenState extends State<BuilderScreen> {
 
   AppState get s => widget.state;
 
+  KeyRouterState? _router;
+  String _yank = '';
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final r = KeyRouter.of(context);
+    if (r == _router) return;
+    _router?.unregister(Area.builder, _focus);
+    _router?.unregister(Area.code, _focus);
+    _router = r
+      ?..register(Area.builder, _focus, _builderAction)
+      ..register(Area.code, _focus, _codeAction);
+  }
+
+  ModuleDoc? get _module => s.project.module(s.selectedModuleId);
+
+  bool _builderAction(String id, int count, String? arg) {
+    final m = _module;
+    final mods = s.project.modules;
+    void step(int d) {
+      if (mods.isEmpty) return;
+      final i = mods.indexWhere((x) => x.id == m?.id);
+      s.selectModule(mods[(i + d * count) % mods.length].id);
+    }
+
+    switch (id) {
+      case 'builder.module.new':
+        _newModule();
+      case 'builder.module.next':
+        step(1);
+      case 'builder.module.prev':
+        step(-1);
+      default:
+        if (m == null) return false;
+        switch (id) {
+          case 'builder.run':
+            _run(m);
+          case 'builder.library' || 'builder.complete':
+            _openLibrary(m);
+          case 'builder.jumpError':
+            final info = s.info[m.id];
+            if (info != null && !info.ok) _code.jumpTo(info.line, info.col);
+          case 'builder.solo':
+            s.setPreviewOnly(!s.previewOnly);
+          case 'builder.module.rename':
+            _rename(m);
+          case 'builder.module.delete':
+            _delete(m);
+          case 'builder.pattern.text':
+            if (!s.isPattern(m.id)) return false;
+            setState(() => _showCode = !_showCode);
+          default:
+            return false;
+        }
+    }
+    return true;
+  }
+
+  /// Vim editing in the code editor (Settings: "Vim keys in the code editor").
+  bool _codeAction(String id, int count, String? arg) {
+    final m = _module;
+    if (m == null) return false;
+    final t = _code.text;
+    var at = _code.selection.isValid ? _code.selection.extentOffset : 0;
+    int lineStart(int i) => i <= 0 ? 0 : t.lastIndexOf('\n', i - 1) + 1;
+    int lineEnd(int i) {
+      final e = t.indexOf('\n', i);
+      return e < 0 ? t.length : e;
+    }
+
+    void go(int i) => _code.selection = TextSelection.collapsed(offset: i.clamp(0, t.length));
+    void setText(String text, int cursor) {
+      _code.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: cursor.clamp(0, text.length)));
+      s.editSource(m.id, text);
+    }
+
+    int vertical(int i, int lines) {
+      final col = i - lineStart(i);
+      var ls = lineStart(i);
+      for (var k = 0; k < lines.abs(); k++) {
+        if (lines > 0) {
+          final e = lineEnd(ls);
+          if (e >= t.length) break;
+          ls = e + 1;
+        } else {
+          if (ls == 0) break;
+          ls = lineStart(ls - 1);
+        }
+      }
+      return (ls + col).clamp(ls, lineEnd(ls));
+    }
+
+    bool word(int c) => RegExp(r'[A-Za-z0-9_]').hasMatch(String.fromCharCode(c));
+    for (var k = 0; k < count; k++) {
+      switch (id) {
+        case 'code.vim.left':
+          at = at > lineStart(at) ? at - 1 : at;
+        case 'code.vim.right':
+          at = at < lineEnd(at) ? at + 1 : at;
+        case 'code.vim.up':
+          at = vertical(at, -1);
+        case 'code.vim.down':
+          at = vertical(at, 1);
+        case 'code.vim.halfPageUp':
+          at = vertical(at, -10);
+        case 'code.vim.halfPageDown':
+          at = vertical(at, 10);
+        case 'code.vim.lineStart':
+          at = lineStart(at);
+        case 'code.vim.lineEnd':
+          at = lineEnd(at);
+        case 'code.vim.wordForward':
+          while (at < t.length && word(t.codeUnitAt(at))) {
+            at++;
+          }
+          while (at < t.length && !word(t.codeUnitAt(at))) {
+            at++;
+          }
+        case 'code.vim.wordBack':
+          while (at > 0 && !word(t.codeUnitAt(at - 1))) {
+            at--;
+          }
+          while (at > 0 && word(t.codeUnitAt(at - 1))) {
+            at--;
+          }
+        default:
+          k = count;
+      }
+    }
+    switch (id) {
+      case 'code.vim.left' || 'code.vim.right' || 'code.vim.up' || 'code.vim.down' || 'code.vim.halfPageUp' ||
+            'code.vim.halfPageDown' || 'code.vim.lineStart' || 'code.vim.lineEnd' || 'code.vim.wordForward' ||
+            'code.vim.wordBack':
+        go(at);
+      case 'code.vim.insert':
+        break; // the action switches to insert mode
+      case 'code.vim.append':
+        go(at < lineEnd(at) ? at + 1 : at);
+      case 'code.vim.openLine':
+        final e = lineEnd(at);
+        setText('${t.substring(0, e)}\n${t.substring(e)}', e + 1);
+      case 'code.vim.deleteLine' || 'code.vim.yankLine':
+        final ls = lineStart(at);
+        var e = lineEnd(at);
+        for (var k = 1; k < count && e < t.length; k++) {
+          e = lineEnd(e + 1);
+        }
+        final end = e < t.length ? e + 1 : e;
+        _yank = t.substring(ls, end);
+        if (!_yank.endsWith('\n')) _yank = '$_yank\n';
+        if (id == 'code.vim.deleteLine') setText(t.substring(0, ls) + t.substring(end), ls);
+      case 'code.vim.paste':
+        if (_yank.isEmpty) return true;
+        final e = lineEnd(at);
+        final pos = e < t.length ? e + 1 : e;
+        final text = pos == t.length && !t.endsWith('\n') && t.isNotEmpty ? '\n$_yank' : _yank;
+        setText(t.substring(0, pos) + text * count + t.substring(pos), pos);
+      case 'code.vim.changeWord' || 'code.vim.changeInnerWord':
+        var a = at, b = at;
+        if (id == 'code.vim.changeInnerWord') {
+          while (a > 0 && word(t.codeUnitAt(a - 1))) {
+            a--;
+          }
+        }
+        while (b < t.length && word(t.codeUnitAt(b))) {
+          b++;
+        }
+        setText(t.substring(0, a) + t.substring(b), a);
+        _router?.vim.mode = VimMode.insert;
+      default:
+        return false;
+    }
+    return true;
+  }
+
   @override
   void dispose() {
+    _router?.unregister(Area.builder, _focus);
+    _router?.unregister(Area.code, _focus);
     _code.dispose();
     _focus.dispose();
     super.dispose();
@@ -229,7 +409,9 @@ class _BuilderScreenState extends State<BuilderScreen> {
           ],
         ),
       ]);
-      final scope = NeonPanel(
+      final scope = s.settings.lightMode
+          ? const SizedBox.shrink()
+          : NeonPanel(
         color: color,
         padding: const EdgeInsets.all(6),
         child: ScopeView(

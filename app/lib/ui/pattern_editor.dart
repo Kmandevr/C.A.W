@@ -1,14 +1,21 @@
 // The pattern editor: a piano roll and a drum grid over the same notes, with an adaptive grid, velocity lane and keys.
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../actions/actions.dart';
+import '../engine/engine.dart';
 
 import '../model/app_state.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
+import 'key_router.dart';
 import 'theme.dart';
 
 enum PatternTool { draw, select, erase }
@@ -17,10 +24,14 @@ enum PatternTool { draw, select, erase }
 const _resolutions = [1, 2, 4, 8, 16, 32, 64, 128];
 
 class PatternEditor extends StatefulWidget {
-  const PatternEditor({super.key, required this.state, required this.module, this.fullScreen = false});
+  const PatternEditor(
+      {super.key, required this.state, required this.module, this.fullScreen = false, this.router});
   final AppState state;
   final ModuleDoc module;
   final bool fullScreen;
+
+  /// The key router, for a full-screen roll whose route sits outside it.
+  final KeyRouterState? router;
 
   @override
   State<PatternEditor> createState() => _PatternEditorState();
@@ -36,7 +47,8 @@ class _PatternEditorState extends State<PatternEditor> {
   PatternTool _tool = PatternTool.draw;
   bool _grid = false; // drum grid instead of the roll
   int _res = 16; // grid resolution: 1/16 of a whole note = one step
-  bool _snap = true, _fixed = false;
+  bool _snap = true, _fixed = false, _triplet = false;
+  bool _velLane = true, _extrasLane = false; // Alt+V, Alt+X
   double _pxPerStep = 28, _scrollX = 0, _scrollY = 0;
   final double _rowH = 16;
   Steps _cursorAt = Steps.zero;
@@ -51,8 +63,13 @@ class _PatternEditorState extends State<PatternEditor> {
   double _dragMovedP = 0;
   PatternDoc? _dragBase;
   double _zoomStart = 28;
+  int _lane = 0; // a drag in the velocity (1) or extras (2) lane
+  double _gridH = 0;
+  Timer? _hold; // long press on a note opens its extras panel
+  Offset? _holdAt;
 
-  static const _keyW = 44.0, _velH = 56.0, _rulerH = 20.0;
+  static const _keyW = 44.0, _velH = 56.0, _xH = 40.0, _rulerH = 20.0;
+  double get _lanesH => (_velLane ? _velH : 0) + (_extrasLane ? _xH : 0);
 
   AppState get s => widget.state;
 
@@ -60,6 +77,18 @@ class _PatternEditorState extends State<PatternEditor> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  KeyRouterState? _router;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final r = widget.router ?? KeyRouter.of(context);
+    if (r != _router) {
+      _router?.unregister(Area.pattern, _focus);
+      _router = r?..register(Area.pattern, _focus, _action);
+    }
   }
 
   @override
@@ -70,6 +99,8 @@ class _PatternEditorState extends State<PatternEditor> {
 
   @override
   void dispose() {
+    _hold?.cancel();
+    _router?.unregister(Area.pattern, _focus);
     _flush();
     _focus.dispose();
     super.dispose();
@@ -94,11 +125,11 @@ class _PatternEditorState extends State<PatternEditor> {
 
   // ---------- edits ----------
 
-  Steps get _resSteps => Steps(16, _res);
+  Steps get _resSteps => _triplet ? Steps(32, _res * 3) : Steps(16, _res);
 
   /// The finest grid level shown at this zoom: lines at least 10 px apart, never finer than the resolution.
   Steps _levelFor(double minPx) {
-    var steps = Steps(16 * 4, 1); // start at 4 bars' worth and halve
+    var steps = _triplet ? Steps(128, 3) : Steps(16 * 4, 1); // start at 4 bars' worth (or its triplet) and halve
     final finest = _snap ? _resSteps : Steps(1, 128);
     while (true) {
       final half = Steps(steps.numerator, steps.denominator * 2);
@@ -158,8 +189,190 @@ class _PatternEditorState extends State<PatternEditor> {
 
   // ---------- keys ----------
 
+  /// The roll's actions (docs/actions.md), run by keys, toolbars and macros through the key router.
+  bool _action(String id, int count, String? arg) {
+    final d = _doc;
+    if (d == null) return false;
+    final g = _resSteps.times(count);
+    void moveCursor(int dir) => setState(() {
+          if (dir == 0) _cursorPitch = math.min(127, _cursorPitch + count);
+          if (dir == 1) _cursorPitch = math.max(0, _cursorPitch - count);
+          if (dir == 2) _cursorAt = Steps.max(Steps.zero, _cursorAt - g);
+          if (dir == 3) _cursorAt = _cursorAt + g;
+          if (_router?.vim.selecting ?? false) {
+            _sel = {..._sel, ...d.notesIn(_cursorAt, _cursorAt, _cursorPitch, _cursorPitch)};
+          } else {
+            _sel = d.notesIn(_cursorAt, _cursorAt, _cursorPitch, _cursorPitch);
+          }
+        });
+    void jump(int dir) => setState(() {
+          for (var i = 0; i < count; i++) {
+            final id = d.nextNoteFrom(_cursorAt, _cursorPitch, dir == 1 || dir == 2 ? -1 : 1);
+            final n = id == null ? null : d.byId(id);
+            if (n == null) break;
+            _cursorAt = n.at;
+            _cursorPitch = n.pitch;
+            _sel = {n.id};
+          }
+        });
+    void times(PatternDoc Function(PatternDoc) f) {
+      var x = d;
+      for (var i = 0; i < count; i++) {
+        x = f(x);
+      }
+      _apply(x);
+    }
+
+    final div = const {'div1': 1, 'div2': 2, 'div4': 4, 'div8': 8, 'div16': 16, 'div32': 32, 'div64': 64, 'div128': 128};
+    switch (id) {
+      case 'roll.notes.later':
+        _apply(d.move(_sel, g, 0));
+      case 'roll.notes.earlier':
+        _apply(d.move(_sel, -g, 0));
+      case 'roll.notes.up':
+        _apply(d.move(_sel, Steps.zero, count.toDouble()));
+      case 'roll.notes.down':
+        _apply(d.move(_sel, Steps.zero, -count.toDouble()));
+      case 'roll.cursor.up':
+        moveCursor(0);
+      case 'roll.cursor.down':
+        moveCursor(1);
+      case 'roll.cursor.left':
+        moveCursor(2);
+      case 'roll.cursor.right':
+        moveCursor(3);
+      case 'roll.cursor.jumpUp' || 'roll.select.next':
+        jump(0);
+      case 'roll.cursor.jumpDown':
+        jump(1);
+      case 'roll.cursor.jumpLeft' || 'roll.select.prev':
+        jump(2);
+      case 'roll.cursor.jumpRight':
+        jump(3);
+      case 'roll.notes.insert':
+        final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _resSteps);
+        if (r.id != null) _apply(r.doc, select: {r.id!});
+      case 'roll.select.copyafter':
+        var x = d;
+        var sel = _sel;
+        for (var i = 0; i < count && sel.isNotEmpty; i++) {
+          final r = x.copyAfter(sel);
+          x = r.doc;
+          sel = r.ids;
+        }
+        _apply(x, select: sel);
+      case 'roll.notes.shorter':
+        _apply(d.resize(_sel, -g));
+      case 'roll.notes.longer':
+        _apply(d.resize(_sel, g));
+      case 'roll.notes.invertUp':
+        times((x) => x.invertUp(_sel));
+      case 'roll.notes.invertDown':
+        times((x) => x.invertDown(_sel));
+      case 'roll.notes.delete':
+        _apply(d.delete(_sel), select: {});
+      case 'roll.edit.cut':
+        _clip = d.copy(_sel);
+        _apply(d.delete(_sel), select: {});
+      case 'roll.select.all':
+        setState(() => _sel = {for (final n in d.notes) n.id});
+      case 'roll.select.none':
+        setState(() => _sel = {});
+      case 'roll.select.addAtCursor':
+        setState(() => _sel = {..._sel, ...d.notesIn(_cursorAt, _cursorAt, _cursorPitch, _cursorPitch)});
+      case 'roll.edit.copy':
+        _clip = d.copy(_sel);
+      case 'roll.edit.paste':
+        final c = _clip;
+        if (c == null) return true;
+        final r = d.paste(c, _cursorAt);
+        _apply(r.doc, select: r.ids);
+      case 'roll.edit.duplicate':
+        final r = d.copyAfter(_sel);
+        _apply(r.doc, select: r.ids);
+      case 'roll.notes.split':
+        final r = d.split(_sel, _cursorAt);
+        _apply(r.doc, select: r.ids);
+      case 'roll.notes.join':
+        final r = d.join(_sel);
+        _apply(r.doc, select: r.ids);
+      case 'roll.notes.quantize':
+        _apply(d.quantize(_sel.isEmpty ? {for (final n in d.notes) n.id} : _sel, _resSteps));
+      case 'roll.gen.legato':
+        _apply(d.legato(_sel));
+      case 'roll.vel.up':
+        _apply(d.addVelocity(_sel, 0.1 * count));
+      case 'roll.vel.down':
+        _apply(d.addVelocity(_sel, -0.1 * count));
+      case 'roll.vel.upFine':
+        _apply(d.addVelocity(_sel, 0.01 * count));
+      case 'roll.vel.downFine':
+        _apply(d.addVelocity(_sel, -0.01 * count));
+      case 'roll.vel.set':
+        final v = double.tryParse(arg ?? '');
+        if (v == null) return true;
+        _apply(d.setVelocity(_sel, v > 1 ? v / 100 : v));
+      case 'roll.prob.cycle':
+        times((x) => x.cycleProb(_sel));
+      case 'roll.ratchet.cycle':
+        times((x) => x.cycleRatchet(_sel));
+      case 'roll.slide.toggle':
+        _apply(d.toggleSlide(_sel));
+      case 'roll.notes.extras':
+        _openExtras();
+      case 'roll.grid.triplets':
+        setState(() => _triplet = !_triplet);
+      case 'roll.grid.snap':
+        setState(() => _snap = !_snap);
+      case 'roll.grid.adaptive':
+        setState(() => _fixed = !_fixed);
+      case 'roll.grid.set':
+        final r = int.tryParse((arg ?? '').replaceFirst('1/', ''));
+        if (r == null || !_resolutions.contains(r)) return true;
+        setState(() => _res = r);
+      case 'roll.tool.draw':
+        setState(() => _tool = PatternTool.draw);
+      case 'roll.tool.select':
+        setState(() => _tool = PatternTool.select);
+      case 'roll.tool.erase':
+        setState(() => _tool = PatternTool.erase);
+      case 'roll.view.switch':
+        setState(() => _grid = !_grid);
+      case 'roll.view.zoomIn':
+        setState(() => _pxPerStep = math.min(200, _pxPerStep * 1.25));
+      case 'roll.view.zoomOut':
+        setState(() => _pxPerStep = math.max(4, _pxPerStep / 1.25));
+      case 'roll.view.fit':
+        setState(() {
+          _scrollX = 0;
+          _pxPerStep = math.max(4, (context.size?.width ?? 400) - _keyW) / math.max(1, d.lengthSteps(s.project.beatsPerBar));
+        });
+      case 'roll.view.velocityLane':
+        setState(() => _velLane = !_velLane);
+      case 'roll.view.extrasLanes':
+        setState(() => _extrasLane = !_extrasLane);
+      case 'edit.undo':
+        for (var i = 0; i < count; i++) {
+          _undoRedo(true);
+        }
+      case 'edit.redo':
+        for (var i = 0; i < count; i++) {
+          _undoRedo(false);
+        }
+      default:
+        final r = div[id.replaceFirst('roll.grid.', '')];
+        if (r == null) return false;
+        setState(() => _res = r);
+    }
+    return true;
+  }
+
+  PatternClip? _clip;
+
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
+    // Keys go through the action system first (keymap, counts, macros); what it doesn't bind falls through to here.
+    if (_router?.handle(e, area: Area.pattern) == KeyEventResult.handled) return KeyEventResult.handled;
     final d = _doc;
     if (d == null) return KeyEventResult.ignored;
     final k = e.logicalKey;
@@ -176,6 +389,14 @@ class _PatternEditorState extends State<PatternEditor> {
     final dd = dir(k);
     if (alt) {
       final digit = k.keyLabel.isNotEmpty ? int.tryParse(k.keyLabel) : null;
+      if (digit == 0) {
+        setState(() => _triplet = !_triplet);
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.keyV || k == LogicalKeyboardKey.keyX) {
+        setState(() => k == LogicalKeyboardKey.keyV ? _velLane = !_velLane : _extrasLane = !_extrasLane);
+        return KeyEventResult.handled;
+      }
       if (digit != null && digit >= 1 && digit <= 8) {
         setState(() => _res = _resolutions[digit - 1]);
         return KeyEventResult.handled;
@@ -263,6 +484,8 @@ class _PatternEditorState extends State<PatternEditor> {
         setState(() => _grid = !_grid);
       case LogicalKeyboardKey.enter:
         _flush();
+      case LogicalKeyboardKey.keyI:
+        if (_sel.isNotEmpty) _openExtras();
       default:
         return KeyEventResult.ignored;
     }
@@ -292,6 +515,12 @@ class _PatternEditorState extends State<PatternEditor> {
     _dragBase = d;
     _dragMovedT = Steps.zero;
     _dragMovedP = 0;
+    _lane = 0;
+    if (p.dy >= _gridH) {
+      _lane = _velLane && p.dy < _gridH + _velH ? 1 : 2;
+      _laneEdit(p);
+      return;
+    }
     final hit = _noteAt(p);
     _cursorPitch = _pitchAt(p.dy).clamp(0, 127);
     _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
@@ -305,6 +534,11 @@ class _PatternEditorState extends State<PatternEditor> {
       _dragNote = hit;
       _resizing = (n.end.toDouble() - _stepAt(p.dx)) * _pxPerStep < 12;
       if (!_sel.contains(hit)) setState(() => _sel = {hit});
+      _holdAt = p;
+      _hold = Timer(const Duration(milliseconds: 500), () {
+        _up();
+        _openExtras();
+      });
       return;
     }
     _dragNote = null;
@@ -327,6 +561,14 @@ class _PatternEditorState extends State<PatternEditor> {
   void _move(Offset p) {
     final start = _dragStart, base = _dragBase;
     if (start == null || base == null) return;
+    if (_hold != null && (p - _holdAt!).distance > 8) {
+      _hold!.cancel();
+      _hold = null;
+    }
+    if (_lane != 0) {
+      _laneEdit(p);
+      return;
+    }
     if (_tool == PatternTool.erase) {
       final hit = _noteAt(p);
       if (hit != null && _doc != null) _apply(_doc!.delete({hit}));
@@ -363,6 +605,8 @@ class _PatternEditorState extends State<PatternEditor> {
   }
 
   void _up() {
+    _hold?.cancel();
+    _hold = null;
     if (_dragBase != null && _doc != null && !identical(_dragBase, _doc)) {
       // One undo step for the whole drag.
       _undo.add(_dragBase!);
@@ -375,6 +619,109 @@ class _PatternEditorState extends State<PatternEditor> {
       _dragNote = null;
       _rectEnd = null;
     });
+  }
+
+  /// A touch in a lane sets the velocity (or chance) of the notes starting under it: the selected ones if any are.
+  void _laneEdit(Offset p) {
+    final d = _doc;
+    if (d == null) return;
+    final top = _lane == 1 ? _gridH : _gridH + (_velLane ? _velH : 0), hgt = _lane == 1 ? _velH : _xH;
+    final v = (1 - (p.dy - top - 3) / (hgt - 6)).clamp(0.0, 1.0);
+    final x = p.dx + _scrollX;
+    var hit = {
+      for (final n in d.notes)
+        if ((n.at.toDouble() * _pxPerStep - x).abs() < 8) n.id
+    };
+    if (hit.any(_sel.contains)) hit = hit.where(_sel.contains).toSet();
+    if (hit.isEmpty) return;
+    setState(() => _doc = _lane == 1 ? d.setVelocity(hit, v) : d.setProb(hit, (v * 20).round() / 20));
+  }
+
+  /// The extras panel for the selected notes: velocity, chance, ratchet, slide. One undo step for the whole visit.
+  Future<void> _openExtras() async {
+    final base = _doc;
+    if (base == null || _sel.isEmpty) return;
+    final sel = Set<int>.of(_sel);
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Neon.panel,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final n = _doc!.byId(sel.first)!;
+        void change(PatternDoc Function(PatternDoc) f) {
+          setState(() => _doc = f(_doc!));
+          set(() {});
+        }
+
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(sel.length == 1 ? 'Note at ${n.at}, length ${n.len}' : '${sel.length} notes',
+                style: const TextStyle(color: Neon.text)),
+            Text('Velocity ${(n.vel * 100).round()}%'),
+            Slider(value: n.vel, onChanged: (v) => change((d) => d.setVelocity(sel, v))),
+            Text('Chance ${(n.prob * 100).round()}%'),
+            Slider(value: n.prob, divisions: 20, onChanged: (v) => change((d) => d.setProb(sel, v))),
+            const Text('Ratchet'),
+            Wrap(spacing: 6, children: [
+              for (var r = 1; r <= 8; r++)
+                ChoiceChip(
+                  label: Text('$r'),
+                  selected: n.ratchet == r,
+                  onSelected: (_) => change((d) => d.setRatchet(sel, r)),
+                ),
+            ]),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Slide'),
+              value: n.slide,
+              onChanged: (v) => change((d) => d.setSlide(sel, v)),
+            ),
+          ]),
+        );
+      }),
+    );
+    if (!mounted || identical(base, _doc)) return;
+    _undo.add(base);
+    _redo.clear();
+    setState(() {});
+    _scheduleSend();
+  }
+
+  void _say(String text) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
+
+  /// Replaces the notes with a MIDI file's (one undo step); the file's tempo isn't applied.
+  Future<void> _importMidi() async {
+    try {
+      final f = await FilePicker.pickFile();
+      if (f == null) return;
+      final text = Engine.patternFromMidi(await f.xFile.readAsBytes());
+      final r = PatternDoc.parse(text);
+      if (!r.ok) throw FormatException(r.error ?? 'unreadable pattern');
+      _apply(r.doc!, select: {});
+      _say('Imported ${r.doc!.notes.length} notes');
+    } catch (e) {
+      _say(e is FormatException ? 'Not a MIDI file: ${e.message}' : 'Could not import: $e');
+    }
+  }
+
+  Future<void> _exportMidi({required bool clip}) async {
+    _flush();
+    final d = _doc;
+    if (d == null) return;
+    final name = '${widget.module.name}.${clip ? 'midi2' : 'mid'}';
+    try {
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}${Platform.pathSeparator}caw-export-${DateTime.now().microsecondsSinceEpoch}';
+      final err = Engine.exportPattern(d.serialize(), path,
+          bpm: s.project.bpm.toDouble(), beatsPerBar: s.project.beatsPerBar, clip: clip);
+      if (err != null) throw Exception(err);
+      final file = File(path);
+      final saved = await FilePicker.saveFile(fileName: name, bytes: await file.readAsBytes(), mimeType: 'audio/midi');
+      await file.delete();
+      _say(saved == null ? 'Not exported (picker closed).' : 'Exported $name');
+    } catch (e) {
+      _say('Could not export: $e');
+    }
   }
 
   // ---------- build ----------
@@ -417,6 +764,26 @@ class _PatternEditorState extends State<PatternEditor> {
       onFixed: () => setState(() => _fixed = !_fixed),
       grid: _grid,
       onGrid: () => setState(() => _grid = !_grid),
+      triplet: _triplet,
+      onTriplet: () => setState(() => _triplet = !_triplet),
+      onMenu: (v) {
+        switch (v) {
+          case 'import':
+            _importMidi();
+          case 'mid':
+            _exportMidi(clip: false);
+          case 'midi2':
+            _exportMidi(clip: true);
+          case 'vel':
+            setState(() => _velLane = !_velLane);
+          case 'extras':
+            setState(() => _extrasLane = !_extrasLane);
+          case 'note':
+            _openExtras();
+        }
+      },
+      velLane: _velLane,
+      extrasLane: _extrasLane,
       fullScreen: widget.fullScreen,
       onFullScreen: () {
         _flush();
@@ -425,7 +792,7 @@ class _PatternEditorState extends State<PatternEditor> {
         } else {
           Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => Scaffold(
-                  body: SafeArea(child: PatternEditor(state: s, module: widget.module, fullScreen: true)))));
+                  body: SafeArea(child: PatternEditor(state: s, module: widget.module, fullScreen: true, router: _router)))));
         }
       },
     );
@@ -436,7 +803,8 @@ class _PatternEditorState extends State<PatternEditor> {
         toolbar,
         Expanded(
           child: LayoutBuilder(builder: (context, box) {
-            final w = box.maxWidth - _keyW, h = box.maxHeight - _velH - _rulerH;
+            final w = box.maxWidth - _keyW, h = box.maxHeight - _lanesH - _rulerH;
+            _gridH = h;
             _scrollX = _scrollX.clamp(0, math.max(0.0, length * _pxPerStep + 200 - w));
             _scrollY = _scrollY.clamp(0, math.max(0.0, 128 * _rowH - h));
             final grid = _grid ? _gridRows(d) : null;
@@ -494,6 +862,8 @@ class _PatternEditorState extends State<PatternEditor> {
                       rect: _rectEnd == null || _dragStart == null ? null : Rect.fromPoints(_dragStart!, _rectEnd!),
                       gridRows: grid,
                       focused: _focus.hasFocus,
+                      velH: _velLane ? _velH : 0,
+                      xH: _extrasLane ? _xH : 0,
                     ),
                   ),
                 ),
@@ -530,11 +900,17 @@ class _Toolbar extends StatelessWidget {
     required this.onGrid,
     required this.fullScreen,
     required this.onFullScreen,
+    required this.triplet,
+    required this.onTriplet,
+    required this.onMenu,
+    required this.velLane,
+    required this.extrasLane,
   });
   final PatternTool tool;
   final ValueChanged<PatternTool> onTool;
-  final bool canUndo, canRedo, snap, fixed, grid, fullScreen;
-  final VoidCallback onUndo, onRedo, onSnap, onFixed, onGrid, onFullScreen;
+  final bool canUndo, canRedo, snap, fixed, grid, fullScreen, triplet, velLane, extrasLane;
+  final VoidCallback onUndo, onRedo, onSnap, onFixed, onGrid, onFullScreen, onTriplet;
+  final ValueChanged<String> onMenu;
   final int res;
   final ValueChanged<int> onRes;
 
@@ -563,10 +939,25 @@ class _Toolbar extends StatelessWidget {
             onChanged: (v) => onRes(v!),
           ),
         ),
+        tb(Icons.looks_3_outlined, 'Triplets (Alt+0)', triplet, onTriplet),
         tb(Icons.grid_on, 'Snap to grid (N)', snap, onSnap),
         tb(Icons.lock_outline, 'Fixed grid (Alt+F)', fixed, onFixed),
         tb(Icons.apps, 'Drum grid / piano roll (G)', grid, onGrid),
         tb(fullScreen ? Icons.fullscreen_exit : Icons.fullscreen, 'Full screen', false, onFullScreen),
+        PopupMenuButton<String>(
+          tooltip: 'More',
+          icon: const Icon(Icons.more_vert, color: Neon.dim),
+          onSelected: onMenu,
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'note', child: Text('Note extras… (I, or hold a note)')),
+            CheckedPopupMenuItem(value: 'vel', checked: velLane, child: const Text('Velocity lane (Alt+V)')),
+            CheckedPopupMenuItem(value: 'extras', checked: extrasLane, child: const Text('Chance lane (Alt+X)')),
+            const PopupMenuDivider(),
+            const PopupMenuItem(value: 'import', child: Text('Import MIDI file…')),
+            const PopupMenuItem(value: 'mid', child: Text('Export as MIDI (.mid)')),
+            const PopupMenuItem(value: 'midi2', child: Text('Export as MIDI 2.0 clip (.midi2)')),
+          ],
+        ),
       ]),
     );
   }
@@ -590,7 +981,10 @@ class _RollPainter extends CustomPainter {
     required this.rect,
     required this.gridRows,
     required this.focused,
+    required this.velH,
+    required this.xH,
   });
+  final double velH, xH;
   final PatternDoc doc;
   final Set<int> sel;
   final int length, beatsPerBar;
@@ -602,11 +996,11 @@ class _RollPainter extends CustomPainter {
   final List<double>? gridRows;
   final bool focused;
 
-  static const keyW = _PatternEditorState._keyW, velH = _PatternEditorState._velH, rulerH = _PatternEditorState._rulerH;
+  static const keyW = _PatternEditorState._keyW, rulerH = _PatternEditorState._rulerH;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final w = size.width - keyW, h = size.height - velH - rulerH;
+    final w = size.width - keyW, h = size.height - velH - xH - rulerH;
     final bg = Paint()..color = Neon.bg;
     canvas.drawRect(Offset.zero & size, bg);
     canvas.save();
@@ -686,16 +1080,27 @@ class _RollPainter extends CustomPainter {
       ts.layout();
       ts.paint(canvas, Offset(x + 3, 3));
     }
-    // Velocity lane.
-    final vy = rulerH + h;
-    canvas.drawRect(Rect.fromLTWH(keyW, vy, w, velH), Paint()..color = Neon.panel);
-    for (final n in doc.notes) {
-      final x = keyW + n.at.toDouble() * pxPerStep - scrollX;
-      if (x < keyW || x > size.width) continue;
-      final bh = (velH - 6) * n.vel;
-      canvas.drawRect(Rect.fromLTWH(x, vy + velH - 3 - bh, 3, bh),
-          Paint()..color = sel.contains(n.id) ? Neon.text : color);
+    // Lanes: velocity, then chance (with ratchet and slide marks).
+    void lane(double top, double hgt, double Function(PatternNote) value, {bool marks = false}) {
+      canvas.drawRect(Rect.fromLTWH(keyW, top, w, hgt), Paint()..color = Neon.panel);
+      canvas.drawLine(Offset(keyW, top), Offset(size.width, top), Paint()..color = Neon.line);
+      for (final n in doc.notes) {
+        final x = keyW + n.at.toDouble() * pxPerStep - scrollX;
+        if (x < keyW || x > size.width) continue;
+        final bh = (hgt - 6) * value(n);
+        final paint = Paint()..color = sel.contains(n.id) ? Neon.text : color;
+        canvas.drawRect(Rect.fromLTWH(x, top + hgt - 3 - bh, 3, bh), paint);
+        if (marks && n.ratchet > 1) {
+          for (var i = 1; i < n.ratchet; i++) {
+            canvas.drawRect(Rect.fromLTWH(x + 4 + i * 3, top + hgt - 6, 2, 3), paint);
+          }
+        }
+        if (marks && n.slide) canvas.drawLine(Offset(x, top + 3), Offset(x + 10, top + 3), paint);
+      }
     }
+
+    if (velH > 0) lane(rulerH + h, velH, (n) => n.vel);
+    if (xH > 0) lane(rulerH + h + velH, xH, (n) => n.prob, marks: true);
   }
 
   @override
@@ -710,5 +1115,7 @@ class _RollPainter extends CustomPainter {
       o.cursorPitch != cursorPitch ||
       o.rect != rect ||
       o.focused != focused ||
+      o.velH != velH ||
+      o.xH != xH ||
       o.color != color;
 }

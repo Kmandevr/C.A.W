@@ -1000,6 +1000,10 @@ class PatternDoc {
     return _map(sel, (n) => n.copyWith(slide: on));
   }
 
+  PatternDoc setProb(Set<int> sel, double prob) => _map(sel, (n) => n.copyWith(prob: _round3(prob.clamp(0, 1).toDouble())));
+  PatternDoc setRatchet(Set<int> sel, int ratchet) => _map(sel, (n) => n.copyWith(ratchet: ratchet.clamp(1, 8)));
+  PatternDoc setSlide(Set<int> sel, bool slide) => _map(sel, (n) => n.copyWith(slide: slide));
+
   // Queries.
 
   /// Notes that sound during [t0, t1) (or at t0 when t0 == t1) with pitch in [p0, p1]; bounds may come in any order.

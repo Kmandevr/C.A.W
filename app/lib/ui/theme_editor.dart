@@ -42,6 +42,20 @@ class SettingsPage extends StatelessWidget {
                 onSelectionChanged: (v) => settings.update((s) => s.density = v.first),
               ),
             ),
+            SwitchListTile(
+              secondary: Icon(Icons.speed, color: Neon.green),
+              title: const Text('Light mode'),
+              subtitle: Text('For slow devices: no glow or scopes, slower meters, 4 voices per pattern layer, '
+                  'and auto-update waits while playing', style: TextStyle(color: Neon.dim)),
+              value: settings.lightMode,
+              onChanged: (v) => settings.update((s) => s.lightMode = v),
+            ),
+            SwitchListTile(
+              secondary: Icon(Icons.auto_mode, color: Neon.blue),
+              title: const Text('Turn light mode on when the sound stutters'),
+              value: settings.lightAuto,
+              onChanged: (v) => settings.update((s) => s.lightAuto = v),
+            ),
             const Heading('Live coding'),
             SwitchListTile(
               secondary: Icon(Icons.bolt, color: Neon.green),
@@ -82,6 +96,13 @@ class SettingsPage extends StatelessWidget {
                 selected: {settings.swapTiming},
                 onSelectionChanged: (v) => settings.update((s) => s.swapTiming = v.first),
               ),
+            ),
+            SwitchListTile(
+              secondary: Icon(Icons.keyboard, color: Neon.yellow),
+              title: const Text('Vim keys in the code editor'),
+              subtitle: Text('With a keyboard: WASD moves, I types, Esc stops typing', style: TextStyle(color: Neon.dim)),
+              value: settings.vimCode,
+              onChanged: (v) => settings.update((s) => s.vimCode = v),
             ),
             const Heading('About'),
             ListTile(

@@ -145,7 +145,9 @@ class ProjectDoc {
   }
 
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
-  String toEngineJson({List<String>? audition, String? auditionPattern, bool auditionOnly = false}) => jsonEncode({
+  String toEngineJson(
+          {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) =>
+      jsonEncode({
         'caw_project': 1,
         'name': name,
         'bpm': bpm,
@@ -154,6 +156,8 @@ class ProjectDoc {
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
+        'voices': voices,
+        'swap': swap,
         if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
         'globals': globals,
         'modules': [

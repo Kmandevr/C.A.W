@@ -174,10 +174,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 - **[Assumption]** For testing, a "potato" means:
   - an Android 8 phone (the app's minimum, `minSdk` 26) with 2 GB of RAM and an old 4-core ARM CPU
   - an old dual-core Windows laptop
-- **[Proposal]** A **Light mode** setting, on by default when the engine reports overload. It:
-  - turns glow off and the scopes off, and runs meters at 15 fps
-  - plays 4 voices per pattern layer instead of 8
-  - pauses auto-update while playing, so swaps happen on Run only
+- **[Fact]** **Light mode** (owner OK and built, 2026-10-28): a setting that turns itself on at the first overload. It turns glow and scopes off, runs meters at 15 fps, plays 4 voices per pattern layer instead of 8, and pauses auto-update while playing, so swaps happen on Run only ([app](app.md)).
 - **Editors:**
   - The piano roll and grid repaint only when something changes, plus the playhead's small region while playing.
   - The pattern model stays the source of truth while editing. It's turned into text only when saving or sending to the engine, not on every touch.

@@ -16,6 +16,7 @@ class Settings extends ChangeNotifier {
   /// Settings kept in [dir] (settings.json and themes/); with no folder they live in memory only.
   Settings({this.dir}) {
     Neon.active = activeTheme;
+    Neon.light = lightMode;
   }
 
   final Directory? dir;
@@ -27,6 +28,14 @@ class Settings extends ChangeNotifier {
   bool liveUpdate = true;
   int liveDelayMs = 400;
   SwapTiming swapTiming = SwapTiming.now;
+
+  /// Light mode for slow devices: no glow or scopes, meters at 15 fps, 4 voices per pattern layer, and auto-update
+  /// waits while playing. [lightAuto] turns it on by itself the first time the engine reports an overload.
+  bool lightMode = false;
+  bool lightAuto = true;
+
+  /// Vim editing in the code editor (WASD moves; I types). Off by default.
+  bool vimCode = false;
 
   /// Themes the user made or imported, saved one file each in themes/.
   List<CawTheme> customThemes = [];
@@ -70,6 +79,9 @@ class Settings extends ChangeNotifier {
         'live_update': liveUpdate,
         'live_delay_ms': liveDelayMs,
         'swap_timing': swapTiming.name,
+        'light_mode': lightMode,
+        'light_auto': lightAuto,
+        'vim_code': vimCode,
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -80,6 +92,9 @@ class Settings extends ChangeNotifier {
     liveUpdate = (j['live_update'] as bool?) ?? liveUpdate;
     liveDelayMs = ((j['live_delay_ms'] as num?)?.toInt() ?? liveDelayMs).clamp(0, 10000);
     swapTiming = pick(SwapTiming.values, j['swap_timing'], swapTiming);
+    lightMode = (j['light_mode'] as bool?) ?? lightMode;
+    lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
+    vimCode = (j['vim_code'] as bool?) ?? vimCode;
   }
 
   Future<void> _load() async {
@@ -105,6 +120,7 @@ class Settings extends ChangeNotifier {
       // Damaged settings fall back to the defaults.
     }
     Neon.active = activeTheme;
+    Neon.light = lightMode;
     _shownLook = activeTheme.toFile();
   }
 
@@ -122,6 +138,7 @@ class Settings extends ChangeNotifier {
   Future<void> update(void Function(Settings) change) async {
     change(this);
     Neon.active = activeTheme;
+    Neon.light = lightMode;
     notifyListeners();
     await save();
   }

@@ -2,12 +2,13 @@
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import '../actions/actions.dart';
 import '../model/app_state.dart';
 import 'arranger_screen.dart';
 import 'builder_screen.dart';
 import 'exporter_screen.dart';
+import 'key_router.dart';
 import 'startup_screen.dart';
 import 'theme.dart';
 import 'theme_editor.dart';
@@ -55,26 +56,6 @@ class _ShellState extends State<Shell> {
     _lastTab = _tab;
   }
 
-  bool _editingText() {
-    final ctx = FocusManager.instance.primaryFocus?.context;
-    return ctx != null && (ctx.widget is EditableText || ctx.findAncestorWidgetOfExactType<EditableText>() != null);
-  }
-
-  KeyEventResult _key(FocusNode _, KeyEvent e) {
-    if (e is! KeyDownEvent) return KeyEventResult.ignored;
-    if (e.logicalKey == LogicalKeyboardKey.space && !_editingText()) {
-      s.togglePlay();
-      return KeyEventResult.handled;
-    }
-    final ctrl = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
-    final digit = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3].indexOf(e.logicalKey);
-    if (ctrl && digit >= 0) {
-      setState(() => _tab = digit);
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
   static const _dest = [
     (Icons.code, 'Builder'),
     (Icons.layers, 'Arranger'),
@@ -105,9 +86,10 @@ class _ShellState extends State<Shell> {
                 ),
               Expanded(child: IndexedStack(index: _tab, children: screens)),
             ]);
-            return Focus(
-              autofocus: true,
-              onKeyEvent: _key,
+            return KeyRouter(
+              state: s,
+              screenArea: const [Area.builder, Area.arranger, Area.exporter][_tab],
+              onView: (i) => setState(() => _tab = i),
               child: Scaffold(
                 body: SafeArea(
                   child: wide

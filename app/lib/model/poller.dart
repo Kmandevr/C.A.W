@@ -16,7 +16,10 @@ class Poller {
   /// Reads the meters; returns whether anything is still moving (playing, or a meter above zero).
   final bool Function() poll;
   final void Function()? onIdle;
-  final Duration interval, settle, idleDelay;
+  final Duration settle, idleDelay;
+
+  /// Time between reads; light mode doubles it.
+  Duration interval;
 
   Timer? _tick, _idle;
   bool _visible = true;

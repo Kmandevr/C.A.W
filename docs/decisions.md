@@ -8,6 +8,11 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Light mode, and this branch becomes main (owner)
+
+- The owner approved the proposed Light mode ([UI design](ui.md#light-on-cpu-and-ram)). It is built as proposed, plus a switch for turning on by itself.
+- The owner asked for the working branch to become `main`.
+
 ## 2026-10-28: JetBrains Mono for code and numbers (Claude, per the owner's font choice)
 
 - The font is JetBrains Mono 2.304, Regular and Bold only. Its licence is the SIL Open Font License 1.1, with copyright "2020 The JetBrains Mono Project Authors".
@@ -17,7 +22,7 @@ Newest first. A later entry wins over an earlier one on the same topic.
 
 ## 2026-10-28: Must run on low-end devices (owner)
 
-The app must run as light as possible, on very low-end devices. This is a limit on every feature. See [UI design](ui.md#light-on-cpu-and-ram) for the measures and a proposed Light mode.
+The app must run as light as possible, on very low-end devices. This is a limit on every feature. See [UI design](ui.md#light-on-cpu-and-ram) for the measures and Light mode.
 
 ## 2026-10-28: Blank files and a startup choice (owner)
 

@@ -14,7 +14,20 @@ import 'storage.dart';
     (last: projects.where((p) => p.id == lastId).firstOrNull, projects: projects);
 
 class AppState extends ChangeNotifier {
-  AppState({Settings? settings}) : settings = settings ?? Settings();
+  AppState({Settings? settings}) : settings = settings ?? Settings() {
+    _light = this.settings.lightMode;
+    this.settings.addListener(_settingsChanged);
+  }
+
+  late bool _light;
+
+  // Light mode changes the engine's voice count and the meter rate.
+  void _settingsChanged() {
+    if (settings.lightMode == _light) return;
+    _light = settings.lightMode;
+    _poller.interval = Duration(milliseconds: _light ? 66 : 33);
+    _sync();
+  }
 
   /// App-wide settings (theme, density, live coding).
   final Settings settings;
@@ -46,13 +59,20 @@ class AppState extends ChangeNotifier {
   /// drag doesn't rebuild the whole app (it rebuilt about 3,500 widgets per step before).
   final ValueNotifier<int> values = ValueNotifier(0);
   EngineMeters meters = const EngineMeters();
+
+  /// Set when an overload switched light mode on, so the app can say so once.
+  bool lightTurnedOnBySelf = false;
   List<LayerMeterValue> layerMeters = const [];
 
   Timer? _saveTimer;
   Timer? _syncTimer;
+  Timer? _liveTimer;
   // Meters are read only while something moves; stopped and settled, the app does no work and closes the audio
   // device after a while (Play reopens it).
-  late final Poller _poller = Poller(poll: _poll, onIdle: () {
+  late final Poller _poller = Poller(
+      poll: _poll,
+      interval: Duration(milliseconds: settings.lightMode ? 66 : 33),
+      onIdle: () {
     if (!meters.playing) engine?.stopAudio();
   });
 
@@ -93,7 +113,9 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    settings.removeListener(_settingsChanged);
     _poller.dispose();
+    _liveTimer?.cancel();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
     engine?.dispose();
@@ -108,6 +130,14 @@ class AppState extends ChangeNotifier {
     meters = e.meters();
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
     tick.value++;
+    if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
+      // The device can't keep up: light mode turns on by itself, once (the setting can turn it back off).
+      lightTurnedOnBySelf = true;
+      settings.update((s) {
+        s.lightMode = true;
+        s.lightAuto = false;
+      });
+    }
     if (before.playing != meters.playing || before.overloaded != meters.overloaded) notifyListeners();
     return meters.playing || meters.peakL > 0 || meters.peakR > 0 || layerMeters.any((m) => m.peak > 0);
   }
@@ -196,7 +226,12 @@ class AppState extends ChangeNotifier {
     final e = engine;
     if (e == null) return;
     final pv = previewOnly ? preview : null;
-    final json = project.toEngineJson(audition: pv?.chain, auditionPattern: pv?.pattern, auditionOnly: previewOnly);
+    final json = project.toEngineJson(
+        audition: pv?.chain,
+        auditionPattern: pv?.pattern,
+        auditionOnly: previewOnly,
+        voices: settings.lightMode ? 4 : 8,
+        swap: settings.swapTiming.name);
     try {
       info = await e.setProject(json);
     } catch (err) {
@@ -283,6 +318,24 @@ class AppState extends ChangeNotifier {
     } else {
       _save();
     }
+    _scheduleLive(id);
+  }
+
+  /// Auto-update: after the pause set in the settings, code that compiles swaps in by itself (at the swap timing).
+  /// Code with an error waits for the next edit; light mode waits while playing, so swaps then happen on Run only.
+  void _scheduleLive(String id) {
+    _liveTimer?.cancel();
+    if (!settings.liveUpdate || engine == null) return;
+    _liveTimer = Timer(Duration(milliseconds: settings.liveDelayMs), () {
+      final m = project.module(id);
+      if (m == null || !m.edited || (settings.lightMode && meters.playing)) return;
+      try {
+        if (!Engine.check(m.source).ok) return;
+      } catch (_) {
+        return;
+      }
+      run(id);
+    });
   }
 
   /// Run: the editor's code goes to the engine and hot-swaps. If it fails, the last good code keeps playing.

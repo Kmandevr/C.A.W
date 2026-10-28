@@ -105,6 +105,7 @@ struct Engine::Cmd {
     uint32_t seed = 0;
     bool seamXf = true, flag = false;
     int swapMode = 0;
+    int voices = kVoices;
 };
 
 struct Engine::Retired {
@@ -346,6 +347,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     t.keyRoot = p.keyRoot;
     t.keyScale = p.keyScale;
     t.swapMode = p.swapMode;
+    t.voices = p.voices;
     send(t);
     const double stepLen = 60.0 * ctlSr_ / (p.bpm * 4.0);
     ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
@@ -909,6 +911,7 @@ void Engine::applyCommands() noexcept {
                 keyRoot_ = c.keyRoot;
                 keyScale_ = c.keyScale;
                 swapMode_ = c.swapMode;
+                voiceLimit_ = c.voices;
                 updateTiming();
                 if (g_ >= loopLen_) g_ = 0;
                 loopLenFlag_.store(loopLen_, std::memory_order_relaxed);
@@ -1093,14 +1096,17 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
     }
     // A free voice, else the oldest released one, else the oldest.
     Voice* pick = nullptr;
-    for (Voice& v : c.voices)
-        if (!v.active) {
-            pick = &v;
+    // Only the project's first `voices` voices take new notes (light mode plays fewer).
+    for (int i = 0; i < voiceLimit_; ++i)
+        if (!c.voices[i].active) {
+            pick = &c.voices[i];
             break;
         }
     for (int pass = 0; pass < 2 && !pick; ++pass)
-        for (Voice& v : c.voices)
+        for (int i = 0; i < voiceLimit_; ++i) {
+            Voice& v = c.voices[i];
             if ((pass == 1 || !v.gate) && (!pick || v.started < pick->started)) pick = &v;
+        }
     Voice& v = *pick;
     if (v.active) c.declick += v.lastY;  // stealing a sounding voice: smooth over the jump
     v.lastY = 0;

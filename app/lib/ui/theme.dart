@@ -149,6 +149,9 @@ class Neon {
   /// The theme every Neon colour reads from. Settings sets it; widgets built earlier repaint when the app remounts.
   static CawTheme active = calmNeon;
 
+  /// Light mode (for slow devices) turns glow off whatever the theme says.
+  static bool light = false;
+
   static const Color bg = _ThemeColor('bg');
   static const Color panel = _ThemeColor('panel');
   static const Color panelHi = _ThemeColor('panelHi');
@@ -178,7 +181,7 @@ class Neon {
       TextStyle(fontFamily: mono, fontFamilyFallback: monoFallback, fontSize: size, color: color, height: 1.45);
 
   /// The glow around active things; nothing when the theme turns glow off.
-  static List<BoxShadow> glow(Color c, {double strength = 0.55}) => active.glow
+  static List<BoxShadow> glow(Color c, {double strength = 0.55}) => active.glow && !light
       ? [BoxShadow(color: c.withValues(alpha: strength), blurRadius: 12, spreadRadius: -2)]
       : const [];
 

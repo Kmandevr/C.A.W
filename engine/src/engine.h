@@ -103,6 +103,7 @@ private:
     bool seamXf_ = true;
     int keyRoot_ = 9, keyScale_ = 1;
     int swapMode_ = 0;  // 0 at once, 1 next beat, 2 next bar
+    int voiceLimit_ = kVoices;  // voices a pattern layer may use for new notes, 1..kVoices
     bool anySolo_ = false;  // some layer is soloed (refreshed each callback)
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note

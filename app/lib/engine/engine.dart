@@ -388,6 +388,32 @@ class Engine {
     b.free(r);
     return ModuleInfo.fromJson(jsonDecode(text) as Map<String, dynamic>);
   }
+
+  /// Turns a MIDI file (.mid or MIDI 2.0 Clip) into pattern module text; throws a [FormatException] if it can't.
+  static String patternFromMidi(Uint8List bytes) {
+    final b = Bindings.instance;
+    final data = calloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
+    data.asTypedList(bytes.length).setAll(0, bytes);
+    final r = b.patternFromMidi(data, bytes.length);
+    calloc.free(data);
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    b.free(r);
+    if (j['ok'] != true) throw FormatException((j['error'] as String?) ?? 'not a MIDI file');
+    return j['pattern'] as String;
+  }
+
+  /// Writes pattern module text to [path] as a .mid ([clip] false) or a MIDI 2.0 Clip File; returns an error or null.
+  static String? exportPattern(String source, String path, {double bpm = 120, int beatsPerBar = 4, bool clip = false}) {
+    final b = Bindings.instance;
+    final src = source.toNativeUtf8(), out = path.toNativeUtf8();
+    final err = calloc<Uint8>(512).cast<Utf8>();
+    final rc = b.patternExport(src, bpm, beatsPerBar, clip ? 1 : 0, out, err, 512);
+    final msg = rc == 0 ? null : err.toDartString();
+    calloc.free(src);
+    calloc.free(out);
+    calloc.free(err);
+    return msg;
+  }
 }
 
 /// A running export. Poll [progress] (0..1); [cancel] stops it.

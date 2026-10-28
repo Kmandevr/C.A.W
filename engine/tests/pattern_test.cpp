@@ -113,6 +113,21 @@ TEST(chords_use_one_voice_per_note_and_the_oldest_is_stolen) {
     CHECK_NEAR(z[500], 0.8, 1e-6);
 }
 
+TEST(the_project_voice_limit_caps_notes_at_once) {
+    // Light mode plays 4 voices per pattern layer: a 5-note chord sounds 4 notes.
+    ProjectSpec p = voicedProject("gate * 0.1", "0 C3,D3,E3,F3,G3 4\n");
+    p.voices = 4;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    CHECK_NEAR(run(e, 1000)[500], 0.4, 1e-6);
+    ProjectSpec q;
+    std::string err;
+    CHECK(parseProject("{\"caw_project\":1,\"voices\":4}", q, err) && q.voices == 4);
+    CHECK(parseProject("{\"caw_project\":1,\"voices\":99}", q, err) && q.voices == 8);
+}
+
 TEST(voices_hear_their_note) {
     // Output is clamped to -1..1, so values are scaled down to read them.
     std::vector<double> y = play("gate * (note + vel) * 0.01", "0 A4 2 0.25\n2 C5 2\n", 20000);

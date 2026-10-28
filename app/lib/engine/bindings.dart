@@ -99,7 +99,11 @@ class Bindings {
         templateFile =
             lib.lookupFunction<Pointer<Utf8> Function(Int32), Pointer<Utf8> Function(int)>('caw_template_file'),
         templateSource =
-            lib.lookupFunction<Pointer<Utf8> Function(Int32), Pointer<Utf8> Function(int)>('caw_template_source');
+            lib.lookupFunction<Pointer<Utf8> Function(Int32), Pointer<Utf8> Function(int)>('caw_template_source'),
+        patternFromMidi = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Uint8>, Int32),
+            Pointer<Utf8> Function(Pointer<Uint8>, int)>('caw_pattern_from_midi'),
+        patternExport = lib.lookupFunction<Int32 Function(Pointer<Utf8>, Double, Int32, Int32, Pointer<Utf8>, Pointer<Utf8>, Int32),
+            int Function(Pointer<Utf8>, double, int, int, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_pattern_export');
 
   static Bindings? _instance;
 
@@ -130,4 +134,6 @@ class Bindings {
   final int Function() templateCount;
   final Pointer<Utf8> Function(int) templateFile;
   final Pointer<Utf8> Function(int) templateSource;
+  final Pointer<Utf8> Function(Pointer<Uint8>, int) patternFromMidi;
+  final int Function(Pointer<Utf8>, double, int, int, Pointer<Utf8>, Pointer<Utf8>, int) patternExport;
 }
