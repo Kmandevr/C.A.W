@@ -187,7 +187,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 - **The audio never depends on the UI.** The C++ engine runs on its own thread ([engine](engine.md)), so a slow frame can't cause a dropout.
 - **Repaint only what moves:**
   - Meters, the playhead and scopes each sit in a small repaint region of their own, driven by one 30 fps ticker. The ticker runs only while playing and visible, and stops when the app is in the background.
-  - **[Fact]** In v1 the meter ticker runs even while stopped; v2 should fix that.
+  - **[Fact]** Fixed 2026-10-28: the meters are read only while playing, and the app does nothing periodic when stopped ([performance](performance.md)).
   - Community advice warns that a repaint boundary around something that changes every frame only adds cost, so measure ([blog](https://omr.it.com/blog/flutter-engine-raster-cache-tuning/)).
 - **Draw grids, not widgets:** the session grid, drum grid and piano roll are each one painter that draws only the visible area, not one widget per cell. Lists are built lazily.
 - **No heavy assets:**

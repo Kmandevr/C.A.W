@@ -398,11 +398,14 @@ class _Params extends StatelessWidget {
     final i = info;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Heading('Controls'),
-      ParamGroups(
-        params: params,
-        color: color,
-        valueOf: (p) => p.global ? state.globalValue(p) : (module.params[p.name] ?? p.defaultValue),
-        onChanged: (p, v) => p.global ? state.setGlobal(p.name, v) : state.setParam(module.id, p.name, v),
+      ValueListenableBuilder<int>(
+        valueListenable: state.values,
+        builder: (context, _, _) => ParamGroups(
+          params: params,
+          color: color,
+          valueOf: (p) => p.global ? state.globalValue(p) : (module.params[p.name] ?? p.defaultValue),
+          onChanged: (p, v) => p.global ? state.setGlobal(p.name, v) : state.setParam(module.id, p.name, v),
+        ),
       ),
       if (i != null && i.isPattern)
         Padding(

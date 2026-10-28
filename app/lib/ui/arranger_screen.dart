@@ -23,11 +23,14 @@ class ArrangerScreen extends StatelessWidget {
           const Heading('Project controls'),
           NeonPanel(
             color: Neon.blue,
-            child: ParamGroups(
-              params: state.globalDefs,
-              color: Neon.blue,
-              valueOf: state.globalValue,
-              onChanged: (p, v) => state.setGlobal(p.name, v),
+            child: ValueListenableBuilder<int>(
+              valueListenable: state.values,
+              builder: (context, _, _) => ParamGroups(
+                params: state.globalDefs,
+                color: Neon.blue,
+                valueOf: state.globalValue,
+                onChanged: (p, v) => state.setGlobal(p.name, v),
+              ),
             ),
           ),
         ],
@@ -387,25 +390,28 @@ class _LayerCard extends StatelessWidget {
                 ),
               ),
           ]),
-          Row(children: [
-            const Icon(Icons.volume_up, size: 18, color: Neon.dim),
-            Expanded(
-              flex: 3,
-              child: Slider(value: layer.volume, activeColor: color, onChanged: (v) => state.mixLayer(layer, volume: v)),
-            ),
-            const Text('L', style: TextStyle(color: Neon.dim, fontSize: 12)),
-            Expanded(
-              flex: 2,
-              child: Slider(
-                value: layer.pan,
-                min: -1,
-                max: 1,
-                activeColor: color,
-                onChanged: (v) => state.mixLayer(layer, pan: v.abs() < 0.04 ? 0 : v),
+          ValueListenableBuilder<int>(
+            valueListenable: state.values,
+            builder: (context, _, _) => Row(children: [
+              const Icon(Icons.volume_up, size: 18, color: Neon.dim),
+              Expanded(
+                flex: 3,
+                child: Slider(value: layer.volume, activeColor: color, onChanged: (v) => state.mixLayer(layer, volume: v)),
               ),
-            ),
-            const Text('R', style: TextStyle(color: Neon.dim, fontSize: 12)),
-          ]),
+              const Text('L', style: TextStyle(color: Neon.dim, fontSize: 12)),
+              Expanded(
+                flex: 2,
+                child: Slider(
+                  value: layer.pan,
+                  min: -1,
+                  max: 1,
+                  activeColor: color,
+                  onChanged: (v) => state.mixLayer(layer, pan: v.abs() < 0.04 ? 0 : v),
+                ),
+              ),
+              const Text('R', style: TextStyle(color: Neon.dim, fontSize: 12)),
+            ]),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 4),
             child: PeakMeter(

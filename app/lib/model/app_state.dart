@@ -2,9 +2,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
+import 'poller.dart';
 import 'project.dart';
 import 'settings.dart';
 import 'storage.dart';
@@ -41,13 +41,20 @@ class AppState extends ChangeNotifier {
 
   /// Bumped on every meter poll (about 30 times a second) so meters can repaint without rebuilding screens.
   final ValueNotifier<int> tick = ValueNotifier(0);
+
+  /// Bumped when a param, global, volume or pan changes. Only the controls showing those values listen, so a slider
+  /// drag doesn't rebuild the whole app (it rebuilt about 3,500 widgets per step before).
+  final ValueNotifier<int> values = ValueNotifier(0);
   EngineMeters meters = const EngineMeters();
   List<LayerMeterValue> layerMeters = const [];
 
   Timer? _saveTimer;
   Timer? _syncTimer;
-  Ticker? _ticker;
-  Duration _lastPoll = Duration.zero;
+  // Meters are read only while something moves; stopped and settled, the app does no work and closes the audio
+  // device after a while (Play reopens it).
+  late final Poller _poller = Poller(poll: _poll, onIdle: () {
+    if (!meters.playing) engine?.stopAudio();
+  });
 
   Future<void> init() async {
     try {
@@ -62,7 +69,7 @@ class AppState extends ChangeNotifier {
     savedProjects = await listProjects();
     ready = true;
     notifyListeners();
-    _ticker = Ticker(_poll)..start();
+    _poller.wake();
   }
 
   /// The startup screen's choice: opens [p] without saving the placeholder project shown before it.
@@ -86,23 +93,23 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
-    _ticker?.dispose();
+    _poller.dispose();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
     engine?.dispose();
     super.dispose();
   }
 
-  void _poll(Duration elapsed) {
-    if (elapsed - _lastPoll < const Duration(milliseconds: 33)) return;
-    _lastPoll = elapsed;
+  /// One meter read; returns whether anything is still moving.
+  bool _poll() {
     final e = engine;
-    if (e == null) return;
+    if (e == null) return false;
     final before = meters;
     meters = e.meters();
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
     tick.value++;
     if (before.playing != meters.playing || before.overloaded != meters.overloaded) notifyListeners();
+    return meters.playing || meters.peakL > 0 || meters.peakR > 0 || layerMeters.any((m) => m.peak > 0);
   }
 
   // ---------- starter content ----------
@@ -233,16 +240,19 @@ class AppState extends ChangeNotifier {
       e.play();
     }
     meters = e.meters();
+    _poller.wake();
     notifyListeners();
   }
 
   void clearOverload() {
     engine?.clearOverload();
+    _poller.wake();
     notifyListeners();
   }
 
   /// Called when the app goes to the background or returns.
   void lifecycle({required bool foreground}) {
+    _poller.setVisible(foreground);
     final e = engine;
     if (e == null) return;
     if (!foreground) {
@@ -265,8 +275,14 @@ class AppState extends ChangeNotifier {
   void editSource(String id, String source) {
     final m = project.module(id);
     if (m == null || m.source == source) return;
+    final wasEdited = m.edited;
     m.source = source;
-    _changed(engine: false);
+    // The text lives in the editor; the rest of the app only shows whether the module has unrun edits.
+    if (m.edited != wasEdited) {
+      _changed(engine: false);
+    } else {
+      _save();
+    }
   }
 
   /// Run: the editor's code goes to the engine and hot-swaps. If it fails, the last good code keeps playing.
@@ -342,7 +358,8 @@ class AppState extends ChangeNotifier {
     if (m == null) return;
     m.params[name] = value;
     engine?.setParam(moduleId, name, value);
-    _changed(engine: false);
+    _save();
+    values.value++;
   }
 
   /// Every `global` declared by the project's modules, once each (the first declaration wins).
@@ -362,7 +379,8 @@ class AppState extends ChangeNotifier {
   void setGlobal(String name, double value) {
     project.globals[name] = value;
     engine?.setGlobal(name, value);
-    _changed(engine: false);
+    _save();
+    values.value++;
   }
 
   void setPreviewOnly(bool on) {
@@ -421,7 +439,13 @@ class AppState extends ChangeNotifier {
     if (mute != null) l.mute = mute;
     if (solo != null) l.solo = solo;
     engine?.setLayerMix(l.id, l.volume, l.pan, l.mute, l.solo);
-    _changed(engine: false);
+    // Volume and pan drags only redraw their sliders; mute and solo change how the whole layer list looks.
+    if (mute == null && solo == null) {
+      _save();
+      values.value++;
+    } else {
+      _changed(engine: false);
+    }
   }
 
   // ---------- project settings and files ----------

@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Performance audit, app part. Each keystroke or slider step rebuilt about 3,520 widgets; now 10 and 169 (measured). The meter poll ran every frame even when stopped; now nothing runs when stopped or hidden, and the audio device closes after 30 s idle ([performance](performance.md)).
+
 - 2026-10-28: Owner's performance audit, engine part. `caw_bench` plus callgrind found the bitwise and `%` conversions and a per-layer solo scan; exact fast paths cut 10–20% of instructions with output unchanged ([performance](performance.md)). Merged MIDI file import/export, the app's pattern model, the actions/keys/Vim core, and themes, fonts, density, settings, the startup screen and blank modules.
 
 - 2026-10-28: Building the go'd plan. Engine live editing done: code swaps keep the running state of unchanged calls, can wait for the next beat or bar, and pattern edits let sounding notes finish ([engine](engine.md#playback)).
