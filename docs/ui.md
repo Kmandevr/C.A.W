@@ -169,6 +169,21 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 ## Light on CPU and RAM
 
+**Owner (2026-10-28):** C.A.W must run as light as possible, so it works on very low-end devices ("a potato"). Every feature is built with that limit.
+
+- **[Assumption]** For testing, a "potato" means:
+  - an Android 8 phone (the app's minimum, `minSdk` 26) with 2 GB of RAM and an old 4-core ARM CPU
+  - an old dual-core Windows laptop
+- **[Proposal]** A **Light mode** setting, on by default when the engine reports overload. It:
+  - turns glow off and the scopes off, and runs meters at 15 fps
+  - plays 4 voices per pattern layer instead of 8
+  - pauses auto-update while playing, so swaps happen on Run only
+- **Editors:**
+  - The piano roll and grid repaint only when something changes, plus the playhead's small region while playing.
+  - The pattern model stays the source of truth while editing. It's turned into text only when saving or sending to the engine, not on every touch.
+- **Keys:** a key press is a lookup in a per-area table. Search and completion run only while the action list or `:` is open.
+- **Auto-update:** compiles off the UI thread after the pause you set. A change that doesn't compile costs nothing on the audio side.
+
 - **The audio never depends on the UI.** The C++ engine runs on its own thread ([engine](engine.md)), so a slow frame can't cause a dropout.
 - **Repaint only what moves:**
   - Meters, the playhead and scopes each sit in a small repaint region of their own, driven by one 30 fps ticker. The ticker runs only while playing and visible, and stops when the app is in the background.

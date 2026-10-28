@@ -8,6 +8,10 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Must run on low-end devices (owner)
+
+The app must run as light as possible, on very low-end devices. This is a limit on every feature. See [UI design](ui.md#light-on-cpu-and-ram) for the measures and a proposed Light mode.
+
 ## 2026-10-28: Blank files and a startup choice (owner)
 
 - New modules start empty, with a faint hint, and templates stay optional.
