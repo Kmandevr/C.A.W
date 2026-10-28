@@ -45,8 +45,8 @@ case "${1:-}" in
   --all) files | show ;;
   ""|--brief)
     if [ "${1:-}" = --brief ]; then
-      echo "Root files (with purposes: .claude/tools/tree.sh):"; files | grep -v / | tr '\n' ' ' | fold -s -w 118 | sed 's/^/  /; s/ *$//'; echo
-    else files | grep -v / | show; fi
+      echo "Root files (with purposes: .claude/tools/tree.sh):"; files | { grep -v / || true; } | tr '\n' ' ' | fold -s -w 118 | sed 's/^/  /; s/ *$//'; echo
+    else files | { grep -v / || true; } | show; fi
     for d in $(git ls-files | grep / | cut -d/ -f1 | sort -u | grep -v '^\.'); do
       n=$(files "$d" | wc -l)
       [ "$n" -gt 0 ] || continue

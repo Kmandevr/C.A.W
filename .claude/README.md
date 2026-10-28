@@ -1,6 +1,6 @@
 # .claude/ tooling
 
-Adapted from the AutoStacc repository's setup. `tools/`, `hooks/` and `workflows/` don't mention this project, so they're kept identical to AutoStacc's and can be refreshed from there. `skills/`, `agents/`, `rules/` and `.serena/` are specific to C.A.W.
+Adapted from the AutoStacc repository's setup. `tools/`, `hooks/` and `workflows/` don't mention this project, so they're kept identical to AutoStacc's and can be refreshed from there. One fix here isn't in AutoStacc yet: `tree.sh` no longer stops early when the repository root has no files of its own. `skills/`, `agents/`, `rules/` and `.serena/` are specific to C.A.W.
 
 | Piece | Loads | Purpose |
 | --- | --- | --- |
