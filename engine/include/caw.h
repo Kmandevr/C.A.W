@@ -90,6 +90,15 @@ CAW_API int32_t caw_render(const char* project_json, const CawRenderOptions* opt
    "constants":[...]}). Free with caw_free. */
 CAW_API char* caw_library(void);
 
+/* MIDI files for note patterns. caw_pattern_from_midi reads a Standard MIDI File (format 0 or 1) or a MIDI 2.0 Clip
+   File and returns JSON {"ok":..., "error":..., "pattern":"<pattern module text>"}; free it with caw_free.
+   caw_pattern_export writes a pattern module (its source text) to out_path: format 0 = Standard MIDI File (.mid),
+   1 = MIDI 2.0 Clip File (.midi2). bpm 20..400, beats_per_bar 1..16. Returns 0 on success. */
+enum { CAW_MIDI_SMF = 0, CAW_MIDI_CLIP = 1 };
+CAW_API char* caw_pattern_from_midi(const uint8_t* data, int32_t size);
+CAW_API int32_t caw_pattern_export(const char* pattern_source, double bpm, int32_t beats_per_bar, int32_t format,
+                                   const char* out_path, char* error, int32_t error_len);
+
 /* Starter templates bundled with the engine (the files in examples/). Strings are static; don't free them. */
 CAW_API int32_t caw_template_count(void);
 CAW_API const char* caw_template_file(int32_t index);

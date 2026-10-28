@@ -1,4 +1,5 @@
-// The caw command-line tool: check modules and render modules or projects to WAV (used by CI and AI agents).
+// The caw command-line tool: check modules, render modules or projects to WAV, and move patterns to and from MIDI
+// files (used by CI and AI agents).
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -11,6 +12,7 @@
 #include "capi_internal.h"
 #include "compile.h"
 #include "docs.h"
+#include "midifile.h"
 #include "pattern.h"
 #include "project.h"
 #include "render.h"
@@ -28,6 +30,12 @@ const char* kUsage =
     "      --bpm B --bars N  tempo and loop length when rendering a single module (default 120, 4)\n"
     "      --steps N         a single module's layer length in 16ths (default: the whole loop)\n"
     "      --pattern FILE    play a single module from a pattern's notes\n"
+    "  caw midi import IN.mid -o OUT.caw     a MIDI file (.mid, or a MIDI 2.0 clip .midi2) as a pattern\n"
+    "      --track N (0-based; default all)  --channel C (1-16; default all)  --name NAME\n"
+    "      --no-bend (ignore pitch bend)     --no-slides (keep legato overlaps as notes)\n"
+    "  caw midi export PATTERN.caw -o OUT.mid|OUT.midi2 [--bpm B] [--beats N] [--clip]\n"
+    "      a pattern as a MIDI 1.0 file, or a MIDI 2.0 clip file with --clip or a .midi2 name\n"
+    "      (default 120 BPM, 4 beats per bar)\n"
     "  caw templates                         list the bundled starter templates\n"
     "  caw docs [--check] [--dir DIR]        write DIR/library.md and DIR/agent-guide.md (default DIR: docs);\n"
     "                                        --check fails if they're stale, a function is undocumented, or an\n"
@@ -191,6 +199,88 @@ int render(int argc, char** argv) {
     return 0;
 }
 
+int midi(int argc, char** argv) {
+    if (argc < 4 || (std::strcmp(argv[2], "import") != 0 && std::strcmp(argv[2], "export") != 0)) {
+        std::fputs(kUsage, stderr);
+        return 2;
+    }
+    const bool import = std::strcmp(argv[2], "import") == 0;
+    const std::string input = argv[3];
+    std::string out;
+    caw::MidiImportOptions opts;
+    double bpm = 120;
+    int beats = 4;
+    bool clip = false;
+    for (int i = 4; i < argc; ++i) {
+        const std::string a = argv[i];
+        auto val = [&](const char* name) -> std::string {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "%s needs a value\n", name);
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (a == "-o") out = val("-o");
+        else if (import && a == "--track") opts.track = std::atoi(val("--track").c_str());
+        else if (import && a == "--channel") opts.channel = std::atoi(val("--channel").c_str()) - 1;
+        else if (import && a == "--name") opts.name = val("--name");
+        else if (import && a == "--no-bend") opts.pitchBend = false;
+        else if (import && a == "--no-slides") opts.legatoSlides = false;
+        else if (!import && a == "--bpm") bpm = std::atof(val("--bpm").c_str());
+        else if (!import && a == "--beats") beats = std::atoi(val("--beats").c_str());
+        else if (!import && a == "--clip") clip = true;
+        else {
+            std::fprintf(stderr, "unknown option %s\n%s", a.c_str(), kUsage);
+            return 2;
+        }
+    }
+    if (out.empty()) {
+        std::fputs(import ? "midi import needs -o OUT.caw\n" : "midi export needs -o OUT.mid\n", stderr);
+        return 2;
+    }
+    std::string data;
+    if (!readFile(input, data)) {
+        std::fprintf(stderr, "%s: can't read the file\n", input.c_str());
+        return 1;
+    }
+    std::string err;
+    if (import) {
+        const std::string text =
+            caw::patternFromMidi(reinterpret_cast<const uint8_t*>(data.data()), data.size(), opts, err);
+        if (text.empty()) {
+            std::fprintf(stderr, "%s: %s\n", input.c_str(), err.c_str());
+            return 1;
+        }
+        if (!caw::writeFile(out, std::vector<uint8_t>(text.begin(), text.end()), err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 1;
+        }
+        const caw::PatternResult pr = caw::parsePattern(text);
+        std::printf("%s: %zu notes, %d steps\n", out.c_str(), pr.pattern ? pr.pattern->notes.size() : 0,
+                    pr.pattern ? pr.pattern->lengthSteps : 0);
+        return 0;
+    }
+    if (!(bpm >= 20 && bpm <= 400) || beats < 1 || beats > 16) {
+        std::fputs("--bpm must be 20 to 400 and --beats 1 to 16\n", stderr);
+        return 2;
+    }
+    const caw::PatternResult pr = caw::parsePattern(data);
+    if (!pr.pattern) {
+        std::fprintf(stderr, "%s: %s\n", input.c_str(), pr.error.c_str());
+        return 1;
+    }
+    clip = clip || endsWith(out, ".midi2");
+    const std::vector<uint8_t> bytes =
+        clip ? caw::patternToMidiClip(*pr.pattern, bpm, beats) : caw::patternToSmf(*pr.pattern, bpm, beats);
+    if (!caw::writeFile(out, bytes, err)) {
+        std::fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+    }
+    std::printf("%s: %s, %zu notes, %zu bytes\n", out.c_str(), clip ? "MIDI 2.0 clip" : "MIDI file",
+                pr.pattern->notes.size(), bytes.size());
+    return 0;
+}
+
 }  // namespace
 
 std::string today() {
@@ -264,6 +354,7 @@ int main(int argc, char** argv) {
     if (cmd == "check") return check(argc, argv);
     if (cmd == "render") return render(argc, argv);
     if (cmd == "docs") return docs(argc, argv);
+    if (cmd == "midi") return midi(argc, argv);
     if (cmd == "templates") {
         for (int i = 0; i < caw::kTemplateCount; ++i) std::printf("%s\n", caw::kTemplateFiles[i]);
         return 0;
