@@ -109,7 +109,9 @@ class _ProjectStrip extends StatelessWidget {
   }
 }
 
-Future<void> showProjectSheet(BuildContext context, AppState s) => showModalBottomSheet<void>(
+Future<void> showProjectSheet(BuildContext context, AppState s) {
+  final opened = s.project;
+  return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,
@@ -118,7 +120,15 @@ Future<void> showProjectSheet(BuildContext context, AppState s) => showModalBott
           constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
           child: ListenableBuilder(
             listenable: s,
-            builder: (context, _) => ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(16, 8, 16, 16), children: [
+            builder: (context, _) {
+              // Another project opened meanwhile: close rather than edit it unseen.
+              if (!identical(s.project, opened)) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (context.mounted) Navigator.maybePop(context);
+                });
+                return const SizedBox(height: 80);
+              }
+              return ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(16, 8, 16, 16), children: [
               const Heading('Project'),
               _ProjectSettings(state: s),
               if (s.globalDefs.isNotEmpty) ...[
@@ -133,11 +143,13 @@ Future<void> showProjectSheet(BuildContext context, AppState s) => showModalBott
                   ),
                 ),
               ],
-            ]),
+            ]);
+            },
           ),
         ),
       ),
     );
+}
 
 class _ProjectSettings extends StatefulWidget {
   const _ProjectSettings({required this.state});
@@ -503,7 +515,7 @@ class _LanePainter extends CustomPainter {
     final paint = Paint();
     for (final n in ns) {
       final x = n.at.toDouble() * stepW;
-      if (x >= size.width) continue;
+      if (x > size.width - 2) continue;
       final w = (n.len.toDouble() * stepW).clamp(2.0, size.width - x);
       final y = 4 + (hi - n.pitch + (span - (hi - lo)) / 2) * rowH + (rowH - noteH) / 2;
       paint.color = color.withValues(alpha: 0.45 + 0.55 * n.vel.clamp(0.0, 1.0));
@@ -588,16 +600,9 @@ class _AddTrackCard extends StatelessWidget {
       ),
     );
     if (pick == null) return;
-    String? soundId;
-    if (pick is ModuleDoc) soundId = pick.id;
-    if (pick is Template) soundId = state.addModule(pick);
-    state.addLayer();
-    final l = state.project.layers.last;
-    final sound = state.project.module(soundId);
-    state.editLayer(l, (l) {
-      l.generatorId = sound?.id;
-      if (sound != null) l.name = sound.name;
-    });
+    if (pick is ModuleDoc) state.addLayer(soundId: pick.id);
+    if (pick is Template) state.addLayer(soundId: state.addModule(pick));
+    if (pick == false) state.addLayer(empty: true);
   }
 
   @override
@@ -640,7 +645,13 @@ Future<void> showTrackSheet(BuildContext context, AppState s, LayerDoc layer, Va
           child: ListenableBuilder(
             listenable: s,
             builder: (context, _) {
-              if (!s.project.layers.contains(layer)) return const SizedBox(height: 80);
+              // Deleted from elsewhere (a key, another project opened): close instead of showing a stale track.
+              if (!s.project.layers.contains(layer)) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (context.mounted) Navigator.maybePop(context);
+                });
+                return const SizedBox(height: 80);
+              }
               return _TrackSheet(
                 state: s,
                 layer: layer,

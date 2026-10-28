@@ -35,11 +35,11 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - for a library module, the functions other modules can call
   - **Run** (Ctrl+Enter) sends the code and hot-swaps it. Code that fails keeps the old sound and puts the cursor on the error
   - **Solo preview** plays only this module. An effect is heard through the generator of a layer that uses it, or the project's first generator. A generator plays the pattern of a layer that uses it, and a pattern plays through the sound of a layer that plays it (or the first generator)
-  - a pattern opens in the piano roll (`app/lib/ui/pattern_editor.dart`), with a **Text** button for its source; its panel says how many notes it has and which layers play it
+  - a pattern opens in the piano roll (`app/lib/ui/pattern_editor.dart`), with **Text** (the switch) for its source; its panel says how many notes it has and which layers play it
     - tools: draw (B), select (V), erase (X); undo/redo; grid resolution 1 to 1/128 (Alt+1..8); snap (N); fixed grid (Alt+F); drum grid (G); full screen
     - the grid adapts to zoom, down to the resolution; rows in the project's key are lit; velocity lane underneath; layer colour, brighter when louder
     - keys: WASD move the selection, Ctrl+WASD the cursor, Ctrl+Shift+WASD jump to the next note; Q inserts at the cursor, E copies the selection after itself; Shift+A/D length, Shift+W/S invert; +/- velocity; P, R, L cycle chance, ratchet, slide
-    - one finger edits, two fingers zoom and scroll; edits reach the text and the engine after 150 ms (one write per pause, light on slow phones); saving keeps comments
+    - touch (owner, 2026-10-28): a tap on empty space draws a note, a one-finger drag on empty space scrolls, a drag on a note moves it (near its end, resizes it), and a **double tap on a note deletes it**; two fingers zoom and scroll. With a mouse or pen, a drag on empty space while drawing sets the new note's length, and the wheel scrolls. Edits reach the text and the engine after 150 ms (one write per pause, light on slow phones); saving keeps comments
     - holding a note (or I, or the ⋮ menu) opens its extras: velocity, chance, ratchet 1–8 and slide, as one undo step
     - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
     - triplets (Alt+0) make every grid size 2/3 as long

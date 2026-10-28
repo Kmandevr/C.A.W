@@ -83,7 +83,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
             _openLibrary(m);
           case 'builder.jumpError':
             final info = s.info[m.id];
-            if (info != null && !info.ok) _code.jumpTo(info.line, info.col);
+            if (info != null && !info.ok) _showError(m, info);
           case 'builder.solo':
             s.setPreviewOnly(!s.previewOnly);
           case 'builder.module.rename':
@@ -256,16 +256,27 @@ class _BuilderScreenState extends State<BuilderScreen> {
     _focus.requestFocus();
   }
 
+  /// Opens the code (a pattern's text) if it's hidden, so jumps and inserts land where they can be seen.
+  void _showCode(ModuleDoc m) {
+    if (!_showingCode(m)) setState(() => _codeView[m.id] = true);
+  }
+
+  void _showError(ModuleDoc m, ModuleInfo info) {
+    _showCode(m);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _code.jumpTo(info.line, info.col));
+  }
+
   void _openLibrary(ModuleDoc m) {
     final lib = _library;
     if (lib == null) return;
+    _showCode(m);
     showLibrarySheet(context, library: lib, query: _code.wordAtCursor, onInsert: (t) => _type(m, t, completing: true));
   }
 
   Future<void> _run(ModuleDoc m) async {
     final info = await s.run(m.id);
     if (!mounted || info == null) return;
-    if (!info.ok) _code.jumpTo(info.line, info.col);
+    if (!info.ok) _showError(m, info);
   }
 
   static const _blanks = [
@@ -400,10 +411,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
       final status = _StatusLine(
           module: m,
           info: info,
-          onJump: () {
-            setState(() => _codeView[m.id] = true);
-            WidgetsBinding.instance.addPostFrameCallback((_) => _code.jumpTo(info!.line, info.col));
-          });
+          onJump: () => _showError(m, info!));
       final header = Row(children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

@@ -67,6 +67,12 @@ class _PatternEditorState extends State<PatternEditor> {
   double _gridH = 0;
   Timer? _hold; // long press on a note opens its extras panel
   Offset? _holdAt;
+  // Touch: a tap on empty space draws a note when the finger lifts, and a drag there scrolls instead.
+  bool _touch = false, _pendingDraw = false, _panning = false;
+  bool _multi = false; // two fingers are (or were, until all lift) zooming and scrolling
+  Offset? _panLast;
+  int? _tapNote; // the note a plain tap just landed on, and when: a second tap on it soon after deletes it
+  DateTime? _tapAt;
 
   static const _keyW = 44.0, _velH = 56.0, _xH = 40.0, _rulerH = 20.0;
   double get _lanesH => (_velLane ? _velH : 0) + (_extrasLane ? _xH : 0);
@@ -524,6 +530,16 @@ class _PatternEditorState extends State<PatternEditor> {
     final hit = _noteAt(p);
     _cursorPitch = _pitchAt(p.dy).clamp(0, 127);
     _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
+    // A double tap on a note deletes it.
+    final now = DateTime.now();
+    if (hit != null && hit == _tapNote && now.difference(_tapAt!) < const Duration(milliseconds: 350)) {
+      _tapNote = null;
+      _dragStart = null;
+      _dragBase = null;
+      _dragNote = null;
+      _apply(d.delete({hit}));
+      return;
+    }
     if (_tool == PatternTool.erase) {
       if (hit != null) _apply(d.delete({hit}));
       _dragNote = null;
@@ -542,6 +558,11 @@ class _PatternEditorState extends State<PatternEditor> {
       return;
     }
     _dragNote = null;
+    if (_tool == PatternTool.draw && _touch) {
+      _pendingDraw = true;
+      _panLast = p;
+      return;
+    }
     if (_tool == PatternTool.draw) {
       final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _tapLevel);
       if (r.id != null) {
@@ -561,6 +582,20 @@ class _PatternEditorState extends State<PatternEditor> {
   void _move(Offset p) {
     final start = _dragStart, base = _dragBase;
     if (start == null || base == null) return;
+    if (_pendingDraw && (p - start).distance > 8) {
+      _pendingDraw = false;
+      _panning = true;
+    }
+    if (_panning) {
+      final last = _panLast ?? p;
+      _panLast = p;
+      setState(() {
+        _scrollX -= p.dx - last.dx;
+        _scrollY -= p.dy - last.dy;
+      });
+      return;
+    }
+    if (_pendingDraw) return;
     if (_hold != null && (p - _holdAt!).distance > 8) {
       _hold!.cancel();
       _hold = null;
@@ -604,9 +639,23 @@ class _PatternEditorState extends State<PatternEditor> {
     }
   }
 
-  void _up() {
+  /// The finger lifted ([draw] false when a second finger came instead: then a pending tap draws nothing).
+  void _up({bool draw = true}) {
     _hold?.cancel();
     _hold = null;
+    final d = _doc, base = _dragBase;
+    // A plain tap on a note (no move, no resize) arms the double tap that deletes it.
+    final tapped = _dragNote != null && identical(base, d) && !_panning;
+    _tapNote = tapped ? _dragNote : null;
+    _tapAt = DateTime.now();
+    if (_pendingDraw && draw && d != null) {
+      _dragBase = null;
+      final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _tapLevel);
+      if (r.id != null) _apply(r.doc, select: {r.id!});
+    }
+    _pendingDraw = false;
+    _panning = false;
+    _panLast = null;
     if (_dragBase != null && _doc != null && !identical(_dragBase, _doc)) {
       // One undo step for the whole drag.
       _undo.add(_dragBase!);
@@ -812,9 +861,12 @@ class _PatternEditorState extends State<PatternEditor> {
               behavior: HitTestBehavior.opaque,
               onScaleStart: (e) {
                 _zoomStart = _pxPerStep;
-                if (e.pointerCount == 1) _down(e.localFocalPoint - const Offset(_keyW, _rulerH));
+                if (e.pointerCount >= 2) _multi = true;
+                _touch = e.kind == PointerDeviceKind.touch;
+                if (e.pointerCount == 1 && !_multi) _down(e.localFocalPoint - const Offset(_keyW, _rulerH));
               },
               onScaleUpdate: (e) {
+                if (_multi && e.pointerCount < 2) return; // one finger left after a pinch: wait for it to lift
                 if (e.pointerCount >= 2) {
                   // Two fingers zoom and scroll; one finger always edits.
                   setState(() {
@@ -826,7 +878,11 @@ class _PatternEditorState extends State<PatternEditor> {
                   _move(e.localFocalPoint - const Offset(_keyW, _rulerH));
                 }
               },
-              onScaleEnd: (_) => _up(),
+              onScaleEnd: (e) {
+                if (_multi && e.pointerCount > 0) return;
+                _up(draw: e.pointerCount == 0 && !_multi);
+                if (e.pointerCount == 0) _multi = false;
+              },
               child: Listener(
                 onPointerSignal: (e) {
                   if (e is PointerScrollEvent) {
