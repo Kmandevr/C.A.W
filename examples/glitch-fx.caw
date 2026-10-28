@@ -4,7 +4,7 @@ kind: effect
 name: Glitch
 summary: Flips bits of the incoming sound on the last 16th of each beat
 ---
-param mask = 240 in 0..4095
+param mask = 240 in 0..4095 step 1 "Which bits flip on the glitch step"
 let q = floor(in * 32767)
 let hit = step % 4 == 3
 (hit ? q ^ mask : q) / 32767

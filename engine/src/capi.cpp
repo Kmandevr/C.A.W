@@ -41,18 +41,7 @@ char* caw_check(const char* source) {
     if (!r.program)
         return dup("{\"ok\":false,\"error\":\"" + jsonEscape(r.error) + "\",\"line\":" + std::to_string(r.line) +
                    ",\"col\":" + std::to_string(r.col) + "}");
-    const Program& p = *r.program;
-    std::string s = std::string("{\"ok\":true,\"kind\":\"") + (p.kind == ModuleKind::Effect ? "effect" : "generator") +
-                    "\",\"name\":\"" + jsonEscape(p.name) + "\",\"summary\":\"" + jsonEscape(p.summary) +
-                    "\",\"params\":[";
-    for (size_t i = 0; i < p.params.size(); ++i) {
-        char buf[160];
-        std::snprintf(buf, sizeof buf, "%s{\"name\":\"%s\",\"default\":%.17g,\"min\":%.17g,\"max\":%.17g}",
-                      i ? "," : "", jsonEscape(p.params[i].name).c_str(), p.params[i].def, p.params[i].min,
-                      p.params[i].max);
-        s += buf;
-    }
-    return dup(s + "]}");
+    return dup("{\"ok\":true," + describeProgram(*r.program) + "}");
 }
 
 CawEngine* caw_engine_create(int32_t sample_rate) {
@@ -75,6 +64,10 @@ char* caw_engine_set_project(CawEngine* e, const char* json) {
 
 void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value) {
     if (e && module_id && name) e->engine->setParam(module_id, name, value);
+}
+
+void caw_engine_set_global(CawEngine* e, const char* name, double value) {
+    if (e && name) e->engine->setGlobal(name, value);
 }
 
 void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,

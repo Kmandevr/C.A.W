@@ -52,7 +52,8 @@ CAW_API int32_t caw_api_version(void);
 /* Strings returned by the engine are allocated; release them with caw_free. */
 CAW_API void caw_free(char* s);
 
-/* Compiles one module and returns JSON: {"ok":..., "error":..., "line":..., "col":..., "kind":..., "params":[...]} */
+/* Compiles one module and returns JSON: {"ok":..., "error":..., "line":..., "col":..., "kind":..., "params":[...],
+   "exports":[...], "imports":[...], "functions":[...]} (docs/engine.md describes every field). */
 CAW_API char* caw_check(const char* source);
 
 /* Engine for live playback. */
@@ -62,6 +63,8 @@ CAW_API void caw_engine_destroy(CawEngine* e);
    hot-swap with a crossfade; a module that fails to compile keeps its last good version. Returns result JSON. */
 CAW_API char* caw_engine_set_project(CawEngine* e, const char* project_json);
 CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value);
+/* Sets a project-wide `global` control; every module declaring it reads the new value. */
+CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
                                       int32_t solo);
 CAW_API void caw_engine_play(CawEngine* e);

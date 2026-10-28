@@ -37,12 +37,17 @@ struct Engine::Slot {
     std::atomic<bool> overloadFlag{false};
     std::atomic<float> scope[kScopeSize];
     std::atomic<int> scopePos{0};
+
+    double exportBuf[kMaxExports][kBlock] = {};  // this layer's exported values for the current chunk
+    int64_t visited = -1;                         // chunk id when last processed
 };
 
 // One layer's modules: the main instances plus shadow copies that play the loop's tail across a seam.
 struct Engine::Chain {
     std::vector<std::unique_ptr<Instance>> main, shadow;
     std::vector<std::string> moduleIds;
+    std::vector<std::vector<std::pair<uint16_t, int>>> exportMap;  // per module: (register, export buffer)
+    std::vector<std::vector<const double*>> importPtrs;            // per module: one pointer per import
     uint32_t used = 0;
     double layerLen = 1;  // samples in this layer's loop, for pos and phase
     double nb[kBlock], tb[kBlock], stepb[kBlock], beatb[kBlock], barb[kBlock], posb[kBlock], timeb[kBlock];
@@ -50,7 +55,9 @@ struct Engine::Chain {
 };
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload } type = Play;
+    enum Type { Install, SetSteps, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload, SetOrder } type = Play;
+    int orderList[kSlots] = {};
+    int orderCount = 0;
     int slot = 0;
     Chain* chain = nullptr;
     int steps = 0, order = 0;
@@ -149,14 +156,24 @@ int Engine::freeSlot() {
     return -1;
 }
 
-Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids) {
+Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring) {
     auto* c = new Chain();
+    int buf = 0;
+    size_t w = 0;
     for (size_t i = 0; i < ids.size(); ++i) {
         const ModuleState& m = modules_.at(ids[i]);
         c->main.push_back(std::make_unique<Instance>(m.program));
         c->shadow.push_back(std::make_unique<Instance>(m.program));
         c->moduleIds.push_back(ids[i]);
         c->used |= m.program->usedVars;
+        // Export buffers are numbered in chain order; setProject uses the same numbering.
+        std::vector<std::pair<uint16_t, int>> exports;
+        for (const ExportDef& e : m.program->exports)
+            if (buf < kMaxExports) exports.emplace_back(e.reg, buf++);
+        c->exportMap.push_back(std::move(exports));
+        std::vector<const double*> imports;
+        for (size_t k = 0; k < m.program->imports.size(); ++k) imports.push_back(w < wiring.size() ? wiring[w++] : nullptr);
+        c->importPtrs.push_back(std::move(imports));
     }
     std::fill_n(c->zero, kBlock, 0.0);
     writeParams(*c);
@@ -168,9 +185,16 @@ void Engine::writeParams(Chain& c) {
         const ModuleState& m = modules_.at(c.moduleIds[i]);
         const Program& p = c.main[i]->program();
         for (size_t k = 0; k < p.params.size(); ++k) {
-            double v = p.params[k].def;
-            auto it = m.params.find(p.params[k].name);
-            if (it != m.params.end()) v = std::min(p.params[k].max, std::max(p.params[k].min, it->second));
+            const ParamDef& d = p.params[k];
+            double v = d.def;
+            if (d.global) {
+                auto it = globals_.find(d.name);
+                if (it != globals_.end()) v = it->second;
+            } else {
+                auto it = m.params.find(d.name);
+                if (it != m.params.end()) v = it->second;
+            }
+            v = std::min(d.max, std::max(d.min, v));
             c.main[i]->setParam(static_cast<int>(k), v);
             c.shadow[i]->setParam(static_cast<int>(k), v);
         }
@@ -209,9 +233,10 @@ std::string Engine::setProject(const ProjectSpec& p) {
     const double stepLen = 60.0 * ctlSr_ / (p.bpm * 4.0);
     ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
 
+    globals_ = p.globals;
+
     // Compile changed modules. A module that fails keeps its last good program, so the old sound plays on.
     bool allOk = true;
-    std::string mods;
     std::map<std::string, ModuleState> next;
     for (const ModuleSpec& m : p.modules) {
         ModuleState st;
@@ -231,27 +256,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
             }
         }
         st.params = m.params;
+        st.ref = refName(!m.name.empty() ? m.name : (st.program && !st.program->name.empty() ? st.program->name : m.id));
         if (!st.error.empty()) allOk = false;
-        if (!mods.empty()) mods += ",";
-        mods += "\"" + jsonEscape(m.id) + "\":{\"ok\":" + (st.error.empty() ? "true" : "false");
-        if (!st.error.empty())
-            mods += ",\"error\":\"" + jsonEscape(st.error) + "\",\"line\":" + std::to_string(st.line) +
-                    ",\"col\":" + std::to_string(st.col);
-        if (st.program) {
-            const Program& pr = *st.program;
-            mods += std::string(",\"kind\":\"") + (pr.kind == ModuleKind::Effect ? "effect" : "generator") +
-                    "\",\"mode\":\"" + (pr.mode == OutputMode::Byte ? "byte" : "float") + "\",\"name\":\"" +
-                    jsonEscape(pr.name) + "\",\"summary\":\"" + jsonEscape(pr.summary) + "\",\"params\":[";
-            for (size_t i = 0; i < pr.params.size(); ++i) {
-                const ParamDef& d = pr.params[i];
-                char buf[160];
-                std::snprintf(buf, sizeof buf, "%s{\"name\":\"%s\",\"default\":%.17g,\"min\":%.17g,\"max\":%.17g}",
-                              i ? "," : "", jsonEscape(d.name).c_str(), d.def, d.min, d.max);
-                mods += buf;
-            }
-            mods += "]";
-        }
-        mods += "}";
         next[m.id] = std::move(st);
     }
     modules_ = std::move(next);
@@ -276,41 +282,89 @@ std::string Engine::setProject(const ProjectSpec& p) {
         wants.push_back({l.id, l.chain, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order});
     }
 
-    std::map<std::string, LayerState> nextLayers;
-    for (Want& w : wants) {
+    // Pass 1: which modules each layer plays, and its slot.
+    struct Planned {
+        Want w;
+        LayerState ls;
         std::vector<std::string> ids;
         std::vector<const Program*> sig;
+    };
+    std::vector<Planned> plan;
+    for (Want& w : wants) {
+        Planned pl{w, {}, {}, {}};
         for (const std::string& id : w.chain) {
             auto it = modules_.find(id);
             if (it == modules_.end() || !it->second.program) continue;
-            ids.push_back(id);
-            sig.push_back(it->second.program.get());
+            pl.ids.push_back(id);
+            pl.sig.push_back(it->second.program.get());
         }
-        LayerState ls;
         auto it = layers_.find(w.id);
         if (it != layers_.end()) {
-            ls = it->second;
+            pl.ls = it->second;
             layers_.erase(it);
         }
         const bool isAudition = w.id[0] == '\x01';
-        if (ids.empty()) {
-            if (ls.slot >= 0) {
+        if (pl.ids.empty()) {
+            if (pl.ls.slot >= 0) {
                 Cmd c;
                 c.type = Cmd::Remove;
-                c.slot = ls.slot;
+                c.slot = pl.ls.slot;
                 send(c);
             }
             continue;
         }
-        if (ls.slot < 0) {
-            ls.slot = isAudition ? kAuditionSlot : freeSlot();
+        if (pl.ls.slot < 0) {
+            pl.ls.slot = isAudition ? kAuditionSlot : freeSlot();
             if (isAudition) slotBusy_[kAuditionSlot] = true;
-            if (ls.slot < 0) continue;  // all slots busy (removals still fading)
-            ls.sig.clear();
-            ls.chain = nullptr;
-            ls.steps = -1;
-            ls.volume = -1;
+            if (pl.ls.slot < 0) continue;  // all slots busy (removals still fading)
+            pl.ls.sig.clear();
+            pl.ls.wiring.clear();
+            pl.ls.chain = nullptr;
+            pl.ls.steps = -1;
+            pl.ls.volume = -1;
         }
+        plan.push_back(std::move(pl));
+    }
+
+    // Pass 2: where each exported value lives. The first layer (in project order) playing a module provides it.
+    struct Source {
+        int slot;
+        const double* buf;
+    };
+    std::map<std::string, Source> sources;
+    for (const Planned& pl : plan) {
+        if (pl.w.id[0] == '\x01') continue;
+        int buf = 0;
+        for (const std::string& id : pl.ids) {
+            const ModuleState& m = modules_.at(id);
+            for (const ExportDef& e : m.program->exports) {
+                if (buf >= kMaxExports) break;
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, slots_[pl.ls.slot].exportBuf[buf]});
+                ++buf;
+            }
+        }
+    }
+
+    // Pass 3: wire imports, install changed chains, and order layers so exporters run before their readers.
+    std::map<std::string, std::vector<std::string>> warnings;
+    std::vector<std::vector<int>> readsFrom(kSlots);
+    std::map<std::string, LayerState> nextLayers;
+    std::vector<int> projectOrder;
+    for (Planned& pl : plan) {
+        std::vector<const double*> wiring;
+        for (const std::string& id : pl.ids)
+            for (const std::string& imp : modules_.at(id).program->imports) {
+                auto src = sources.find(imp);
+                if (src == sources.end()) {
+                    wiring.push_back(nullptr);
+                    warnings[id].push_back("nothing exports '" + imp + "' (it reads 0)");
+                } else {
+                    wiring.push_back(src->second.buf);
+                    if (src->second.slot != pl.ls.slot) readsFrom[pl.ls.slot].push_back(src->second.slot);
+                }
+            }
+        LayerState& ls = pl.ls;
+        const Want& w = pl.w;
         if (w.vol != ls.volume || w.pan != ls.pan || w.mute != ls.mute || w.solo != ls.solo) {
             writeMix(ls.slot, w.vol, w.pan, w.mute, w.solo);
             ls.volume = w.vol;
@@ -318,8 +372,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
             ls.mute = w.mute;
             ls.solo = w.solo;
         }
-        if (sig != ls.sig) {
-            Chain* c = buildChain(ids);
+        if (pl.sig != ls.sig || wiring != ls.wiring) {
+            Chain* c = buildChain(pl.ids, wiring);
             Cmd cmd;
             cmd.type = Cmd::Install;
             cmd.slot = ls.slot;
@@ -328,7 +382,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
             cmd.order = w.order;
             send(cmd);
             ls.chain = c;
-            ls.sig = sig;
+            ls.sig = pl.sig;
+            ls.wiring = std::move(wiring);
             ls.steps = w.steps;
         } else {
             writeParams(*ls.chain);
@@ -341,6 +396,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 ls.steps = w.steps;
             }
         }
+        projectOrder.push_back(ls.slot);
         nextLayers[w.id] = ls;
     }
     // Layers that disappeared fade out and free their slot.
@@ -353,11 +409,57 @@ std::string Engine::setProject(const ProjectSpec& p) {
     }
     layers_ = std::move(nextLayers);
 
+    // Dependency order: repeatedly take the first layer (in project order) whose sources are all placed. Layers
+    // in a loop are placed last in project order; one side of the loop then hears the other a block late.
+    {
+        Cmd oc;
+        oc.type = Cmd::SetOrder;
+        std::vector<bool> placed(kSlots, false);
+        bool progress = true;
+        while (progress) {
+            progress = false;
+            for (int slot : projectOrder) {
+                if (placed[slot]) continue;
+                bool ready = true;
+                for (int src : readsFrom[slot])
+                    if (!placed[src] && std::find(projectOrder.begin(), projectOrder.end(), src) != projectOrder.end())
+                        ready = false;
+                if (!ready) continue;
+                placed[slot] = true;
+                oc.orderList[oc.orderCount++] = slot;
+                progress = true;
+            }
+        }
+        for (int slot : projectOrder)
+            if (!placed[slot]) oc.orderList[oc.orderCount++] = slot;
+        send(oc);
+    }
+
     Cmd a;
     a.type = Cmd::AuditionOnly;
     a.flag = p.auditionOnly;
     send(a);
 
+    std::string mods;
+    for (const ModuleSpec& m : p.modules) {
+        const ModuleState& st = modules_.at(m.id);
+        if (!mods.empty()) mods += ",";
+        mods += "\"" + jsonEscape(m.id) + "\":{\"ok\":" + (st.error.empty() ? "true" : "false") + ",\"ref\":\"" +
+                jsonEscape(st.ref) + "\"";
+        if (!st.error.empty())
+            mods += ",\"error\":\"" + jsonEscape(st.error) + "\",\"line\":" + std::to_string(st.line) +
+                    ",\"col\":" + std::to_string(st.col);
+        if (st.program) mods += "," + describeProgram(*st.program);
+        mods += ",\"warnings\":[";
+        auto wit = warnings.find(m.id);
+        if (wit != warnings.end()) {
+            std::sort(wit->second.begin(), wit->second.end());
+            wit->second.erase(std::unique(wit->second.begin(), wit->second.end()), wit->second.end());
+            for (size_t i = 0; i < wit->second.size(); ++i)
+                mods += (i ? ",\"" : "\"") + jsonEscape(wit->second[i]) + "\"";
+        }
+        mods += "]}";
+    }
     return std::string("{\"ok\":") + (allOk ? "true" : "false") + ",\"modules\":{" + mods + "}}";
 }
 
@@ -373,6 +475,13 @@ void Engine::setParam(const std::string& moduleId, const std::string& name, doub
                     writeParams(*ls.chain);
                     break;
                 }
+}
+
+void Engine::setGlobal(const std::string& name, double value) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    globals_[name] = value;
+    for (auto& [id, ls] : layers_)
+        if (ls.chain) writeParams(*ls.chain);
 }
 
 void Engine::setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo) {
@@ -565,6 +674,10 @@ void Engine::applyCommands() noexcept {
             case Cmd::AuditionOnly:
                 auditionOnly_ = c.flag;
                 break;
+            case Cmd::SetOrder:
+                std::copy_n(c.orderList, c.orderCount, processOrder_);
+                processCount_ = c.orderCount;
+                break;
             case Cmd::ClearOverload:
                 for (int i = 0; i < kSlots; ++i) {
                     slots_[i].overloaded = false;
@@ -593,7 +706,7 @@ int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
     return static_cast<int64_t>(std::floor(static_cast<double>(k) * (s.steps * stepLen_) + 0.5));
 }
 
-void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out) noexcept {
+void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, Slot* exportTo, int offset) noexcept {
     auto& insts = shadow ? c.shadow : c.main;
     BlockCtx ctx;
     ctx.n = len;
@@ -630,7 +743,10 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out) n
     ctx.vars[static_cast<int>(Var::Phase)] = c.posb;
     ctx.vars[static_cast<int>(Var::Time)] = c.timeb;
     const double* input = c.zero;
-    for (auto& inst : insts) {
+    ctx.importOffset = offset;
+    for (size_t idx = 0; idx < insts.size(); ++idx) {
+        auto& inst = insts[idx];
+        ctx.imports = c.importPtrs[idx].empty() ? nullptr : c.importPtrs[idx].data();
         const Program& p = inst->program();
         if (p.mode == OutputMode::Byte) {
             const double ratio = p.rate / sr_;
@@ -644,6 +760,8 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out) n
         ctx.vars[static_cast<int>(Var::Rate)] = c.rateb;
         ctx.vars[static_cast<int>(Var::In)] = input;
         input = inst->process(ctx);
+        if (exportTo)
+            for (const auto& [reg, buf] : c.exportMap[idx]) std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf] + offset);
     }
     std::copy_n(input, len, out);
 }
@@ -697,11 +815,11 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         const int64_t n0 = gg - st;
         double* y = tmp_;
         s.cur->layerLen = layerLen;
-        runChain(*s.cur, false, n0, len, y);
+        runChain(*s.cur, false, n0, len, y, &s, j);
         if (s.seamLeft > 0) {
             const int sl = std::min(len, s.seamLeft);
             double z[kBlock];
-            runChain(*s.cur, true, s.shadowN, sl, z);
+            runChain(*s.cur, true, s.shadowN, sl, z, nullptr, j);
             for (int i = 0; i < sl; ++i) {
                 const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
                 y[i] = z[i] * (1.0 - w) + y[i] * w;
@@ -711,7 +829,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         }
         if (s.old) {
             s.old->layerLen = layerLen;
-            runChain(*s.old, false, n0, len, tmp2_);
+            runChain(*s.old, false, n0, len, tmp2_, nullptr, j);
             const int sl = std::min(len, s.swapLeft);
             for (int i = 0; i < len; ++i) {
                 double w = 1.0;
@@ -751,22 +869,31 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
 void Engine::processChunk(float* l, float* r, int m) noexcept {
     std::fill_n(mixL_, m, 0.0);
     std::fill_n(mixR_, m, 0.0);
-    for (int i = 0; i < kSlots; ++i) {
-        Slot& s = slots_[i];
-        if (!s.active || !s.cur) continue;
-        const double target = slotTarget(s);
-        if (target == 0.0 && s.gain == 0.0) {
-            s.contiguous = false;
-            if (s.removing) {
-                retire(s.cur, -1);
-                retire(s.old, i);
-                s.cur = s.old = nullptr;
-                s.active = false;
-                s.removing = false;
+    ++chunkId_;
+    // Layers in dependency order first, then any others (for example a layer installed before its order arrived).
+    for (int pass = 0; pass < 2; ++pass) {
+        const int count = pass == 0 ? processCount_ : kSlots;
+        for (int k = 0; k < count; ++k) {
+            const int i = pass == 0 ? processOrder_[k] : k;
+            Slot& s = slots_[i];
+            if (s.visited == chunkId_) continue;
+            s.visited = chunkId_;
+            if (!s.active || !s.cur) continue;
+            const double target = slotTarget(s);
+            if (target == 0.0 && s.gain == 0.0) {
+                s.contiguous = false;
+                for (auto& b : s.exportBuf) std::fill_n(b, m, 0.0);  // a silent layer shares zeros
+                if (s.removing) {
+                    retire(s.cur, -1);
+                    retire(s.old, i);
+                    s.cur = s.old = nullptr;
+                    s.active = false;
+                    s.removing = false;
+                }
+                continue;
             }
-            continue;
+            processSlot(s, m, target);
         }
-        processSlot(s, m, target);
     }
     // Master: gain, DC blocker, then the safety limiter, always last.
     const double R = 1.0 - kTwoPi * 5.0 / sr_;

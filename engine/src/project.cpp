@@ -2,6 +2,7 @@
 #include "project.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 #include "json.h"
@@ -58,6 +59,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             if (m.type != Json::Type::Object) continue;
             ModuleSpec spec;
             spec.id = m.string("id");
+            spec.name = m.string("name");
             spec.source = m.string("source");
             if (spec.id.empty()) continue;
             if (const Json* ps = m.get("params"); ps && ps->type == Json::Type::Object)
@@ -87,12 +89,31 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             out.layers.push_back(std::move(spec));
         }
     }
+    if (const Json* g = root.get("globals"); g && g->type == Json::Type::Object)
+        for (const auto& [k, v] : g->obj)
+            if (v.type == Json::Type::Number && std::isfinite(v.num)) out.globals[k] = v.num;
     if (const Json* a = root.get("audition"); a && a->type == Json::Type::Object) {
         out.auditionChain = idList(a->get("chain"));
         out.auditionSteps = clampi(a->number("length_steps", 0), 0, 64 * 16 * 16);
     }
     out.auditionOnly = root.boolean("audition_only", false) && !out.auditionChain.empty();
     return true;
+}
+
+std::string refName(const std::string& name) {
+    std::string out;
+    bool gap = false;
+    for (const char ch : name) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (std::isalnum(c)) {
+            if (gap && !out.empty()) out += '_';
+            out += static_cast<char>(std::tolower(c));
+            gap = false;
+        } else {
+            gap = true;
+        }
+    }
+    return out;
 }
 
 ProjectSpec singleModuleProject(const std::string& source, double bpm, int bars) {

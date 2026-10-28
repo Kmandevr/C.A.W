@@ -6,6 +6,7 @@ import '../engine/engine.dart';
 import '../model/app_state.dart';
 import '../model/project.dart';
 import 'code_editor.dart';
+import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -304,33 +305,33 @@ class _Params extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final params = info?.params ?? const <ParamInfo>[];
-    if (params.isEmpty) {
+    if (params.isEmpty && (info?.exports.isEmpty ?? true) && (info?.warnings.isEmpty ?? true)) {
       return const Padding(
         padding: EdgeInsets.only(top: 12),
         child: Text('Add `param name = 0.5 in 0..1` to get a slider.', style: TextStyle(color: Neon.dim, fontSize: 13)),
       );
     }
     final color = state.isEffect(module.id) ? Neon.pink : Neon.green;
+    final i = info;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Heading('Params'),
-      for (final p in params)
-        Row(children: [
-          SizedBox(width: 92, child: Text(p.name, overflow: TextOverflow.ellipsis, style: Neon.code(size: 14))),
-          Expanded(
-            child: Slider(
-              min: p.min,
-              max: p.max,
-              activeColor: color,
-              value: (module.params[p.name] ?? p.defaultValue).clamp(p.min, p.max),
-              onChanged: (v) => state.setParam(module.id, p.name, v),
-            ),
-          ),
-          SizedBox(
-            width: 60,
-            child: Text(formatParam(module.params[p.name] ?? p.defaultValue, p),
-                textAlign: TextAlign.right, style: Neon.code(size: 14, color: color)),
-          ),
-        ]),
+      const Heading('Controls'),
+      ParamGroups(
+        params: params,
+        color: color,
+        valueOf: (p) => p.global ? state.globalValue(p) : (module.params[p.name] ?? p.defaultValue),
+        onChanged: (p, v) => p.global ? state.setGlobal(p.name, v) : state.setParam(module.id, p.name, v),
+      ),
+      if (i != null && i.exports.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text('Shares: ${i.exports.map((e) => '${i.ref}.${e.name}').join(', ')}',
+              style: Neon.code(size: 13, color: Neon.blue)),
+        ),
+      for (final w in i?.warnings ?? const <String>[])
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(w, style: const TextStyle(color: Neon.yellow, fontSize: 13)),
+        ),
     ]);
   }
 }

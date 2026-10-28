@@ -4,6 +4,6 @@ kind: effect
 name: Bitcrush
 summary: Rounds the incoming sound to fewer bits
 ---
-param depth = 6 in 1..16
+param depth = 6 in 1..16 step 1 "Bits kept: fewer bits, more crunch"
 let q = 2 ** (floor(depth) - 1)
 floor(in * q + 0.5) / q

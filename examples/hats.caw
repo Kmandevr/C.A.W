@@ -5,7 +5,7 @@ name: Hats
 summary: Noise hi-hats on every 16th, opening on the off-beat
 mode: float
 ---
-param tone = 7000 in 2000..12000
+param tone = 7000 in 2000..12000 step 100 "Lowest frequency let through; higher is thinner"
 let open = step % 8 == 6
 let env = ad(fract(time * bpm / 15) < 0.5, 0.0005, open ? 0.25 : 0.04)
 hpf(noise(), tone, 1.2) * env * 0.5

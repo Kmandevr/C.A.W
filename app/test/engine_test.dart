@@ -16,6 +16,16 @@ void main() {
     final info = Engine.check(kick.source);
     expect(info.ok, isTrue);
     expect(info.params.map((p) => p.name), containsAll(['punch', 'decay']));
+    final punch = info.params.firstWhere((p) => p.name == 'punch');
+    expect(punch.tip, contains('pitch drops'));
+    expect(punch.header, 'Kick');
+    final rich = Engine.check('global swing = 0.1 in 0..0.5\nparam wave = saw in [sine, saw]\nparam on1 = on\nexport let x = 1\nwave');
+    expect(rich.ok, isTrue);
+    expect(rich.params[0].global, isTrue);
+    expect(rich.params[1].kind, ParamKind.choice);
+    expect(rich.params[1].choices, ['sine', 'saw']);
+    expect(rich.params[2].kind, ParamKind.toggle);
+    expect(rich.exports.single.name, 'x');
     final bad = Engine.check('t >>');
     expect(bad.ok, isFalse);
     expect(bad.line, 1);
@@ -29,6 +39,8 @@ void main() {
     ]);
     final result = await e.setProject(p.toEngineJson());
     expect(result['k']!.ok, isTrue);
+    expect(result['k']!.ref, 'kick');
+    expect(result['k']!.exports.single.name, 'env');
     expect(result['x']!.ok, isFalse);
     expect(result['x']!.error, contains('line 1'));
     e.play();

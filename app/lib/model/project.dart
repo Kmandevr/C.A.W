@@ -95,9 +95,11 @@ class ProjectDoc {
     this.seed = 0x7f3a,
     this.master = 0.7,
     this.seamCrossfade = true,
+    Map<String, double>? globals,
     List<ModuleDoc>? modules,
     List<LayerDoc>? layers,
-  })  : modules = modules ?? [],
+  })  : globals = globals ?? {},
+        modules = modules ?? [],
         layers = layers ?? [];
 
   static const int fileVersion = 1;
@@ -111,6 +113,7 @@ class ProjectDoc {
   int seed;
   double master;
   bool seamCrossfade;
+  Map<String, double> globals; // project-wide control values by name
   List<ModuleDoc> modules;
   List<LayerDoc> layers;
 
@@ -135,8 +138,9 @@ class ProjectDoc {
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
+        'globals': globals,
         'modules': [
-          for (final m in modules) {'id': m.id, 'source': m.runSource, 'params': m.params},
+          for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
         'layers': [
           for (final l in layers)
@@ -166,6 +170,7 @@ class ProjectDoc {
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
+        'globals': globals,
         'modules': [for (final m in modules) m.toJson()],
         'layers': [for (final l in layers) l.toJson()],
       };
@@ -180,6 +185,7 @@ class ProjectDoc {
         seed: (j['seed'] as num?)?.toInt() ?? 0,
         master: (j['master'] as num?)?.toDouble() ?? 0.7,
         seamCrossfade: j['seam_crossfade'] != false,
+        globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
         modules: ((j['modules'] as List?) ?? const [])
             .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>))
             .toList(),

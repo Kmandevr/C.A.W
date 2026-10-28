@@ -9,13 +9,50 @@ import 'package:ffi/ffi.dart';
 
 import 'bindings.dart';
 
-class ParamInfo {
-  const ParamInfo(this.name, this.defaultValue, this.min, this.max);
-  final String name;
-  final double defaultValue, min, max;
+enum ParamKind { number, toggle, choice }
 
-  static ParamInfo fromJson(Map<String, dynamic> j) => ParamInfo(j['name'] as String,
-      (j['default'] as num).toDouble(), (j['min'] as num).toDouble(), (j['max'] as num).toDouble());
+class ParamInfo {
+  const ParamInfo(
+    this.name,
+    this.defaultValue,
+    this.min,
+    this.max, {
+    this.step = 0,
+    this.kind = ParamKind.number,
+    this.choices = const [],
+    this.tip = '',
+    this.header = '',
+    this.doc = '',
+    this.global = false,
+  });
+  final String name;
+  final double defaultValue, min, max, step;
+  final ParamKind kind;
+  final List<String> choices;
+  final String tip, header, doc;
+  final bool global;
+
+  /// Tooltip text: the short tip, then the longer doc comment.
+  String get help => [tip, doc].where((s) => s.isNotEmpty).join('\n');
+
+  static ParamInfo fromJson(Map<String, dynamic> j) => ParamInfo(
+        j['name'] as String,
+        (j['default'] as num).toDouble(),
+        (j['min'] as num).toDouble(),
+        (j['max'] as num).toDouble(),
+        step: (j['step'] as num?)?.toDouble() ?? 0,
+        kind: switch (j['kind']) { 'toggle' => ParamKind.toggle, 'choice' => ParamKind.choice, _ => ParamKind.number },
+        choices: ((j['choices'] as List?) ?? const []).cast<String>(),
+        tip: (j['tip'] as String?) ?? '',
+        header: (j['header'] as String?) ?? '',
+        doc: (j['doc'] as String?) ?? '',
+        global: j['global'] == true,
+      );
+}
+
+class ExportInfo {
+  const ExportInfo(this.name, this.doc);
+  final String name, doc;
 }
 
 /// What the engine said about one module after compiling it.
@@ -29,6 +66,10 @@ class ModuleInfo {
     this.name = '',
     this.summary = '',
     this.params = const [],
+    this.ref = '',
+    this.exports = const [],
+    this.imports = const [],
+    this.warnings = const [],
   });
   final bool ok;
   final String error;
@@ -36,6 +77,12 @@ class ModuleInfo {
   final bool isEffect;
   final String name, summary;
   final List<ParamInfo> params;
+
+  /// The name other modules use to read this module's exports (`ref.export`).
+  final String ref;
+  final List<ExportInfo> exports;
+  final List<String> imports;
+  final List<String> warnings;
 
   static ModuleInfo fromJson(Map<String, dynamic> j) => ModuleInfo(
         ok: j['ok'] == true,
@@ -48,6 +95,12 @@ class ModuleInfo {
         params: ((j['params'] as List?) ?? const [])
             .map((p) => ParamInfo.fromJson(p as Map<String, dynamic>))
             .toList(),
+        ref: (j['ref'] as String?) ?? '',
+        exports: ((j['exports'] as List?) ?? const [])
+            .map((e) => ExportInfo((e as Map)['name'] as String, (e['doc'] as String?) ?? ''))
+            .toList(),
+        imports: ((j['imports'] as List?) ?? const []).cast<String>(),
+        warnings: ((j['warnings'] as List?) ?? const []).cast<String>(),
       );
 }
 
@@ -146,6 +199,12 @@ class Engine {
     final m = moduleId.toNativeUtf8(), n = name.toNativeUtf8();
     _b.setParam(_handle, m, n, value);
     calloc.free(m);
+    calloc.free(n);
+  }
+
+  void setGlobal(String name, double value) {
+    final n = name.toNativeUtf8();
+    _b.setGlobal(_handle, n, value);
     calloc.free(n);
   }
 

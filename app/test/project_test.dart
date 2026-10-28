@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:caw/model/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, modules: [
+ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'swing': 0.2}, modules: [
       ModuleDoc(id: 'm1', name: 'Lead', source: 't*2', runSource: 't', params: {'shift': 6}),
       ModuleDoc(id: 'fx', name: 'Crush', source: '---\nkind: effect\n---\nin'),
     ], layers: [
@@ -28,6 +28,8 @@ void main() {
     expect(layer['chain'], ['m1', 'fx']);
     expect(layer['length_steps'], 48);
     expect(j['audition_only'], false);
+    expect(j['globals'], {'swing': 0.2});
+    expect((j['modules'] as List).first['name'], 'Lead');
     final a = jsonDecode(sample().toEngineJson(audition: ['m1'], auditionOnly: true)) as Map<String, dynamic>;
     expect(a['audition'], {'chain': ['m1']});
     expect(a['audition_only'], true);

@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: v2 step 1 built: `fn` functions, rich params (step, tips, toggles, dropdowns, headers, doc comments), project `global`s, and `export`/`module.name` sharing between layers in dependency order. The app shows grouped Controls and Project controls; templates gained tips and `kick.env`. Templates sound unchanged (golden hashes equal).
+
 - 2026-10-28: Owner asked for a documented standard library (envelopes, connectors, MIDI and more); planned for v2 with generated docs in four places ([decisions](decisions.md)).
 
 - 2026-10-28: Owner set the direction: a light, easy halfway DAW without recording. Researched layouts and interactions; proposal in the new [UI design](ui.md) note, then refined with the owner's answers (orientation, keyboard-only PC use, library, controls-first sounds).

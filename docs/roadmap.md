@@ -88,6 +88,7 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - local `param`s with steps, tooltips, dropdowns, toggles and headers
   - project `global`s in a Project Controls panel
   - `export`ed signals other modules read (sidechain)
+  - **[Fact]** Built (step 1): params, globals, exports and functions, with the app's Controls and Project controls panels.
 - **Automation lanes** for globals.
 - **Pattern builder:**
   - single-sound and kit patterns, 1 step to 64 bars long

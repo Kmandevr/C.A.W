@@ -51,7 +51,25 @@ Unknown header keys are ignored, so newer files still load. With no header, a fi
 ### Statements
 
 - `let name = expression` names a value.
-- `param name = default in min..max` declares a slider. The app shows one per param, and the value is fixed for a whole block. Without `in`, the range is 0–1 if the default is in it, and otherwise 0 to twice the default.
+- `param name = default in min..max` declares a slider. The app shows one per param, and the value is fixed for a whole block. Without `in`, the range is 0–1 if the default is in it, and otherwise 0 to twice the default. Options can come in any order after the default:
+  - `step 0.5`: the slider moves in steps
+  - `"How bright the bass is"`: a tooltip
+  - `param filter = on` (or `off`): a toggle, 1 or 0
+  - `param wave = saw in [sine, saw, square]`: a dropdown. Its value is the index (here 1), and the code can compare with `wave.square`.
+- `global name = …` takes the same options as `param`, but the value belongs to the project. The app shows it once under Project controls, and every module that declares the same name reads the same value.
+- `export let name = expression` shares a value. Other modules read it as `module.name`.
+  - `module` is the module's name in lower case, with other characters as `_`: Kick gives `kick`, and Bytebeat loop gives `bytebeat_loop`.
+  - The first layer (in project order) that plays the module provides the value. A silent layer shares zeros.
+  - Layers run in dependency order, so a reader hears the same sample. When two modules read each other, one of them hears the other one block (64 samples) late.
+  - An effect can read the export of the generator in front of it.
+  - A name that nothing exports reads 0, and the project result lists it as a warning.
+- `fn name(a, b) = expression` defines a function.
+  - Each call is expanded in place, so oscillators, envelopes and filters inside a function get their own state per call.
+  - The body sees its arguments, built-ins, and names defined above the function.
+  - Functions can't call themselves. Errors in a body show even if it's never called.
+- **Comments with meaning:**
+  - `/// text` lines directly above a `param`, `global`, `export let` or `fn` document it. The app shows them in tooltips.
+  - `// --- Name ---` starts a group: the controls below it appear under that heading.
 - The last line is the output, and it must be an expression.
 - Statements are separated by new lines or `;`. A line ending in an operator, or an open bracket, continues on the next line. Comments are `//` and `/* */`.
 
@@ -108,7 +126,9 @@ The language has no I/O, loops or recursion, so a program's cost is fixed when i
 - 64 KB of source
 - nesting 128 deep
 - 1024 values (registers)
-- 32 params
+- 32 params and globals
+- 16 exports and 32 imports
+- functions nested 32 calls deep
 - 8192 numbers of oscillator, envelope and filter state
 
 Errors give a line and column, counting the header lines, for example `line 5, col 5: unknown name 'nope'`.
@@ -122,6 +142,9 @@ Errors give a line and column, counting the header lines, for example `line 5, c
 - **Mix:** each layer has volume, constant-power pan, mute and solo, smoothed over 5 ms. The master chain is master volume, then a 5 Hz DC blocker, then a safety limiter with a ceiling of −0.2 dBFS, always last.
 - **Overload:** the host reports how much of each audio callback was used. If the average stays above 85% for 20 callbacks, the engine mutes the newest audible layer, flags it in the meters and waits 100 callbacks before it would mute another. Clearing the overload unmutes them.
 - **Threads:** the control thread compiles code and sends messages to the audio thread through a lock-free queue. The audio thread hands retired programs back the same way, so it never allocates, locks or frees. Parameter and mix values are atomics.
+- **Globals and exports:**
+  - A global's value comes from the project's `globals` (or its default), and changes take effect without recompiling.
+  - Each layer has 16 export buffers. They're filled while its chain runs, so they're also ready for the effects later in that chain.
 - **Determinism:**
   - The output doesn't depend on the device's buffer size.
   - The engine builds with `-ffp-contract=off` (MSVC `/fp:precise`, which never contracts).
@@ -133,13 +156,14 @@ The app, the CLI and exports share one format:
 
 ```json
 { "caw_project": 1, "name": "Night Glitch", "bpm": 140, "beats_per_bar": 4, "loop_bars": 4,
-  "seed": 7, "master": 0.7, "seam_crossfade": true,
-  "modules": [ { "id": "m1", "source": "...the .caw text...", "params": { "shift": 6 } } ],
+  "seed": 7, "master": 0.7, "seam_crossfade": true, "globals": { "swing": 0.1 },
+  "modules": [ { "id": "m1", "name": "Kick", "source": "...the .caw text...", "params": { "shift": 6 } } ],
   "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"], "length_steps": 48,
                 "volume": 0.8, "pan": 0, "mute": false, "solo": false } ],
   "audition": { "chain": ["m1"], "length_steps": 0 }, "audition_only": false }
 ```
 
+- A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `audition` is the Builder's preview. With `audition_only`, only that chain is heard.
 - Values outside their range are clamped:
   - BPM 20–400
@@ -162,8 +186,12 @@ The app, the CLI and exports share one format:
 
 ## C API (`engine/include/caw.h`)
 
-- **Checking a module:** `caw_check(source)` returns JSON with ok, error, line, col, kind and params.
-- **Engine:** `caw_engine_create(sample_rate)` creates one. `caw_engine_set_project(json)` returns per-module results. Live controls: `caw_engine_set_param`, `caw_engine_set_layer_mix`, `caw_engine_play`, `caw_engine_stop`, `caw_engine_clear_overload`.
+- **Checking a module:** `caw_check(source)` returns JSON: ok, error, line, col, kind, mode, name, summary, and:
+  - `params`: each with name, default, min, max, step, kind (`number`, `toggle` or `choice`), choices, tip, header, doc and global
+  - `exports` (name and doc), `imports`, and `functions` (name, args and doc)
+- **Engine:** `caw_engine_create(sample_rate)` creates one.
+  - `caw_engine_set_project(json)` returns the same description per module, plus `ref` (its name for exports) and `warnings`.
+  - Live controls: `caw_engine_set_param`, `caw_engine_set_global`, `caw_engine_set_layer_mix`, `caw_engine_play`, `caw_engine_stop`, `caw_engine_clear_overload`.
 - **Meters:** `caw_engine_meters`, `caw_engine_layer_meter` and `caw_engine_scope` (1024 samples per layer, for the audition at index 64, or for the master at −1).
 - **Hosts and devices:** `caw_engine_process(left, right, frames)` lets hosts such as a plugin drive the audio. `caw_audio_start` and `caw_audio_stop` open the device through miniaudio: AAudio or OpenSL ES on Android, WASAPI on Windows, Core Audio, and ALSA or PulseAudio.
 - **Exports:** `caw_render(project_json, options, path, progress, cancel, …)` writes a WAV. Progress counts 0–1000, and a non-zero cancel stops it.
@@ -184,8 +212,9 @@ caw templates
 
 ## Tests
 
-`engine/build/caw_tests` runs 32 tests:
+`engine/build/caw_tests` runs 38 tests:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
+- **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Mixer:** block-size independence, layer lengths, seams, hot swap, broken code, mute, solo and pan, overload, stop and removal, effects, params and the limiter.
 - **Exports:** loop lengths, export equal to playback, free-length renders and cancel, one-shots, wavetables, broken modules and WAV bytes.
 - **Golden renders:** one hash per template in `engine/tests/golden.txt`. A hash changes only with an intended sound change; then run `caw_tests --update-golden` and say why in the commit.
