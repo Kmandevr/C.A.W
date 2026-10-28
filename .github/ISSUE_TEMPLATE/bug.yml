@@ -1,0 +1,56 @@
+name: Bug
+description: Something in the app, engine or tooling is broken
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "**This issue is public.** Don't include security problems (report them privately from the Security tab), personal details, tokens or keys."
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken? One or two sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Exact steps, including the sound code if it matters.
+      placeholder: "1. Open ...\n2. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Only what matters, e.g. phone model, Android version, app build or commit, headphones or speaker.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Logs, a short recording or screenshots, if useful.
+  - type: input
+    id: suspected-area
+    attributes:
+      label: Suspected area
+      description: Likely file or module, if known.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this to count as fixed.
+    validations:
+      required: true

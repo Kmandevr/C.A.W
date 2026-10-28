@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "serena": {
+      "command": ".claude/tools/serena.sh"
+    }
+  }
+}

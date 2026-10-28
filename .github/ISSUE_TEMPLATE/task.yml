@@ -1,0 +1,31 @@
+name: Task
+description: A feature, improvement, refactor, docs change or chore
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: "**This issue is public.** Don't include security problems (report them privately from the Security tab), personal details, tokens or keys."
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What should change and why. Keep it narrow; one piece of work per issue.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this to be done.
+    validations:
+      required: true
+  - type: input
+    id: files
+    attributes:
+      label: Relevant files
+      description: Optional. Likely files or modules.
+  - type: input
+    id: depends
+    attributes:
+      label: Blocked by
+      description: Optional. Issue numbers, e.g. #12.

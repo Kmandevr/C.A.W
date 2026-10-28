@@ -1,0 +1,6 @@
+# Changes here need the owner's review once the default branch ruleset requires code-owner review: what runs in CI
+# and the instructions Claude sessions follow.
+/.github/   @Kmandevr
+/.claude/   @Kmandevr
+/CLAUDE.md  @Kmandevr
+/scripts/   @Kmandevr

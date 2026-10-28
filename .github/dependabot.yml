@@ -1,0 +1,9 @@
+# Dependency updates: GitHub opens one grouped pull request a month when a workflow's actions have a newer version.
+# Gradle and other ecosystems join when android/ and engine/ land.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    groups: { actions: { patterns: ["*"] } }
+    open-pull-requests-limit: 2

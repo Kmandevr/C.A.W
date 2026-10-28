@@ -1,6 +1,12 @@
+---
+title: Roadmap
+summary: Staged plan from the first phone-testable bytebeat instrument to commercial release, with Milestone 1's scope and acceptance test.
+updated: 2026-10-28
+---
+
 # Roadmap
 
-Each stage ends with something you can install and use. Stages are provisional.
+How the plan in [architecture](architecture.md) gets built. Each stage ends with something you can install and use. Stages are provisional.
 
 ## Milestone 1 — "Bytebeat pocket instrument" (Stage 1)
 
@@ -38,7 +44,7 @@ Modules, parameters, GitHub sync, sequencer, spectrum display, audio import.
 
 ### Build order (each step is one reviewable PR)
 
-1. Repo scaffolding: Gradle + CMake skeleton, CI that builds an APK artifact, license decision.
+1. Project skeleton: Gradle + CMake, CI that builds an APK artifact. (Repository tooling, docs and agent setup are done.)
 2. Engine core and CLI: lexer → parser → compiler → VM, WAV writer, golden tests (Linux only).
 3. Android audio: JNI bridge, Oboe stream, program hot-swap, limiter.
 4. UI: editor, transport, errors, scope.
@@ -60,8 +66,6 @@ GitHub App with device-flow sign-in, a library repo template, tree-diff sync, at
 
 Sequencing mini-language with a shared clock and polyrhythms, audio import with nondestructive byte/bit mangling chains (originals are never modified), spectrum display, performance work, and commercial release preparation (licensing, privacy policy, Play Store compliance).
 
-## Decisions needed from you
+## Before Milestone 1 starts
 
-1. **Your phone model and Android version.** These confirm `minSdk 27` and are the main test device.
-2. **App license direction:** closed or commercial, open-source, or open-core. This affects what dependencies and contributions we can accept.
-3. **Name:** keep "C.A.W" as the working name?
+The owner answers the open questions in [vision](vision.md#open-questions) that block step 1: phone and Android version, and licence direction.

@@ -1,23 +1,24 @@
+<!-- covers: [scripts/, .github/] -->
 # C.A.W
 
-An experimental, code-driven glitch-sound instrument for Android: bytebeat,
-procedural synthesis, raw byte/audio mangling and compact sequencing. Code is
-the source of truth, audio renders locally on the phone, and WAV export feeds
-Reaper.
+An experimental, code-driven glitch-sound instrument for Android: bytebeat, procedural synthesis, raw byte and audio mangling, and compact sequencing. Code is the source of truth, audio renders locally on the phone, and WAV export feeds Reaper.
 
-**Status:** planning. There's no application code yet.
+**Status:** planning and repository setup. There's no application code yet; Milestone 1 is in [docs/roadmap.md](docs/roadmap.md).
 
-| Doc | What it covers |
+## Where things are
+
+| Path | What it is |
 | --- | --- |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Stack, audio engine, code execution, module format, GitHub sync, AI workflow, risks |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Staged plan and the concrete first milestone |
+| `docs/` | The plan and project memory (an Obsidian vault): [vision](docs/vision.md), [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), [decisions](docs/decisions.md), [log](docs/log.md) |
+| `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository |
+| `.github/` | Issue and PR templates, CODEOWNERS, Dependabot, and the workflows below |
+| `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, hooks ([.claude/README.md](.claude/README.md)) |
+| `CLAUDE.md` | Instructions every AI session follows |
 
-## Principles (short form)
+Workflows:
+- `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push and pull request.
+- `.github/workflows/clear-status-on-close.yml`: removes `status:` labels when an issue closes.
 
-1. Code is the source of truth.
-2. Edit, then hear it right away.
-3. All audio runs on the device and works offline.
-4. Modules are reusable across projects.
-5. Any AI agent can create sounds by editing plain files in git. No agent has to tap through the UI.
-6. No lock-in to one AI provider or one engine.
-7. Licensing, security and user data ownership are considered from day one.
+## Working on it
+
+Tasks and bugs are GitHub Issues. Security problems: [SECURITY.md](SECURITY.md).

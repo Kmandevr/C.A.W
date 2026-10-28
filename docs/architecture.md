@@ -1,4 +1,12 @@
+---
+title: Architecture
+summary: Technical plan: stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks.
+updated: 2026-10-28
+---
+
 # Architecture
+
+The technical plan for the owner's brief in [vision](vision.md). Build order: [roadmap](roadmap.md). Why each choice was made: [decisions](decisions.md).
 
 Labels used below:
 - **[Fact]** is verified, either in this repo or from a primary source. The date is noted when it matters.
@@ -7,7 +15,7 @@ Labels used below:
 
 ## 0. Current state
 
-- **[Fact]** As of 2026-10-28 the repository was empty: no commits, no code. Nothing exists to reuse.
+- **[Fact]** As of 2026-10-28 there is no application code. The repository holds this plan in `docs/`, the docs guard in `scripts/`, CI in `.github/` and the agent setup in `.claude/`. The `engine/`, `android/` and `examples/` folders below are planned, not built.
 
 ## 1. Technology stack
 
@@ -64,12 +72,14 @@ The central decision: **user code is compiled into bytecode for our own small VM
 
 ### This repo (Repository A — app) **[Proposal]**
 
+Already in place: `docs/`, `scripts/`, `.github/`, `.claude/`. Planned:
+
 ```
 engine/        C++ core: lexer, parser, compiler, VM, DSP built-ins, WAV writer (no Android deps)
 engine/cli/    Linux/macOS CLI: `caw check`, `caw render` (used by CI and AI agents)
 engine/tests/  Golden-render tests (hash of rendered output per example)
 android/       Gradle project: Compose UI, JNI bridge, Oboe stream, storage, sync
-docs/          These docs + language reference
+docs/          These notes + language reference (exists)
 examples/      Bundled starter sounds in the module format (later mirrored to the library)
 ```
 

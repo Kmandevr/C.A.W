@@ -1,0 +1,20 @@
+# Closed issues drop their "status: ..." labels so a stale "in progress" never lingers.
+name: Clear status labels on close
+on:
+  issues:
+    types: [closed]
+permissions:
+  issues: write
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          N: ${{ github.event.issue.number }}
+        run: |
+          gh api "repos/$REPO/issues/$N/labels" --jq '.[].name | select(startswith("status: "))' |
+            while read -r label; do
+              gh api -X DELETE "repos/$REPO/issues/$N/labels/$(jq -rn --arg l "$label" '$l|@uri')" --silent
+            done

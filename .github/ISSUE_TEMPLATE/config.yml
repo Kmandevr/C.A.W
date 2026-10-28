@@ -1,0 +1,6 @@
+# Issues here are public. Security problems go to a private advisory (SECURITY.md).
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem (private)
+    url: https://github.com/Kmandevr/C.A.W/security/advisories/new
+    about: Only the maintainers see it. Please don't open a public issue for anything that could be misused.

@@ -1,0 +1,21 @@
+# Docs guard and repo hygiene on every push and pull request: notes stay true to the repository and nothing secret or generated is committed.
+name: Docs and hygiene
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Docs guard (stale notes fail on pull requests)
+        run: node scripts/docs-test.js ${{ github.event_name == 'pull_request' && '--strict' || '' }}
+      - name: Repo hygiene
+        run: .claude/skills/release-check/check.sh

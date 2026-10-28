@@ -1,0 +1,64 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.claude/tools/graph.sh:*)",
+      "Bash(.claude/tools/tree.sh:*)",
+      "Bash(.claude/skills/code-nav/check.sh)",
+      "Bash(.claude/skills/handoff/check.sh)",
+      "Bash(.claude/skills/release-check/check.sh)",
+      "Bash(graphify:*)",
+      "Bash(uv tool install graphifyy)",
+      "mcp__serena",
+      "Bash(node scripts/docs-test.js:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Grep|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/tools/serena-hook.sh remind"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/docs-reminder.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/tools/serena-hook.sh cleanup"
+          }
+        ]
+      }
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "serena"
+  ],
+  "env": {
+    "MCP_TIMEOUT": "120000"
+  }
+}
