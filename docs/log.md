@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: Owner asked for synthesis, MIDI and user-friendly musical helpers ([decisions](decisions.md)); architecture gained the section, Milestone 1 gained exact-length musical loops, Stage 2 gained synthesis and MIDI.
+
 - 2026-10-28: Owner added synth, wavetable and sample output as a core capability ([decisions](decisions.md)); architecture gained voice mode and the export formats, roadmap Stage 2 includes them.
 
 - 2026-10-28: Flutter confirmed and the bit-exact, repeatable-chaos rules added to the architecture ([decisions](decisions.md)); the Flutter open question closed.

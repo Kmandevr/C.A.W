@@ -8,6 +8,16 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Synthesis, MIDI and musical helpers (owner)
+
+- **Owner requirement:** proper synthesis and MIDI, and user-friendly helpers so things like a loop that fits the beat are easy.
+- **How (proposal):**
+  - Musical time is built into the language (`bpm`, `beat`, `bar`, `step`, `pos`), and loops are exact-length with seam crossfades.
+  - Synthesis built-ins sit on Signalsmith DSP and DaisySP.
+  - MIDI covers notes, CC learn, clock, and MIDI file import and export.
+  - Note and scale helpers, plus starter templates.
+- **Milestone 1 gains** the BPM and loop length, the time variables and exact-length loop export, because they're small and they're what the owner needs for making samples now ([architecture](architecture.md#synthesis-midi-and-musical-helpers)).
+
 ## 2026-10-28: Every sound can be a synth, a wavetable or a sample (owner)
 
 - **Owner requirement:** any sound code can be played as a synth, exported as a waveform or wavetable for other synths, or exported as a sample (one-shot, loop, multisample).

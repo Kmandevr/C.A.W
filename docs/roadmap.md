@@ -26,7 +26,8 @@ How the plan in [architecture](architecture.md) gets built. Each stage ends with
 - C++ engine: bytebeat expression compiler + VM, played through miniaudio. **Hot-swaps on Run without stopping audio**, with a short crossfade.
 - Safety limiter, NaN guard, cost guard.
 - Save / load / duplicate `.caw` files in app storage, plus 5–10 bundled original examples.
-- **Export WAV:** choose a length, 44.1 or 48 kHz, 24-bit or 32-bit float. You choose where it's saved through the system file picker (e.g. Drive or Downloads).
+- **Musical loops:** a BPM and a loop length in bars. Code can use `bpm`, `beat`, `bar`, `step` and `pos`, playback wraps exactly at the loop, and export is cut exactly to it with loop points set.
+- **Export WAV:** the loop or a chosen length, 44.1 or 48 kHz, 24-bit or 32-bit float. You choose where it's saved through the system file picker (e.g. Drive or Downloads).
 - `caw render` Linux CLI. CI renders every example and checks that the output hasn't changed.
 
 ### Not in scope yet
@@ -39,7 +40,7 @@ Modules, parameters, GitHub sync, sequencer, spectrum display, audio import.
 2. Edit the formula and tap Run. The sound changes without a click or dropout.
 3. Type a broken formula. You get a clear error, and the previous sound keeps playing.
 4. Type something absurdly expensive. The app fades out and warns you instead of crashing or stuttering.
-5. Export 30 s to WAV. It opens in Reaper and sounds identical to playback.
+5. Export a 4-bar loop at 140 BPM to WAV. It opens in Reaper, lines up with Reaper's grid at 140 BPM, loops without a click, and sounds identical to playback.
 6. Close the app, reopen it, and your saved file is still there.
 
 ### Build order (each step is one reviewable PR)
@@ -52,7 +53,7 @@ Modules, parameters, GitHub sync, sequencer, spectrum display, audio import.
 
 ## Stage 2 — Modular sound library, synth and exports
 
-Voice mode (play any sound as a synth from an on-screen keyboard or MIDI), wavetable export, and one-shot, loop and multisample export (see [architecture](architecture.md#instruments-wavetables-and-samples)). Module format v1 (header + code), `param` declarations that generate sliders, `use` imports, stateful DSP built-ins (envelopes, filters, delay, noise, waveshaper, bitcrush), procedural instruments (e.g. a kick built from pitch decay, sine body, distortion and a noise click), and hot reload. Includes a 1-day NKIDO/Cedar spike.
+Synthesis built-ins, MIDI (notes, CC learn, clock, MIDI file import and export), note and scale helpers, starter templates (see [architecture](architecture.md#synthesis-midi-and-musical-helpers)). Voice mode (play any sound as a synth from an on-screen keyboard or MIDI), wavetable export, and one-shot, loop and multisample export (see [architecture](architecture.md#instruments-wavetables-and-samples)). Module format v1 (header + code), `param` declarations that generate sliders, `use` imports, stateful DSP built-ins (envelopes, filters, delay, noise, waveshaper, bitcrush), procedural instruments (e.g. a kick built from pitch decay, sine body, distortion and a noise click), and hot reload. Includes a 1-day NKIDO/Cedar spike.
 
 ## Stage 3 — GitHub integration
 

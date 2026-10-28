@@ -116,6 +116,32 @@ The owner's requirement: any sound code can become a **playable synth**, a **wav
 - **Sample export:** one-shots and loops as WAV (24-bit or 32-bit float). Loops get loop points in a `smpl` chunk, set at exactly repeating lengths where the code repeats. Multisample sets render a range of notes and velocities, plus an SFZ mapping file (an open text format).
 - **Aliasing is a choice:** bit-twiddled waveforms alias when pitched up, which is part of their sound. Voice mode and export offer optional oversampling (2× or 4×) for a cleaner result.
 
+### Synthesis, MIDI and musical helpers **[Proposal]**
+
+The owner's requirement: proper synthesis and MIDI, and helpers that make musical results (such as a loop that fits a beat) easy, without taking away raw bit code.
+
+- **Synthesis built-ins** (Stage 2, on top of Signalsmith DSP and DaisySP):
+  - oscillators: sine, saw, square, triangle, band-limited and raw
+  - noise, filters, envelopes (ADSR, decay) and LFOs
+  - FM and phase modulation, additive partials, wavetable playback of our own exported tables, and later granular
+
+  They mix freely with bytebeat expressions: `saw(freq) * (t>>8 & 1)` is valid code.
+- **MIDI:**
+  - notes in from the on-screen keyboard, USB/Bluetooth MIDI devices or the plugin host, driving voice mode
+  - CC and pitch bend mapped to `param`s ("MIDI learn")
+  - MIDI clock in, so the tempo follows external gear
+  - MIDI files imported to play a sound, and the sequencer's patterns exported as MIDI files for Reaper
+  - MPE later
+- **Musical time is built in:** `bpm` (project setting, or the host's when it's a plugin), `beat`, `bar`, `step` (16ths), and `pos` (0–1 through the loop). Code can say `(beat & 1) ? kick : 0` instead of working out sample counts.
+- **Loops that repeat cleanly:** a project has a loop length in bars at its BPM. Playback wraps at exactly that length, the waveform shows the loop, and export cuts at exactly that length, with loop points set. A bytebeat formula that doesn't repeat on its own gets a short crossfade at the seam, which can be turned off. For classic formulas the engine can also *find* their natural repeat length (powers of two of `t`) and offer it.
+- **Notes and scales:** note names (`C4`, `A#2`) and `mtof()`, plus `scale("minor", i)` and `chord("m7", i)` helpers. Quantizing a pitch to the project's key is one call.
+- **Approachable defaults in the app:**
+  - starter templates (a bytebeat loop, a kick, a bass synth, a pad, a glitch fx)
+  - auto-generated sliders for every `param`
+  - BPM tap, a bar-length picker, and one-tap "export this loop"
+
+  Beginners can start from a template and a few sliders, and every helper is still plain code that can be edited.
+
 ### Language direction **[Proposal]**
 
 - Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
