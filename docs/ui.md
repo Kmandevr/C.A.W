@@ -105,6 +105,15 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 ## Editors
 
+- **Owner's answers (2026-10-28), not built yet; the owner has more input before building starts:**
+  - The piano roll comes next, inside today's app (before the session-grid redesign), together with the drum grid.
+  - The piano roll and the drum grid edit the same pattern files, which stay readable text.
+  - **Scale:** rows in the project's key are highlighted. Notes can go anywhere, with no lock to the key.
+  - **Velocity:** a lane under the roll.
+  - **New notes:** a tap makes a note as long as the last one you sized; dragging while drawing sets the length directly.
+  - **Extras** (probability, ratchet, slide): both a long-press panel (right-click or the Menu key on PC) and lanes you can switch on under the roll. Notes with extras show a dot.
+  - **Saving:** the editor rewrites the pattern's text but keeps the header and comment lines; note lines are rewritten in time order, and a comment at the end of a note line stays with that note.
+  - **Where:** selecting a pattern in Builder shows the roll or grid in place of the code, with the text one tap away, plus a button to go full screen.
 - **Drum grid:**
   - cells at least 48 dp, scrolling one bar at a time, with a velocity lane under the steps
   - notes with extras (probability, ratchets, custom values) show a small dot, like Elektron's blinking locked steps

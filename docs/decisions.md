@@ -8,6 +8,10 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Pattern editor answers (owner); building waits for more input
+
+The owner chose to build the piano roll next, inside today's app, together with the drum grid. Rows in the key are highlighted, with no lock to the key. Velocity goes in a lane under the roll. New notes take the last length used, or a dragged length. Extras go both in a long-press panel and in optional lanes. Saving keeps comments. The editor sits in Builder, with full screen as an option. Details in [UI design](ui.md#editors). The owner has more input to give, so building waits for the owner's go.
+
 ## 2026-10-28: Notes before the piano roll (owner); how patterns play (Claude, after an architect review)
 
 - **Owner:** before the UI and piano roll, a sound you make must play from the notes you make.
