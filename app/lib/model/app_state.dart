@@ -1,4 +1,4 @@
-// App state: the open project, engine sync, autosave, meters polling and every edit the screens make.
+// App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -6,9 +6,19 @@ import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import 'project.dart';
+import 'settings.dart';
 import 'storage.dart';
 
+/// What the startup screen offers: the last project (if it still exists) and every saved project.
+({ProjectSummary? last, List<ProjectSummary> projects}) startupChoices(String? lastId, List<ProjectSummary> projects) =>
+    (last: projects.where((p) => p.id == lastId).firstOrNull, projects: projects);
+
 class AppState extends ChangeNotifier {
+  AppState({Settings? settings}) : settings = settings ?? Settings();
+
+  /// App-wide settings (theme, density, live coding).
+  final Settings settings;
+
   Engine? engine;
   String? engineError;
   String? audioError;
@@ -20,6 +30,14 @@ class AppState extends ChangeNotifier {
   String? selectedModuleId;
   bool previewOnly = false;
   bool ready = false;
+
+  /// True until the startup screen's choice opens a project.
+  bool starting = true;
+  String? lastProjectId;
+  List<ProjectSummary> savedProjects = const [];
+
+  /// The kind picked for a blank new module, so the editor can hint until the file has a header (not saved).
+  final Map<String, String> blankKinds = {};
 
   /// Bumped on every meter poll (about 30 times a second) so meters can repaint without rebuilding screens.
   final ValueNotifier<int> tick = ValueNotifier(0);
@@ -40,16 +58,31 @@ class AppState extends ChangeNotifier {
       engineError = 'The sound engine did not load: $e';
     }
     _storage = await ProjectStorage.open();
-    final last = await _storage!.lastOpened();
-    final loaded = last == null ? null : await _storage!.load(last);
-    project = loaded ?? starterProject();
-    selectedModuleId = project.modules.isEmpty ? null : project.modules.first.id;
+    lastProjectId = await _storage!.lastOpened();
+    savedProjects = await listProjects();
     ready = true;
     notifyListeners();
-    await _storage!.setLastOpened(project.id);
-    await _syncNow();
     _ticker = Ticker(_poll)..start();
   }
+
+  /// The startup screen's choice: opens [p] without saving the placeholder project shown before it.
+  Future<void> start(ProjectDoc p) async {
+    starting = false;
+    await _switchTo(p, saveCurrent: false);
+  }
+
+  Future<void> startLast() async {
+    final p = lastProjectId == null ? null : await _storage?.load(lastProjectId!);
+    await start(p ?? starterProject());
+  }
+
+  Future<void> startProject(String id) async {
+    final p = await _storage?.load(id);
+    if (p != null) await start(p);
+  }
+
+  /// An empty project: no modules and no layers.
+  ProjectDoc blankProject() => ProjectDoc(id: newId('p'), name: 'New project');
 
   @override
   void dispose() {
@@ -178,6 +211,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> flush() async {
     _saveTimer?.cancel();
+    if (starting) return; // the placeholder shown behind the startup screen is never saved
     await _storage?.save(project);
   }
 
@@ -248,18 +282,41 @@ class AppState extends ChangeNotifier {
     return info[id];
   }
 
-  String addModule(Template t) {
-    final m = moduleFromTemplate(t);
-    var name = m.name;
+  String _freeModuleName(String base) {
+    var name = base;
     var n = 2;
     while (project.modules.any((x) => x.name == name)) {
-      name = '${m.name} ${n++}';
+      name = '$base ${n++}';
     }
-    m.name = name;
+    return name;
+  }
+
+  String addModule(Template t) {
+    final m = moduleFromTemplate(t);
+    m.name = _freeModuleName(m.name);
     project.modules.add(m);
     selectedModuleId = m.id;
     _changed();
     return m.id;
+  }
+
+  /// A new, truly empty module. Until it has a header it compiles as a byte-mode generator, so the picked [kind]
+  /// (generator, effect, pattern or library) is remembered only for the editor's hint and badge.
+  String addBlankModule(String kind) {
+    final label = switch (kind) { 'effect' => 'Effect', 'pattern' => 'Pattern', 'library' => 'Library', _ => 'Sound' };
+    final m = ModuleDoc(id: newId('m'), name: _freeModuleName(label), source: '');
+    project.modules.add(m);
+    blankKinds[m.id] = kind;
+    selectedModuleId = m.id;
+    _changed();
+    return m.id;
+  }
+
+  /// The kind to hint for an empty module (null once it has any text).
+  String? hintKindOf(String moduleId) {
+    final m = project.module(moduleId);
+    if (m == null || m.source.isNotEmpty) return null;
+    return blankKinds[moduleId] ?? 'generator';
   }
 
   void renameModule(String id, String name) {
@@ -376,11 +433,12 @@ class AppState extends ChangeNotifier {
 
   Future<List<ProjectSummary>> listProjects() async => await _storage?.list() ?? const [];
 
-  Future<void> _switchTo(ProjectDoc p) async {
-    await flush();
+  Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
+    if (saveCurrent) await flush();
     engine?.stop();
     project = p;
     info = {};
+    blankKinds.clear();
     selectedModuleId = p.modules.isEmpty ? null : p.modules.first.id;
     previewOnly = false;
     await _storage?.setLastOpened(p.id);
@@ -389,7 +447,9 @@ class AppState extends ChangeNotifier {
     await _syncNow();
   }
 
-  Future<void> newProject() => _switchTo(starterProject()..name = 'New loop');
+  Future<void> newProject() => _switchTo(blankProject());
+
+  Future<void> newProjectFromTemplate() => _switchTo(starterProject());
 
   Future<void> openProject(String id) async {
     final p = await _storage?.load(id);

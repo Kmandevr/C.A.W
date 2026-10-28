@@ -107,12 +107,24 @@ class CodeController extends TextEditingController {
   }
 }
 
-/// The editable code area.
+/// The faint example an empty module shows for its kind (generator, effect, pattern or library): a header and a
+/// first line. It is only a hint; the file stays empty until you type.
+String codeHint(String kind) => switch (kind) {
+      'effect' => '---\nkind: effect\nname: My effect\n---\nin * 0.5',
+      'pattern' => '---\nkind: pattern\nname: My pattern\nlength: 16\n---\n// at  note  len  vel\n0      A2    2    1',
+      'library' => '---\nkind: library\nnamespace: mine\nname: My tools\n---\n/// Folds a signal back into -1..1.\n'
+          'fn fold(x, amount) = sin(x * amount)',
+      _ => '---\nkind: generator\nname: My sound\nmode: float\n---\nsine(mtof(A3)) * 0.5\n\n'
+          '// or with no header, a bytebeat formula: t * (t >> 5 | t >> 8)',
+    };
+
+/// The editable code area. [hint] shows faintly while it is empty.
 class CodeField extends StatelessWidget {
-  const CodeField({super.key, required this.controller, required this.focus, required this.onChanged});
+  const CodeField({super.key, required this.controller, required this.focus, required this.onChanged, this.hint});
   final CodeController controller;
   final FocusNode focus;
   final ValueChanged<String> onChanged;
+  final String? hint;
 
   @override
   Widget build(BuildContext context) => TextField(
@@ -129,10 +141,13 @@ class CodeField extends StatelessWidget {
         textCapitalization: TextCapitalization.none,
         style: Neon.code(),
         cursorColor: Neon.green,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           filled: true,
-          fillColor: Color(0xFF0B0B12),
-          contentPadding: EdgeInsets.all(12),
+          fillColor: Color.lerp(Neon.bg, Neon.panel, 0.4),
+          contentPadding: const EdgeInsets.all(12),
+          hintText: hint,
+          hintMaxLines: 12,
+          hintStyle: Neon.code(color: Neon.dim.withValues(alpha: 0.55)),
         ),
       );
 }

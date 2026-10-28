@@ -76,28 +76,50 @@ class _BuilderScreenState extends State<BuilderScreen> {
     if (!info.ok) _code.jumpTo(info.line, info.col);
   }
 
+  static const _blanks = [
+    ('generator', 'Sound', 'Makes sound: a formula, a synth or a drum'),
+    ('effect', 'Effect', 'Changes the sound coming in'),
+    ('pattern', 'Pattern', 'Notes for a sound to play'),
+    ('library', 'Library', 'Functions other modules can call'),
+  ];
+
+  /// New: a blank module of each kind first (an empty file with a faint hint), then the templates.
   Future<void> _newModule() async {
-    final t = await showModalBottomSheet<Template>(
+    final pick = await showModalBottomSheet<Object>(
       context: context,
       backgroundColor: Neon.panel,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text('Start from a template', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          ),
-          for (final t in s.templates)
-            ListTile(
-              leading: Icon(headerValue(t.source, 'kind') == 'effect' ? Icons.tune : Icons.graphic_eq,
-                  color: headerValue(t.source, 'kind') == 'effect' ? Neon.pink : Neon.green),
-              title: Text(headerValue(t.source, 'name') ?? t.file),
-              subtitle: Text(headerValue(t.source, 'summary') ?? '', style: const TextStyle(color: Neon.dim)),
-              onTap: () => Navigator.pop(context, t),
-            ),
-        ]),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+          child: ListView(shrinkWrap: true, children: [
+            const Heading('New blank'),
+            for (final (i, b) in _blanks.indexed)
+              ListTile(
+                autofocus: i == 0,
+                leading: Icon(kindIcon(b.$1), color: kindColor(b.$1)),
+                title: Text(b.$2),
+                subtitle: Text(b.$3, style: const TextStyle(color: Neon.dim)),
+                onTap: () => Navigator.pop(context, b.$1),
+              ),
+            const Heading('From a template'),
+            for (final t in s.templates)
+              ListTile(
+                leading: Icon(kindIcon(headerValue(t.source, 'kind') ?? 'generator'),
+                    color: kindColor(headerValue(t.source, 'kind') ?? 'generator')),
+                title: Text(headerValue(t.source, 'name') ?? t.file),
+                subtitle: Text(headerValue(t.source, 'summary') ?? '', style: const TextStyle(color: Neon.dim)),
+                onTap: () => Navigator.pop(context, t),
+              ),
+          ]),
+        ),
       ),
     );
-    if (t != null) s.addModule(t);
+    if (pick is Template) s.addModule(pick);
+    if (pick is String) {
+      s.addBlankModule(pick);
+      _focus.requestFocus();
+    }
   }
 
   Future<void> _rename(ModuleDoc m) async {
@@ -142,25 +164,32 @@ class _BuilderScreenState extends State<BuilderScreen> {
       if (m == null) {
         return Column(children: [
           picker,
-          const Expanded(child: Center(child: Text('No modules yet: tap + to start from a template'))),
+          const Expanded(child: Center(child: Text('No modules yet: tap New to start one'))),
         ]);
       }
       final info = s.info[m.id];
-      final color = kindColor(s.kindOf(m.id));
+      // An empty module shows the kind picked for it until its header says otherwise.
+      final kind = s.hintKindOf(m.id) ?? s.kindOf(m.id);
+      final color = kindColor(kind);
       final editor = CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _run(m),
           const SingleActivator(LogicalKeyboardKey.enter, meta: true): () => _run(m),
           const SingleActivator(LogicalKeyboardKey.f1): () => _openLibrary(m),
         },
-        child: CodeField(controller: _code, focus: _focus, onChanged: (v) => s.editSource(m.id, v)),
+        child: CodeField(
+          controller: _code,
+          focus: _focus,
+          onChanged: (v) => s.editSource(m.id, v),
+          hint: s.hintKindOf(m.id) == null ? null : codeHint(s.hintKindOf(m.id)!),
+        ),
       );
       final status = _StatusLine(module: m, info: info, onJump: () => _code.jumpTo(info!.line, info.col));
       final header = Row(children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(border: Border.all(color: color), borderRadius: BorderRadius.circular(6)),
-          child: Text(s.kindOf(m.id).toUpperCase(),
+          child: Text(kind.toUpperCase(),
               style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
         ),
         const SizedBox(width: 10),
