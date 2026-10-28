@@ -8,6 +8,12 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: Sold only through AutoStacc; samples first (owner)
+
+- **Closed and commercial, sold only through AutoStacc**, not the Play Store or other stores. The repository stays private. Permissive dependencies remain the rule, since the app's own source isn't published.
+- **Until then it's the owner's sample-making tool for AutoStacc**, so WAV export quality and speed of getting sounds out come first.
+- **Default branch:** `main` was pushed at the current commit. Sessions can't change repository settings (the proxy blocks GitHub's write APIs for branches and settings), so the owner switches the default to `main` in GitHub settings.
+
 ## 2026-10-28: Repository and agent setup (owner)
 
 - **Setup comes from AutoStacc**, the owner's other repository: `CLAUDE.md` with read-in-layers, the repo map from purpose lines (`.claude/tools/tree.sh`), Graphify for file-level orientation, Serena for symbols, path-scoped rules, skills, read-only review agents, the `change` workflow, the handoff, and GitHub Issues as the only task list. AutoStacc's project-agnostic `tools/`, `hooks/` and `workflows/` are kept identical so they can be refreshed from there (one exception: a `tree.sh` fix for a root with no files of its own, worth porting back).

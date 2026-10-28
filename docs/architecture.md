@@ -125,7 +125,7 @@ GitHub stores and versions files. It never executes audio code.
 - **Write:** the Git Data API (blobs → tree → commit → non-force ref update) gives **one atomic commit per save batch**. No git client is bundled.
 - **Conflicts:** if the ref update fails because the remote moved, the app re-fetches and merges files that only one side changed. When both sides changed a file, the app pushes local work to a branch (`caw/conflict-<timestamp>`) and shows a "pick one" choice. Nothing is lost silently.
 - **Offline-first:** the local copy is the working copy. Playback never waits on the network.
-- **Separate updates:** APK updates come from releases or the Play Store. Library updates come from git. Neither requires the other.
+- **Separate updates:** APK updates come from release builds (later delivered through AutoStacc). Library updates come from git. Neither requires the other.
 
 ## 5. AI-assisted editing (no phone UI control)
 
@@ -149,7 +149,7 @@ Any agent that can edit files in git works with this setup. There's no provider-
 | Touch code editing is clumsy | Symbol row (`t >> << & \| ^ ( ) ? :`), short files, live error line, Compose `BasicTextField` with lightweight highlighting |
 | Token leakage or over-broad access | Device flow, GitHub App limited to selected repos, Keystore storage, no shipped secrets |
 | Licensing | Use only permissive dependencies (Oboe Apache-2.0, any NKIDO use MIT), avoid GPL. Don't bundle community bytebeat formulas without permission. Choose the app license and library license (e.g. CC0/MIT for modules) **before** accepting outside contributions |
-| Play Store policy | Foreground-service type declarations, target SDK deadlines and a privacy policy (the app stores GitHub tokens) |
+| Selling outside the Play Store (owner: AutoStacc only) | **[Proposal]** One release signing key kept for good in repository secrets, since every update must be signed with it. Buyers enable installing from their browser, so give clear install steps on the AutoStacc page. A privacy policy is still needed (the app stores GitHub tokens). Foreground-service and target-SDK rules still apply on the device |
 
 ## Sources
 

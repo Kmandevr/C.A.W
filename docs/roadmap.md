@@ -64,8 +64,8 @@ GitHub App with device-flow sign-in, a library repo template, tree-diff sync, at
 
 ## Stage 5 — Advanced instrument
 
-Sequencing mini-language with a shared clock and polyrhythms, audio import with nondestructive byte/bit mangling chains (originals are never modified), spectrum display, performance work, and commercial release preparation (licensing, privacy policy, Play Store compliance).
+Sequencing mini-language with a shared clock and polyrhythms, audio import with nondestructive byte/bit mangling chains (originals are never modified), spectrum display, performance work, and preparing to sell through AutoStacc (signed release builds, privacy policy, install steps, how a purchase unlocks the app).
 
 ## Before Milestone 1 starts
 
-The owner answers the open questions in [vision](vision.md#open-questions) that block step 1: phone and Android version, and licence direction.
+The owner answers the open questions in [vision](vision.md#open-questions) that block step 1: phone and Android version.

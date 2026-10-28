@@ -12,6 +12,8 @@ The owner's brief (2026-10-28), condensed. Where this note and the code disagree
 
 An Android app that works as an experimental sound-design instrument: bytebeat, mathematical sound, procedural synthesis, raw audio manipulation and glitch music. It has the immediacy of an instrument and the flexibility of a programming environment. It isn't a DAW, a generic code editor or just a bytebeat player. It complements Reaper by making unusual sounds, instruments, effects and samples to export.
 
+**Business direction (owner, 2026-10-28):** closed and commercial, sold only through AutoStacc, the owner's own store. Until then, it's the owner's tool for making samples to sell on AutoStacc, so getting sound out as WAV comes before polish for other users.
+
 ## Principles (established direction)
 
 1. **Code is the source of truth.** Sounds and effects are defined in editable code, not locked behind conventional synth controls.
@@ -20,7 +22,7 @@ An Android app that works as an experimental sound-design instrument: bytebeat, 
 4. **Modular.** Instruments, effects, functions, patterns and tools are reusable across projects without copying source around.
 5. **AI-assisted creation.** AI assistants create and edit sound files through the file structure and GitHub. The instrument stays fully useful without AI, and all rendering is local.
 6. **Open architecture.** Not tied to one AI provider or one sound engine.
-7. **Built for commercial release.** Licensing, security, maintainability, performance and user data ownership are considered from the start.
+7. **Built for commercial release** through AutoStacc. Licensing, security, maintainability, performance and user data ownership are considered from the start.
 
 ## Sound engine approaches
 
@@ -55,6 +57,6 @@ Only the owner can settle these. Never build one as settled; ask.
 | Question | Blocks | Status |
 | --- | --- | --- |
 | Phone model and Android version (main test device, confirms `minSdk 27`) | Milestone 1, step 1 | Open |
-| App licence direction: closed/commercial, open-source or open-core | Milestone 1, step 1; accepting contributions | Open |
 | Licence for the sound library's modules (e.g. CC0 or MIT) | Stage 2 | Open |
-| Keep "C.A.W" as the name? | Store listing | Open |
+| Keep "C.A.W" as the name? | AutoStacc listing | Open |
+| How a purchase on AutoStacc unlocks or delivers the app (plain APK download, account check, licence key) | Stage 5 | Open |
