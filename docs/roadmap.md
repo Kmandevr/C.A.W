@@ -88,12 +88,17 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - local `param`s with steps, tooltips, dropdowns, toggles and headers
   - project `global`s in a Project Controls panel
   - `export`ed signals other modules read (sidechain)
+- **Automation lanes** for globals.
 - **Pattern builder:**
-  - pattern files with a drum grid and a piano roll
+  - single-sound and kit patterns, 1 step to 64 bars long
+  - a drum grid and a piano roll, with snap (1/16, 1/32, triplets) or free timing
+  - notes with probability, ratchets, slide and custom values
+  - curves on notes, drawn freehand and then refined with handles: bent pitch shows as a curved note
   - chord stamping, and generator buttons (Euclid, random in key, arpeggiate, humanize)
-  - procedural pattern code with Freeze
+  - procedural pattern code with optional per-repeat variation, and Freeze
   - drag a pattern onto any layer
-  - `.mid` import and export
+- **Scenes:** sets of patterns and global values per layer, switched in time with the loop.
+- **Notes stored the MIDI 2.0 way.** `.mid` import and MPE export come later; DAW export isn't a priority yet.
 - **The house-built synth:** play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Its voice pool also plays chords from patterns.
 - on-screen keys
 - USB/Bluetooth MIDI: notes, CC learn, clock, MIDI file import and export
@@ -116,7 +121,7 @@ macOS and Linux desktop apps, then iOS once its distribution question is settled
 
 ## Stage 5 — Advanced instrument
 
-- scenes and a timeline arranger
+- a timeline arranger
 - the sequencing mini-language
 - audio import with nondestructive byte/bit mangling chains (originals are never modified)
 - sends and buses

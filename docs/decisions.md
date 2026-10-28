@@ -19,6 +19,16 @@ Newest first. A later entry wins over an earlier one on the same topic.
   - pattern code in the module language, plus generator buttons that write notes you can edit
   - code can be frozen into a drawn pattern
 - **Release:** both features ship in v2 with the house synth, because chord patterns need its voice engine.
+- **Details, from a second round of questions:**
+  - Patterns come in two shapes, single-sound and kit (rows routed to layers), and can be 1 step to 64 bars long.
+  - Notes carry probability, ratchets, slide and custom values.
+  - Any note can carry curves for pitch and for any value. The piano roll draws a bent note as a curve, drawn freehand and then refined with points and handles.
+  - Notes snap to a grid (1/16, 1/32 or triplets) or are placed off-grid.
+  - Procedural patterns may vary between loop repeats, deterministically.
+  - Globals get automation lanes.
+  - No note recording in v2: patterns are drawn or generated.
+  - **Scenes move from Stage 5 into v2.**
+  - **MIDI 2.0 is the project's own note model.** MPE export stays possible, but exporting MIDI to a DAW isn't a priority yet.
 - **Status:** planning only. Nothing is built until the owner says so ([architecture](architecture.md#variables-and-patterns-proposal), [roadmap](roadmap.md)).
 
 ## 2026-10-28: How v1 was built (Claude's defaults, open to change)
