@@ -1,6 +1,6 @@
 # C.A.W
 
-**C.A.W** (Code Auditioning Workspace; the logo is a crow) is an experimental, code-driven glitch-sound instrument for Android, iOS, Windows, macOS and Linux (Android first): bytebeat, procedural synthesis, raw byte and audio mangling, and compact sequencing. Code is the source of truth, all audio renders locally on the phone, and WAV export feeds the owner's Reaper projects. Sound modules live as plain files in git, so any AI agent can make sounds without driving the phone's UI. It will be sold only through AutoStacc; until then it's the owner's tool for making AutoStacc samples. The owner's brief: [docs/vision.md](docs/vision.md). The plan: [docs/architecture.md](docs/architecture.md) and [docs/roadmap.md](docs/roadmap.md). **Status:** planning and repository setup; no application code yet.
+**C.A.W** (Code Auditioning Workspace; the logo is a crow) is an experimental, code-driven glitch-sound instrument for Android, iOS, Windows, macOS and Linux (Android first): bytebeat, procedural synthesis, raw byte and audio mangling, and compact sequencing. Code is the source of truth, all audio renders locally on the phone, and WAV export feeds the owner's Reaper projects. Sound modules live as plain files in git, so any AI agent can make sounds without driving the phone's UI. It will be sold only through AutoStacc; until then it's the owner's tool for making AutoStacc samples. The owner's brief: [docs/vision.md](docs/vision.md). The plan: [docs/architecture.md](docs/architecture.md) and [docs/roadmap.md](docs/roadmap.md). **Status:** v1 is built: engine ([docs/engine.md](docs/engine.md)) and app ([docs/app.md](docs/app.md)).
 
 ## Start of every session
 
@@ -18,7 +18,7 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 
 ## Layout
 
-`docs/` is the plan and memory, `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). The planned code folders (`engine/`, `app/`, `examples/`) are described in `docs/architecture.md`. Conventions for each kind of file load from `.claude/rules/` when you touch it.
+`docs/` is the plan and memory, `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (starter modules). Conventions for each kind of file load from `.claude/rules/` when you touch it.
 
 ## Read in layers
 
@@ -42,7 +42,7 @@ Keep context while it helps; clean up only at a task boundary (task done, PR ope
 
 ## Checking changes
 
-Run `node scripts/docs-test.js` after touching any note, `README.md`, `CLAUDE.md` or `.claude/`. Before calling a change ready, run the `release-check` skill. CI (`.github/workflows/docs.yml`) runs the same checks on every push and pull request. Engine and Android checks join this section when their code lands.
+Run `node scripts/docs-test.js` after touching any note, `README.md`, `CLAUDE.md` or `.claude/`. Before calling a change ready, run the `release-check` skill. CI (`.github/workflows/docs.yml`) runs the same checks on every push and pull request. Engine: `cmake -S engine -B engine/build && cmake --build engine/build && engine/build/caw_tests` (golden hashes change only with an intended sound change: `--update-golden`). App: `flutter analyze` and `flutter test` in `app/` (`CAW_LIB=<built libcaw.so>` adds the engine integration test). CI (`engine.yml`, `app.yml`) runs both.
 
 ## Git
 

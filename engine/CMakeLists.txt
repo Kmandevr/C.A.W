@@ -66,22 +66,22 @@ set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILIT
 
 # The library the app loads through dart:ffi.
 if(CAW_AUDIO)
-  add_library(caw SHARED src/capi.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
-  target_include_directories(caw PRIVATE third_party/miniaudio)
-  target_compile_options(caw PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CAW_FLAGS}>)
+  add_library(caw_engine SHARED src/capi.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
+  target_include_directories(caw_engine PRIVATE third_party/miniaudio)
+  target_compile_options(caw_engine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CAW_FLAGS}>)
   if(ANDROID)
-    target_link_libraries(caw PRIVATE log)
+    target_link_libraries(caw_engine PRIVATE log)
   endif()
   if(UNIX AND NOT APPLE AND NOT ANDROID)
-    target_link_libraries(caw PRIVATE dl m)
+    target_link_libraries(caw_engine PRIVATE dl m)
   endif()
 else()
-  add_library(caw SHARED src/capi.cpp platform/audio_none.cpp)
-  target_compile_options(caw PRIVATE ${CAW_FLAGS})
+  add_library(caw_engine SHARED src/capi.cpp platform/audio_none.cpp)
+  target_compile_options(caw_engine PRIVATE ${CAW_FLAGS})
 endif()
-target_link_libraries(caw PRIVATE caw_core)
-# Only the C API (marked CAW_API) is exported.
-set_target_properties(caw PROPERTIES CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden)
+target_link_libraries(caw_engine PRIVATE caw_core)
+# The file is libcaw.so / caw.dll; only the C API (marked CAW_API) is exported.
+set_target_properties(caw_engine PROPERTIES OUTPUT_NAME caw CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden)
 
 if(CAW_TOOLS)
   add_executable(caw_cli cli/main.cpp platform/audio_none.cpp)

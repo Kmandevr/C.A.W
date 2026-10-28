@@ -8,6 +8,26 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-28: How v1 was built (Claude's defaults, open to change)
+
+The owner asked for v1 to be built. These are the choices made while building it; each can be changed.
+- **Language values:** values are 64-bit floats with JavaScript's operator results, instead of pure int32 wrapping, so pasted bytebeat formulas give exactly what they give on the web. `x/0` and `x%0` stay defined as 0.
+- **Params live in the code** (`param name = 6 in 1..12`), not in the header, so a module's interface is in one place. The header keeps `caw`, `kind` (`generator` or `effect` in v1), `name`, `summary`, `mode` and `rate`.
+- **Fewer dependencies than planned:**
+  - The engine writes WAV and reads JSON with its own small code, instead of CHOC.
+  - v1's oscillators, envelope and filter are our own, which keeps them bit-exact. Signalsmith DSP and DaisySP move to v2.
+  - Dart bindings are written by hand, not generated with ffigen, so its licence question no longer arises.
+  - The only third-party code in the engine is miniaudio 0.11.25.
+- **App dependencies, all permissive:** Flutter 3.47.7 (BSD-3-Clause), `ffi` 2.2.0 (BSD-3-Clause), `path_provider` 2.1.6 (BSD-3-Clause), `file_picker` 13.1.0 (MIT). Versions are pinned and were at least two weeks old when chosen.
+- **Exports:**
+  - A loop export renders two loops and keeps the second, so it matches repeating playback, seams included.
+  - A one-shot is one pass of a layer with the silent end trimmed.
+  - A wavetable frame is one cycle (`t` 0–2047, `sine(1)` is one cycle).
+- **Overload:** the engine mutes the newest audible layer and shows a banner, instead of letting audio break up.
+- **Android application id `com.kmandevr.caw`:** it can still change, but only until the first release build is installed.
+- **Not in v1:** playing on in the background (an Android foreground service), RealtimeSanitizer and fuzzing in CI, and Serum's `clm ` wavetable chunk.
+- **Delivery:** all of v1 is on the one session branch and PR, in separate commits, instead of one PR per build step.
+
 ## 2026-10-28: Public repository, proprietary licence (owner)
 
 - **The repository goes public** (owner) so GitHub Actions minutes are free. This replaces "the repository stays private" in the entry below.

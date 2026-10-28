@@ -67,15 +67,18 @@ Neon on near-black: neon green, pink, yellow and blue (owner), each layer in one
 6. Export a 4-bar loop at 140 BPM. It lines up with Reaper's grid, loops without a click, and matches playback bit for bit. A one-shot ends cleanly. A wavetable loads into a wavetable synth.
 7. Close and reopen the app: the project, modules and settings are all there.
 
-### Build order (each step is one reviewable PR)
+### Status
 
-1. Skeleton: Flutter app (Android and Windows), CMake engine, CI that builds both apps and the Linux CLI.
-2. Engine core and CLI: lexer → parser → compiler → VM with the bit semantics, WAV writer, golden-render tests.
-3. Synth basics and effect modules (`in`, chains), plus the mixer: layers with their own lengths, volume, pan, mute, solo, limiter.
-4. Audio output: the engine's C API over `dart:ffi`, a miniaudio stream, hot-swap, CPU meter.
-5. Builder screen.
-6. Arranger screen and project settings.
-7. Exporter and project files.
+**[Fact]** All seven build steps are done (2026-10-28):
+1. skeleton and CI
+2. engine core and CLI
+3. synth basics, effects and the mixer
+4. audio output and hot swap
+5. Builder
+6. Arranger
+7. Exporter and project files
+
+CI runs the engine tests and golden renders, and checks the acceptance test's timing claims (layer lengths at 140 BPM, exact loop length, export matching playback). Steps 1, 2 and 5 of the acceptance test, and how exports load in Reaper and a wavetable synth, need the owner on the S22+ and on Windows. The engine is described in [engine](engine.md), and the app in [app](app.md).
 
 ## v2 — House synth and MIDI
 
@@ -108,7 +111,3 @@ macOS and Linux desktop apps, then iOS once its distribution question is settled
 - spectrum display
 - performance work
 - preparing to sell through AutoStacc: signed release builds, privacy policy, install steps, and how a purchase unlocks the app
-
-## Before v1 starts
-
-Nothing in the plan blocks step 1. GitHub Actions must run on the owner's account, though, because every build comes from CI.

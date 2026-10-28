@@ -15,7 +15,7 @@ Labels used below:
 
 ## 0. Current state
 
-- **[Fact]** As of 2026-10-28 there is no application code. The repository holds this plan in `docs/`, the docs guard in `scripts/`, CI in `.github/` and the agent setup in `.claude/`. The `engine/`, `app/` and `examples/` folders below are planned, not built.
+- **[Fact]** As of 2026-10-28, v1 is built: the C++ engine (`engine/`, described in [engine](engine.md)), the Flutter app for Android and Windows (`app/`) and the starter modules (`examples/`). CI builds and tests all of it. The plugin, GitHub sync, AI library editing and the v2 synth are still plans.
 
 ## 1. Technology stack
 
@@ -51,12 +51,11 @@ The language, compiler and VM are ours, because they are the product and the san
 | Job | Library | Licence | When |
 | --- | --- | --- | --- |
 | Audio output on every platform | [miniaudio](https://github.com/mackron/miniaudio) | Public domain / MIT-0 | v1 |
-| WAV (and FLAC) writing, lock-free FIFOs, sinc interpolation | [CHOC](https://github.com/Tracktion/choc) | ISC | v1 |
-| Catching allocations and locks on the audio thread | Clang [RealtimeSanitizer](https://clang.llvm.org/docs/RealtimeSanitizer.html) (`[[clang::nonblocking]]`, `-fsanitize=realtime`) in CI | Part of LLVM | v1 |
-| Crash-hunting the parser and compiler | libFuzzer with AddressSanitizer and UBSan in CI | Part of LLVM | v1 |
-| Dart bindings to the engine's C API | `ffigen` (generates them from the C header) | **[Assumption: check licence]** | v1 |
-| Filters, delays, FFT, envelopes, spectral tools | [Signalsmith DSP](https://github.com/Signalsmith-Audio/dsp) | MIT | v1 (basics), v2 |
-| Oscillators, filters, effects, synthesized drum voices | [DaisySP](https://github.com/electro-smith/DaisySP) (the MIT library only, never DaisySP-LGPL) | MIT | v1 (basics), v2 |
+| FLAC writing, sinc interpolation, if needed | [CHOC](https://github.com/Tracktion/choc) | ISC | Later (v1 writes WAV and passes messages with its own small code) |
+| Catching allocations and locks on the audio thread | Clang [RealtimeSanitizer](https://clang.llvm.org/docs/RealtimeSanitizer.html) (`[[clang::nonblocking]]`, `-fsanitize=realtime`) in CI | Part of LLVM | v2 (v1 CI runs AddressSanitizer and UBSan) |
+| Crash-hunting the parser and compiler | libFuzzer with AddressSanitizer and UBSan in CI | Part of LLVM | v2 |
+| Filters, delays, FFT, envelopes, spectral tools | [Signalsmith DSP](https://github.com/Signalsmith-Audio/dsp) | MIT | v2 (v1's filter and envelope are our own, for exact repeatability) |
+| Oscillators, filters, effects, synthesized drum voices | [DaisySP](https://github.com/electro-smith/DaisySP) (the MIT library only, never DaisySP-LGPL) | MIT | v2 |
 | Reference DSP algorithms | [Soundpipe](https://github.com/PaulBatchelor/Soundpipe) (archived January 2024: read and port, don't depend on it) | MIT | v1 onward |
 | Plugin format | [CLAP](https://cleveraudio.org/) | MIT | Stage 4b |
 | VST3, AUv2, AUv3 (macOS and iOS) and standalone builds from one CLAP plugin | [clap-wrapper](https://github.com/free-audio/clap-wrapper) | MIT (skip its AAX and ASIO options: GPL or commercial) | Stage 4b |
@@ -96,8 +95,8 @@ The central decision: **user code is compiled into bytecode for our own small VM
 
 The owner's requirement: code works directly on the bits, so sounds come out chaotic and noise-like, yet **exactly repeatable**, the way `t>>6<<5%t` is. The same code, seed and settings give the same samples, bit for bit, on every platform, in playback, in the plugin and in WAV export.
 
-- **Integers are 32-bit, wrapping**, with JavaScript's bytebeat semantics, so pasted formulas sound identical. Shift counts are masked to 0–31. `>>` is arithmetic and `>>>` logical. `%` keeps the sign of the left side, and `x/0` and `x%0` give 0. Operator precedence follows C and JavaScript, so `t>>6<<5%t` reads as `(t>>6) << (5%t)`.
-- **No undefined behaviour inside:** the VM computes on unsigned 32-bit values and converts, so C++'s signed-overflow and oversized-shift traps can't leak into the sound.
+- **[Fact]** **JavaScript's number semantics**, so pasted formulas sound identical: values are 64-bit floats, and bitwise operators work on 32-bit wrapping integers. Shift counts are masked to 0–31. `>>` is arithmetic and `>>>` logical. `%` keeps the sign of the left side, and `x/0` and `x%0` give 0. Operator precedence follows C and JavaScript, so `t>>6<<5%t` reads as `(t>>6) << (5%t)`. The full reference is in [engine](engine.md).
+- **No undefined behaviour inside:** bit operations convert through unsigned 32-bit values, so C++'s signed-overflow and oversized-shift traps can't leak into the sound.
 - **Bit tools as built-ins**, using C++20's `<bit>`: rotate (`rotl`, `rotr`), `popcount`, count leading/trailing zeros, bit reverse, byte swap, and reinterpreting a float's bits as an integer and back (`bits(x)`, `float(i)`). Later, the same tools work on the bytes of imported audio (Stage 5).
 - **Randomness is seeded, never live:** `hash(x)` and `noise(seed, t)` are counter-based hash functions (no hidden state, so jumping to any `t` gives the same value), and a project-level `seed` changes all of them at once. There's no clock or system randomness anywhere in the language.
 - **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits.
@@ -156,18 +155,18 @@ The owner's requirement: proper synthesis and MIDI, and helpers that make musica
 
 ## 3. Source and module structure
 
-### This repo (Repository A — app) **[Proposal]**
+### This repo (Repository A — app)
 
-Already in place: `docs/`, `scripts/`, `.github/`, `.claude/`. Planned:
+**[Fact]** Built as of v1:
 
 ```
-engine/          C++ core: lexer, parser, compiler, VM, DSP built-ins, WAV writer (no platform deps)
-engine/platform/ Audio output (miniaudio) and the C API the app calls
+engine/src/      C++ core: compiler, VM, built-ins, mixer, exports, WAV writer, C API (no platform deps)
+engine/platform/ Audio output (miniaudio)
 engine/cli/      Desktop CLI: `caw check`, `caw render` (used by CI and AI agents)
-engine/tests/    Golden-render tests (hash of rendered output per example)
-app/             Flutter app for every target: UI, editor, files, sync; per-platform folders inside
-docs/          These notes + language reference (exists)
-examples/      Bundled starter sounds in the module format (later mirrored to the library)
+engine/tests/    Unit tests and golden renders (hash of rendered output per template)
+app/             Flutter app: lib/ (engine bindings, model, screens), android/, windows/, linux/ (local testing)
+docs/            These notes and the language reference
+examples/        Bundled starter sounds in the module format (later mirrored to the library)
 ```
 
 ### Sound library (Repository B, created in Stage 3)
@@ -183,23 +182,13 @@ projects/     full pieces that reference modules
 AGENTS.md     language + format guide for any AI agent
 ```
 
-### Module file **[Proposal]**
+### Module file
 
 One plain-text file per module: a small metadata header followed by code. Single files are easy for AI agents to edit and produce clean git diffs.
 
-```
----
-caw: 1                 # module format version
-kind: effect           # instrument | effect | function | pattern | project
-name: bitcrush
-params:
-  bits: { default: 6, min: 1, max: 16, step: 1 }
----
-<code>
-```
-
-- Modules are referenced by path (`use effects/bitcrush`). Projects pin the library to a **commit SHA**, so an old project always sounds the same.
-- The app declares which format versions it supports. It lists incompatible modules but never loads them.
+- **[Fact]** Built in v1: the header holds `caw: 1`, `kind` (`generator` or `effect`), `name`, `summary`, `mode` and `rate`. Sliders come from `param` lines in the code, so a module's whole interface lives in one place. Format and language: [engine](engine.md).
+- **[Proposal]** Later kinds (`function`, `pattern`, `project`), referencing modules by path (`use effects/bitcrush`), and projects that pin the library to a **commit SHA**, so an old project always sounds the same.
+- The engine reads only format version 1 and rejects others with a clear error, so incompatible modules are listed but never played.
 
 ## 4. GitHub sync
 

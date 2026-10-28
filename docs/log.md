@@ -8,6 +8,8 @@ updated: 2026-10-28
 
 Newest first.
 
+- 2026-10-28: v1 built: the C++ engine (`engine/`, [engine](engine.md)), the Flutter app for Android and Windows (`app/`, [app](app.md)), seven starter modules (`examples/`), and CI for engine tests (Linux x64 and Arm64, Windows, sanitizers) and app builds (APK, Windows). Build choices are in [decisions](decisions.md); architecture and roadmap now say what is built.
+
 - 2026-10-28: Owner is making the repository public for free CI with the licence unchanged ([decisions](decisions.md)); proprietary `LICENSE` added and named in the README.
 
 - 2026-10-28: Owner named C.A.W "Code Auditioning Workspace", with a crow logo ([decisions](decisions.md)); name question closed.
