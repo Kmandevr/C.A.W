@@ -178,7 +178,7 @@ void main() {
       expect(err('${head}0 A1 0\n'), 'line 4, col 6: the length (in steps) must be 0.001 to 4096');
       expect(err('${head}0 A1 1 2\n'), 'line 4, col 8: velocity must be 0 to 1');
       expect(
-          err('${head}0 A1 1 1 wobble\n'), "line 4, col 10: unknown extra 'wobble' (try prob 0.5, ratchet 3 or slide)");
+          err('${head}0 A1 1 1 wobble\n'), "line 4, col 10: unknown extra 'wobble' (try prob 0.5, ratchet 3, slide, bend, vib, press or timbre)");
       expect(err('${head}0 A1 1 prob\n'), "line 4, col 8: 'prob' needs a number after it");
       expect(err('${head}0 A1 1 ratchet 2.5\n'), 'line 4, col 16: ratchet must be a whole number');
       expect(err('${head}0 A1 1 ratchet 9\n'), 'line 4, col 16: ratchet must be 1 to 8');
@@ -519,6 +519,39 @@ void main() {
       final d = body('0 C3 1\n2 D3 2\n');
       expect(d.reverse({1, 2}).notes.map((n) => n.at.toDouble()), [3, 0]);
       expect(d.invertPitch({1, 2}, 49).notes.map((n) => n.pitch), [50, 48]);
+    });
+  });
+
+  group('note expression', () {
+    test('reads and writes bend, vib, press and timbre like the engine', () {
+      final d = body('0 C3 4 1 bend 0:0~0.5 0.5:12 1:-2 vib 0.3 5.5 0.25 press 0:1 1:0.2 timbre 0:0 1:1\n4 D3 4\n');
+      final e = d.notes.first.expr;
+      expect(e.bend, [const NotePoint(0, 0, 0.5), const NotePoint(0.5, 12), const NotePoint(1, -2)]);
+      expect(e.vibDepth, 0.3);
+      expect(e.vibFade, 0.25);
+      expect(e.press.last.v, 0.2);
+      expect(d.notes[1].expr.isEmpty, isTrue);
+      expect(NoteExpression.valueAt(e.bend, 0.5), 12);
+      expect(NoteExpression.valueAt(e.bend, 0.25), lessThan(6)); // eased in
+      // An edited note writes its expression back after the other extras.
+      final changed = d.setExpression({d.notes[1].id}, const NoteExpression(bend: [NotePoint(0, 0), NotePoint(1, 2)], vibDepth: 0.5, vibRate: 6));
+      expect(changed.serialize(), contains('bend 0:0 1:2  vib 0.5 6'));
+      final again = PatternDoc.parse(changed.serialize()).doc!;
+      expect(again.notes[1].expr, changed.notes[1].expr);
+    });
+
+    test('errors match the engine', () {
+      expect(PatternDoc.parse('${head}0 C3 1 bend\n').error, contains('needs points'));
+      expect(PatternDoc.parse('${head}0 C3 1 bend 0.5:1 0.2:0\n').error, contains('rising'));
+      expect(PatternDoc.parse('${head}0 C3 1 press 0:2\n').error, contains('press values must be 0 to 1'));
+      expect(PatternDoc.parse('${head}0 C3 1 vib 0.3\n').error, contains('vib needs depth and rate'));
+    });
+
+    test('a chord line shares its expression; different expressions split the line', () {
+      final d = body('0 C3,E3 2 1 bend 0:0 1:1\n');
+      expect(d.notes[0].expr, d.notes[1].expr);
+      final split = d.setExpression({d.notes[1].id}, NoteExpression.none);
+      expect(split.serialize().split('\n').where((l) => l.trim().startsWith('0 ')).length, 2);
     });
   });
 }

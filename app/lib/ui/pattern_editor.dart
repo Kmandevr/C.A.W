@@ -20,6 +20,7 @@ import '../model/pattern_doc.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
 import 'key_router.dart';
+import 'note_expression.dart';
 import 'theme.dart';
 
 enum PatternTool { draw, select, curve, erase }
@@ -83,6 +84,11 @@ class _PatternEditorState extends State<PatternEditor> {
   double _cBend0 = 0;
   Offset? _cStart;
   bool _cAddOnTap = false; // a touch inside a segment: a tap adds a point there, a drag bends it
+  // The Curve tool on a selected note: editing its pitch curve (bend points) right on the roll.
+  int? _bNote, _bPoint, _bSeg;
+  double _bK0 = 0;
+  Offset? _bStart;
+  bool _bAddOnTap = false;
   double _gridH = 0;
   Timer? _hold; // long press on a note opens its extras panel
   Offset? _holdAt;
@@ -671,6 +677,126 @@ class _PatternEditorState extends State<PatternEditor> {
     setState(() => _doc = base.shape(targets, (n) => c.valueAt(n.at.toDouble()), chance: lane == 2));
   }
 
+  // ---------- pitch curves on notes (Curve tool) ----------
+
+  static const _bendRange = 12.0; // the owner's default: +-12 semitones on screen (the file allows +-48)
+
+  double _noteX(PatternNote n) => n.at.toDouble() * _pxPerStep - _scrollX;
+  double _noteW(PatternNote n) => math.max(3.0, n.len.toDouble() * _pxPerStep - 1);
+  double _noteMid(PatternNote n) => (127 - n.pitch.round()) * _rowH - _scrollY + _rowH / 2;
+  Offset _bendPx(PatternNote n, NotePoint q) => Offset(_noteX(n) + q.t * _noteW(n), _noteMid(n) - q.v * _rowH);
+
+  /// The selected note whose row or bent line is under [p] (a tap on an unselected note selects it instead).
+  int? _bendNoteAt(Offset p) {
+    final d = _doc;
+    if (d == null) return null;
+    final secPerStep = 15 / s.project.bpm;
+    for (final id in _sel) {
+      final n = d.byId(id);
+      if (n == null) continue;
+      final x0 = _noteX(n), w = _noteW(n);
+      if (p.dx < x0 - 12 || p.dx > x0 + w + 12) continue;
+      final u = ((p.dx - x0) / w).clamp(0.0, 1.0);
+      final lineY = _noteMid(n) - n.expr.pitchAt(u, u * n.len.toDouble() * secPerStep) * _rowH;
+      if ((p.dy - lineY).abs() < math.max(_rowH, 16) || (p.dy - _noteMid(n)).abs() < _rowH / 2) return id;
+    }
+    return null;
+  }
+
+  double _bendValue(double y, PatternNote n) {
+    var v = (_noteMid(n) - y) / _rowH;
+    if (_snap && !HardwareKeyboard.instance.isShiftPressed) v = v.roundToDouble();
+    return v.clamp(-_bendRange, _bendRange).toDouble();
+  }
+
+  void _setBend(int id, List<NotePoint> pts) {
+    final d = _doc!, n = d.byId(id)!;
+    setState(() => _doc = d.setExpression({id}, n.expr.copyWith(bend: List.unmodifiable(pts))));
+  }
+
+  void _bendDown(Offset p, int id) {
+    final d = _doc!, n = d.byId(id)!;
+    _dragBase = d;
+    _bNote = id;
+    _bStart = p;
+    final pts = n.expr.bend;
+    for (var i = 0; i < pts.length; i++) {
+      if ((_bendPx(n, pts[i]) - p).distance < math.max(16, _look.grab)) {
+        _bPoint = i;
+        _holdAt = p;
+        _hold = Timer(Duration(milliseconds: _look.holdMs), () {
+          final now = _doc!.byId(id)!.expr.bend;
+          if (i < now.length) _setBend(id, [...now]..removeAt(i));
+          _bPoint = null;
+        });
+        return;
+      }
+    }
+    final u = ((p.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0);
+    for (var i = 0; i + 1 < pts.length; i++) {
+      if (u > pts[i].t && u < pts[i + 1].t) {
+        _bSeg = i;
+        _bK0 = pts[i].k;
+        _bAddOnTap = true;
+        return;
+      }
+    }
+    // No points yet: the curve starts at the note's own pitch, then the touched point. Outside the points: a new one.
+    final q = NotePoint(u, _bendValue(p.dy, n));
+    final next = pts.isEmpty && u > 0.02 ? [const NotePoint(0, 0), q] : _insertPoint(pts, q);
+    _bPoint = next.indexOf(q);
+    _setBend(id, next);
+  }
+
+  List<NotePoint> _insertPoint(List<NotePoint> pts, NotePoint q) {
+    final out = [...pts];
+    final i = out.indexWhere((x) => x.t > q.t);
+    out.insert(i < 0 ? out.length : i, q);
+    return out.take(NoteExpression.maxPoints).toList();
+  }
+
+  void _bendMove(Offset p) {
+    final id = _bNote, start = _bStart, d = _doc;
+    if (id == null || start == null || d == null) return;
+    final n = d.byId(id);
+    if (n == null) return;
+    if (_hold != null && (p - _holdAt!).distance > 8) {
+      _hold!.cancel();
+      _hold = null;
+    }
+    final pts = [...n.expr.bend];
+    final i = _bPoint, seg = _bSeg;
+    if (i != null && i < pts.length) {
+      final lo = i > 0 ? pts[i - 1].t : 0.0, hi = i + 1 < pts.length ? pts[i + 1].t : 1.0;
+      final u = ((p.dx - _noteX(n)) / _noteW(n)).clamp(lo, hi);
+      pts[i] = NotePoint(u, _bendValue(p.dy, n), pts[i].k);
+      _setBend(id, pts);
+    } else if (seg != null && seg < pts.length) {
+      if (_bAddOnTap && (p - start).distance <= kTouchSlop) return;
+      _bAddOnTap = false;
+      // Dragging the line up bends it to rise late (eases in), down to rise early, as on the lanes.
+      final k = (_bK0 - (p.dy - start.dy) / 120).clamp(-1.0, 1.0);
+      pts[seg] = NotePoint(pts[seg].t, pts[seg].v, (k * 100).roundToDouble() / 100);
+      _setBend(id, pts);
+    }
+  }
+
+  void _bendEnd({required bool cancel}) {
+    final id = _bNote, start = _bStart;
+    if (id == null) return;
+    _hold?.cancel();
+    _hold = null;
+    if (!cancel && _bAddOnTap && start != null && _doc != null) {
+      final n = _doc!.byId(id)!;
+      final u = ((start.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0);
+      _setBend(id, _insertPoint(n.expr.bend, NotePoint(u, _bendValue(start.dy, n))));
+    }
+    _bNote = _bPoint = _bSeg = null;
+    _bStart = null;
+    _bAddOnTap = false;
+    cancel ? _cancelEdit() : _up();
+  }
+
   // ---------- generators ----------
 
   /// Asks for a generator's settings, then applies it as one undo step. Euclid and Random write from the cursor at the
@@ -732,8 +858,11 @@ class _PatternEditorState extends State<PatternEditor> {
       final p = e.localPosition - _origin;
       if (_tool == PatternTool.curve) {
         // Curve tool: the lanes edit their curve; on the grid a tap picks notes and a drag scrolls.
+        final bendOn = p.dy < _gridH ? _bendNoteAt(p) : null;
         if (p.dy >= _gridH) {
           _curveDown(p);
+        } else if (bendOn != null) {
+          _bendDown(p, bendOn);
         } else {
           _pending = p;
           _panning = false;
@@ -747,6 +876,7 @@ class _PatternEditorState extends State<PatternEditor> {
     } else if (_pointers.length == 2) {
       _cancelEdit();
       _curveEnd(cancel: true);
+      _bendEnd(cancel: true);
       _pending = null;
       final ps = _pointers.values.toList();
       _pinchSpan = (ps[0].dx - ps[1].dx).abs();
@@ -790,6 +920,7 @@ class _PatternEditorState extends State<PatternEditor> {
       }
       return;
     }
+    if (_bNote != null) return _bendMove(p);
     if (_cLane != 0) return _curveMove(p);
     _move(p);
   }
@@ -816,6 +947,7 @@ class _PatternEditorState extends State<PatternEditor> {
       }
       return;
     }
+    if (_bNote != null) return _bendEnd(cancel: cancel);
     if (_cLane != 0) return _curveEnd(cancel: cancel);
     cancel ? _cancelEdit() : _up();
   }
@@ -1011,6 +1143,7 @@ class _PatternEditorState extends State<PatternEditor> {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
+      isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
         final n = _doc!.byId(sel.first)!;
         void change(PatternDoc Function(PatternDoc) f) {
@@ -1018,7 +1151,9 @@ class _PatternEditorState extends State<PatternEditor> {
           set(() {});
         }
 
-        return Padding(
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
+          child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(sel.length == 1 ? 'Note at ${n.at}, length ${n.len}' : '${sel.length} notes',
@@ -1042,7 +1177,10 @@ class _PatternEditorState extends State<PatternEditor> {
               value: n.slide,
               onChanged: (v) => change((d) => d.setSlide(sel, v)),
             ),
+            // The note's own pitch curve, vibrato, volume and timbre (MPE style); one undo step with the rest.
+            ExpressionPanel(expr: n.expr, color: _noteColor, onChanged: (e) => change((d) => d.setExpression(sel, e))),
           ]),
+          ),
         );
       }),
     );
@@ -1246,6 +1384,8 @@ class _PatternEditorState extends State<PatternEditor> {
                       xH: _extrasLane ? _xH : 0,
                       gridStrength: _look.gridStrength,
                       curves: _tool == PatternTool.curve ? _curves : null,
+                      secPerStep: 15 / s.project.bpm,
+                      editBend: _tool == PatternTool.curve && _sel.length == 1 ? _sel.first : null,
                       keyLabels: _look.keyLabels,
                     ),
                   ),
@@ -1579,8 +1719,12 @@ class _RollPainter extends CustomPainter {
     required this.gridStrength,
     required this.keyLabels,
     required this.curves,
+    required this.secPerStep,
+    required this.editBend,
   });
   final Map<int, LaneCurve>? curves;
+  final double secPerStep; // seconds per 16th at the project tempo, for drawing vibrato
+  final int? editBend; // the note whose pitch points show (the Curve tool's selected note)
   final double velH, xH, gridStrength;
   final KeyLabels keyLabels;
   final PatternDoc doc;
@@ -1633,9 +1777,36 @@ class _RollPainter extends CustomPainter {
       final x = n.at.toDouble() * pxPerStep - scrollX, nw = math.max(3.0, n.len.toDouble() * pxPerStep - 1);
       if (x > w || x + nw < 0) continue;
       final y = (127 - n.pitch.round()) * rowH - scrollY;
-      if (y > h || y + rowH < 0) continue;
+      final e = n.expr;
+      final bent = e.bend.isNotEmpty || e.vibDepth > 0;
+      // A bent note can sound far from its row: keep it on screen while any of its curve is.
+      final reach = bent ? (e.bend.fold(0.0, (m, p) => math.max(m, p.v.abs())) + e.vibDepth + 1) * rowH : 0.0;
+      if (y - reach > h || y + rowH + reach < 0) continue;
       final r = RRect.fromRectAndRadius(Rect.fromLTWH(x, y + 1, nw, rowH - 2), const Radius.circular(3));
-      canvas.drawRRect(r, Paint()..color = color.withValues(alpha: 0.35 + 0.65 * n.vel));
+      final fill = color.withValues(alpha: 0.35 + 0.65 * n.vel);
+      if (bent) {
+        // The note's pitch over time, MIDI Sketch style: its row stays faint, the bent line carries it.
+        canvas.drawRRect(r, Paint()..color = fill.withValues(alpha: 0.18));
+        final path = Path();
+        final lenSec = n.len.toDouble() * secPerStep;
+        for (var px = 0.0; px <= nw; px += 2) {
+          final u = px / nw;
+          final py = y + rowH / 2 - e.pitchAt(u, u * lenSec) * rowH;
+          px == 0 ? path.moveTo(x + px, py) : path.lineTo(x + px, py);
+        }
+        canvas.drawPath(path, Paint()
+          ..color = fill
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = math.max(3.0, rowH * 0.55));
+        if (editBend == n.id) {
+          for (final p in e.bend) {
+            canvas.drawCircle(Offset(x + p.t * nw, y + rowH / 2 - p.v * rowH), 5, Paint()..color = Neon.yellow);
+          }
+        }
+      } else {
+        canvas.drawRRect(r, Paint()..color = fill);
+      }
       if (sel.contains(n.id)) {
         canvas.drawRRect(r, Paint()
           ..color = Neon.text
@@ -1753,6 +1924,8 @@ class _RollPainter extends CustomPainter {
       o.gridStrength != gridStrength ||
       o.keyLabels != keyLabels ||
       o.curves != curves ||
+      o.secPerStep != secPerStep ||
+      o.editBend != editBend ||
       o.color != color;
 }
 

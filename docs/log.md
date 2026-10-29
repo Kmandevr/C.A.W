@@ -8,6 +8,7 @@ updated: 2026-10-29
 
 Newest first.
 
+- 2026-10-29: Per-note expression in the roll: bent notes drawn as lines, pitch points drawn on a selected note with the Curve tool, and vibrato, presets and pitch/volume/timbre curve editors in the extras panel ([app](app.md)).
 - 2026-10-29: Per-note expression in the engine: `bend`, `vib`, `press` and `timbre` note extras, the `press` and `timbre` variables, `freq` following the bend, and MPE `.mid` export ([engine](engine.md#patterns)).
 - 2026-10-29: Synth stage 1.3: `kind: synth` patch files (oscillators, sub, noise, two filters, the volume envelope, effects in line order including project effect modules) translate to ordinary code (`engine/src/synth.cpp`); `caw check --code`; the Init synth template; the app plays synths as sounds ([synth](synth.md)).
 - 2026-10-29: Synth stage 1.2: a generator's `voices:` header (1–32, default 8) sets its notes at once; the project's `voices` is now a cap (default 32, Light mode 4). `wt` latches its table and unison count at the note start and follows detune per sample, so live and export agree on every buffer size.

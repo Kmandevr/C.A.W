@@ -154,7 +154,7 @@ The same meaning everywhere, so nothing has to be learned twice:
   - **Zoom and scroll:** two fingers zoom and scroll. One finger on empty grid scrolls too; on a note, in a lane or with the select tool it edits, and a double tap on a note deletes it (owner, 2026-10-28 and 2026-10-29).
   - **Feedback:** moving a note plays it, and moving a chord plays the chord.
   - **Snap:** follows the grid setting, with a magnet toggle for free timing.
-  - **Curve mode** (owner, 2026-10-29: points and bendable segments): tap to add a point, drag a point to move it, drag a segment to bend it. Value curves are lines in a lane under the roll; pitch bends will show as a bent note.
+  - **Curve mode** (owner, 2026-10-29: points and bendable segments): tap to add a point, drag a point to move it, drag a segment to bend it. Value curves are lines in a lane under the roll; a note's pitch curve is drawn on the note itself, which shows as a bent line. **[Fact]** Built ([app](app.md)).
 - **Sound editor:** opens on the inspector (sliders, toggles, tips). The code editor from v1's Builder is a tab or drawer one tap away, for changing the sound itself.
 
 ## Keyboard (PC)
