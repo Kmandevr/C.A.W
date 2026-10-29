@@ -1,12 +1,14 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Log
 
 Newest first.
+
+- 2026-10-29: The piano roll works inline in the Builder (it claims its touches; one finger on empty grid scrolls, a tap draws). New [how it works](how-it-works.md) note for agents. Owner's plan for roll, editor and curve work in [decisions](decisions.md).
 
 - 2026-10-28: Light mode (owner OK), auto-update while typing, the key router (keymaps, Vim, counts, macros, action list, code-editor Vim), roll extras panel, lanes, triplets and MIDI import/export buttons; engine `voices` limit ([app](app.md)).
 - 2026-10-28: Piano roll and drum grid built for pattern modules: adaptive grid, key rows, velocity lane, draw/select/erase, the owner's WASD/Q/E keys ([app](app.md)).

@@ -18,7 +18,7 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 
 ## Layout
 
-`docs/` is the plan and memory, `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (starter modules). Conventions for each kind of file load from `.claude/rules/` when you touch it.
+`docs/` is the plan and memory ([docs/how-it-works.md](docs/how-it-works.md) shows how the code connects), `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (starter modules). Conventions for each kind of file load from `.claude/rules/` when you touch it.
 
 ## Read in layers
 
