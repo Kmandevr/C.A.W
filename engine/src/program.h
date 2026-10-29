@@ -23,7 +23,7 @@ constexpr int kMaxSynthParams = 64;  // a synth patch: its voice's params plus i
 // Built-in variables a module can read.
 // Trig and after are the note variables a pattern drives. They are "soft": a `let` or argument of the same name
 // hides them, so code written before patterns existed keeps working.
-enum class Var : uint8_t { T, Sr, Rate, Bpm, Beat, Bar, Step, Pos, Phase, Time, In, Seed, Trig, Gate, Note, Freq, Vel, Rel, Bend, Count };
+enum class Var : uint8_t { T, Sr, Rate, Bpm, Beat, Bar, Step, Pos, Phase, Time, In, Seed, Trig, Gate, Note, Freq, Vel, Rel, Bend, Press, Timbre, Count };
 
 enum class OpCode : uint8_t { Const, Var, Param, Bin, Un, Select, Call, Import };
 

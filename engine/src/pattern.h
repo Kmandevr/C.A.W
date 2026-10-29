@@ -13,6 +13,24 @@ constexpr int kMaxPatternNotes = 4096;
 constexpr int kMaxPatternSteps = 4096;  // 64 bars of 16/4; whole bars are checked against the project's meter
 constexpr int kMaxRatchet = 8;
 
+constexpr int kMaxCurvePoints = 16;
+constexpr double kMaxBend = 48.0;  // semitones either way (the app draws within +-12 by default)
+
+// A curve over one note: points at times 0..1 through the note, each with a value and a bend for the segment after
+// it (0 straight, + eases in, - eases out; the shape is u^(4^bend)). Fixed size, so a voice can copy it at note start
+// on the audio thread without allocating.
+struct NoteCurve {
+    int count = 0;
+    float t[kMaxCurvePoints] = {}, v[kMaxCurvePoints] = {}, k[kMaxCurvePoints] = {};
+    double at(double u) const;  // the value at u (0..1); holds the first and last values outside the points
+};
+
+// A note's own expression, MPE style: pitch bend (semitones), pressure (volume 0..1), timbre (0..1) and vibrato.
+struct NoteExpression {
+    NoteCurve bend, press, timbre;
+    double vibDepth = 0, vibRate = 5, vibDelay = 0;  // semitones, Hz, and how much of the note it takes to fade in
+};
+
 // One note. Times are in steps (16ths) from the pattern start and may be fractions (off the grid, triplets).
 // Pitch is a MIDI note number kept as a float, MIDI 2.0 style, so fractions are microtones.
 struct PatternNote {
@@ -25,7 +43,7 @@ struct PatternNote {
     int slideTo = -1;     // index of that note, or -1
     int slideFrom = -1;   // index of the note sliding into this one, or -1
     int row = 0;          // kit row; kit patterns are not built yet, so always 0
-    int extra = -1;       // reserved: index of this note's curves and custom values
+    int extra = -1;       // index of this note's expression in Pattern::expressions, or -1
     int line = 0;         // where it was written, for messages
 };
 
@@ -44,6 +62,7 @@ struct Pattern {
     double lastEnd = 0;   // where the last note ends, in steps
     std::vector<PatternNote> notes;    // sorted by start; same start keeps the written order
     std::vector<PatternEvent> events;  // sorted by step, starts before ends at the same step
+    std::vector<NoteExpression> expressions;  // notes with bend, press, timbre or vib point here (PatternNote::extra)
 
     // The pattern's length in steps for a meter of `beatsPerBar` beats.
     int steps(int beatsPerBar) const;

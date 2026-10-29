@@ -357,3 +357,50 @@ TEST(editing_a_synth_does_not_restart_its_held_notes) {
     CHECK_NEAR(b[5000], 0.2, 1e-6);
 }
 
+
+TEST(notes_carry_their_own_bend_vibrato_press_and_timbre) {
+    // Parsing: points, bends after ~, ranges and errors.
+    PatternResult r = parsePattern(kHead + "0 C3 4 1 bend 0:0~0.5 0.5:12 1:-2 vib 0.3 5.5 0.25 press 0:1 1:0.2 timbre 0:0 1:1\n4 D3 4\n");
+    CHECK(r.pattern != nullptr);
+    if (r.pattern) {
+        CHECK_EQ(r.pattern->expressions.size(), size_t{1});
+        CHECK_EQ(r.pattern->notes[0].extra, 0);
+        CHECK_EQ(r.pattern->notes[1].extra, -1);
+        const NoteExpression& ex = r.pattern->expressions[0];
+        CHECK_EQ(ex.bend.count, 3);
+        CHECK_NEAR(ex.bend.at(0.0), 0.0, 1e-9);
+        CHECK_NEAR(ex.bend.at(0.5), 12.0, 1e-6);
+        CHECK(ex.bend.at(0.25) < 6.0);  // bend 0.5 eases in
+        CHECK_NEAR(ex.bend.at(1.0), -2.0, 1e-6);
+        CHECK_NEAR(ex.vibDepth, 0.3, 1e-9);
+        CHECK_NEAR(ex.press.at(1.0), 0.2, 1e-6);
+    }
+    CHECK(patternError("0 C3 1 bend\n").find("needs points") != std::string::npos);
+    CHECK(patternError("0 C3 1 bend 0.5:1 0.2:0\n").find("rising") != std::string::npos);
+    CHECK(patternError("0 C3 1 press 0:2\n").find("press values must be 0 to 1") != std::string::npos);
+    CHECK(patternError("0 C3 1 bend 0:60\n").find("bend values must be -48 to 48") != std::string::npos);
+    CHECK(patternError("0 C3 1 vib 0.3\n").find("vib needs depth and rate") != std::string::npos);
+
+    // Playing: the bend moves freq and note; 12 semitones up over the note doubles freq.
+    std::vector<double> y = play("gate * freq * 0.001", "0 C3 4 1 bend 0:0 1:12\n", 24000);
+    CHECK_NEAR(y[100], 0.1308, 0.002);
+    CHECK_NEAR(y[23900], 0.2616, 0.003);
+    // bend reads the semitones; vibrato swings around the note.
+    std::vector<double> b = play("gate * bend * 0.1", "0 C3 4 1 vib 1 6\n", 24000);
+    double lo = 1, hi = -1;
+    for (int i = 0; i < 24000; ++i) {
+        lo = std::min(lo, b[static_cast<size_t>(i)]);
+        hi = std::max(hi, b[static_cast<size_t>(i)]);
+    }
+    CHECK(hi > 0.09 && lo < -0.09);
+    // A sound that doesn't read press still follows the note's volume curve; timbre reads 0..1.
+    std::vector<double> pr = play("gate * 0.5", "0 C3 4 1 press 0:1 1:0\n", 24000);
+    CHECK_NEAR(pr[100], 0.5, 0.01);
+    CHECK(pr[23900] < 0.01);
+    std::vector<double> tb = play("gate * timbre * 0.5", "0 C3 4 1 timbre 0:0 1:1\n", 24000);
+    CHECK(tb[100] < 0.01);
+    CHECK_NEAR(tb[23900], 0.5, 0.01);
+    // A note without expression is unchanged, and press reads 1, timbre 0.
+    std::vector<double> plain = play("gate * (press - timbre) * 0.5", "0 C3 4\n", 1000);
+    CHECK_NEAR(plain[500], 0.5, 1e-6);
+}

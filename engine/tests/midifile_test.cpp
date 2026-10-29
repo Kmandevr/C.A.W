@@ -369,3 +369,68 @@ TEST(midi_c_api_imports_and_exports) {
     CHECK(has(error, "kind: pattern"));
     CHECK_EQ(caw_pattern_export(src.c_str(), 1000, 4, CAW_MIDI_SMF, path.c_str(), error, sizeof error), 1);
 }
+
+TEST(midi_export_writes_note_expression_as_mpe) {
+    auto p = parse("---\nkind: pattern\n---\n0 C3 4 1 bend 0:0 1:12 press 0:1 1:0 timbre 0:0 1:1\n1 E3 2\n");
+    CHECK(p != nullptr);
+    if (!p) return;
+    const Bytes f = patternToSmf(*p, 120, 4);
+    // Walk the note track (the second MTrk): delta time, then a channel event (no running status) or a meta event.
+    size_t at = 14;
+    for (int skip = 0; skip < 2; ++skip) {
+        const uint32_t len = (f[at + 4] << 24) | (f[at + 5] << 16) | (f[at + 6] << 8) | f[at + 7];
+        if (skip == 0) at += 8 + len;
+    }
+    at += 8;
+    struct Ev {
+        int64_t tick;
+        uint8_t st, a, b;
+    };
+    std::vector<Ev> ev;
+    int64_t tick = 0;
+    while (at < f.size()) {
+        uint32_t d = 0;
+        while (f[at] & 0x80) d = (d << 7) | (f[at++] & 0x7F);
+        d = (d << 7) | f[at++];
+        tick += d;
+        const uint8_t st = f[at++];
+        if (st == 0xFF) {
+            const uint8_t type = f[at++];
+            const uint8_t len = f[at++];
+            at += len;
+            if (type == 0x2F) break;
+            continue;
+        }
+        const int kind = st >> 4;
+        const uint8_t a = f[at++];
+        const uint8_t b = kind == 0xD ? 0 : f[at++];
+        ev.push_back({tick, st, a, b});
+    }
+    // The MPE Configuration Message (RPN 6 = 15 member channels) on channel 1.
+    bool mcm = false;
+    for (size_t i = 0; i + 2 < ev.size(); ++i)
+        mcm = mcm || (ev[i].st == 0xB0 && ev[i].a == 101 && ev[i].b == 0 && ev[i + 1].a == 100 && ev[i + 1].b == 6 &&
+                      ev[i + 2].a == 6 && ev[i + 2].b == 15);
+    CHECK(mcm);
+    // The two overlapping notes sound on different member channels (2-16).
+    std::vector<int> chans;
+    for (const Ev& e : ev)
+        if ((e.st >> 4) == 0x9) chans.push_back(e.st & 15);
+    CHECK(chans.size() == 2 && chans[0] != chans[1] && chans[0] >= 1 && chans[1] >= 1);
+    // C3's channel: the bend rises from the centre to the top of the +-12 range, pressure falls, CC74 rises.
+    const int ch = chans.empty() ? 1 : chans[0];
+    int firstPb = -1, lastPb = -1, lastPress = -1, lastTimbre = -1;
+    for (const Ev& e : ev) {
+        if (e.st == (0xE0 | ch)) {
+            const int v = e.a | (e.b << 7);
+            if (firstPb < 0) firstPb = v;
+            lastPb = v;
+        }
+        if (e.st == (0xD0 | ch)) lastPress = e.a;
+        if (e.st == (0xB0 | ch) && e.a == 74) lastTimbre = e.b;
+    }
+    CHECK_EQ(firstPb, 8192);
+    CHECK(lastPb > 16000);
+    CHECK(lastPress >= 0 && lastPress < 10);
+    CHECK(lastTimbre > 115);
+}

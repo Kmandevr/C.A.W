@@ -83,6 +83,7 @@ private:
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
                    int offset, const BlockCtx& base) noexcept;
     void noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept;
+    void takeExpression(struct Voice& v, const Pattern& pat, const PatternNote& n) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
     void pickOverloadVictim() noexcept;

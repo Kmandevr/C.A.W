@@ -108,7 +108,8 @@ Bitwise operators convert their inputs the JavaScript way: they drop the fractio
 | `trig`, `gate` | The note: `trig` is 1 on its first sample, `gate` is 1 while it's held |
 | `note`, `freq`, `vel` | The note's pitch as a MIDI number (fractions allowed) and in Hz, and its velocity 0–1 |
 | `rel` | Samples since the note was released (0 while held) |
-| `bend` | Reserved for pitch curves; 0 for now |
+| `bend` | The note's pitch bend in semitones (its `bend` curve plus vibrato); `note` and `freq` already include it |
+| `press`, `timbre` | The note's pressure (volume curve, 1 without one) and timbre (0..1, 0 without one) |
 | `pi` | π |
 
 - **Note variables** come from the layer's [pattern](#patterns). Each note runs the generator as its own voice, and inside a voice `t`, `time` and `phase` count from the note's start: `phase` goes 0→1 once per cycle at `freq`, and in byte mode `t` runs at `rate` when the note is C4, twice as fast an octave up. `step`, `beat`, `bar` and `pos` still follow the layer.
@@ -130,6 +131,7 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
 3       A1         1     0.8   slide
 13/3    E2         1     0.6   prob 0.5
 4.5     C3,E3,G3   1/2   0.9   ratchet 2
+8       A2         4     1     bend 0:0 0.5:2~0.4 1:0 vib 0.3 5.5 0.25
 ```
 
 - **Columns:** `at` and `len` are in 16ths and may be decimals or fractions (`13/3` lands exactly on a triplet). Notes are names (`A1`, `F#3`) or MIDI numbers, with fractions for microtones; commas make a chord. `vel` is 0–1 and optional (default 1).
@@ -137,6 +139,12 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
   - `prob P`: the note plays with chance P. The choice comes from the project seed, the note and which repeat of the pattern this is, so every project loop plays the same way and exports match playback.
   - `ratchet N`: the note is split into N equal repeats (2–8).
   - `slide`: the next note starting exactly where this one ends takes over its voice. No new `trig`; the pitch glides over half a step. In a chord, sliding notes pair with the next chord's notes in written order.
+  - **Note expression** (MPE style; owner, 2026-10-29), each note its own:
+    - `bend T:V …`: a pitch curve in semitones (−48 to 48; the app draws within ±12). Times run 0–1 through the note; `T:V~K` bends the segment after that point (−1 to 1: + eases in, − eases out; the shape is u^(4^K)). 1–16 points, times rising; before the first and after the last point the curve holds.
+    - `vib DEPTH RATE [FADE]`: vibrato of DEPTH semitones (0–12) at RATE Hz (0.1–30), reaching full depth after FADE of the note (0–1, default 0).
+    - `press T:V …`: the note's volume over its length, 0–1. A sound that doesn't read `press` is multiplied by it.
+    - `timbre T:V …`: a 0–1 curve the sound reads as `timbre` (MPE's "slide", CC74).
+    - The curves run over each sounding note (each ratchet repeat has its own run), and a slide hands the voice to the next note's curves. A chord line's notes share the line's expression.
 - **Playback:**
   - The pattern sets the layer's loop length; a note running past the end is released there.
   - A layer with a pattern plays as many voices at once as its generator's `voices:` header asks for (1–32, default 8; a layer always keeps at least 2 voice instances) and steals the oldest when one more note starts. Memory counts every voice. Changing the count while notes play keeps the ones that still fit and ends the rest, smoothed over.
@@ -163,6 +171,7 @@ A pattern can be imported from, and exported to, MIDI files for use in Reaper an
   - Both formats use 960 ticks per quarter and carry the tempo, the meter and the pattern's name.
   - Ratchets are written as their repeats, every note is written whatever its `prob`, and a slide is a legato overlap of 1/16 step. Notes are cut at the pattern's length, as in playback.
   - `.mid` is a format 1 file. Microtonal notes round to the nearest note and play on a channel of their own (2–9, 11–16) with a pitch bend; RPN 0 sets the bend range to ±2 semitones.
+  - **MPE:** a pattern with any note expression is written as MPE (lower zone): the MPE Configuration Message on channel 1 (RPN 6 = 15), each note on its own member channel (2–16, round robin), its bend range set by RPN 0 (±12 semitones, or ±48 if a note bends further), and before and during the note its pitch bend (curve, vibrato and microtonal offset), channel pressure (`press`) and CC74 (`timbre`), every 1/32 note when they change. **[Assumption]** Reaper and MPE synths read this layout (the MPE spec's standard one); not yet checked in Reaper. `.midi2` export and MIDI import don't carry note expression yet.
   - `.midi2` follows the MIDI Clip File specification (M2-116-U, read 2026-10-28): MIDI 2.0 notes with 16-bit velocity, and microtones through the Note On Pitch 7.9 attribute.
     - **[Assumption]** Some layout choices aren't fixed by the spec. Everything is on group 0, channel 1. Tempo, time signature and clip name sit right after Start of Clip. Note Off has velocity 0x8000.
     - **[Assumption]** Which DAWs read clip files is unverified ([architecture](architecture.md#variables-and-patterns-proposal)).

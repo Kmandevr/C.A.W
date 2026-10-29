@@ -246,7 +246,7 @@ const std::pair<const char*, Var> kVars[] = {
     {"beat", Var::Beat}, {"bar", Var::Bar},   {"step", Var::Step}, {"pos", Var::Pos},
     {"phase", Var::Phase}, {"time", Var::Time}, {"in", Var::In},   {"seed", Var::Seed},
     {"trig", Var::Trig},   {"gate", Var::Gate}, {"note", Var::Note}, {"freq", Var::Freq},
-    {"vel", Var::Vel},     {"rel", Var::Rel},   {"bend", Var::Bend},
+    {"vel", Var::Vel},     {"rel", Var::Rel},   {"bend", Var::Bend}, {"press", Var::Press}, {"timbre", Var::Timbre},
 };
 
 bool findVar(const std::string& name, Var& out) {

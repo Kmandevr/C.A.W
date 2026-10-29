@@ -61,6 +61,11 @@ struct Voice {
     double vel = 1, tacc = 0, phase = 0;
     double lastY = 0;     // last output sample, so a voice cut short can be smoothed over
     int64_t offAt = -1;   // a note from an edited pattern: the sample (in the layer pass) where it ends
+    // The note's own bend, pressure, timbre and vibrato, copied at note start (no allocation on the audio thread).
+    bool expressive = false;
+    NoteExpression ex;
+    int64_t exStart = 0;  // `since` when this note took the voice (a slide hands a voice on mid-way)
+    double exLen = 1;     // the note's length in samples, for the curves' 0..1 time
 };
 
 constexpr uint32_t kOrphanNote = 0xFFFFFFFFu;  // a held note whose pattern was edited: ends at offAt
@@ -78,6 +83,7 @@ struct Engine::Chain {
     double declick = 0;  // what voices cut short (stolen or ended) were playing; decays over about 2 ms
     double vtb[kBlock], vtime[kBlock], vphase[kBlock], vtrig[kBlock], vgate[kBlock], vnote[kBlock], vfreq[kBlock];
     double vvel[kBlock], vrel[kBlock], vout[kBlock], gen[kBlock];
+    double vbend[kBlock], vpress[kBlock], vtimbre[kBlock];
     double dtrig[kBlock], ones[kBlock], dnote[kBlock], dfreq[kBlock];
     std::vector<std::string> moduleIds;
     // How each module takes over the running state of the chain it replaces, so unchanged calls play on.
@@ -1117,6 +1123,8 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, S
     ctx.vars[static_cast<int>(Var::Vel)] = c.ones;
     ctx.vars[static_cast<int>(Var::Rel)] = c.zero;
     ctx.vars[static_cast<int>(Var::Bend)] = c.zero;
+    ctx.vars[static_cast<int>(Var::Press)] = c.ones;
+    ctx.vars[static_cast<int>(Var::Timbre)] = c.zero;
     const double* input = c.zero;
     ctx.importOffset = offset;
     for (size_t idx = 0; idx < insts.size(); ++idx) {
@@ -1146,6 +1154,15 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, S
     std::copy_n(input, len, out);
 }
 
+// A note taking a voice brings its own expression; its curves run over the note's (or ratchet repeat's) length.
+void Engine::takeExpression(Voice& v, const Pattern& pat, const PatternNote& n) noexcept {
+    v.expressive = n.extra >= 0 && static_cast<size_t>(n.extra) < pat.expressions.size();
+    if (!v.expressive) return;
+    v.ex = pat.expressions[static_cast<size_t>(n.extra)];
+    v.exStart = v.since;
+    v.exLen = std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_);
+}
+
 void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept {
     const PatternNote& n = pat.notes[e.note];
     // A note-off just releases whichever voice holds the note; only note-ons ask whether the note plays.
@@ -1170,6 +1187,7 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
                 v.target = n.pitch;
                 v.glideLeft = std::max(1, static_cast<int>(std::floor(stepLen_ * 0.5 + 0.5)));
                 v.glideStep = (v.target - v.pitch) / v.glideLeft;
+                takeExpression(v, pat, n);
                 return;
             }
     }
@@ -1203,6 +1221,7 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
     v.vel = n.vel;
     v.tacc = v.phase = 0;
     v.offAt = -1;
+    takeExpression(v, pat, n);
 }
 
 void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
@@ -1268,7 +1287,9 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         ctx.vars[static_cast<int>(Var::Freq)] = c.vfreq;
         ctx.vars[static_cast<int>(Var::Vel)] = c.vvel;
         ctx.vars[static_cast<int>(Var::Rel)] = c.vrel;
-        ctx.vars[static_cast<int>(Var::Bend)] = c.zero;
+        ctx.vars[static_cast<int>(Var::Bend)] = c.vbend;
+        ctx.vars[static_cast<int>(Var::Press)] = c.vpress;
+        ctx.vars[static_cast<int>(Var::Timbre)] = c.vtimbre;
         ctx.imports = c.importPtrs[0].empty() ? nullptr : c.importPtrs[0].data();
         ctx.importOffset = offset + o;
         for (int vi = 0; vi < c.voiceCount; ++vi) {
@@ -1282,21 +1303,40 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
                 c.vtrig[i] = v.trig ? 1.0 : 0.0;
                 v.trig = false;
                 c.vgate[i] = v.gate ? 1.0 : 0.0;
-                c.vnote[i] = v.pitch;
-                c.vfreq[i] = v.freq;
+                // The note's expression: its bend (plus vibrato) moves note and freq; press and timbre are 0..1.
+                double bend = 0.0, press = 1.0, timbre = 0.0;
+                if (v.expressive) {
+                    const double into = static_cast<double>(v.since - v.exStart);
+                    const double u = std::min(1.0, into / v.exLen);
+                    if (v.ex.bend.count) bend = v.ex.bend.at(u);
+                    if (v.ex.vibDepth > 0) {
+                        const double fade = v.ex.vibDelay > 0 ? std::min(1.0, u / v.ex.vibDelay) : 1.0;
+                        bend += v.ex.vibDepth * fade * detSin(kTwoPi * v.ex.vibRate * into / sr_);
+                    }
+                    if (v.ex.press.count) press = v.ex.press.at(u);
+                    if (v.ex.timbre.count) timbre = v.ex.timbre.at(u);
+                }
+                const double freq = bend != 0.0 ? mtof(v.pitch + bend) : v.freq;
+                c.vnote[i] = v.pitch + bend;
+                c.vfreq[i] = freq;
+                c.vbend[i] = bend;
+                c.vpress[i] = press;
+                c.vtimbre[i] = timbre;
                 c.vvel[i] = v.vel;
                 c.vrel[i] = v.gate ? 0.0 : static_cast<double>(v.rel++);
                 c.vtb[i] = byteMode ? std::floor(v.tacc) : static_cast<double>(v.since);
-                v.tacc += tPerHz * v.freq;
+                v.tacc += tPerHz * freq;
                 c.vtime[i] = static_cast<double>(v.since++) / sr_;
                 c.vphase[i] = v.phase;
-                v.phase += v.freq / sr_;
+                v.phase += freq / sr_;
                 v.phase -= std::floor(v.phase);
             }
             const double* y = v.inst->process(ctx);
+            const bool autoPress = v.expressive && v.ex.press.count > 0 && !reads(Var::Press);
             for (int i = 0; i < n; ++i) {
                 double s = y[i];
                 if (engineFade && !v.gate) s *= std::max(0.0, 1.0 - c.vrel[i] / fadeLen);
+                if (autoPress) s *= c.vpress[i];  // code that doesn't read press still gets the note's volume curve
                 out[o + i] += s;
                 v.lastY = s;
                 if (!v.gate) v.quiet = std::fabs(s) < kQuietLevel ? v.quiet + 1 : 0;

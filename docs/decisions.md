@@ -8,6 +8,14 @@ updated: 2026-10-29
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-29: Per-note expression, MPE style (owner)
+
+- Every note can carry its own pitch curve (drawn with points and bendable segments, like MIDI Sketch), vibrato, volume (pressure) and timbre curves. Pitch comes first in the roll; volume and timbre use the same mechanism.
+- **Bend range:** ±12 semitones by default (the file allows ±48).
+- **Vibrato:** drawn by hand, and also a per-note knob (depth, rate, fade-in) and shape presets.
+- **MIDI export:** as MPE, for Reaper and MPE synths.
+- Syntax as proposed on [#11](https://github.com/Kmandevr/C.A.W/issues/11): `bend`, `vib`, `press` and `timbre` extras on a note line ([engine](engine.md#patterns)). Automation lanes for params and globals (the rest of #11) are still open.
+
 ## 2026-10-29: Roll touch, agent docs, and the next editor work (owner)
 
 - **Roll touch:** one finger dragged on empty grid scrolls; a tap there draws. Drawing by dragging out a new note is dropped, so a stray swipe never adds notes. The roll must work inline in the Builder, not only full screen.
