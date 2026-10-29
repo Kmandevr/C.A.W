@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: its three areas, how it talks to the engine, where projects are saved, and how CI builds and signs it.
 covers: [app/]
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # App
@@ -22,12 +22,12 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
   - a code editor with highlighting and the symbol key row
-  - **completion chips** above the key row: typing two or more letters offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
+  - **completion chips** above the key row: typing two or more letters (set in Settings) offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
   - **Library** (the book button, or F1): every function from the engine's `caw_library()` plus the project's own library modules, grouped by category and searchable from the word at the cursor. Each shows its signature, description, arguments and example, with **Insert call** and **Insert example**
   - a one-line status: the error (tap it to jump to the spot), "edited, tap Run", or the module's summary
   - a scope, and a Controls panel built from the module's `param`s and `global`s:
     - sliders (with steps), toggles, and dropdowns (buttons when there are 4 or fewer choices)
-    - grouped under `// --- Headers ---`, with tips and doc comments on long-press or hover
+    - grouped under `// --- Headers ---`; tapping a header folds its group while the app runs; tips and doc comments on long-press or hover
     - a double-tap on a value resets it
     - a "Shares" line naming the module's exports (`kick.env`), and warnings in yellow
     - for a library module, the functions other modules can call
@@ -37,12 +37,15 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - tools: draw (B), select (V), erase (X); undo/redo; grid resolution 1 to 1/128 (Alt+1..8); snap (N); fixed grid (Alt+F); drum grid (G); full screen
     - the grid adapts to zoom, down to the resolution; rows in the project's key are lit; velocity lane underneath; layer colour, brighter when louder
     - keys: WASD move the selection, Ctrl+WASD the cursor, Ctrl+Shift+WASD jump to the next note; Q inserts at the cursor, E copies the selection after itself; Shift+A/D length, Shift+W/S invert; +/- velocity; P, R, L cycle chance, ratchet, slide
-    - one finger edits, two fingers zoom and scroll; edits reach the text and the engine after 150 ms (one write per pause, light on slow phones); saving keeps comments
+    - one finger on a note, in a lane or with the select tool edits; on empty grid a tap draws (or erases) and a drag scrolls; two fingers zoom and scroll. The roll claims its touches, so it works the same inside the Builder's scrolling page as full screen; edits reach the text and the engine after 150 ms (one write per pause, light on slow phones); saving keeps comments
     - holding a note (or I, or the ⋮ menu) opens its extras: velocity, chance, ratchet 1–8 and slide, as one undo step
     - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
     - triplets (Alt+0) make every grid size 2/3 as long
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
-    - the curve tool and the `roll.gen.*` generators (euclid, random, arpeggiate, humanize, chord stamp, reverse) are not built yet
+    - generators, from the ⋮ menu or a toolbar button, each one undo step: Euclid (hits, steps and rotation at the grid size, from the cursor), Random in key (density, range around the cursor, bars), Arpeggiate (each selected chord becomes a run at the grid size: up, down, up and down), Humanize (timing and velocity nudges), Chord stamp (3rd and 5th, or a seventh, in the project's key), Legato, Reverse and Invert pitch around the cursor. The last values are kept while the app runs
+    - the toolbar is the keymap's pattern toolbar: ⋮ → Customise toolbar adds any action or macro, reorders, removes or goes back to the default, saved in `keys.txt`. Full screen and ⋮ always stay
+    - **Curve tool** (C): over the velocity and chance lanes, tap to add a point, drag a point to move it, drag a segment to bend it (up eases in, down eases out), hold a point to delete it. The curve sets the selected notes, or every note when none is selected, between its first and last points; each gesture is one undo step. On the grid a tap picks or unpicks a note and a drag scrolls. The curves themselves are kept only while the roll is open (`app/lib/model/lane_curve.dart`)
+    - not built yet: pitch-bend curves on notes, automation lanes and curves in MIDI export ([#11](https://github.com/Kmandevr/C.A.W/issues/11), syntax proposed there)
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - project settings: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, hex seed, master volume and the seam crossfade switch
   - **Project controls:** one control per `global` declared by any module. Its value is saved with the project and sent to the engine without recompiling.
@@ -84,13 +87,15 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - Unless that switch is off, it turns itself on the first time the engine reports an overload, and the Arranger's overload banner says so.
   - **Live coding:** auto-update (on by default) runs code that compiles the set pause (100–2000 ms) after the last edit. Code with an error waits for the next edit. Swaps land at the swap timing: now, the next beat or the next bar.
   - **Vim keys in the code editor:** off by default.
+  - **Code editor:** the symbol key row's keys (add, reorder, remove, default; a key may end in a space), completion chips on or off with how many letters start them and how many show, the Library and Solo preview buttons (Solo moves to the module's ⋮ menu when hidden), the scope, the key row and Run bar above the code instead of by the keyboard, the Controls panel above the code on a phone, and compact control rows.
+  - **Piano roll:** row height, velocity and chance lane heights, grid line strength, key names (none, C only, all), the grab zone (how near a note's end a touch resizes it; short notes are easier to hit by this much), how long a hold takes to open a note's extras, and what a drag on empty grid does with the draw or erase tool: scroll (default), select, or the tool's own drag.
 - **Keys** (`lib/ui/key_router.dart`): with a keyboard, every key goes through the action system in [actions](actions.md): per-area keymaps, Vim modes, counts, `:` commands, `.` and macros.
   - A badge at the bottom right shows the mode, a recording macro, pending keys, key hints and short toasts.
   - `?` opens the action list: search, keys and run.
   - Recorded macros are saved in `keys.txt` next to `settings.json`; a user `keys.txt` is merged over the default keys.
   - Text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X.
   - The roll, the Builder and the code editor's Vim mode each run their area's actions; the Arranger's actions work on a keyboard-selected layer.
-  - **Not built yet:** editing keys in the action list, custom toolbars and the long-press menu entries from the keymap.
+  - **Not built yet:** editing keys in the action list and the long-press menu entries from the keymap.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
 ## Build

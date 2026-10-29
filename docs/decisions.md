@@ -1,12 +1,19 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Decisions
 
 Newest first. A later entry wins over an earlier one on the same topic.
+
+## 2026-10-29: Roll touch, agent docs, and the next editor work (owner)
+
+- **Roll touch:** one finger dragged on empty grid scrolls; a tap there draws. Drawing by dragging out a new note is dropped, so a stray swipe never adds notes. The roll must work inline in the Builder, not only full screen.
+- **Agent docs:** a note on how the code connects end to end ([how it works](how-it-works.md)), on top of each file's purpose line.
+- **Next, in this order** (each a GitHub issue): roll customisation (own toolbar, sizes and look, gestures, bigger targets, the `roll.gen.*` generators); the code editor (customisable Controls panel, key row, chips and toolbar; new controls declared from code: buttons, XY pad, knobs on desktop, a step/table editor); curves with points and bendable segments, for velocity and chance shapes, param and global automation, per-note pitch bend and MIDI CC export.
+- The syntax for new controls and for curves in pattern files is proposed to the owner before it is built.
 
 ## 2026-10-28: Light mode, and this branch becomes main (owner)
 

@@ -199,14 +199,16 @@ class _FunctionTile extends StatelessWidget {
 
 /// Names that complete the word being typed; a tap finishes it (a function comes with its arguments to type over).
 class CompletionChips extends StatelessWidget {
-  const CompletionChips({super.key, required this.library, required this.word, required this.onPick});
+  const CompletionChips(
+      {super.key, required this.library, required this.word, required this.onPick, this.minLetters = 2, this.limit = 8});
   final Library library;
   final String word;
   final void Function(String text) onPick;
+  final int minLetters, limit;
 
   @override
   Widget build(BuildContext context) {
-    final names = library.complete(word);
+    final names = library.complete(word, limit: limit, minLetters: minLetters);
     if (names.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       height: 40,

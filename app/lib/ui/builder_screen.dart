@@ -350,6 +350,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ]);
       }
       final info = s.info[m.id];
+      final look = s.settings.editor;
       // An empty module shows the kind picked for it until its header says otherwise.
       final kind = s.hintKindOf(m.id) ?? s.kindOf(m.id);
       final color = kindColor(kind);
@@ -391,25 +392,33 @@ class _BuilderScreenState extends State<BuilderScreen> {
             child: Text(m.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           ),
         ),
-        Tooltip(
-          message: 'Hear only this module',
-          child: FilterChip(
-            label: const Text('Solo preview'),
-            selected: s.previewOnly,
-            onSelected: s.setPreviewOnly,
-            selectedColor: Neon.blue.withValues(alpha: 0.25),
-            checkmarkColor: Neon.blue,
+        if (look.soloButton)
+          Tooltip(
+            message: 'Hear only this module',
+            child: FilterChip(
+              label: const Text('Solo preview'),
+              selected: s.previewOnly,
+              onSelected: s.setPreviewOnly,
+              selectedColor: Neon.blue.withValues(alpha: 0.25),
+              checkmarkColor: Neon.blue,
+            ),
           ),
-        ),
         PopupMenuButton<String>(
-          onSelected: (v) => v == 'rename' ? _rename(m) : _delete(m),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'rename', child: Text('Rename')),
-            PopupMenuItem(value: 'delete', child: Text('Delete')),
+          onSelected: (v) => switch (v) {
+            'rename' => _rename(m),
+            'solo' => s.setPreviewOnly(!s.previewOnly),
+            _ => _delete(m),
+          },
+          itemBuilder: (_) => [
+            // With the Solo button hidden (Settings → Code editor), Solo preview stays here.
+            if (!look.soloButton)
+              CheckedPopupMenuItem(value: 'solo', checked: s.previewOnly, child: const Text('Solo preview')),
+            const PopupMenuItem(value: 'rename', child: Text('Rename')),
+            const PopupMenuItem(value: 'delete', child: Text('Delete')),
           ],
         ),
       ]);
-      final scope = s.settings.lightMode
+      final scope = s.settings.lightMode || !look.scope
           ? const SizedBox.shrink()
           : NeonPanel(
         color: color,
@@ -417,23 +426,28 @@ class _BuilderScreenState extends State<BuilderScreen> {
         child: ScopeView(
             state: s, index: s.previewOnly ? Engine.auditionIndex : Engine.masterIndex, color: color, height: wide ? 140 : 88),
       );
-      final params = _Params(state: s, module: m, info: info);
+      final params = _Params(state: s, module: m, info: info, compact: look.compactControls);
       final library = _library;
-      final completion = library == null
+      final completion = library == null || !look.chips
           ? const SizedBox.shrink()
           : ListenableBuilder(
               listenable: _code,
               builder: (context, _) => CompletionChips(
-                  library: library, word: _code.wordAtCursor, onPick: (t) => _type(m, t, completing: true)),
+                  library: library,
+                  word: _code.wordAtCursor,
+                  minLetters: look.chipLetters,
+                  limit: look.chipCount,
+                  onPick: (t) => _type(m, t, completing: true)),
             );
       final runBar = Row(children: [
-        Expanded(child: SymbolRow(onInsert: (t) => _type(m, t))),
+        Expanded(child: SymbolRow(symbols: look.keyRow, onInsert: (t) => _type(m, t))),
         const SizedBox(width: 4),
-        IconButton(
-          tooltip: 'Function library (F1)',
-          onPressed: library == null ? null : () => _openLibrary(m),
-          icon: const Icon(Icons.menu_book, color: Neon.blue),
-        ),
+        if (look.libraryButton)
+          IconButton(
+            tooltip: 'Function library (F1)',
+            onPressed: library == null ? null : () => _openLibrary(m),
+            icon: const Icon(Icons.menu_book, color: Neon.blue),
+          ),
         const SizedBox(width: 4),
         FilledButton.icon(
           style: FilledButton.styleFrom(
@@ -447,9 +461,14 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ),
       ]);
 
+      // The key row and Run bar sit under the code (by the keyboard) or above it, as set in Settings → Code editor.
+      final bar = Padding(
+          padding: look.barOnTop ? const EdgeInsets.fromLTRB(12, 6, 12, 6) : const EdgeInsets.fromLTRB(12, 6, 12, 10),
+          child: Column(children: look.barOnTop ? [runBar, completion] : [completion, runBar]));
       if (wide) {
         return Column(children: [
           picker,
+          if (look.barOnTop) bar,
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -470,11 +489,12 @@ class _BuilderScreenState extends State<BuilderScreen> {
               ]),
             ),
           ),
-          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), child: Column(children: [completion, runBar])),
+          if (!look.barOnTop) bar,
         ]);
       }
       return Column(children: [
         picker,
+        if (look.barOnTop) bar,
         Expanded(
           child: ListView(padding: const EdgeInsets.symmetric(horizontal: 12), children: [
             header,
@@ -483,13 +503,14 @@ class _BuilderScreenState extends State<BuilderScreen> {
             const SizedBox(height: 8),
             status,
             const SizedBox(height: 6),
+            if (look.controlsFirst) params,
             rollToggle,
             roll == null ? editor : SizedBox(height: 440, child: roll),
-            params,
+            if (!look.controlsFirst) params,
             const SizedBox(height: 12),
           ]),
         ),
-        Padding(padding: const EdgeInsets.fromLTRB(12, 6, 12, 10), child: Column(children: [completion, runBar])),
+        if (!look.barOnTop) bar,
       ]);
     });
   }
@@ -564,10 +585,11 @@ class _StatusLine extends StatelessWidget {
 }
 
 class _Params extends StatelessWidget {
-  const _Params({required this.state, required this.module, required this.info});
+  const _Params({required this.state, required this.module, required this.info, this.compact = false});
   final AppState state;
   final ModuleDoc module;
   final ModuleInfo? info;
+  final bool compact;
 
   String _patternUse(ModuleInfo i) {
     final users = [for (final l in state.project.layers) if (l.patternId == module.id) l.name];
@@ -597,6 +619,7 @@ class _Params extends StatelessWidget {
       ValueListenableBuilder<int>(
         valueListenable: state.values,
         builder: (context, _, _) => ParamGroups(
+          compact: compact,
           params: params,
           color: color,
           valueOf: (p) => p.global ? state.globalValue(p) : (module.params[p.name] ?? p.defaultValue),
