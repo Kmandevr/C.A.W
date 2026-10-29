@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "builtins.h"
+#include "synth.h"
 #include "json.h"
 #include "ops.h"
 
@@ -1128,7 +1129,8 @@ size_t parseHeader(std::string_view src, Program& p, int& codeLine) {
             else if (value == "effect") p.kind = ModuleKind::Effect;
             else if (value == "library") p.kind = ModuleKind::Library;
             else if (value == "pattern") p.kind = ModuleKind::Pattern;
-            else throw CompileError(lineNo, 1, "kind must be 'generator', 'effect', 'library' or 'pattern'");
+            else if (value == "synth") p.kind = ModuleKind::Synth;
+            else throw CompileError(lineNo, 1, "kind must be 'generator', 'effect', 'library', 'pattern' or 'synth'");
         } else if (key == "name") {
             p.name = value;
         } else if (key == "summary") {
@@ -1166,7 +1168,8 @@ std::string describeProgram(const Program& p) {
         return std::string(buf);
     };
     std::string o = "\"kind\":" +
-                    str(p.kind == ModuleKind::Effect ? "effect" : p.kind == ModuleKind::Library ? "library" : "generator") +
+                    str(p.synth ? "synth"
+                                : p.kind == ModuleKind::Effect ? "effect" : p.kind == ModuleKind::Library ? "library" : "generator") +
                     ",\"namespace\":" + str(p.ns) +
                     ",\"mode\":" + str(p.mode == OutputMode::Byte ? "byte" : "float") + ",\"name\":" + str(p.name) +
                     ",\"summary\":" + str(p.summary) + ",\"params\":[";
@@ -1195,7 +1198,14 @@ std::string describeProgram(const Program& p) {
                  str(a < f.argDocs.size() ? f.argDocs[a] : std::string()) + "}";
         o += "]}";
     }
-    return o + "]";
+    o += "]";
+    if (p.synth) {
+        // The code the patch becomes, and its effect chain ("@name" is a project module), for the app and agents.
+        o += ",\"code\":" + str(p.synthCode) + ",\"fx\":[";
+        for (size_t i = 0; i < p.synthFx.size(); ++i) o += std::string(i ? "," : "") + str(p.synthFx[i]);
+        o += "]";
+    }
+    return o;
 }
 
 namespace {
@@ -1238,6 +1248,43 @@ CompileResult compileModule(std::string_view source, const std::vector<LibrarySo
         if (prog->kind == ModuleKind::Library) validNamespace(prog->ns);
         if (prog->kind == ModuleKind::Pattern)
             throw CompileError(1, 1, "a pattern holds notes, not code: pick it as a layer's pattern to play it");
+        if (prog->kind == ModuleKind::Synth) {
+            // A synth patch: translate it to code, compile the voice, and keep the generated parts for the engine.
+            SynthResult t = translateSynth(source);
+            if (!t.ok) {
+                r.line = t.line;
+                r.col = t.col;
+                r.error = t.error;
+                return r;
+            }
+            CompileResult voice = compileModule(t.generator, libs);
+            if (!voice.program) {
+                r.line = r.col = 1;
+                r.error = "line 1, col 1: the code made from this patch doesn't compile (an engine bug): " + voice.error;
+                return r;
+            }
+            auto out = std::make_shared<Program>(*voice.program);
+            // The effects' params are listed with the voice's (under "Effects"), so one panel shows the whole patch;
+            // the voice never reads them, and setting one on the synth reaches its effect modules.
+            for (const SynthFx& f : t.fx) {
+                if (f.user) continue;
+                CompileResult fx = compileModule(f.source, libs);
+                if (!fx.program) {
+                    r.line = r.col = 1;
+                    r.error = "line 1, col 1: the effects made from this patch don't compile (an engine bug): " + fx.error;
+                    return r;
+                }
+                for (ParamDef d : fx.program->params) {
+                    d.header = "Effects";
+                    out->params.push_back(std::move(d));
+                }
+            }
+            out->synth = true;
+            out->synthCode = t.generator;
+            for (const SynthFx& f : t.fx) out->synthFx.push_back(f.user ? "@" + f.module : f.source);
+            r.program = std::move(out);
+            return r;
+        }
         Lexer lex(source.substr(start), codeLine);
         std::vector<Token> toks = lex.run();
         Compiler c(toks, lex.comments(), *prog);

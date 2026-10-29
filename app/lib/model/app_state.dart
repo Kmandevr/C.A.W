@@ -451,7 +451,8 @@ class AppState extends ChangeNotifier {
   bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
   bool isLibrary(String moduleId) => kindOf(moduleId) == 'library';
   bool isPattern(String moduleId) => kindOf(moduleId) == 'pattern';
-  bool isGenerator(String moduleId) => kindOf(moduleId) == 'generator';
+  /// A sound a track can play: a generator, or a synth patch (which the engine plays as one).
+  bool isGenerator(String moduleId) => const {'generator', 'synth'}.contains(kindOf(moduleId));
 
   // ---------- layers (Arranger) ----------
 

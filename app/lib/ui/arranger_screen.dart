@@ -561,7 +561,7 @@ class _AddTrackCard extends StatelessWidget {
     final sounds = p.modules.where((m) => state.isGenerator(m.id)).toList();
     final templates = [
       for (final t in state.templates)
-        if ((headerValue(t.source, 'kind') ?? 'generator') == 'generator') t,
+        if (const {'generator', 'synth'}.contains(headerValue(t.source, 'kind') ?? 'generator')) t,
     ];
     final pick = await showModalBottomSheet<Object>(
       context: context,

@@ -407,6 +407,31 @@ std::string Engine::setProject(const ProjectSpec& p) {
         }
         st.params = m.params;
         st.ref = refName(!m.name.empty() ? m.name : (st.program && !st.program->name.empty() ? st.program->name : m.id));
+        // A synth plays as its voice then its effects: generated effect modules live as hidden modules beside it.
+        st.expand.clear();
+        if (st.program && st.program->synth) {
+            st.expand.push_back(m.id);
+            for (size_t k = 0; k < st.program->synthFx.size(); ++k) {
+                const std::string& fx = st.program->synthFx[k];
+                if (fx[0] == '@') {
+                    st.expand.push_back("\x1e" + fx.substr(1));
+                    continue;
+                }
+                const std::string hid = m.id + "\x1f" + std::to_string(k);
+                ModuleState hs;
+                auto old = modules_.find(hid);
+                if (old != modules_.end()) hs = old->second;
+                if (hs.source != fx || hs.libSig != libSig || !hs.program) {
+                    CompileResult cr = compileModule(fx, libs);
+                    hs.source = fx;
+                    hs.libSig = libSig;
+                    if (cr.program) hs.program = cr.program;
+                }
+                hs.params = m.params;
+                next[hid] = std::move(hs);
+                st.expand.push_back(hid);
+            }
+        }
         if (!st.error.empty()) allOk = false;
         next[m.id] = std::move(st);
     }
@@ -456,7 +481,30 @@ std::string Engine::setProject(const ProjectSpec& p) {
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}, nullptr};
         int64_t layerState = 0;
+        // A synth in the chain stands for its voice and effects; its project effect modules are found by name.
+        std::vector<std::string> chain;
         for (const std::string& id : w.chain) {
+            auto it = modules_.find(id);
+            if (it == modules_.end() || it->second.expand.empty()) {
+                chain.push_back(id);
+                continue;
+            }
+            for (const std::string& e : it->second.expand) {
+                if (e[0] != '\x1e') {
+                    chain.push_back(e);
+                    continue;
+                }
+                const std::string name = e.substr(1);
+                std::string found;
+                for (const auto& [mid, ms] : modules_)
+                    if (mid.find('\x1f') == std::string::npos && (mid == name || ms.ref == refName(name))) found = mid;
+                if (found.empty() || !modules_.at(found).program || modules_.at(found).program->kind != ModuleKind::Effect)
+                    warnings[id].push_back("fx " + name + ": there is no effect module called '" + name + "' in the project");
+                else
+                    chain.push_back(found);
+            }
+        }
+        for (const std::string& id : chain) {
             auto it = modules_.find(id);
             if (it == modules_.end() || !it->second.program || it->second.program->kind == ModuleKind::Library) continue;
             pl.ids.push_back(id);
@@ -664,10 +712,17 @@ void Engine::setParam(const std::string& moduleId, const std::string& name, doub
     auto it = modules_.find(moduleId);
     if (it == modules_.end()) return;
     it->second.params[name] = value;
+    // A synth's params reach its generated effect modules too.
+    std::vector<std::string> ids{moduleId};
+    for (const std::string& e : it->second.expand)
+        if (e != moduleId && e[0] != '\x1e') {
+            modules_.at(e).params[name] = value;
+            ids.push_back(e);
+        }
     for (auto& [id, ls] : layers_)
         if (ls.chain)
             for (const std::string& m : ls.chain->moduleIds)
-                if (m == moduleId) {
+                if (std::find(ids.begin(), ids.end(), m) != ids.end()) {
                     writeParams(*ls.chain);
                     break;
                 }

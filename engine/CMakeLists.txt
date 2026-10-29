@@ -95,6 +95,7 @@ add_library(caw_core STATIC
   src/midifile.cpp
   src/project.cpp
   src/render.cpp
+  src/synth.cpp
   src/tables.cpp
   src/vm.cpp
   src/wav.cpp

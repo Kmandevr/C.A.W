@@ -141,6 +141,8 @@ private:
         std::string error;
         int line = 0, col = 0;
         std::map<std::string, double> params;
+        // A synth: the chain it plays as (its voice, generated effect modules, and "\x1e" + name for a project module).
+        std::vector<std::string> expand;
     };
     struct LayerState {
         int slot = -1;

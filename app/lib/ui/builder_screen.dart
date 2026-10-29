@@ -14,10 +14,11 @@ import 'pattern_editor.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Generators are green, effects pink, libraries blue and patterns yellow.
+/// Generators and synths are green, effects pink, libraries blue and patterns yellow.
 Color kindColor(String kind) =>
     switch (kind) { 'effect' => Neon.pink, 'library' => Neon.blue, 'pattern' => Neon.yellow, _ => Neon.green };
 IconData kindIcon(String kind) => switch (kind) {
+  'synth' => Icons.waves,
   'effect' => Icons.tune,
   'library' => Icons.menu_book,
   'pattern' => Icons.piano,

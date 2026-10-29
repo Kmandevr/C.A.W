@@ -37,7 +37,7 @@ A module is one text file: an optional header between `---` lines, then code.
 ```
 ---
 caw: 1               # module format version (only 1 exists)
-kind: generator      # generator (makes sound), effect (changes `in`), library (functions only) or pattern (notes)
+kind: generator      # generator (makes sound), effect (changes `in`), library (functions only), pattern (notes) or synth (a patch, see synth.md)
 name: Bass
 summary: Filtered saw bass playing an A minor pattern
 mode: float          # byte or float; default byte for generators, float for effects

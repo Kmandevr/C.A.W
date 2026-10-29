@@ -6,6 +6,9 @@
 
 #include "compile.h"
 #include "detmath.h"
+#include "engine.h"
+#include "project.h"
+#include "synth.h"
 #include "tables.h"
 #include "test.h"
 #include "vm.h"
@@ -78,6 +81,38 @@ double amplitudeAt(const std::vector<double>& x, double hz, double sr = 48000) {
         im += x[i] * std::sin(a);
     }
     return 2.0 * std::sqrt(re * re + im * im) / static_cast<double>(x.size());
+}
+
+const std::string kPatch = "---\ncaw: 1\nkind: synth\nname: Test\n---\n";
+
+std::string patchError(const std::string& body) { return translateSynth(kPatch + body).error; }
+
+// Plays a synth module (plus any extra modules) from a held C3 note for `frames` samples; returns the left channel.
+std::vector<double> playSynth(const std::string& patch, int64_t frames, std::vector<ModuleSpec> extra = {},
+                              std::string* result = nullptr, Engine* reuse = nullptr) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 4;
+    p.master = 1.0;
+    p.modules.push_back({"s", patch, {}});
+    p.modules.push_back({"p", "---\nkind: pattern\n---\n0 C3 4\n", {}});
+    for (ModuleSpec& m : extra) p.modules.push_back(m);
+    LayerSpec l;
+    l.id = "l";
+    l.chain = {"s"};
+    l.pattern = "p";
+    l.volume = 1.0;
+    p.layers = {l};
+    Engine local(48000);
+    Engine& e = reuse ? *reuse : local;
+    e.setMasterBypass(true);
+    const std::string res = e.setProject(p);
+    if (result) *result = res;
+    e.play();
+    std::vector<float> lf(static_cast<size_t>(frames)), rf(static_cast<size_t>(frames));
+    for (int64_t i = 0; i < frames; i += 64)
+        e.process(lf.data() + i, rf.data() + i, static_cast<int>(std::min<int64_t>(64, frames - i)));
+    return std::vector<double>(lf.begin(), lf.end());
 }
 
 double rms(const std::vector<double>& x) {
@@ -172,4 +207,86 @@ TEST(wt_unknown_table_and_bad_values_stay_safe) {
     CHECK(bad.error.find("table names: sine, tri, saw") != std::string::npos);
     // scale.x, chord.x and arp.x with an unknown x still read another module's value, as they always did.
     CHECK(compileModule("---\nmode: float\n---\nscale.mine * 0.1\n").program != nullptr);
+}
+
+TEST(synth_patches_report_errors_at_their_line) {
+    CHECK(patchError("osc a level 2\n").find("line 6, col 13: level must be 0 to 1, not 2") == 0);
+    CHECK(patchError("osc a\nosc d\n").find("line 7, col 1: osc needs its name: a, b or c") == 0);
+    CHECK(patchError("osc a table nope\n").find("unknown table 'nope'") != std::string::npos);
+    CHECK(patchError("osc a wobble 3\n").find("unknown setting 'wobble'") != std::string::npos);
+    CHECK(patchError("filter 1 lowpass cutoff 5\n").find("cutoff must be 20 to 20000") != std::string::npos);
+    CHECK(patchError("lfo 1 rate 2\n").find("later synth stage") != std::string::npos);
+    CHECK(patchError("mod env 2 -> filter 1 cutoff 0.4\n").find("later synth stage") != std::string::npos);
+    CHECK(patchError("bananas\n").find("unknown line 'bananas'") != std::string::npos);
+    CHECK(patchError("voices 40\n").find("voices must be 1 to 32") != std::string::npos);
+    CHECK(translateSynth("---\nkind: generator\n---\nosc a\n").error.find("kind: synth") != std::string::npos);
+    // Comments and blank lines are fine; a patch with no sources gets one saw.
+    SynthResult ok = translateSynth(kPatch + "// just a comment\n\nvoices 4 // four notes\n");
+    CHECK(ok.ok);
+    CHECK(ok.generator.find("wt(table.saw") != std::string::npos);
+    CHECK(ok.generator.find("voices: 4") != std::string::npos);
+}
+
+TEST(a_synth_patch_compiles_to_a_voice_with_its_effects) {
+    CompileResult r = compileModule(kPatch +
+                                    "osc a table basic unison 5 detune 0.3\nsub level 0.3\nfilter 1 lowpass cutoff 900\n"
+                                    "fx drive amount 0.5\nfx crushfx\nfx reverb mix 0.4\n");
+    CHECK(r.program != nullptr);
+    if (!r.program) return;
+    CHECK(r.program->synth);
+    CHECK_EQ(r.program->voices, 8);
+    CHECK_EQ(r.program->synthFx.size(), size_t{3});
+    CHECK(r.program->synthFx[1] == "@crushfx");
+    bool fxParam = false;
+    for (const ParamDef& d : r.program->params) fxParam = fxParam || (d.name == "reverb_1_mix" && d.header == "Effects");
+    CHECK(fxParam);
+    CHECK(describeProgram(*r.program).find("\"kind\":\"synth\"") != std::string::npos);
+    // The same patch always gives the same code.
+    CHECK(translateSynth(kPatch + "osc a\nfx reverb\n").generator == translateSynth(kPatch + "osc a\nfx reverb\n").generator);
+}
+
+TEST(a_synth_plays_notes_through_its_effects_and_project_modules) {
+    const std::string patch = kPatch + "osc a table saw\nenv 1 attack 0.001 release 0.05\n";
+    auto dry = playSynth(patch, 48000);
+    CHECK(rms(std::vector<double>(dry.begin() + 1000, dry.begin() + 20000)) > 0.05);
+    // The note lasts 4 steps (24000 samples at 120 BPM); without effects it is silent soon after.
+    CHECK(rms(std::vector<double>(dry.begin() + 30000, dry.end())) < 1e-4);
+    // A delay keeps sounding after the note ends.
+    auto wet = playSynth(patch + "fx delay time 0.25 feedback 0.5 mix 0.5\n", 48000);
+    CHECK(rms(std::vector<double>(wet.begin() + 30000, wet.end())) > 0.01);
+    // A project effect module named in an fx line runs where its line is: this one silences everything.
+    auto muted = playSynth(patch + "fx silence\n", 48000, {{"m", "---\nkind: effect\nname: silence\n---\nin * 0\n", {}}});
+    CHECK(rms(muted) < 1e-9);
+    // A missing one is a warning, and the synth still plays.
+    std::string res;
+    auto still = playSynth(patch + "fx nothere\n", 24000, {}, &res);
+    CHECK(res.find("no effect module called 'nothere'") != std::string::npos);
+    CHECK(rms(still) > 0.05);
+}
+
+TEST(setting_a_synth_param_reaches_its_voice_and_its_effects) {
+    const std::string patch = kPatch + "osc a table saw\nenv 1 attack 0.001\nfx drive amount 0\n";
+    Engine e(48000);
+    auto before = playSynth(patch, 12000, {}, nullptr, &e);
+    e.setParam("s", "volume", 0.0);
+    std::vector<float> lf(4800), rf(4800);
+    for (int i = 0; i < 4800; i += 64) e.process(lf.data() + i, rf.data() + i, 64);
+    double tail = 0;
+    for (int i = 2400; i < 4800; ++i) tail = std::max(tail, std::fabs(static_cast<double>(lf[static_cast<size_t>(i)])));
+    CHECK(tail < 1e-6);
+    // The effect's param: full drive squashes the saw, so its crest factor (peak over RMS) drops.
+    auto crest = [&] {
+        for (int i = 0; i < 4800; i += 64) e.process(lf.data() + i, rf.data() + i, 64);
+        std::vector<double> seg(lf.begin() + 2400, lf.end());
+        double peak = 0;
+        for (double v : seg) peak = std::max(peak, std::fabs(v));
+        return peak / std::max(1e-12, rms(seg));
+    };
+    e.setParam("s", "volume", 0.8);
+    const double clean = crest();
+    e.setParam("s", "drive_1_amount", 1.0);
+    const double driven = crest();
+    CHECK(clean > 1.3);
+    CHECK(driven < clean * 0.9);
+    CHECK(rms(before) > 0.0);
 }

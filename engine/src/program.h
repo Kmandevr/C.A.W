@@ -46,7 +46,7 @@ struct Op {
     double k;        // constant value
 };
 
-enum class ModuleKind : uint8_t { Generator, Effect, Library, Pattern };
+enum class ModuleKind : uint8_t { Generator, Effect, Library, Pattern, Synth };
 enum class OutputMode : uint8_t { Byte, Float };
 
 constexpr int kMaxExports = 16;  // per layer, across its chain
@@ -110,6 +110,10 @@ struct Program {
     std::vector<std::pair<uint32_t, uint32_t>> resetRanges;  // (offset, count) of state a reset clears
     uint32_t usedVars = 0;             // bit per Var
     int voices = 8;                    // notes it plays at once on a pattern layer (header voices:, 1..32)
+    // A synth patch compiles to its voice (this program, kind Generator) plus effects after the voices are summed.
+    bool synth = false;
+    std::string synthCode;                  // the generated voice code, for caw check and "eject to code"
+    std::vector<std::string> synthFx;       // in order: a generated effect module's source, or "@name" for a project module
 };
 
 // Per-block values the host fills in for one module instance.
