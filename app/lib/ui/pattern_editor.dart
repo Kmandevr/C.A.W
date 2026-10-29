@@ -63,6 +63,12 @@ class _PatternEditorState extends State<PatternEditor> {
   double _dragMovedP = 0;
   PatternDoc? _dragBase;
   double _zoomStart = 28;
+  // Raw touches: every finger on the roll, and a one-finger touch on empty grid that is not yet a tap or a scroll.
+  final Map<int, Offset> _pointers = {};
+  Offset? _pending;
+  bool _panning = false;
+  double _pinchSpan = 0;
+  Offset _pinchFocal = Offset.zero;
   int _lane = 0; // a drag in the velocity (1) or extras (2) lane
   double _gridH = 0;
   Timer? _hold; // long press on a note opens its extras panel
@@ -494,6 +500,96 @@ class _PatternEditorState extends State<PatternEditor> {
 
   // ---------- pointer ----------
 
+  static const _origin = Offset(_keyW, _rulerH);
+
+  /// One finger on a note, in a lane or with the select tool edits; on empty grid it waits: a tap draws (or erases),
+  /// a drag scrolls. Two fingers zoom and scroll, and drop an edit the first finger had started.
+  void _pointerDown(PointerDownEvent e) {
+    _focus.requestFocus();
+    _pointers[e.pointer] = e.localPosition;
+    if (_pointers.length == 1) {
+      final p = e.localPosition - _origin;
+      if (p.dy >= _gridH || _noteAt(p) != null || _tool == PatternTool.select) {
+        _down(p);
+      } else {
+        _pending = p;
+        _panning = false;
+      }
+    } else if (_pointers.length == 2) {
+      _cancelEdit();
+      _pending = null;
+      final ps = _pointers.values.toList();
+      _pinchSpan = (ps[0].dx - ps[1].dx).abs();
+      _pinchFocal = (ps[0] + ps[1]) / 2;
+      _zoomStart = _pxPerStep;
+    }
+  }
+
+  void _pointerMove(PointerMoveEvent e) {
+    if (!_pointers.containsKey(e.pointer)) return;
+    _pointers[e.pointer] = e.localPosition;
+    if (_pointers.length >= 2) {
+      final ps = _pointers.values.take(2).toList();
+      final focal = (ps[0] + ps[1]) / 2, span = (ps[0].dx - ps[1].dx).abs();
+      setState(() {
+        // A pinch that starts with the fingers stacked vertically only scrolls.
+        if (_pinchSpan > 24) _pxPerStep = (_zoomStart * span / _pinchSpan).clamp(4.0, 200.0);
+        _scrollX -= focal.dx - _pinchFocal.dx;
+        _scrollY -= focal.dy - _pinchFocal.dy;
+      });
+      _pinchFocal = focal;
+      return;
+    }
+    final p = e.localPosition - _origin, pending = _pending;
+    if (pending != null) {
+      if (!_panning && (p - pending).distance > kTouchSlop) _panning = true;
+      if (_panning) {
+        setState(() {
+          _scrollX -= e.delta.dx;
+          _scrollY -= e.delta.dy;
+        });
+      }
+      return;
+    }
+    _move(p);
+  }
+
+  void _pointerUp(PointerEvent e, {required bool cancel}) {
+    if (_pointers.remove(e.pointer) == null) return;
+    if (_pointers.length == 1) {
+      // Back to one finger after a pinch: it keeps scrolling until it lifts.
+      _pending = _pointers.values.first - _origin;
+      _panning = true;
+      return;
+    }
+    if (_pointers.isNotEmpty) return;
+    final pending = _pending;
+    _pending = null;
+    if (pending != null) {
+      if (!_panning && !cancel) {
+        _down(pending);
+        _up();
+      }
+      return;
+    }
+    cancel ? _cancelEdit() : _up();
+  }
+
+  /// Drops a one-finger edit in progress, restoring the notes as they were before it.
+  void _cancelEdit() {
+    _hold?.cancel();
+    _hold = null;
+    final base = _dragBase;
+    if (base == null) return;
+    setState(() {
+      _doc = base;
+      _dragStart = null;
+      _dragBase = null;
+      _dragNote = null;
+      _rectEnd = null;
+    });
+  }
+
   double _stepAt(double x) => (x + _scrollX) / _pxPerStep;
   double _pitchAt(double y) => 127 - ((y + _scrollY) / _rowH).floorToDouble();
 
@@ -808,26 +904,19 @@ class _PatternEditorState extends State<PatternEditor> {
             _scrollX = _scrollX.clamp(0, math.max(0.0, length * _pxPerStep + 200 - w));
             _scrollY = _scrollY.clamp(0, math.max(0.0, 128 * _rowH - h));
             final grid = _grid ? _gridRows(d) : null;
-            return GestureDetector(
+            // The roll claims every touch on it, so a scrolling page around it (the Builder on a phone) never takes
+            // its drags; the pointers are then read raw below.
+            return RawGestureDetector(
               behavior: HitTestBehavior.opaque,
-              onScaleStart: (e) {
-                _zoomStart = _pxPerStep;
-                if (e.pointerCount == 1) _down(e.localFocalPoint - const Offset(_keyW, _rulerH));
+              gestures: {
+                EagerGestureRecognizer: GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
+                    () => EagerGestureRecognizer(), (_) {}),
               },
-              onScaleUpdate: (e) {
-                if (e.pointerCount >= 2) {
-                  // Two fingers zoom and scroll; one finger always edits.
-                  setState(() {
-                    _pxPerStep = (_zoomStart * e.horizontalScale).clamp(4.0, 200.0);
-                    _scrollX -= e.focalPointDelta.dx;
-                    _scrollY -= e.focalPointDelta.dy;
-                  });
-                } else {
-                  _move(e.localFocalPoint - const Offset(_keyW, _rulerH));
-                }
-              },
-              onScaleEnd: (_) => _up(),
               child: Listener(
+                onPointerDown: _pointerDown,
+                onPointerMove: _pointerMove,
+                onPointerUp: (e) => _pointerUp(e, cancel: false),
+                onPointerCancel: (e) => _pointerUp(e, cancel: true),
                 onPointerSignal: (e) {
                   if (e is PointerScrollEvent) {
                     setState(() {

@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: How the app should look and feel as a light "halfway DAW" on phone and desktop: layout, one gesture vocabulary, the session grid, editors, inspector, and the performance budget.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # UI design
@@ -126,7 +126,7 @@ The same meaning everywhere, so nothing has to be learned twice:
   - The piano roll and the drum grid edit the same pattern files, which stay readable text.
   - **Scale:** rows in the project's key are highlighted. Notes can go anywhere, with no lock to the key.
   - **Velocity:** a lane under the roll.
-  - **New notes:** a tap makes a note as long as the last one you sized; dragging while drawing sets the length directly.
+  - **New notes:** a tap makes a note as long as the last one you sized; to change its length, drag its end (owner, 2026-10-29: a drag on empty grid scrolls instead of drawing, so edits are intentional).
   - **Extras** (probability, ratchet, slide): both a long-press panel (right-click or the Menu key on PC) and lanes you can switch on under the roll. Notes with extras show a dot.
   - **Saving:** the editor rewrites the pattern's text but keeps the header and comment lines; note lines are rewritten in time order, and a comment at the end of a note line stays with that note.
   - **Where:** selecting a pattern in Builder shows the roll or grid in place of the code, with the text one tap away, plus a button to go full screen.
@@ -150,7 +150,7 @@ The same meaning everywhere, so nothing has to be learned twice:
   - notes with extras (probability, ratchets, custom values) show a small dot, like Elektron's blinking locked steps
 - **Piano roll:**
   - **Modes:** a thumb tool bar switches between Draw, Select, Curve and Erase. That replaces the modifier keys a phone doesn't have.
-  - **Zoom:** two fingers zoom and scroll. One finger always edits, so editing and navigating never clash.
+  - **Zoom and scroll:** two fingers zoom and scroll. One finger on empty grid scrolls too; on a note, in a lane or with the select tool it edits (owner, 2026-10-29).
   - **Feedback:** moving a note plays it, and moving a chord plays the chord.
   - **Snap:** follows the grid setting, with a magnet toggle for free timing.
   - **Curve mode:** draw on a note freehand, and it smooths into points and handles. Pitch bends show as a bent note. Other value curves are lines in a lane under the roll.

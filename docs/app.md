@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: its three areas, how it talks to the engine, where projects are saved, and how CI builds and signs it.
 covers: [app/]
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # App
@@ -37,7 +37,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - tools: draw (B), select (V), erase (X); undo/redo; grid resolution 1 to 1/128 (Alt+1..8); snap (N); fixed grid (Alt+F); drum grid (G); full screen
     - the grid adapts to zoom, down to the resolution; rows in the project's key are lit; velocity lane underneath; layer colour, brighter when louder
     - keys: WASD move the selection, Ctrl+WASD the cursor, Ctrl+Shift+WASD jump to the next note; Q inserts at the cursor, E copies the selection after itself; Shift+A/D length, Shift+W/S invert; +/- velocity; P, R, L cycle chance, ratchet, slide
-    - one finger edits, two fingers zoom and scroll; edits reach the text and the engine after 150 ms (one write per pause, light on slow phones); saving keeps comments
+    - one finger on a note, in a lane or with the select tool edits; on empty grid a tap draws (or erases) and a drag scrolls; two fingers zoom and scroll. The roll claims its touches, so it works the same inside the Builder's scrolling page as full screen; edits reach the text and the engine after 150 ms (one write per pause, light on slow phones); saving keeps comments
     - holding a note (or I, or the ⋮ menu) opens its extras: velocity, chance, ratchet 1–8 and slide, as one undo step
     - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
     - triplets (Alt+0) make every grid size 2/3 as long
