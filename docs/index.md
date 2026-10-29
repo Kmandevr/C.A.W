@@ -19,6 +19,7 @@ Project memory for C.A.W. Open this `docs/` folder as a vault in Obsidian, or re
 - [App](app.md): the built Flutter app: areas, engine access, storage, build and signing
 - [Performance](performance.md): how the engine and app are measured for low-end devices, the audit's ranked bottlenecks, fixes with before/after numbers, and next steps
 - [Actions, keys and macros](actions.md): draft for review: every command as an action, customisable keys per area, macros, toolbars and the default keymap
+- [Synth](synth.md): the house synth (`kind: synth`): owner's choices, the patch file, how the engine plays it, open questions and build stages
 - [UI design](ui.md): v2 layout and interactions for phone and desktop, gestures, editors, and the CPU and RAM budget
 - [Roadmap](roadmap.md): v1 (build, arrange, export) and later stages, with v1's acceptance test and build order
 - [Decisions](decisions.md): what was chosen and why
