@@ -66,7 +66,13 @@ struct Voice {
     NoteExpression ex;
     int64_t exStart = 0;  // `since` when this note took the voice (a slide hands a voice on mid-way)
     double exLen = 1;     // the note's length in samples, for the curves' 0..1 time
+    // The curves run at control rate: worked out every kExpressionStep samples, with linear steps in between.
+    double bend = 0, press = 1, timbre = 0, freqNow = 0;
+    double dBend = 0, dPress = 0, dTimbre = 0, dFreq = 0;
+    int exLeft = 0;  // samples until the next control point
 };
+
+constexpr int kExpressionStep = 16;  // 1/3 ms at 48 kHz: smooth for bends and vibrato up to 30 Hz, 16x cheaper
 
 constexpr uint32_t kOrphanNote = 0xFFFFFFFFu;  // a held note whose pattern was edited: ends at offAt
 
@@ -908,6 +914,8 @@ void Engine::swapIn(Slot& s, Chain* c) noexcept {
             t.trig = true;
             t.started = ++to.noteCount;
             t.since = t.rel = t.quiet = 0;
+            t.exStart = 0;
+            t.exLeft = 0;
             t.tacc = t.phase = t.lastY = 0;
         }
 }
@@ -1161,6 +1169,19 @@ void Engine::takeExpression(Voice& v, const Pattern& pat, const PatternNote& n) 
     v.ex = pat.expressions[static_cast<size_t>(n.extra)];
     v.exStart = v.since;
     v.exLen = std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_);
+    v.exLeft = 0;  // work out the first control point on the next sample
+}
+
+// The note's expression `into` samples after it took the voice: bend (curve + vibrato), press and timbre.
+static void expressionAt(const NoteExpression& x, double into, double len, double sr, double& bend, double& press, double& timbre) {
+    const double u = std::clamp(into / len, 0.0, 1.0);
+    bend = x.bend.count ? x.bend.at(u) : 0.0;
+    if (x.vibDepth > 0) {
+        const double fade = x.vibDelay > 0 ? std::clamp(u / x.vibDelay, 0.0, 1.0) : 1.0;
+        bend += x.vibDepth * fade * detSin(kTwoPi * x.vibRate * into / sr);
+    }
+    press = x.press.count ? x.press.at(u) : 1.0;
+    timbre = x.timbre.count ? x.timbre.at(u) : 0.0;
 }
 
 void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept {
@@ -1184,6 +1205,8 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
                 v.note = e.note;
                 v.sub = 0;
                 v.vel = n.vel;
+                // The glide starts from the pitch being heard, bend included, so a bent note doesn't snap first.
+                if (v.expressive) v.pitch += v.bend;
                 v.target = n.pitch;
                 v.glideLeft = std::max(1, static_cast<int>(std::floor(stepLen_ * 0.5 + 0.5)));
                 v.glideStep = (v.target - v.pitch) / v.glideLeft;
@@ -1304,19 +1327,34 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
                 v.trig = false;
                 c.vgate[i] = v.gate ? 1.0 : 0.0;
                 // The note's expression: its bend (plus vibrato) moves note and freq; press and timbre are 0..1.
-                double bend = 0.0, press = 1.0, timbre = 0.0;
+                // Worked out every kExpressionStep samples from the note's start, stepped linearly in between, so
+                // it costs little per sample and doesn't depend on how the device splits blocks.
+                double bend = 0.0, press = 1.0, timbre = 0.0, freq = v.freq;
                 if (v.expressive) {
-                    const double into = static_cast<double>(v.since - v.exStart);
-                    const double u = std::min(1.0, into / v.exLen);
-                    if (v.ex.bend.count) bend = v.ex.bend.at(u);
-                    if (v.ex.vibDepth > 0) {
-                        const double fade = v.ex.vibDelay > 0 ? std::min(1.0, u / v.ex.vibDelay) : 1.0;
-                        bend += v.ex.vibDepth * fade * detSin(kTwoPi * v.ex.vibRate * into / sr_);
+                    const int64_t into = v.since - v.exStart;
+                    if (v.exLeft <= 0) {
+                        if (into == 0 || v.freqNow == 0) {
+                            expressionAt(v.ex, 0.0, v.exLen, sr_, v.bend, v.press, v.timbre);
+                            v.freqNow = mtof(v.pitch + v.bend);
+                        }
+                        double b, p, t;
+                        expressionAt(v.ex, static_cast<double>(into + kExpressionStep), v.exLen, sr_, b, p, t);
+                        v.dBend = (b - v.bend) / kExpressionStep;
+                        v.dPress = (p - v.press) / kExpressionStep;
+                        v.dTimbre = (t - v.timbre) / kExpressionStep;
+                        v.dFreq = (mtof(v.pitch + v.glideStep * kExpressionStep + b) - v.freqNow) / kExpressionStep;
+                        v.exLeft = kExpressionStep;
                     }
-                    if (v.ex.press.count) press = v.ex.press.at(u);
-                    if (v.ex.timbre.count) timbre = v.ex.timbre.at(u);
+                    bend = v.bend;
+                    press = v.press;
+                    timbre = v.timbre;
+                    freq = v.freqNow;
+                    v.bend += v.dBend;
+                    v.press += v.dPress;
+                    v.timbre += v.dTimbre;
+                    v.freqNow += v.dFreq;
+                    --v.exLeft;
                 }
-                const double freq = bend != 0.0 ? mtof(v.pitch + bend) : v.freq;
                 c.vnote[i] = v.pitch + bend;
                 c.vfreq[i] = freq;
                 c.vbend[i] = bend;

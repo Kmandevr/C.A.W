@@ -144,7 +144,8 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
     - `vib DEPTH RATE [FADE]`: vibrato of DEPTH semitones (0–12) at RATE Hz (0.1–30), reaching full depth after FADE of the note (0–1, default 0).
     - `press T:V …`: the note's volume over its length, 0–1. A sound that doesn't read `press` is multiplied by it.
     - `timbre T:V …`: a 0–1 curve the sound reads as `timbre` (MPE's "slide", CC74).
-    - The curves run over each sounding note (each ratchet repeat has its own run), and a slide hands the voice to the next note's curves. A chord line's notes share the line's expression.
+    - The curves run over each sounding note (each ratchet repeat has its own run), and a slide hands the voice to the next note's curves, gliding from the bent pitch. A chord line's notes share the line's expression. A note's bend plus its vibrato depth is at most 48 semitones.
+    - The engine works the curves out every 16 samples from the note's start and steps linearly in between, so they cost little and don't depend on the device's buffer size.
 - **Playback:**
   - The pattern sets the layer's loop length; a note running past the end is released there.
   - A layer with a pattern plays as many voices at once as its generator's `voices:` header asks for (1–32, default 8; a layer always keeps at least 2 voice instances) and steals the oldest when one more note starts. Memory counts every voice. Changing the count while notes play keeps the ones that still fit and ends the rest, smoothed over.
