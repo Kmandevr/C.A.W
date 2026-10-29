@@ -75,25 +75,39 @@ table vocal file vocal.wav                            // imported 2048-sample fr
 
 ## How the engine plays it **[Proposal]**
 
-- **A patch compiles to C.A.W code.** The engine translates the patch into a generator program (one voice) plus an effect program (after the voices are summed), using new native built-ins for the heavy parts. That reuses what already works: the voice pool and pattern playback, hot swap that keeps running state, exports, the CLI, determinism, golden tests and the sandbox.
+Reviewed by the `architect` agent (2026-10-29): the core fits the engine as built, with the changes folded in below.
+
+- **A patch compiles to C.A.W code.** The engine translates the patch into a generator program (one voice) plus effect programs, using new native built-ins for the heavy parts. That reuses what already works: the voice pool and pattern playback, hot swap that keeps running state, exports, the CLI, determinism, golden tests and the sandbox. The VM runs each op over a whole block, so a few dozen ops per voice cost little; the work is inside the built-ins.
+- **Each part is its own function** in the generated code (`osc_a`, `filt_1`, `env_2`), because hot swap matches running state by call path: adding an oscillator then doesn't restart the others.
+- **Voices hold no delays or reverbs.** Every voice is a whole copy of the voice program's state, so effects live only in the effect programs, after the voices are summed.
+- **Voice count:** today every pattern track has a fixed pool of 8. It becomes a per-patch setting (`voices`) up to a fixed maximum, set aside when the track is installed; the sandbox needs a fixed bound. Proposed maximum: 32.
 - **New built-ins**, each native C++ over a whole block:
   - `wt(table, freq, pos, unison, detune, …)`: a wavetable oscillator with up to 16 unison voices inside one call, morphing between frames, band-limited by mipmapped tables (one table per octave) so high notes don't alias
   - warps: sync, bend, phase distortion, FM from another oscillator, and bit and sample crush
   - comb and formant filters next to the existing `lpf`, `hpf`, `bpf` and `notch`; a drawn-shape LFO `lfo.shape`; `fx.chorus` and `fx.eq`
 - **Tables** are shared, read-only data owned by the compiled program (or by the engine, for the built-in shapes), never per-voice state: a 256-frame table with its mipmaps is about 5 MB of floats, loaded once.
+  - In code a table is a name fixed at compile time (`table.saw`, `table.hollow`); the compiler stores its index in the call, and the VM hands the built-in a pointer to it. Tables don't count against a module's state limit; they get their own memory budget, and going over it fails closed (the module reports an error, nothing crashes).
+  - Mipmaps (one band-limited copy per octave) are built with the engine's own deterministic maths, the same on every device.
+  - Settings that can't change while a note plays (the table, the unison count) are fixed at compile time, which keeps `wt` within the 6 arguments a call can take.
+  - Drawn LFO shapes and drawn tables use the same mechanism. Tables from code reuse the wavetable export.
 - **Imported tables** are stored next to the patch: in the project file as their own `tables` entry, and in git as a `.wav` beside the `.caw`.
-- **User effect modules** in `fx` lines join the track's effect chain after the synth's own effects.
-- **Stereo:** unison spread, chorus and reverb need stereo, and the engine is mono per track today (a track is panned at the mix). See the open question below.
+- **Effects run in line order:** each run of built-in `fx` lines becomes one generated effect program, each user module is its own instance where its line is, and the track's own effects come after. In the example, drive and chorus run first, then `crushfx`, then reverb.
+- **Stereo:** unison spread, chorus and reverb need stereo, and the engine is mono per track today (a track is panned at the mix). The plan: synth stage 1 is mono; then a program can declare stereo output (a second output register and right-channel buffer, stereo built-ins writing two adjacent registers, mono user effects run as a left and right pair, and pan acting as balance). Mono tracks keep today's code path, so every existing golden render stays bit-identical.
+- **Placement:** `engine/src/tables.{h,cpp}` (storage, mipmaps, built-in shapes) and `engine/src/synth.{h,cpp}` (patch to code and tables, a pure function); the new built-ins in `builtins.cpp`; imported WAV tables are read when the project is set, never on the audio thread. No new C API call: `caw_check` accepts `kind: synth` and returns the parsed parts and the generated code, which is also what "eject to code" uses.
+- **The app doesn't parse the patch itself.** It edits lines as text and reads the structure from the engine's JSON, so there is one grammar, in the engine.
 
 ## Open questions
 
-- **Stereo engine.** Make every track stereo end to end (programs, effects, the mix and exports), or give only synth tracks a stereo path? Either way, mono modules and the golden renders must stay bit-identical.
+- **Voice maximum.** The owner asked for no caps; the sandbox needs some fixed bound. Proposed: 32 voices per track, each oscillator up to 16 unison.
 - **Plugin UI library.** Picked when the plugin stage starts; it must be permissively licensed. **[Fact]** (checked 2026-10-29 on [github.com/VitalAudio/visage](https://github.com/VitalAudio/visage)) Visage is MIT-licensed and draws with Direct3D 11, Metal, Vulkan and WebGL on Windows, macOS, Linux and the web; it lists no Android or iOS support, so it would serve the desktop plugin, not the phone app.
 
 ## Build stages **[Proposal]**
 
-1. **Engine core:** table storage with mipmaps and the built-in shapes, `wt` with unison and morphing, the patch parser and its translation to code, `kind: synth` in `caw check` and the C API, tests and golden renders.
-2. **Stereo** (after the open question is settled), then spread, chorus and reverb in stereo.
+1. **Engine core**, each step tested on its own with `caw_tests` and the CLI:
+   1. tables with the built-in shapes and mipmaps, and `wt(table.saw, freq, pos, unison, detune)` usable from plain code, with golden renders
+   2. the voice count as a per-patch setting up to the maximum
+   3. `synth.cpp` for a first subset (oscillators, sub, noise, one filter, the volume envelope, effect groups) and `kind: synth` in `caw check`, with goldens of the generated code and its sound
+2. **Stereo** for programs that declare it, then spread, chorus and reverb in stereo.
 3. **Modulation:** envelopes, drawn LFOs, macros and the mod matrix.
 4. **App:** the synth screen (oscillators, filters, modulation, effects pages), drag-to-modulate, the on-screen keyboard, the table editor (draw, from code, import WAV), presets with tags and search.
 5. **Warps, the extra filters and effects, and optimisation** measured with `caw_bench` on the phone's budget.
