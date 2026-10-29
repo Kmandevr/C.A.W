@@ -104,6 +104,8 @@ class SettingsPage extends StatelessWidget {
               value: settings.vimCode,
               onChanged: (v) => settings.update((s) => s.vimCode = v),
             ),
+            const Heading('Piano roll'),
+            ..._rollSettings(settings),
             const Heading('About'),
             ListTile(
               leading: Icon(Icons.description_outlined, color: Neon.dim),
@@ -437,4 +439,68 @@ class _ColorPickerState extends State<ColorPicker> {
           ]),
         ]),
       );
+}
+
+/// The roll's sizes, look and touch choices; sliders show the value while dragging and save when let go.
+List<Widget> _rollSettings(Settings settings) {
+  final r = settings.roll;
+  Widget slider(String label, IconData icon, double value, double min, double max, String Function(double) show,
+      RollLook Function(double) set) {
+    return ListTile(
+      leading: Icon(icon, color: Neon.blue),
+      title: Text('$label: ${show(value)}', style: Neon.code(size: 14)),
+      subtitle: Slider(
+        min: min,
+        max: max,
+        value: value.clamp(min, max),
+        onChanged: (v) {
+          settings.roll = set(v);
+          settings.preview(null);
+        },
+        onChangeEnd: (v) => settings.update((s) => s.roll = set(v)),
+      ),
+    );
+  }
+
+  String px(double v) => '${v.round()} px';
+  return [
+    slider('Row height', Icons.height, r.rowHeight, 10, 40, px, (v) => r.copyWith(rowHeight: v.roundToDouble())),
+    slider('Velocity lane', Icons.equalizer, r.velocityLane, 32, 160, px,
+        (v) => r.copyWith(velocityLane: v.roundToDouble())),
+    slider('Chance lane', Icons.casino_outlined, r.chanceLane, 24, 120, px,
+        (v) => r.copyWith(chanceLane: v.roundToDouble())),
+    slider('Grid lines', Icons.grid_4x4, r.gridStrength, 0.2, 2, (v) => '${(v * 100).round()}%',
+        (v) => r.copyWith(gridStrength: (v * 10).round() / 10)),
+    slider('Grab zone', Icons.pan_tool_alt_outlined, r.grab, 6, 40, px, (v) => r.copyWith(grab: v.roundToDouble())),
+    slider('Hold for extras', Icons.touch_app_outlined, r.holdMs.toDouble(), 250, 1500, (v) => '${v.round()} ms',
+        (v) => r.copyWith(holdMs: (v / 50).round() * 50)),
+    ListTile(
+      leading: Icon(Icons.piano, color: Neon.yellow),
+      title: const Text('Key names'),
+      subtitle: SegmentedButton<KeyLabels>(
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(value: KeyLabels.none, label: Text('None')),
+          ButtonSegment(value: KeyLabels.octaves, label: Text('C')),
+          ButtonSegment(value: KeyLabels.all, label: Text('All')),
+        ],
+        selected: {r.keyLabels},
+        onSelectionChanged: (v) => settings.update((s) => s.roll = s.roll.copyWith(keyLabels: v.first)),
+      ),
+    ),
+    ListTile(
+      leading: Icon(Icons.swipe, color: Neon.green),
+      title: const Text('Drag on empty grid (draw tool; a tap still draws)'),
+      subtitle: SegmentedButton<EmptyDrag>(
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(value: EmptyDrag.scroll, label: Text('Scroll')),
+          ButtonSegment(value: EmptyDrag.select, label: Text('Select')),
+          ButtonSegment(value: EmptyDrag.draw, label: Text('Draw')),
+        ],
+        selected: {r.emptyDrag},
+        onSelectionChanged: (v) => settings.update((s) => s.roll = s.roll.copyWith(emptyDrag: v.first)),
+      ),
+    ),
+  ];
 }

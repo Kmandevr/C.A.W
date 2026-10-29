@@ -8,6 +8,7 @@ updated: 2026-10-29
 
 Newest first.
 
+- 2026-10-29: Roll customisation (#9): Settings → Piano roll (sizes, grid strength, key names, grab zone, hold time, empty-grid drag), a toolbar you edit (actions and macros), and the generators (euclid, random in key, arpeggiate, humanize, chord stamp, reverse, invert pitch).
 - 2026-10-29: The piano roll works inline in the Builder (it claims its touches; one finger on empty grid scrolls, a tap draws). New [how it works](how-it-works.md) note for agents. Owner's plan for roll, editor and curve work in [decisions](decisions.md).
 
 - 2026-10-28: Light mode (owner OK), auto-update while typing, the key router (keymaps, Vim, counts, macros, action list, code-editor Vim), roll extras panel, lanes, triplets and MIDI import/export buttons; engine `voices` limit ([app](app.md)).

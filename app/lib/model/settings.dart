@@ -37,6 +37,9 @@ class Settings extends ChangeNotifier {
   /// Vim editing in the code editor (WASD moves; I types). Off by default.
   bool vimCode = false;
 
+  /// The piano roll's sizes, look and touch choices.
+  RollLook roll = const RollLook();
+
   /// Themes the user made or imported, saved one file each in themes/.
   List<CawTheme> customThemes = [];
 
@@ -82,6 +85,7 @@ class Settings extends ChangeNotifier {
         'light_mode': lightMode,
         'light_auto': lightAuto,
         'vim_code': vimCode,
+        'roll': roll.toJson(),
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -95,6 +99,8 @@ class Settings extends ChangeNotifier {
     lightMode = (j['light_mode'] as bool?) ?? lightMode;
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
+    final r = j['roll'];
+    if (r is Map<String, dynamic>) roll = RollLook.fromJson(r);
   }
 
   Future<void> _load() async {
@@ -197,5 +203,82 @@ class Settings extends ChangeNotifier {
       if (await f.exists()) await f.delete();
     }
     if (save) await update((s) => s.themeName = s.themeNamed(s.themeName).name);
+  }
+}
+
+/// Which C keys of the roll's keyboard carry a note name.
+enum KeyLabels { none, octaves, all }
+
+/// What one finger dragged on empty grid does in the draw tool (owner's default: scroll).
+enum EmptyDrag { scroll, select, draw }
+
+/// The piano roll's sizes, look and touch choices, each clamped to a range that stays usable.
+class RollLook {
+  const RollLook({
+    this.rowHeight = 16,
+    this.velocityLane = 56,
+    this.chanceLane = 40,
+    this.gridStrength = 1,
+    this.keyLabels = KeyLabels.octaves,
+    this.grab = 12,
+    this.emptyDrag = EmptyDrag.scroll,
+    this.holdMs = 500,
+  });
+
+  final double rowHeight, velocityLane, chanceLane, gridStrength;
+  final KeyLabels keyLabels;
+
+  /// How close to a note's end (px) a touch resizes it instead of moving it; notes shorter than twice this are
+  /// also easier to hit, since a touch this close beside one counts as on it.
+  final double grab;
+  final EmptyDrag emptyDrag;
+
+  /// How long holding a note takes to open its extras.
+  final int holdMs;
+
+  RollLook copyWith({
+    double? rowHeight,
+    double? velocityLane,
+    double? chanceLane,
+    double? gridStrength,
+    KeyLabels? keyLabels,
+    double? grab,
+    EmptyDrag? emptyDrag,
+    int? holdMs,
+  }) =>
+      RollLook(
+        rowHeight: (rowHeight ?? this.rowHeight).clamp(10, 40).toDouble(),
+        velocityLane: (velocityLane ?? this.velocityLane).clamp(32, 160).toDouble(),
+        chanceLane: (chanceLane ?? this.chanceLane).clamp(24, 120).toDouble(),
+        gridStrength: (gridStrength ?? this.gridStrength).clamp(0.2, 2).toDouble(),
+        keyLabels: keyLabels ?? this.keyLabels,
+        grab: (grab ?? this.grab).clamp(6, 40).toDouble(),
+        emptyDrag: emptyDrag ?? this.emptyDrag,
+        holdMs: (holdMs ?? this.holdMs).clamp(250, 1500),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'row_height': rowHeight,
+        'velocity_lane': velocityLane,
+        'chance_lane': chanceLane,
+        'grid_strength': gridStrength,
+        'key_labels': keyLabels.name,
+        'grab': grab,
+        'empty_drag': emptyDrag.name,
+        'hold_ms': holdMs,
+      };
+
+  static RollLook fromJson(Map<String, dynamic> j) {
+    double? n(String k) => (j[k] as num?)?.toDouble();
+    return const RollLook().copyWith(
+      rowHeight: n('row_height'),
+      velocityLane: n('velocity_lane'),
+      chanceLane: n('chance_lane'),
+      gridStrength: n('grid_strength'),
+      keyLabels: KeyLabels.values.where((e) => e.name == j['key_labels']).firstOrNull,
+      grab: n('grab'),
+      emptyDrag: EmptyDrag.values.where((e) => e.name == j['empty_drag']).firstOrNull,
+      holdMs: n('hold_ms')?.round(),
+    );
   }
 }

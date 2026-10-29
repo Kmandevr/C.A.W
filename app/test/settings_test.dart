@@ -47,6 +47,18 @@ void main() {
     expect(File('${dir.path}/themes/Mine.theme').readAsStringSync(), contains('kind: theme'));
   });
 
+  test('the roll\'s look and touch choices are saved, loaded and clamped', () async {
+    final s = await Settings.open(base: dir);
+    expect(s.roll.emptyDrag, EmptyDrag.scroll);
+    await s.update((x) => x.roll = x.roll.copyWith(rowHeight: 24, emptyDrag: EmptyDrag.select, keyLabels: KeyLabels.all));
+    final back = await Settings.open(base: dir);
+    expect(back.roll.rowHeight, 24);
+    expect(back.roll.emptyDrag, EmptyDrag.select);
+    expect(back.roll.keyLabels, KeyLabels.all);
+    expect(RollLook.fromJson({'row_height': 999, 'hold_ms': 1}).rowHeight, 40);
+    expect(RollLook.fromJson({'row_height': 999, 'hold_ms': 1}).holdMs, 250);
+  });
+
   test('a starter theme is never overwritten: saving it makes a copy', () async {
     final s = await Settings.open(base: dir);
     final saved = await s.saveTheme(calmNeon.withColor('pink', const Color(0xFF00FF00)));

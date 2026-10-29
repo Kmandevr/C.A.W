@@ -42,7 +42,9 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
     - triplets (Alt+0) make every grid size 2/3 as long
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
-    - the curve tool and the `roll.gen.*` generators (euclid, random, arpeggiate, humanize, chord stamp, reverse) are not built yet
+    - generators, from the ⋮ menu or a toolbar button, each one undo step: Euclid (hits, steps and rotation at the grid size, from the cursor), Random in key (density, range around the cursor, bars), Arpeggiate (each selected chord becomes a run at the grid size: up, down, up and down), Humanize (timing and velocity nudges), Chord stamp (3rd and 5th, or a seventh, in the project's key), Legato, Reverse and Invert pitch around the cursor. The last values are kept while the app runs
+    - the toolbar is the keymap's pattern toolbar: ⋮ → Customise toolbar adds any action or macro, reorders, removes or goes back to the default, saved in `keys.txt`. Full screen and ⋮ always stay
+    - the curve tool is not built yet ([#11](https://github.com/Kmandevr/C.A.W/issues/11))
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - project settings: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, hex seed, master volume and the seam crossfade switch
   - **Project controls:** one control per `global` declared by any module. Its value is saved with the project and sent to the engine without recompiling.
@@ -84,13 +86,14 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - Unless that switch is off, it turns itself on the first time the engine reports an overload, and the Arranger's overload banner says so.
   - **Live coding:** auto-update (on by default) runs code that compiles the set pause (100–2000 ms) after the last edit. Code with an error waits for the next edit. Swaps land at the swap timing: now, the next beat or the next bar.
   - **Vim keys in the code editor:** off by default.
+  - **Piano roll:** row height, velocity and chance lane heights, grid line strength, key names (none, C only, all), the grab zone (how near a note's end a touch resizes it; short notes are easier to hit by this much), how long a hold takes to open a note's extras, and what a drag on empty grid does with the draw or erase tool: scroll (default), select, or the tool's own drag.
 - **Keys** (`lib/ui/key_router.dart`): with a keyboard, every key goes through the action system in [actions](actions.md): per-area keymaps, Vim modes, counts, `:` commands, `.` and macros.
   - A badge at the bottom right shows the mode, a recording macro, pending keys, key hints and short toasts.
   - `?` opens the action list: search, keys and run.
   - Recorded macros are saved in `keys.txt` next to `settings.json`; a user `keys.txt` is merged over the default keys.
   - Text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X.
   - The roll, the Builder and the code editor's Vim mode each run their area's actions; the Arranger's actions work on a keyboard-selected layer.
-  - **Not built yet:** editing keys in the action list, custom toolbars and the long-press menu entries from the keymap.
+  - **Not built yet:** editing keys in the action list and the long-press menu entries from the keymap.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
 ## Build

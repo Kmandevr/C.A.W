@@ -1,4 +1,4 @@
-// The piano roll: tapping draws a note and the pattern's text gets it; keys move it; it works inside a scrolling page (needs CAW_LIB).
+// The piano roll: tapping draws a note and the pattern's text gets it; keys move it; it works inside a scrolling page; the menu runs generators (needs CAW_LIB).
 import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
@@ -66,6 +66,29 @@ void main() {
     await tester.tapAt(const Offset(200, 380));
     await tester.pump(const Duration(milliseconds: 200));
     expect(m.source.split('---').last.trim().split('\n').length, 1, reason: m.source);
+    s.dispose();
+  }, skip: skip != null);
+
+  testWidgets('the menu runs a generator: Euclid writes 3 hits in 8 steps', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    final s = AppState();
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject();
+    final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
+    s.project.modules.add(m);
+    s.ready = true;
+    s.starting = false;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
+    expect(find.byTooltip('Draw tool'), findsOneWidget);
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Generate: Euclid'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apply'));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(m.source.split('---').last.trim().split('\n').length, 3, reason: m.source);
     s.dispose();
   }, skip: skip != null);
 }

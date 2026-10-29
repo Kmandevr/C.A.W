@@ -2,12 +2,12 @@
 title: Actions, keys and macros
 summary: Every command as an action, customisable keys per area, macros and toolbars, and the full action catalogue with default keys.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart]
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Actions, keys and macros
 
-**[Fact]** Built (2026-10-28): the action catalogue, keymaps, macros and Vim core (`app/lib/actions/`) and the key router that runs them in the app ([app](app.md)). Still a draft for the owner to change; editing keys in the action list and custom toolbars aren't built yet. The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
+**[Fact]** Built (2026-10-28): the action catalogue, keymaps, macros and Vim core (`app/lib/actions/`) and the key router that runs them in the app ([app](app.md)). Still a draft for the owner to change; editing keys in the action list isn't built yet. The roll's toolbar can be customised (2026-10-29). The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
 
 ## How it works
 
@@ -205,5 +205,6 @@ The piano roll's default toolbar (owner, 2026-10-28) holds:
 - the tools: Draw, Select, Curve and Erase
 - undo and redo
 - grid size and the snap magnet
+- triplets, the fixed grid and the drum grid switch, which the built roll already showed (Claude, 2026-10-29)
 
-You can add your own actions and macros or remove any of these.
+You can add your own actions and macros, reorder them or remove any of these (⋮ → Customise toolbar), and go back to the default. The Curve tool stays hidden until it is built.

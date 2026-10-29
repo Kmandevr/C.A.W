@@ -1038,4 +1038,142 @@ class PatternDoc {
     }
     return best?.id;
   }
+
+  // ---------- generators (roll.gen.*) ----------
+
+  /// Adds notes, each clamped like [insert]; stops at the note limit. Returns the new notes' ids.
+  ({PatternDoc doc, Set<int> ids}) _addAll(Iterable<({Steps at, double pitch, Steps len, double vel})> add,
+      {Set<int> remove = const {}}) {
+    final out = [
+      for (final n in notes)
+        if (!remove.contains(n.id)) n
+    ];
+    final ids = <int>{};
+    var id = _nextId;
+    for (final a in add) {
+      if (out.length >= kPatternMaxNotes || a.at >= Steps(kPatternMaxSteps)) continue;
+      out.add(PatternNote(
+        id: id,
+        at: a.at.clamp(Steps.zero, Steps(kPatternMaxSteps)),
+        len: a.len.clamp(kMinNoteLength, Steps(kPatternMaxSteps)),
+        pitch: a.pitch.clamp(0, 127).toDouble(),
+        vel: _round3(a.vel.clamp(0, 1).toDouble()),
+      ));
+      ids.add(id++);
+    }
+    return (doc: _withNotes(out, id), ids: ids);
+  }
+
+  /// A Euclidean rhythm: [pulses] hits spread as evenly as they go over [steps] cells of [cell] each, from [at],
+  /// turned [rotate] cells later. Each hit is a note of one cell at [pitch].
+  ({PatternDoc doc, Set<int> ids}) euclid(
+      {required Steps at, required int pulses, required int steps, required Steps cell, required double pitch,
+      int rotate = 0, double vel = 1}) {
+    final n = steps.clamp(1, 64), k = pulses.clamp(0, n);
+    return _addAll([
+      for (var i = 0; i < n; i++)
+        if (((i - rotate) % n * k) % n < k) (at: at + cell.times(i), pitch: pitch, len: cell, vel: vel)
+    ]);
+  }
+
+  /// Random notes in [key] (every pitch when null): each [cell] from [at] over [span] gets a note with chance
+  /// [density], at a pitch from [lo] to [hi]. The same [seed] gives the same notes.
+  ({PatternDoc doc, Set<int> ids}) randomInKey(
+      {required Steps at, required Steps span, required Steps cell, required int lo, required int hi,
+      required double density, ({int root, List<int> scale})? key, int seed = 1}) {
+    final r = math.Random(seed);
+    final pitches = [
+      for (var p = math.min(lo, hi); p <= math.max(lo, hi); p++)
+        if (key == null || key.scale.contains((p - key.root) % 12)) p
+    ];
+    if (pitches.isEmpty || cell <= Steps.zero) return (doc: this, ids: <int>{});
+    final cells = (span / cell).floor().clamp(0, kPatternMaxNotes);
+    return _addAll([
+      for (var i = 0; i < cells; i++)
+        if (r.nextDouble() < density)
+          (at: at + cell.times(i), pitch: pitches[r.nextInt(pitches.length)].toDouble(), len: cell, vel: 0.6 + 0.4 * r.nextDouble())
+    ]);
+  }
+
+  /// Turns each chord in the selection (notes starting together) into a run of its notes, one every [rate], over the
+  /// chord's length: up, down, or up then down. Single notes stay.
+  ({PatternDoc doc, Set<int> ids}) arpeggiate(Set<int> sel, Steps rate, {String order = 'up'}) {
+    final chords = <Steps, List<PatternNote>>{};
+    for (final n in _selected(sel)) {
+      (chords[n.at] ??= []).add(n);
+    }
+    final remove = <int>{};
+    final add = <({Steps at, double pitch, Steps len, double vel})>[];
+    if (rate <= Steps.zero) return (doc: this, ids: <int>{});
+    for (final c in chords.values) {
+      if (c.length < 2) continue;
+      c.sort((a, b) => a.pitch.compareTo(b.pitch));
+      final run = switch (order) {
+        'down' => c.reversed.toList(),
+        'updown' => [...c, ...c.reversed.skip(1).take(c.length - 2)],
+        _ => c,
+      };
+      final len = c.map((n) => n.len).reduce(Steps.max), start = c.first.at;
+      final count = math.max(1, (len / rate).ceil()).clamp(1, kPatternMaxNotes);
+      for (var i = 0; i < count; i++) {
+        final t = start + rate.times(i), n = run[i % run.length];
+        add.add((at: t, pitch: n.pitch, len: Steps.min(rate, start + len - t), vel: n.vel));
+      }
+      remove.addAll(c.map((n) => n.id));
+    }
+    return _addAll(add, remove: remove);
+  }
+
+  /// Nudges each selected note's start by up to [timing] steps either way (to 1/96 of a step, never before 0) and
+  /// its velocity by up to [velocity]. The same [seed] gives the same result.
+  PatternDoc humanize(Set<int> sel, {double timing = 0.1, double velocity = 0.1, int seed = 1}) {
+    final r = math.Random(seed);
+    return _map(sel, (n) {
+      final dt = Steps.fromDouble((r.nextDouble() * 2 - 1) * timing, maxDenominator: 96);
+      final dv = (r.nextDouble() * 2 - 1) * velocity;
+      return n.copyWith(
+          at: (n.at + dt).clamp(Steps.zero, Steps(kPatternMaxSteps)), vel: _round3((n.vel + dv).clamp(0.05, 1).toDouble()));
+    });
+  }
+
+  /// Stacks a chord on each selected note: the 3rd and 5th above it in [key] (and the 7th with [seventh]), or a
+  /// major triad when there is no key. A pitch past 127 or one already sounding at that start is left out. Returns
+  /// the added notes' ids.
+  ({PatternDoc doc, Set<int> ids}) chordStamp(Set<int> sel, {({int root, List<int> scale})? key, bool seventh = false}) {
+    double above(double p, int degrees) {
+      if (key == null) return p + const [0, 0, 4, 0, 7, 0, 11][degrees];
+      final scale = key.scale;
+      // Walk up the scale from the note (a note outside the key starts from the scale note below it).
+      var q = p.round();
+      var walked = 0;
+      while (walked < degrees && q < 128) {
+        q++;
+        if (scale.contains((q - key.root) % 12)) walked++;
+      }
+      return q.toDouble();
+    }
+
+    final taken = {for (final n in notes) (n.at, n.pitch)};
+    final add = <({Steps at, double pitch, Steps len, double vel})>[];
+    for (final n in _selected(sel)) {
+      for (final d in [2, 4, if (seventh) 6]) {
+        final p = above(n.pitch, d);
+        if (p > 127 || !taken.add((n.at, p))) continue;
+        add.add((at: n.at, pitch: p, len: n.len, vel: n.vel));
+      }
+    }
+    return _addAll(add);
+  }
+
+  /// Mirrors the selection in time inside its own span, so the last note comes first.
+  PatternDoc reverse(Set<int> sel) {
+    final s = _selected(sel);
+    if (s.isEmpty) return this;
+    final start = s.map((n) => n.at).reduce(Steps.min), end = s.map((n) => n.end).reduce(Steps.max);
+    return _map(sel, (n) => n.copyWith(at: start + end - n.end));
+  }
+
+  /// Mirrors the selection's pitches around [center].
+  PatternDoc invertPitch(Set<int> sel, double center) =>
+      _map(sel, (n) => n.copyWith(pitch: (2 * center - n.pitch).clamp(0, 127).toDouble()));
 }
