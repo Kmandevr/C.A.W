@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "builtins.h"
+#include "synth.h"
 #include "json.h"
 #include "ops.h"
 
@@ -245,7 +246,7 @@ const std::pair<const char*, Var> kVars[] = {
     {"beat", Var::Beat}, {"bar", Var::Bar},   {"step", Var::Step}, {"pos", Var::Pos},
     {"phase", Var::Phase}, {"time", Var::Time}, {"in", Var::In},   {"seed", Var::Seed},
     {"trig", Var::Trig},   {"gate", Var::Gate}, {"note", Var::Note}, {"freq", Var::Freq},
-    {"vel", Var::Vel},     {"rel", Var::Rel},   {"bend", Var::Bend},
+    {"vel", Var::Vel},     {"rel", Var::Rel},   {"bend", Var::Bend}, {"press", Var::Press}, {"timbre", Var::Timbre},
 };
 
 bool findVar(const std::string& name, Var& out) {
@@ -933,8 +934,19 @@ private:
             return v;
         }
         const size_t dot = tok.text.find('.');
-        if (dot != std::string::npos && dot > 0 && tok.text.find('.', dot + 1) == std::string::npos)
+        if (dot != std::string::npos && dot > 0 && tok.text.find('.', dot + 1) == std::string::npos) {
+            // table.x is a wavetable name, never another module's value: an unknown one is an error. (scale.x,
+            // chord.x and arp.x still read a module of that name, as before tables existed.)
+            int groups = 0;
+            const ConstantGroup* g = constantGroups(groups);
+            for (int i = 0; i < groups; ++i)
+                if (std::strcmp(g[i].prefix, "table") == 0 && tok.text.compare(0, dot, "table") == 0 && dot == 5) {
+                    std::string names;
+                    for (int k = 0; k < g[i].count; ++k) names += (k ? ", " : "") + std::string(g[i].names[k]);
+                    fail(tok, "unknown name '" + tok.text + "' (" + g[i].prefix + " names: " + names + ")");
+                }
             return importVal(tok);
+        }
         fail(tok, "unknown name '" + tok.text + "'");
     }
 
@@ -1117,7 +1129,8 @@ size_t parseHeader(std::string_view src, Program& p, int& codeLine) {
             else if (value == "effect") p.kind = ModuleKind::Effect;
             else if (value == "library") p.kind = ModuleKind::Library;
             else if (value == "pattern") p.kind = ModuleKind::Pattern;
-            else throw CompileError(lineNo, 1, "kind must be 'generator', 'effect', 'library' or 'pattern'");
+            else if (value == "synth") p.kind = ModuleKind::Synth;
+            else throw CompileError(lineNo, 1, "kind must be 'generator', 'effect', 'library', 'pattern' or 'synth'");
         } else if (key == "name") {
             p.name = value;
         } else if (key == "summary") {
@@ -1129,6 +1142,10 @@ size_t parseHeader(std::string_view src, Program& p, int& codeLine) {
             else if (value == "float") p.mode = OutputMode::Float;
             else throw CompileError(lineNo, 1, "mode must be 'byte' or 'float'");
             modeSet = true;
+        } else if (key == "voices") {
+            const double v = std::strtod(value.c_str(), nullptr);
+            if (!(v >= 1 && v <= 32) || v != std::floor(v)) throw CompileError(lineNo, 1, "voices must be a whole number 1 to 32");
+            p.voices = static_cast<int>(v);
         } else if (key == "rate") {
             const double r = std::strtod(value.c_str(), nullptr);
             if (!(r >= 1000.0 && r <= 192000.0)) throw CompileError(lineNo, 1, "rate must be 1000 to 192000");
@@ -1151,7 +1168,8 @@ std::string describeProgram(const Program& p) {
         return std::string(buf);
     };
     std::string o = "\"kind\":" +
-                    str(p.kind == ModuleKind::Effect ? "effect" : p.kind == ModuleKind::Library ? "library" : "generator") +
+                    str(p.synth ? "synth"
+                                : p.kind == ModuleKind::Effect ? "effect" : p.kind == ModuleKind::Library ? "library" : "generator") +
                     ",\"namespace\":" + str(p.ns) +
                     ",\"mode\":" + str(p.mode == OutputMode::Byte ? "byte" : "float") + ",\"name\":" + str(p.name) +
                     ",\"summary\":" + str(p.summary) + ",\"params\":[";
@@ -1180,7 +1198,14 @@ std::string describeProgram(const Program& p) {
                  str(a < f.argDocs.size() ? f.argDocs[a] : std::string()) + "}";
         o += "]}";
     }
-    return o + "]";
+    o += "]";
+    if (p.synth) {
+        // The code the patch becomes, and its effect chain ("@name" is a project module), for the app and agents.
+        o += ",\"code\":" + str(p.synthCode) + ",\"fx\":[";
+        for (size_t i = 0; i < p.synthFx.size(); ++i) o += std::string(i ? "," : "") + str(p.synthFx[i]);
+        o += "]";
+    }
+    return o;
 }
 
 namespace {
@@ -1223,6 +1248,51 @@ CompileResult compileModule(std::string_view source, const std::vector<LibrarySo
         if (prog->kind == ModuleKind::Library) validNamespace(prog->ns);
         if (prog->kind == ModuleKind::Pattern)
             throw CompileError(1, 1, "a pattern holds notes, not code: pick it as a layer's pattern to play it");
+        if (prog->kind == ModuleKind::Synth) {
+            // A synth patch: translate it to code, compile the voice, and keep the generated parts for the engine.
+            SynthResult t = translateSynth(source);
+            if (!t.ok) {
+                r.line = t.line;
+                r.col = t.col;
+                r.error = t.error;
+                return r;
+            }
+            CompileResult voice = compileModule(t.generator, libs);
+            if (!voice.program) {
+                r.line = r.col = 1;
+                r.error = "line 1, col 1: the code made from this patch doesn't compile (an engine bug): " + voice.error;
+                return r;
+            }
+            auto out = std::make_shared<Program>(*voice.program);
+            // The effects' params are listed with the voice's (under "Effects"), so one panel shows the whole patch;
+            // the voice never reads them, and setting one on the synth reaches its effect modules.
+            for (const SynthFx& f : t.fx) {
+                if (f.user) continue;
+                CompileResult fx = compileModule(f.source, libs);
+                if (!fx.program) {
+                    r.line = r.col = 1;
+                    r.error = "line 1, col 1: the effects made from this patch don't compile (an engine bug): " + fx.error;
+                    return r;
+                }
+                for (ParamDef d : fx.program->params) {
+                    if (out->params.size() >= static_cast<size_t>(kMaxSynthParams)) {
+                        r.line = r.col = 1;
+                        r.error = "line 1, col 1: this patch has more than 64 values to set; remove an effect or a part";
+                        return r;
+                    }
+                    d.header = "Effects";
+                    out->params.push_back(std::move(d));
+                }
+            }
+            out->synth = true;
+            out->synthCode = t.generator;
+            for (const SynthFx& f : t.fx) {
+                out->synthFx.push_back(f.user ? "@" + f.module : f.source);
+                out->synthFxKeys.push_back(f.key);
+            }
+            r.program = std::move(out);
+            return r;
+        }
         Lexer lex(source.substr(start), codeLine);
         std::vector<Token> toks = lex.run();
         Compiler c(toks, lex.comments(), *prog);

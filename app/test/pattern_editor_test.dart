@@ -1,4 +1,4 @@
-// The piano roll: tapping draws a note and the pattern's text gets it; keys move it; it works inside a scrolling page; the menu runs generators; the Curve tool shapes velocity; a double tap deletes a note (needs CAW_LIB).
+// The piano roll: tapping draws a note and the pattern's text gets it; keys move it; it works inside a scrolling page; the menu runs generators; the Curve tool shapes velocity; a double tap deletes a note; notes take pitch bends and vibrato (needs CAW_LIB).
 import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
@@ -153,6 +153,44 @@ void main() {
     await tester.tapAt(const Offset(125, 200));
     await tester.pump(const Duration(milliseconds: 500));
     expect(body(), isEmpty, reason: m.source);
+    s.dispose();
+  }, skip: skip != null);
+
+  testWidgets('the Curve tool draws a pitch bend on a selected note, and the extras panel adds vibrato', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    final s = AppState();
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject();
+    final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n0 C3 4\n');
+    s.project.modules.add(m);
+    s.ready = true;
+    s.starting = false;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
+    await tester.tap(find.byTooltip('Curve tool'));
+    await tester.pump();
+    // The roll scrolls so C3 sits 4 rows from the top: its row's middle is at y = 48 + 20 + 4 * 16 + 8 = 140.
+    await tester.tapAt(const Offset(100, 140)); // selects the note
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.dragFrom(const Offset(130, 140), const Offset(0, -48)); // three rows up: +3 semitones
+    await tester.pump(const Duration(milliseconds: 200));
+    final n = PatternDoc.parse(m.source).doc!.notes.single;
+    expect(n.expr.bend.first, const NotePoint(0, 0), reason: m.source);
+    expect(n.expr.bend.last.v, 3, reason: m.source);
+    // The extras panel's Vibrato preset.
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Note extras'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Vibrato').first);
+    await tester.tap(find.widgetWithText(ActionChip, 'Vibrato'));
+    await tester.pump();
+    Navigator.of(tester.element(find.text('Expression'))).pop();
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(m.source, contains('vib 0.4 5.5 0.3'));
+    expect(m.source, contains('bend 0:0'));
     s.dispose();
   }, skip: skip != null);
 }

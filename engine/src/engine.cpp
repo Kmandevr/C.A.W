@@ -11,6 +11,7 @@
 #include "compile.h"
 #include "detmath.h"
 #include "json.h"
+#include "tables.h"
 
 namespace caw {
 
@@ -60,21 +61,29 @@ struct Voice {
     double vel = 1, tacc = 0, phase = 0;
     double lastY = 0;     // last output sample, so a voice cut short can be smoothed over
     int64_t offAt = -1;   // a note from an edited pattern: the sample (in the layer pass) where it ends
+    // The note's own bend, pressure, timbre and vibrato, copied at note start (no allocation on the audio thread).
+    bool expressive = false;
+    NoteExpression ex;
+    int64_t exStart = 0;  // `since` when this note took the voice (a slide hands a voice on mid-way)
+    double exLen = 1;     // the note's length in samples, for the curves' 0..1 time
 };
 
 constexpr uint32_t kOrphanNote = 0xFFFFFFFFu;  // a held note whose pattern was edited: ends at offAt
 
 // One layer's modules: the main instances plus shadow copies that play the loop's tail across a seam. A layer
-// with a pattern runs its generator as kVoices voices instead (main[0], shadow[0] and extras), with no seams.
+// with a pattern runs its generator as voiceCount voices instead (main[0], shadow[0] and extras), with no seams.
 struct Engine::Chain {
     std::vector<std::unique_ptr<Instance>> main, shadow;
     bool voiced = false;
     std::vector<std::unique_ptr<Instance>> extraVoices;
-    Voice voices[kVoices];
+    Voice voices[kMaxVoices];
+    int voiceCount = 0;  // voices with an instance: the generator's voices: setting, at least 2 (main and shadow)
+    int voiceTake = 0;   // voices that take new notes: the voices: setting itself, 1..kMaxVoices
     int64_t noteCount = 0;
     double declick = 0;  // what voices cut short (stolen or ended) were playing; decays over about 2 ms
     double vtb[kBlock], vtime[kBlock], vphase[kBlock], vtrig[kBlock], vgate[kBlock], vnote[kBlock], vfreq[kBlock];
     double vvel[kBlock], vrel[kBlock], vout[kBlock], gen[kBlock];
+    double vbend[kBlock], vpress[kBlock], vtimbre[kBlock];
     double dtrig[kBlock], ones[kBlock], dnote[kBlock], dfreq[kBlock];
     std::vector<std::string> moduleIds;
     // How each module takes over the running state of the chain it replaces, so unchanged calls play on.
@@ -105,7 +114,7 @@ struct Engine::Cmd {
     uint32_t seed = 0;
     bool seamXf = true, flag = false;
     int swapMode = 0;
-    int voices = kVoices;
+    int voices = kMaxVoices;
 };
 
 struct Engine::Retired {
@@ -134,8 +143,8 @@ constexpr double kC4 = 261.6255653005986;
 double mtof(double note) { return 440.0 * detPow(2.0, (note - 69.0) / 12.0); }
 
 // Lets every held note go into its release (at a layer restart, or when the pattern changes).
-void releaseVoices(Voice* voices) {
-    for (int v = 0; v < kVoices; ++v)
+void releaseVoices(Voice* voices, int count) {
+    for (int v = 0; v < count; ++v)
         if (voices[v].active && voices[v].gate) {
             voices[v].gate = false;
             voices[v].rel = 0;
@@ -167,6 +176,7 @@ Engine::Engine(double sampleRate)
     std::fill_n(mixL_, kBlock, 0.0);
     std::fill_n(mixR_, kBlock, 0.0);
     ctlSr_ = sampleRate;
+    warmTables();  // the built-in wavetables are built here, never on the audio thread
     updateTiming();
     ctlLoopLen_ = loopLen_;
     loopLenFlag_.store(loopLen_);
@@ -256,10 +266,14 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
     std::fill_n(c->dnote, kBlock, 60.0);
     std::fill_n(c->dfreq, kBlock, kC4);
     if (voiced && !c->main.empty()) {
-        for (int v = 2; v < kVoices; ++v) c->extraVoices.push_back(std::make_unique<Instance>(c->main[0]->programPtr()));
+        // Voice 0 and 1 reuse the main and shadow instances, so a layer always has at least two.
+        c->voiceCount = std::clamp(c->main[0]->program().voices, 2, kMaxVoices);
+        c->voiceTake = std::clamp(c->main[0]->program().voices, 1, kMaxVoices);
+        for (int v = 2; v < c->voiceCount; ++v)
+            c->extraVoices.push_back(std::make_unique<Instance>(c->main[0]->programPtr()));
         c->voices[0].inst = c->main[0].get();
         c->voices[1].inst = c->shadow[0].get();
-        for (int v = 2; v < kVoices; ++v) c->voices[v].inst = c->extraVoices[v - 2].get();
+        for (int v = 2; v < c->voiceCount; ++v) c->voices[v].inst = c->extraVoices[static_cast<size_t>(v - 2)].get();
     }
     writeParams(*c);
     // Plan how this chain takes over the running state of the one it replaces: every stateful call whose name
@@ -277,7 +291,8 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
                 const Program& from = prev->main[j]->program();
                 const Program& to = c->main[i]->program();
                 m.expect = &from;
-                const int64_t copies = (i == 0 && voiced && prev->voiced) ? kVoices : 1;
+                const int64_t copies =
+                    (i == 0 && voiced && prev->voiced) ? std::min(c->voiceCount, prev->voiceCount) : 1;
                 for (const StateSite& site : to.stateSites)
                     for (const StateSite& old : from.stateSites)
                         if (old.key == site.key && old.size == site.size) {
@@ -363,6 +378,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
 
     // Compile changed modules. A module that fails keeps its last good program, so the old sound plays on.
     bool allOk = true;
+    std::vector<std::pair<std::string, std::string>> synthWarnings;  // (synth id, message), added to warnings below
     std::map<std::string, ModuleState> next;
     for (const ModuleSpec& m : p.modules) {
         ModuleState st;
@@ -400,6 +416,35 @@ std::string Engine::setProject(const ProjectSpec& p) {
         }
         st.params = m.params;
         st.ref = refName(!m.name.empty() ? m.name : (st.program && !st.program->name.empty() ? st.program->name : m.id));
+        // A synth plays as its voice then its effects: generated effect modules live as hidden modules beside it.
+        st.expand.clear();
+        if (st.program && st.program->synth) {
+            st.expand.push_back(m.id);
+            for (size_t k = 0; k < st.program->synthFx.size(); ++k) {
+                const std::string& fx = st.program->synthFx[k];
+                if (fx[0] == '@') {
+                    st.expand.push_back("\x1e" + fx.substr(1));
+                    continue;
+                }
+                // Keyed by the effect's kind and count ("delay_2"), so adding a line elsewhere keeps its tail.
+                const std::string hid = m.id + "\x1f" + st.program->synthFxKeys[k];
+                ModuleState hs;
+                auto old = modules_.find(hid);
+                if (old != modules_.end()) hs = old->second;
+                if (hs.source != fx || hs.libSig != libSig || !hs.program) {
+                    CompileResult cr = compileModule(fx, libs);
+                    hs.source = fx;
+                    hs.libSig = libSig;
+                    if (cr.program) hs.program = cr.program;
+                    hs.error = cr.program ? std::string() : cr.error;
+                }
+                if (!hs.error.empty())
+                    synthWarnings.push_back({m.id, "the " + st.program->synthFxKeys[k] + " effect made from this patch doesn't compile (an engine bug): " + hs.error});
+                hs.params = m.params;
+                next[hid] = std::move(hs);
+                st.expand.push_back(hid);
+            }
+        }
         if (!st.error.empty()) allOk = false;
         next[m.id] = std::move(st);
     }
@@ -436,6 +481,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
+    for (const auto& [id, msg] : synthWarnings) warnings[id].push_back(msg);
     for (const auto& [id, st] : modules_) {
         if (!st.pattern) continue;
         const int steps = st.pattern->steps(p.beatsPerBar);
@@ -449,7 +495,35 @@ std::string Engine::setProject(const ProjectSpec& p) {
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}, nullptr};
         int64_t layerState = 0;
+        // A synth in the chain stands for its voice and effects; its project effect modules are found by name.
+        std::vector<std::string> chain;
         for (const std::string& id : w.chain) {
+            auto it = modules_.find(id);
+            if (it == modules_.end() || it->second.expand.empty()) {
+                chain.push_back(id);
+                continue;
+            }
+            for (const std::string& e : it->second.expand) {
+                if (e[0] != '\x1e') {
+                    chain.push_back(e);
+                    continue;
+                }
+                const std::string name = e.substr(1);
+                std::string found;
+                for (const auto& [mid, ms] : modules_)
+                    if (mid.find('\x1f') == std::string::npos && (mid == name || ms.ref == refName(name))) found = mid;
+                if (found.empty() || !modules_.at(found).program || modules_.at(found).program->kind != ModuleKind::Effect)
+                    warnings[id].push_back("fx " + name + ": there is no effect module called '" + name + "' in the project");
+                else
+                    chain.push_back(found);
+            }
+        }
+        if (chain.size() > static_cast<size_t>(kMaxChain)) {
+            warnings[w.chain.front()].push_back("this track's chain has more than " + std::to_string(kMaxChain - 1) +
+                                                " effects; the rest are left out");
+            chain.resize(static_cast<size_t>(kMaxChain));
+        }
+        for (const std::string& id : chain) {
             auto it = modules_.find(id);
             if (it == modules_.end() || !it->second.program || it->second.program->kind == ModuleKind::Library) continue;
             pl.ids.push_back(id);
@@ -462,7 +536,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
             if (it != modules_.end() && it->second.pattern) {
                 pl.pattern = it->second.pattern;
                 pl.w.steps = pl.pattern->steps(p.beatsPerBar);
-                layerState += static_cast<int64_t>(kVoices - 1) * modules_.at(pl.ids.front()).program->stateSize;
+                const Program& gen = *modules_.at(pl.ids.front()).program;
+                layerState += static_cast<int64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) * gen.stateSize;
             } else {
                 warnings[pl.ids.front()].push_back("pattern '" + w.pattern + "' is missing or has an error, so it plays without one");
             }
@@ -656,10 +731,17 @@ void Engine::setParam(const std::string& moduleId, const std::string& name, doub
     auto it = modules_.find(moduleId);
     if (it == modules_.end()) return;
     it->second.params[name] = value;
+    // A synth's params reach its generated effect modules too.
+    std::vector<std::string> ids{moduleId};
+    for (const std::string& e : it->second.expand)
+        if (e != moduleId && e[0] != '\x1e') {
+            modules_.at(e).params[name] = value;
+            ids.push_back(e);
+        }
     for (auto& [id, ls] : layers_)
         if (ls.chain)
             for (const std::string& m : ls.chain->moduleIds)
-                if (m == moduleId) {
+                if (std::find(ids.begin(), ids.end(), m) != ids.end()) {
                     writeParams(*ls.chain);
                     break;
                 }
@@ -796,14 +878,17 @@ void Engine::swapIn(Slot& s, Chain* c) noexcept {
         const bool gen = i == 0 && m.from == 0;
         if (gen && to.voiced != from.voiced) continue;
         if (gen && to.voiced) {
-            for (int v = 0; v < kVoices; ++v) {
+            // Voices past the new count end here, smoothed over like a stolen voice.
+            for (int v = to.voiceCount; v < from.voiceCount; ++v)
+                if (from.voices[v].active) to.declick += from.voices[v].lastY;
+            for (int v = 0; v < std::min(to.voiceCount, from.voiceCount); ++v) {
                 Instance* inst = to.voices[v].inst;
                 to.voices[v] = from.voices[v];
                 to.voices[v].inst = inst;
                 for (const auto& [a, b, n] : m.ranges) inst->copyStateRange(*from.voices[v].inst, a, b, n);
             }
             to.noteCount = from.noteCount;
-            to.declick = from.declick;
+            to.declick += from.declick;
             voicesTaken = true;
         } else {
             for (const auto& [a, b, n] : m.ranges)
@@ -812,7 +897,7 @@ void Engine::swapIn(Slot& s, Chain* c) noexcept {
     }
     // A pattern layer whose generator changed too much to take over: held notes start again in the new code.
     if (!voicesTaken && from.voiced && to.voiced)
-        for (int v = 0; v < kVoices; ++v) {
+        for (int v = 0; v < std::min(to.voiceCount, from.voiceCount); ++v) {
             const Voice& f = from.voices[v];
             Voice& t = to.voices[v];
             if (!f.active || !f.gate) continue;
@@ -899,8 +984,8 @@ void Engine::applyCommands() noexcept {
                 // A tempo change moves every note in time: let held notes go so none is left hanging.
                 if (c.bpm != bpm_)
                     for (int i = 0; i < kSlots; ++i) {
-                        if (slots_[i].cur && slots_[i].cur->voiced) releaseVoices(slots_[i].cur->voices);
-                        if (slots_[i].old && slots_[i].old->voiced) releaseVoices(slots_[i].old->voices);
+                        if (slots_[i].cur && slots_[i].cur->voiced) releaseVoices(slots_[i].cur->voices, slots_[i].cur->voiceCount);
+                        if (slots_[i].old && slots_[i].old->voiced) releaseVoices(slots_[i].old->voices, slots_[i].old->voiceCount);
                     }
                 bpm_ = c.bpm;
                 beatsPerBar_ = c.beatsPerBar;
@@ -1038,6 +1123,8 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, S
     ctx.vars[static_cast<int>(Var::Vel)] = c.ones;
     ctx.vars[static_cast<int>(Var::Rel)] = c.zero;
     ctx.vars[static_cast<int>(Var::Bend)] = c.zero;
+    ctx.vars[static_cast<int>(Var::Press)] = c.ones;
+    ctx.vars[static_cast<int>(Var::Timbre)] = c.zero;
     const double* input = c.zero;
     ctx.importOffset = offset;
     for (size_t idx = 0; idx < insts.size(); ++idx) {
@@ -1067,6 +1154,15 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, S
     std::copy_n(input, len, out);
 }
 
+// A note taking a voice brings its own expression; its curves run over the note's (or ratchet repeat's) length.
+void Engine::takeExpression(Voice& v, const Pattern& pat, const PatternNote& n) noexcept {
+    v.expressive = n.extra >= 0 && static_cast<size_t>(n.extra) < pat.expressions.size();
+    if (!v.expressive) return;
+    v.ex = pat.expressions[static_cast<size_t>(n.extra)];
+    v.exStart = v.since;
+    v.exLen = std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_);
+}
+
 void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept {
     const PatternNote& n = pat.notes[e.note];
     // A note-off just releases whichever voice holds the note; only note-ons ask whether the note plays.
@@ -1091,19 +1187,21 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
                 v.target = n.pitch;
                 v.glideLeft = std::max(1, static_cast<int>(std::floor(stepLen_ * 0.5 + 0.5)));
                 v.glideStep = (v.target - v.pitch) / v.glideLeft;
+                takeExpression(v, pat, n);
                 return;
             }
     }
     // A free voice, else the oldest released one, else the oldest.
     Voice* pick = nullptr;
     // Only the project's first `voices` voices take new notes (light mode plays fewer).
-    for (int i = 0; i < voiceLimit_; ++i)
+    const int limit = std::min(voiceLimit_, c.voiceTake);  // voices: 1 is mono: each note steals the one voice
+    for (int i = 0; i < limit; ++i)
         if (!c.voices[i].active) {
             pick = &c.voices[i];
             break;
         }
     for (int pass = 0; pass < 2 && !pick; ++pass)
-        for (int i = 0; i < voiceLimit_; ++i) {
+        for (int i = 0; i < limit; ++i) {
             Voice& v = c.voices[i];
             if ((pass == 1 || !v.gate) && (!pick || v.started < pick->started)) pick = &v;
         }
@@ -1123,6 +1221,7 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
     v.vel = n.vel;
     v.tacc = v.phase = 0;
     v.offAt = -1;
+    takeExpression(v, pat, n);
 }
 
 void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
@@ -1169,7 +1268,7 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         const int64_t next = std::min(orphanNext, e < ne ? std::min(end, sampleOf(ev[e].step)) : end);
         const int n = static_cast<int>(next - pos), o = static_cast<int>(pos - n0);
         int newest = -1;
-        for (int v = 0; v < kVoices; ++v)
+        for (int v = 0; v < c.voiceCount; ++v)
             if (c.voices[v].active && (newest < 0 || c.voices[v].started > c.voices[newest].started)) newest = v;
         if (exportTo)
             for (const auto& [reg, buf] : c.exportMap[0]) std::fill_n(exportTo->exportBuf[buf] + offset + o, n, 0.0);
@@ -1188,10 +1287,12 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         ctx.vars[static_cast<int>(Var::Freq)] = c.vfreq;
         ctx.vars[static_cast<int>(Var::Vel)] = c.vvel;
         ctx.vars[static_cast<int>(Var::Rel)] = c.vrel;
-        ctx.vars[static_cast<int>(Var::Bend)] = c.zero;
+        ctx.vars[static_cast<int>(Var::Bend)] = c.vbend;
+        ctx.vars[static_cast<int>(Var::Press)] = c.vpress;
+        ctx.vars[static_cast<int>(Var::Timbre)] = c.vtimbre;
         ctx.imports = c.importPtrs[0].empty() ? nullptr : c.importPtrs[0].data();
         ctx.importOffset = offset + o;
-        for (int vi = 0; vi < kVoices; ++vi) {
+        for (int vi = 0; vi < c.voiceCount; ++vi) {
             Voice& v = c.voices[vi];
             if (!v.active) continue;
             for (int i = 0; i < n; ++i) {
@@ -1202,21 +1303,40 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
                 c.vtrig[i] = v.trig ? 1.0 : 0.0;
                 v.trig = false;
                 c.vgate[i] = v.gate ? 1.0 : 0.0;
-                c.vnote[i] = v.pitch;
-                c.vfreq[i] = v.freq;
+                // The note's expression: its bend (plus vibrato) moves note and freq; press and timbre are 0..1.
+                double bend = 0.0, press = 1.0, timbre = 0.0;
+                if (v.expressive) {
+                    const double into = static_cast<double>(v.since - v.exStart);
+                    const double u = std::min(1.0, into / v.exLen);
+                    if (v.ex.bend.count) bend = v.ex.bend.at(u);
+                    if (v.ex.vibDepth > 0) {
+                        const double fade = v.ex.vibDelay > 0 ? std::min(1.0, u / v.ex.vibDelay) : 1.0;
+                        bend += v.ex.vibDepth * fade * detSin(kTwoPi * v.ex.vibRate * into / sr_);
+                    }
+                    if (v.ex.press.count) press = v.ex.press.at(u);
+                    if (v.ex.timbre.count) timbre = v.ex.timbre.at(u);
+                }
+                const double freq = bend != 0.0 ? mtof(v.pitch + bend) : v.freq;
+                c.vnote[i] = v.pitch + bend;
+                c.vfreq[i] = freq;
+                c.vbend[i] = bend;
+                c.vpress[i] = press;
+                c.vtimbre[i] = timbre;
                 c.vvel[i] = v.vel;
                 c.vrel[i] = v.gate ? 0.0 : static_cast<double>(v.rel++);
                 c.vtb[i] = byteMode ? std::floor(v.tacc) : static_cast<double>(v.since);
-                v.tacc += tPerHz * v.freq;
+                v.tacc += tPerHz * freq;
                 c.vtime[i] = static_cast<double>(v.since++) / sr_;
                 c.vphase[i] = v.phase;
-                v.phase += v.freq / sr_;
+                v.phase += freq / sr_;
                 v.phase -= std::floor(v.phase);
             }
             const double* y = v.inst->process(ctx);
+            const bool autoPress = v.expressive && v.ex.press.count > 0 && !reads(Var::Press);
             for (int i = 0; i < n; ++i) {
                 double s = y[i];
                 if (engineFade && !v.gate) s *= std::max(0.0, 1.0 - c.vrel[i] / fadeLen);
+                if (autoPress) s *= c.vpress[i];  // code that doesn't read press still gets the note's volume curve
                 out[o + i] += s;
                 v.lastY = s;
                 if (!v.gate) v.quiet = std::fabs(s) < kQuietLevel ? v.quiet + 1 : 0;
@@ -1266,8 +1386,8 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         if (k != s.k || epoch_ != s.epoch) {
             if (!s.fresh && s.cur && s.cur->voiced) {
                 // A pattern layer restarts its pattern: held notes ring out, voices and effects carry on.
-                releaseVoices(s.cur->voices);
-                if (s.old && s.old->voiced) releaseVoices(s.old->voices);
+                releaseVoices(s.cur->voices, s.cur->voiceCount);
+                if (s.old && s.old->voiced) releaseVoices(s.old->voices, s.old->voiceCount);
                 else if (s.old)
                     for (auto& inst : s.old->main) inst->reset();
                 s.seamLeft = 0;

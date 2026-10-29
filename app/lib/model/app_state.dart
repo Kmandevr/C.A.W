@@ -230,7 +230,7 @@ class AppState extends ChangeNotifier {
         audition: pv?.chain,
         auditionPattern: pv?.pattern,
         auditionOnly: previewOnly,
-        voices: settings.lightMode ? 4 : 8,
+        voices: settings.lightMode ? 4 : 32, // a cap; each sound asks for its own count (voices:, default 8)
         swap: settings.swapTiming.name);
     try {
       info = await e.setProject(json);
@@ -451,7 +451,8 @@ class AppState extends ChangeNotifier {
   bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
   bool isLibrary(String moduleId) => kindOf(moduleId) == 'library';
   bool isPattern(String moduleId) => kindOf(moduleId) == 'pattern';
-  bool isGenerator(String moduleId) => kindOf(moduleId) == 'generator';
+  /// A sound a track can play: a generator, or a synth patch (which the engine plays as one).
+  bool isGenerator(String moduleId) => const {'generator', 'synth'}.contains(kindOf(moduleId));
 
   // ---------- layers (Arranger) ----------
 

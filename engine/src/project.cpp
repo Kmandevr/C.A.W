@@ -49,7 +49,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.name = root.string("name");
     out.bpm = clampd(root.number("bpm", 120), 20, 400);
     out.beatsPerBar = clampi(root.number("beats_per_bar", 4), 1, 16);
-    out.voices = clampi(root.number("voices", 8), 1, 8);
+    out.voices = clampi(root.number("voices", 32), 1, 32);  // a cap: each generator plays its own voices: count
     out.loopBars = clampi(root.number("loop_bars", 4), 1, 64);
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
     out.master = clampd(root.number("master", 0.7), 0, 1);
@@ -68,7 +68,10 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.id = m.string("id");
             spec.name = m.string("name");
             spec.source = m.string("source");
-            if (spec.id.empty()) continue;
+            // Ids with control characters are left out: the engine names its hidden modules with them.
+            bool control = false;
+            for (unsigned char ch : spec.id) control = control || ch < 0x20;
+            if (spec.id.empty() || control) continue;
             if (const Json* ps = m.get("params"); ps && ps->type == Json::Type::Object)
                 for (const auto& [k, v] : ps->obj)
                     if (v.type == Json::Type::Number && std::isfinite(v.num)) spec.params[k] = v.num;

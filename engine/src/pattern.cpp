@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "compile.h"
+#include "detmath.h"
 #include "json.h"
 
 namespace caw {
@@ -88,6 +89,39 @@ std::vector<double> pitches(const Word& w, int line) {
     return out;
 }
 
+// A curve's points: `t:v` or `t:v~k`, as many as follow (2..16), times rising from 0 to 1.
+size_t curvePoints(const std::vector<Word>& w, size_t k, int line, const Word& key, double lo, double hi, NoteCurve& c) {
+    c.count = 0;
+    double last = -1;
+    while (k < w.size()) {
+        const std::string& s = w[k].text;
+        const size_t colon = s.find(':');
+        if (colon == std::string::npos) break;
+        const size_t tilde = s.find('~', colon);
+        double t = 0, v = 0, b = 0;
+        const bool ok = number(s.substr(0, colon), t) &&
+                        number(s.substr(colon + 1, tilde == std::string::npos ? std::string::npos : tilde - colon - 1), v) &&
+                        (tilde == std::string::npos || number(s.substr(tilde + 1), b));
+        if (!ok) throw PatternError(line, w[k].col, "a curve point looks like 0.5:2 or 0.5:2~0.3 (time:value~bend)");
+        if (t < 0 || t > 1 || t < last) throw PatternError(line, w[k].col, "curve times go from 0 to 1, rising");
+        if (v < lo || v > hi) {
+            char msg[120];
+            std::snprintf(msg, sizeof msg, "%s values must be %g to %g", key.text.c_str(), lo, hi);
+            throw PatternError(line, w[k].col, msg);
+        }
+        if (b < -1 || b > 1) throw PatternError(line, w[k].col, "a bend (after ~) must be -1 to 1");
+        if (c.count >= kMaxCurvePoints) throw PatternError(line, w[k].col, "a curve has at most 16 points");
+        c.t[c.count] = static_cast<float>(t);
+        c.v[c.count] = static_cast<float>(v);
+        c.k[c.count] = static_cast<float>(b);
+        ++c.count;
+        last = t;
+        ++k;
+    }
+    if (c.count == 0) throw PatternError(line, key.col, "'" + key.text + "' needs points such as 0:0 0.5:2 1:0");
+    return k;
+}
+
 uint64_t mix64(uint64_t x) {
     x += 0x9E3779B97F4A7C15ull;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
@@ -96,6 +130,20 @@ uint64_t mix64(uint64_t x) {
 }
 
 }  // namespace
+
+double NoteCurve::at(double u) const {
+    if (count == 0) return 0;
+    if (u <= t[0]) return v[0];
+    for (int i = 0; i + 1 < count; ++i) {
+        if (u <= t[i + 1]) {
+            const double span = static_cast<double>(t[i + 1]) - t[i];
+            double x = span > 0 ? (u - t[i]) / span : 1.0;
+            if (k[i] != 0) x = detPow(x, detPow(4.0, k[i]));
+            return v[i] + (static_cast<double>(v[i + 1]) - v[i]) * x;
+        }
+    }
+    return v[count - 1];
+}
 
 int Pattern::steps(int beatsPerBar) const {
     const int bar = std::max(1, beatsPerBar) * 4;
@@ -180,9 +228,22 @@ PatternResult parsePattern(std::string_view src) {
             size_t k = 3;
             double v = 0;
             if (k < w.size() && number(w[k].text, v)) n.vel = needNumber(w[k++], lineNo, "velocity", 0, 1);
+            NoteExpression ex;
+            bool expressive = false;
             while (k < w.size()) {
                 const Word& x = w[k++];
-                if (x.text == "slide") {
+                if (x.text == "bend" || x.text == "press" || x.text == "timbre") {
+                    NoteCurve& c = x.text == "bend" ? ex.bend : (x.text == "press" ? ex.press : ex.timbre);
+                    k = x.text == "bend" ? curvePoints(w, k, lineNo, x, -kMaxBend, kMaxBend, c)
+                                         : curvePoints(w, k, lineNo, x, 0, 1, c);
+                    expressive = true;
+                } else if (x.text == "vib") {
+                    if (k + 1 >= w.size()) throw PatternError(lineNo, x.col, "vib needs depth and rate: vib 0.3 5.5 (and a fade-in, 0..1)");
+                    ex.vibDepth = needNumber(w[k++], lineNo, "vib depth (semitones)", 0, 12);
+                    ex.vibRate = needNumber(w[k++], lineNo, "vib rate (Hz)", 0.1, 30);
+                    if (k < w.size() && number(w[k].text, v)) ex.vibDelay = needNumber(w[k++], lineNo, "vib fade-in", 0, 1);
+                    expressive = true;
+                } else if (x.text == "slide") {
                     n.slide = true;
                 } else if (x.text == "prob" || x.text == "ratchet") {
                     if (k >= w.size()) throw PatternError(lineNo, x.col, "'" + x.text + "' needs a number after it");
@@ -195,8 +256,13 @@ PatternResult parsePattern(std::string_view src) {
                         ++k;
                     }
                 } else {
-                    throw PatternError(lineNo, x.col, "unknown extra '" + x.text + "' (try prob 0.5, ratchet 3 or slide)");
+                    throw PatternError(lineNo, x.col,
+                                       "unknown extra '" + x.text + "' (try prob 0.5, ratchet 3, slide, bend, vib, press or timbre)");
                 }
+            }
+            if (expressive) {
+                n.extra = static_cast<int>(p->expressions.size());
+                p->expressions.push_back(ex);
             }
             for (double pitch : chord) {
                 if (static_cast<int>(p->notes.size()) >= kMaxPatternNotes)

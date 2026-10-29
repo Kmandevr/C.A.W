@@ -18,7 +18,8 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - Play/Stop (the space bar on desktop)
 - **Sounds** (the Builder area, `lib/ui/builder_screen.dart`):
   - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)
-  - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth and the Acid line and Chords patterns)
+  - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth, the Wavetable pad, the Init synth patch and the Acid line and Chords patterns)
+  - a **synth patch** (`kind: synth`, [synth](synth.md)) plays wherever a sound can: its Controls panel lists every value in the patch (the effects' under Effects) and its Code view is the patch text; the synth screen itself is not built yet
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
   - **Controls | Code** (a pattern: **Notes | Text**): on a phone a module opens on its controls (a pattern on its piano roll), and the code is one tap away. A blank module, one that doesn't compile, or one with no controls opens on its code; the choice is remembered per module while the app runs. A tap on an error opens the code at it. On a wide screen code and controls sit side by side, so only patterns get the switch.
@@ -47,7 +48,12 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - generators, from the ⋮ menu or a toolbar button, each one undo step: Euclid (hits, steps and rotation at the grid size, from the cursor), Random in key (density, range around the cursor, bars), Arpeggiate (each selected chord becomes a run at the grid size: up, down, up and down), Humanize (timing and velocity nudges), Chord stamp (3rd and 5th, or a seventh, in the project's key), Legato, Reverse and Invert pitch around the cursor. The last values are kept while the app runs
     - the toolbar is the keymap's pattern toolbar: ⋮ → Customise toolbar adds any action or macro, reorders, removes or goes back to the default, saved in `keys.txt`. Full screen and ⋮ always stay
     - **Curve tool** (C): over the velocity and chance lanes, tap to add a point, drag a point to move it, drag a segment to bend it (up eases in, down eases out), hold a point to delete it. The curve sets the selected notes, or every note when none is selected, between its first and last points; each gesture is one undo step. On the grid a tap picks or unpicks a note and a drag scrolls. The curves themselves are kept only while the roll is open (`app/lib/model/lane_curve.dart`)
-    - not built yet: pitch-bend curves on notes, automation lanes and curves in MIDI export ([#11](https://github.com/Kmandevr/C.A.W/issues/11), syntax proposed there)
+    - **Note expression** (MPE style; owner, 2026-10-29), saved as the note's `bend`, `vib`, `press` and `timbre` extras ([engine](engine.md#patterns)):
+      - a note with a bend or vibrato draws as a line following its pitch over time (MIDI Sketch style), its row faint behind it
+      - with the Curve tool, a tap on a note selects it; then on that note a tap adds a pitch point, a drag moves one, a drag on the line bends that segment, and holding a point deletes it. Values snap to semitones (Shift or snap off: free), within ±12
+      - the extras panel (hold a note, I, or ⋮ → Note extras) adds presets (scoop up, fall off, bend up 2, dive, vibrato, trill, swell, fade, clear), vibrato depth, rate and fade-in, and small editors for the pitch, volume and timbre curves; the whole visit is one undo step
+      - exported `.mid` files carry it as MPE (`app/lib/ui/note_expression.dart`)
+    - not built yet: automation lanes for params and globals ([#11](https://github.com/Kmandevr/C.A.W/issues/11))
 - **Tracks** (the Arranger area, `lib/ui/arranger_screen.dart`; a track is a layer):
   - a **project strip**: big BPM, time signature, loop length and key pills, and the master meter. A tap opens the project sheet: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, master volume, and under **More** the hex seed and the seam crossfade switch. **Project controls** (one per `global` declared by any module, saved with the project and sent to the engine without recompiling) are in the same sheet.
   - a **card per track**: its colour, name, sound (when the name doesn't already say it), pattern, cycle length and effect count, M and S, a peak meter, and a lane picturing one cycle: the pattern's notes, or a block per bar for a sound with no pattern, with the playhead while playing
@@ -85,7 +91,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - **Light mode** for slow devices (owner OK, 2026-10-28). It:
     - turns glow and the Builder's scope off
     - reads meters 15 times a second instead of 30
-    - plays 4 voices per pattern layer instead of 8 (the project's `voices`)
+    - caps every pattern layer at 4 voices (the project's `voices`; otherwise each sound plays its own count, 8 by default)
     - stops auto-update while playing
     - Unless that switch is off, it turns itself on the first time the engine reports an overload, and the Arranger's overload banner says so.
   - **Live coding:** auto-update (on by default) runs code that compiles the set pause (100–2000 ms) after the last edit. Code with an error waits for the next edit. Swaps land at the swap timing: now, the next beat or the next bar.

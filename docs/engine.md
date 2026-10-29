@@ -2,7 +2,7 @@
 title: Engine and language reference
 summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI and the tests.
 covers: [engine/, examples/]
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Engine and language reference
@@ -37,11 +37,12 @@ A module is one text file: an optional header between `---` lines, then code.
 ```
 ---
 caw: 1               # module format version (only 1 exists)
-kind: generator      # generator (makes sound), effect (changes `in`), library (functions only) or pattern (notes)
+kind: generator      # generator (makes sound), effect (changes `in`), library (functions only), pattern (notes) or synth (a patch, see synth.md)
 name: Bass
 summary: Filtered saw bass playing an A minor pattern
 mode: float          # byte or float; default byte for generators, float for effects
 rate: 8000           # byte mode only: how fast t counts (1000-192000, default 8000)
+voices: 8            # notes it plays at once on a pattern layer (1-32, default 8)
 ---
 param cutoff = 900 in 100..4000
 let env = ad(step % 4 == 0, 0.002, 0.18)
@@ -107,7 +108,8 @@ Bitwise operators convert their inputs the JavaScript way: they drop the fractio
 | `trig`, `gate` | The note: `trig` is 1 on its first sample, `gate` is 1 while it's held |
 | `note`, `freq`, `vel` | The note's pitch as a MIDI number (fractions allowed) and in Hz, and its velocity 0–1 |
 | `rel` | Samples since the note was released (0 while held) |
-| `bend` | Reserved for pitch curves; 0 for now |
+| `bend` | The note's pitch bend in semitones (its `bend` curve plus vibrato); `note` and `freq` already include it |
+| `press`, `timbre` | The note's pressure (volume curve, 1 without one) and timbre (0..1, 0 without one) |
 | `pi` | π |
 
 - **Note variables** come from the layer's [pattern](#patterns). Each note runs the generator as its own voice, and inside a voice `t`, `time` and `phase` count from the note's start: `phase` goes 0→1 once per cycle at `freq`, and in byte mode `t` runs at `rate` when the note is C4, twice as fast an octave up. `step`, `beat`, `bar` and `pos` still follow the layer.
@@ -129,6 +131,7 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
 3       A1         1     0.8   slide
 13/3    E2         1     0.6   prob 0.5
 4.5     C3,E3,G3   1/2   0.9   ratchet 2
+8       A2         4     1     bend 0:0 0.5:2~0.4 1:0 vib 0.3 5.5 0.25
 ```
 
 - **Columns:** `at` and `len` are in 16ths and may be decimals or fractions (`13/3` lands exactly on a triplet). Notes are names (`A1`, `F#3`) or MIDI numbers, with fractions for microtones; commas make a chord. `vel` is 0–1 and optional (default 1).
@@ -136,9 +139,15 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
   - `prob P`: the note plays with chance P. The choice comes from the project seed, the note and which repeat of the pattern this is, so every project loop plays the same way and exports match playback.
   - `ratchet N`: the note is split into N equal repeats (2–8).
   - `slide`: the next note starting exactly where this one ends takes over its voice. No new `trig`; the pitch glides over half a step. In a chord, sliding notes pair with the next chord's notes in written order.
+  - **Note expression** (MPE style; owner, 2026-10-29), each note its own:
+    - `bend T:V …`: a pitch curve in semitones (−48 to 48; the app draws within ±12). Times run 0–1 through the note; `T:V~K` bends the segment after that point (−1 to 1: + eases in, − eases out; the shape is u^(4^K)). 1–16 points, times rising; before the first and after the last point the curve holds.
+    - `vib DEPTH RATE [FADE]`: vibrato of DEPTH semitones (0–12) at RATE Hz (0.1–30), reaching full depth after FADE of the note (0–1, default 0).
+    - `press T:V …`: the note's volume over its length, 0–1. A sound that doesn't read `press` is multiplied by it.
+    - `timbre T:V …`: a 0–1 curve the sound reads as `timbre` (MPE's "slide", CC74).
+    - The curves run over each sounding note (each ratchet repeat has its own run), and a slide hands the voice to the next note's curves. A chord line's notes share the line's expression.
 - **Playback:**
   - The pattern sets the layer's loop length; a note running past the end is released there.
-  - A layer with a pattern plays up to 8 voices at once and steals the oldest when a ninth note starts.
+  - A layer with a pattern plays as many voices at once as its generator's `voices:` header asks for (1–32, default 8; a layer always keeps at least 2 voice instances) and steals the oldest when one more note starts. Memory counts every voice. Changing the count while notes play keeps the ones that still fit and ends the rest, smoothed over.
   - A released voice ends after 0.1 s below −90 dB, or 10 s after release. Code that reads `gate` or `rel` shapes its own release and code that reads `trig` rings on like a one-shot; anything else (a plain bytebeat) is faded out by the engine over 10 ms at note-off.
   - A stolen or ended voice that is still sounding is smoothed over (its last value fades in about 2 ms), so it doesn't click. Effects in the chain run once on the sum of the voices.
   - A tempo change releases held notes. At most 16 note changes split one 64-sample block; further ones in that block start together (at most 1.3 ms early).
@@ -162,6 +171,7 @@ A pattern can be imported from, and exported to, MIDI files for use in Reaper an
   - Both formats use 960 ticks per quarter and carry the tempo, the meter and the pattern's name.
   - Ratchets are written as their repeats, every note is written whatever its `prob`, and a slide is a legato overlap of 1/16 step. Notes are cut at the pattern's length, as in playback.
   - `.mid` is a format 1 file. Microtonal notes round to the nearest note and play on a channel of their own (2–9, 11–16) with a pitch bend; RPN 0 sets the bend range to ±2 semitones.
+  - **MPE:** a pattern with any note expression is written as MPE (lower zone): the MPE Configuration Message on channel 1 (RPN 6 = 15), each note on its own member channel (2–16, round robin), its bend range set by RPN 0 (±12 semitones, or ±48 if a note bends further), and before and during the note its pitch bend (curve, vibrato and microtonal offset), channel pressure (`press`) and CC74 (`timbre`), every 1/32 note when they change. **[Assumption]** Reaper and MPE synths read this layout (the MPE spec's standard one); not yet checked in Reaper. `.midi2` export and MIDI import don't carry note expression yet.
   - `.midi2` follows the MIDI Clip File specification (M2-116-U, read 2026-10-28): MIDI 2.0 notes with 16-bit velocity, and microtones through the Note On Pitch 7.9 attribute.
     - **[Assumption]** Some layout choices aren't fixed by the spec. Everything is on group 0, channel 1. Tempo, time signature and clip name sit right after Start of Clip. Note Off has velocity 0x8000.
     - **[Assumption]** Which DAWs read clip files is unverified ([architecture](architecture.md#variables-and-patterns-proposal)).
@@ -172,12 +182,13 @@ Every function, with its arguments and an example, is in the generated [function
 
 - **Built-in functions** (C++, `engine/src/builtins.cpp`), by category:
   - Maths, Bits and Random (`hash`, `noise`, `rand`, `randi`, `chance`)
-  - Oscillators (band-limited `saw` and `square`) and Envelopes (`ad`, `env.adsr`, `env.ar`)
+  - Oscillators (band-limited `saw` and `square`; `wt`, a wavetable oscillator with up to 16 unison voices, for the [synth](synth.md)) and Envelopes (`ad`, `env.adsr`, `env.ar`)
   - LFOs (`lfo.*`, in beats, so they follow the tempo)
   - Filters (`lpf`, `hpf`, `bpf`, `notch`, `lp1`, `hp1`, `slew`)
   - Effects (`fx.*`: delay, reverb, drive, crush and more) and Glitch (`glitch.*`: stutter, hold, mask, wrap and more)
   - Music: `scale`, `quantize`, `chord`, `arp`, `euclid`, `beats`
-- **Constants:** `scale.*`, `chord.*` and `arp.*` name the scales, chords and arpeggio modes the music functions take.
+- **Constants:** `scale.*`, `chord.*` and `arp.*` name the scales, chords and arpeggio modes the music functions take; `table.*` names the built-in wavetables for `wt` (sine, tri, saw, square, basic, pwm). An unknown `table.x` is a compile error; an unknown `scale.x`, `chord.x` or `arp.x` still reads module `scale`'s (or `chord`'s, `arp`'s) exported value, as it always has.
+- **Wavetables** (`engine/src/tables.cpp`): a table is 1–256 frames of 2048 samples, stored as 11 band-limited copies (level L keeps harmonics up to 1024 >> L, at 4 samples per harmonic, 2 at the lowest level). `wt` picks the finest level whose harmonics all stay under half the sample rate, so no harmonic folds back; linear interpolation leaves faint images around -50 dB on bright tables, and the level switches without a crossfade when the pitch crosses an octave boundary (smoothing both is in the synth's optimisation stage); the band-limiting uses the engine's own FFT on its deterministic sine, so tables are the same bits everywhere. The built-in tables are built when the engine is created, never on the audio thread.
 - **The project key:** `scale`, `chord` and `arp` default to the key in the project file (`key_root`, `key_scale`); A minor when it has none.
 - **Built-in libraries** (`engine/lib/*.caw`), written in the module language so anyone can read how they work: `drum.*` (kick, snare, hat, clap), `synth.*` (supersaw, pluck, acid, pad, fm) and `util.*` (duck, gate, trem).
 - Each call to a function with state (oscillators, envelopes, filters, effects) has its own state. The state returns to its start at every loop start, so every loop repeats exactly, and echo and reverb tails stop at the restart (after the seam crossfade). Delay, reverb and stutter buffers aren't cleared at the restart; they count what they've written since and read unwritten samples as 0, so a restart costs the audio thread almost nothing.
@@ -259,7 +270,7 @@ The app, the CLI and exports share one format:
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
 - A layer's `pattern` names a pattern module; its notes play the generator, and its length replaces `length_steps`. A missing or broken pattern leaves the layer playing without one, with a warning (a broken pattern keeps its last good version playing).
-- `voices` is how many voices each pattern layer may use for new notes, 1–8 (default 8; the app's light mode sends 4). Voices already sounding finish when it drops.
+- `voices` caps how many voices any pattern layer may use for new notes, 1–32 (default 32, so each generator's own `voices:` rules; the app's light mode sends 4). Voices already sounding finish when it drops.
 - `swap` is when changed code is heard while playing: `now` (default), `beat` or `bar`.
 - `audition` is the Builder's preview, with an optional pattern. With `audition_only`, only that chain is heard.
 - Values outside their range are clamped:

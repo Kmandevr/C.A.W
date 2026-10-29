@@ -18,11 +18,12 @@ constexpr int kMaxStateDoubles = 1 << 20;  // 8 MB: room for a few delay lines a
 constexpr int64_t kMaxProjectStateDoubles = int64_t{1} << 23;  // 64 MB
 constexpr int kMaxCallArgs = 6;
 constexpr int kMaxParams = 32;
+constexpr int kMaxSynthParams = 64;  // a synth patch: its voice's params plus its effects'
 
 // Built-in variables a module can read.
 // Trig and after are the note variables a pattern drives. They are "soft": a `let` or argument of the same name
 // hides them, so code written before patterns existed keeps working.
-enum class Var : uint8_t { T, Sr, Rate, Bpm, Beat, Bar, Step, Pos, Phase, Time, In, Seed, Trig, Gate, Note, Freq, Vel, Rel, Bend, Count };
+enum class Var : uint8_t { T, Sr, Rate, Bpm, Beat, Bar, Step, Pos, Phase, Time, In, Seed, Trig, Gate, Note, Freq, Vel, Rel, Bend, Press, Timbre, Count };
 
 enum class OpCode : uint8_t { Const, Var, Param, Bin, Un, Select, Call, Import };
 
@@ -46,7 +47,7 @@ struct Op {
     double k;        // constant value
 };
 
-enum class ModuleKind : uint8_t { Generator, Effect, Library, Pattern };
+enum class ModuleKind : uint8_t { Generator, Effect, Library, Pattern, Synth };
 enum class OutputMode : uint8_t { Byte, Float };
 
 constexpr int kMaxExports = 16;  // per layer, across its chain
@@ -109,6 +110,12 @@ struct Program {
     std::vector<StateSite> stateSites; // every stateful call, in code order
     std::vector<std::pair<uint32_t, uint32_t>> resetRanges;  // (offset, count) of state a reset clears
     uint32_t usedVars = 0;             // bit per Var
+    int voices = 8;                    // notes it plays at once on a pattern layer (header voices:, 1..32)
+    // A synth patch compiles to its voice (this program, kind Generator) plus effects after the voices are summed.
+    bool synth = false;
+    std::string synthCode;                  // the generated voice code, for caw check and "eject to code"
+    std::vector<std::string> synthFx;       // in order: a generated effect module's source, or "@name" for a project module
+    std::vector<std::string> synthFxKeys;   // each generated effect's stable key ("delay_2"); empty for a project module
 };
 
 // Per-block values the host fills in for one module instance.

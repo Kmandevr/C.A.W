@@ -1,0 +1,24 @@
+---
+caw: 1
+kind: synth
+name: Init synth
+summary: A starting synth patch: two wavetable oscillators, a sub, a filter and a little reverb; plays a pattern's notes
+---
+// One line per part. Change a number, or delete a line to turn that part off.
+// Settings left out take their defaults; caw check --code shows the code this becomes.
+voices 8
+
+// --- Oscillators: tables are sine, tri, saw, square, basic (morphs with pos) and pwm ---
+osc a table saw level 0.7 unison 5 detune 0.15
+osc b table basic level 0.4 pos 0.3 octave -1
+sub level 0.3 shape sine octave -1
+
+// --- Filter: lowpass, highpass, bandpass or notch ---
+filter 1 lowpass cutoff 1800 res 0.25 keytrack 0.5
+
+// --- Volume envelope ---
+env 1 attack 0.01 decay 0.4 sustain 0.6 release 0.3
+
+// --- Effects, in order; a line can also name an effect module of your own ---
+fx drive amount 0.15
+fx reverb size 0.5 mix 0.2

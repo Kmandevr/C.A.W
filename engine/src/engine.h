@@ -20,7 +20,7 @@ namespace caw {
 constexpr int kSlots = kMaxLayers + 1;  // the last slot is the Builder's audition
 constexpr int kAuditionSlot = kMaxLayers;
 constexpr int kScopeSize = 1024;
-constexpr int kVoices = 8;  // notes a pattern layer plays at once; the oldest is stolen when all are busy
+constexpr int kMaxVoices = 32;  // most notes a pattern layer plays at once (a module asks for 1..32 with voices:)
 
 struct Meters {
     float cpu = 0, peakL = 0, peakR = 0;
@@ -83,6 +83,7 @@ private:
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
                    int offset, const BlockCtx& base) noexcept;
     void noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept;
+    void takeExpression(struct Voice& v, const Pattern& pat, const PatternNote& n) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
     void pickOverloadVictim() noexcept;
@@ -103,7 +104,7 @@ private:
     bool seamXf_ = true;
     int keyRoot_ = 9, keyScale_ = 1;
     int swapMode_ = 0;  // 0 at once, 1 next beat, 2 next bar
-    int voiceLimit_ = kVoices;  // voices a pattern layer may use for new notes, 1..kVoices
+    int voiceLimit_ = kMaxVoices;  // the project's cap on voices for new notes (light mode sends 4)
     bool anySolo_ = false;  // some layer is soloed (refreshed each callback)
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note
@@ -141,6 +142,8 @@ private:
         std::string error;
         int line = 0, col = 0;
         std::map<std::string, double> params;
+        // A synth: the chain it plays as (its voice, generated effect modules, and "\x1e" + name for a project module).
+        std::vector<std::string> expand;
     };
     struct LayerState {
         int slot = -1;
