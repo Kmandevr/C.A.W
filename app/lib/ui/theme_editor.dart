@@ -598,7 +598,7 @@ class _KeyRowEditorState extends State<_KeyRowEditor> {
   void _addKey() {
     // A trailing space is kept, so a key like "let " types the space too.
     final k = _add.text;
-    if (k.trim().isEmpty) return;
+    if (k.trim().isEmpty || _keys.length >= 64) return; // the row holds at most 64 keys
     setState(() {
       _keys.add(k);
       _ids.add(_nextId++);
@@ -636,6 +636,7 @@ class _KeyRowEditorState extends State<_KeyRowEditor> {
                   Expanded(
                     child: TextField(
                       controller: _add,
+                      maxLength: 16,
                       style: Neon.code(size: 15),
                       decoration: const InputDecoration(hintText: 'New key, e.g. sine( or "let "'),
                       onSubmitted: (_) => _addKey(),

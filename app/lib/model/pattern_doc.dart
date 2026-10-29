@@ -968,6 +968,14 @@ class PatternDoc {
     });
   }
 
+  /// Sets each selected note's velocity, or chance, from [f] of the note (the Curve tool's shapes). Returns this
+  /// same doc when no value changes, so a gesture that changes nothing makes no undo step.
+  PatternDoc shape(Set<int> sel, double Function(PatternNote n) f, {bool chance = false}) {
+    double v(PatternNote n) => _round3(f(n).clamp(0, 1).toDouble());
+    if (_selected(sel).every((n) => v(n) == (chance ? n.prob : n.vel))) return this;
+    return _map(sel, (n) => chance ? n.copyWith(prob: v(n)) : n.copyWith(vel: v(n)));
+  }
+
   PatternDoc setVelocity(Set<int> sel, double vel) =>
       _map(sel, (n) => n.copyWith(vel: _round3(vel.clamp(0, 1).toDouble())));
 

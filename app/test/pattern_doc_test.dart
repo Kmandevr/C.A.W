@@ -507,6 +507,14 @@ void main() {
       expect(body('0 G9 1\n').chordStamp({1}).doc.notes.length, 1, reason: 'nothing past 127');
     });
 
+    test('shape sets velocity or chance per note, and changes nothing when the values match', () {
+      final d = body('0 C3 1 0.5\n4 D3 1 0.5\n');
+      final v = d.shape({1, 2}, (n) => n.at.toDouble() / 4);
+      expect(v.notes.map((n) => n.vel), [0, 1]);
+      expect(d.shape({2}, (n) => 0.25, chance: true).notes[1].prob, 0.25);
+      expect(identical(d.shape({1, 2}, (n) => 0.5), d), isTrue);
+    });
+
     test('reverse and invert pitch', () {
       final d = body('0 C3 1\n2 D3 2\n');
       expect(d.reverse({1, 2}).notes.map((n) => n.at.toDouble()), [3, 0]);

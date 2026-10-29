@@ -207,4 +207,4 @@ The piano roll's default toolbar (owner, 2026-10-28) holds:
 - grid size and the snap magnet
 - triplets, the fixed grid and the drum grid switch, which the built roll already showed (Claude, 2026-10-29)
 
-You can add your own actions and macros, reorder them or remove any of these (⋮ → Customise toolbar), and go back to the default. The Curve tool stays hidden until it is built.
+You can add your own actions and macros, reorder them or remove any of these (⋮ → Customise toolbar), and go back to the default. The Curve tool shapes the velocity and chance lanes ([app](app.md)).

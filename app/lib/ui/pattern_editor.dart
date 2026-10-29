@@ -15,13 +15,14 @@ import '../actions/macro.dart';
 import '../engine/engine.dart';
 
 import '../model/app_state.dart';
+import '../model/lane_curve.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
 import 'key_router.dart';
 import 'theme.dart';
 
-enum PatternTool { draw, select, erase }
+enum PatternTool { draw, select, curve, erase }
 
 /// Grid resolutions as fractions of a whole note (1 = a bar of 4/4), from 1 down to 1/128.
 const _resolutions = [1, 2, 4, 8, 16, 32, 64, 128];
@@ -73,6 +74,15 @@ class _PatternEditorState extends State<PatternEditor> {
   Offset _pinchFocal = Offset.zero;
   int _lane = 0; // a drag in the velocity (1) or extras (2) lane
   bool _rectSelect = false; // this drag draws a selection rectangle
+  // The Curve tool: one curve per lane (1 velocity, 2 chance), kept while the roll is open.
+  // Replaced (never changed in place) on each edit, so the painter sees a new map only when a curve changed.
+  Map<int, LaneCurve> _curves = const {1: LaneCurve(), 2: LaneCurve()};
+  LaneCurve? _cBase; // the lane's curve when the gesture began, put back if it is cancelled
+  int _cLane = 0; // the lane a curve gesture is in, 0 when none
+  int? _cPoint, _cSeg; // the point being dragged, or the segment being bent
+  double _cBend0 = 0;
+  Offset? _cStart;
+  bool _cAddOnTap = false; // a touch inside a segment: a tap adds a point there, a drag bends it
   double _gridH = 0;
   Timer? _hold; // long press on a note opens its extras panel
   Offset? _holdAt;
@@ -363,6 +373,8 @@ class _PatternEditorState extends State<PatternEditor> {
         setState(() => _tool = PatternTool.draw);
       case 'roll.tool.select':
         setState(() => _tool = PatternTool.select);
+      case 'roll.tool.curve':
+        setState(() => _tool = PatternTool.curve);
       case 'roll.tool.erase':
         setState(() => _tool = PatternTool.erase);
       case 'roll.view.switch':
@@ -537,6 +549,125 @@ class _PatternEditorState extends State<PatternEditor> {
     }
   }
 
+  // ---------- curve tool ----------
+
+  void _setCurve(int lane, LaneCurve c) => setState(() => _curves = {..._curves, lane: c});
+
+  /// A lane's top and height in grid coordinates (1 velocity, 2 chance).
+  (double, double) _laneBox(int lane) =>
+      lane == 1 ? (_gridH, _velH) : (_gridH + (_velLane ? _velH : 0), _xH);
+
+  double _laneValue(int lane, double y) {
+    final (top, hgt) = _laneBox(lane);
+    return (1 - (y - top - 3) / (hgt - 6)).clamp(0.0, 1.0);
+  }
+
+  Offset _curvePx(int lane, CurvePoint q) {
+    final (top, hgt) = _laneBox(lane);
+    return Offset(q.at * _pxPerStep - _scrollX, top + 3 + (1 - q.value) * (hgt - 6));
+  }
+
+  /// A tap on the grid with the Curve tool: adds the note under it to the notes the curves shape, or clears them.
+  void _pickForCurve(Offset p) {
+    final hit = _noteAt(p);
+    setState(() {
+      if (hit == null) {
+        _sel = {};
+      } else {
+        _sel = _sel.contains(hit) ? (Set.of(_sel)..remove(hit)) : {..._sel, hit};
+      }
+    });
+  }
+
+  void _curveDown(Offset p) {
+    final d = _doc;
+    if (d == null) return;
+    final lane = _velLane && p.dy < _gridH + _velH ? 1 : (_extrasLane ? 2 : 0);
+    if (lane == 0) return;
+    _cLane = lane;
+    _cStart = p;
+    _dragBase = d;
+    final c = _cBase = _curves[lane]!;
+    // Near a point: drag it (hold to delete). Inside a segment: wait to see a tap (add) or a drag (bend). Else add.
+    for (var i = 0; i < c.points.length; i++) {
+      if ((_curvePx(lane, c.points[i]) - p).distance < math.max(16, _look.grab)) {
+        _cPoint = i;
+        _hold = Timer(Duration(milliseconds: _look.holdMs), () {
+          _setCurve(lane, _curves[lane]!.remove(i));
+          _cPoint = null;
+          _shapeNotes();
+        });
+        _holdAt = p;
+        return;
+      }
+    }
+    final seg = c.segmentAt(_stepAt(p.dx));
+    if (seg != null) {
+      _cSeg = seg;
+      _cBend0 = c.points[seg].bend;
+      _cAddOnTap = true;
+      return;
+    }
+    final (added, i) = c.add(_stepAt(p.dx), _laneValue(lane, p.dy));
+    _setCurve(lane, added);
+    _cPoint = i;
+    _shapeNotes();
+  }
+
+  void _curveMove(Offset p) {
+    final lane = _cLane, start = _cStart;
+    if (start == null) return;
+    if (_hold != null && (p - _holdAt!).distance > 8) {
+      _hold!.cancel();
+      _hold = null;
+    }
+    final i = _cPoint, seg = _cSeg;
+    if (i != null) {
+      _setCurve(lane, _curves[lane]!.move(i, _stepAt(p.dx), _laneValue(lane, p.dy)));
+    } else if (seg != null) {
+      if (_cAddOnTap && (p - start).distance <= kTouchSlop) return;
+      _cAddOnTap = false;
+      // Dragging a segment up bends it to rise late (ease in), down to rise early.
+      final (_, hgt) = _laneBox(lane);
+      _setCurve(lane, _curves[lane]!.bend(seg, _cBend0 - (p.dy - start.dy) / hgt * 2));
+    }
+    _shapeNotes();
+  }
+
+  void _curveEnd({required bool cancel}) {
+    if (_cLane == 0) return;
+    _hold?.cancel();
+    _hold = null;
+    final start = _cStart;
+    if (!cancel && _cAddOnTap && start != null) {
+      final (added, _) = _curves[_cLane]!.add(_stepAt(start.dx), _laneValue(_cLane, start.dy));
+      _setCurve(_cLane, added);
+      _shapeNotes();
+    }
+    if (cancel && _cBase != null) _setCurve(_cLane, _cBase!);
+    _cLane = 0;
+    _cPoint = _cSeg = null;
+    _cStart = null;
+    _cBase = null;
+    _cAddOnTap = false;
+    cancel ? _cancelEdit() : _up();
+  }
+
+  /// Sets the velocity (or chance) of the selected notes, or of every note when none is selected, from the lane's
+  /// curve; notes outside its first and last points keep their value. One undo step per gesture.
+  void _shapeNotes() {
+    final base = _dragBase, lane = _cLane;
+    if (base == null || lane == 0) return;
+    final c = _curves[lane]!;
+    if (c.isEmpty) return setState(() => _doc = base);
+    final first = c.points.first.at, last = c.points.last.at;
+    final targets = {
+      for (final n in base.notes)
+        if ((_sel.isEmpty || _sel.contains(n.id)) && n.at.toDouble() >= first && n.at.toDouble() <= last) n.id
+    };
+    setState(() => _doc = base.shape(targets, (n) => c.valueAt(n.at.toDouble()), chance: lane == 2));
+  }
+
   // ---------- generators ----------
 
   /// Asks for a generator's settings, then applies it as one undo step. Euclid and Random write from the cursor at the
@@ -596,7 +727,15 @@ class _PatternEditorState extends State<PatternEditor> {
     _pointers[e.pointer] = e.localPosition;
     if (_pointers.length == 1) {
       final p = e.localPosition - _origin;
-      if (p.dy >= _gridH || _noteAt(p) != null || _tool == PatternTool.select) {
+      if (_tool == PatternTool.curve) {
+        // Curve tool: the lanes edit their curve; on the grid a tap picks notes and a drag scrolls.
+        if (p.dy >= _gridH) {
+          _curveDown(p);
+        } else {
+          _pending = p;
+          _panning = false;
+        }
+      } else if (p.dy >= _gridH || _noteAt(p) != null || _tool == PatternTool.select) {
         _down(p);
       } else {
         _pending = p;
@@ -604,6 +743,7 @@ class _PatternEditorState extends State<PatternEditor> {
       }
     } else if (_pointers.length == 2) {
       _cancelEdit();
+      _curveEnd(cancel: true);
       _pending = null;
       final ps = _pointers.values.toList();
       _pinchSpan = (ps[0].dx - ps[1].dx).abs();
@@ -631,7 +771,7 @@ class _PatternEditorState extends State<PatternEditor> {
     if (pending != null) {
       if (!_panning && (p - pending).distance > kTouchSlop) {
         // A drag from empty grid does what the settings say: scroll, select, or the tool's own drag.
-        if (_look.emptyDrag != EmptyDrag.scroll) {
+        if (_look.emptyDrag != EmptyDrag.scroll && _tool != PatternTool.curve) {
           _pending = null;
           _down(pending, rect: _look.emptyDrag == EmptyDrag.select);
           _move(p);
@@ -647,6 +787,7 @@ class _PatternEditorState extends State<PatternEditor> {
       }
       return;
     }
+    if (_cLane != 0) return _curveMove(p);
     _move(p);
   }
 
@@ -663,11 +804,16 @@ class _PatternEditorState extends State<PatternEditor> {
     _pending = null;
     if (pending != null) {
       if (!_panning && !cancel) {
-        _down(pending);
-        _up();
+        if (_tool == PatternTool.curve) {
+          _pickForCurve(pending);
+        } else {
+          _down(pending);
+          _up();
+        }
       }
       return;
     }
+    if (_cLane != 0) return _curveEnd(cancel: cancel);
     cancel ? _cancelEdit() : _up();
   }
 
@@ -960,6 +1106,7 @@ class _PatternEditorState extends State<PatternEditor> {
         'roll.tool.draw' => _tool == PatternTool.draw,
         'roll.tool.select' => _tool == PatternTool.select,
         'roll.tool.erase' => _tool == PatternTool.erase,
+        'roll.tool.curve' => _tool == PatternTool.curve,
         'roll.grid.snap' => _snap,
         'roll.grid.triplets' => _triplet,
         'roll.grid.adaptive' => _fixed,
@@ -1079,6 +1226,7 @@ class _PatternEditorState extends State<PatternEditor> {
                       velH: _velLane ? _velH : 0,
                       xH: _extrasLane ? _xH : 0,
                       gridStrength: _look.gridStrength,
+                      curves: _tool == PatternTool.curve ? _curves : null,
                       keyLabels: _look.keyLabels,
                     ),
                   ),
@@ -1103,6 +1251,7 @@ const Map<String, IconData> _actionIcons = {
   'roll.tool.draw': Icons.edit,
   'roll.tool.select': Icons.highlight_alt,
   'roll.tool.erase': Icons.auto_fix_normal,
+  'roll.tool.curve': Icons.gesture,
   'edit.undo': Icons.undo,
   'edit.redo': Icons.redo,
   'roll.grid.triplets': Icons.looks_3_outlined,
@@ -1132,7 +1281,7 @@ const Map<String, IconData> _actionIcons = {
 };
 
 /// Actions the roll can't run yet; they stay in the keymap but don't show on its toolbar.
-const Set<String> _notBuilt = {'roll.tool.curve'};
+const Set<String> _notBuilt = {};
 
 /// The roll's toolbar: the keymap's pattern toolbar (the user's own actions and macros, in their order), then the
 /// full-screen switch and the ⋮ menu, which always stay.
@@ -1410,7 +1559,9 @@ class _RollPainter extends CustomPainter {
     required this.xH,
     required this.gridStrength,
     required this.keyLabels,
+    required this.curves,
   });
+  final Map<int, LaneCurve>? curves;
   final double velH, xH, gridStrength;
   final KeyLabels keyLabels;
   final PatternDoc doc;
@@ -1537,6 +1688,32 @@ class _RollPainter extends CustomPainter {
 
     if (velH > 0) lane(rulerH + h, velH, (n) => n.vel);
     if (xH > 0) lane(rulerH + h + velH, xH, (n) => n.prob, marks: true);
+    // The Curve tool's curves, over their lanes: the line, sampled every few pixels, and its points.
+    void curve(LaneCurve c, double top, double hgt) {
+      if (c.isEmpty) return;
+      double y(double v) => top + 3 + (1 - v) * (hgt - 6);
+      final path = Path();
+      for (var x = keyW; x <= size.width; x += 3) {
+        final v = c.valueAt((x - keyW + scrollX) / pxPerStep);
+        x == keyW ? path.moveTo(x, y(v)) : path.lineTo(x, y(v));
+      }
+      canvas.save();
+      canvas.clipRect(Rect.fromLTWH(keyW, top, w, hgt));
+      canvas.drawPath(path, Paint()
+        ..color = Neon.yellow
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5);
+      for (final q in c.points) {
+        canvas.drawCircle(Offset(keyW + q.at * pxPerStep - scrollX, y(q.value)), 5, Paint()..color = Neon.yellow);
+      }
+      canvas.restore();
+    }
+
+    final cs = curves;
+    if (cs != null) {
+      if (velH > 0) curve(cs[1]!, rulerH + h, velH);
+      if (xH > 0) curve(cs[2]!, rulerH + h + velH, xH);
+    }
   }
 
   @override
@@ -1556,6 +1733,7 @@ class _RollPainter extends CustomPainter {
       o.rowH != rowH ||
       o.gridStrength != gridStrength ||
       o.keyLabels != keyLabels ||
+      o.curves != curves ||
       o.color != color;
 }
 
