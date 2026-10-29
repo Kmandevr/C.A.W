@@ -22,6 +22,7 @@ constexpr double kMaxBend = 48.0;  // semitones either way (the app draws within
 struct NoteCurve {
     int count = 0;
     float t[kMaxCurvePoints] = {}, v[kMaxCurvePoints] = {}, k[kMaxCurvePoints] = {};
+    double e[kMaxCurvePoints] = {};  // 4^k for each segment, worked out once when the pattern is read
     double at(double u) const;  // the value at u (0..1); holds the first and last values outside the points
 };
 

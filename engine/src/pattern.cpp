@@ -114,6 +114,7 @@ size_t curvePoints(const std::vector<Word>& w, size_t k, int line, const Word& k
         c.t[c.count] = static_cast<float>(t);
         c.v[c.count] = static_cast<float>(v);
         c.k[c.count] = static_cast<float>(b);
+        c.e[c.count] = detPow(4.0, c.k[c.count]);
         ++c.count;
         last = t;
         ++k;
@@ -138,7 +139,7 @@ double NoteCurve::at(double u) const {
         if (u <= t[i + 1]) {
             const double span = static_cast<double>(t[i + 1]) - t[i];
             double x = span > 0 ? (u - t[i]) / span : 1.0;
-            if (k[i] != 0) x = detPow(x, detPow(4.0, k[i]));
+            if (k[i] != 0) x = detPow(x, e[i]);
             return v[i] + (static_cast<double>(v[i + 1]) - v[i]) * x;
         }
     }
@@ -261,6 +262,10 @@ PatternResult parsePattern(std::string_view src) {
                 }
             }
             if (expressive) {
+                double most = 0;
+                for (int q = 0; q < ex.bend.count; ++q) most = std::max(most, std::fabs(static_cast<double>(ex.bend.v[q])));
+                if (most + ex.vibDepth > kMaxBend)
+                    throw PatternError(lineNo, w[0].col, "a note's bend plus its vibrato depth can be at most 48 semitones");
                 n.extra = static_cast<int>(p->expressions.size());
                 p->expressions.push_back(ex);
             }
