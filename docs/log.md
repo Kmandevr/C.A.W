@@ -1,13 +1,18 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Log
 
 Newest first.
 
+- 2026-10-29: Merged the friendlier layout (PR #6) with the roll and editor work: the roll keeps the newer touch handling plus the double tap that deletes a note; the Solo headphones button can be hidden; the phone's Controls | Code switch replaces the "Controls above the code" setting.
+- 2026-10-29: Curve tool for the velocity and chance lanes (points and bendable segments; part of #11).
+- 2026-10-29: Code editor layout in Settings (part of #10): key row, completion chips, which buttons and the scope show, Run bar position, compact and foldable controls. Syntax for new controls and for curves proposed on #10 and #11 for the owner.
+- 2026-10-29: Roll customisation (#9): Settings → Piano roll (sizes, grid strength, key names, grab zone, hold time, empty-grid drag), a toolbar you edit (actions and macros), and the generators (euclid, random in key, arpeggiate, humanize, chord stamp, reverse, invert pitch).
+- 2026-10-29: The piano roll works inline in the Builder (it claims its touches; one finger on empty grid scrolls, a tap draws). New [how it works](how-it-works.md) note for agents. Owner's plan for roll, editor and curve work in [decisions](decisions.md).
 - 2026-10-28: Piano roll on touch: one finger scrolls from empty space, a double tap deletes a note (owner) ([app](app.md)).
 - 2026-10-28: Friendlier layout (owner's choice: track-first, more visual, less cluttered; scenes later): areas renamed Sounds, Tracks and Export; Tracks has a project strip, visual track cards and a track panel; Sounds opens on controls with the code one tap away ([app](app.md)).
 - 2026-10-28: Light mode (owner OK), auto-update while typing, the key router (keymaps, Vim, counts, macros, action list, code-editor Vim), roll extras panel, lanes, triplets and MIDI import/export buttons; engine `voices` limit ([app](app.md)).

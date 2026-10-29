@@ -451,4 +451,74 @@ void main() {
       expect(d.serialize(), before);
     });
   });
+
+  group('generators', () {
+    const aMinor = (root: 9, scale: [0, 2, 3, 5, 7, 8, 10]);
+
+    test('euclid spreads pulses evenly and rotates', () {
+      final d = body('');
+      final e = d.euclid(at: Steps.zero, pulses: 3, steps: 8, cell: Steps.one, pitch: 36);
+      expect(e.doc.notes.map((n) => n.at.toDouble()), [0, 3, 6]);
+      expect(e.ids.length, 3);
+      final r = d.euclid(at: Steps(4), pulses: 3, steps: 8, cell: Steps.one, pitch: 36, rotate: 1);
+      expect(r.doc.notes.map((n) => n.at.toDouble()), [5, 8, 11]);
+    });
+
+    test('random in key keeps to the key and the seed', () {
+      final d = body('');
+      final a = d.randomInKey(
+          at: Steps.zero, span: Steps(16), cell: Steps.one, lo: 57, hi: 69, density: 0.6, key: aMinor, seed: 3);
+      final b = d.randomInKey(
+          at: Steps.zero, span: Steps(16), cell: Steps.one, lo: 57, hi: 69, density: 0.6, key: aMinor, seed: 3);
+      expect(a.doc.serialize(), b.doc.serialize());
+      expect(a.doc.notes, isNotEmpty);
+      for (final n in a.doc.notes) {
+        expect(aMinor.scale.contains((n.pitch.round() - 9) % 12), isTrue);
+        expect(n.pitch, inInclusiveRange(57, 69));
+      }
+    });
+
+    test('arpeggiate turns a chord into a run', () {
+      final d = body('0 C3,E3,G3 4\n4 A3 1\n');
+      final a = d.arpeggiate({1, 2, 3, 4}, Steps.one);
+      expect(a.doc.notes.map((n) => (n.at.toDouble(), n.pitch)).toList(),
+          [(4.0, 57.0), (0.0, 48.0), (1.0, 52.0), (2.0, 55.0), (3.0, 48.0)]);
+      final ud = d.arpeggiate({1, 2, 3}, Steps.one, order: 'updown');
+      expect(ud.doc.notes.where((n) => n.at < Steps(4)).map((n) => n.pitch), [48, 52, 55, 52]);
+    });
+
+    test('humanize stays near the note and is repeatable', () {
+      final d = body('0 C3 1 0.8\n4 D3 1 0.8\n');
+      final h = d.humanize({1, 2}, timing: 0.25, velocity: 0.1, seed: 5);
+      expect(h.serialize(), d.humanize({1, 2}, timing: 0.25, velocity: 0.1, seed: 5).serialize());
+      for (final n in h.notes) {
+        expect(n.at.toDouble(), greaterThanOrEqualTo(0));
+        expect(n.vel, inInclusiveRange(0.7, 0.9));
+      }
+      expect((h.notes[1].at.toDouble() - 4).abs(), lessThanOrEqualTo(0.25));
+    });
+
+    test('chord stamp follows the key', () {
+      final d = body('0 A2 2\n');
+      expect(d.chordStamp({1}, key: aMinor).doc.notes.map((n) => n.pitch), [45, 48, 52]); // A C E
+      expect(d.chordStamp({1}).doc.notes.map((n) => n.pitch), [45, 49, 52]); // A C# E
+      expect(d.chordStamp({1}, key: aMinor, seventh: true).doc.notes.length, 4);
+      expect(body('0 C3,E3,G3 1\n').chordStamp({1, 2, 3}).doc.notes.length, 6, reason: 'no doubled pitches');
+      expect(body('0 G9 1\n').chordStamp({1}).doc.notes.length, 1, reason: 'nothing past 127');
+    });
+
+    test('shape sets velocity or chance per note, and changes nothing when the values match', () {
+      final d = body('0 C3 1 0.5\n4 D3 1 0.5\n');
+      final v = d.shape({1, 2}, (n) => n.at.toDouble() / 4);
+      expect(v.notes.map((n) => n.vel), [0, 1]);
+      expect(d.shape({2}, (n) => 0.25, chance: true).notes[1].prob, 0.25);
+      expect(identical(d.shape({1, 2}, (n) => 0.5), d), isTrue);
+    });
+
+    test('reverse and invert pitch', () {
+      final d = body('0 C3 1\n2 D3 2\n');
+      expect(d.reverse({1, 2}).notes.map((n) => n.at.toDouble()), [3, 0]);
+      expect(d.invertPitch({1, 2}, 49).notes.map((n) => n.pitch), [50, 48]);
+    });
+  });
 }

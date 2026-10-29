@@ -10,15 +10,19 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../actions/actions.dart';
+import '../actions/keymap.dart';
+import '../actions/macro.dart';
 import '../engine/engine.dart';
 
 import '../model/app_state.dart';
+import '../model/lane_curve.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
+import '../model/settings.dart';
 import 'key_router.dart';
 import 'theme.dart';
 
-enum PatternTool { draw, select, erase }
+enum PatternTool { draw, select, curve, erase }
 
 /// Grid resolutions as fractions of a whole note (1 = a bar of 4/4), from 1 down to 1/128.
 const _resolutions = [1, 2, 4, 8, 16, 32, 64, 128];
@@ -50,7 +54,6 @@ class _PatternEditorState extends State<PatternEditor> {
   bool _snap = true, _fixed = false, _triplet = false;
   bool _velLane = true, _extrasLane = false; // Alt+V, Alt+X
   double _pxPerStep = 28, _scrollX = 0, _scrollY = 0;
-  final double _rowH = 16;
   Steps _cursorAt = Steps.zero;
   double _cursorPitch = 60;
   Steps? _lastLen;
@@ -63,18 +66,35 @@ class _PatternEditorState extends State<PatternEditor> {
   double _dragMovedP = 0;
   PatternDoc? _dragBase;
   double _zoomStart = 28;
+  // Raw touches: every finger on the roll, and a one-finger touch on empty grid that is not yet a tap or a scroll.
+  final Map<int, Offset> _pointers = {};
+  Offset? _pending;
+  bool _panning = false;
+  double _pinchSpan = 0;
+  Offset _pinchFocal = Offset.zero;
   int _lane = 0; // a drag in the velocity (1) or extras (2) lane
+  bool _rectSelect = false; // this drag draws a selection rectangle
+  // The Curve tool: one curve per lane (1 velocity, 2 chance), kept while the roll is open.
+  // Replaced (never changed in place) on each edit, so the painter sees a new map only when a curve changed.
+  Map<int, LaneCurve> _curves = const {1: LaneCurve(), 2: LaneCurve()};
+  LaneCurve? _cBase; // the lane's curve when the gesture began, put back if it is cancelled
+  int _cLane = 0; // the lane a curve gesture is in, 0 when none
+  int? _cPoint, _cSeg; // the point being dragged, or the segment being bent
+  double _cBend0 = 0;
+  Offset? _cStart;
+  bool _cAddOnTap = false; // a touch inside a segment: a tap adds a point there, a drag bends it
   double _gridH = 0;
   Timer? _hold; // long press on a note opens its extras panel
   Offset? _holdAt;
-  // Touch: a tap on empty space draws a note when the finger lifts, and a drag there scrolls instead.
-  bool _touch = false, _pendingDraw = false, _panning = false;
-  bool _multi = false; // two fingers are (or were, until all lift) zooming and scrolling
-  Offset? _panLast;
-  int? _tapNote; // the note a plain tap just landed on, and when: a second tap on it soon after deletes it
+  // A plain tap on a note arms a double tap: a second tap on it soon after deletes it.
+  int? _tapCandidate, _tapNote;
   DateTime? _tapAt;
 
-  static const _keyW = 44.0, _velH = 56.0, _xH = 40.0, _rulerH = 20.0;
+  static const _keyW = 44.0, _rulerH = 20.0;
+  RollLook get _look => s.settings.roll;
+  double get _rowH => _look.rowHeight;
+  double get _velH => _look.velocityLane;
+  double get _xH => _look.chanceLane;
   double get _lanesH => (_velLane ? _velH : 0) + (_extrasLane ? _xH : 0);
 
   AppState get s => widget.state;
@@ -82,7 +102,12 @@ class _PatternEditorState extends State<PatternEditor> {
   @override
   void initState() {
     super.initState();
+    s.settings.addListener(_settingsChanged);
     _load();
+  }
+
+  void _settingsChanged() {
+    if (mounted) setState(() {});
   }
 
   KeyRouterState? _router;
@@ -106,6 +131,7 @@ class _PatternEditorState extends State<PatternEditor> {
   @override
   void dispose() {
     _hold?.cancel();
+    s.settings.removeListener(_settingsChanged);
     _router?.unregister(Area.pattern, _focus);
     _flush();
     _focus.dispose();
@@ -304,6 +330,16 @@ class _PatternEditorState extends State<PatternEditor> {
         _apply(r.doc, select: r.ids);
       case 'roll.notes.quantize':
         _apply(d.quantize(_sel.isEmpty ? {for (final n in d.notes) n.id} : _sel, _resSteps));
+      case 'roll.gen.euclid' ||
+            'roll.gen.random' ||
+            'roll.gen.arpeggiate' ||
+            'roll.gen.humanize' ||
+            'roll.gen.chordStamp':
+        _generate(id);
+      case 'roll.gen.reverse':
+        _apply(d.reverse(_sel));
+      case 'roll.gen.invertPitch':
+        _apply(d.invertPitch(_sel, _cursorPitch));
       case 'roll.gen.legato':
         _apply(d.legato(_sel));
       case 'roll.vel.up':
@@ -340,6 +376,8 @@ class _PatternEditorState extends State<PatternEditor> {
         setState(() => _tool = PatternTool.draw);
       case 'roll.tool.select':
         setState(() => _tool = PatternTool.select);
+      case 'roll.tool.curve':
+        setState(() => _tool = PatternTool.curve);
       case 'roll.tool.erase':
         setState(() => _tool = PatternTool.erase);
       case 'roll.view.switch':
@@ -498,7 +536,304 @@ class _PatternEditorState extends State<PatternEditor> {
     return KeyEventResult.handled;
   }
 
+  static final ActionRegistry _fallbackRegistry = ActionRegistry.standard();
+  static final Keymap _fallbackKeymap = Keymap.defaults(_fallbackRegistry);
+
+  /// A toolbar button: through the key router (so `.`, recording and toasts see it), or straight to the roll when
+  /// there is no router (tests, previews).
+  void _runRef(ActionRef r) {
+    final router = _router;
+    if (router != null) {
+      // The router runs a roll action on the focused roll; give this one focus first (applied before the next task).
+      _focus.requestFocus();
+      Future(() => router.runRef(r));
+    } else if (!r.isMacro) {
+      _action(r.id, 1, null);
+    }
+  }
+
+  // ---------- curve tool ----------
+
+  void _setCurve(int lane, LaneCurve c) => setState(() => _curves = {..._curves, lane: c});
+
+  /// A lane's top and height in grid coordinates (1 velocity, 2 chance).
+  (double, double) _laneBox(int lane) =>
+      lane == 1 ? (_gridH, _velH) : (_gridH + (_velLane ? _velH : 0), _xH);
+
+  double _laneValue(int lane, double y) {
+    final (top, hgt) = _laneBox(lane);
+    return (1 - (y - top - 3) / (hgt - 6)).clamp(0.0, 1.0);
+  }
+
+  Offset _curvePx(int lane, CurvePoint q) {
+    final (top, hgt) = _laneBox(lane);
+    return Offset(q.at * _pxPerStep - _scrollX, top + 3 + (1 - q.value) * (hgt - 6));
+  }
+
+  /// A tap on the grid with the Curve tool: adds the note under it to the notes the curves shape, or clears them.
+  void _pickForCurve(Offset p) {
+    final hit = _noteAt(p);
+    setState(() {
+      if (hit == null) {
+        _sel = {};
+      } else {
+        _sel = _sel.contains(hit) ? (Set.of(_sel)..remove(hit)) : {..._sel, hit};
+      }
+    });
+  }
+
+  void _curveDown(Offset p) {
+    final d = _doc;
+    if (d == null) return;
+    final lane = _velLane && p.dy < _gridH + _velH ? 1 : (_extrasLane ? 2 : 0);
+    if (lane == 0) return;
+    _cLane = lane;
+    _cStart = p;
+    _dragBase = d;
+    final c = _cBase = _curves[lane]!;
+    // Near a point: drag it (hold to delete). Inside a segment: wait to see a tap (add) or a drag (bend). Else add.
+    for (var i = 0; i < c.points.length; i++) {
+      if ((_curvePx(lane, c.points[i]) - p).distance < math.max(16, _look.grab)) {
+        _cPoint = i;
+        _hold = Timer(Duration(milliseconds: _look.holdMs), () {
+          _setCurve(lane, _curves[lane]!.remove(i));
+          _cPoint = null;
+          _shapeNotes();
+        });
+        _holdAt = p;
+        return;
+      }
+    }
+    final seg = c.segmentAt(_stepAt(p.dx));
+    if (seg != null) {
+      _cSeg = seg;
+      _cBend0 = c.points[seg].bend;
+      _cAddOnTap = true;
+      return;
+    }
+    final (added, i) = c.add(_stepAt(p.dx), _laneValue(lane, p.dy));
+    _setCurve(lane, added);
+    _cPoint = i;
+    _shapeNotes();
+  }
+
+  void _curveMove(Offset p) {
+    final lane = _cLane, start = _cStart;
+    if (start == null) return;
+    if (_hold != null && (p - _holdAt!).distance > 8) {
+      _hold!.cancel();
+      _hold = null;
+    }
+    final i = _cPoint, seg = _cSeg;
+    if (i != null) {
+      _setCurve(lane, _curves[lane]!.move(i, _stepAt(p.dx), _laneValue(lane, p.dy)));
+    } else if (seg != null) {
+      if (_cAddOnTap && (p - start).distance <= kTouchSlop) return;
+      _cAddOnTap = false;
+      // Dragging a segment up bends it to rise late (ease in), down to rise early.
+      final (_, hgt) = _laneBox(lane);
+      _setCurve(lane, _curves[lane]!.bend(seg, _cBend0 - (p.dy - start.dy) / hgt * 2));
+    }
+    _shapeNotes();
+  }
+
+  void _curveEnd({required bool cancel}) {
+    if (_cLane == 0) return;
+    _hold?.cancel();
+    _hold = null;
+    final start = _cStart;
+    if (!cancel && _cAddOnTap && start != null) {
+      final (added, _) = _curves[_cLane]!.add(_stepAt(start.dx), _laneValue(_cLane, start.dy));
+      _setCurve(_cLane, added);
+      _shapeNotes();
+    }
+    if (cancel && _cBase != null) _setCurve(_cLane, _cBase!);
+    _cLane = 0;
+    _cPoint = _cSeg = null;
+    _cStart = null;
+    _cBase = null;
+    _cAddOnTap = false;
+    cancel ? _cancelEdit() : _up();
+  }
+
+  /// Sets the velocity (or chance) of the selected notes, or of every note when none is selected, from the lane's
+  /// curve; notes outside its first and last points keep their value. One undo step per gesture.
+  void _shapeNotes() {
+    final base = _dragBase, lane = _cLane;
+    if (base == null || lane == 0) return;
+    final c = _curves[lane]!;
+    if (c.isEmpty) return setState(() => _doc = base);
+    final first = c.points.first.at, last = c.points.last.at;
+    final targets = {
+      for (final n in base.notes)
+        if ((_sel.isEmpty || _sel.contains(n.id)) && n.at.toDouble() >= first && n.at.toDouble() <= last) n.id
+    };
+    setState(() => _doc = base.shape(targets, (n) => c.valueAt(n.at.toDouble()), chance: lane == 2));
+  }
+
+  // ---------- generators ----------
+
+  /// Asks for a generator's settings, then applies it as one undo step. Euclid and Random write from the cursor at the
+  /// grid size; the others work on the selection.
+  Future<void> _generate(String id) async {
+    final d = _doc;
+    if (d == null) return;
+    final bar = Steps(s.project.beatsPerBar * 4);
+    final seed = DateTime.now().microsecondsSinceEpoch & 0x7fffffff;
+    final v = await showDialog<Map<String, double>>(
+      context: context,
+      builder: (_) => _GenDialog(id: id),
+    );
+    if (v == null || !mounted || _doc == null) return;
+    final doc = _doc!;
+    switch (id) {
+      case 'roll.gen.euclid':
+        final r = doc.euclid(
+            at: _cursorAt,
+            pulses: v['pulses']!.round(),
+            steps: v['steps']!.round(),
+            rotate: v['rotate']!.round(),
+            cell: _resSteps,
+            pitch: _cursorPitch);
+        _apply(r.doc, select: r.ids);
+      case 'roll.gen.random':
+        final range = v['range']!.round();
+        final r = doc.randomInKey(
+            at: _cursorAt,
+            span: bar.times(v['bars']!.round()),
+            cell: _resSteps,
+            lo: (_cursorPitch - range).round(),
+            hi: (_cursorPitch + range).round(),
+            density: v['density']! / 100,
+            key: _key,
+            seed: seed);
+        _apply(r.doc, select: r.ids);
+      case 'roll.gen.arpeggiate':
+        final r = doc.arpeggiate(_sel, _resSteps, order: const ['up', 'down', 'updown'][v['order']!.round()]);
+        _apply(r.doc, select: r.ids);
+      case 'roll.gen.humanize':
+        _apply(doc.humanize(_sel, timing: v['timing']! / 100, velocity: v['velocity']! / 100, seed: seed));
+      case 'roll.gen.chordStamp':
+        final r = doc.chordStamp(_sel, key: _key, seventh: v['seventh']! > 0);
+        _apply(r.doc, select: {..._sel, ...r.ids});
+    }
+  }
+
   // ---------- pointer ----------
+
+  static const _origin = Offset(_keyW, _rulerH);
+
+  /// One finger on a note, in a lane or with the select tool edits; on empty grid it waits: a tap draws (or erases),
+  /// a drag scrolls. Two fingers zoom and scroll, and drop an edit the first finger had started.
+  void _pointerDown(PointerDownEvent e) {
+    _focus.requestFocus();
+    _pointers[e.pointer] = e.localPosition;
+    if (_pointers.length == 1) {
+      final p = e.localPosition - _origin;
+      if (_tool == PatternTool.curve) {
+        // Curve tool: the lanes edit their curve; on the grid a tap picks notes and a drag scrolls.
+        if (p.dy >= _gridH) {
+          _curveDown(p);
+        } else {
+          _pending = p;
+          _panning = false;
+        }
+      } else if (p.dy >= _gridH || _noteAt(p) != null || _tool == PatternTool.select) {
+        _down(p);
+      } else {
+        _pending = p;
+        _panning = false;
+      }
+    } else if (_pointers.length == 2) {
+      _cancelEdit();
+      _curveEnd(cancel: true);
+      _pending = null;
+      final ps = _pointers.values.toList();
+      _pinchSpan = (ps[0].dx - ps[1].dx).abs();
+      _pinchFocal = (ps[0] + ps[1]) / 2;
+      _zoomStart = _pxPerStep;
+    }
+  }
+
+  void _pointerMove(PointerMoveEvent e) {
+    if (!_pointers.containsKey(e.pointer)) return;
+    _pointers[e.pointer] = e.localPosition;
+    if (_pointers.length >= 2) {
+      final ps = _pointers.values.take(2).toList();
+      final focal = (ps[0] + ps[1]) / 2, span = (ps[0].dx - ps[1].dx).abs();
+      setState(() {
+        // A pinch that starts with the fingers stacked vertically only scrolls.
+        if (_pinchSpan > 24) _pxPerStep = (_zoomStart * span / _pinchSpan).clamp(4.0, 200.0);
+        _scrollX -= focal.dx - _pinchFocal.dx;
+        _scrollY -= focal.dy - _pinchFocal.dy;
+      });
+      _pinchFocal = focal;
+      return;
+    }
+    final p = e.localPosition - _origin, pending = _pending;
+    if (pending != null) {
+      if (!_panning && (p - pending).distance > kTouchSlop) {
+        // A drag from empty grid does what the settings say: scroll, select, or the tool's own drag.
+        if (_look.emptyDrag != EmptyDrag.scroll && _tool != PatternTool.curve) {
+          _pending = null;
+          _down(pending, rect: _look.emptyDrag == EmptyDrag.select);
+          _move(p);
+          return;
+        }
+        _panning = true;
+      }
+      if (_panning) {
+        setState(() {
+          _scrollX -= e.delta.dx;
+          _scrollY -= e.delta.dy;
+        });
+      }
+      return;
+    }
+    if (_cLane != 0) return _curveMove(p);
+    _move(p);
+  }
+
+  void _pointerUp(PointerEvent e, {required bool cancel}) {
+    if (_pointers.remove(e.pointer) == null) return;
+    if (_pointers.length == 1) {
+      // Back to one finger after a pinch: it keeps scrolling until it lifts.
+      _pending = _pointers.values.first - _origin;
+      _panning = true;
+      return;
+    }
+    if (_pointers.isNotEmpty) return;
+    final pending = _pending;
+    _pending = null;
+    if (pending != null) {
+      if (!_panning && !cancel) {
+        if (_tool == PatternTool.curve) {
+          _pickForCurve(pending);
+        } else {
+          _down(pending);
+          _up();
+        }
+      }
+      return;
+    }
+    if (_cLane != 0) return _curveEnd(cancel: cancel);
+    cancel ? _cancelEdit() : _up();
+  }
+
+  /// Drops a one-finger edit in progress, restoring the notes as they were before it.
+  void _cancelEdit() {
+    _hold?.cancel();
+    _hold = null;
+    final base = _dragBase;
+    if (base == null) return;
+    setState(() {
+      _doc = base;
+      _dragStart = null;
+      _dragBase = null;
+      _dragNote = null;
+      _rectEnd = null;
+    });
+  }
 
   double _stepAt(double x) => (x + _scrollX) / _pxPerStep;
   double _pitchAt(double y) => 127 - ((y + _scrollY) / _rowH).floorToDouble();
@@ -510,10 +845,18 @@ class _PatternEditorState extends State<PatternEditor> {
     for (final n in d.notes.reversed) {
       if (n.pitch.round() == pitch && t >= n.at.toDouble() && t < n.end.toDouble()) return n.id;
     }
+    // A short note is easier to grab: a touch beside it, within the grab zone, counts as on it, but only inside the
+    // tap cell the note starts in, so a tap in the next cell still draws there.
+    final cell = _tapLevel.toDouble(), touchCell = (t / cell).floor();
+    for (final n in d.notes.reversed) {
+      if (n.pitch.round() != pitch || (n.at.toDouble() / cell).floor() != touchCell) continue;
+      final w = n.len.toDouble() * _pxPerStep, pad = math.max(0.0, _look.grab * 2 - w) / 2 / _pxPerStep;
+      if (t >= n.at.toDouble() - pad && t < n.end.toDouble() + pad) return n.id;
+    }
     return null;
   }
 
-  void _down(Offset p) {
+  void _down(Offset p, {bool rect = false}) {
     _focus.requestFocus();
     final d = _doc;
     if (d == null) return;
@@ -522,6 +865,7 @@ class _PatternEditorState extends State<PatternEditor> {
     _dragMovedT = Steps.zero;
     _dragMovedP = 0;
     _lane = 0;
+    _rectSelect = rect || _tool == PatternTool.select;
     if (p.dy >= _gridH) {
       _lane = _velLane && p.dy < _gridH + _velH ? 1 : 2;
       _laneEdit(p);
@@ -530,9 +874,10 @@ class _PatternEditorState extends State<PatternEditor> {
     final hit = _noteAt(p);
     _cursorPitch = _pitchAt(p.dy).clamp(0, 127);
     _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
-    // A double tap on a note deletes it.
-    final now = DateTime.now();
-    if (hit != null && hit == _tapNote && now.difference(_tapAt!) < const Duration(milliseconds: 350)) {
+    _tapCandidate = null;
+    final tapAt = _tapAt;
+    if (hit != null && hit == _tapNote && tapAt != null &&
+        DateTime.now().difference(tapAt) < const Duration(milliseconds: 350)) {
       _tapNote = null;
       _dragStart = null;
       _dragBase = null;
@@ -540,7 +885,7 @@ class _PatternEditorState extends State<PatternEditor> {
       _apply(d.delete({hit}));
       return;
     }
-    if (_tool == PatternTool.erase) {
+    if (_tool == PatternTool.erase && !_rectSelect) {
       if (hit != null) _apply(d.delete({hit}));
       _dragNote = null;
       return;
@@ -548,22 +893,18 @@ class _PatternEditorState extends State<PatternEditor> {
     if (hit != null) {
       final n = d.byId(hit)!;
       _dragNote = hit;
-      _resizing = (n.end.toDouble() - _stepAt(p.dx)) * _pxPerStep < 12;
+      _tapCandidate = hit;
+      _resizing = (n.end.toDouble() - _stepAt(p.dx)) * _pxPerStep < _look.grab;
       if (!_sel.contains(hit)) setState(() => _sel = {hit});
       _holdAt = p;
-      _hold = Timer(const Duration(milliseconds: 500), () {
+      _hold = Timer(Duration(milliseconds: _look.holdMs), () {
         _up();
         _openExtras();
       });
       return;
     }
     _dragNote = null;
-    if (_tool == PatternTool.draw && _touch) {
-      _pendingDraw = true;
-      _panLast = p;
-      return;
-    }
-    if (_tool == PatternTool.draw) {
+    if (_tool == PatternTool.draw && !_rectSelect) {
       final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _tapLevel);
       if (r.id != null) {
         _apply(r.doc, select: {r.id!});
@@ -582,20 +923,6 @@ class _PatternEditorState extends State<PatternEditor> {
   void _move(Offset p) {
     final start = _dragStart, base = _dragBase;
     if (start == null || base == null) return;
-    if (_pendingDraw && (p - start).distance > 8) {
-      _pendingDraw = false;
-      _panning = true;
-    }
-    if (_panning) {
-      final last = _panLast ?? p;
-      _panLast = p;
-      setState(() {
-        _scrollX -= p.dx - last.dx;
-        _scrollY -= p.dy - last.dy;
-      });
-      return;
-    }
-    if (_pendingDraw) return;
     if (_hold != null && (p - _holdAt!).distance > 8) {
       _hold!.cancel();
       _hold = null;
@@ -604,13 +931,13 @@ class _PatternEditorState extends State<PatternEditor> {
       _laneEdit(p);
       return;
     }
-    if (_tool == PatternTool.erase) {
+    if (_tool == PatternTool.erase && !_rectSelect) {
       final hit = _noteAt(p);
       if (hit != null && _doc != null) _apply(_doc!.delete({hit}));
       return;
     }
     if (_dragNote == null) {
-      if (_tool == PatternTool.select) {
+      if (_rectSelect) {
         setState(() {
           _rectEnd = p;
           final a = _stepAt(math.min(start.dx, p.dx)), b = _stepAt(math.max(start.dx, p.dx));
@@ -639,23 +966,13 @@ class _PatternEditorState extends State<PatternEditor> {
     }
   }
 
-  /// The finger lifted ([draw] false when a second finger came instead: then a pending tap draws nothing).
-  void _up({bool draw = true}) {
+  void _up() {
     _hold?.cancel();
     _hold = null;
-    final d = _doc, base = _dragBase;
-    // A plain tap on a note (no move, no resize) arms the double tap that deletes it.
-    final tapped = _dragNote != null && identical(base, d) && !_panning;
-    _tapNote = tapped ? _dragNote : null;
+    // A tap on an existing note that moved nothing arms the double tap; a note just drawn doesn't.
+    _tapNote = _tapCandidate != null && identical(_dragBase, _doc) ? _tapCandidate : null;
     _tapAt = DateTime.now();
-    if (_pendingDraw && draw && d != null) {
-      _dragBase = null;
-      final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _tapLevel);
-      if (r.id != null) _apply(r.doc, select: {r.id!});
-    }
-    _pendingDraw = false;
-    _panning = false;
-    _panLast = null;
+    _tapCandidate = null;
     if (_dragBase != null && _doc != null && !identical(_dragBase, _doc)) {
       // One undo step for the whole drag.
       _undo.add(_dragBase!);
@@ -798,25 +1115,46 @@ class _PatternEditorState extends State<PatternEditor> {
       );
     }
     final length = d.lengthSteps(s.project.beatsPerBar);
+    final router = _router;
+    final registry = router?.registry ?? _fallbackRegistry;
     final toolbar = _Toolbar(
-      tool: _tool,
-      onTool: (t) => setState(() => _tool = t),
-      canUndo: _undo.isNotEmpty,
-      canRedo: _redo.isNotEmpty,
-      onUndo: () => _undoRedo(true),
-      onRedo: () => _undoRedo(false),
+      items: router?.vim.keymap.toolbars[Area.pattern] ?? _fallbackKeymap.toolbars[Area.pattern] ?? const [],
+      registry: registry,
+      keymap: router?.vim.keymap,
+      isOn: (id) => switch (id) {
+        'roll.tool.draw' => _tool == PatternTool.draw,
+        'roll.tool.select' => _tool == PatternTool.select,
+        'roll.tool.erase' => _tool == PatternTool.erase,
+        'roll.tool.curve' => _tool == PatternTool.curve,
+        'roll.grid.snap' => _snap,
+        'roll.grid.triplets' => _triplet,
+        'roll.grid.adaptive' => _fixed,
+        'roll.view.switch' => _grid,
+        'roll.view.velocityLane' => _velLane,
+        'roll.view.extrasLanes' => _extrasLane,
+        _ => false,
+      },
+      isEnabled: (id) => switch (id) {
+        'edit.undo' => _undo.isNotEmpty,
+        'edit.redo' => _redo.isNotEmpty,
+        _ => true,
+      },
+      onRun: _runRef,
       res: _res,
       onRes: (r) => setState(() => _res = r),
-      snap: _snap,
-      onSnap: () => setState(() => _snap = !_snap),
-      fixed: _fixed,
-      onFixed: () => setState(() => _fixed = !_fixed),
-      grid: _grid,
-      onGrid: () => setState(() => _grid = !_grid),
-      triplet: _triplet,
-      onTriplet: () => setState(() => _triplet = !_triplet),
+      canCustomise: router != null,
       onMenu: (v) {
+        if (v.startsWith('run:')) return _runRef(ActionRef.action(v.substring(4)));
         switch (v) {
+          case 'toolbar':
+            if (router != null) {
+              showModalBottomSheet<void>(
+                context: context,
+                backgroundColor: Neon.panel,
+                isScrollControlled: true,
+                builder: (_) => _ToolbarEditor(router: router),
+              ).then((_) => mounted ? setState(() {}) : null);
+            }
           case 'import':
             _importMidi();
           case 'mid':
@@ -857,33 +1195,19 @@ class _PatternEditorState extends State<PatternEditor> {
             _scrollX = _scrollX.clamp(0, math.max(0.0, length * _pxPerStep + 200 - w));
             _scrollY = _scrollY.clamp(0, math.max(0.0, 128 * _rowH - h));
             final grid = _grid ? _gridRows(d) : null;
-            return GestureDetector(
+            // The roll claims every touch on it, so a scrolling page around it (the Builder on a phone) never takes
+            // its drags; the pointers are then read raw below.
+            return RawGestureDetector(
               behavior: HitTestBehavior.opaque,
-              onScaleStart: (e) {
-                _zoomStart = _pxPerStep;
-                if (e.pointerCount >= 2) _multi = true;
-                _touch = e.kind == PointerDeviceKind.touch;
-                if (e.pointerCount == 1 && !_multi) _down(e.localFocalPoint - const Offset(_keyW, _rulerH));
-              },
-              onScaleUpdate: (e) {
-                if (_multi && e.pointerCount < 2) return; // one finger left after a pinch: wait for it to lift
-                if (e.pointerCount >= 2) {
-                  // Two fingers zoom and scroll; one finger always edits.
-                  setState(() {
-                    _pxPerStep = (_zoomStart * e.horizontalScale).clamp(4.0, 200.0);
-                    _scrollX -= e.focalPointDelta.dx;
-                    _scrollY -= e.focalPointDelta.dy;
-                  });
-                } else {
-                  _move(e.localFocalPoint - const Offset(_keyW, _rulerH));
-                }
-              },
-              onScaleEnd: (e) {
-                if (_multi && e.pointerCount > 0) return;
-                _up(draw: e.pointerCount == 0 && !_multi);
-                if (e.pointerCount == 0) _multi = false;
+              gestures: {
+                EagerGestureRecognizer: GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
+                    () => EagerGestureRecognizer(), (_) {}),
               },
               child: Listener(
+                onPointerDown: _pointerDown,
+                onPointerMove: _pointerMove,
+                onPointerUp: (e) => _pointerUp(e, cancel: false),
+                onPointerCancel: (e) => _pointerUp(e, cancel: true),
                 onPointerSignal: (e) {
                   if (e is PointerScrollEvent) {
                     setState(() {
@@ -920,6 +1244,9 @@ class _PatternEditorState extends State<PatternEditor> {
                       focused: _focus.hasFocus,
                       velH: _velLane ? _velH : 0,
                       xH: _extrasLane ? _xH : 0,
+                      gridStrength: _look.gridStrength,
+                      curves: _tool == PatternTool.curve ? _curves : null,
+                      keyLabels: _look.keyLabels,
                     ),
                   ),
                 ),
@@ -938,68 +1265,121 @@ class _PatternEditorState extends State<PatternEditor> {
   }
 }
 
+/// Icons for actions that sit well on a toolbar; any other action shows its name.
+const Map<String, IconData> _actionIcons = {
+  'roll.tool.draw': Icons.edit,
+  'roll.tool.select': Icons.highlight_alt,
+  'roll.tool.erase': Icons.auto_fix_normal,
+  'roll.tool.curve': Icons.gesture,
+  'edit.undo': Icons.undo,
+  'edit.redo': Icons.redo,
+  'roll.grid.triplets': Icons.looks_3_outlined,
+  'roll.grid.snap': Icons.grid_on,
+  'roll.grid.adaptive': Icons.lock_outline,
+  'roll.view.switch': Icons.apps,
+  'roll.view.zoomIn': Icons.zoom_in,
+  'roll.view.zoomOut': Icons.zoom_out,
+  'roll.view.fit': Icons.fit_screen,
+  'roll.view.velocityLane': Icons.equalizer,
+  'roll.view.extrasLanes': Icons.casino_outlined,
+  'roll.notes.delete': Icons.delete_outline,
+  'roll.notes.extras': Icons.tune,
+  'roll.edit.copy': Icons.content_copy,
+  'roll.edit.paste': Icons.content_paste,
+  'roll.edit.duplicate': Icons.copy_all,
+  'roll.notes.quantize': Icons.straighten,
+  'roll.gen.euclid': Icons.blur_circular,
+  'roll.gen.random': Icons.shuffle,
+  'roll.gen.arpeggiate': Icons.stairs_outlined,
+  'roll.gen.humanize': Icons.waves,
+  'roll.gen.chordStamp': Icons.library_music_outlined,
+  'roll.gen.legato': Icons.linear_scale,
+  'roll.gen.reverse': Icons.swap_horiz,
+  'roll.gen.invertPitch': Icons.swap_vert,
+  'transport.playstop': Icons.play_arrow,
+};
+
+/// Actions the roll can't run yet; they stay in the keymap but don't show on its toolbar.
+const Set<String> _notBuilt = {};
+
+/// The roll's toolbar: the keymap's pattern toolbar (the user's own actions and macros, in their order), then the
+/// full-screen switch and the ⋮ menu, which always stay.
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
-    required this.tool,
-    required this.onTool,
-    required this.canUndo,
-    required this.canRedo,
-    required this.onUndo,
-    required this.onRedo,
+    required this.items,
+    required this.registry,
+    required this.keymap,
+    required this.isOn,
+    required this.isEnabled,
+    required this.onRun,
     required this.res,
     required this.onRes,
-    required this.snap,
-    required this.onSnap,
-    required this.fixed,
-    required this.onFixed,
-    required this.grid,
-    required this.onGrid,
     required this.fullScreen,
     required this.onFullScreen,
-    required this.triplet,
-    required this.onTriplet,
     required this.onMenu,
     required this.velLane,
     required this.extrasLane,
+    required this.canCustomise,
   });
-  final PatternTool tool;
-  final ValueChanged<PatternTool> onTool;
-  final bool canUndo, canRedo, snap, fixed, grid, fullScreen, triplet, velLane, extrasLane;
-  final VoidCallback onUndo, onRedo, onSnap, onFixed, onGrid, onFullScreen, onTriplet;
+  final List<ActionRef> items;
+  final ActionRegistry registry;
+  final Keymap? keymap;
+  final bool Function(String id) isOn, isEnabled;
+  final ValueChanged<ActionRef> onRun;
+  final bool fullScreen, velLane, extrasLane, canCustomise;
+  final VoidCallback onFullScreen;
   final ValueChanged<String> onMenu;
   final int res;
   final ValueChanged<int> onRes;
 
+  String _tip(ActionRef r) {
+    final name = r.isMacro ? 'Macro: ${r.id}' : (registry[r.id]?.name ?? r.id);
+    final keys = keymap?.keysFor(Area.pattern, r).map((k) => k.format()).join(', ') ?? '';
+    return keys.isEmpty ? name : '$name ($keys)';
+  }
+
+  Widget _item(ActionRef r) {
+    if (!r.isMacro && r.id == 'roll.grid.menu') {
+      return Center(
+        child: DropdownButton<int>(
+          value: res,
+          underline: const SizedBox(),
+          items: [for (final x in _resolutions) DropdownMenuItem(value: x, child: Text(x == 1 ? '1' : '1/$x'))],
+          onChanged: (v) => onRes(v!),
+        ),
+      );
+    }
+    final icon = r.isMacro ? null : _actionIcons[r.id];
+    final enabled = r.isMacro || isEnabled(r.id);
+    if (icon != null) {
+      return IconButton(
+        tooltip: _tip(r),
+        onPressed: enabled ? () => onRun(r) : null,
+        icon: Icon(icon, color: isOn(r.id) ? Neon.yellow : Neon.dim),
+      );
+    }
+    final label = r.isMacro ? '▶ ${r.id}' : (registry[r.id]?.name ?? r.id);
+    return Tooltip(
+      message: _tip(r),
+      child: TextButton(
+        onPressed: enabled ? () => onRun(r) : null,
+        child: Text(label, style: TextStyle(color: isOn(r.id) ? Neon.yellow : Neon.text)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    Widget tb(IconData i, String tip, bool on, VoidCallback? f) => IconButton(
-          tooltip: tip,
-          onPressed: f,
-          icon: Icon(i, color: on ? Neon.yellow : Neon.dim),
-        );
     return SizedBox(
       height: 48,
       child: ListView(scrollDirection: Axis.horizontal, children: [
-        tb(Icons.edit, 'Draw (B)', tool == PatternTool.draw, () => onTool(PatternTool.draw)),
-        tb(Icons.highlight_alt, 'Select (V)', tool == PatternTool.select, () => onTool(PatternTool.select)),
-        tb(Icons.auto_fix_normal, 'Erase (X)', tool == PatternTool.erase, () => onTool(PatternTool.erase)),
-        const VerticalDivider(width: 12),
-        tb(Icons.undo, 'Undo (Ctrl+Z)', false, canUndo ? onUndo : null),
-        tb(Icons.redo, 'Redo (Ctrl+Shift+Z)', false, canRedo ? onRedo : null),
-        const VerticalDivider(width: 12),
-        Center(
-          child: DropdownButton<int>(
-            value: res,
-            underline: const SizedBox(),
-            items: [for (final r in _resolutions) DropdownMenuItem(value: r, child: Text(r == 1 ? '1' : '1/$r'))],
-            onChanged: (v) => onRes(v!),
-          ),
+        for (final r in items)
+          if (r.isMacro || !_notBuilt.contains(r.id)) _item(r),
+        IconButton(
+          tooltip: 'Full screen',
+          onPressed: onFullScreen,
+          icon: Icon(fullScreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Neon.dim),
         ),
-        tb(Icons.looks_3_outlined, 'Triplets (Alt+0)', triplet, onTriplet),
-        tb(Icons.grid_on, 'Snap to grid (N)', snap, onSnap),
-        tb(Icons.lock_outline, 'Fixed grid (Alt+F)', fixed, onFixed),
-        tb(Icons.apps, 'Drum grid / piano roll (G)', grid, onGrid),
-        tb(fullScreen ? Icons.fullscreen_exit : Icons.fullscreen, 'Full screen', false, onFullScreen),
         PopupMenuButton<String>(
           tooltip: 'More',
           icon: const Icon(Icons.more_vert, color: Neon.dim),
@@ -1009,12 +1389,169 @@ class _Toolbar extends StatelessWidget {
             CheckedPopupMenuItem(value: 'vel', checked: velLane, child: const Text('Velocity lane (Alt+V)')),
             CheckedPopupMenuItem(value: 'extras', checked: extrasLane, child: const Text('Chance lane (Alt+X)')),
             const PopupMenuDivider(),
+            for (final id in const [
+              'roll.gen.euclid',
+              'roll.gen.random',
+              'roll.gen.arpeggiate',
+              'roll.gen.humanize',
+              'roll.gen.chordStamp',
+              'roll.gen.legato',
+              'roll.gen.reverse',
+              'roll.gen.invertPitch',
+            ])
+              PopupMenuItem(value: 'run:$id', child: Text('Generate: ${registry[id]?.name ?? id}')),
+            const PopupMenuDivider(),
+            PopupMenuItem(value: 'toolbar', enabled: canCustomise, child: const Text('Customise toolbar…')),
+            const PopupMenuDivider(),
             const PopupMenuItem(value: 'import', child: Text('Import MIDI file…')),
             const PopupMenuItem(value: 'mid', child: Text('Export as MIDI (.mid)')),
             const PopupMenuItem(value: 'midi2', child: Text('Export as MIDI 2.0 clip (.midi2)')),
           ],
         ),
       ]),
+    );
+  }
+}
+
+/// Edits the roll's toolbar: reorder, remove, add any action or macro, or go back to the default.
+class _ToolbarEditor extends StatefulWidget {
+  const _ToolbarEditor({required this.router});
+  final KeyRouterState router;
+
+  @override
+  State<_ToolbarEditor> createState() => _ToolbarEditorState();
+}
+
+class _ToolbarEditorState extends State<_ToolbarEditor> {
+  Keymap get _k => widget.router.vim.keymap;
+  late List<ActionRef> _items = List.of(_k.toolbars[Area.pattern] ?? const []);
+  Future<void> _saving = Future.value();
+
+  /// Saves one after another, so quick edits never write keys.txt at the same time.
+  Future<void> _save() {
+    _k.toolbars[Area.pattern] = List.of(_items);
+    return _saving = _saving.then((_) => widget.router.saveKeymap());
+  }
+
+  Future<void> _add() async {
+    final reg = widget.router.registry;
+    final choices = [
+      for (final d in reg.all)
+        if ((d.area == Area.pattern || d.area == Area.global) && !d.internal && !d.takesArg) ActionRef.action(d.id),
+      for (final m in _k.macros.names) ActionRef.macro(m),
+    ].where((r) => !_items.contains(r)).toList();
+    final picked = await showModalBottomSheet<ActionRef>(
+      context: context,
+      backgroundColor: Neon.panel,
+      isScrollControlled: true,
+      builder: (ctx) => _ActionPicker(choices: choices, registry: reg),
+    );
+    if (picked == null) return;
+    setState(() => _items.add(picked));
+    await _save();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reg = widget.router.registry;
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.7,
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+            child: Row(children: [
+              const Expanded(child: Text('Roll toolbar', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+              TextButton(
+                onPressed: () async {
+                  setState(() => _items = List.of(widget.router.defaults.toolbars[Area.pattern] ?? const []));
+                  await _save();
+                },
+                child: const Text('Default'),
+              ),
+              FilledButton.icon(onPressed: _add, icon: const Icon(Icons.add), label: const Text('Add')),
+            ]),
+          ),
+          Expanded(
+            child: ReorderableListView(
+              onReorderItem: (from, to) {
+                setState(() => _items.insert(to, _items.removeAt(from)));
+                _save();
+              },
+              children: [
+                for (final r in _items)
+                  ListTile(
+                    key: ValueKey(r),
+                    leading: Icon(r.isMacro ? Icons.playlist_play : (_actionIcons[r.id] ?? Icons.label_outline),
+                        color: Neon.blue),
+                    title: Text(r.isMacro ? 'Macro: ${r.id}' : (reg[r.id]?.name ?? r.id)),
+                    subtitle: _notBuilt.contains(r.id) ? const Text('Not built yet, hidden') : null,
+                    trailing: IconButton(
+                      tooltip: 'Remove',
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        setState(() => _items.remove(r));
+                        _save();
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// A searchable list of actions and macros to put on the toolbar.
+class _ActionPicker extends StatefulWidget {
+  const _ActionPicker({required this.choices, required this.registry});
+  final List<ActionRef> choices;
+  final ActionRegistry registry;
+
+  @override
+  State<_ActionPicker> createState() => _ActionPickerState();
+}
+
+class _ActionPickerState extends State<_ActionPicker> {
+  String _q = '';
+
+  String _name(ActionRef r) => r.isMacro ? 'Macro: ${r.id}' : (widget.registry[r.id]?.name ?? r.id);
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _q.toLowerCase();
+    final found = widget.choices.where((r) => q.isEmpty || _name(r).toLowerCase().contains(q) || r.id.contains(q)).toList();
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.6,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                autofocus: true,
+                decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Find an action or macro'),
+                onChanged: (v) => setState(() => _q = v),
+              ),
+            ),
+            Expanded(
+              child: ListView(children: [
+                for (final r in found)
+                  ListTile(
+                    leading: Icon(r.isMacro ? Icons.playlist_play : (_actionIcons[r.id] ?? Icons.label_outline),
+                        color: Neon.blue),
+                    title: Text(_name(r)),
+                    subtitle: r.isMacro ? null : Text(r.id, style: Neon.code(size: 11)),
+                    onTap: () => Navigator.pop(context, r),
+                  ),
+              ]),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }
@@ -1039,8 +1576,13 @@ class _RollPainter extends CustomPainter {
     required this.focused,
     required this.velH,
     required this.xH,
+    required this.gridStrength,
+    required this.keyLabels,
+    required this.curves,
   });
-  final double velH, xH;
+  final Map<int, LaneCurve>? curves;
+  final double velH, xH, gridStrength;
+  final KeyLabels keyLabels;
   final PatternDoc doc;
   final Set<int> sel;
   final int length, beatsPerBar;
@@ -1053,6 +1595,7 @@ class _RollPainter extends CustomPainter {
   final bool focused;
 
   static const keyW = _PatternEditorState._keyW, rulerH = _PatternEditorState._rulerH;
+  static const _names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1079,8 +1622,8 @@ class _RollPainter extends CustomPainter {
     for (var t = (t0 / lineSteps).floor() * lineSteps; t <= t1; t += lineSteps) {
       final x = t * pxPerStep - scrollX;
       final isBar = (t % bar).abs() < 1e-9, isBeat = (t % 4).abs() < 1e-9;
-      canvas.drawLine(Offset(x, 0), Offset(x, h),
-          Paint()..color = isBar ? Neon.dim : (isBeat ? Neon.line : Neon.line.withValues(alpha: 0.45)));
+      final c = isBar ? Neon.dim : Neon.line, a = isBar || isBeat ? 1.0 : 0.45;
+      canvas.drawLine(Offset(x, 0), Offset(x, h), Paint()..color = c.withValues(alpha: (c.a * a * gridStrength).clamp(0.0, 1.0)));
     }
     // Past the pattern's end is shaded.
     final endX = length * pxPerStep - scrollX;
@@ -1122,8 +1665,15 @@ class _RollPainter extends CustomPainter {
       if (y < rulerH - rowH || y > rulerH + h) continue;
       final black = const [1, 3, 6, 8, 10].contains(pitch % 12);
       canvas.drawRect(Rect.fromLTWH(0, y, keyW - 2, rowH - 1), Paint()..color = black ? Neon.bg : Neon.panelHi);
-      if (pitch % 12 == 0) {
-        ts.text = TextSpan(text: 'C${pitch ~/ 12 - 1}', style: const TextStyle(color: Neon.dim, fontSize: 10));
+      final label = switch (keyLabels) {
+        KeyLabels.none => false,
+        KeyLabels.octaves => pitch % 12 == 0,
+        KeyLabels.all => !black && rowH >= 11,
+      };
+      if (label) {
+        ts.text = TextSpan(
+            text: '${_names[pitch % 12]}${pitch ~/ 12 - 1}',
+            style: TextStyle(color: Neon.dim, fontSize: math.min(10, rowH - 4)));
         ts.layout();
         ts.paint(canvas, Offset(4, y + 2));
       }
@@ -1157,6 +1707,32 @@ class _RollPainter extends CustomPainter {
 
     if (velH > 0) lane(rulerH + h, velH, (n) => n.vel);
     if (xH > 0) lane(rulerH + h + velH, xH, (n) => n.prob, marks: true);
+    // The Curve tool's curves, over their lanes: the line, sampled every few pixels, and its points.
+    void curve(LaneCurve c, double top, double hgt) {
+      if (c.isEmpty) return;
+      double y(double v) => top + 3 + (1 - v) * (hgt - 6);
+      final path = Path();
+      for (var x = keyW; x <= size.width; x += 3) {
+        final v = c.valueAt((x - keyW + scrollX) / pxPerStep);
+        x == keyW ? path.moveTo(x, y(v)) : path.lineTo(x, y(v));
+      }
+      canvas.save();
+      canvas.clipRect(Rect.fromLTWH(keyW, top, w, hgt));
+      canvas.drawPath(path, Paint()
+        ..color = Neon.yellow
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5);
+      for (final q in c.points) {
+        canvas.drawCircle(Offset(keyW + q.at * pxPerStep - scrollX, y(q.value)), 5, Paint()..color = Neon.yellow);
+      }
+      canvas.restore();
+    }
+
+    final cs = curves;
+    if (cs != null) {
+      if (velH > 0) curve(cs[1]!, rulerH + h, velH);
+      if (xH > 0) curve(cs[2]!, rulerH + h + velH, xH);
+    }
   }
 
   @override
@@ -1173,5 +1749,86 @@ class _RollPainter extends CustomPainter {
       o.focused != focused ||
       o.velH != velH ||
       o.xH != xH ||
+      o.rowH != rowH ||
+      o.gridStrength != gridStrength ||
+      o.keyLabels != keyLabels ||
+      o.curves != curves ||
       o.color != color;
+}
+
+/// The settings a generator asks for, as named numbers; the last values are kept for the next time.
+class _GenDialog extends StatefulWidget {
+  const _GenDialog({required this.id});
+  final String id;
+
+  static final Map<String, double> _last = {};
+
+  @override
+  State<_GenDialog> createState() => _GenDialogState();
+}
+
+class _GenDialogState extends State<_GenDialog> {
+  late final List<(String key, String label, double min, double max, double init, List<String>? names)> _fields =
+      switch (widget.id) {
+    'roll.gen.euclid' => [
+        ('pulses', 'Hits', 1, 32, 3, null),
+        ('steps', 'Steps (at the grid size)', 1, 32, 8, null),
+        ('rotate', 'Rotate', 0, 31, 0, null),
+      ],
+    'roll.gen.random' => [
+        ('density', 'Density %', 5, 100, 50, null),
+        ('range', 'Range ± semitones', 1, 24, 7, null),
+        ('bars', 'Bars', 1, 8, 1, null),
+      ],
+    'roll.gen.arpeggiate' => [('order', 'Order', 0, 2, 0, ['Up', 'Down', 'Up and down'])],
+    'roll.gen.humanize' => [
+        ('timing', 'Timing ± % of a step', 0, 50, 10, null),
+        ('velocity', 'Velocity ± %', 0, 50, 10, null),
+      ],
+    _ => [('seventh', 'Chord', 0, 1, 0, ['Triad', 'Seventh'])],
+  };
+  late final Map<String, double> _v = {
+    for (final f in _fields) f.$1: (_GenDialog._last['${widget.id}.${f.$1}'] ?? f.$5).clamp(f.$3, f.$4)
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final name = widget.id.replaceFirst('roll.gen.', '');
+    return AlertDialog(
+      backgroundColor: Neon.panel,
+      title: Text(name[0].toUpperCase() + name.substring(1)),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        for (final f in _fields)
+          if (f.$6 != null)
+            Wrap(spacing: 6, children: [
+              for (var i = 0; i < f.$6!.length; i++)
+                ChoiceChip(
+                  label: Text(f.$6![i]),
+                  selected: _v[f.$1]!.round() == i,
+                  onSelected: (_) => setState(() => _v[f.$1] = i.toDouble()),
+                ),
+            ])
+          else ...[
+            Text('${f.$2}: ${_v[f.$1]!.round()}'),
+            Slider(
+              min: f.$3,
+              max: f.$4,
+              divisions: (f.$4 - f.$3).round(),
+              value: _v[f.$1]!,
+              onChanged: (x) => setState(() => _v[f.$1] = x.roundToDouble()),
+            ),
+          ],
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            _v.forEach((k, x) => _GenDialog._last['${widget.id}.$k'] = x);
+            Navigator.pop(context, _v);
+          },
+          child: const Text('Apply'),
+        ),
+      ],
+    );
+  }
 }

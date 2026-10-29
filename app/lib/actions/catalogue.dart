@@ -12,7 +12,8 @@ const _c = Area.code;
 const Map<Area, List<String>> standardToolbars = {
   Area.pattern: [
     'roll.tool.draw', 'roll.tool.select', 'roll.tool.curve', 'roll.tool.erase', //
-    'edit.undo', 'edit.redo', 'roll.grid.menu', 'roll.grid.snap',
+    'edit.undo', 'edit.redo', 'roll.grid.menu', 'roll.grid.snap', //
+    'roll.grid.triplets', 'roll.grid.adaptive', 'roll.view.switch',
   ],
 };
 

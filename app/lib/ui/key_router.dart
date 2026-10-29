@@ -90,11 +90,23 @@ class KeyRouterState extends State<KeyRouter> {
     if (f == null) return;
     try {
       await f.parent.create(recursive: true);
-      await f.writeAsString(vim.keymap.serialize(base: _defaults), flush: true);
+      // Written whole to a temp file, then renamed over keys.txt, so a crash never leaves it half written.
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(vim.keymap.serialize(base: _defaults), flush: true);
+      await tmp.rename(f.path);
     } catch (_) {
-      _say('Could not save the macro', error: true);
+      _say('Could not save the keys', error: true);
     }
   }
+
+  /// Runs an action or macro from a toolbar button and shows its toast, like a key would.
+  void runRef(ActionRef ref) => _show(vim.run(ref));
+
+  /// The shipped keymap, for "reset to default".
+  Keymap get defaults => _defaults;
+
+  /// Saves the keymap (keys, toolbars, macros) to keys.txt after a change made outside the key router.
+  Future<void> saveKeymap() => _saveKeymap();
 
   /// An editor or screen offers its actions while [focus] has focus (or always, for a screen's own area).
   void register(Area area, FocusNode focus, ActionTarget run) {

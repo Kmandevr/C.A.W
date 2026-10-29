@@ -191,8 +191,8 @@ class Library {
   }
 
   /// Functions and constants that complete [prefix], best first; the part after a dot matches too (`adsr`).
-  List<String> complete(String prefix, {int limit = 8}) {
-    if (prefix.length < 2) return const [];
+  List<String> complete(String prefix, {int limit = 8, int minLetters = 2}) {
+    if (prefix.length < minLetters || prefix.isEmpty) return const [];
     final names = [for (final f in functions) f.name, ...constants];
     final starts = names.where((n) => n.startsWith(prefix) && n != prefix);
     final parts = names.where((n) => !n.startsWith(prefix) && n.contains('.') && n.split('.').last.startsWith(prefix));
