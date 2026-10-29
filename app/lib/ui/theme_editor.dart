@@ -104,6 +104,8 @@ class SettingsPage extends StatelessWidget {
               value: settings.vimCode,
               onChanged: (v) => settings.update((s) => s.vimCode = v),
             ),
+            const Heading('Code editor'),
+            ..._editorSettings(context, settings),
             const Heading('Piano roll'),
             ..._rollSettings(settings),
             const Heading('About'),
@@ -503,4 +505,176 @@ List<Widget> _rollSettings(Settings settings) {
       ),
     ),
   ];
+}
+
+/// The code editor's key row, chips, buttons and Controls panel.
+List<Widget> _editorSettings(BuildContext context, Settings settings) {
+  final e = settings.editor;
+  Widget toggle(String title, String? sub, IconData icon, bool value, EditorLook Function(bool) set) => SwitchListTile(
+        secondary: Icon(icon, color: Neon.blue),
+        title: Text(title),
+        subtitle: sub == null ? null : Text(sub, style: TextStyle(color: Neon.dim)),
+        value: value,
+        onChanged: (v) => settings.update((s) => s.editor = set(v)),
+      );
+  return [
+    ListTile(
+      leading: Icon(Icons.keyboard_alt_outlined, color: Neon.yellow),
+      title: const Text('Key row'),
+      subtitle: Text(e.keyRow.map((k) => k.trim()).join('  '),
+          maxLines: 1, overflow: TextOverflow.ellipsis, style: Neon.code(size: 12, color: Neon.dim)),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Neon.panel,
+        isScrollControlled: true,
+        builder: (_) => _KeyRowEditor(settings: settings),
+      ),
+    ),
+    toggle('Completion chips', 'Function names above the keyboard as you type', Icons.auto_awesome, e.chips,
+        (v) => e.copyWith(chips: v)),
+    if (e.chips)
+      ListTile(
+        leading: Icon(Icons.text_fields, color: Neon.blue),
+        title: Text('After ${e.chipLetters} letter${e.chipLetters == 1 ? '' : 's'}, up to ${e.chipCount} chips',
+            style: Neon.code(size: 14)),
+        subtitle: Row(children: [
+          Expanded(
+            child: Slider(
+              min: 1,
+              max: 4,
+              divisions: 3,
+              value: e.chipLetters.toDouble(),
+              onChanged: (v) => settings.update((s) => s.editor = s.editor.copyWith(chipLetters: v.round())),
+            ),
+          ),
+          Expanded(
+            child: Slider(
+              min: 3,
+              max: 16,
+              divisions: 13,
+              value: e.chipCount.toDouble(),
+              onChanged: (v) => settings.update((s) => s.editor = s.editor.copyWith(chipCount: v.round())),
+            ),
+          ),
+        ]),
+      ),
+    toggle('Library button', 'F1 still opens it', Icons.menu_book, e.libraryButton, (v) => e.copyWith(libraryButton: v)),
+    toggle('Solo preview button', 'Also in the module\'s ⋮ menu when hidden', Icons.hearing, e.soloButton,
+        (v) => e.copyWith(soloButton: v)),
+    toggle('Scope', 'Light mode hides it too', Icons.show_chart, e.scope, (v) => e.copyWith(scope: v)),
+    toggle('Run bar on top', 'The key row and Run above the code instead of by the keyboard', Icons.vertical_align_top,
+        e.barOnTop, (v) => e.copyWith(barOnTop: v)),
+    toggle('Controls above the code', 'On a phone', Icons.tune, e.controlsFirst, (v) => e.copyWith(controlsFirst: v)),
+    toggle('Compact controls', 'Denser slider rows; tap a header to fold its group', Icons.density_small,
+        e.compactControls, (v) => e.copyWith(compactControls: v)),
+  ];
+}
+
+/// Edits the symbol key row: add keys, drag to reorder, remove, or go back to the default.
+class _KeyRowEditor extends StatefulWidget {
+  const _KeyRowEditor({required this.settings});
+  final Settings settings;
+
+  @override
+  State<_KeyRowEditor> createState() => _KeyRowEditorState();
+}
+
+class _KeyRowEditorState extends State<_KeyRowEditor> {
+  late List<String> _keys = List.of(widget.settings.editor.keyRow);
+  // A stable id per row, so dragging keeps each row's widget (two keys may be the same text).
+  late List<int> _ids = List.generate(_keys.length, (i) => i);
+  late int _nextId = _keys.length;
+  final _add = TextEditingController();
+
+  @override
+  void dispose() {
+    _add.dispose();
+    super.dispose();
+  }
+
+  void _save() => widget.settings.update((s) => s.editor = s.editor.copyWith(keyRow: _keys));
+
+  void _addKey() {
+    // A trailing space is kept, so a key like "let " types the space too.
+    final k = _add.text;
+    if (k.trim().isEmpty) return;
+    setState(() {
+      _keys.add(k);
+      _ids.add(_nextId++);
+    });
+    _add.clear();
+    _save();
+  }
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.7,
+            child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+                child: Row(children: [
+                  const Expanded(child: Text('Key row', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _keys = List.of(EditorLook.defaultKeyRow);
+                        _ids = List.generate(_keys.length, (i) => _nextId++);
+                      });
+                      _save();
+                    },
+                    child: const Text('Default'),
+                  ),
+                ]),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _add,
+                      style: Neon.code(size: 15),
+                      decoration: const InputDecoration(hintText: 'New key, e.g. sine( or "let "'),
+                      onSubmitted: (_) => _addKey(),
+                    ),
+                  ),
+                  IconButton(tooltip: 'Add', onPressed: _addKey, icon: const Icon(Icons.add)),
+                ]),
+              ),
+              Expanded(
+                child: ReorderableListView(
+                  onReorderItem: (from, to) {
+                    setState(() {
+                      _keys.insert(to, _keys.removeAt(from));
+                      _ids.insert(to, _ids.removeAt(from));
+                    });
+                    _save();
+                  },
+                  children: [
+                    for (var i = 0; i < _keys.length; i++)
+                      ListTile(
+                        key: ValueKey(_ids[i]),
+                        title: Text(_keys[i].endsWith(' ') ? '${_keys[i].trim()} ␣' : _keys[i], style: Neon.code(size: 15)),
+                        trailing: IconButton(
+                          tooltip: 'Remove',
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            setState(() {
+                              _keys.removeAt(i);
+                              _ids.removeAt(i);
+                            });
+                            _save();
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ]),
+          ),
+        ),
+      );
 }

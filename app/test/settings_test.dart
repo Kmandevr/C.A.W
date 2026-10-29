@@ -59,6 +59,16 @@ void main() {
     expect(RollLook.fromJson({'row_height': 999, 'hold_ms': 1}).holdMs, 250);
   });
 
+  test('the code editor\'s layout is saved, loaded and kept in range', () async {
+    final s = await Settings.open(base: dir);
+    expect(s.editor.keyRow, EditorLook.defaultKeyRow);
+    await s.update((x) => x.editor = x.editor.copyWith(keyRow: ['t', 'sine(', 'let ', '  '], chipLetters: 9, barOnTop: true));
+    final back = await Settings.open(base: dir);
+    expect(back.editor.keyRow, ['t', 'sine(', 'let '], reason: 'blank keys are dropped, a trailing space is kept');
+    expect(back.editor.chipLetters, 4);
+    expect(back.editor.barOnTop, isTrue);
+  });
+
   test('a starter theme is never overwritten: saving it makes a copy', () async {
     final s = await Settings.open(base: dir);
     final saved = await s.saveTheme(calmNeon.withColor('pink', const Color(0xFF00FF00)));

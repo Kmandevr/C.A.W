@@ -40,6 +40,9 @@ class Settings extends ChangeNotifier {
   /// The piano roll's sizes, look and touch choices.
   RollLook roll = const RollLook();
 
+  /// The code editor's key row, completion chips, buttons and Controls panel.
+  EditorLook editor = const EditorLook();
+
   /// Themes the user made or imported, saved one file each in themes/.
   List<CawTheme> customThemes = [];
 
@@ -86,6 +89,7 @@ class Settings extends ChangeNotifier {
         'light_auto': lightAuto,
         'vim_code': vimCode,
         'roll': roll.toJson(),
+        'editor': editor.toJson(),
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -101,6 +105,8 @@ class Settings extends ChangeNotifier {
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     final r = j['roll'];
     if (r is Map<String, dynamic>) roll = RollLook.fromJson(r);
+    final e = j['editor'];
+    if (e is Map<String, dynamic>) editor = EditorLook.fromJson(e);
   }
 
   Future<void> _load() async {
@@ -279,6 +285,100 @@ class RollLook {
       grab: n('grab'),
       emptyDrag: EmptyDrag.values.where((e) => e.name == j['empty_drag']).firstOrNull,
       holdMs: n('hold_ms')?.round(),
+    );
+  }
+}
+
+/// The code editor's layout: what the symbol key row holds, when completion chips show, which buttons and panels
+/// show, and where.
+class EditorLook {
+  const EditorLook({
+    this.keyRow = defaultKeyRow,
+    this.chips = true,
+    this.chipLetters = 2,
+    this.chipCount = 8,
+    this.libraryButton = true,
+    this.soloButton = true,
+    this.scope = true,
+    this.barOnTop = false,
+    this.controlsFirst = false,
+    this.compactControls = false,
+  });
+
+  static const defaultKeyRow = [
+    't', '>>', '<<', '&', '|', '^', '%', '(', ')', '?', ':', '~', '*', '+', '-', '/', '=', '255', 'let ', 'param ', //
+  ];
+
+  /// The symbol key row's keys, in order; a key may end in a space ("let ").
+  final List<String> keyRow;
+
+  /// Completion chips, after how many typed letters, and how many at most.
+  final bool chips;
+  final int chipLetters, chipCount;
+
+  /// The Library and Solo preview buttons and the scope.
+  final bool libraryButton, soloButton, scope;
+
+  /// The key row and Run bar above the code instead of under it.
+  final bool barOnTop;
+
+  /// On a phone, the Controls panel above the code instead of under it; and denser control rows.
+  final bool controlsFirst, compactControls;
+
+  EditorLook copyWith({
+    List<String>? keyRow,
+    bool? chips,
+    int? chipLetters,
+    int? chipCount,
+    bool? libraryButton,
+    bool? soloButton,
+    bool? scope,
+    bool? barOnTop,
+    bool? controlsFirst,
+    bool? compactControls,
+  }) =>
+      EditorLook(
+        keyRow: List.unmodifiable([
+          for (final k in keyRow ?? this.keyRow)
+            if (k.trim().isNotEmpty && k.length <= 16) k
+        ].take(64)),
+        chips: chips ?? this.chips,
+        chipLetters: (chipLetters ?? this.chipLetters).clamp(1, 4),
+        chipCount: (chipCount ?? this.chipCount).clamp(3, 16),
+        libraryButton: libraryButton ?? this.libraryButton,
+        soloButton: soloButton ?? this.soloButton,
+        scope: scope ?? this.scope,
+        barOnTop: barOnTop ?? this.barOnTop,
+        controlsFirst: controlsFirst ?? this.controlsFirst,
+        compactControls: compactControls ?? this.compactControls,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'key_row': keyRow,
+        'chips': chips,
+        'chip_letters': chipLetters,
+        'chip_count': chipCount,
+        'library_button': libraryButton,
+        'solo_button': soloButton,
+        'scope': scope,
+        'bar_on_top': barOnTop,
+        'controls_first': controlsFirst,
+        'compact_controls': compactControls,
+      };
+
+  static EditorLook fromJson(Map<String, dynamic> j) {
+    final row = j['key_row'];
+    return const EditorLook().copyWith(
+      keyRow: row is List ? [for (final k in row) if (k is String) k] : null,
+      chips: j['chips'] as bool?,
+      chipLetters: (j['chip_letters'] as num?)?.toInt(),
+      chipCount: (j['chip_count'] as num?)?.toInt(),
+      libraryButton: j['library_button'] as bool?,
+      soloButton: j['solo_button'] as bool?,
+      scope: j['scope'] as bool?,
+      barOnTop: j['bar_on_top'] as bool?,
+      controlsFirst: j['controls_first'] as bool?,
+      compactControls: j['compact_controls'] as bool?,
     );
   }
 }

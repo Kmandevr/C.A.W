@@ -22,12 +22,12 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
   - a code editor with highlighting and the symbol key row
-  - **completion chips** above the key row: typing two or more letters offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
+  - **completion chips** above the key row: typing two or more letters (set in Settings) offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
   - **Library** (the book button, or F1): every function from the engine's `caw_library()` plus the project's own library modules, grouped by category and searchable from the word at the cursor. Each shows its signature, description, arguments and example, with **Insert call** and **Insert example**
   - a one-line status: the error (tap it to jump to the spot), "edited, tap Run", or the module's summary
   - a scope, and a Controls panel built from the module's `param`s and `global`s:
     - sliders (with steps), toggles, and dropdowns (buttons when there are 4 or fewer choices)
-    - grouped under `// --- Headers ---`, with tips and doc comments on long-press or hover
+    - grouped under `// --- Headers ---`; tapping a header folds its group while the app runs; tips and doc comments on long-press or hover
     - a double-tap on a value resets it
     - a "Shares" line naming the module's exports (`kick.env`), and warnings in yellow
     - for a library module, the functions other modules can call
@@ -86,6 +86,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - Unless that switch is off, it turns itself on the first time the engine reports an overload, and the Arranger's overload banner says so.
   - **Live coding:** auto-update (on by default) runs code that compiles the set pause (100–2000 ms) after the last edit. Code with an error waits for the next edit. Swaps land at the swap timing: now, the next beat or the next bar.
   - **Vim keys in the code editor:** off by default.
+  - **Code editor:** the symbol key row's keys (add, reorder, remove, default; a key may end in a space), completion chips on or off with how many letters start them and how many show, the Library and Solo preview buttons (Solo moves to the module's ⋮ menu when hidden), the scope, the key row and Run bar above the code instead of by the keyboard, the Controls panel above the code on a phone, and compact control rows.
   - **Piano roll:** row height, velocity and chance lane heights, grid line strength, key names (none, C only, all), the grab zone (how near a note's end a touch resizes it; short notes are easier to hit by this much), how long a hold takes to open a note's extras, and what a drag on empty grid does with the draw or erase tool: scroll (default), select, or the tool's own drag.
 - **Keys** (`lib/ui/key_router.dart`): with a keyboard, every key goes through the action system in [actions](actions.md): per-area keymaps, Vim modes, counts, `:` commands, `.` and macros.
   - A badge at the bottom right shows the mode, a recording macro, pending keys, key hints and short toasts.

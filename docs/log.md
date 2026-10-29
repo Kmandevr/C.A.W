@@ -8,6 +8,7 @@ updated: 2026-10-29
 
 Newest first.
 
+- 2026-10-29: Code editor layout in Settings (part of #10): key row, completion chips, which buttons and the scope show, Run bar position, Controls above the code, compact and foldable controls. Syntax for new controls and for curves proposed on #10 and #11 for the owner.
 - 2026-10-29: Roll customisation (#9): Settings → Piano roll (sizes, grid strength, key names, grab zone, hold time, empty-grid drag), a toolbar you edit (actions and macros), and the generators (euclid, random in key, arpeggiate, humanize, chord stamp, reverse, invert pitch).
 - 2026-10-29: The piano roll works inline in the Builder (it claims its touches; one finger on empty grid scrolls, a tap draws). New [how it works](how-it-works.md) note for agents. Owner's plan for roll, editor and curve work in [decisions](decisions.md).
 
