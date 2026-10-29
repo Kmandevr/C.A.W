@@ -1,4 +1,4 @@
-// The piano roll: tapping draws a note and the pattern's text gets it; keys move it; it works inside a scrolling page; the menu runs generators; the Curve tool shapes velocity (needs CAW_LIB).
+// The piano roll: tapping draws a note and the pattern's text gets it; keys move it; it works inside a scrolling page; the menu runs generators; the Curve tool shapes velocity; a double tap deletes a note (needs CAW_LIB).
 import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
@@ -118,6 +118,41 @@ void main() {
     for (var i = 1; i < vels.length; i++) {
       expect(vels[i], greaterThan(vels[i - 1]), reason: m.source);
     }
+    s.dispose();
+  }, skip: skip != null);
+
+  testWidgets('touch: a double tap on a note deletes it, a single tap keeps it', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    final s = AppState();
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject();
+    final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
+    s.project.modules.add(m);
+    s.ready = true;
+    s.starting = false;
+    String body() => m.source.split('---').last.trim();
+    // The double tap is timed by the wall clock, so the test waits real time where the taps must be apart.
+    Future<void> wait() => tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
+    await tester.tapAt(const Offset(120, 200));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(body(), isNotEmpty);
+    await wait();
+    await tester.tapAt(const Offset(125, 200));
+    await tester.pump(const Duration(milliseconds: 500));
+    await wait();
+    expect(body(), isNotEmpty, reason: 'one tap keeps the note');
+    await tester.tapAt(const Offset(125, 200));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(body(), isNotEmpty, reason: 'taps far apart are two single taps');
+    await wait();
+    await tester.tapAt(const Offset(125, 200));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tapAt(const Offset(125, 200));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(body(), isEmpty, reason: m.source);
     s.dispose();
   }, skip: skip != null);
 }

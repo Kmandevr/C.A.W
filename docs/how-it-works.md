@@ -7,7 +7,7 @@ updated: 2026-10-29
 
 # How it works
 
-The map for an agent new to the repo. It shows how the parts connect; the details live in [engine](engine.md) (language, playback, C API), [app](app.md) (screens) and [agent guide](agent-guide.md) (writing modules). Every source file starts with a one-line comment saying what it is for, and `.claude/tools/tree.sh <dir>` lists them.
+The map for an agent new to the repo. It shows how the parts connect; the details live in [engine](engine.md) (language, playback, C API), [app](app.md) (screens) and [agent guide](agent-guide.md) (writing modules). Every source file starts with a one-line comment saying what it is for, and `.claude/tools/tree.sh <dir>` lists them. The app's areas are called Sounds, Tracks and Export on screen, and `builder`, `arranger` and `exporter` in code (`app/lib/ui/builder_screen.dart`, `arranger_screen.dart`, `exporter_screen.dart`).
 
 ## From a keystroke to sound
 
@@ -24,7 +24,7 @@ The map for an agent new to the repo. It shows how the parts connect; the detail
 
 ## Export
 
-`caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file matches what was heard bit for bit, and writes it with `engine/src/wav.cpp`. The app runs it on a worker isolate with progress and cancel (`app/lib/ui/exporter_screen.dart`). The CLI (`engine/cli/main.cpp`) uses the same calls.
+`caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file matches what was heard bit for bit, and writes it with `engine/src/wav.cpp`. The app runs it on a worker isolate with progress and cancel (the Export area). The CLI (`engine/cli/main.cpp`) uses the same calls.
 
 ## Where to change what
 

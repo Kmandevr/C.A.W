@@ -1,4 +1,4 @@
-// App shell: the crow logo, transport bar (play, BPM, CPU), project menu and navigation between the three areas.
+// App shell: the crow logo, transport bar (play, BPM, CPU), project menu and navigation between Sounds, Tracks and Export.
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
@@ -57,9 +57,9 @@ class _ShellState extends State<Shell> {
   }
 
   static const _dest = [
-    (Icons.code, 'Builder'),
-    (Icons.layers, 'Arranger'),
-    (Icons.ios_share, 'Exporter'),
+    (Icons.graphic_eq, 'Sounds'),
+    (Icons.view_agenda_outlined, 'Tracks'),
+    (Icons.ios_share, 'Export'),
   ];
 
   @override
@@ -70,7 +70,13 @@ class _ShellState extends State<Shell> {
           if (s.starting) return StartupScreen(state: s);
           final screens = [
             BuilderScreen(state: s),
-            ArrangerScreen(state: s),
+            ArrangerScreen(
+              state: s,
+              onOpenModule: (id) {
+                s.selectModule(id);
+                setState(() => _tab = 0);
+              },
+            ),
             ExporterScreen(state: s),
           ];
           return LayoutBuilder(builder: (context, box) {

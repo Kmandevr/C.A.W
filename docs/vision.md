@@ -22,7 +22,7 @@ A cross-platform app that works as an experimental sound-design instrument: byte
 
 **Synthesis, MIDI, ease of use (owner, 2026-10-28):** proper synthesis and MIDI support, and user-friendly helpers so musical results, such as a loop that fits the beat, are easy to make.
 
-**Layout and look (owner, 2026-10-28):** three areas: a **Builder** for making modules (sounds and effects), an **Arranger** for using them, and an **Exporter**. What you build can later be played in a **house-built synth**. Neon on black: green, pink, yellow and blue.
+**Layout and look (owner, 2026-10-28):** three areas: a **Builder** for making modules (sounds and effects), an **Arranger** for using them, and an **Exporter**; in the app they are called **Sounds**, **Tracks** and **Export** (owner, 2026-10-28, [UI design](ui.md)). What you build can later be played in a **house-built synth**. Neon on black: green, pink, yellow and blue.
 
 **Variables and patterns (owner, 2026-10-28):** two features make C.A.W much more useful.
 - **Unity-style variables:** modules expose their variables as controls with sliders, tooltips and the like. Variables can be local to a module or global to the project, and other modules can use them.

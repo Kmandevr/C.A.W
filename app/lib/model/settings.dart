@@ -290,7 +290,7 @@ class RollLook {
 }
 
 /// The code editor's layout: what the symbol key row holds, when completion chips show, which buttons and panels
-/// show, and where.
+/// show, and where the Run bar sits.
 class EditorLook {
   const EditorLook({
     this.keyRow = defaultKeyRow,
@@ -301,7 +301,6 @@ class EditorLook {
     this.soloButton = true,
     this.scope = true,
     this.barOnTop = false,
-    this.controlsFirst = false,
     this.compactControls = false,
   });
 
@@ -322,8 +321,8 @@ class EditorLook {
   /// The key row and Run bar above the code instead of under it.
   final bool barOnTop;
 
-  /// On a phone, the Controls panel above the code instead of under it; and denser control rows.
-  final bool controlsFirst, compactControls;
+  /// Denser control rows.
+  final bool compactControls;
 
   EditorLook copyWith({
     List<String>? keyRow,
@@ -334,7 +333,6 @@ class EditorLook {
     bool? soloButton,
     bool? scope,
     bool? barOnTop,
-    bool? controlsFirst,
     bool? compactControls,
   }) =>
       EditorLook(
@@ -349,7 +347,6 @@ class EditorLook {
         soloButton: soloButton ?? this.soloButton,
         scope: scope ?? this.scope,
         barOnTop: barOnTop ?? this.barOnTop,
-        controlsFirst: controlsFirst ?? this.controlsFirst,
         compactControls: compactControls ?? this.compactControls,
       );
 
@@ -362,7 +359,6 @@ class EditorLook {
         'solo_button': soloButton,
         'scope': scope,
         'bar_on_top': barOnTop,
-        'controls_first': controlsFirst,
         'compact_controls': compactControls,
       };
 
@@ -377,7 +373,6 @@ class EditorLook {
       soloButton: j['solo_button'] as bool?,
       scope: j['scope'] as bool?,
       barOnTop: j['bar_on_top'] as bool?,
-      controlsFirst: j['controls_first'] as bool?,
       compactControls: j['compact_controls'] as bool?,
     );
   }

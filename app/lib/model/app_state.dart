@@ -455,11 +455,12 @@ class AppState extends ChangeNotifier {
 
   // ---------- layers (Arranger) ----------
 
-  void addLayer() {
-    final gen = project.modules.where((m) => isGenerator(m.id)).firstOrNull;
+  /// A new layer playing [soundId], or the project's first generator; [empty] leaves its sound unset.
+  void addLayer({String? soundId, bool empty = false}) {
+    final gen = empty ? null : project.module(soundId) ?? project.modules.where((m) => isGenerator(m.id)).firstOrNull;
     project.layers.add(LayerDoc(
       id: newId('l'),
-      name: gen?.name ?? 'Layer ${project.layers.length + 1}',
+      name: gen?.name ?? 'Track ${project.layers.length + 1}',
       color: project.layers.length % 4,
       generatorId: gen?.id,
       lengthSteps: project.stepsPerBar,
