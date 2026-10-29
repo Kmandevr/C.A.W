@@ -401,12 +401,12 @@ saw(110) * 0.4
 
 ### `wt(table, freq, pos?, unison?, detune?)`
 
-Wavetable oscillator: plays a table (table.saw, table.basic …), morphing through its frames with pos, with up to 16 detuned unison voices. Band-limited, so high notes stay clean.
+Wavetable oscillator: plays a table (table.saw, table.basic …), morphing through its frames with pos, with up to 16 detuned unison voices. Band-limited per octave, so high notes stay clean. The table and unison count are set when a note starts.
 
-- `table`: which table, e.g. table.basic
+- `table`: which table, e.g. table.basic (set at the note start)
 - `freq`: Hz
 - `pos` (optional): frame position 0..1 (default 0)
-- `unison` (optional): voices 1..16 (default 1)
+- `unison` (optional): voices 1..16 (default 1; set at the note start)
 - `detune` (optional): spread of the unison voices, 0..1 = up to +-1 semitone (default 0)
 
 ```

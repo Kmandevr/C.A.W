@@ -12,7 +12,7 @@ constexpr int kTableMaxFrames = 256;
 constexpr int kTableLevels = 11;      // level L keeps harmonics 1 .. 1024 >> L
 
 // A read-only wavetable. Level L of each frame holds the frame with every harmonic above 1024 >> L removed, stored at
-// levelSize(L) samples (at least 4 per kept harmonic) plus one guard sample that repeats the first, for interpolation.
+// levelSize(L) samples (4 per kept harmonic; 2 at level 0) plus one guard sample that repeats the first, for interpolation.
 struct Table {
     int frames = 0;
     std::vector<float> data;

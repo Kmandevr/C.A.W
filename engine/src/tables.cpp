@@ -8,7 +8,7 @@
 namespace caw {
 
 int Table::levelSize(int level) {
-    const int n = 4096 >> level;  // 4 samples per kept harmonic
+    const int n = 4096 >> level;  // 4 samples per kept harmonic (level 0, used only below about 23 Hz, has 2)
     return n > kTableSize ? kTableSize : (n < 64 ? 64 : n);
 }
 
@@ -92,13 +92,14 @@ std::shared_ptr<const Table> shapeTable(int id) {
 const char* const kNames[] = {"sine", "tri", "saw", "square", "basic", "pwm"};
 constexpr int kCount = sizeof(kNames) / sizeof(kNames[0]);
 
+// Built once and never freed, so an audio callback still running at process exit never reads a destroyed table.
 const std::vector<std::shared_ptr<const Table>>& builtins() {
-    static const std::vector<std::shared_ptr<const Table>> all = [] {
-        std::vector<std::shared_ptr<const Table>> v;
-        for (int i = 0; i < kCount; ++i) v.push_back(shapeTable(i));
+    static const auto* all = [] {
+        auto* v = new std::vector<std::shared_ptr<const Table>>();
+        for (int i = 0; i < kCount; ++i) v->push_back(shapeTable(i));
         return v;
     }();
-    return all;
+    return *all;
 }
 
 }  // namespace

@@ -153,7 +153,7 @@ std::string agentGuide(const std::string& updated) {
          "[function library](library.md).\n\n"
          "## Writing a module\n\n"
          "- A `.caw` file: optional header between `---` lines (`caw: 1`, `kind: generator|effect|library|pattern`, `name`, "
-         "`summary`, `mode: byte|float`, `rate`), then code. The last line is the output.\n"
+         "`summary`, `mode: byte|float`, `rate`, `voices: 1..32` for notes at once on a pattern layer, default 8), then code. The last line is the output.\n"
          "- Byte mode keeps the low 8 bits of the output (`v & 255`); float mode outputs -1..1. Effects read `in`.\n"
          "- Values are 64-bit floats with JavaScript operators; bit operators work on 32-bit integers; `x/0` and `x%0` are 0.\n"
          "- Time: `t`, `time` (s), `step` (16ths), `beat`, `bar`, `pos` (0..1 through the layer's loop), `bpm`, `sr`.\n"

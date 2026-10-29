@@ -934,11 +934,12 @@ private:
         }
         const size_t dot = tok.text.find('.');
         if (dot != std::string::npos && dot > 0 && tok.text.find('.', dot + 1) == std::string::npos) {
-            // table.x, scale.x …: a name in a constant group that doesn't exist, not another module's value.
+            // table.x is a wavetable name, never another module's value: an unknown one is an error. (scale.x,
+            // chord.x and arp.x still read a module of that name, as before tables existed.)
             int groups = 0;
             const ConstantGroup* g = constantGroups(groups);
             for (int i = 0; i < groups; ++i)
-                if (tok.text.compare(0, dot, g[i].prefix) == 0 && std::strlen(g[i].prefix) == dot) {
+                if (std::strcmp(g[i].prefix, "table") == 0 && tok.text.compare(0, dot, "table") == 0 && dot == 5) {
                     std::string names;
                     for (int k = 0; k < g[i].count; ++k) names += (k ? ", " : "") + std::string(g[i].names[k]);
                     fail(tok, "unknown name '" + tok.text + "' (" + g[i].prefix + " names: " + names + ")");
@@ -1139,6 +1140,10 @@ size_t parseHeader(std::string_view src, Program& p, int& codeLine) {
             else if (value == "float") p.mode = OutputMode::Float;
             else throw CompileError(lineNo, 1, "mode must be 'byte' or 'float'");
             modeSet = true;
+        } else if (key == "voices") {
+            const double v = std::strtod(value.c_str(), nullptr);
+            if (!(v >= 1 && v <= 32) || v != std::floor(v)) throw CompileError(lineNo, 1, "voices must be a whole number 1 to 32");
+            p.voices = static_cast<int>(v);
         } else if (key == "rate") {
             const double r = std::strtod(value.c_str(), nullptr);
             if (!(r >= 1000.0 && r <= 192000.0)) throw CompileError(lineNo, 1, "rate must be 1000 to 192000");

@@ -109,6 +109,7 @@ struct Program {
     std::vector<StateSite> stateSites; // every stateful call, in code order
     std::vector<std::pair<uint32_t, uint32_t>> resetRanges;  // (offset, count) of state a reset clears
     uint32_t usedVars = 0;             // bit per Var
+    int voices = 8;                    // notes it plays at once on a pattern layer (header voices:, 1..32)
 };
 
 // Per-block values the host fills in for one module instance.

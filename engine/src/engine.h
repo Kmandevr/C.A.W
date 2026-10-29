@@ -20,7 +20,7 @@ namespace caw {
 constexpr int kSlots = kMaxLayers + 1;  // the last slot is the Builder's audition
 constexpr int kAuditionSlot = kMaxLayers;
 constexpr int kScopeSize = 1024;
-constexpr int kVoices = 8;  // notes a pattern layer plays at once; the oldest is stolen when all are busy
+constexpr int kMaxVoices = 32;  // most notes a pattern layer plays at once (a module asks for 1..32 with voices:)
 
 struct Meters {
     float cpu = 0, peakL = 0, peakR = 0;
@@ -103,7 +103,7 @@ private:
     bool seamXf_ = true;
     int keyRoot_ = 9, keyScale_ = 1;
     int swapMode_ = 0;  // 0 at once, 1 next beat, 2 next bar
-    int voiceLimit_ = kVoices;  // voices a pattern layer may use for new notes, 1..kVoices
+    int voiceLimit_ = kMaxVoices;  // the project's cap on voices for new notes (light mode sends 4)
     bool anySolo_ = false;  // some layer is soloed (refreshed each callback)
     bool auditionOnly_ = false;
     double stepLen_ = 0;  // samples per 16th note

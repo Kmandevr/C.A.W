@@ -8,6 +8,7 @@ updated: 2026-10-29
 
 Newest first.
 
+- 2026-10-29: Synth stage 1.2: a generator's `voices:` header (1–32, default 8) sets its notes at once; the project's `voices` is now a cap (default 32, Light mode 4). `wt` latches its table and unison count at the note start and follows detune per sample, so live and export agree on every buffer size.
 - 2026-10-29: Synth stage 1.1: wavetables (`engine/src/tables.cpp`, band-limited per octave with our own deterministic FFT), the `wt` oscillator with up to 16 unison voices, `table.*` constants, and the Wavetable pad template ([synth](synth.md)).
 - 2026-10-29: Merged the friendlier layout (PR #6) with the roll and editor work: the roll keeps the newer touch handling plus the double tap that deletes a note; the Solo headphones button can be hidden; the phone's Controls | Code switch replaces the "Controls above the code" setting.
 - 2026-10-29: Curve tool for the velocity and chance lanes (points and bendable segments; part of #11).

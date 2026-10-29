@@ -159,36 +159,55 @@ enum { AdPrev, AdLevel, AdStage, AdA, AdD, AdInc, AdCoef, AdSize };
 constexpr int kMaxUnison = 16;
 constexpr double kSemitone = 0.69314718055994530942 / 12.0;  // ln(2) / 12
 
-// State: [0] call site, [1..16] each unison voice's phase. Voice 1 starts at 0 and the others at fixed scattered
-// phases, so a unison stack sounds wide from the first sample and the same on every note.
+// State: [0] call site, [1..16] each unison voice's phase, then the values latched at the note's start (table and
+// unison count, read on the first sample after a reset so live playback and exports agree on every device), the
+// detune and pitch last used (so their maths runs only when they change), and the unison ratios.
+enum WtState { WtSite = 0, WtPhase = 1, WtTable = 1 + kMaxUnison, WtUnison, WtDetune, WtFreq, WtLevel, WtTop, WtRatio, WtSize = WtRatio + kMaxUnison };
+
 void wtInit(double* s, uint32_t site) {
-    s[0] = static_cast<double>(site);
+    s[WtSite] = static_cast<double>(site);
     for (int v = 1; v < kMaxUnison; ++v)
-        s[1 + v] = static_cast<double>(hash32(site * 0x9E3779B9U + static_cast<uint32_t>(v) * 0x85EBCA6BU)) / 4294967296.0;
+        s[WtPhase + v] = static_cast<double>(hash32(site * 0x9E3779B9U + static_cast<uint32_t>(v) * 0x85EBCA6BU)) / 4294967296.0;
+    s[WtTable] = -1.0;  // not latched yet
+    s[WtDetune] = -1.0;
+    s[WtFreq] = -1.0;
 }
 
-// wt(table, freq, pos, unison, detune): the table and the unison count are read once per block (they don't change
-// while a note plays); freq and pos follow every sample. Unison voices spread evenly over +-detune semitones.
+// wt(table, freq, pos, unison, detune): the table and unison count hold for the whole note; freq, pos and detune
+// follow every sample. Unison voices spread evenly over +-detune semitones.
 void runWt(const CallArgs& c) {
-    const Table& t = *builtinTable(static_cast<int>(finiteOr0(c.a[0][0])));
-    const double u = std::floor(finiteOr0(c.a[3][0]));
-    const int uni = u < 1 ? 1 : (u > kMaxUnison ? kMaxUnison : static_cast<int>(u));
-    const double det = clampd(finiteOr0(c.a[4][0]), 0.0, 1.0);
-    double ratio[kMaxUnison];
-    double top = 1.0;
-    for (int v = 0; v < uni; ++v) {
-        const double off = uni == 1 ? 0.0 : det * (2.0 * v / (uni - 1) - 1.0);
-        ratio[v] = detExp(off * kSemitone);
-        if (ratio[v] > top) top = ratio[v];
+    double* s = c.state;
+    if (s[WtTable] < 0) {
+        s[WtTable] = clampd(std::floor(finiteOr0(c.a[0][0])), 0.0, 255.0);
+        s[WtUnison] = clampd(std::floor(finiteOr0(c.a[3][0])), 1.0, kMaxUnison);
     }
+    const Table& t = *builtinTable(static_cast<int>(s[WtTable]));
+    const int uni = static_cast<int>(s[WtUnison]);
     const double gain = 1.0 / std::sqrt(static_cast<double>(uni));
     const double inv = 1.0 / c.ctx->sr;
     const int last = t.frames - 1;
-    double* ph = c.state + 1;
+    double* ph = s + WtPhase;
+    double* ratio = s + WtRatio;
     for (int i = 0; i < c.n; ++i) {
+        const double det = clampd(finiteOr0(c.a[4][i]), 0.0, 1.0);
+        if (det != s[WtDetune]) {
+            s[WtDetune] = det;
+            double top = 1.0;
+            for (int v = 0; v < uni; ++v) {
+                const double off = uni == 1 ? 0.0 : det * (2.0 * v / (uni - 1) - 1.0);
+                ratio[v] = detExp(off * kSemitone);
+                if (ratio[v] > top) top = ratio[v];
+            }
+            s[WtTop] = top;
+            s[WtFreq] = -1.0;  // the level depends on the top voice
+        }
         const double f = std::fabs(finiteOr0(c.a[1][i])) * inv;
-        // One band-limit level for the whole stack, chosen by its highest voice.
-        const int level = Table::levelFor(f * top);
+        if (f != s[WtFreq]) {
+            // One band-limit level for the whole stack, chosen by its highest voice.
+            s[WtFreq] = f;
+            s[WtLevel] = Table::levelFor(f * s[WtTop]);
+        }
+        const int level = static_cast<int>(s[WtLevel]);
         const int size = Table::levelSize(level);
         const double pos = clampd(finiteOr0(c.a[2][i]), 0.0, 1.0) * last;
         const int f0 = static_cast<int>(pos), f1 = f0 < last ? f0 + 1 : last;
@@ -773,9 +792,9 @@ const Builtin kBuiltins[] = {
     // Oscillators
     {"sine", 1, 1, {}, 1, kNone, noInit, runOsc<0>, "Oscillators", "Sine wave, -1..1.", {"freq: Hz"}, "sine(220) * 0.5"},
     {"saw", 1, 1, {}, 1, kNone, noInit, runOsc<1>, "Oscillators", "Band-limited sawtooth, -1..1.", {"freq: Hz"}, "saw(110) * 0.4"},
-    {"wt", 2, 5, {0, 0, 0, 1, 0}, 1 + kMaxUnison, kNone, wtInit, runWt, "Oscillators",
-     "Wavetable oscillator: plays a table (table.saw, table.basic …), morphing through its frames with pos, with up to 16 detuned unison voices. Band-limited, so high notes stay clean.",
-     {"table: which table, e.g. table.basic", "freq: Hz", "pos: frame position 0..1 (default 0)", "unison: voices 1..16 (default 1)", "detune: spread of the unison voices, 0..1 = up to +-1 semitone (default 0)"},
+    {"wt", 2, 5, {0, 0, 0, 1, 0}, WtSize, kNone, wtInit, runWt, "Oscillators",
+     "Wavetable oscillator: plays a table (table.saw, table.basic …), morphing through its frames with pos, with up to 16 detuned unison voices. Band-limited per octave, so high notes stay clean. The table and unison count are set when a note starts.",
+     {"table: which table, e.g. table.basic (set at the note start)", "freq: Hz", "pos: frame position 0..1 (default 0)", "unison: voices 1..16 (default 1; set at the note start)", "detune: spread of the unison voices, 0..1 = up to +-1 semitone (default 0)"},
      "wt(table.basic, mtof(A2), lfo.tri(8) * 0.5 + 0.5, 7, 0.15) * 0.3"},
     {"square", 1, 2, {0, 0.5}, 1, kNone, noInit, runOsc<2>, "Oscillators", "Band-limited square/pulse wave, -1..1.", {"freq: Hz", "width: pulse width 0.01..0.99 (default 0.5)"}, "square(110, 0.25) * 0.3"},
     {"tri", 1, 1, {}, 1, kNone, noInit, runOsc<3>, "Oscillators", "Triangle wave, -1..1.", {"freq: Hz"}, "tri(220) * 0.5"},

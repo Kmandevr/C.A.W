@@ -42,6 +42,7 @@ name: Bass
 summary: Filtered saw bass playing an A minor pattern
 mode: float          # byte or float; default byte for generators, float for effects
 rate: 8000           # byte mode only: how fast t counts (1000-192000, default 8000)
+voices: 8            # notes it plays at once on a pattern layer (1-32, default 8)
 ---
 param cutoff = 900 in 100..4000
 let env = ad(step % 4 == 0, 0.002, 0.18)
@@ -138,7 +139,7 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
   - `slide`: the next note starting exactly where this one ends takes over its voice. No new `trig`; the pitch glides over half a step. In a chord, sliding notes pair with the next chord's notes in written order.
 - **Playback:**
   - The pattern sets the layer's loop length; a note running past the end is released there.
-  - A layer with a pattern plays up to 8 voices at once and steals the oldest when a ninth note starts.
+  - A layer with a pattern plays as many voices at once as its generator's `voices:` header asks for (1–32, default 8; a layer always keeps at least 2 voice instances) and steals the oldest when one more note starts. Memory counts every voice. Changing the count while notes play keeps the ones that still fit and ends the rest, smoothed over.
   - A released voice ends after 0.1 s below −90 dB, or 10 s after release. Code that reads `gate` or `rel` shapes its own release and code that reads `trig` rings on like a one-shot; anything else (a plain bytebeat) is faded out by the engine over 10 ms at note-off.
   - A stolen or ended voice that is still sounding is smoothed over (its last value fades in about 2 ms), so it doesn't click. Effects in the chain run once on the sum of the voices.
   - A tempo change releases held notes. At most 16 note changes split one 64-sample block; further ones in that block start together (at most 1.3 ms early).
@@ -177,8 +178,8 @@ Every function, with its arguments and an example, is in the generated [function
   - Filters (`lpf`, `hpf`, `bpf`, `notch`, `lp1`, `hp1`, `slew`)
   - Effects (`fx.*`: delay, reverb, drive, crush and more) and Glitch (`glitch.*`: stutter, hold, mask, wrap and more)
   - Music: `scale`, `quantize`, `chord`, `arp`, `euclid`, `beats`
-- **Constants:** `scale.*`, `chord.*` and `arp.*` name the scales, chords and arpeggio modes the music functions take; `table.*` names the built-in wavetables for `wt` (sine, tri, saw, square, basic, pwm). A dotted name with one of these prefixes that doesn't exist is a compile error, not another module's value.
-- **Wavetables** (`engine/src/tables.cpp`): a table is 1–256 frames of 2048 samples, stored as 11 band-limited copies (level L keeps harmonics up to 1024 >> L, at 4 or more samples per harmonic). `wt` picks the finest level whose harmonics all stay under half the sample rate, so a note never aliases; the band-limiting uses the engine's own FFT on its deterministic sine, so tables are the same bits everywhere. The built-in tables are built when the engine is created, never on the audio thread.
+- **Constants:** `scale.*`, `chord.*` and `arp.*` name the scales, chords and arpeggio modes the music functions take; `table.*` names the built-in wavetables for `wt` (sine, tri, saw, square, basic, pwm). An unknown `table.x` is a compile error; an unknown `scale.x`, `chord.x` or `arp.x` still reads module `scale`'s (or `chord`'s, `arp`'s) exported value, as it always has.
+- **Wavetables** (`engine/src/tables.cpp`): a table is 1–256 frames of 2048 samples, stored as 11 band-limited copies (level L keeps harmonics up to 1024 >> L, at 4 samples per harmonic, 2 at the lowest level). `wt` picks the finest level whose harmonics all stay under half the sample rate, so no harmonic folds back; linear interpolation leaves faint images around -50 dB on bright tables, and the level switches without a crossfade when the pitch crosses an octave boundary (smoothing both is in the synth's optimisation stage); the band-limiting uses the engine's own FFT on its deterministic sine, so tables are the same bits everywhere. The built-in tables are built when the engine is created, never on the audio thread.
 - **The project key:** `scale`, `chord` and `arp` default to the key in the project file (`key_root`, `key_scale`); A minor when it has none.
 - **Built-in libraries** (`engine/lib/*.caw`), written in the module language so anyone can read how they work: `drum.*` (kick, snare, hat, clap), `synth.*` (supersaw, pluck, acid, pad, fm) and `util.*` (duck, gate, trem).
 - Each call to a function with state (oscillators, envelopes, filters, effects) has its own state. The state returns to its start at every loop start, so every loop repeats exactly, and echo and reverb tails stop at the restart (after the seam crossfade). Delay, reverb and stutter buffers aren't cleared at the restart; they count what they've written since and read unwritten samples as 0, so a restart costs the audio thread almost nothing.
@@ -260,7 +261,7 @@ The app, the CLI and exports share one format:
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
 - A layer's `pattern` names a pattern module; its notes play the generator, and its length replaces `length_steps`. A missing or broken pattern leaves the layer playing without one, with a warning (a broken pattern keeps its last good version playing).
-- `voices` is how many voices each pattern layer may use for new notes, 1–8 (default 8; the app's light mode sends 4). Voices already sounding finish when it drops.
+- `voices` caps how many voices any pattern layer may use for new notes, 1–32 (default 32, so each generator's own `voices:` rules; the app's light mode sends 4). Voices already sounding finish when it drops.
 - `swap` is when changed code is heard while playing: `now` (default), `beat` or `bar`.
 - `audition` is the Builder's preview, with an optional pattern. With `audition_only`, only that chain is heard.
 - Values outside their range are clamped:

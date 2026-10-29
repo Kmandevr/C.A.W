@@ -85,7 +85,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - **Light mode** for slow devices (owner OK, 2026-10-28). It:
     - turns glow and the Builder's scope off
     - reads meters 15 times a second instead of 30
-    - plays 4 voices per pattern layer instead of 8 (the project's `voices`)
+    - caps every pattern layer at 4 voices (the project's `voices`; otherwise each sound plays its own count, 8 by default)
     - stops auto-update while playing
     - Unless that switch is off, it turns itself on the first time the engine reports an overload, and the Arranger's overload banner says so.
   - **Live coding:** auto-update (on by default) runs code that compiles the set pause (100–2000 ms) after the last edit. Code with an error waits for the next edit. Swaps land at the swap timing: now, the next beat or the next bar.

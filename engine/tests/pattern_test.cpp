@@ -125,7 +125,57 @@ TEST(the_project_voice_limit_caps_notes_at_once) {
     ProjectSpec q;
     std::string err;
     CHECK(parseProject("{\"caw_project\":1,\"voices\":4}", q, err) && q.voices == 4);
-    CHECK(parseProject("{\"caw_project\":1,\"voices\":99}", q, err) && q.voices == 8);
+    CHECK(parseProject("{\"caw_project\":1,\"voices\":99}", q, err) && q.voices == 32);
+}
+
+TEST(a_generator_sets_its_own_voice_count) {
+    // voices: 16 plays a 12-note chord whole; voices: 2 plays two of them; the default stays 8.
+    const std::string chord = "0 C3,D3,E3,F3,G3,A3,B3,C4,D4,E4,F4,G4 4\n";
+    auto with = [&](const std::string& header) {
+        ProjectSpec p = voicedProject("gate * 0.05", chord);
+        p.modules[0].source = "---\nmode: float\n" + header + "---\ngate * 0.05\n";
+        Engine e(48000);
+        e.setMasterBypass(true);
+        e.setProject(p);
+        e.play();
+        return run(e, 1000)[500];
+    };
+    CHECK_NEAR(with("voices: 16\n"), 0.6, 1e-6);
+    CHECK_NEAR(with("voices: 2\n"), 0.1, 1e-6);
+    CHECK_NEAR(with(""), 0.4, 1e-6);
+    // The project's cap (light mode) still wins.
+    ProjectSpec p = voicedProject("gate * 0.05", chord);
+    p.modules[0].source = "---\nmode: float\nvoices: 16\n---\ngate * 0.05\n";
+    p.voices = 4;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    CHECK_NEAR(run(e, 1000)[500], 0.2, 1e-6);
+    // Out of range is a compile error.
+    CHECK(!compileModule("---\nvoices: 33\n---\nt\n").program);
+    CHECK(!compileModule("---\nvoices: 2.5\n---\nt\n").program);
+}
+
+TEST(changing_the_voice_count_while_notes_play_keeps_them_sounding) {
+    const std::string chord = "0 C3,D3,E3,F3 16\n";
+    ProjectSpec p = voicedProject("gate * 0.1", chord);
+    p.modules[0].source = "---\nmode: float\nvoices: 8\n---\ngate * 0.1\n";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    CHECK_NEAR(run(e, 1000)[500], 0.4, 1e-6);
+    // More voices: the four held notes carry over.
+    p.modules[0].source = "---\nmode: float\nvoices: 16\n---\ngate * 0.1 \n";
+    e.setProject(p);
+    std::vector<double> y = run(e, 4000);
+    CHECK_NEAR(y[3999], 0.4, 1e-6);
+    // Fewer: the notes past the new count end, smoothed over.
+    p.modules[0].source = "---\nmode: float\nvoices: 2\n---\ngate * 0.1\n";
+    e.setProject(p);
+    y = run(e, 4000);
+    CHECK_NEAR(y[3999], 0.2, 1e-6);
 }
 
 TEST(voices_hear_their_note) {

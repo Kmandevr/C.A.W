@@ -1,4 +1,5 @@
 // Synth tests: wavetables (band-limiting, determinism, frames) and the wt oscillator (pitch, aliasing, morph, unison).
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -12,6 +13,34 @@
 using namespace caw;
 
 namespace {
+
+// Runs a module over `total` samples in blocks of `chunk` (as a device with that buffer size would).
+std::vector<double> runChunks(const std::string& body, int total, int chunk, double sr = 48000) {
+    CompileResult r = compileModule("---\nmode: float\n---\n" + body);
+    if (!r.program) {
+        cawtest::fail(__FILE__, __LINE__, "compile failed: " + body + " -> " + r.error);
+        return {};
+    }
+    Instance inst(r.program);
+    std::vector<double> out;
+    double tb[kBlock], time[kBlock], zero[kBlock] = {};
+    BlockCtx c;
+    c.sr = sr;
+    for (int at = 0; at < total; at += chunk) {
+        c.n = std::min(chunk, total - at);
+        for (int i = 0; i < c.n; ++i) {
+            tb[i] = at + i;
+            time[i] = tb[i] / sr;
+        }
+        for (int v = 0; v < static_cast<int>(Var::Count); ++v) c.vars[v] = zero;
+        c.vars[static_cast<int>(Var::T)] = tb;
+        c.vars[static_cast<int>(Var::Time)] = time;
+        inst.process(c);
+        const double* raw = inst.rawOutput();
+        out.insert(out.end(), raw, raw + c.n);
+    }
+    return out;
+}
 
 std::vector<double> run(const std::string& body, int blocks, double sr = 48000) {
     CompileResult r = compileModule("---\nmode: float\n---\n" + body);
@@ -125,10 +154,22 @@ TEST(wt_unison_detunes_and_keeps_the_level) {
     CHECK(run("wt(table.saw, 220, 0, 7, 0.3)", 750) == seven);
 }
 
+TEST(wt_gives_the_same_samples_whatever_the_block_size) {
+    // Detune, pos and pitch move every sample, and the unison count and table come from expressions: a device with
+    // 17-sample buffers and an export in 64-sample blocks must agree exactly.
+    const std::string body = "wt(t > 100 ? table.saw : table.basic, 200 + t * 0.01, fract(t / 3000), 3 + (t > 50) * 4, fract(t / 777))";
+    CHECK(runChunks(body, 6000, 64) == runChunks(body, 6000, 17));
+    CHECK(runChunks(body, 6000, 64) == runChunks(body, 6000, 1));
+}
+
 TEST(wt_unknown_table_and_bad_values_stay_safe) {
     auto x = run("wt(99, 0 / 0, 2, 50, -3)", 10);
+    auto huge = run("wt(1e30, 1e300, -1e30, 1e30, 1e30)", 10);
+    for (double v : huge) CHECK(std::isfinite(v));
     for (double v : x) CHECK(std::isfinite(v));
     CompileResult bad = compileModule("---\nmode: float\n---\nwt(table.nothing, 220)\n");
     CHECK(!bad.program);
     CHECK(bad.error.find("table names: sine, tri, saw") != std::string::npos);
+    // scale.x, chord.x and arp.x with an unknown x still read another module's value, as they always did.
+    CHECK(compileModule("---\nmode: float\n---\nscale.mine * 0.1\n").program != nullptr);
 }
