@@ -933,8 +933,18 @@ private:
             return v;
         }
         const size_t dot = tok.text.find('.');
-        if (dot != std::string::npos && dot > 0 && tok.text.find('.', dot + 1) == std::string::npos)
+        if (dot != std::string::npos && dot > 0 && tok.text.find('.', dot + 1) == std::string::npos) {
+            // table.x, scale.x …: a name in a constant group that doesn't exist, not another module's value.
+            int groups = 0;
+            const ConstantGroup* g = constantGroups(groups);
+            for (int i = 0; i < groups; ++i)
+                if (tok.text.compare(0, dot, g[i].prefix) == 0 && std::strlen(g[i].prefix) == dot) {
+                    std::string names;
+                    for (int k = 0; k < g[i].count; ++k) names += (k ? ", " : "") + std::string(g[i].names[k]);
+                    fail(tok, "unknown name '" + tok.text + "' (" + g[i].prefix + " names: " + names + ")");
+                }
             return importVal(tok);
+        }
         fail(tok, "unknown name '" + tok.text + "'");
     }
 

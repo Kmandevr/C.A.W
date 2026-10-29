@@ -11,6 +11,7 @@
 #include "compile.h"
 #include "detmath.h"
 #include "json.h"
+#include "tables.h"
 
 namespace caw {
 
@@ -167,6 +168,7 @@ Engine::Engine(double sampleRate)
     std::fill_n(mixL_, kBlock, 0.0);
     std::fill_n(mixR_, kBlock, 0.0);
     ctlSr_ = sampleRate;
+    warmTables();  // the built-in wavetables are built here, never on the audio thread
     updateTiming();
     ctlLoopLen_ = loopLen_;
     loopLenFlag_.store(loopLen_);

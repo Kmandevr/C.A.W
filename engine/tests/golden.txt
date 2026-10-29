@@ -8,3 +8,4 @@ fold.caw 48433acf7a36e723
 glitch-fx.caw 971eb36a095b14cb
 hats.caw a71cf4e5126c2837
 kick.caw 780a1fec042af48f
+wavetable-pad.caw 2d3e3cc4bda3e387

@@ -8,6 +8,7 @@ updated: 2026-10-29
 
 Newest first.
 
+- 2026-10-29: Synth stage 1.1: wavetables (`engine/src/tables.cpp`, band-limited per octave with our own deterministic FFT), the `wt` oscillator with up to 16 unison voices, `table.*` constants, and the Wavetable pad template ([synth](synth.md)).
 - 2026-10-29: Curve tool for the velocity and chance lanes (points and bendable segments; part of #11).
 - 2026-10-29: Code editor layout in Settings (part of #10): key row, completion chips, which buttons and the scope show, Run bar position, Controls above the code, compact and foldable controls. Syntax for new controls and for curves proposed on #10 and #11 for the owner.
 - 2026-10-29: Roll customisation (#9): Settings → Piano roll (sizes, grid strength, key names, grab zone, hold time, empty-grid drag), a toolbar you edit (actions and macros), and the generators (euclid, random in key, arpeggiate, humanize, chord stamp, reverse, invert pitch).

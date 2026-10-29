@@ -1,7 +1,7 @@
 ---
 title: Function library
 summary: Every built-in function, constant and library function the module language offers, generated from the engine.
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Function library
@@ -399,6 +399,20 @@ Band-limited sawtooth, -1..1.
 saw(110) * 0.4
 ```
 
+### `wt(table, freq, pos?, unison?, detune?)`
+
+Wavetable oscillator: plays a table (table.saw, table.basic …), morphing through its frames with pos, with up to 16 detuned unison voices. Band-limited, so high notes stay clean.
+
+- `table`: which table, e.g. table.basic
+- `freq`: Hz
+- `pos` (optional): frame position 0..1 (default 0)
+- `unison` (optional): voices 1..16 (default 1)
+- `detune` (optional): spread of the unison voices, 0..1 = up to +-1 semitone (default 0)
+
+```
+wt(table.basic, mtof(A2), lfo.tri(8) * 0.5 + 0.5, 7, 0.15) * 0.3
+```
+
 ### `square(freq, width?)`
 
 Band-limited square/pulse wave, -1..1.
@@ -793,6 +807,7 @@ noise() * ad(euclid(5, 16, step), 0.001, 0.05) * 0.4
 - **`scale.*`**: Scales for scale() and quantize(): major, natural minor, the modes, harmonic and melodic minor, major and minor pentatonic, blues, chromatic and whole-tone. Values: `scale.major`, `scale.minor`, `scale.dorian`, `scale.phrygian`, `scale.lydian`, `scale.mixolydian`, `scale.locrian`, `scale.harmonic`, `scale.melodic`, `scale.pentatonic`, `scale.minorpenta`, `scale.blues`, `scale.chromatic`, `scale.whole`.
 - **`chord.*`**: Chord shapes for chord() and arp(). Values: `chord.maj`, `chord.min`, `chord.dim`, `chord.aug`, `chord.sus2`, `chord.sus4`, `chord.maj7`, `chord.min7`, `chord.dom7`, `chord.maj9`, `chord.min9`, `chord.power`.
 - **`arp.*`**: Arpeggio directions for arp(). Values: `arp.up`, `arp.down`, `arp.updown`, `arp.random`.
+- **`table.*`**: Wavetables for wt(): sine, tri, saw and square (one frame each), basic (sine, triangle, saw, square to morph through) and pwm (a pulse narrowing from 50% to 5% over 32 frames). Values: `table.sine`, `table.tri`, `table.saw`, `table.square`, `table.basic`, `table.pwm`.
 
 ## Library: Drums (`drum.*`)
 

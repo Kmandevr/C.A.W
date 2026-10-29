@@ -2,7 +2,7 @@
 title: Engine and language reference
 summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI and the tests.
 covers: [engine/, examples/]
-updated: 2026-10-28
+updated: 2026-10-29
 ---
 
 # Engine and language reference
@@ -172,12 +172,13 @@ Every function, with its arguments and an example, is in the generated [function
 
 - **Built-in functions** (C++, `engine/src/builtins.cpp`), by category:
   - Maths, Bits and Random (`hash`, `noise`, `rand`, `randi`, `chance`)
-  - Oscillators (band-limited `saw` and `square`) and Envelopes (`ad`, `env.adsr`, `env.ar`)
+  - Oscillators (band-limited `saw` and `square`; `wt`, a wavetable oscillator with up to 16 unison voices, for the [synth](synth.md)) and Envelopes (`ad`, `env.adsr`, `env.ar`)
   - LFOs (`lfo.*`, in beats, so they follow the tempo)
   - Filters (`lpf`, `hpf`, `bpf`, `notch`, `lp1`, `hp1`, `slew`)
   - Effects (`fx.*`: delay, reverb, drive, crush and more) and Glitch (`glitch.*`: stutter, hold, mask, wrap and more)
   - Music: `scale`, `quantize`, `chord`, `arp`, `euclid`, `beats`
-- **Constants:** `scale.*`, `chord.*` and `arp.*` name the scales, chords and arpeggio modes the music functions take.
+- **Constants:** `scale.*`, `chord.*` and `arp.*` name the scales, chords and arpeggio modes the music functions take; `table.*` names the built-in wavetables for `wt` (sine, tri, saw, square, basic, pwm). A dotted name with one of these prefixes that doesn't exist is a compile error, not another module's value.
+- **Wavetables** (`engine/src/tables.cpp`): a table is 1–256 frames of 2048 samples, stored as 11 band-limited copies (level L keeps harmonics up to 1024 >> L, at 4 or more samples per harmonic). `wt` picks the finest level whose harmonics all stay under half the sample rate, so a note never aliases; the band-limiting uses the engine's own FFT on its deterministic sine, so tables are the same bits everywhere. The built-in tables are built when the engine is created, never on the audio thread.
 - **The project key:** `scale`, `chord` and `arp` default to the key in the project file (`key_root`, `key_scale`); A minor when it has none.
 - **Built-in libraries** (`engine/lib/*.caw`), written in the module language so anyone can read how they work: `drum.*` (kick, snare, hat, clap), `synth.*` (supersaw, pluck, acid, pad, fm) and `util.*` (duck, gate, trem).
 - Each call to a function with state (oscillators, envelopes, filters, effects) has its own state. The state returns to its start at every loop start, so every loop repeats exactly, and echo and reverb tails stop at the restart (after the seam crossfade). Delay, reverb and stutter buffers aren't cleared at the restart; they count what they've written since and read unwritten samples as 0, so a restart costs the audio thread almost nothing.

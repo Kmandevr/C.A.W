@@ -95,6 +95,7 @@ add_library(caw_core STATIC
   src/midifile.cpp
   src/project.cpp
   src/render.cpp
+  src/tables.cpp
   src/vm.cpp
   src/wav.cpp
   "${CAW_TEMPLATES_CPP}"
@@ -132,7 +133,7 @@ if(CAW_TOOLS)
 
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
                            tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
-                           tests/midifile_test.cpp src/capi.cpp platform/audio_none.cpp)
+                           tests/midifile_test.cpp tests/synth_test.cpp src/capi.cpp platform/audio_none.cpp)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_tests PRIVATE caw_core)

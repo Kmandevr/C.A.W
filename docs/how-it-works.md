@@ -31,6 +31,7 @@ The map for an agent new to the repo. It shows how the parts connect; the detail
 | To change | Edit | Then |
 | --- | --- | --- |
 | Add or change a built-in function | `engine/src/builtins.cpp` (and `builtins.h` for a new kind) | `caw docs` to regenerate [library](library.md) and [agent guide](agent-guide.md); `caw_tests` |
+| Add a built-in wavetable shape | `engine/src/tables.cpp` (and its `table.*` name in `builtins.cpp`) | `caw docs`; `synth_test.cpp` |
 | Add a library function in the language | `engine/lib/*.caw` with `///` docs | `caw docs`; `caw_tests` |
 | Language syntax (statements, params, operators) | `engine/src/compile.cpp`, `ops.h` for operators | [engine](engine.md) language section; `language_test.cpp` or `variables_test.cpp` |
 | Pattern text format | `engine/src/pattern.cpp` and the app's `app/lib/model/pattern_doc.dart`, which must agree | `pattern_test.cpp`, `app/test/pattern_doc_test.dart` |

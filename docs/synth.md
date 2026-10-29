@@ -104,7 +104,7 @@ Reviewed by the `architect` agent (2026-10-29): the core fits the engine as buil
 ## Build stages **[Proposal]**
 
 1. **Engine core**, each step tested on its own with `caw_tests` and the CLI:
-   1. tables with the built-in shapes and mipmaps, and `wt(table.saw, freq, pos, unison, detune)` usable from plain code, with golden renders
+   1. **[Fact]** built (2026-10-29): tables with the built-in shapes and mipmaps, and `wt(table, freq, pos, unison, detune)` usable from plain code, with tests (`engine/tests/synth_test.cpp`) and the Wavetable pad template's golden render. Built-in tables are named by `table.*` constants for now; program-owned tables (drawn, imported, from code) come with the patch translation
    2. the voice count as a per-patch setting up to the maximum
    3. `synth.cpp` for a first subset (oscillators, sub, noise, one filter, the volume envelope, effect groups) and `kind: synth` in `caw check`, with goldens of the generated code and its sound
 2. **Stereo** for programs that declare it, then spread, chorus and reverb in stereo.
