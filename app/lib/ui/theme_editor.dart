@@ -565,7 +565,6 @@ List<Widget> _editorSettings(BuildContext context, Settings settings) {
     toggle('Scope', 'Light mode hides it too', Icons.show_chart, e.scope, (v) => e.copyWith(scope: v)),
     toggle('Run bar on top', 'The key row and Run above the code instead of by the keyboard', Icons.vertical_align_top,
         e.barOnTop, (v) => e.copyWith(barOnTop: v)),
-    toggle('Controls above the code', 'On a phone', Icons.tune, e.controlsFirst, (v) => e.copyWith(controlsFirst: v)),
     toggle('Compact controls', 'Denser slider rows; tap a header to fold its group', Icons.density_small,
         e.compactControls, (v) => e.copyWith(compactControls: v)),
   ];

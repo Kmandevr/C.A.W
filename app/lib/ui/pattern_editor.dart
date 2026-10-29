@@ -86,6 +86,9 @@ class _PatternEditorState extends State<PatternEditor> {
   double _gridH = 0;
   Timer? _hold; // long press on a note opens its extras panel
   Offset? _holdAt;
+  // A plain tap on a note arms a double tap: a second tap on it soon after deletes it.
+  int? _tapCandidate, _tapNote;
+  DateTime? _tapAt;
 
   static const _keyW = 44.0, _rulerH = 20.0;
   RollLook get _look => s.settings.roll;
@@ -871,6 +874,17 @@ class _PatternEditorState extends State<PatternEditor> {
     final hit = _noteAt(p);
     _cursorPitch = _pitchAt(p.dy).clamp(0, 127);
     _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
+    _tapCandidate = null;
+    final tapAt = _tapAt;
+    if (hit != null && hit == _tapNote && tapAt != null &&
+        DateTime.now().difference(tapAt) < const Duration(milliseconds: 350)) {
+      _tapNote = null;
+      _dragStart = null;
+      _dragBase = null;
+      _dragNote = null;
+      _apply(d.delete({hit}));
+      return;
+    }
     if (_tool == PatternTool.erase && !_rectSelect) {
       if (hit != null) _apply(d.delete({hit}));
       _dragNote = null;
@@ -879,6 +893,7 @@ class _PatternEditorState extends State<PatternEditor> {
     if (hit != null) {
       final n = d.byId(hit)!;
       _dragNote = hit;
+      _tapCandidate = hit;
       _resizing = (n.end.toDouble() - _stepAt(p.dx)) * _pxPerStep < _look.grab;
       if (!_sel.contains(hit)) setState(() => _sel = {hit});
       _holdAt = p;
@@ -954,6 +969,10 @@ class _PatternEditorState extends State<PatternEditor> {
   void _up() {
     _hold?.cancel();
     _hold = null;
+    // A tap on an existing note that moved nothing arms the double tap; a note just drawn doesn't.
+    _tapNote = _tapCandidate != null && identical(_dragBase, _doc) ? _tapCandidate : null;
+    _tapAt = DateTime.now();
+    _tapCandidate = null;
     if (_dragBase != null && _doc != null && !identical(_dragBase, _doc)) {
       // One undo step for the whole drag.
       _undo.add(_dragBase!);

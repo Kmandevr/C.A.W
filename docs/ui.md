@@ -32,7 +32,8 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
 - **Audience:** built for the owner first. It should be fast for someone who knows it, with tooltips and tips but no onboarding tour yet.
 - **PC:** mouse and keyboard, and **everything must also be reachable with the keyboard alone**. Shortcuts follow Reaper's where they overlap.
 - **Library:** folders (matching the library repo) plus tags and search across them, with favourites pinned.
-- **Opening a sound** shows its controls (the inspector) first. The code editor is one tap away.
+- **Opening a sound** shows its controls (the inspector) first. The code editor is one tap away. **[Fact]** built 2026-10-28 ([app](app.md)).
+- **Track-first layout** (owner, 2026-10-28): the Builder and Arranger felt cluttered; the owner wants the app more visual and less cluttered. Chosen: the areas become **Sounds**, **Tracks** and **Export**; Tracks is a list of big visual track cards, and a tap opens one panel with the track's sound (and its sliders), notes, effects and mix; project settings fold into a sheet. Scenes and the session grid come later. **[Fact]** built 2026-10-28 ([app](app.md)).
 
 ## What other apps teach
 
@@ -150,7 +151,7 @@ The same meaning everywhere, so nothing has to be learned twice:
   - notes with extras (probability, ratchets, custom values) show a small dot, like Elektron's blinking locked steps
 - **Piano roll:**
   - **Modes:** a thumb tool bar switches between Draw, Select, Curve and Erase. That replaces the modifier keys a phone doesn't have.
-  - **Zoom and scroll:** two fingers zoom and scroll. One finger on empty grid scrolls too; on a note, in a lane or with the select tool it edits (owner, 2026-10-29).
+  - **Zoom and scroll:** two fingers zoom and scroll. One finger on empty grid scrolls too; on a note, in a lane or with the select tool it edits, and a double tap on a note deletes it (owner, 2026-10-28 and 2026-10-29).
   - **Feedback:** moving a note plays it, and moving a chord plays the chord.
   - **Snap:** follows the grid setting, with a magnet toggle for free timing.
   - **Curve mode** (owner, 2026-10-29: points and bendable segments): tap to add a point, drag a point to move it, drag a segment to bend it. Value curves are lines in a lane under the roll; pitch bends will show as a bent note.

@@ -10,7 +10,7 @@ An experimental, code-driven glitch-sound instrument for Android, iOS, Windows, 
 | Path | What it is |
 | --- | --- |
 | `engine/` | The C++20 sound engine: module language, standard library, mixer, WAV exports, C API, the `caw` CLI and tests ([reference](docs/engine.md), [functions](docs/library.md), [agent guide](docs/agent-guide.md)) |
-| `app/` | The Flutter app for Android and Windows: Builder, Arranger and Exporter ([app](docs/app.md)) |
+| `app/` | The Flutter app for Android and Windows: Sounds, Tracks and Export ([app](docs/app.md)) |
 | `examples/` | Starter sound modules (`.caw`), built into the engine as templates |
 | `docs/` | The plan and project memory (an Obsidian vault): [vision](docs/vision.md), [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), [decisions](docs/decisions.md), [log](docs/log.md) |
 | `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository |
