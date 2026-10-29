@@ -72,7 +72,8 @@ struct Engine::Chain {
     bool voiced = false;
     std::vector<std::unique_ptr<Instance>> extraVoices;
     Voice voices[kMaxVoices];
-    int voiceCount = 0;  // voices with an instance: the generator's voices: setting, 2..kMaxVoices
+    int voiceCount = 0;  // voices with an instance: the generator's voices: setting, at least 2 (main and shadow)
+    int voiceTake = 0;   // voices that take new notes: the voices: setting itself, 1..kMaxVoices
     int64_t noteCount = 0;
     double declick = 0;  // what voices cut short (stolen or ended) were playing; decays over about 2 ms
     double vtb[kBlock], vtime[kBlock], vphase[kBlock], vtrig[kBlock], vgate[kBlock], vnote[kBlock], vfreq[kBlock];
@@ -261,6 +262,7 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
     if (voiced && !c->main.empty()) {
         // Voice 0 and 1 reuse the main and shadow instances, so a layer always has at least two.
         c->voiceCount = std::clamp(c->main[0]->program().voices, 2, kMaxVoices);
+        c->voiceTake = std::clamp(c->main[0]->program().voices, 1, kMaxVoices);
         for (int v = 2; v < c->voiceCount; ++v)
             c->extraVoices.push_back(std::make_unique<Instance>(c->main[0]->programPtr()));
         c->voices[0].inst = c->main[0].get();
@@ -370,6 +372,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
 
     // Compile changed modules. A module that fails keeps its last good program, so the old sound plays on.
     bool allOk = true;
+    std::vector<std::pair<std::string, std::string>> synthWarnings;  // (synth id, message), added to warnings below
     std::map<std::string, ModuleState> next;
     for (const ModuleSpec& m : p.modules) {
         ModuleState st;
@@ -417,7 +420,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
                     st.expand.push_back("\x1e" + fx.substr(1));
                     continue;
                 }
-                const std::string hid = m.id + "\x1f" + std::to_string(k);
+                // Keyed by the effect's kind and count ("delay_2"), so adding a line elsewhere keeps its tail.
+                const std::string hid = m.id + "\x1f" + st.program->synthFxKeys[k];
                 ModuleState hs;
                 auto old = modules_.find(hid);
                 if (old != modules_.end()) hs = old->second;
@@ -426,7 +430,10 @@ std::string Engine::setProject(const ProjectSpec& p) {
                     hs.source = fx;
                     hs.libSig = libSig;
                     if (cr.program) hs.program = cr.program;
+                    hs.error = cr.program ? std::string() : cr.error;
                 }
+                if (!hs.error.empty())
+                    synthWarnings.push_back({m.id, "the " + st.program->synthFxKeys[k] + " effect made from this patch doesn't compile (an engine bug): " + hs.error});
                 hs.params = m.params;
                 next[hid] = std::move(hs);
                 st.expand.push_back(hid);
@@ -468,6 +475,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
+    for (const auto& [id, msg] : synthWarnings) warnings[id].push_back(msg);
     for (const auto& [id, st] : modules_) {
         if (!st.pattern) continue;
         const int steps = st.pattern->steps(p.beatsPerBar);
@@ -503,6 +511,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 else
                     chain.push_back(found);
             }
+        }
+        if (chain.size() > static_cast<size_t>(kMaxChain)) {
+            warnings[w.chain.front()].push_back("this track's chain has more than " + std::to_string(kMaxChain - 1) +
+                                                " effects; the rest are left out");
+            chain.resize(static_cast<size_t>(kMaxChain));
         }
         for (const std::string& id : chain) {
             auto it = modules_.find(id);
@@ -1163,7 +1176,7 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
     // A free voice, else the oldest released one, else the oldest.
     Voice* pick = nullptr;
     // Only the project's first `voices` voices take new notes (light mode plays fewer).
-    const int limit = std::min(voiceLimit_, c.voiceCount);
+    const int limit = std::min(voiceLimit_, c.voiceTake);  // voices: 1 is mono: each note steals the one voice
     for (int i = 0; i < limit; ++i)
         if (!c.voices[i].active) {
             pick = &c.voices[i];

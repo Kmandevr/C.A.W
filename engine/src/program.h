@@ -18,6 +18,7 @@ constexpr int kMaxStateDoubles = 1 << 20;  // 8 MB: room for a few delay lines a
 constexpr int64_t kMaxProjectStateDoubles = int64_t{1} << 23;  // 64 MB
 constexpr int kMaxCallArgs = 6;
 constexpr int kMaxParams = 32;
+constexpr int kMaxSynthParams = 64;  // a synth patch: its voice's params plus its effects'
 
 // Built-in variables a module can read.
 // Trig and after are the note variables a pattern drives. They are "soft": a `let` or argument of the same name
@@ -114,6 +115,7 @@ struct Program {
     bool synth = false;
     std::string synthCode;                  // the generated voice code, for caw check and "eject to code"
     std::vector<std::string> synthFx;       // in order: a generated effect module's source, or "@name" for a project module
+    std::vector<std::string> synthFxKeys;   // each generated effect's stable key ("delay_2"); empty for a project module
 };
 
 // Per-block values the host fills in for one module instance.

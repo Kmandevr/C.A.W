@@ -10,6 +10,7 @@ namespace caw {
 // One step of the synth's effect chain, in line order: a generated effect module, or a project module by name.
 struct SynthFx {
     bool user = false;
+    std::string key;     // generated: the effect's kind and count in the patch ("delay_2"), stable when lines move
     std::string source;  // generated effect module (user == false)
     std::string module;  // the project module's name (user == true)
 };
@@ -20,7 +21,7 @@ struct SynthResult {
     int line = 0, col = 0;
     std::string name, summary;
     std::string generator;     // the voice: a generator module, one note per voice
-    std::vector<SynthFx> fx;   // after the voices are summed
+    std::vector<SynthFx> fx;   // after the voices are summed, one per fx line
 };
 
 // A pure function of the text: the same patch always gives the same code. Every value the screen can move becomes a

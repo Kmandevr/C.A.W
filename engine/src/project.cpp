@@ -68,7 +68,10 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.id = m.string("id");
             spec.name = m.string("name");
             spec.source = m.string("source");
-            if (spec.id.empty()) continue;
+            // Ids with control characters are left out: the engine names its hidden modules with them.
+            bool control = false;
+            for (unsigned char ch : spec.id) control = control || ch < 0x20;
+            if (spec.id.empty() || control) continue;
             if (const Json* ps = m.get("params"); ps && ps->type == Json::Type::Object)
                 for (const auto& [k, v] : ps->obj)
                     if (v.type == Json::Type::Number && std::isfinite(v.num)) spec.params[k] = v.num;

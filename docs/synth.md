@@ -77,7 +77,7 @@ table vocal file vocal.wav                            // imported 2048-sample fr
 
 | Line | Settings (range, default) |
 | --- | --- |
-| `voices N` | notes at once, 1–32 (8) |
+| `voices N` | notes at once, 1–32 (8); `voices 1` is mono: each note takes over the one voice |
 | `glide S` | seconds, 0–2 (0); smooths pitch changes inside a note, such as slides (each note starts its own voice) |
 | `volume V` | 0–1 (0.8) |
 | `osc a\|b\|c …` or `osc b off` | `table` (saw), `level` 0–1 (0.8), `unison` 1–16 (1), `detune` 0–1 (0.2), `pos` 0–1 (0), `octave` −4–4, `semi` −24–24, `fine` −100–100 cents. A patch with no sources gets osc a |
@@ -87,7 +87,7 @@ table vocal file vocal.wav                            // imported 2048-sample fr
 | `filters serial\|parallel` | serial (default): filter 2 takes filter 1's output plus its own `from`; parallel: both take their sources. Sources no filter takes go straight out |
 | `env 1 …` | the volume: `attack`, `decay`, `release` 0–20 s, `sustain` 0–1. Velocity scales the volume by 0.5–1 |
 | `fx drive\|crush\|delay\|reverb\|comp …` | drive `amount` 0–1; crush `bits` 1–24; delay `time` in beats, `feedback`, `mix`; reverb `size`, `damp`, `mix`; comp `threshold` dB, `ratio` |
-| `fx NAME` | a project effect module, by name, where its line is |
+| `fx NAME` | a project effect module, by name, where its line is. At most 8 `fx` lines |
 
 - Every value becomes a `param` of the generated code, so the app's Controls panel shows them all (the effects' under Effects) and moving one doesn't recompile.
 - Lines for later stages (`lfo`, `macro`, `mod`, `env 2`/`3`, `table`, `warp`) give an error that says so, rather than being ignored. A built-in `fx chorus` and `fx eq` aren't written yet; until then `fx chorus` looks for a project module called chorus.
@@ -110,7 +110,7 @@ Reviewed by the `architect` agent (2026-10-29): the core fits the engine as buil
   - Settings that can't change while a note plays (the table, the unison count) are fixed at compile time, which keeps `wt` within the 6 arguments a call can take.
   - Drawn LFO shapes and drawn tables use the same mechanism. Tables from code reuse the wavetable export.
 - **Imported tables** are stored next to the patch: in the project file as their own `tables` entry, and in git as a `.wav` beside the `.caw`.
-- **Effects run in line order:** each run of built-in `fx` lines becomes one generated effect program, each user module is its own instance where its line is, and the track's own effects come after. In the example, drive and chorus run first, then `crushfx`, then reverb.
+- **Effects run in line order:** each `fx` line becomes its own effect module (generated, or the project module it names) where its line is, and the track's own effects come after. In the example: drive, chorus, `crushfx`, then reverb. **[Fact]** Built that way: a patch has at most 8 `fx` lines (a track's chain holds a sound and 8 effects); each generated effect is named by its kind and count in the patch (`delay_2`), so its params never clash and adding a line elsewhere keeps its tail on hot swap; and a synth has at most 64 values to set (`kMaxSynthParams`), against 32 for a module.
 - **Stereo:** unison spread, chorus and reverb need stereo, and the engine is mono per track today (a track is panned at the mix). The plan: synth stage 1 is mono; then a program can declare stereo output (a second output register and right-channel buffer, stereo built-ins writing two adjacent registers, mono user effects run as a left and right pair, and pan acting as balance). Mono tracks keep today's code path, so every existing golden render stays bit-identical.
 - **Placement:** `engine/src/tables.{h,cpp}` (storage, mipmaps, built-in shapes) and `engine/src/synth.{h,cpp}` (patch to code and tables, a pure function); the new built-ins in `builtins.cpp`; imported WAV tables are read when the project is set, never on the audio thread. No new C API call: `caw_check` accepts `kind: synth` and returns the parsed parts and the generated code, which is also what "eject to code" uses.
 - **The app doesn't parse the patch itself.** It edits lines as text and reads the structure from the engine's JSON, so there is one grammar, in the engine.

@@ -290,3 +290,55 @@ TEST(setting_a_synth_param_reaches_its_voice_and_its_effects) {
     CHECK(driven < clean * 0.9);
     CHECK(rms(before) > 0.0);
 }
+
+TEST(a_patch_cannot_grow_the_chain_or_params_past_the_limits) {
+    // At most 8 fx lines: more is an error at its line, so a patch can't make the engine build thousands of modules.
+    std::string many = kPatch + "osc a\n";
+    for (int i = 0; i < 9; ++i) many += (i % 2 ? "fx drive\n" : "fx zz\n");
+    CHECK(translateSynth(many).error.find("line 15, col 1: a patch can have at most 8 fx lines") == 0);
+    // A full patch with 8 effects stays under the 64-value limit and compiles.
+    std::string full = kPatch + "osc a\nosc b\nosc c\nsub\nnoise\nfilter 1 lowpass\nfilter 2 highpass\n";
+    for (int i = 0; i < 8; ++i) full += "fx delay\n";
+    CompileResult r = compileModule(full);
+    CHECK(r.program != nullptr);
+    if (r.program) CHECK(r.program->params.size() <= static_cast<size_t>(kMaxSynthParams));
+    // Ids with control characters never reach the engine (it names hidden modules with them).
+    ProjectSpec p;
+    std::string err;
+    CHECK(parseProject("{\"caw_project\":1,\"modules\":[{\"id\":\"s\\u001f0\",\"source\":\"t\"},{\"id\":\"ok\",\"source\":\"t\"}]}", p, err));
+    CHECK_EQ(p.modules.size(), size_t{1});
+}
+
+TEST(effects_are_numbered_across_the_patch_and_mono_patches_steal) {
+    // fx delay, a project module, fx delay: two delays with their own params (delay_1, delay_2).
+    CompileResult r = compileModule(kPatch + "osc a\nfx delay\nfx mine\nfx delay mix 0.1\n");
+    CHECK(r.program != nullptr);
+    if (r.program) {
+        int d1 = 0, d2 = 0;
+        for (const ParamDef& d : r.program->params) {
+            d1 += d.name == "delay_1_mix";
+            d2 += d.name == "delay_2_mix";
+        }
+        CHECK(d1 == 1 && d2 == 1);
+        CHECK(r.program->synthFxKeys.size() == 3 && r.program->synthFxKeys[2] == "delay_2");
+    }
+    // voices 1: a 3-note chord plays one note, not two.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.master = 1.0;
+    p.modules.push_back({"s", "---\nmode: float\nvoices: 1\n---\ngate * 0.1\n", {}});
+    p.modules.push_back({"p", "---\nkind: pattern\n---\n0 C3,E3,G3 4\n", {}});
+    LayerSpec l;
+    l.id = "l";
+    l.chain = {"s"};
+    l.pattern = "p";
+    l.volume = 1.0;
+    p.layers = {l};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    std::vector<float> lf(1024), rf(1024);
+    for (int i = 0; i < 1024; i += 64) e.process(lf.data() + i, rf.data() + i, 64);
+    CHECK_NEAR(lf[500] / std::cos(kPi / 4.0), 0.1, 1e-6);
+}

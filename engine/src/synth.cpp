@@ -298,6 +298,8 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
     }
     if (k == "fx") {
         if (w.size() < 2) throw PatchError{line, head.col, "fx needs a type (drive, crush, delay, reverb, comp) or a module's name"};
+        // A track's chain holds a sound and at most 8 effects (project.h kMaxChain), so a patch does too.
+        if (p.fx.size() >= 8) throw PatchError{line, head.col, "a patch can have at most 8 fx lines"};
         Fx x;
         x.line = line;
         const std::string& t = w[1].text;
@@ -451,41 +453,36 @@ std::string generatorCode(const Patch& p) {
     return c;
 }
 
-std::string fxCode(const Patch& p, const std::vector<const Fx*>& group, int index) {
-    std::string c = "---\ncaw: 1\nkind: effect\nname: " + p.name + " effects " + std::to_string(index) + "\n---\n";
+// One effect line as its own effect module. `id` numbers effects of a kind across the whole patch (delay_1, delay_2),
+// so param names are unique and stay put when other lines move.
+std::string fxCode(const Patch& p, const Fx& x, const std::string& id) {
+    std::string c = "---\ncaw: 1\nkind: effect\nname: " + p.name + " " + id + "\n---\n";
     c += "// Generated from the synth patch; edit the patch, not this code.\n";
-    std::map<std::string, int> seen;
-    std::string last = "in";
-    for (const Fx* x : group) {
-        const std::string id = x->kind + "_" + std::to_string(++seen[x->kind]);
-        auto v = [&](const char* k) { return x->v.at(k); };
-        std::string call;
-        if (x->kind == "drive") {
-            c += param(id + "_amount", v("amount"), 0, 1, "Drive amount");
-            call = "fx.drive(x, 1 + " + id + "_amount * 9)";
-        } else if (x->kind == "crush") {
-            c += param(id + "_bits", v("bits"), 1, 24, "Crush: bits kept", 1);
-            call = "fx.crush(x, " + id + "_bits)";
-        } else if (x->kind == "delay") {
-            c += param(id + "_time", v("time"), 0.0625, 4, "Delay time in beats");
-            c += param(id + "_feedback", v("feedback"), 0, 0.98, "Delay feedback");
-            c += param(id + "_mix", v("mix"), 0, 1, "Delay mix");
-            call = "fx.delay(x, beats(" + id + "_time), " + id + "_feedback, " + id + "_mix)";
-        } else if (x->kind == "reverb") {
-            c += param(id + "_size", v("size"), 0, 1, "Reverb size");
-            c += param(id + "_damp", v("damp"), 0, 1, "Reverb damping");
-            c += param(id + "_mix", v("mix"), 0, 1, "Reverb mix");
-            call = "fx.reverb(x, " + id + "_size, " + id + "_damp, " + id + "_mix)";
-        } else {
-            c += param(id + "_threshold", v("threshold"), -60, 0, "Compressor threshold (dB)");
-            c += param(id + "_ratio", v("ratio"), 1, 40, "Compressor ratio");
-            call = "fx.comp(x, " + id + "_threshold, " + id + "_ratio)";
-        }
-        // Each effect is its own fn, named by its kind and count, so hot swap keeps its tail when others change.
-        c += "fn fx_" + id + "(x) = " + call + "\n";
-        last = "fx_" + id + "(" + last + ")";
+    auto v = [&](const char* k) { return x.v.at(k); };
+    std::string call;
+    if (x.kind == "drive") {
+        c += param(id + "_amount", v("amount"), 0, 1, "Drive amount");
+        call = "fx.drive(x, 1 + " + id + "_amount * 9)";
+    } else if (x.kind == "crush") {
+        c += param(id + "_bits", v("bits"), 1, 24, "Crush: bits kept", 1);
+        call = "fx.crush(x, " + id + "_bits)";
+    } else if (x.kind == "delay") {
+        c += param(id + "_time", v("time"), 0.0625, 4, "Delay time in beats");
+        c += param(id + "_feedback", v("feedback"), 0, 0.98, "Delay feedback");
+        c += param(id + "_mix", v("mix"), 0, 1, "Delay mix");
+        call = "fx.delay(x, beats(" + id + "_time), " + id + "_feedback, " + id + "_mix)";
+    } else if (x.kind == "reverb") {
+        c += param(id + "_size", v("size"), 0, 1, "Reverb size");
+        c += param(id + "_damp", v("damp"), 0, 1, "Reverb damping");
+        c += param(id + "_mix", v("mix"), 0, 1, "Reverb mix");
+        call = "fx.reverb(x, " + id + "_size, " + id + "_damp, " + id + "_mix)";
+    } else {
+        c += param(id + "_threshold", v("threshold"), -60, 0, "Compressor threshold (dB)");
+        c += param(id + "_ratio", v("ratio"), 1, 40, "Compressor ratio");
+        call = "fx.comp(x, " + id + "_threshold, " + id + "_ratio)";
     }
-    c += last + "\n";
+    c += "fn fx_" + id + "(x) = " + call + "\n";
+    c += "fx_" + id + "(in)\n";
     return c;
 }
 
@@ -540,23 +537,17 @@ SynthResult translateSynth(std::string_view src) {
         r.name = p.name;
         r.summary = p.summary;
         r.generator = generatorCode(p);
-        // Effects in line order: consecutive built-in ones share one generated module; a project module stands alone.
-        std::vector<const Fx*> group;
-        int groups = 0;
-        auto flush = [&] {
-            if (group.empty()) return;
-            r.fx.push_back({false, fxCode(p, group, ++groups), ""});
-            group.clear();
-        };
+        // Effects in line order, each its own module (a delay or reverb holds a lot of state; one module per line keeps
+        // each under a module's limit), or a project module by name.
+        std::map<std::string, int> seen;
         for (const Fx& x : p.fx) {
             if (x.kind.empty()) {
-                flush();
-                r.fx.push_back({true, "", x.module});
-            } else {
-                group.push_back(&x);
+                r.fx.push_back({true, "", "", x.module});
+                continue;
             }
+            const std::string id = x.kind + "_" + std::to_string(++seen[x.kind]);
+            r.fx.push_back({false, id, fxCode(p, x, id), ""});
         }
-        flush();
         r.ok = true;
     } catch (const PatchError& e) {
         r.ok = false;
