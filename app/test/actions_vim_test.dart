@@ -41,6 +41,12 @@ class Rig {
 }
 
 void main() {
+  test('T runs the global tap-tempo action from every area', () {
+    final r = Rig(area: Area.arranger);
+    expect(r.key('T').handled, isTrue);
+    expect(r.calls, ['transport.tap*1']);
+  });
+
   test('a key runs its action in the current area', () {
     final r = Rig();
     expect(r.key('W').handled, isTrue);
