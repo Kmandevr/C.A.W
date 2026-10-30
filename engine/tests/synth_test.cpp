@@ -217,6 +217,12 @@ TEST(synth_patches_report_errors_at_their_line) {
     CHECK(patchError("filter 1 lowpass cutoff 5\n").find("cutoff must be 20 to 20000") != std::string::npos);
     CHECK(patchError("lfo 5 rate 2\n").find("lfo needs its number") != std::string::npos);
     CHECK(patchError("mod env 1 -> filter 1 cutoff 0.4\n").find("env 1 is the amplitude envelope") != std::string::npos);
+    CHECK(patchError("mod env 2 -> volume 0.5\n").find("env2 is used as a modulator but is not enabled") != std::string::npos);
+    CHECK(patchError("mod macro 1 -> volume 0.5\n").find("macro1 is used as a modulator but is not enabled") != std::string::npos);
+    const SynthResult defaults = translateSynth(kPatch);
+    CHECK(defaults.ok);
+    CHECK(defaults.generator.find("env2") == std::string::npos);
+    CHECK(defaults.generator.find("macro1") == std::string::npos);
     CHECK(patchError("macro 5 Bright 0.5\n").find("macro syntax") != std::string::npos);
     CHECK(patchError("macro 1 Bad! 0.5\n").find("macro name must use only") != std::string::npos);
     CHECK(translateSynth(kPatch + "mod lfo 1 -> volume 0.5\n").error.find("lfo1 is used as a modulator") != std::string::npos);
@@ -265,7 +271,8 @@ TEST(synth_supports_three_envelopes_four_lfos_macros_and_modulation_routes) {
     CHECK(translated.generator.find("lfo1 * 0.3") != std::string::npos);
     CHECK(translated.generator.find("macro1 * 0.2") != std::string::npos);
     CHECK(translated.generator.find("vel * 0.5") != std::string::npos);
-    CHECK(compileModule(translated.generator).program != nullptr);
+    const CompileResult generated = compileModule(translated.generator);
+    if (!generated.program) cawtest::fail(__FILE__, __LINE__, "generated synth code does not compile: " + generated.error);
 }
 
 TEST(a_synth_patch_compiles_to_a_voice_with_its_effects) {
@@ -341,7 +348,7 @@ TEST(a_patch_cannot_grow_the_chain_or_params_past_the_limits) {
     std::string full = kPatch + "osc a\nosc b\nosc c\nsub\nnoise\nfilter 1 lowpass\nfilter 2 highpass\n";
     for (int i = 0; i < 8; ++i) full += "fx delay\n";
     CompileResult r = compileModule(full);
-    CHECK(r.program != nullptr);
+    if (!r.program) cawtest::fail(__FILE__, __LINE__, "full synth patch does not compile: " + r.error);
     if (r.program) CHECK(r.program->params.size() <= static_cast<size_t>(kMaxSynthParams));
     // Ids with control characters never reach the engine (it names hidden modules with them).
     ProjectSpec p;
