@@ -8,6 +8,8 @@ updated: 2026-10-30
 
 # Log
 
+- 2026-10-30: Added a collapsible touchscreen Vim key panel that sends virtual keys through the normal keymap/controller path, including multi-key prefixes, counts and macros; it is available on phone screens and in the code editor on wider screens (Issue #23).
+
 - 2026-10-30: The piano-roll toolbar now exposes touch-friendly Copy and Paste for selected notes; dragging a selected note moves the entire group without accidentally resizing it (Issue #21).
 
 - 2026-10-30: Focused text fields now receive Backspace, Delete and text-navigation keys even in code-editor Vim normal mode; ordinary Vim letters and command-line handling remain with Vim (Issue #20).
