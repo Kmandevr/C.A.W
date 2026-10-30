@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include "execution.h"
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -53,6 +54,28 @@ private:
     uint64_t nextSequence_ = 0;
     bool stopping_ = false;
     std::vector<std::thread> workers_;
+};
+
+ // Applies deterministic hardware/pressure policy to a bounded worker pool.
+ // This wrapper is for control/background work only, never the audio callback.
+class AdaptiveWorkerPool {
+public:
+    explicit AdaptiveWorkerPool(HardwareProfile hardware, uint32_t maxWorkers = WorkerPool::kMaxWorkers);
+    ExecutionPlan apply(const ExecutionRequest& request) noexcept;
+    const ExecutionPlan& currentPlan() const noexcept { return plan_; }
+    bool submit(JobPriority priority, JobFunction function, void* context) noexcept {
+        return pool_.submit(priority, function, context);
+    }
+    uint32_t cancelPending() noexcept { return pool_.cancelPending(); }
+    void waitIdle() { pool_.waitIdle(); }
+    uint32_t queued() const noexcept { return pool_.queued(); }
+    uint32_t active() const noexcept { return pool_.active(); }
+
+private:
+    HardwareProfile hardware_;
+    uint32_t capacity_ = 1;
+    WorkerPool pool_;
+    ExecutionPlan plan_;
 };
 
 }  // namespace caw
