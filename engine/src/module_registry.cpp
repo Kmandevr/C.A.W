@@ -29,6 +29,7 @@ std::unique_ptr<ModuleProcessor> ModuleRegistry::create(std::string_view id) con
             delete processor;
             return {};
         }
+        processor->reset();
         return std::unique_ptr<ModuleProcessor>(processor);
     }
     return {};
