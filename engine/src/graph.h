@@ -52,7 +52,8 @@ struct CompiledGraph {
 CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                            const std::vector<GraphConnection>& connections);
 
-// Prepared native stereo executor. prepare() allocates on a control thread; process() performs
+// Prepared native stereo executor. Processor instances and descriptors are borrowed and must outlive the executor.
+// reset() never destroys processors. prepare() allocates on a control thread; process() performs
 // no allocation, locking, I/O or graph traversal and is suitable for a bounded audio callback.
 class GraphExecutor {
 public:
