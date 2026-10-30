@@ -66,3 +66,31 @@ TEST(scheduler_shutdown_drains_accepted_jobs_even_when_budget_is_zero) {
     }
     CHECK_EQ(value.load(), 7);
 }
+
+namespace {
+struct OrderTask { int* output; std::atomic<int>* cursor; int value; };
+void recordOrder(void* p) noexcept {
+    auto* task = static_cast<OrderTask*>(p);
+    const int at = task->cursor->fetch_add(1, std::memory_order_relaxed);
+    task->output[at] = task->value;
+}
+}
+
+TEST(scheduler_runs_higher_priority_jobs_first_and_preserves_fifo_within_priority) {
+    WorkerPool pool(1);
+    pool.setWorkerLimit(0);
+    int order[4] = {};
+    std::atomic<int> cursor{0};
+    OrderTask background{order, &cursor, 1}, offline{order, &cursor, 2};
+    OrderTask foregroundA{order, &cursor, 3}, foregroundB{order, &cursor, 4};
+    CHECK(pool.submit(JobPriority::Background, recordOrder, &background));
+    CHECK(pool.submit(JobPriority::Offline, recordOrder, &offline));
+    CHECK(pool.submit(JobPriority::Foreground, recordOrder, &foregroundA));
+    CHECK(pool.submit(JobPriority::Foreground, recordOrder, &foregroundB));
+    pool.setWorkerLimit(1);
+    pool.waitIdle();
+    CHECK(order[0] == 3);
+    CHECK(order[1] == 4);
+    CHECK(order[2] == 2);
+    CHECK(order[3] == 1);
+}
