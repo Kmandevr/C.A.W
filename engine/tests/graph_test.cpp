@@ -37,7 +37,7 @@ TEST(graph_rejects_mono_stereo_mismatch) {
     const ModuleDescriptor mono{"test.mono", 1, monoOut, 1, nullptr, 0};
     const std::vector<GraphNode> nodes{{"mono", &mono}, {"stereo", &sink}};
     const CompiledGraph graph = compileGraph(nodes, {{0, 0, 1, 0}});
-    CHECK_EQ(graph.error, GraphError::ChannelLayoutMismatch);
+    CHECK(graph.error == GraphError::ChannelLayoutMismatch);
     CHECK_EQ(graph.errorConnection, 0u);
 }
 
@@ -45,7 +45,7 @@ TEST(graph_rejects_control_audio_connection) {
     const PortDescriptor controlOut[] = {{"out", PortType::Control, ChannelLayout::None, false}};
     const ModuleDescriptor control{"test.control", 1, controlOut, 1, nullptr, 0};
     const std::vector<GraphNode> nodes{{"control", &control}, {"audio", &sink}};
-    CHECK_EQ(compileGraph(nodes, {{0, 0, 1, 0}}).error, GraphError::PortTypeMismatch);
+    CHECK(compileGraph(nodes, {{0, 0, 1, 0}}).error == GraphError::PortTypeMismatch);
 }
 
 TEST(graph_rejects_duplicate_drivers) {
@@ -56,10 +56,10 @@ TEST(graph_rejects_duplicate_drivers) {
 
 TEST(graph_rejects_cycles) {
     const std::vector<GraphNode> nodes{{"a", &effect}, {"b", &effect}};
-    CHECK_EQ(compileGraph(nodes, {{0, 1, 1, 0}, {1, 1, 0, 0}}).error, GraphError::Cycle);
+    CHECK(compileGraph(nodes, {{0, 1, 1, 0}, {1, 1, 0, 0}}).error == GraphError::Cycle);
 }
 
 TEST(graph_rejects_duplicate_node_ids) {
     const std::vector<GraphNode> nodes{{"same", &source}, {"same", &sink}};
-    CHECK_EQ(compileGraph(nodes, {}).error, GraphError::DuplicateNodeId);
+    CHECK(compileGraph(nodes, {}).error == GraphError::DuplicateNodeId);
 }
