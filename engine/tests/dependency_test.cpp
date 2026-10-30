@@ -13,7 +13,7 @@ TEST(dependencies_resolve_exact_version_scope_hash_and_interface) {
     };
     const auto report = resolveDependencies(refs, assets);
     CHECK(report.complete);
-    CHECK_EQ(report.entries[0].status, DependencyStatus::Resolved);
+    CHECK(report.entries[0].status == DependencyStatus::Resolved);
     CHECK_EQ(report.entries[0].assetIndex, 0u);
 }
 
@@ -28,8 +28,8 @@ TEST(dependencies_never_fall_back_across_scopes_or_versions) {
     };
     const auto report = resolveDependencies(refs, assets);
     CHECK(!report.complete);
-    CHECK_EQ(report.entries[0].status, DependencyStatus::VersionMismatch);
-    CHECK_EQ(report.entries[1].status, DependencyStatus::Missing);
+    CHECK(report.entries[0].status == DependencyStatus::VersionMismatch);
+    CHECK(report.entries[1].status == DependencyStatus::Missing);
 }
 
 TEST(dependencies_report_hash_and_interface_mismatches) {
@@ -42,8 +42,8 @@ TEST(dependencies_report_hash_and_interface_mismatches) {
         {"asset.two", "1.0", "hash", AssetScope::Factory, 1},
     };
     const auto report = resolveDependencies(refs, assets);
-    CHECK_EQ(report.entries[0].status, DependencyStatus::HashMismatch);
-    CHECK_EQ(report.entries[1].status, DependencyStatus::InterfaceMismatch);
+    CHECK(report.entries[0].status == DependencyStatus::HashMismatch);
+    CHECK(report.entries[1].status == DependencyStatus::InterfaceMismatch);
 }
 
 TEST(dependencies_allow_optional_missing_and_reject_ambiguous_records) {
@@ -57,8 +57,8 @@ TEST(dependencies_allow_optional_missing_and_reject_ambiguous_records) {
     };
     const auto report = resolveDependencies(refs, assets);
     CHECK(!report.complete);
-    CHECK_EQ(report.entries[0].status, DependencyStatus::OptionalMissing);
-    CHECK_EQ(report.entries[1].status, DependencyStatus::Ambiguous);
+    CHECK(report.entries[0].status == DependencyStatus::OptionalMissing);
+    CHECK(report.entries[1].status == DependencyStatus::Ambiguous);
 }
 
 TEST(dependencies_reject_empty_ids_and_unversioned_references) {
@@ -67,8 +67,8 @@ TEST(dependencies_reject_empty_ids_and_unversioned_references) {
         {"valid.id", "", "", AssetScope::Factory, 1, false},
     };
     const auto report = resolveDependencies(refs, {});
-    CHECK_EQ(report.entries[0].status, DependencyStatus::InvalidReference);
-    CHECK_EQ(report.entries[1].status, DependencyStatus::InvalidReference);
+    CHECK(report.entries[0].status == DependencyStatus::InvalidReference);
+    CHECK(report.entries[1].status == DependencyStatus::InvalidReference);
 }
 
 TEST(project_json_loads_pinned_asset_dependencies) {
@@ -81,10 +81,10 @@ TEST(project_json_loads_pinned_asset_dependencies) {
     CHECK(parseProject(json, project, error));
     CHECK_EQ(project.dependencies.size(), 2u);
     CHECK_EQ(project.dependencies[0].stableId, std::string("caw.fx.delay"));
-    CHECK_EQ(project.dependencies[0].scope, AssetScope::AddOn);
+    CHECK(project.dependencies[0].scope == AssetScope::AddOn);
     CHECK_EQ(project.dependencies[0].contentHash, std::string("sha256:abc"));
     CHECK(project.dependencies[1].optional);
-    CHECK_EQ(project.dependencies[1].scope, AssetScope::Factory);
+    CHECK(project.dependencies[1].scope == AssetScope::Factory);
 }
 
 TEST(project_json_rejects_invalid_dependency_scope_and_unpinned_versions) {
