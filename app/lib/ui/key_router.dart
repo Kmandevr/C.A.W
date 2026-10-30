@@ -320,6 +320,8 @@ class KeyRouterState extends State<KeyRouter> {
     final touchArea = _area;
     final isPhone = MediaQuery.sizeOf(context).shortestSide < 600;
     final viewInsets = MediaQuery.viewInsetsOf(context);
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final quickActionsBottom = viewInsets.bottom > 0 ? viewInsets.bottom + 8 : safeBottom + 72;
     final badge = <Widget>[
       if (vim.recording) Text('● @${vim.recordingSlot}', style: const TextStyle(color: Neon.pink)),
       if (vim.mode != VimMode.normal) Text(vim.mode.name.toUpperCase(), style: const TextStyle(color: Neon.yellow)),
@@ -360,7 +362,7 @@ class KeyRouterState extends State<KeyRouter> {
           Positioned(
             left: 8,
             right: 8,
-            bottom: viewInsets.bottom + 8,
+            bottom: quickActionsBottom,
             child: TouchQuickActions(
               area: touchArea,
               keymap: vim.keymap,
