@@ -84,7 +84,7 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Action list | ? |
 | Go to Sounds / Tracks / Export (the Builder, Arranger and Exporter areas) | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built) |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |
-| Tap tempo | T |
+| Tap tempo | T (updates the project BPM from repeated taps) |
 | Tempo up / down 1 BPM (Shift: 0.1) | Ctrl+= / Ctrl+- |
 | Master volume up / down | — |
 | Unmute layers the engine muted (overload) | — |
