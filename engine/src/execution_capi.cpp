@@ -1,6 +1,6 @@
 // C ABI adapter for the portable execution policy. Host code owns capability detection and worker scheduling.
 #include "caw.h"
-#include "execution.h"
+#include "execution.h"\n#include "hardware.h"
 
 #include <algorithm>
 
@@ -33,5 +33,16 @@ extern "C" CAW_API int32_t caw_execution_plan(const CawHardwareProfile* hardware
     out->use_simd = plan.useSimd ? 1 : 0;
     out->allow_gpu = plan.allowGpu ? 1 : 0;
     out->yield_to_foreground = plan.yieldToForeground ? 1 : 0;
+    return 0;
+}
+
+
+extern "C" CAW_API int32_t caw_hardware_profile_detect(CawHardwareProfile* out) {
+    if (!out) return 1;
+    const caw::HardwareProfile profile = caw::detectHardwareProfile();
+    out->logical_cores = profile.logicalCores;
+    out->memory_budget_mib = profile.memoryBudgetMiB;
+    out->supports_simd = profile.supportsSimd ? 1 : 0;
+    out->supports_gpu_compute = profile.supportsGpuCompute ? 1 : 0;
     return 0;
 }
