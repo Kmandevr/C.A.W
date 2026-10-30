@@ -17,7 +17,7 @@ The house synth from [vision](vision.md) and [roadmap](roadmap.md#v2--variables-
 - **[Fact]** Wavetables: built-in shapes (sine, saw, square, triangle and more), tables rendered from any C.A.W code, tables drawn by hand, and imported Serum/Vital WAV tables.
 - **[Fact]** Full size (no small caps on voices or unison), heavily optimised, and the app warns on overload (the engine's overload muting and Light mode already do).
 - **[Fact]** Effects stay basic and useful first, and any slot can hold an effect module the user built.
-- **[Fact]** The owner accepted these defaults (2026-10-29): 3 wavetable oscillators plus a sub and a noise source; unison up to 16 with detune and spread; warp modes; 2 filters (serial or parallel); 3 envelopes, 4 drawn LFOs, 4 macros, a mod matrix with drag-to-modulate; drive, chorus, delay, reverb, EQ and compressor; presets as `.caw` files with tags.
+- **[Fact]** The owner accepted these defaults (2026-10-29): 3 wavetable oscillators plus a sub and a noise source; unison up to 16 with detune and spread; warp modes; 2 filters (serial or parallel); 3 envelopes, 4 tempo-synced LFOs, 4 macros, a code-editable modulation matrix (visual drag-to-modulate UI remains future work); drive, chorus, delay, reverb, EQ and compressor; presets as `.caw` files with tags.
 
 ## The patch file
 
@@ -73,7 +73,7 @@ table vocal file vocal.wav                            // imported 2048-sample fr
 - `~k` bends the segment after a point, as in [the Curve tool](app.md) and the [curve proposal on #11](https://github.com/Kmandevr/C.A.W/issues/11).
 - **Eject to code:** the screen can turn a patch into an ordinary generator module (the code the engine runs for it, below), for sound design past what the layout offers.
 
-**[Fact]** Built (2026-10-30; `engine/src/synth.cpp`, tested in `engine/tests/synth_test.cpp`). Every value is checked against its range, and an error names the line and column. `caw check --code FILE.caw` prints the code a patch becomes, and the Init synth template (`examples/init-synth.caw`) is a starting patch. The patch compiler now supports three ADSR envelopes, four tempo-synced LFOs (sine, triangle, saw, square and stepped random shapes), four macro controls and a modulation matrix. Current modulation sources are envelopes 2/3, LFOs 1–4, macros 1–4 and velocity. Destinations are oscillator position/level/pitch, filter cutoff/resonance and master volume. The generated patch uses the existing native envelope/LFO/wavetable built-ins; drawn LFO curves and oscillator warp modes are still future work.
+**[Fact]** Built (2026-10-30; `engine/src/synth.cpp`, tested in `engine/tests/synth_test.cpp`). Every value is checked against its range, and an error names the line and column. `caw check --code FILE.caw` prints the code a patch becomes, and the Init synth template (`examples/init-synth.caw`) is a starting patch. The patch compiler now supports three ADSR envelopes, four tempo-synced LFOs (sine, triangle, saw, square and stepped random shapes), four macro controls and a modulation matrix. Current modulation sources are envelopes 2/3, LFOs 1–4, macros 1–4 and velocity. Destinations are oscillator position/level/pitch, filter cutoff/resonance and master volume. The generated patch uses the existing native envelope/LFO/wavetable built-ins; drawn LFO curves, visual drag-to-modulate editing and oscillator warp modes are still future work.
 
 | Line | Settings (range, default) |
 | --- | --- |
