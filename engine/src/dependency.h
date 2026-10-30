@@ -2,7 +2,7 @@
 #pragma once
 
 #include <cstdint>
-#include <string_view>
+#include <string>
 #include <vector>
 
 namespace caw {
@@ -10,9 +10,9 @@ namespace caw {
 enum class AssetScope : uint8_t { ProjectLocal, UserGlobal, Factory, AddOn };
 
 struct DependencyRef {
-    std::string_view stableId;
-    std::string_view version;       // exact pinned version in v1
-    std::string_view contentHash;   // optional exact content hash
+    std::string stableId;
+    std::string version;       // exact pinned version in v1
+    std::string contentHash;   // optional exact content hash
     AssetScope scope = AssetScope::ProjectLocal;
     uint32_t interfaceVersion = 1;
     bool optional = false;
