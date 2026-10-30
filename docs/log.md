@@ -6,6 +6,8 @@ updated: 2026-10-30
 
 # Log
 
+- 2026-10-30: The piano-roll toolbar now exposes touch-friendly Copy and Paste for selected notes; dragging a selected note moves the entire group without accidentally resizing it (Issue #21).
+
 - 2026-10-30: Focused text fields now receive Backspace, Delete and text-navigation keys even in code-editor Vim normal mode; ordinary Vim letters and command-line handling remain with Vim (Issue #20).
 
 - 2026-10-30: Tap tempo now shares timing state between the project settings button and the global `T` shortcut; the shortcut is routed, tap timing resets after a pause, and the on-screen target is larger (Issue #19).
