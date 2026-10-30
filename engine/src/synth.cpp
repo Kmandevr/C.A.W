@@ -660,7 +660,7 @@ SynthResult translateSynth(std::string_view src) {
                 if (index < 0 || index >= 4 || !p.lfo[index].on)
                     throw PatchError{mod.line, 1, mod.source + " is used as a modulator but is not enabled"};
             }
-            if (mod.destination.size() >= 3 && mod.destination[1] == '_') {
+            if (mod.destination.size() >= 3 && mod.destination[0] >= 'a' && mod.destination[0] <= 'c' && mod.destination[1] == '_') {
                 const int index = mod.destination[0] - 'a';
                 if (index < 0 || index >= 3 || !p.osc[index].on)
                     throw PatchError{mod.line, 1, "modulation destination oscillator is off"};
