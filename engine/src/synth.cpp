@@ -337,6 +337,11 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
         if (w.size() != 4 || w[1].text.size() != 1 || w[1].text[0] < '1' || w[1].text[0] > '4')
             throw PatchError{line, head.col, "macro syntax: macro 1 Name 0.5 (numbers 1 to 4)"};
         Macro& macro = p.macro[w[1].text[0] - '1'];
+        if (w[2].text.empty() || w[2].text.size() > 32)
+            throw PatchError{line, w[2].col, "macro name must be 1 to 32 letters, numbers, _ or -"};
+        for (unsigned char ch : w[2].text)
+            if (!(std::isalnum(ch) || ch == '_' || ch == '-'))
+                throw PatchError{line, w[2].col, "macro name must use only letters, numbers, _ or -"};
         macro.name = w[2].text;
         char* end = nullptr;
         macro.value = std::strtod(w[3].text.c_str(), &end);
