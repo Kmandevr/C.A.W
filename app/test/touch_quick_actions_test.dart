@@ -1,6 +1,6 @@
 import 'package:caw/actions/actions.dart';
 import 'package:caw/actions/keymap.dart';
-import 'package:caw/ui/theme.dart';
+import 'package:caw/actions/macro.dart';
 import 'package:caw/ui/touch_quick_actions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
