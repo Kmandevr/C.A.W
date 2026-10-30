@@ -8,7 +8,9 @@ updated: 2026-10-30
 
 This document makes one rule explicit: **engine capabilities belong to the product ecosystem, not only to the engine implementation.** A feature is not complete merely because a C++ class exists. It must have a supported route into projects, add-ons, the asset library, the app UI and external consumers where relevant.
 
-## One engine, multiple hosts
+## One engine, modular by construction
+
+The owner's direction (2026-10-30) is explicit: the engine is one coherent system, and its modularity is foundational—not an afterthought, optional plugin layer or set of disconnected sub-engines. Every host uses the same module identity, typed-port, parameter, state, processing and dependency contracts. Build configurations may omit unused modules for size, but must not fork their behavior or project semantics.
 
 The portable C++ core is the single source of processing behavior. Hosts must not reimplement DSP or invent a parallel project format.
 
