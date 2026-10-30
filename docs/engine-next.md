@@ -1,7 +1,7 @@
 ---
 title: Modular adaptive engine blueprint
 summary: Owner direction for CAW's native sound engine, reusable modules, interactive creation interfaces, portable assets, expressive MIDI, exports and adaptive hardware use.
-covers: [engine/, app/, caw/factory/, examples/]
+covers: [engine/, app/, examples/]
 updated: 2026-10-30
 ---
 
