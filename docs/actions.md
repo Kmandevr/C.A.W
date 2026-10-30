@@ -2,7 +2,7 @@
 title: Actions, keys and macros
 summary: Every command as an action, customisable keys per area, macros and toolbars, and the full action catalogue with default keys.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart]
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Actions, keys and macros
