@@ -1,7 +1,7 @@
 // Typed graph validation. No graph traversal, allocation or sorting occurs on the audio thread.
 #include "graph.h"
 
-#include <algorithm>
+#include <algorithm>\n#include <cmath>\n#include <new>
 #include <limits>
 
 namespace caw {
