@@ -45,7 +45,7 @@ macro "Run of four"
   roll.notes.up
 ```
 
-- **Phone without a keyboard:** the Vim strip has a collapsible **KEYS** panel. Its virtual keys feed the same keymap path as hardware input, so prefixes (`C` then `W`), counts and macros work as tap sequences. The panel changes keys for the active editor, keeps an explicit Escape button, and scrolls on narrow screens. Insert mode still uses the Android text keyboard; the virtual keys are for commands, not text composition.
+- **Touchscreen quick actions:** phones show a compact action strip in Sounds, Tracks and Export. Buttons run actions directly through the action registry; they do not imitate key presses or enter Vim modes. Use the tune button to add actions or macros, remove them, reorder them and restore defaults. Each area's toolbar is saved in the existing `keys.txt` keymap. The piano roll keeps its own dedicated customizable toolbar. Vim remains a physical-keyboard feature.
 
 ## Vim-style control
 
