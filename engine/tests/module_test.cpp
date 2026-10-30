@@ -44,3 +44,30 @@ TEST(module_descriptor_rejects_default_outside_range) {
     const ModuleDescriptor d{"caw.test.default", 1, nullptr, 0, params, 1};
     CHECK_EQ(validateModuleDescriptor(d), ModuleValidation::DefaultOutsideRange);
 }
+
+TEST(module_descriptor_accepts_generated_and_custom_ui_contracts) {
+    const ParameterDescriptor params[] = {{"cutoff", 1200, 20, 20000, true}};
+    const UiControlDescriptor controls[] = {
+        {"cutoff-slider", "Cutoff", "cutoff", UiControlKind::Slider, 20, 20000},
+        {"custom-action", "Randomize", "", UiControlKind::Button, 0, 1},
+    };
+    ModuleDescriptor d{"caw.test.ui", 1, nullptr, 0, params, 1, controls, 2, "caw.ui.synth"};
+    CHECK_EQ(validateModuleDescriptor(d), ModuleValidation::Ok);
+}
+
+TEST(module_descriptor_rejects_ui_controls_without_parameters) {
+    const UiControlDescriptor controls[] = {
+        {"unknown", "Unknown", "missing", UiControlKind::Slider, 0, 1},
+    };
+    ModuleDescriptor d{"caw.test.bad-ui", 1, nullptr, 0, nullptr, 0, controls, 1, ""};
+    CHECK_EQ(validateModuleDescriptor(d), ModuleValidation::UiControlMissingParameter);
+}
+
+TEST(module_descriptor_rejects_ui_ranges_outside_parameter_contract) {
+    const ParameterDescriptor params[] = {{"gain", 0.5, 0, 1, true}};
+    const UiControlDescriptor controls[] = {
+        {"gain-slider", "Gain", "gain", UiControlKind::Slider, -1, 2},
+    };
+    ModuleDescriptor d{"caw.test.bad-range", 1, nullptr, 0, params, 1, controls, 1, ""};
+    CHECK_EQ(validateModuleDescriptor(d), ModuleValidation::InvalidUiControlRange);
+}
