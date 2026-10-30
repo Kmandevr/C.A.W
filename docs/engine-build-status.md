@@ -14,22 +14,24 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Hardware profile input and C ABI adapter for workload planning, plus a native best-effort probe for online cores, conservative available-memory budget and CPU SIMD support on Windows, macOS, Linux and Android. Thermal/battery pressure remains host supplied; GPU compute is reported unavailable until a real kernel backend exists.
 - First-class internal module descriptors with stable IDs, typed ports, parameter metadata and validation, plus framework-neutral generated UI controls and custom-view identifiers with parameter/range validation.
 - Stereo-native borrowed-buffer processor contract. This is an interface contract; it is not yet wired into the existing VM/mixer as a universal processor path.
-- Typed DSP graph validation, deterministic topological ordering and a prepared stereo executor. The executor allocates only during prepare; its process path uses preallocated buffers and invokes borrowed processors without graph traversal or locks.
-- Bounded, fixed-capacity non-real-time worker pool with priority scheduling, worker-budget controls, queue rejection and pending-job cancellation. It is not yet connected to app/render/analysis jobs or the adaptive workload policy.
+- Typed DSP graph validation, deterministic topological ordering and a prepared stereo executor. Topological compilation uses a stable min-heap; the executor allocates only during prepare and processes with preallocated buffers and no graph traversal or locks.
+- A graph runtime publication helper that adopts prepared graphs on the audio thread and defers old-graph reclamation to the control thread. This helper is not yet connected to Engine/VM.
+- Bounded, fixed-capacity non-real-time worker pool with priority scheduling, worker-budget controls, queue rejection and pending-job cancellation, plus an `AdaptiveWorkerPool` wrapper that applies the deterministic workload plan to actual worker concurrency. The app/host still needs to feed live platform pressure and route real compile/render/analysis jobs through it.
 - Exact, scope-aware dependency resolver for project-local, user-global, factory and add-on assets, including pinned version, content hash, interface version, optional references and ambiguity detection. Project JSON now parses and stores these dependency references; matching them against the installed library and surfacing repair actions remain unimplemented.
-- Public native module C ABI header and SDK contract for trusted add-ons. Dynamic loading, host adapter, state lifecycle and package signing remain unimplemented.
+- Native module registry with stable-ID lookup, factory creation, descriptor verification and reset/versioned state hooks. The registry is static/in-process only; dynamic loading, host adapter, state migration/serialization policy and package signing remain unimplemented.
+- MIDI 2.0 Channel Voice UMP decoder for note, per-note pitch, pressure, CC and channel pitch events, plus a bounded lock-free SPSC input queue. This is a host bridge primitive, not live device I/O or Engine voice routing.
 - Existing note model already supports fractional MIDI pitches and per-note bend, pressure, timbre and vibrato curves. Existing MIDI import/export handles Standard MIDI Files and MIDI 2.0 Clip Files.
 - Synth patch compiler now supports three oscillators, sub/noise, unison, two filters, three ADSR envelopes, four tempo-synced LFOs, four macros, modulation routing to oscillator position/level/pitch, filter cutoff/resonance and master volume, plus effect chains. Drawn LFO curves, warp modes and custom/imported wavetable authoring remain unimplemented.
 
 ## Not yet implemented
 
-- Integration of the prepared graph executor into the existing Engine/VM mixer path, including a host-facing processor registry and project representation.
-- Universal state transfer, graph hot-swap and dependency-aware retirement for native module instances.
-- Scheduling integration: the pool and workload policy exist, but platform pressure is not yet fed into the pool automatically and engine jobs do not yet use it.
+- Integration of the prepared graph executor and graph runtime into the existing Engine/VM mixer path, including project graph representation and bytecode/native processor interoperation.
+- Universal state transfer, graph hot-swap integration and dependency-aware retirement for native module instances; the graph helper currently provides only prepared-graph pointer publication and deferred reclamation.
+- Host scheduling integration: the adaptive pool now applies workload plans, but platform pressure is not yet fed into it automatically and engine/app jobs do not yet use it.
 - Automatic Android/Windows/macOS/Linux hardware, SIMD, memory, thermal and battery capability probes.
 - A true adaptive quality ladder with measurable preview-quality modes and guaranteed unchanged offline exports.
 - Drawn LFO curves, oscillator warp modes and the complete custom/imported table draw/render pipeline.
-- MIDI 2.0 live input/output and full per-note controller/attribute mapping. File/clip support is not equivalent to live MIDI 2.0 device support.
+- MIDI 2.0 device input/output, Engine voice routing, output scheduling and full per-note controller/attribute mapping. The decoder/queue do not by themselves provide device support.
 - Project manifest writing/round-tripping, dependency snapshots, content-hash generation and library/app integration for the new resolver.
 - App-side rendering/runtime for declarative and custom module interfaces.
 - Dynamic native module loading, package verification, crash containment and optional out-of-process isolation.
@@ -48,4 +50,4 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Verification
 
-The new native CMake workflow builds the engine without a device backend and runs the full CTest suite on pushes and pull requests. CI must pass before the new foundation is treated as verified. Device profiling remains a separate requirement; cloud CI cannot prove phone latency, thermal behavior, battery use or drop-out resistance.
+The new native CMake workflow builds the engine without a device backend and runs the full CTest suite on pushes and pull requests. The latest observed Engine, App and Docs workflow runs for this branch were queued; no passing build is claimed. CI must pass before the new foundation is treated as verified. Device profiling remains a separate requirement; cloud CI cannot prove phone latency, thermal behavior, battery use or drop-out resistance.
