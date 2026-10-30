@@ -1178,7 +1178,13 @@ class _PatternEditorState extends State<PatternEditor> {
               onChanged: (v) => change((d) => d.setSlide(sel, v)),
             ),
             // The note's own pitch curve, vibrato, volume and timbre (MPE style); one undo step with the rest.
-            ExpressionPanel(expr: n.expr, color: _noteColor, onChanged: (e) => change((d) => d.setExpression(sel, e))),
+            ExpressionPanel(
+              expr: n.expr,
+              color: _noteColor,
+              // A shared expression edit has no single note duration to snap against.
+              timeSnap: _snap && sel.length == 1 ? _resSteps.toDouble() / n.len.toDouble() : 0,
+              onChanged: (e) => change((d) => d.setExpression(sel, e)),
+            ),
           ]),
           ),
         );
