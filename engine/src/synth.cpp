@@ -449,6 +449,34 @@ std::string generatorCode(const Patch& p) {
     c += "mode: float\nvoices: " + num(p.voices) + "\n---\n";
     c += "// Generated from the synth patch; edit the patch, not this code.\n";
     std::vector<std::string> sources;  // the sound sources, by patch name
+    auto modExpr = [&](const std::string& destination) {
+        std::string expr;
+        for (const Mod& m : p.mods) if (m.destination == destination) {
+            expr += (expr.empty() ? "" : " + ") + "(" + m.source + " * " + num(m.amount) + ")";
+        }
+        return expr.empty() ? std::string("0") : expr;
+    };
+    auto addEnv = [&](int index, const Env& e) {
+        const std::string n = "env" + std::to_string(index);
+        c += param(n + "_attack", e.attack, 0, 20, n + " attack");
+        c += param(n + "_decay", e.decay, 0, 20, n + " decay");
+        c += param(n + "_sustain", e.sustain, 0, 1, n + " sustain");
+        c += param(n + "_release", e.release, 0, 20, n + " release");
+        c += "let " + n + " = env.adsr(gate, " + n + "_attack, " + n + "_decay, " + n + "_sustain, " + n + "_release)\n";
+    };
+    addEnv(2, p.env2);
+    addEnv(3, p.env3);
+    const char* lfoFns[] = {"sine", "tri", "saw", "square", "random"};
+    for (int i = 0; i < 4; ++i) if (p.lfo[i].on) {
+        const std::string n = "lfo" + std::to_string(i + 1);
+        c += param(n + "_rate", p.lfo[i].rate, 0.015625, 64, n + " cycle length in beats");
+        c += param(n + "_phase", p.lfo[i].phase, 0, 1, n + " phase");
+        c += "let " + n + " = lfo." + p.lfo[i].shape + "(" + n + "_rate, " + n + "_phase)\n";
+    }
+    for (int i = 0; i < 4; ++i) {
+        const std::string n = "macro" + std::to_string(i + 1);
+        c += param(n, p.macro[i].value, 0, 1, p.macro[i].name);
+    }
     const char names[3] = {'a', 'b', 'c'};
     for (int i = 0; i < 3; ++i) {
         const Osc& o = p.osc[i];
@@ -460,7 +488,7 @@ std::string generatorCode(const Patch& p) {
         c += param(n + "_pos", o.pos, 0, 1, "Osc " + N + " position in the table");
         c += param(n + "_detune", o.detune, 0, 1, "Osc " + N + " unison spread");
         c += param(n + "_pitch", o.octave * 12 + o.semi + o.fine / 100, -72, 72, "Osc " + N + " pitch in semitones", 0.01);
-        c += "fn osc_" + n + "(f) = wt(table." + o.table + ", f * pow(2, " + n + "_pitch / 12), " + n + "_pos, " +
+        c += "fn osc_" + n + "(f) = wt(table." + o.table + ", f * pow(2, (" + n + "_pitch + (" + modExpr(n + "_pitch") + ")) / 12), clamp(" + n + "_pos + (" + modExpr(n + "_pos") + "), 0, 1), " +
              num(o.unison) + ", " + n + "_detune) * clamp(" + n + "_level + (" + modExpr(n + "_level") + "), 0, 1)\n";
         sources.push_back(n);
     }
@@ -505,34 +533,6 @@ std::string generatorCode(const Patch& p) {
     c += param("sustain", p.env.sustain, 0, 1, "Level while the note is held");
     c += param("release", p.env.release, 0, 20, "Seconds to fade after the note ends");
     c += param("volume", p.volume, 0, 1, "Synth volume");
-    auto addEnv = [&](int index, const Env& e) {
-        const std::string n = "env" + std::to_string(index);
-        c += param(n + "_attack", e.attack, 0, 20, n + " attack");
-        c += param(n + "_decay", e.decay, 0, 20, n + " decay");
-        c += param(n + "_sustain", e.sustain, 0, 1, n + " sustain");
-        c += param(n + "_release", e.release, 0, 20, n + " release");
-        c += "let " + n + " = env.adsr(gate, " + n + "_attack, " + n + "_decay, " + n + "_sustain, " + n + "_release)\n";
-    };
-    addEnv(2, p.env2);
-    addEnv(3, p.env3);
-    const char* lfoFns[] = {"sine", "tri", "saw", "square", "random"};
-    for (int i = 0; i < 4; ++i) if (p.lfo[i].on) {
-        const std::string n = "lfo" + std::to_string(i + 1);
-        c += param(n + "_rate", p.lfo[i].rate, 0.015625, 64, n + " cycle length in beats");
-        c += param(n + "_phase", p.lfo[i].phase, 0, 1, n + " phase");
-        c += "let " + n + " = lfo." + p.lfo[i].shape + "(" + n + "_rate, " + n + "_phase)\n";
-    }
-    for (int i = 0; i < 4; ++i) {
-        const std::string n = "macro" + std::to_string(i + 1);
-        c += param(n, p.macro[i].value, 0, 1, p.macro[i].name);
-    }
-    auto modExpr = [&](const std::string& destination) {
-        std::string expr;
-        for (const Mod& m : p.mods) if (m.destination == destination) {
-            expr += (expr.empty() ? "" : " + ") + "(" + m.source + " * " + num(m.amount) + ")";
-        }
-        return expr.empty() ? std::string("0") : expr;
-    };
     c += p.glide > 0 ? "let pitch = slew(freq, " + num(p.glide) + ")\n" : "let pitch = freq\n";
     // Routing: each filter takes its sources (by default filter 1 takes them all; in parallel, filter 2 too); in
     // series filter 2 also takes filter 1's output. Sources no filter takes go straight out.
