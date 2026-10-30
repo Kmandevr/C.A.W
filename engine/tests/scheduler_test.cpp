@@ -55,3 +55,14 @@ TEST(scheduler_rejects_null_jobs_and_caps_worker_count) {
     pool.waitIdle();
     CHECK_EQ(value.load(), static_cast<int>(WorkerPool::kQueueCapacity));
 }
+
+TEST(scheduler_shutdown_drains_accepted_jobs_even_when_budget_is_zero) {
+    std::atomic<int> value{0};
+    TaskState state{&value, 7};
+    {
+        WorkerPool pool(2);
+        pool.setWorkerLimit(0);
+        CHECK(pool.submit(JobPriority::Offline, addTask, &state));
+    }
+    CHECK_EQ(value.load(), 7);
+}
