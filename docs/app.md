@@ -24,6 +24,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
   - **Controls | Code** (a pattern: **Notes | Text**): on a phone a module opens on its controls (a pattern on its piano roll), and the code is one tap away. A blank module, one that doesn't compile, or one with no controls opens on its code; the choice is remembered per module while the app runs. A tap on an error opens the code at it. On a wide screen code and controls sit side by side, so only patterns get the switch.
   - When the code editor is active, a touch toolbar exposes Normal, Insert, Visual, command line, repeat, macro record/stop and the action list. The command line is an editable text field with completion chips.
+  - In the piano-roll toolbar, selecting notes reveals on-screen Copy and Paste controls. Dragging any selected note moves the whole selection together; a multi-note drag does not resize notes.
   - the headphones button is **Solo preview** (below)
   - a code editor with highlighting and the symbol key row
   - **completion chips** above the key row: typing two or more letters (set in Settings) offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
