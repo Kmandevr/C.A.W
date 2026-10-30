@@ -183,6 +183,29 @@ class KeyRouterState extends State<KeyRouter> {
     return r.handled ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
+  void _touchMode(VimMode mode) {
+    vim.mode = mode;
+    _prefixTimer?.cancel();
+    setState(() {
+      _hints = const [];
+      _toast = mode == VimMode.normal ? 'Normal mode' : '${mode.name[0].toUpperCase()}${mode.name.substring(1)} mode';
+    });
+  }
+
+  void _touchRun(String id) {
+    _prefixTimer?.cancel();
+    _show(vim.runAction(id));
+  }
+
+  void _touchCommandLine() {
+    if (vim.commandLineOpen) {
+      vim.closeCommandLine();
+    } else {
+      vim.openCommandLine();
+    }
+    setState(() {});
+  }
+
   void _show(KeyResult r) {
     setState(() => _hints = r.hints);
     if (r.toast != null) _say(r.toast!, error: r.error);
@@ -308,8 +331,25 @@ class KeyRouterState extends State<KeyRouter> {
     if (ref != null) _show(vim.run(ref));
   }
 
+  Widget _touchButton(String label, IconData icon, bool active, VoidCallback onPressed) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+        child: TextButton.icon(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 18),
+          label: Text(label),
+          style: TextButton.styleFrom(
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            backgroundColor: active ? Neon.blue.withValues(alpha: 0.18) : Colors.transparent,
+            foregroundColor: active ? Neon.blue : Neon.text,
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
+    final aIsCode = _area == Area.code;
     final badge = <Widget>[
       if (vim.recording) Text('● @${vim.recordingSlot}', style: const TextStyle(color: Neon.pink)),
       if (vim.mode != VimMode.normal) Text(vim.mode.name.toUpperCase(), style: const TextStyle(color: Neon.yellow)),
@@ -346,21 +386,66 @@ class KeyRouterState extends State<KeyRouter> {
               ),
             ),
           ),
+        if (aIsCode)
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: vim.commandLineOpen ? 74 : 8,
+            child: Material(
+              color: Neon.panelHi.withValues(alpha: 0.98),
+              borderRadius: BorderRadius.circular(12),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  _touchButton('NORMAL', Icons.keyboard, vim.mode == VimMode.normal, () => _touchMode(VimMode.normal)),
+                  _touchButton('INSERT', Icons.edit, vim.mode == VimMode.insert, () => _touchMode(VimMode.insert)),
+                  _touchButton('VISUAL', Icons.select_all, vim.mode == VimMode.visual, () => _touchMode(VimMode.visual)),
+                  _touchButton(': CMD', Icons.terminal, vim.commandLineOpen, _touchCommandLine),
+                  _touchButton('.', Icons.repeat, false, () => _touchRun('vim.repeat')),
+                  _touchButton(vim.recording ? 'STOP REC' : 'REC', Icons.fiber_manual_record, vim.recording, () => _touchRun('vim.record')),
+                  _touchButton('ACTIONS', Icons.list, false, () => showActionList(context)),
+                ]),
+              ),
+            ),
+          ),
         if (vim.commandLineOpen)
           Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
+            left: 8,
+            right: 8,
+            bottom: 68,
             child: Material(
               color: Neon.panelHi,
+              borderRadius: BorderRadius.circular(10),
               child: Padding(
                 padding: const EdgeInsets.all(10),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                   Wrap(spacing: 12, children: [
                     for (final c in vim.completions.take(8))
-                      Text('${c.keys} ${c.label}', style: Neon.code(size: 12, color: Neon.dim)),
+                      ActionChip(
+                        label: Text('${c.keys} · ${c.label}', style: Neon.code(size: 12)),
+                        onPressed: () {
+                          vim.setCommandText(c.keys);
+                          setState(() {});
+                        },
+                      ),
                   ]),
-                  Text('${vim.prompt}${vim.commandText}▏', style: Neon.code(size: 15)),
+                  TextField(
+                    autofocus: true,
+                    key: const ValueKey('vim-command-line'),
+                    controller: TextEditingController(text: vim.commandText)
+                      ..selection = TextSelection.collapsed(offset: vim.commandText.length),
+                    onChanged: vim.setCommandText,
+                    onSubmitted: (_) {
+                      _show(vim.submitCommand());
+                      setState(() {});
+                    },
+                    decoration: InputDecoration(
+                      isDense: true,
+                      prefixText: '${vim.prompt ?? ':'} ',
+                      hintText: 'Type a command and press Enter',
+                      suffixIcon: IconButton(icon: const Icon(Icons.close), onPressed: _touchCommandLine),
+                    ),
+                  ),
                 ]),
               ),
             ),
