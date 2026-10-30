@@ -139,6 +139,7 @@ struct Lfo {
     bool on = false;
     std::string shape = "sine";
     double rate = 1, phase = 0;
+    double points[4] = {0, 1, 0, -1};
 };
 struct Macro {
     std::string name = "Macro";
@@ -326,11 +327,13 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
             if (key.text == "shape") {
                 lfo.shape = f.word(key);
                 if (lfo.shape != "sine" && lfo.shape != "tri" && lfo.shape != "saw" &&
-                    lfo.shape != "square" && lfo.shape != "random")
+                    lfo.shape != "square" && lfo.shape != "random" && lfo.shape != "curve")
                     throw PatchError{line, key.col, "LFO shape must be sine, tri, saw, square or random"};
             } else if (key.text == "rate") lfo.rate = f.number(key, 0.015625, 64);
             else if (key.text == "phase") lfo.phase = f.number(key, 0, 1);
-            else f.unknown(key, "shape, rate (beats) and phase");
+            else if (key.text.size() == 2 && key.text[0] == 'p' && key.text[1] >= '0' && key.text[1] <= '3')
+                lfo.points[key.text[1] - '0'] = f.number(key, -1, 1);
+            else f.unknown(key, "shape, rate (beats), phase and p0..p3 for curve shapes");
         }
         return;
     }
@@ -478,7 +481,13 @@ std::string generatorCode(const Patch& p) {
         const std::string n = "lfo" + std::to_string(i + 1);
         c += param(n + "_rate", p.lfo[i].rate, 0.015625, 64, n + " cycle length in beats");
         c += param(n + "_phase", p.lfo[i].phase, 0, 1, n + " phase");
-        c += "let " + n + " = lfo." + p.lfo[i].shape + "(" + n + "_rate, " + n + "_phase)\n";
+        if (p.lfo[i].shape == "curve") {
+            c += "let " + n + " = lfo.curve(" + n + "_rate, " + n + "_phase";
+            for (double point : p.lfo[i].points) c += ", " + num(point);
+            c += ")\n";
+        } else {
+            c += "let " + n + " = lfo." + p.lfo[i].shape + "(" + n + "_rate, " + n + "_phase)\n";
+        }
     }
     for (int i = 0; i < 4; ++i) {
         const std::string n = "macro" + std::to_string(i + 1);
