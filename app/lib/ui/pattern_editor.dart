@@ -319,7 +319,7 @@ class _PatternEditorState extends State<PatternEditor> {
       case 'roll.select.addAtCursor':
         setState(() => _sel = {..._sel, ...d.notesIn(_cursorAt, _cursorAt, _cursorPitch, _cursorPitch)});
       case 'roll.edit.copy':
-        if (_sel.isNotEmpty) setState(() => _clip = d.copy(_sel));
+        if (_sel.isNotEmpty) setState(() { _clip = d.copy(_sel); });
       case 'roll.edit.paste':
         final c = _clip;
         if (c == null) return true;
