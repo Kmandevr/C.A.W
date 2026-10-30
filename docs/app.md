@@ -107,7 +107,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - **Not built yet:** editing keys in the action list and the long-press menu entries from the keymap.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
-## Build
+The piano roll's toolbar exposes **Copy (N)** and **Paste** while notes are selected. Copy stores the whole selection; Paste places that group at the roll cursor and selects the new notes. Dragging any selected note moves the complete selection as a block; group drags move pitch and timing together and do not resize notes. A single selected note can still be resized from its end.\n\n## Build
 
 - **Flutter:** 3.47.7, pinned in `.github/workflows/app.yml`.
 - **Dependencies, all permissive:**
