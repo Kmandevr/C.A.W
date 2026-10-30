@@ -32,3 +32,23 @@ TEST(midi2_rejects_other_ump_types_and_unknown_statuses) {
     CHECK(!decodeMidi2ChannelVoice(0x20903C00u, 0xFFFF0000u, event));
     CHECK(!decodeMidi2ChannelVoice(0x40F03C00u, 0xFFFFFFFFu, event));
 }
+
+
+TEST(midi2_input_queue_preserves_order_and_bounds_overflow) {
+    Midi2InputQueue queue;
+    Midi2Event input;
+    input.type = Midi2EventType::NoteOn;
+    input.note = 60;
+    for (uint32_t i = 0; i < Midi2InputQueue::kCapacity; ++i) {
+        input.note = static_cast<uint8_t>(i & 0x7F);
+        CHECK(queue.push(input));
+    }
+    CHECK(!queue.push(input));
+    CHECK_EQ(queue.dropped(), 1u);
+    Midi2Event output;
+    for (uint32_t i = 0; i < Midi2InputQueue::kCapacity; ++i) {
+        CHECK(queue.pop(output));
+        CHECK_EQ(output.note, static_cast<uint8_t>(i & 0x7F));
+    }
+    CHECK(!queue.pop(output));
+}
