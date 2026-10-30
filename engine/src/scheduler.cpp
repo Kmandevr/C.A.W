@@ -27,6 +27,7 @@ WorkerPool::~WorkerPool() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stopping_ = true;
+        workerLimit_ = static_cast<uint32_t>(workers_.size()); // drain accepted work during orderly shutdown
     }
     wake_.notify_all();
     for (std::thread& worker : workers_) if (worker.joinable()) worker.join();
