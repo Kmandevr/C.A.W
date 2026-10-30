@@ -2,7 +2,7 @@
 title: How it works
 summary: The path a sound takes from a .caw file to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
 covers: [engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/src/builtins.cpp, app/lib/engine/engine.dart, app/lib/model/app_state.dart]
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # How it works
@@ -21,6 +21,8 @@ The map for an agent new to the repo. It shows how the parts connect; the detail
 8. **Audio callback.** miniaudio (`engine/platform/audio_miniaudio.cpp`) calls `Engine::process`. For each layer in dependency order, the generator's `Instance::process` (`engine/src/vm.cpp`) runs every op over a whole block, then the effects run on its output. Pattern layers run the generator once per voice, with `note`, `gate` and the rest set per note. Then the mix, pan, the DC blocker and the limiter.
 9. **Built-ins.** Every function a module calls is a row in `kBuiltins` (`engine/src/builtins.cpp`): its code, its state size and its docs. Library modules in `engine/lib/*.caw` are written in the module language and compiled in.
 10. **Back to the screen.** The app reads meters and scopes through `caw_engine_meters`, `caw_engine_layer_meter` and `caw_engine_scope`, polled by `app/lib/model/poller.dart` only while something can change.
+
+`AppState` also owns transport timing. Tap Tempo keeps up to five increasing tap timestamps, starts a new measurement after a pause longer than two seconds, averages the intervals and clamps the resulting project tempo to 20–400 BPM. The project update then follows the normal sync and save path.
 
 ## Export
 
