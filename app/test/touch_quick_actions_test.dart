@@ -41,7 +41,7 @@ void main() {
           defaults: Keymap.defaults(registry),
           registry: registry,
           onRun: (_) {},
-          onSave: () async => saves++,
+          onSave: () async { saves++; },
         ),
       ),
     ));
