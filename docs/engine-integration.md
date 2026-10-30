@@ -62,7 +62,7 @@ Library results should expose documentation, previews, dependencies, compatible 
 
 ## Shared adaptive execution
 
-The host supplies measured hardware facts and current pressure to `caw_execution_plan`. The app, CLI and add-ons should all use the same workload vocabulary rather than each inventing a different policy. The current C ABI planner is pure advice only: it does not probe the OS or run worker threads.
+The native core now exposes `caw_hardware_profile_detect` for a best-effort core-count, conservative memory-budget and CPU SIMD snapshot on supported desktop and Android platforms. The host supplies live battery/thermal pressure and passes the resulting profile to `caw_execution_plan`. The app, CLI and add-ons should all use the same workload vocabulary rather than each inventing a different policy. The current C ABI planner is pure advice only: it does not probe the OS or run worker threads.
 
 The current native core now includes a bounded worker pool with fixed-capacity submission, foreground/offline/background priorities, worker-budget controls and pending-job cancellation. The workload planner and pool are still separate primitives: the host does not yet feed live platform pressure into the pool, and compile/render/analysis jobs are not all routed through it. The eventual integration adds memory limits, cache budgets and progress reporting. A project render, library preview, waveform analysis, module compile and package build are jobs with explicit workload classes. Interactive audio remains on its real-time-safe path. Background work yields to foreground use and thermal/battery pressure. Offline export can use more resources when the user permits it.
 
