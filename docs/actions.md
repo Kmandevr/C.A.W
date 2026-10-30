@@ -7,7 +7,7 @@ updated: 2026-10-30
 
 # Actions, keys and macros
 
-**[Fact]** Built (2026-10-28): the action catalogue, keymaps, macros and Vim core (`app/lib/actions/`) and the key router that runs them in the app ([app](app.md)). Still a draft for the owner to change; editing keys in the action list isn't built yet. The roll's toolbar can be customised (2026-10-29). The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
+**[Fact]** Built (2026-10-28): the action catalogue, keymaps, macros and Vim core (`app/lib/actions/`) and the key router that runs them in the app ([app](app.md)). Still a draft for the owner to change; editing keys in the action list isn't built yet. The roll toolbar and phone Quick Actions strips can be customised (2026-10-30). The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
 
 ## How it works
 
