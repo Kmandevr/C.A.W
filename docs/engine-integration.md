@@ -50,7 +50,7 @@ A module package needs:
 - dependency manifest and content hash;
 - test vectors or deterministic render fixtures where practical.
 
-The engine owns parameter values, state validation, graph preparation and processing. A custom UI is only a view/controller over the public parameter/event interface. A module must remain usable with generated controls if its custom UI is unavailable. UI code never runs on the audio callback.
+The engine owns parameter values, state validation, graph preparation and processing. A first prepared stereo graph executor now runs native processors in topological order without allocating or locking in `process`; the current runtime supports one stereo audio input/output per node. It is not yet connected to the existing project mixer, and non-audio runtime ports and graph hot-swap remain future work. A custom UI is only a view/controller over the public parameter/event interface. A module must remain usable with generated controls if its custom UI is unavailable. UI code never runs on the audio callback.
 
 Third-party native add-ons are executable code and therefore a separate trust boundary. Do not load them into the core process by default. Require explicit user installation/approval, signature/hash verification where available, declared permissions, compatibility checks and a crash-isolation strategy. Downloaded .caw source remains sandboxed with bounded CPU, memory, loops, source size and call depth.
 
