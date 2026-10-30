@@ -212,12 +212,12 @@ void runWt(const CallArgs& c) {
         const double pos = clampd(finiteOr0(c.a[2][i]), 0.0, 1.0) * last;
         const int f0 = static_cast<int>(pos), f1 = f0 < last ? f0 + 1 : last;
         const double mix = pos - f0;
+        const double warp = clampd(finiteOr0(c.a[5][i]), -0.95, 0.95);
         const float* a = t.frame(level, f0);
         const float* b = t.frame(level, f1);
         double acc = 0.0;
         for (int v = 0; v < uni; ++v) {
             double phase = ph[v];
-            const double warp = clampd(finiteOr0(c.a[5][i]), -0.95, 0.95);
             if (warp != 0.0) phase += warp * detSin(kTwoPi * phase) / kTwoPi;
             const double x = phase * size;
             const int k = static_cast<int>(x);
