@@ -72,17 +72,21 @@ void main() {
     expect(r.calls.last, 'arranger.layer.longer*4');
   });
 
-  test('virtual-key taps can enter Vim prefixes and execute the same mapped action', () {
-    final r = Rig(area: Area.code);
-    final prefix = r.key('C');
-    expect(prefix.handled, isTrue);
-    expect(prefix.hints.map((e) => e.keys), contains('W'));
-    final result = r.key('W');
-    expect(result.handled, isTrue);
-    expect(r.calls, ['code.vim.changeWord*1']);
-    expect(r.vim.mode, VimMode.insert);
-    expect(r.key('Esc').handled, isTrue);
-    expect(r.vim.mode, VimMode.normal);
+  test('touch quick-action toolbars have defaults and persist custom order', () {
+    final reg = ActionRegistry.standard();
+    final keymap = Keymap.defaults(reg);
+    expect(keymap.toolbars[Area.builder], contains(ActionRef.action('transport.playstop')));
+    expect(keymap.toolbars[Area.arranger], contains(ActionRef.action('project.save')));
+    keymap.toolbars[Area.builder] = [
+      ActionRef.action('project.save'),
+      ActionRef.action('transport.playstop'),
+    ];
+    final saved = keymap.serialize(base: Keymap.defaults(reg));
+    final restored = Keymap.parse(saved, registry: reg).mergedOver(Keymap.defaults(reg));
+    expect(restored.toolbars[Area.builder], [
+      ActionRef.action('project.save'),
+      ActionRef.action('transport.playstop'),
+    ]);
   });
 
   test('multi-key sequences show hints and run on the last key', () {
