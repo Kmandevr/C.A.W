@@ -45,7 +45,7 @@ macro "Run of four"
   roll.notes.up
 ```
 
-- **Phone without a keyboard:** the default toolbar holds the most-used actions, and you swap in your own.
+- **Phone without a keyboard:** the Vim strip has a collapsible **KEYS** panel. Its virtual keys feed the same keymap path as hardware input, so prefixes (`C` then `W`), counts and macros work as tap sequences. The panel changes keys for the active editor, keeps an explicit Escape button, and scrolls on narrow screens. Insert mode still uses the Android text keyboard; the virtual keys are for commands, not text composition.
 
 ## Vim-style control
 
