@@ -381,3 +381,22 @@ TEST(effects_are_numbered_across_the_patch_and_mono_patches_steal) {
     for (int i = 0; i < 1024; i += 64) e.process(lf.data() + i, rf.data() + i, 64);
     CHECK_NEAR(lf[500] / std::cos(kPi / 4.0), 0.1, 1e-6);
 }
+
+
+TEST(synth_oscillator_phase_warp_is_exposed_and_changes_the_waveform) {
+    const std::string plain = kPatch + "osc a table saw warp 0\n";
+    const std::string warped = kPatch + "osc a table saw warp 0.8\n";
+    const SynthResult a = translateSynth(plain);
+    const SynthResult b = translateSynth(warped);
+    CHECK(a.ok);
+    CHECK(b.ok);
+    CHECK(b.generator.find("a_warp") != std::string::npos);
+    CHECK(!translateSynth(kPatch + "osc a warp 1\n").ok);
+    const auto dry = playSynth(plain, 4096);
+    const auto shaped = playSynth(warped, 4096);
+    CHECK_EQ(dry.size(), shaped.size());
+    double difference = 0;
+    for (size_t i = 0; i < dry.size(); ++i)
+        difference = std::max(difference, std::fabs(dry[i] - shaped[i]));
+    CHECK(difference > 1e-4);
+}
