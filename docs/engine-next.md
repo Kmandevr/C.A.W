@@ -34,6 +34,8 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 
 ## 3. Engine architecture
 
+**Owner decision (2026-10-30): one engine, modular by construction.** The engine must behave as one coherent system; modularity is not a bolt-on option or a collection of loosely connected sub-engines. Its module boundaries are the architecture itself. The app, project runtime, synth, add-ons, CLI and future plugin wrappers all use the same module identities, typed ports, parameter/state model, processing semantics and dependency rules. Hosts may omit unused capabilities from a build, but they do not get separate competing implementations or incompatible module models.
+
 Keep a portable C++20 engine independent of Flutter, OS APIs, audio backends and external hosts. The app, CLI, offline renderer and future plugin wrappers are hosts of the same engine.
 
 Core layers:
@@ -44,7 +46,7 @@ Core layers:
 - **Voice/expression engine:** polyphony, per-note state, MIDI events, MPE-style expression and shared post-voice processing.
 - **Existing .caw compiler and VM:** preserve as a first-class, sandboxed creation path. Do not replace it with a mandatory visual graph.
 - **Asset/project layer:** versioned serialization, local/global references, dependency resolution and portability.
-- **Host/API layer:** versioned C ABI for Flutter, CLI, future plugins and other clients. No UI types or C++ ABI cross this boundary.
+- **Host/API layer:** versioned C ABI for Flutter, CLI, future plugins and other clients. No UI types or C++ ABI cross this boundary.\n- **Unified module contract:** typed port metadata, stable IDs, parameter descriptors, state/version rules and a borrowed-buffer processing contract shared by built-in and third-party modules.
 
 ### Stereo and typed connections
 
