@@ -1,7 +1,7 @@
 // Tests for pinned, scope-aware project dependency resolution.
 #include "test.h"
 
-#include "dependency.h"
+#include "dependency.h"\n#include "project.h"
 
 using namespace caw;
 
@@ -69,4 +69,30 @@ TEST(dependencies_reject_empty_ids_and_unversioned_references) {
     const auto report = resolveDependencies(refs, {});
     CHECK_EQ(report.entries[0].status, DependencyStatus::InvalidReference);
     CHECK_EQ(report.entries[1].status, DependencyStatus::InvalidReference);
+}
+
+TEST(project_json_loads_pinned_asset_dependencies) {
+    const char* json = R"({"caw_project":1,"dependencies":[
+        {"id":"caw.fx.delay","version":"2.1.0","hash":"sha256:abc","scope":"addon","interface_version":1},
+        {"id":"factory.wavetable.saw","version":"1.0","scope":"factory","interface_version":1,"optional":true}
+    ]})";
+    ProjectSpec project;
+    std::string error;
+    CHECK(parseProject(json, project, error));
+    CHECK_EQ(project.dependencies.size(), 2u);
+    CHECK_EQ(project.dependencies[0].stableId, std::string("caw.fx.delay"));
+    CHECK_EQ(project.dependencies[0].scope, AssetScope::AddOn);
+    CHECK_EQ(project.dependencies[0].contentHash, std::string("sha256:abc"));
+    CHECK(project.dependencies[1].optional);
+    CHECK_EQ(project.dependencies[1].scope, AssetScope::Factory);
+}
+
+TEST(project_json_rejects_invalid_dependency_scope_and_unpinned_versions) {
+    ProjectSpec project;
+    std::string error;
+    CHECK(!parseProject(R"({"caw_project":1,"dependencies":[{"id":"asset","version":"1","scope":"somewhere"}]})", project, error));
+    CHECK(error.find("scope must be") != std::string::npos);
+    error.clear();
+    CHECK(!parseProject(R"({"caw_project":1,"dependencies":[{"id":"asset","scope":"project"}]})", project, error));
+    CHECK(error.find("stable id, exact version") != std::string::npos);
 }
