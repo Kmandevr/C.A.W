@@ -21,10 +21,14 @@ TEST(midi2_decodes_per_note_pitch_and_signed_bend) {
     CHECK(decodeMidi2ChannelVoice(0x40603C00u, 0x40000000u, event));
     CHECK(event.type == Midi2EventType::PerNotePitch);
     CHECK_EQ(event.note, 60);
-    CHECK_NEAR(event.value, 0.5, 1e-8);
-    CHECK(decodeMidi2ChannelVoice(0x40E00000u, 0x80000000u, event));
+    CHECK_NEAR(event.value, -0.5, 1e-8);
+    CHECK(decodeMidi2ChannelVoice(0x40E00000u, 0x00000000u, event));
     CHECK(event.type == Midi2EventType::PitchBend);
     CHECK_NEAR(event.value, -1.0, 1e-12);
+    CHECK(decodeMidi2ChannelVoice(0x40E00000u, 0x80000000u, event));
+    CHECK_NEAR(event.value, 0.0, 1e-12);
+    CHECK(decodeMidi2ChannelVoice(0x40E00000u, 0xFFFFFFFFu, event));
+    CHECK_NEAR(event.value, 1.0, 1e-8);
 }
 
 TEST(midi2_rejects_other_ump_types_and_unknown_statuses) {
