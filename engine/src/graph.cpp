@@ -76,6 +76,7 @@ void GraphExecutor::reset() noexcept {
     processors_.clear();
     left_.clear();
     right_.clear();
+    zero_.clear();
     inputSource_.clear();
     hasInput_.clear();
     hasOutput_.clear();
@@ -104,6 +105,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         processors_.reserve(nodes.size());
         left_.resize(nodes.size());
         right_.resize(nodes.size());
+        zero_.assign(maxFrames, 0.0f);
         inputSource_.assign(nodes.size(), -1);
         hasInput_.assign(nodes.size(), 0);
         hasOutput_.assign(nodes.size(), 0);
@@ -163,8 +165,8 @@ bool GraphExecutor::process(const float* inputLeft, const float* inputRight,
                 inL = left_[static_cast<size_t>(source)].data();
                 inR = right_[static_cast<size_t>(source)].data();
             } else {
-                inL = const_cast<float*>(inputLeft);
-                inR = const_cast<float*>(inputRight);
+                inL = const_cast<float*>(inputLeft ? inputLeft : zero_.data());
+                inR = const_cast<float*>(inputRight ? inputRight : zero_.data());
             }
         }
         float* outL = hasOutput_[nodeIndex] ? left_[nodeIndex].data() : nullptr;
