@@ -1,6 +1,7 @@
 // Typed, deterministic DSP graph validation and compilation order. Control-thread only.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -88,6 +89,25 @@ private:
     uint32_t maxFrames_ = 0;
     double sampleRate_ = 48000.0;
     bool ready_ = false;
+};
+
+// Single-producer control-thread publication and single audio-thread adoption.
+// The control thread owns published executors until publish succeeds, then reclaims
+// replaced executors with collectRetired(). Never destroy an executor on the audio thread.
+class GraphRuntime {
+public:
+    bool publish(GraphExecutor* prepared) noexcept;
+    bool process(const float* inputLeft, const float* inputRight,
+                 float* outputLeft, float* outputRight, uint32_t frames) noexcept;
+    GraphExecutor* collectRetired() noexcept;
+    // Call only after the audio callback has stopped.
+    GraphExecutor* takeActiveAfterStop() noexcept;
+    GraphExecutor* takePendingAfterStop() noexcept;
+
+private:
+    GraphExecutor* active_ = nullptr; // audio-thread only except after stop
+    std::atomic<GraphExecutor*> pending_{nullptr};
+    std::atomic<GraphExecutor*> retired_{nullptr};
 };
 
 }  // namespace caw
