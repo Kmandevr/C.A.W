@@ -463,7 +463,7 @@ std::string generatorCode(const Patch& p) {
     auto modExpr = [&](const std::string& destination) {
         std::string expr;
         for (const Mod& m : p.mods) if (m.destination == destination) {
-            expr += (expr.empty() ? "" : " + ") + "(" + m.source + " * " + num(m.amount) + ")";
+            expr += (expr.empty() ? std::string() : " + ") + "(" + m.source + " * " + num(m.amount) + ")";
         }
         return expr.empty() ? std::string("0") : expr;
     };
