@@ -1,6 +1,7 @@
 // Control-thread registry for native module factories. Descriptors must have static lifetime.
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -22,7 +23,7 @@ public:
     bool add(const ModuleDescriptor& descriptor, ModuleFactory factory);
     const ModuleDescriptor* find(std::string_view id) const noexcept;
     std::unique_ptr<ModuleProcessor> create(std::string_view id) const noexcept;
-    size_t size() const noexcept { return registrations_.size(); }
+    std::size_t size() const noexcept { return registrations_.size(); }
 
 private:
     std::vector<ModuleRegistration> registrations_;
