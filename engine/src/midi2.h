@@ -1,6 +1,8 @@
 // Realtime-safe decoder for two-word MIDI 2.0 Channel Voice UMP messages.
 #pragma once
 
+#include <array>
+#include <atomic>
 #include <cstdint>
 
 namespace caw {
@@ -23,5 +25,22 @@ struct Midi2Event {
 // Decodes one MIDI 2.0 Channel Voice (message type 0x4) UMP.
 // Returns false for other message types or unsupported statuses. No allocation.
 bool decodeMidi2ChannelVoice(uint32_t word0, uint32_t word1, Midi2Event& out) noexcept;
+
+class Midi2InputQueue {
+public:
+    static constexpr uint32_t kCapacity = 1024;
+    static_assert((kCapacity & (kCapacity - 1)) == 0, "MIDI queue capacity must be a power of two");
+
+    // One platform MIDI producer, one audio-thread consumer. Full queues drop newest events.
+    bool push(const Midi2Event& event) noexcept;
+    bool pop(Midi2Event& event) noexcept;
+    uint32_t dropped() const noexcept { return dropped_.load(std::memory_order_relaxed); }
+
+private:
+    std::array<Midi2Event, kCapacity> events_{};
+    alignas(64) std::atomic<uint32_t> write_{0};
+    alignas(64) std::atomic<uint32_t> read_{0};
+    std::atomic<uint32_t> dropped_{0};
+};
 
 }  // namespace caw
