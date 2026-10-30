@@ -60,6 +60,11 @@ class AppState extends ChangeNotifier {
   final ValueNotifier<int> values = ValueNotifier(0);
   EngineMeters meters = const EngineMeters();
 
+  // Shared tap history lets the on-screen control and the global T action use identical timing.
+  final List<DateTime> _tempoTaps = [];
+  int get tempoTapCount => _tempoTaps.length;
+
+
   /// Set when an overload switched light mode on, so the app can say so once.
   bool lightTurnedOnBySelf = false;
   List<LayerMeterValue> layerMeters = const [];
@@ -264,6 +269,28 @@ class AppState extends ChangeNotifier {
   }
 
   // ---------- transport ----------
+
+  /// Records a tempo tap. A pause over two seconds starts a fresh measurement.
+  /// [at] is injectable for deterministic tests; normal callers use the current time.
+  void tapTempo({DateTime? at}) {
+    final now = at ?? DateTime.now();
+    if (_tempoTaps.isNotEmpty && now.difference(_tempoTaps.last) > const Duration(seconds: 2)) {
+      _tempoTaps.clear();
+    }
+    if (_tempoTaps.isNotEmpty && !now.isAfter(_tempoTaps.last)) return;
+    _tempoTaps.add(now);
+    if (_tempoTaps.length > 5) _tempoTaps.removeAt(0);
+    if (_tempoTaps.length >= 2) {
+      final elapsed = now.difference(_tempoTaps.first).inMicroseconds;
+      final intervals = _tempoTaps.length - 1;
+      if (elapsed > 0) {
+        final bpm = (60000000.0 * intervals / elapsed).clamp(20.0, 400.0);
+        editProject((p) => p.bpm = double.parse(bpm.toStringAsFixed(1)));
+        return;
+      }
+    }
+    notifyListeners();
+  }
 
   void togglePlay() {
     final e = engine;
