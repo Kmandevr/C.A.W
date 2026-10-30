@@ -44,12 +44,14 @@ TEST(scheduler_respects_worker_limit_and_cancels_queued_work) {
 
 TEST(scheduler_rejects_null_jobs_and_caps_worker_count) {
     WorkerPool pool(WorkerPool::kMaxWorkers + 10);
+    pool.setWorkerLimit(0);
     CHECK(!pool.submit(JobPriority::Foreground, nullptr, nullptr));
     std::atomic<int> value{0};
     TaskState a{&value, 1};
     for (uint32_t i = 0; i < WorkerPool::kQueueCapacity; ++i)
         CHECK(pool.submit(JobPriority::Background, addTask, &a));
     CHECK(!pool.submit(JobPriority::Background, addTask, &a));
+    pool.setWorkerLimit(WorkerPool::kMaxWorkers);
     pool.waitIdle();
     CHECK_EQ(value.load(), static_cast<int>(WorkerPool::kQueueCapacity));
 }
