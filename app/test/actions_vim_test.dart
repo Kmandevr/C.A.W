@@ -72,6 +72,19 @@ void main() {
     expect(r.calls.last, 'arranger.layer.longer*4');
   });
 
+  test('virtual-key taps can enter Vim prefixes and execute the same mapped action', () {
+    final r = Rig(area: Area.code);
+    final prefix = r.key('C');
+    expect(prefix.handled, isTrue);
+    expect(prefix.hints.map((e) => e.keys), contains('W'));
+    final result = r.key('W');
+    expect(result.handled, isTrue);
+    expect(r.calls, ['code.vim.changeWord*1']);
+    expect(r.vim.mode, VimMode.insert);
+    expect(r.key('Esc').handled, isTrue);
+    expect(r.vim.mode, VimMode.normal);
+  });
+
   test('multi-key sequences show hints and run on the last key', () {
     final r = Rig(area: Area.code);
     final h = r.key('C');
