@@ -23,3 +23,14 @@ TEST(execution_c_api_rejects_invalid_inputs) {
     CHECK_EQ(caw_execution_plan(&hw, nullptr, &out), 1);
     CHECK_EQ(caw_execution_plan(&hw, &req, nullptr), 1);
 }
+
+TEST(hardware_profile_c_api_detects_bounded_host_capabilities) {
+    CawHardwareProfile profile{};
+    CHECK_EQ(caw_hardware_profile_detect(&profile), 0);
+    CHECK(profile.logical_cores >= 1);
+    CHECK(profile.memory_budget_mib >= 64);
+    CHECK(profile.memory_budget_mib <= 8192);
+    CHECK(profile.supports_simd == 0 || profile.supports_simd == 1);
+    CHECK_EQ(profile.supports_gpu_compute, 0);
+    CHECK_EQ(caw_hardware_profile_detect(nullptr), 1);
+}
