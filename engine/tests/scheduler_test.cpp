@@ -1,0 +1,55 @@
+// Tests for bounded scheduling, priority ordering, worker limits and cancellation.
+#include "test.h"
+
+#include "scheduler.h"
+
+#include <atomic>
+#include <chrono>
+#include <thread>
+
+using namespace caw;
+
+namespace {
+struct TaskState { std::atomic<int>* value; int add; };
+void addTask(void* p) noexcept {
+    auto* state = static_cast<TaskState*>(p);
+    state->value->fetch_add(state->add, std::memory_order_relaxed);
+}
+}
+
+TEST(scheduler_runs_jobs_and_waits_for_idle) {
+    WorkerPool pool(2);
+    std::atomic<int> value{0};
+    TaskState a{&value, 2}, b{&value, 3}, c{&value, 5};
+    CHECK(pool.submit(JobPriority::Background, addTask, &a));
+    CHECK(pool.submit(JobPriority::Foreground, addTask, &b));
+    CHECK(pool.submit(JobPriority::Offline, addTask, &c));
+    pool.waitIdle();
+    CHECK_EQ(value.load(), 10);
+    CHECK_EQ(pool.queued(), 0u);
+    CHECK_EQ(pool.active(), 0u);
+}
+
+TEST(scheduler_respects_worker_limit_and_cancels_queued_work) {
+    WorkerPool pool(2);
+    pool.setWorkerLimit(0);
+    std::atomic<int> value{0};
+    TaskState a{&value, 1}, b{&value, 10};
+    CHECK(pool.submit(JobPriority::Background, addTask, &a));
+    CHECK(pool.submit(JobPriority::Background, addTask, &b));
+    CHECK_EQ(pool.cancelPending(), 2u);
+    pool.waitIdle();
+    CHECK_EQ(value.load(), 0);
+}
+
+TEST(scheduler_rejects_null_jobs_and_caps_worker_count) {
+    WorkerPool pool(WorkerPool::kMaxWorkers + 10);
+    CHECK(!pool.submit(JobPriority::Foreground, nullptr, nullptr));
+    std::atomic<int> value{0};
+    TaskState a{&value, 1};
+    for (uint32_t i = 0; i < WorkerPool::kQueueCapacity; ++i)
+        CHECK(pool.submit(JobPriority::Background, addTask, &a));
+    CHECK(!pool.submit(JobPriority::Background, addTask, &a));
+    pool.waitIdle();
+    CHECK_EQ(value.load(), static_cast<int>(WorkerPool::kQueueCapacity));
+}
