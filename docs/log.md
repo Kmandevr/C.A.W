@@ -1,5 +1,3 @@
-- 2026-10-30: Added touchscreen Vim controls in the active code editor, including mode switches, repeat, macro record/stop, action list, and an editable command line with completion chips (Issue #22). Android layout/input verification pending.
-
 ---
 title: Log
 summary: Dated history of changes, newest first.
@@ -8,6 +6,7 @@ updated: 2026-10-30
 
 # Log
 
+- 2026-10-30: Briefly added touchscreen Vim controls and an editable command line (Issue #22); the touch controls were later removed after the owner clarified Vim is for attached physical keyboards.
 - 2026-10-30: Replaced the proposed touchscreen Vim key panel with customizable touch quick actions in Sounds, Tracks and Export. Actions run directly, and per-area toolbars reuse the persistent keymap format; Vim remains for attached physical keyboards (Issue #23).
 
 - 2026-10-30: The piano-roll toolbar now exposes touch-friendly Copy and Paste for selected notes; dragging a selected note moves the entire group without accidentally resizing it (Issue #21).
