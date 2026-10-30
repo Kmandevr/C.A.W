@@ -119,4 +119,19 @@ void WorkerPool::workerLoop(uint32_t index) noexcept {
     }
 }
 
+AdaptiveWorkerPool::AdaptiveWorkerPool(HardwareProfile hardware, uint32_t maxWorkers)
+    : hardware_(hardware),
+      capacity_(std::clamp<uint32_t>(maxWorkers, 1, WorkerPool::kMaxWorkers)),
+      pool_(capacity_) {
+    ExecutionRequest initial;
+    initial.workload = WorkloadClass::BackgroundGeneration;
+    apply(initial);
+}
+
+ExecutionPlan AdaptiveWorkerPool::apply(const ExecutionRequest& request) noexcept {
+    plan_ = makeExecutionPlan(hardware_, request);
+    pool_.setWorkerLimit(std::min<uint32_t>(capacity_, plan_.workerThreads));
+    return plan_;
+}
+
 }  // namespace caw
