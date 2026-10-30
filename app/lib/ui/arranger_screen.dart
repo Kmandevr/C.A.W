@@ -160,7 +160,6 @@ class _ProjectSettings extends StatefulWidget {
 }
 
 class _ProjectSettingsState extends State<_ProjectSettings> {
-  final List<DateTime> _taps = [];
   late final TextEditingController _seed;
 
   static const keys = [
@@ -187,17 +186,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
     super.dispose();
   }
 
-  void _tap() {
-    final now = DateTime.now();
-    if (_taps.isNotEmpty && now.difference(_taps.last).inMilliseconds > 2000) _taps.clear();
-    _taps.add(now);
-    if (_taps.length > 5) _taps.removeAt(0);
-    if (_taps.length >= 2) {
-      final ms = _taps.last.difference(_taps.first).inMicroseconds / 1000.0 / (_taps.length - 1);
-      final bpm = (60000 / ms).clamp(20.0, 400.0);
-      widget.state.editProject((p) => p.bpm = double.parse(bpm.toStringAsFixed(1)));
-    }
-  }
+  void _tap() => widget.state.tapTempo();
 
   @override
   Widget build(BuildContext context) {
@@ -219,9 +208,9 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
             icon: const Icon(Icons.add)),
         const SizedBox(width: 8),
         OutlinedButton(
-          style: OutlinedButton.styleFrom(foregroundColor: Neon.blue, minimumSize: const Size(72, 48)),
+          style: OutlinedButton.styleFrom(foregroundColor: Neon.blue, minimumSize: const Size(88, 52)),
           onPressed: _tap,
-          child: const Text('TAP', style: TextStyle(fontWeight: FontWeight.w800)),
+          child: const Text('TAP TEMPO', style: TextStyle(fontWeight: FontWeight.w800)),
         ),
       ]),
       const SizedBox(height: 10),
