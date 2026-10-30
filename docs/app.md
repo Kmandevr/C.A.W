@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: its three areas (Sounds, Tracks, Export), how it talks to the engine, where projects are saved, and how CI builds and signs it.
 covers: [app/]
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # App
