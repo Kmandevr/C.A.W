@@ -107,7 +107,7 @@ private:
 struct Osc {
     bool on = false;
     std::string table = "saw";
-    double level = 0.8, unison = 1, detune = 0.2, pos = 0, octave = 0, semi = 0, fine = 0;
+    double level = 0.8, unison = 1, detune = 0.2, pos = 0, warp = 0, octave = 0, semi = 0, fine = 0;
 };
 struct Sub {
     bool on = false;
@@ -229,7 +229,7 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
             else if (key.text == "octave") o.octave = f.number(key, -4, 4);
             else if (key.text == "semi") o.semi = f.number(key, -24, 24);
             else if (key.text == "fine") o.fine = f.number(key, -100, 100);
-            else if (key.text == "warp") later("warp");
+            else if (key.text == "warp") o.warp = f.number(key, -0.95, 0.95);
             else f.unknown(key, "table, level, unison, detune, pos, octave, semi and fine");
         }
         return;
@@ -494,9 +494,10 @@ std::string generatorCode(const Patch& p) {
         c += param(n + "_level", o.level, 0, 1, "Osc " + N + " level");
         c += param(n + "_pos", o.pos, 0, 1, "Osc " + N + " position in the table");
         c += param(n + "_detune", o.detune, 0, 1, "Osc " + N + " unison spread");
+        c += param(n + "_warp", o.warp, -0.95, 0.95, "Osc " + N + " phase distortion");
         c += param(n + "_pitch", o.octave * 12 + o.semi + o.fine / 100, -72, 72, "Osc " + N + " pitch in semitones", 0.01);
         c += "fn osc_" + n + "(f) = wt(table." + o.table + ", f * pow(2, (" + n + "_pitch + (" + modExpr(n + "_pitch") + ")) / 12), clamp(" + n + "_pos + (" + modExpr(n + "_pos") + "), 0, 1), " +
-             num(o.unison) + ", " + n + "_detune) * clamp(" + n + "_level + (" + modExpr(n + "_level") + "), 0, 1)\n";
+             num(o.unison) + ", " + n + "_detune, " + n + "_warp) * clamp(" + n + "_level + (" + modExpr(n + "_level") + "), 0, 1)\n";
         sources.push_back(n);
     }
     if (p.sub.on) {
