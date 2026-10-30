@@ -12,7 +12,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 - Portable deterministic workload policy for audition, preview, background generation, offline render and idle workloads.
 - Hardware profile input and C ABI adapter for workload planning, plus a native best-effort probe for online cores, conservative available-memory budget and CPU SIMD support on Windows, macOS, Linux and Android. Thermal/battery pressure remains host supplied; GPU compute is reported unavailable until a real kernel backend exists.
-- First-class internal module descriptors with stable IDs, typed ports, parameter metadata and validation.
+- First-class internal module descriptors with stable IDs, typed ports, parameter metadata and validation, plus framework-neutral generated UI controls and custom-view identifiers with parameter/range validation.
 - Stereo-native borrowed-buffer processor contract. This is an interface contract; it is not yet wired into the existing VM/mixer as a universal processor path.
 - Typed DSP graph validation and deterministic topological ordering, including cycle, direction, port type, channel layout and duplicate-input checks.\n- Bounded, fixed-capacity non-real-time worker pool with priority scheduling, worker-budget controls, queue rejection and pending-job cancellation. It is not yet connected to app/render/analysis jobs or the adaptive workload policy.\n- Exact, scope-aware dependency resolver for project-local, user-global, factory and add-on assets, including pinned version, content hash, interface version, optional references and ambiguity detection. Project JSON now parses and stores these dependency references; matching them against the installed library and surfacing repair actions remain unimplemented.
 - Public native module C ABI header and SDK contract for trusted add-ons. Dynamic loading, host adapter, state lifecycle and package signing remain unimplemented.
@@ -29,7 +29,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Drawn LFO curves, oscillator warp modes and the complete custom/imported table draw/render pipeline.
 - MIDI 2.0 live input/output and full per-note controller/attribute mapping. File/clip support is not equivalent to live MIDI 2.0 device support.
 - Project manifest writing/round-tripping, dependency snapshots, content-hash generation and library/app integration for the new resolver.
-- Declarative and custom module UI schema/runtime.
+- App-side rendering/runtime for declarative and custom module interfaces.
 - Dynamic native module loading, package verification, crash containment and optional out-of-process isolation.
 - CLAP/VST3 export wrappers.
 
