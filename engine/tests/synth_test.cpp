@@ -227,6 +227,41 @@ TEST(synth_patches_report_errors_at_their_line) {
     CHECK(ok.generator.find("voices: 4") != std::string::npos);
 }
 
+
+TEST(synth_supports_three_envelopes_four_lfos_macros_and_modulation_routes) {
+    const std::string patch = kPatch +
+        "osc a table saw\\n"
+        "filter 1 lowpass cutoff 1200\\n"
+        "env 2 attack 0.1 decay 0.4 sustain 0.3 release 0.2\\n"
+        "env 3 attack 0.01 decay 0.2 sustain 0.8 release 0.3\\n"
+        "lfo 1 shape sine rate 2 phase 0.25\\n"
+        "lfo 2 shape tri rate 1/4\\n"
+        "lfo 3 shape saw rate 4\\n"
+        "lfo 4 shape random rate 0.5\\n"
+        "macro 1 Bright 0.5\\n"
+        "macro 2 Width 0.7\\n"
+        "mod env 2 -> filter 1 cutoff 0.4\\n"
+        "mod lfo 1 -> osc a pos 0.3\\n"
+        "mod macro 1 -> osc a pitch 0.2\\n"
+        "mod vel -> volume 0.5\\n";
+    SynthResult translated = translateSynth(patch);
+    CHECK(translated.ok);
+    if (!translated.ok) return;
+    CHECK(translated.generator.find("let env2 = env.adsr") != std::string::npos);
+    CHECK(translated.generator.find("let env3 = env.adsr") != std::string::npos);
+    CHECK(translated.generator.find("lfo.sine") != std::string::npos);
+    CHECK(translated.generator.find("lfo.tri") != std::string::npos);
+    CHECK(translated.generator.find("lfo.saw") != std::string::npos);
+    CHECK(translated.generator.find("lfo.random") != std::string::npos);
+    CHECK(translated.generator.find("macro1") != std::string::npos);
+    CHECK(translated.generator.find("macro2") != std::string::npos);
+    CHECK(translated.generator.find("env2 * 0.4") != std::string::npos);
+    CHECK(translated.generator.find("lfo1 * 0.3") != std::string::npos);
+    CHECK(translated.generator.find("macro1 * 0.2") != std::string::npos);
+    CHECK(translated.generator.find("vel * 0.5") != std::string::npos);
+    CHECK(compileModule(translated.generator).program != nullptr);
+}
+
 TEST(a_synth_patch_compiles_to_a_voice_with_its_effects) {
     CompileResult r = compileModule(kPatch +
                                     "osc a table basic unison 5 detune 0.3\nsub level 0.3\nfilter 1 lowpass cutoff 900\n"
