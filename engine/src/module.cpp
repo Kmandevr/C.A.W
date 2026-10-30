@@ -32,6 +32,23 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
         for (uint32_t j = 0; j < i; ++j)
             if (d.parameters[j].id == p.id) return ModuleValidation::DuplicateParameterId;
     }
+    if (d.uiControlCount && !d.uiControls) return ModuleValidation::MissingUiControlArray;
+    for (uint32_t i = 0; i < d.uiControlCount; ++i) {
+        const UiControlDescriptor& ui = d.uiControls[i];
+        if (ui.id.empty()) return ModuleValidation::EmptyUiControlId;
+        if (!std::isfinite(ui.minimum) || !std::isfinite(ui.maximum) || ui.minimum > ui.maximum)
+            return ModuleValidation::InvalidUiControlRange;
+        for (uint32_t j = 0; j < i; ++j)
+            if (d.uiControls[j].id == ui.id) return ModuleValidation::DuplicateUiControlId;
+        if (!ui.parameterId.empty()) {
+            const ParameterDescriptor* parameter = nullptr;
+            for (uint32_t j = 0; j < d.parameterCount; ++j)
+                if (d.parameters[j].id == ui.parameterId) parameter = &d.parameters[j];
+            if (!parameter) return ModuleValidation::UiControlMissingParameter;
+            if (ui.minimum < parameter->minimum || ui.maximum > parameter->maximum)
+                return ModuleValidation::InvalidUiControlRange;
+        }
+    }
     return ModuleValidation::Ok;
 }
 
