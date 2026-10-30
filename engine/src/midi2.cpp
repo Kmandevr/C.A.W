@@ -30,10 +30,7 @@ bool decodeMidi2ChannelVoice(uint32_t w0, uint32_t w1, Midi2Event& out) noexcept
             break;
         case 0x6: {
             event.type = Midi2EventType::PerNotePitch;
-            const int32_t signedValue = static_cast<int32_t>(w1);
-            event.value = signedValue < 0
-                ? static_cast<double>(signedValue) / 2147483648.0
-                : static_cast<double>(signedValue) / 2147483647.0;
+            event.value = (static_cast<double>(w1) - 2147483648.0) / 2147483648.0;
             event.index = index;
             break;
         }
