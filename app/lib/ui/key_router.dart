@@ -164,13 +164,6 @@ class KeyRouterState extends State<KeyRouter> {
     return _handleChord(chord, area: area, fromTouch: false);
   }
 
-  /// Sends a virtual key through the exact same keymap/Vim path as a physical key.
-  /// It deliberately bypasses text-focus deferral because the source is an explicit touch button.
-  KeyResult handleTouchKey(KeyChord chord) {
-    _handleChord(chord, fromTouch: true);
-    return KeyResult.ok;
-  }
-
   KeyEventResult _handleChord(KeyChord chord, {Area? area, required bool fromTouch}) {
     final a = area ?? _area;
     if (!fromTouch && shouldDeferTextEditingKey(
