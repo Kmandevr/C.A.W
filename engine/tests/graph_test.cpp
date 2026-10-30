@@ -63,3 +63,59 @@ TEST(graph_rejects_duplicate_node_ids) {
     const std::vector<GraphNode> nodes{{"same", &source}, {"same", &sink}};
     CHECK(compileGraph(nodes, {}).error == GraphError::DuplicateNodeId);
 }
+
+namespace {
+class PassThrough final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return effect; }
+    void process(const StereoProcessBlock& block) noexcept override {
+        for (uint32_t i = 0; i < block.frames; ++i) {
+            block.outputLeft[i] = block.inputLeft ? block.inputLeft[i] : 0.0f;
+            block.outputRight[i] = block.inputRight ? block.inputRight[i] : 0.0f;
+        }
+    }
+};
+class GainProcessor final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return effect; }
+    void process(const StereoProcessBlock& block) noexcept override {
+        for (uint32_t i = 0; i < block.frames; ++i) {
+            block.outputLeft[i] = (block.inputLeft ? block.inputLeft[i] : 0.0f) * 0.25f;
+            block.outputRight[i] = (block.inputRight ? block.inputRight[i] : 0.0f) * 0.25f;
+        }
+    }
+};
+}
+
+TEST(graph_executor_processes_prepared_stereo_chain_without_changing_block_size) {
+    const std::vector<GraphNode> nodes{{"input", &effect}, {"gain", &effect}};
+    const std::vector<GraphConnection> edges{{0, 1, 1, 0}};
+    PassThrough pass;
+    GainProcessor gain;
+    const std::vector<ModuleProcessor*> processors{&pass, &gain};
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, edges, processors, 1, 64, 48000) == GraphError::Ok);
+    CHECK(executor.ready());
+    const float inL[] = {1, 2, 3, 4};
+    const float inR[] = {-1, -2, -3, -4};
+    float outL[4] = {}, outR[4] = {};
+    CHECK(executor.process(inL, inR, outL, outR, 4));
+    for (int i = 0; i < 4; ++i) {
+        CHECK_NEAR(outL[i], inL[i] * 0.25, 1e-7);
+        CHECK_NEAR(outR[i], inR[i] * 0.25, 1e-7);
+    }
+    CHECK(!executor.process(inL, inR, outL, outR, 65));
+}
+
+TEST(graph_executor_rejects_unimplemented_control_runtime_connections) {
+    const PortDescriptor controlOut[] = {{"out", PortType::Control, ChannelLayout::None, false}};
+    const ModuleDescriptor control{"test.control.runtime", 1, controlOut, 1, nullptr, 0};
+    const std::vector<GraphNode> nodes{{"control", &control}, {"effect", &effect}};
+    PassThrough pass;
+    GainProcessor gain;
+    const std::vector<ModuleProcessor*> processors{&pass, &gain};
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, {{0, 0, 1, 0}}, processors, 1, 64, 48000) ==
+          GraphError::RuntimeUnsupportedPortType);
+    CHECK(!executor.ready());
+}
