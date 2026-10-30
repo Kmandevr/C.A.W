@@ -6,6 +6,8 @@ updated: 2026-10-30
 
 # Log
 
+- 2026-10-30: Tap tempo now shares timing state between the project settings button and the global `T` shortcut; the shortcut is routed, tap timing resets after a pause, and the on-screen target is larger (Issue #19).
+
 - 2026-10-30: Note-expression curve points now snap to the piano-roll grid when enabled and stay within the note's normalised duration; snap-off remains free. Added model tests and updated the app reference (Issue #15).
 
 Newest first.
