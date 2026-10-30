@@ -161,12 +161,12 @@ class KeyRouterState extends State<KeyRouter> {
   KeyEventResult handle(KeyEvent e, {Area? area}) {
     final chord = keyChordFromEvent(e, metaAsCtrl: defaultTargetPlatform == TargetPlatform.macOS);
     if (chord == null) return KeyEventResult.ignored;
-    return _handleChord(chord, area: area, fromTouch: false);
+    return _handleChord(chord, area: area);
   }
 
-  KeyEventResult _handleChord(KeyChord chord, {Area? area, required bool fromTouch}) {
+  KeyEventResult _handleChord(KeyChord chord, {Area? area}) {
     final a = area ?? _area;
-    if (!fromTouch && shouldDeferTextEditingKey(
+    if (shouldDeferTextEditingKey(
       editingText: _editingText(),
       commandLineOpen: vim.commandLineOpen,
       area: a,
@@ -185,7 +185,7 @@ class KeyRouterState extends State<KeyRouter> {
       _prefixTimer = Timer(const Duration(seconds: 1), () => _show(vim.flush()));
     }
     if (!r.handled && a == Area.code && vim.mode != VimMode.insert && !chord.ctrl && !chord.alt && !chord.meta) {
-      return fromTouch ? KeyEventResult.ignored : KeyEventResult.handled;
+      return KeyEventResult.handled;
     }
     return r.handled ? KeyEventResult.handled : KeyEventResult.ignored;
   }
