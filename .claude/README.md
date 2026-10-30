@@ -4,6 +4,7 @@ Adapted from the AutoStacc repository's setup. `tools/`, `hooks/` and `workflows
 
 | Piece | Loads | Purpose |
 | --- | --- | --- |
+| [`../AGENTS.md`](../AGENTS.md) | every task for non-Claude agents | Portable entry point: links to project-wide guidance, area rules and skills, and explains connector-only workarounds. |
 | `hooks/session-start.sh` | every session | Prints the branch, last 5 commits, uncommitted count, the newest `docs/log.md` lines, `.claude/handoff.md` if one exists, and the brief repo map. Installs Serena, and refreshes the Graphify graph in the background. Runs again after a compaction. |
 | `hooks/docs-reminder.sh` | when Claude stops (`Stop` hook) | Runs `node scripts/docs-test.js --stale`. When this branch changed files a note covers but not the note, it asks Claude once to check those notes before finishing. |
 | `tools/tree.sh` | on call | Repo map built from each file's own purpose line. `<dir>` expands one directory, `--all` lists every file. A directory's purpose is the first line of its `.purpose` file; a `.caw` module's is its `summary:`. |
@@ -25,6 +26,7 @@ There's one home for each kind of instruction; the others point to it.
 
 | Kind | Home |
 | --- | --- |
+| Portable entry point for non-Claude agents | [`../AGENTS.md`](../AGENTS.md) |
 | Project identity, global rules, how to work | `CLAUDE.md` |
 | Conventions for certain files | `rules/`, loaded when matching files are touched |
 | Repeatable procedures | `skills/` |
