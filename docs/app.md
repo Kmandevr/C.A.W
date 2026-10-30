@@ -51,7 +51,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - **Note expression** (MPE style; owner, 2026-10-29), saved as the note's `bend`, `vib`, `press` and `timbre` extras ([engine](engine.md#patterns)):
       - a note with a bend or vibrato draws as a line following its pitch over time (MIDI Sketch style), its row faint behind it
       - with the Curve tool, a tap on a note selects it; then on that note a tap adds a pitch point, a drag moves one, a drag on the line bends that segment, and holding a point deletes it. Values snap to semitones (Shift or snap off: free), within ±12
-      - the extras panel (hold a note, I, or ⋮ → Note extras) adds presets (scoop up, fall off, bend up 2, dive, vibrato, trill, swell, fade, clear), vibrato depth, rate and fade-in, and small editors for the pitch, volume and timbre curves; the whole visit is one undo step
+      - the extras panel (hold a note, I, or ⋮ → Note extras) adds presets (scoop up, fall off, bend up 2, dive, vibrato, trill, swell, fade, clear), vibrato depth, rate and fade-in, and small editors for the pitch, volume and timbre curves; curve points snap in time to the piano-roll grid when snap is on, remain within the note, and the whole visit is one undo step
       - exported `.mid` files carry it as MPE (`app/lib/ui/note_expression.dart`)
     - not built yet: automation lanes for params and globals ([#11](https://github.com/Kmandevr/C.A.W/issues/11))
 - **Tracks** (the Arranger area, `lib/ui/arranger_screen.dart`; a track is a layer):
