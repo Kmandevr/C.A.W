@@ -65,7 +65,7 @@ These notes apply to chat-based agents operating only through a GitHub connector
 - It cannot run the repository's build, tests, `.claude/tools/tree.sh`, `.claude/tools/graph.sh`, or `node scripts/docs-test.js` in that environment.
 - Claude hooks, subagents, and Serena MCP tools are not available there.
 - A new chat does not retain the prior chat's working context.
-- Connector-written files can be malformed (for example, literal `\\n` sequences, flattened lines, or broken Markdown links/includes).
+- Connector-written files can be malformed (for example, literal `\n` sequences, flattened lines, or broken Markdown links/includes).
 
 ### Workarounds
 
