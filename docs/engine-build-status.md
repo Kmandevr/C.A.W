@@ -11,7 +11,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 ## Implemented in the current branch
 
 - Portable deterministic workload policy for audition, preview, background generation, offline render and idle workloads.
-- Hardware profile input and C ABI adapter for workload planning. The host supplies the profile; automatic platform capability detection is not implemented yet.
+- Hardware profile input and C ABI adapter for workload planning, plus a native best-effort probe for online cores, conservative available-memory budget and CPU SIMD support on Windows, macOS, Linux and Android. Thermal/battery pressure remains host supplied; GPU compute is reported unavailable until a real kernel backend exists.
 - First-class internal module descriptors with stable IDs, typed ports, parameter metadata and validation.
 - Stereo-native borrowed-buffer processor contract. This is an interface contract; it is not yet wired into the existing VM/mixer as a universal processor path.
 - Typed DSP graph validation and deterministic topological ordering, including cycle, direction, port type, channel layout and duplicate-input checks.\n- Bounded, fixed-capacity non-real-time worker pool with priority scheduling, worker-budget controls, queue rejection and pending-job cancellation. It is not yet connected to app/render/analysis jobs or the adaptive workload policy.\n- Exact, scope-aware dependency resolver for project-local, user-global, factory and add-on assets, including pinned version, content hash, interface version, optional references and ambiguity detection. Project JSON serialization and the library UI do not yet call this resolver.
