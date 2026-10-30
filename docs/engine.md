@@ -13,7 +13,7 @@ The engine in `engine/` as built. The reasons behind v1 are in [architecture](ar
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, typed module and graph validation (`module.*`, `graph.*`), dependency resolution (`dependency.*`), workload policy (`execution.*`) and bounded worker pool (`scheduler.*`) |
+| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, typed module and graph validation (`module.*`, `graph.*`), dependency resolution (`dependency.*`), workload policy (`execution.*`), hardware probe (`hardware.*`) and bounded worker pool (`scheduler.*`) |
 | `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
 | `engine/include/caw.h` | The host C API, version 1 |\n| `engine/include/caw_module_sdk.h` | Versioned C ABI for trusted native module authors (loading is not implemented yet) |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
