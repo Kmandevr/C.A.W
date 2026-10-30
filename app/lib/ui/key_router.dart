@@ -200,6 +200,8 @@ class KeyRouterState extends State<KeyRouter> {
     switch (id) {
       case 'transport.playstop':
         s.togglePlay();
+      case 'transport.tap':
+        s.tapTempo();
       case 'project.save':
         s.flush();
       case 'view.actions':
