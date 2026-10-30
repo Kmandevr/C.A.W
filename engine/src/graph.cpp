@@ -181,4 +181,44 @@ bool GraphExecutor::process(const float* inputLeft, const float* inputRight,
     return true;
 }
 
+bool GraphRuntime::publish(GraphExecutor* prepared) noexcept {
+    if (!prepared || !prepared->ready()) return false;
+    GraphExecutor* expected = nullptr;
+    return pending_.compare_exchange_strong(expected, prepared, std::memory_order_release,
+                                            std::memory_order_relaxed);
+}
+
+bool GraphRuntime::process(const float* inputLeft, const float* inputRight,
+                           float* outputLeft, float* outputRight, uint32_t frames) noexcept {
+    if (!outputLeft || !outputRight || frames == 0) return false;
+    if (retired_.load(std::memory_order_acquire) == nullptr) {
+        GraphExecutor* next = pending_.exchange(nullptr, std::memory_order_acq_rel);
+        if (next) {
+            GraphExecutor* previous = active_;
+            active_ = next;
+            if (previous) retired_.store(previous, std::memory_order_release);
+        }
+    }
+    if (!active_ || !active_->process(inputLeft, inputRight, outputLeft, outputRight, frames)) {
+        std::fill_n(outputLeft, frames, 0.0f);
+        std::fill_n(outputRight, frames, 0.0f);
+        return false;
+    }
+    return true;
+}
+
+GraphExecutor* GraphRuntime::collectRetired() noexcept {
+    return retired_.exchange(nullptr, std::memory_order_acq_rel);
+}
+
+GraphExecutor* GraphRuntime::takeActiveAfterStop() noexcept {
+    GraphExecutor* result = active_;
+    active_ = nullptr;
+    return result;
+}
+
+GraphExecutor* GraphRuntime::takePendingAfterStop() noexcept {
+    return pending_.exchange(nullptr, std::memory_order_acq_rel);
+}
+
 }  // namespace caw
