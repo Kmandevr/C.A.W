@@ -5,6 +5,8 @@
 #include <cmath>
 #include <new>
 #include <limits>
+#include <functional>
+#include <queue>
 
 namespace caw {
 
@@ -56,17 +58,23 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
         ++indegree[c.destinationNode];
     }
 
-    // Stable Kahn ordering: among currently-ready nodes, preserve authored node order.
-    std::vector<uint8_t> emitted(nodes.size(), 0);
+    // Stable Kahn ordering with a min-heap: O((V + E) log V), preserving
+    // authored order among nodes that are simultaneously ready.
+    std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
+    for (uint32_t i = 0; i < nodes.size(); ++i)
+        if (indegree[i] == 0) ready.push(i);
     out.executionOrder.reserve(nodes.size());
-    while (out.executionOrder.size() < nodes.size()) {
-        uint32_t next = UINT32_MAX;
-        for (uint32_t i = 0; i < nodes.size(); ++i)
-            if (!emitted[i] && indegree[i] == 0) { next = i; break; }
-        if (next == UINT32_MAX) { out.error = GraphError::Cycle; out.executionOrder.clear(); return out; }
-        emitted[next] = 1;
+    while (!ready.empty()) {
+        const uint32_t next = ready.top();
+        ready.pop();
         out.executionOrder.push_back(next);
-        for (uint32_t dst : outgoing[next]) --indegree[dst];
+        for (uint32_t dst : outgoing[next])
+            if (--indegree[dst] == 0) ready.push(dst);
+    }
+    if (out.executionOrder.size() != nodes.size()) {
+        out.error = GraphError::Cycle;
+        out.executionOrder.clear();
+        return out;
     }
     return out;
 }
@@ -112,17 +120,37 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         for (size_t n = 0; n < nodes.size(); ++n) {
             if (!processors[n]) { reset(); return GraphError::MissingProcessor; }
             const ModuleDescriptor& descriptor = processors[n]->descriptor();
-            if (descriptor.id != nodes[n].module->id || descriptor.apiVersion != nodes[n].module->apiVersion) {
+            if (validateModuleDescriptor(descriptor) != ModuleValidation::Ok ||
+                descriptor.id != nodes[n].module->id || descriptor.apiVersion != nodes[n].module->apiVersion ||
+                descriptor.portCount != nodes[n].module->portCount ||
+                descriptor.parameterCount != nodes[n].module->parameterCount) {
                 reset(); return GraphError::ProcessorDescriptorMismatch;
+            }
+            for (uint32_t p = 0; p < descriptor.portCount; ++p) {
+                const PortDescriptor& actual = descriptor.ports[p];
+                const PortDescriptor& expected = nodes[n].module->ports[p];
+                if (actual.id != expected.id || actual.type != expected.type ||
+                    actual.layout != expected.layout || actual.input != expected.input) {
+                    reset(); return GraphError::ProcessorDescriptorMismatch;
+                }
+            }
+            for (uint32_t p = 0; p < descriptor.parameterCount; ++p) {
+                const ParameterDescriptor& actual = descriptor.parameters[p];
+                const ParameterDescriptor& expected = nodes[n].module->parameters[p];
+                if (actual.id != expected.id || actual.minimum != expected.minimum ||
+                    actual.maximum != expected.maximum || actual.defaultValue != expected.defaultValue ||
+                    actual.automatable != expected.automatable) {
+                    reset(); return GraphError::ProcessorDescriptorMismatch;
+                }
             }
             uint32_t audioInputs = 0, audioOutputs = 0;
             for (uint32_t p = 0; p < descriptor.portCount; ++p) {
                 const PortDescriptor& port = descriptor.ports[p];
-                if (port.type != PortType::Audio) return GraphError::RuntimeUnsupportedPortType;
-                if (port.layout != ChannelLayout::Stereo) return GraphError::RuntimeUnsupportedPortLayout;
+                if (port.type != PortType::Audio) { reset(); return GraphError::RuntimeUnsupportedPortType; }
+                if (port.layout != ChannelLayout::Stereo) { reset(); return GraphError::RuntimeUnsupportedPortLayout; }
                 if (port.input) ++audioInputs; else ++audioOutputs;
             }
-            if (audioInputs > 1 || audioOutputs > 1) return GraphError::RuntimeUnsupportedPortCount;
+            if (audioInputs > 1 || audioOutputs > 1) { reset(); return GraphError::RuntimeUnsupportedPortCount; }
             hasInput_[n] = audioInputs ? 1 : 0;
             hasOutput_[n] = audioOutputs ? 1 : 0;
             if (audioInputs) {
