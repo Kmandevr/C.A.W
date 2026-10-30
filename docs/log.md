@@ -1,3 +1,5 @@
+- 2026-10-30: Added touchscreen Vim controls in the active code editor, including mode switches, repeat, macro record/stop, action list, and an editable command line with completion chips (Issue #22). Android layout/input verification pending.
+
 ---
 title: Log
 summary: Dated history of changes, newest first.
