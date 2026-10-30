@@ -80,6 +80,7 @@ public:
 private:
     std::vector<ModuleProcessor*> processors_;
     std::vector<std::vector<float>> left_, right_;
+    std::vector<float> zero_;
     std::vector<int32_t> inputSource_;
     std::vector<uint8_t> hasInput_, hasOutput_;
     std::vector<uint32_t> order_;
