@@ -77,7 +77,7 @@ ${_lsrcs}nullptr};
 
 add_library(caw_core STATIC
   src/builtins.cpp src/compile.cpp src/detmath.cpp src/docs.cpp src/pattern.cpp
-  src/engine.cpp src/execution.cpp src/module.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/engine.cpp src/execution.cpp src/module.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
   "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
 target_include_directories(caw_core PUBLIC include src)
