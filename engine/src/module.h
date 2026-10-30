@@ -86,6 +86,21 @@ public:
     virtual ~ModuleProcessor() = default;
     virtual const ModuleDescriptor& descriptor() const noexcept = 0;
     virtual void process(const StereoProcessBlock& block) noexcept = 0;
+
+    // Lifecycle/state hooks run off the audio callback except reset(), which may be used
+    // only when the host has stopped or exclusively owns the instance.
+    virtual void reset() noexcept {}
+    virtual uint32_t stateVersion() const noexcept { return 1; }
+    virtual bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept {
+        (void)destination;
+        (void)capacity;
+        written = 0; // default modules are stateless
+        return true;
+    }
+    virtual bool loadState(const uint8_t* source, uint32_t size, uint32_t version) noexcept {
+        (void)source;
+        return size == 0 && version == stateVersion();
+    }
 };
 
 }  // namespace caw
