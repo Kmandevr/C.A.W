@@ -466,7 +466,6 @@ std::string generatorCode(const Patch& p) {
     };
     addEnv(2, p.env2);
     addEnv(3, p.env3);
-    const char* lfoFns[] = {"sine", "tri", "saw", "square", "random"};
     for (int i = 0; i < 4; ++i) if (p.lfo[i].on) {
         const std::string n = "lfo" + std::to_string(i + 1);
         c += param(n + "_rate", p.lfo[i].rate, 0.015625, 64, n + " cycle length in beats");
