@@ -216,7 +216,10 @@ void runWt(const CallArgs& c) {
         const float* b = t.frame(level, f1);
         double acc = 0.0;
         for (int v = 0; v < uni; ++v) {
-            const double x = ph[v] * size;
+            double phase = ph[v];
+            const double warp = clampd(finiteOr0(c.a[5][i]), -0.95, 0.95);
+            if (warp != 0.0) phase += warp * detSin(kTwoPi * phase) / kTwoPi;
+            const double x = phase * size;
             const int k = static_cast<int>(x);
             const double fr = x - k;
             const double sa = a[k] + (a[k + 1] - a[k]) * fr, sb = b[k] + (b[k + 1] - b[k]) * fr;
@@ -792,10 +795,10 @@ const Builtin kBuiltins[] = {
     // Oscillators
     {"sine", 1, 1, {}, 1, kNone, noInit, runOsc<0>, "Oscillators", "Sine wave, -1..1.", {"freq: Hz"}, "sine(220) * 0.5"},
     {"saw", 1, 1, {}, 1, kNone, noInit, runOsc<1>, "Oscillators", "Band-limited sawtooth, -1..1.", {"freq: Hz"}, "saw(110) * 0.4"},
-    {"wt", 2, 5, {0, 0, 0, 1, 0}, WtSize, kNone, wtInit, runWt, "Oscillators",
+    {"wt", 2, 6, {0, 0, 0, 1, 0, 0}, WtSize, kNone, wtInit, runWt, "Oscillators",
      "Wavetable oscillator: plays a table (table.saw, table.basic …), morphing through its frames with pos, with up to 16 detuned unison voices. Band-limited per octave, so high notes stay clean. The table and unison count are set when a note starts.",
-     {"table: which table, e.g. table.basic (set at the note start)", "freq: Hz", "pos: frame position 0..1 (default 0)", "unison: voices 1..16 (default 1; set at the note start)", "detune: spread of the unison voices, 0..1 = up to +-1 semitone (default 0)"},
-     "wt(table.basic, mtof(A2), lfo.tri(8) * 0.5 + 0.5, 7, 0.15) * 0.3"},
+     {"table: which table, e.g. table.basic (set at the note start)", "freq: Hz", "pos: frame position 0..1 (default 0)", "unison: voices 1..16 (default 1; set at the note start)", "detune: spread of the unison voices, 0..1 = up to +-1 semitone (default 0)", "warp: phase distortion amount -0.95..0.95 (default 0)"},
+     "wt(table.basic, mtof(A2), lfo.tri(8) * 0.5 + 0.5, 7, 0.15, 0.25) * 0.3"},
     {"square", 1, 2, {0, 0.5}, 1, kNone, noInit, runOsc<2>, "Oscillators", "Band-limited square/pulse wave, -1..1.", {"freq: Hz", "width: pulse width 0.01..0.99 (default 0.5)"}, "square(110, 0.25) * 0.3"},
     {"tri", 1, 1, {}, 1, kNone, noInit, runOsc<3>, "Oscillators", "Triangle wave, -1..1.", {"freq: Hz"}, "tri(220) * 0.5"},
     // Envelopes and LFOs
