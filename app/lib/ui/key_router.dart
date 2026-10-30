@@ -407,7 +407,6 @@ class KeyRouterState extends State<KeyRouter> {
                       isDense: true,
                       prefixText: '${vim.prompt ?? ':'} ',
                       hintText: 'Type a command and press Enter',
-                      suffixIcon: IconButton(icon: const Icon(Icons.close), onPressed: _touchCommandLine),
                     ),
                   ),
                 ]),
