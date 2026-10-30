@@ -94,3 +94,21 @@ TEST(scheduler_runs_higher_priority_jobs_first_and_preserves_fifo_within_priorit
     CHECK(order[2] == 2);
     CHECK(order[3] == 1);
 }
+
+
+TEST(adaptive_worker_pool_applies_thermal_and_idle_limits) {
+    HardwareProfile hardware{8, 4096, true, false};
+    AdaptiveWorkerPool pool(hardware, 8);
+    ExecutionRequest request;
+    request.workload = WorkloadClass::BackgroundGeneration;
+    const ExecutionPlan normal = pool.apply(request);
+    CHECK_EQ(normal.workerThreads, 7);
+    request.pressure = DevicePressure::ThermalCritical;
+    const ExecutionPlan hot = pool.apply(request);
+    CHECK_EQ(hot.workerThreads, 1);
+    CHECK_EQ(pool.currentPlan().workerThreads, 1);
+    request.workload = WorkloadClass::Idle;
+    const ExecutionPlan idle = pool.apply(request);
+    CHECK_EQ(idle.workerThreads, 0);
+    CHECK_EQ(pool.active(), 0u);
+}
