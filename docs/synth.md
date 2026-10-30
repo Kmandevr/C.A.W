@@ -102,7 +102,7 @@ Reviewed by the `architect` agent (2026-10-29): the core fits the engine as buil
 - **Voice count:** today every pattern track has a fixed pool of 8. It becomes a per-patch setting (`voices`) up to a fixed maximum, set aside when the track is installed; the sandbox needs a fixed bound. Proposed maximum: 32.
 - **New built-ins**, each native C++ over a whole block:
   - `wt(table, freq, pos, unison, detune, …)`: a wavetable oscillator with up to 16 unison voices inside one call, morphing between frames, band-limited by mipmapped tables (one table per octave) so high notes don't alias
-  - warps: sync, bend, phase distortion, FM from another oscillator, and bit and sample crush
+  - phase distortion on each wavetable oscillator (`warp -0.95..0.95`); hard sync, FM routing and additional warp modes remain future work
   - comb and formant filters next to the existing `lpf`, `hpf`, `bpf` and `notch`; a drawn-shape LFO `lfo.shape`; `fx.chorus` and `fx.eq`
 - **Tables** are shared, read-only data owned by the compiled program (or by the engine, for the built-in shapes), never per-voice state: a 256-frame table with its mipmaps is about 5 MB of floats, loaded once.
   - In code a table is a name fixed at compile time (`table.saw`, `table.hollow`); the compiler stores its index in the call, and the VM hands the built-in a pointer to it. Tables don't count against a module's state limit; they get their own memory budget, and going over it fails closed (the module reports an error, nothing crashes).
