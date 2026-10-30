@@ -65,4 +65,24 @@ bool decodeMidi2ChannelVoice(uint32_t w0, uint32_t w1, Midi2Event& out) noexcept
     return true;
 }
 
+bool Midi2InputQueue::push(const Midi2Event& event) noexcept {
+    const uint32_t write = write_.load(std::memory_order_relaxed);
+    const uint32_t next = write + 1;
+    if (next - read_.load(std::memory_order_acquire) > kCapacity) {
+        dropped_.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    events_[write & (kCapacity - 1)] = event;
+    write_.store(next, std::memory_order_release);
+    return true;
+}
+
+bool Midi2InputQueue::pop(Midi2Event& event) noexcept {
+    const uint32_t read = read_.load(std::memory_order_relaxed);
+    if (read == write_.load(std::memory_order_acquire)) return false;
+    event = events_[read & (kCapacity - 1)];
+    read_.store(read + 1, std::memory_order_release);
+    return true;
+}
+
 }  // namespace caw
