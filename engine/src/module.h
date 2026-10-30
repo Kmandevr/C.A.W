@@ -24,6 +24,17 @@ struct ParameterDescriptor {
     bool automatable = true;
 };
 
+enum class UiControlKind : uint8_t { Slider, Toggle, Dropdown, XYPad, Button, Curve };
+
+struct UiControlDescriptor {
+    std::string_view id;
+    std::string_view label;
+    std::string_view parameterId; // empty for action-only controls
+    UiControlKind kind = UiControlKind::Slider;
+    double minimum = 0.0;
+    double maximum = 1.0;
+};
+
 struct ModuleDescriptor {
     std::string_view id;
     uint32_t apiVersion = 1;
@@ -31,6 +42,9 @@ struct ModuleDescriptor {
     uint32_t portCount = 0;
     const ParameterDescriptor* parameters = nullptr;
     uint32_t parameterCount = 0;
+    const UiControlDescriptor* uiControls = nullptr;
+    uint32_t uiControlCount = 0;
+    std::string_view customUiId; // optional host-rendered/custom view identifier
 };
 
 enum class ModuleValidation : uint8_t {
@@ -45,7 +59,12 @@ enum class ModuleValidation : uint8_t {
     EmptyParameterId,
     DuplicateParameterId,
     InvalidParameterRange,
-    DefaultOutsideRange
+    DefaultOutsideRange,
+    MissingUiControlArray,
+    EmptyUiControlId,
+    DuplicateUiControlId,
+    UiControlMissingParameter,
+    InvalidUiControlRange
 };
 
 // Validation is control-thread work. It never allocates and never runs in audio processing.
