@@ -153,8 +153,6 @@ class KeyRouterState extends State<KeyRouter> {
     return ctx != null && (ctx.widget is EditableText || ctx.findAncestorWidgetOfExactType<EditableText>() != null);
   }
 
-  static const _textKeys = {'Z', 'Y', 'A', 'C', 'V', 'X'};
-
   /// One key press. [area] is given by an editor that asks first (the piano roll); otherwise the focus decides.
   KeyEventResult handle(KeyEvent e, {Area? area}) {
     final chord = keyChordFromEvent(e, metaAsCtrl: defaultTargetPlatform == TargetPlatform.macOS);
