@@ -1,7 +1,8 @@
 // Synth patches: reads each line, checks every value against its range, and writes the voice and effect code.
 #include "synth.h"
 
-#include <cmath>\n#include <cctype>
+#include <cmath>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
