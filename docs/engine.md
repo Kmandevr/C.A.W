@@ -7,15 +7,15 @@ updated: 2026-10-29
 
 # Engine and language reference
 
-The engine in `engine/` as built. The reasons behind v1 are in [architecture](architecture.md); the next-generation direction is [Modular adaptive engine](engine-next.md). The version plan is in [roadmap](roadmap.md). Built implementation details are **[Fact]** and checked by `engine/tests/`.
+The engine in `engine/` as built. The reasons behind v1 are in [architecture](architecture.md); the next-generation direction is [Modular adaptive engine](engine-next.md). The version plan is in [roadmap](roadmap.md). The new modular engine implementation ledger is [here](engine-build-status.md), and the native add-on contract is [here](native-module-sdk.md). Built implementation details are **[Fact]** and checked by `engine/tests/`.
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, docs, WAV/JSON/C API, and workload policy (`execution.*`) |
+| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, typed module and graph validation (`module.*`, `graph.*`), workload policy (`execution.*`) |
 | `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
-| `engine/include/caw.h` | The C API, version 1 |
+| `engine/include/caw.h` | The host C API, version 1 |\n| `engine/include/caw_module_sdk.h` | Versioned C ABI for trusted native module authors (loading is not implemented yet) |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
 | `engine/cli/` | The `caw` tool |
 | `engine/tests/` | Unit tests and golden renders (`golden.txt`) |
