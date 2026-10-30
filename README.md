@@ -12,7 +12,7 @@ An experimental, code-driven glitch-sound instrument for Android, iOS, Windows, 
 | `engine/` | The C++20 sound engine: module language, standard library, mixer, WAV exports, C API, the `caw` CLI and tests ([reference](docs/engine.md), [functions](docs/library.md), [agent guide](docs/agent-guide.md)) |
 | `app/` | The Flutter app for Android and Windows: Sounds, Tracks and Export ([app](docs/app.md)) |
 | `examples/` | Starter sound modules (`.caw`), built into the engine as templates |
-| `docs/` | Project memory and plans: [vision](docs/vision.md), [current architecture](docs/architecture.md), [modular adaptive engine blueprint](docs/engine-next.md), [engine integration contract](docs/engine-integration.md), [roadmap](docs/roadmap.md), [decisions](docs/decisions.md), [log](docs/log.md) |
+| `docs/` | Project memory and plans: [vision](docs/vision.md), [current architecture](docs/architecture.md), [modular adaptive engine blueprint](docs/engine-next.md), [engine integration contract](docs/engine-integration.md), [native module SDK](docs/native-module-sdk.md), [engine build status](docs/engine-build-status.md), [roadmap](docs/roadmap.md), [decisions](docs/decisions.md), [log](docs/log.md) |
 | `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository |
 | `.github/` | Issue and PR templates, CODEOWNERS, Dependabot, and the workflows below |
 | `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, hooks ([.claude/README.md](.claude/README.md)) |
