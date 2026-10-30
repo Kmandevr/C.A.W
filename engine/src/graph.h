@@ -38,7 +38,16 @@ enum class GraphError : uint8_t {
     PortTypeMismatch,
     ChannelLayoutMismatch,
     InputAlreadyConnected,
-    Cycle
+    Cycle,
+    ProcessorCountMismatch,
+    MissingProcessor,
+    ProcessorDescriptorMismatch,
+    RuntimeUnsupportedPortType,
+    RuntimeUnsupportedPortLayout,
+    RuntimeUnsupportedPortCount,
+    InvalidOutputNode,
+    InvalidBlockSize,
+    OutOfMemory
 };
 
 struct CompiledGraph {
