@@ -6,6 +6,8 @@ updated: 2026-10-29
 
 # Log
 
+- 2026-10-30: Note-expression curve points now snap to the piano-roll grid when enabled and stay within the note's normalised duration; snap-off remains free. Added model tests and updated the app reference (Issue #15).
+
 Newest first.
 
 - 2026-10-29: Per-note expression in the roll: bent notes drawn as lines, pitch points drawn on a selected note with the Curve tool, and vibrato, presets and pitch/volume/timbre curve editors in the extras panel ([app](app.md)).
