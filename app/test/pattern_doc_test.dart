@@ -345,7 +345,7 @@ void main() {
       expect(notes.map((n) => n.at), [Steps(3), Steps(5)]);
       expect(notes.map((n) => n.pitch), [53, 57]);
       expect(notes.map((n) => n.len), [Steps(2), Steps.one]);
-      expect(notes.map((n) => n.velocity), [0.4, 0.8]);
+      expect(notes.map((n) => n.vel), [0.4, 0.8]);
       expect(notes.first.probability, 0.5);
       expect(notes.last.ratchet, 2);
     });
