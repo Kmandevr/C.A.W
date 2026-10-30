@@ -19,6 +19,11 @@ const PortDescriptor sinkPorts[] = {
 const ModuleDescriptor source{"test.source", 1, sourcePorts, 1, nullptr, 0};
 const ModuleDescriptor effect{"test.effect", 1, effectPorts, 2, nullptr, 0};
 const ModuleDescriptor sink{"test.sink", 1, sinkPorts, 1, nullptr, 0};
+const PortDescriptor monoRuntimePorts[] = {
+    {"in", PortType::Audio, ChannelLayout::Mono, true},
+    {"out", PortType::Audio, ChannelLayout::Mono, false},
+};
+const ModuleDescriptor monoRuntime{"test.mono.runtime", 1, monoRuntimePorts, 2, nullptr, 0};
 }
 
 TEST(graph_compiles_stereo_chain_in_dependency_order) {
@@ -108,17 +113,12 @@ TEST(graph_executor_processes_prepared_stereo_chain_without_changing_block_size)
 }
 
 TEST(graph_executor_rejects_mono_runtime_layout_until_adapter_exists) {
-    const PortDescriptor monoPorts[] = {
-        {"in", PortType::Audio, ChannelLayout::Mono, true},
-        {"out", PortType::Audio, ChannelLayout::Mono, false},
-    };
-    const ModuleDescriptor mono{"test.mono.runtime", 1, monoPorts, 2, nullptr, 0};
     class MonoProcessor final : public ModuleProcessor {
     public:
-        const ModuleDescriptor& descriptor() const noexcept override { return mono; }
+        const ModuleDescriptor& descriptor() const noexcept override { return monoRuntime; }
         void process(const StereoProcessBlock&) noexcept override {}
     } processor;
-    const std::vector<GraphNode> nodes{{"mono", &mono}};
+    const std::vector<GraphNode> nodes{{"mono", &monoRuntime}};
     const std::vector<ModuleProcessor*> processors{&processor};
     GraphExecutor executor;
     CHECK(executor.prepare(nodes, {}, processors, 0, 64, 48000) == GraphError::RuntimeUnsupportedPortLayout);
