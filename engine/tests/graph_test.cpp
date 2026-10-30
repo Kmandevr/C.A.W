@@ -124,3 +124,32 @@ TEST(graph_executor_rejects_mono_runtime_layout_until_adapter_exists) {
     CHECK(executor.prepare(nodes, {}, processors, 0, 64, 48000) == GraphError::RuntimeUnsupportedPortLayout);
     CHECK(!executor.ready());
 }
+
+
+TEST(graph_runtime_publishes_on_audio_thread_and_retires_off_thread) {
+    const std::vector<GraphNode> nodes{{"input", &effect}, {"gain", &effect}};
+    const std::vector<GraphConnection> edges{{0, 1, 1, 0}};
+    PassThrough pass;
+    GainProcessor gain;
+    const std::vector<ModuleProcessor*> processors{&pass, &gain};
+    auto* first = new GraphExecutor();
+    CHECK(first->prepare(nodes, edges, processors, 1, 64, 48000) == GraphError::Ok);
+    GraphRuntime runtime;
+    CHECK(runtime.publish(first));
+    CHECK(!runtime.publish(first));
+    const float in[] = {4, 8};
+    float outL[2] = {}, outR[2] = {};
+    CHECK(runtime.process(in, in, outL, outR, 2));
+    CHECK_NEAR(outL[0], 1.0, 1e-7);
+    CHECK(runtime.collectRetired() == nullptr);
+
+    auto* second = new GraphExecutor();
+    CHECK(second->prepare(nodes, edges, processors, 1, 64, 48000) == GraphError::Ok);
+    CHECK(runtime.publish(second));
+    CHECK(runtime.process(in, in, outL, outR, 2));
+    GraphExecutor* retired = runtime.collectRetired();
+    CHECK(retired == first);
+    delete retired;
+    delete runtime.takeActiveAfterStop();
+    CHECK(runtime.takePendingAfterStop() == nullptr);
+}
