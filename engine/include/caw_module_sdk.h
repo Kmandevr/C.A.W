@@ -45,6 +45,24 @@ typedef struct CawModuleParameterInfo {
     uint32_t flags; /* bit 0: automatable */
 } CawModuleParameterInfo;
 
+typedef enum CawModuleUiControlKind {
+    CAW_UI_SLIDER = 0,
+    CAW_UI_TOGGLE = 1,
+    CAW_UI_DROPDOWN = 2,
+    CAW_UI_XY_PAD = 3,
+    CAW_UI_BUTTON = 4,
+    CAW_UI_CURVE = 5
+} CawModuleUiControlKind;
+
+typedef struct CawModuleUiControlV1 {
+    const char* id;
+    const char* label;
+    const char* parameter_id; /* null/empty for action-only controls */
+    uint32_t kind;
+    double minimum;
+    double maximum;
+} CawModuleUiControlV1;
+
 typedef struct CawModuleDescriptorV1 {
     uint32_t struct_size;
     uint32_t abi_version;
@@ -56,6 +74,9 @@ typedef struct CawModuleDescriptorV1 {
     uint32_t parameter_count;
     uint32_t maximum_state_bytes;
     uint32_t flags; /* reserved; must be zero in v1 */
+    const CawModuleUiControlV1* ui_controls;
+    uint32_t ui_control_count;
+    const char* custom_ui_id; /* optional host-rendered view identifier */
 } CawModuleDescriptorV1;
 
 /* Borrowed buffers are valid only for this call. Never retain pointers. Frames are bounded by host. */
