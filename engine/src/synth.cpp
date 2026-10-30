@@ -134,6 +134,19 @@ struct Fx {
     int line = 0;
 };
 
+struct Lfo {
+    bool on = false;
+    std::string shape = "sine";
+    double rate = 1, phase = 0;
+};
+struct Macro {
+    std::string name = "Macro";
+    double value = 0.5;
+};
+struct Mod {
+    std::string source, destination;
+    double amount = 0;
+};
 struct Patch {
     std::string name = "Synth", summary;
     double voices = 8, glide = 0, volume = 0.8;
@@ -142,7 +155,10 @@ struct Patch {
     Noise noise;
     Filter filter[2];
     bool parallel = false;
-    Env env;
+    Env env, env2, env3;
+    Lfo lfo[4];
+    Macro macro[4];
+    std::vector<Mod> mods;
     std::vector<Fx> fx;
 };
 
@@ -281,19 +297,95 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
         return;
     }
     if (k == "env") {
-        if (w.size() < 2 || w[1].text != "1") {
-            if (w.size() >= 2 && (w[1].text == "2" || w[1].text == "3")) later("env 2 and env 3 (modulation)");
-            throw PatchError{line, head.col, "env needs its number; env 1 shapes the volume"};
-        }
+        if (w.size() < 2 || (w[1].text != "1" && w[1].text != "2" && w[1].text != "3"))
+            throw PatchError{line, head.col, "env needs its number: 1, 2 or 3"};
+        Env& env = w[1].text == "1" ? p.env : (w[1].text == "2" ? p.env2 : p.env3);
         Fields f(w, 2, line);
         while (!f.done()) {
             const Word& key = f.take();
-            if (key.text == "attack") p.env.attack = f.number(key, 0, 20);
-            else if (key.text == "decay") p.env.decay = f.number(key, 0, 20);
-            else if (key.text == "sustain") p.env.sustain = f.number(key, 0, 1);
-            else if (key.text == "release") p.env.release = f.number(key, 0, 20);
+            if (key.text == "attack") env.attack = f.number(key, 0, 20);
+            else if (key.text == "decay") env.decay = f.number(key, 0, 20);
+            else if (key.text == "sustain") env.sustain = f.number(key, 0, 1);
+            else if (key.text == "release") env.release = f.number(key, 0, 20);
             else f.unknown(key, "attack, decay, sustain and release");
         }
+        return;
+    }
+    if (k == "lfo") {
+        if (w.size() < 2 || w[1].text.size() != 1 || w[1].text[0] < '1' || w[1].text[0] > '4')
+            throw PatchError{line, head.col, "lfo needs its number: 1 to 4"};
+        Lfo& lfo = p.lfo[w[1].text[0] - '1'];
+        lfo = Lfo{};
+        if (w.size() == 3 && w[2].text == "off") return;
+        lfo.on = true;
+        Fields f(w, 2, line);
+        while (!f.done()) {
+            const Word& key = f.take();
+            if (key.text == "shape") {
+                lfo.shape = f.word(key);
+                if (lfo.shape != "sine" && lfo.shape != "tri" && lfo.shape != "saw" &&
+                    lfo.shape != "square" && lfo.shape != "random")
+                    throw PatchError{line, key.col, "LFO shape must be sine, tri, saw, square or random"};
+            } else if (key.text == "rate") lfo.rate = f.number(key, 0.015625, 64);
+            else if (key.text == "phase") lfo.phase = f.number(key, 0, 1);
+            else f.unknown(key, "shape, rate (beats) and phase");
+        }
+        return;
+    }
+    if (k == "macro") {
+        if (w.size() != 4 || w[1].text.size() != 1 || w[1].text[0] < '1' || w[1].text[0] > '4')
+            throw PatchError{line, head.col, "macro syntax: macro 1 Name 0.5 (numbers 1 to 4)"};
+        Macro& macro = p.macro[w[1].text[0] - '1'];
+        macro.name = w[2].text;
+        char* end = nullptr;
+        macro.value = std::strtod(w[3].text.c_str(), &end);
+        if (!end || *end || !std::isfinite(macro.value) || macro.value < 0 || macro.value > 1)
+            throw PatchError{line, w[3].col, "macro value must be 0 to 1"};
+        return;
+    }
+    if (k == "mod") {
+        if (w.size() < 5) throw PatchError{line, head.col, "mod syntax needs a source, ->, destination and amount"};
+        size_t arrow = 0;
+        for (size_t i = 1; i < w.size(); ++i) if (w[i].text == "->") { arrow = i; break; }
+        if (!arrow) throw PatchError{line, head.col, "mod needs -> between source and destination"};
+        Mod mod;
+        if (w[1].text == "vel") {
+            mod.source = "vel";
+            if (arrow != 2) throw PatchError{line, w[1].col, "velocity source is written: mod vel -> ..."};
+        } else {
+            if (arrow != 3 || (w[1].text != "env" && w[1].text != "lfo" && w[1].text != "macro") ||
+                w[2].text.size() != 1 || w[2].text[0] < '1' || w[2].text[0] > '4')
+                throw PatchError{line, head.col, "source must be env 2/3, lfo 1-4, macro 1-4 or vel"};
+            mod.source = w[1].text + w[2].text;
+            if (w[1].text == "env" && w[2].text == "1")
+                throw PatchError{line, w[2].col, "env 1 is the amplitude envelope; use env 2 or 3 as a modulator"};
+        }
+        const size_t d = arrow + 1;
+        size_t amountIndex = d;
+        if (d >= w.size()) throw PatchError{line, head.col, "mod needs a destination"};
+        if (w[d].text == "volume" && d + 1 < w.size()) {
+            mod.destination = "volume"; amountIndex = d + 1;
+        } else if (w[d].text == "osc" && d + 3 < w.size()) {
+            if (w[d + 1].text.size() != 1 || w[d + 1].text[0] < 'a' || w[d + 1].text[0] > 'c' ||
+                (w[d + 2].text != "pos" && w[d + 2].text != "level" && w[d + 2].text != "pitch"))
+                throw PatchError{line, w[d].col, "osc destination must be osc a/b/c pos, level or pitch"};
+            mod.destination = std::string(1, w[d + 1].text[0]) + "_" + w[d + 2].text;
+            amountIndex = d + 3;
+        } else if (w[d].text == "filter" && d + 3 < w.size()) {
+            if ((w[d + 1].text != "1" && w[d + 1].text != "2") ||
+                (w[d + 2].text != "cutoff" && w[d + 2].text != "res"))
+                throw PatchError{line, w[d].col, "filter destination must be filter 1/2 cutoff or res"};
+            mod.destination = "f" + w[d + 1].text + "_" + w[d + 2].text;
+            amountIndex = d + 3;
+        } else {
+            throw PatchError{line, w[d].col, "destination must be volume, osc a/b/c pos/level/pitch or filter 1/2 cutoff/res"};
+        }
+        if (amountIndex + 1 != w.size()) throw PatchError{line, w[amountIndex].col, "mod needs one amount from -1 to 1"};
+        char* end = nullptr;
+        mod.amount = std::strtod(w[amountIndex].text.c_str(), &end);
+        if (!end || *end || !std::isfinite(mod.amount) || mod.amount < -1 || mod.amount > 1)
+            throw PatchError{line, w[amountIndex].col, "mod amount must be -1 to 1"};
+        p.mods.push_back(mod);
         return;
     }
     if (k == "fx") {
@@ -340,7 +432,6 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
         p.fx.push_back(x);
         return;
     }
-    if (k == "lfo" || k == "macro" || k == "mod") later(k);
     if (k == "table") later("table");
     throw PatchError{line, head.col,
                      "unknown line '" + k + "' (a patch has voices, glide, volume, osc, sub, noise, filter, filters, env and fx lines)"};
@@ -370,7 +461,7 @@ std::string generatorCode(const Patch& p) {
         c += param(n + "_detune", o.detune, 0, 1, "Osc " + N + " unison spread");
         c += param(n + "_pitch", o.octave * 12 + o.semi + o.fine / 100, -72, 72, "Osc " + N + " pitch in semitones", 0.01);
         c += "fn osc_" + n + "(f) = wt(table." + o.table + ", f * pow(2, " + n + "_pitch / 12), " + n + "_pos, " +
-             num(o.unison) + ", " + n + "_detune) * " + n + "_level\n";
+             num(o.unison) + ", " + n + "_detune) * clamp(" + n + "_level + (" + modExpr(n + "_level") + "), 0, 1)\n";
         sources.push_back(n);
     }
     if (p.sub.on) {
@@ -406,7 +497,7 @@ std::string generatorCode(const Patch& p) {
         c += param(n + "_drive", f.drive, 0, 1, "Filter " + N + " drive");
         c += param(n + "_keytrack", f.keytrack, 0, 1, "How far filter " + N + " follows the note");
         c += "fn filt_" + N + "(x) = " + filterFn(f.type) + "(fx.drive(x, 1 + " + n + "_drive * 9), clamp(" + n +
-             "_cutoff * pow(2, " + n + "_keytrack * (note - 60) / 12), 20, 20000), 0.5 + " + n + "_res * 19.5)\n";
+             "_cutoff * pow(2, " + n + "_keytrack * (note - 60) / 12) + (" + modExpr(n + "_cutoff") + "), 20, 20000), 0.5 + clamp(" + n + "_res + (" + modExpr(n + "_res") + "), 0, 1) * 19.5)\n";
     }
     c += "// --- Volume ---\n";
     c += param("attack", p.env.attack, 0, 20, "Seconds to full volume");
@@ -414,6 +505,34 @@ std::string generatorCode(const Patch& p) {
     c += param("sustain", p.env.sustain, 0, 1, "Level while the note is held");
     c += param("release", p.env.release, 0, 20, "Seconds to fade after the note ends");
     c += param("volume", p.volume, 0, 1, "Synth volume");
+    auto addEnv = [&](int index, const Env& e) {
+        const std::string n = "env" + std::to_string(index);
+        c += param(n + "_attack", e.attack, 0, 20, n + " attack");
+        c += param(n + "_decay", e.decay, 0, 20, n + " decay");
+        c += param(n + "_sustain", e.sustain, 0, 1, n + " sustain");
+        c += param(n + "_release", e.release, 0, 20, n + " release");
+        c += "let " + n + " = env.adsr(gate, " + n + "_attack, " + n + "_decay, " + n + "_sustain, " + n + "_release)\n";
+    };
+    addEnv(2, p.env2);
+    addEnv(3, p.env3);
+    const char* lfoFns[] = {"sine", "tri", "saw", "square", "random"};
+    for (int i = 0; i < 4; ++i) if (p.lfo[i].on) {
+        const std::string n = "lfo" + std::to_string(i + 1);
+        c += param(n + "_rate", p.lfo[i].rate, 0.015625, 64, n + " cycle length in beats");
+        c += param(n + "_phase", p.lfo[i].phase, 0, 1, n + " phase");
+        c += "let " + n + " = lfo." + p.lfo[i].shape + "(" + n + "_rate, " + n + "_phase)\n";
+    }
+    for (int i = 0; i < 4; ++i) {
+        const std::string n = "macro" + std::to_string(i + 1);
+        c += param(n, p.macro[i].value, 0, 1, p.macro[i].name);
+    }
+    auto modExpr = [&](const std::string& destination) {
+        std::string expr;
+        for (const Mod& m : p.mods) if (m.destination == destination) {
+            expr += (expr.empty() ? "" : " + ") + "(" + m.source + " * " + num(m.amount) + ")";
+        }
+        return expr.empty() ? std::string("0") : expr;
+    };
     c += p.glide > 0 ? "let pitch = slew(freq, " + num(p.glide) + ")\n" : "let pitch = freq\n";
     // Routing: each filter takes its sources (by default filter 1 takes them all; in parallel, filter 2 too); in
     // series filter 2 also takes filter 1's output. Sources no filter takes go straight out.
@@ -449,7 +568,7 @@ std::string generatorCode(const Patch& p) {
     if (!dry.empty()) out += (out.empty() ? "" : " + ") + sum(dry);
     if (out.empty()) out = "0";
     c += "let amp = env.adsr(gate, attack, decay, sustain, release) * (0.5 + 0.5 * vel)\n";
-    c += "(" + out + ") * amp * volume\n";
+    c += "(" + out + ") * amp * clamp(volume + (" + modExpr("volume") + "), 0, 1)\n";
     return c;
 }
 
