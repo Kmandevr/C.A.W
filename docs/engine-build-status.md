@@ -14,7 +14,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Hardware profile input and C ABI adapter for workload planning, plus a native best-effort probe for online cores, conservative available-memory budget and CPU SIMD support on Windows, macOS, Linux and Android. Thermal/battery pressure remains host supplied; GPU compute is reported unavailable until a real kernel backend exists.
 - First-class internal module descriptors with stable IDs, typed ports, parameter metadata and validation, plus framework-neutral generated UI controls and custom-view identifiers with parameter/range validation.
 - Stereo-native borrowed-buffer processor contract. This is an interface contract; it is not yet wired into the existing VM/mixer as a universal processor path.
-- Typed DSP graph validation and deterministic topological ordering, including cycle, direction, port type, channel layout and duplicate-input checks.
+- Typed DSP graph validation, deterministic topological ordering and a prepared stereo executor. The executor allocates only during prepare; its process path uses preallocated buffers and invokes borrowed processors without graph traversal or locks.
 - Bounded, fixed-capacity non-real-time worker pool with priority scheduling, worker-budget controls, queue rejection and pending-job cancellation. It is not yet connected to app/render/analysis jobs or the adaptive workload policy.
 - Exact, scope-aware dependency resolver for project-local, user-global, factory and add-on assets, including pinned version, content hash, interface version, optional references and ambiguity detection. Project JSON now parses and stores these dependency references; matching them against the installed library and surfacing repair actions remain unimplemented.
 - Public native module C ABI header and SDK contract for trusted add-ons. Dynamic loading, host adapter, state lifecycle and package signing remain unimplemented.
@@ -23,7 +23,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Not yet implemented
 
-- A real-time-safe graph executor that runs compiled graph plans through the existing engine and VM.
+- Integration of the prepared graph executor into the existing Engine/VM mixer path, including a host-facing processor registry and project representation.
 - Universal state transfer, graph hot-swap and dependency-aware retirement for native module instances.
 - Scheduling integration: the pool and workload policy exist, but platform pressure is not yet fed into the pool automatically and engine jobs do not yet use it.
 - Automatic Android/Windows/macOS/Linux hardware, SIMD, memory, thermal and battery capability probes.
@@ -37,7 +37,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Engineering order
 
-1. Make the module graph executable and safely hot-swappable.
+1. Integrate the prepared graph into the existing Engine/VM path and add safe graph replacement/state migration.
 2. Add the bounded non-real-time worker scheduler and platform capability providers.
 3. Expand the synth parser/code generator with modulation primitives while retaining the readable patch format.
 4. Connect graph/module identity and pinned dependencies to project serialization and the asset library.
