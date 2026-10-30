@@ -1,7 +1,8 @@
 ---
 title: Synth
 summary: The house synth (kind: synth): a Vital/Serum-style instrument whose patch is a readable .caw file, its layout, file format, engine design and build stages.
-updated: 2026-10-29
+covers: [engine/src/synth.cpp, engine/tests/synth_test.cpp]
+updated: 2026-10-30
 ---
 
 # Synth
@@ -85,7 +86,11 @@ table vocal file vocal.wav                            // imported 2048-sample fr
 | `noise …` / `noise off` | `level` 0–1 (0.2), `color` 0 dark – 1 white (1) |
 | `filter 1\|2 TYPE …` / `filter 2 off` | TYPE lowpass, highpass, bandpass or notch; `cutoff` 20–20000 Hz (2000), `res` 0–1 (0.2), `drive` 0–1 (0), `keytrack` 0–1 (0.5), `from a b c sub noise` (filter 1 takes every source by default) |
 | `filters serial\|parallel` | serial (default): filter 2 takes filter 1's output plus its own `from`; parallel: both take their sources. Sources no filter takes go straight out |
-| `env 1 …` | the volume envelope: `attack`, `decay`, `release` 0–20 s, `sustain` 0–1. Velocity scales the volume by 0.5–1 |\n| `env 2\|3 …` | additional ADSR modulation envelopes with the same ranges |\n| `lfo 1..4 …` | `shape` sine/tri/saw/square/random, `rate` 0.015625–64 beats per cycle, `phase` 0–1; generated with native tempo-synced LFO functions |\n| `macro 1..4 NAME VALUE` | named 0–1 macro controls |\n| `mod SOURCE -> DESTINATION AMOUNT` | source `env 2/3`, `lfo 1..4`, `macro 1..4` or `vel`; destination oscillator `pos/level/pitch`, filter `cutoff/res`, or `volume`; amount −1..1 |
+| `env 1 …` | the volume envelope: `attack`, `decay`, `release` 0–20 s, `sustain` 0–1. Velocity scales the volume by 0.5–1 |
+| `env 2\|3 …` | additional ADSR modulation envelopes with the same ranges |
+| `lfo 1..4 …` | `shape` sine/tri/saw/square/random, `rate` 0.015625–64 beats per cycle, `phase` 0–1; generated with native tempo-synced LFO functions |
+| `macro 1..4 NAME VALUE` | named 0–1 macro controls |
+| `mod SOURCE -> DESTINATION AMOUNT` | source `env 2/3`, `lfo 1..4`, `macro 1..4` or `vel`; destination oscillator `pos/level/pitch`, filter `cutoff/res`, or `volume`; amount −1..1 |
 | `fx drive\|crush\|delay\|reverb\|comp …` | drive `amount` 0–1; crush `bits` 1–24; delay `time` in beats, `feedback`, `mix`; reverb `size`, `damp`, `mix`; comp `threshold` dB, `ratio` |
 | `fx NAME` | a project effect module, by name, where its line is. At most 8 `fx` lines |
 

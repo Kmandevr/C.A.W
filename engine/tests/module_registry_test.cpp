@@ -1,3 +1,4 @@
+// Tests for the static native module registry, factory validation and processor state contract.
 #include "test.h"
 
 #include "module_registry.h"
@@ -35,8 +36,8 @@ TEST(module_registry_registers_and_creates_valid_processors) {
 
 TEST(module_registry_rejects_duplicate_and_unknown_modules) {
     ModuleRegistry registry;
-    CHECK(registry.add(descriptor, &makeTest));
-    CHECK(!registry.add(descriptor, &makeTest));
+    CHECK(registry.add(kDescriptor, &makeTest));
+    CHECK(!registry.add(kDescriptor, &makeTest));
     CHECK(registry.create("missing") == nullptr);
 }
 

@@ -1,6 +1,7 @@
 // Regression tests for text-field key routing alongside the app's Vim/action shortcuts.
 import 'package:caw/actions/actions.dart';
 import 'package:caw/actions/key_event.dart';
+import 'package:caw/actions/keys.dart';
 import 'package:caw/actions/vim.dart';
 import 'package:caw/ui/key_router.dart';
 import 'package:flutter_test/flutter_test.dart';

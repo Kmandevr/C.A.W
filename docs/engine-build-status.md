@@ -1,6 +1,7 @@
 ---
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
+covers: [engine/, app/]
 updated: 2026-10-30
 ---
 
@@ -28,7 +29,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Integration of the prepared graph executor and graph runtime into the existing Engine/VM mixer path, including project graph representation and bytecode/native processor interoperation.
 - Universal state transfer, graph hot-swap integration and dependency-aware retirement for native module instances; the graph helper currently provides only prepared-graph pointer publication and deferred reclamation.
 - Host scheduling integration: the adaptive pool now applies workload plans, but platform pressure is not yet fed into it automatically and engine/app jobs do not yet use it.
-- Automatic Android/Windows/macOS/Linux hardware, SIMD, memory, thermal and battery capability probes.
+- Automatic host/app integration of the native hardware probe and live thermal/battery pressure feeds. The core already has a best-effort logical-core, memory-budget and SIMD probe; platform accuracy and real-device behavior still need validation.
 - A true adaptive quality ladder with measurable preview-quality modes and guaranteed unchanged offline exports.
 - Drawn LFO curves, additional oscillator warp modes (hard sync/FM/fold) and the complete custom/imported table draw/render pipeline.
 - MIDI 2.0 device input/output, Engine voice routing, output scheduling and full per-note controller/attribute mapping. The decoder/queue do not by themselves provide device support.
@@ -50,4 +51,4 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Verification
 
-The new native CMake workflow builds the engine without a device backend and runs the full CTest suite on pushes and pull requests. The latest observed Engine, App and Docs workflow runs for this branch were queued; no passing build is claimed. CI must pass before the new foundation is treated as verified. Device profiling remains a separate requirement; cloud CI cannot prove phone latency, thermal behavior, battery use or drop-out resistance.
+The native CMake workflow builds the engine without a device backend and runs the full CTest suite on pushes and pull requests. Treat the checks on the current PR head as authoritative: queued or partial jobs are not passes, and a successful library build is not a test-suite pass. The modular foundation remains unverified until the complete Engine, App and Docs checks are green. Device profiling remains separate; cloud CI cannot prove phone latency, thermal behavior, battery use or drop-out resistance.

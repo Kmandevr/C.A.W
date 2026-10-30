@@ -1,7 +1,6 @@
 ---
 title: Modular adaptive engine blueprint
 summary: Owner direction for CAW's native sound engine, reusable modules, interactive creation interfaces, portable assets, expressive MIDI, exports and adaptive hardware use.
-covers: [engine/, app/, examples/]
 updated: 2026-10-30
 ---
 
@@ -46,7 +45,8 @@ Core layers:
 - **Voice/expression engine:** polyphony, per-note state, MIDI events, MPE-style expression and shared post-voice processing.
 - **Existing .caw compiler and VM:** preserve as a first-class, sandboxed creation path. Do not replace it with a mandatory visual graph.
 - **Asset/project layer:** versioned serialization, local/global references, dependency resolution and portability.
-- **Host/API layer:** versioned C ABI for Flutter, CLI, future plugins and other clients. No UI types or C++ ABI cross this boundary.\n- **Unified module contract:** typed port metadata, stable IDs, parameter descriptors, state/version rules and a borrowed-buffer processing contract shared by built-in and third-party modules.
+- **Host/API layer:** versioned C ABI for Flutter, CLI, future plugins and other clients. No UI types or C++ ABI cross this boundary.
+- **Unified module contract:** typed port metadata, stable IDs, parameter descriptors, state/version rules and a borrowed-buffer processing contract shared by built-in and third-party modules.
 
 ### Stereo and typed connections
 
@@ -207,7 +207,11 @@ No one can promise bugs are impossible. The engineering commitment is explicit i
 
 Do not attempt a one-shot rewrite. Keep existing project files, .caw modules and C API working through versioned migration. Each stage must leave a buildable, testable product.
 
-## 13. First implementation slice (2026-10-30)\n\n**[Fact]** A pure, deterministic workload-policy helper now exists in engine/src/execution.h and engine/src/execution.cpp, with tests in engine/tests/execution_test.cpp. It maps interactive audition/preview, background generation, offline render and idle workloads to bounded worker/batch recommendations using host-supplied core, memory, SIMD, GPU and pressure hints. It does not query the OS, start a worker pool, change the audio callback, select an audio backend profile or perform GPU work yet. Those integrations require platform-specific measurement and separate review. CI must pass before this slice is considered verified.\n\n## 14. Existing work to preserve
+## 13. Implementation status
+
+This blueprint describes direction and proposed architecture, not a claim that every capability is built. The [implementation ledger](engine-build-status.md) records what exists, what remains unintegrated, and the verification state. The [engine reference](engine.md) documents the established v1 runtime.
+
+## 14. Existing work to preserve
 
 This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, AI-friendly files, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities without expanding them into a full DAW, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, factory content under caw/factory, local/global assets, optional direct AI project editing, CLAP-first plugin generation, VST3 later, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
 

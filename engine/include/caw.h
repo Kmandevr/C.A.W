@@ -122,6 +122,7 @@ CAW_API const char* caw_template_source(int32_t index);
    this does not query OS APIs, start workers, or alter the real-time audio callback. */
 CAW_API int32_t caw_execution_plan(const CawHardwareProfile* hardware, const CawExecutionRequest* request,
                                    CawExecutionPlan* out);
+CAW_API int32_t caw_hardware_profile_detect(CawHardwareProfile* out);
 
 #ifdef __cplusplus
 }
