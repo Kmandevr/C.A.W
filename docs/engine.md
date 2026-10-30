@@ -7,13 +7,13 @@ updated: 2026-10-29
 
 # Engine and language reference
 
-The engine in `engine/` as built. The reasons behind it are in [architecture](architecture.md), and the version plan is in [roadmap](roadmap.md). All of it is **[Fact]**: it is checked by `engine/tests/`.
+The engine in `engine/` as built. The reasons behind v1 are in [architecture](architecture.md); the next-generation direction is [Modular adaptive engine](engine-next.md). The version plan is in [roadmap](roadmap.md). Built implementation details are **[Fact]** and checked by `engine/tests/`.
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath`, `pattern` (note patterns), `engine` (mixer and voices), `project`, `render` (exports), `docs` (generated reference), `wav`, `json`, `capi` |
+| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, docs, WAV/JSON/C API, and workload policy (`execution.*`) |
 | `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
 | `engine/include/caw.h` | The C API, version 1 |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
