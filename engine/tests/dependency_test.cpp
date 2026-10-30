@@ -1,7 +1,8 @@
 // Tests for pinned, scope-aware project dependency resolution.
 #include "test.h"
 
-#include "dependency.h"\n#include "project.h"
+#include "dependency.h"
+#include "project.h"
 
 using namespace caw;
 
