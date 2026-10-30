@@ -359,6 +359,27 @@ void runSlew(const CallArgs& c) {
 
 // ---------- LFOs (tempo-synced, from the layer's time) ----------
 
+void runLfoCurve(const CallArgs& c) {
+    const double* time = c.ctx->vars[static_cast<int>(Var::Time)];
+    const double bps = c.ctx->bpm / 60.0;
+    for (int i = 0; i < c.n; ++i) {
+        const double beats = c.a[0][i];
+        if (!(beats > 0.0) || !std::isfinite(beats) || !time) {
+            c.out[i] = 0.0;
+            continue;
+        }
+        const double cycles = time[i] * bps / beats + c.a[1][i];
+        const double phase = cycles - std::floor(cycles);
+        const double scaled = phase * 4.0;
+        const int segment = static_cast<int>(scaled);
+        const double mix = scaled - segment;
+        const int next = (segment + 1) & 3;
+        const double a = clampd(finiteOr0(c.a[2 + segment][i]), -1.0, 1.0);
+        const double b = clampd(finiteOr0(c.a[2 + next][i]), -1.0, 1.0);
+        c.out[i] = a + (b - a) * mix;
+    }
+}
+
 template <int Shape>
 void runLfo(const CallArgs& c) {
     const double* time = c.ctx->vars[static_cast<int>(Var::Time)];
@@ -811,6 +832,7 @@ const Builtin kBuiltins[] = {
     {"lfo.saw", 1, 2, {1, 0}, 0, Var::Time, noInit, runLfo<2>, "LFOs", "Rising saw LFO -1..1 synced to the tempo.", {"beats: length of one cycle in beats", "phase: start point 0..1 (default 0)"}, "sine(220 + 100 * lfo.saw(2)) * 0.5"},
     {"lfo.square", 1, 2, {1, 0}, 0, Var::Time, noInit, runLfo<3>, "LFOs", "Square LFO (1 then -1) synced to the tempo.", {"beats: length of one cycle in beats", "phase: start point 0..1 (default 0)"}, "sine(220 * (1.5 + 0.5 * lfo.square(1))) * 0.5"},
     {"lfo.random", 1, 2, {1, 0}, 1, Var::Time, siteInit, runLfo<4>, "LFOs", "A new random level -1..1 every cycle (stepped), synced to the tempo and the seed.", {"beats: how long each level lasts, in beats", "phase: start point 0..1 (default 0)"}, "sine(330 + 200 * lfo.random(0.25)) * 0.5"},
+    {"lfo.curve", 2, 6, {1, 0, 0, 1, 0, -1}, 0, Var::Time, noInit, runLfoCurve, "LFOs", "Tempo-synced four-point editable curve, linearly interpolated and looped.", {"beats: length of one cycle in beats", "phase: start point 0..1", "p0: first point -1..1", "p1: second point -1..1", "p2: third point -1..1", "p3: fourth point -1..1"}, "sine(220 + 80 * lfo.curve(4, 0, 0, 1, 0, -1)) * 0.5"},
     // Filters
     {"lpf", 2, 3, {0, 0, 0.707}, SvSize, kNone, svfInit, runSvf<0>, "Filters", "Low-pass state-variable filter (12 dB/octave).", {"x: input", "cutoff: Hz", "q: resonance 0.1..40 (default 0.707)"}, "lpf(saw(55), 800, 4) * 0.5"},
     {"hpf", 2, 3, {0, 0, 0.707}, SvSize, kNone, svfInit, runSvf<1>, "Filters", "High-pass state-variable filter (12 dB/octave).", {"x: input", "cutoff: Hz", "q: resonance 0.1..40 (default 0.707)"}, "hpf(noise(), 6000) * 0.3"},
