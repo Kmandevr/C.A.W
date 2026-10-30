@@ -2,7 +2,7 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
+#include <string>\n#include <string_view>
 #include <vector>
 
 namespace caw {
