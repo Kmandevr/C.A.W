@@ -319,7 +319,7 @@ class _PatternEditorState extends State<PatternEditor> {
       case 'roll.select.addAtCursor':
         setState(() => _sel = {..._sel, ...d.notesIn(_cursorAt, _cursorAt, _cursorPitch, _cursorPitch)});
       case 'roll.edit.copy':
-        _clip = d.copy(_sel);
+        if (_sel.isNotEmpty) setState(() => _clip = d.copy(_sel));
       case 'roll.edit.paste':
         final c = _clip;
         if (c == null) return true;
@@ -1026,8 +1026,11 @@ class _PatternEditorState extends State<PatternEditor> {
       final n = d.byId(hit)!;
       _dragNote = hit;
       _tapCandidate = hit;
-      _resizing = (n.end.toDouble() - _stepAt(p.dx)) * _pxPerStep < _look.grab;
-      if (!_sel.contains(hit)) setState(() => _sel = {hit});
+      // Keep an existing multi-selection intact when dragging any member. Only a single note can resize;
+      // a group drag always moves the complete selection without changing note lengths.
+      final dragSelection = _sel.contains(hit) ? _sel : <int>{hit};
+      if (!_sel.contains(hit)) setState(() => _sel = dragSelection);
+      _resizing = dragSelection.length == 1 && (n.end.toDouble() - _stepAt(p.dx)) * _pxPerStep < _look.grab;
       _holdAt = p;
       _hold = Timer(Duration(milliseconds: _look.holdMs), () {
         _up();
@@ -1283,6 +1286,10 @@ class _PatternEditorState extends State<PatternEditor> {
         'edit.redo' => _redo.isNotEmpty,
         _ => true,
       },
+      selectedCount: _sel.length,
+      canPaste: _clip != null,
+      onCopy: () => _runRef(ActionRef.action('roll.edit.copy')),
+      onPaste: () => _runRef(ActionRef.action('roll.edit.paste')),
       onRun: _runRef,
       res: _res,
       onRes: (r) => setState(() => _res = r),
@@ -1457,6 +1464,10 @@ class _Toolbar extends StatelessWidget {
     required this.keymap,
     required this.isOn,
     required this.isEnabled,
+    required this.selectedCount,
+    required this.canPaste,
+    required this.onCopy,
+    required this.onPaste,
     required this.onRun,
     required this.res,
     required this.onRes,
@@ -1471,6 +1482,9 @@ class _Toolbar extends StatelessWidget {
   final ActionRegistry registry;
   final Keymap? keymap;
   final bool Function(String id) isOn, isEnabled;
+  final int selectedCount;
+  final bool canPaste;
+  final VoidCallback onCopy, onPaste;
   final ValueChanged<ActionRef> onRun;
   final bool fullScreen, velLane, extrasLane, canCustomise;
   final VoidCallback onFullScreen;
@@ -1521,6 +1535,20 @@ class _Toolbar extends StatelessWidget {
       child: ListView(scrollDirection: Axis.horizontal, children: [
         for (final r in items)
           if (r.isMacro || !_notBuilt.contains(r.id)) _item(r),
+        if (selectedCount > 0) ...[
+          TextButton.icon(
+            onPressed: onCopy,
+            icon: const Icon(Icons.content_copy),
+            label: Text('Copy ($selectedCount)'),
+            style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+          ),
+          TextButton.icon(
+            onPressed: canPaste ? onPaste : null,
+            icon: const Icon(Icons.content_paste),
+            label: const Text('Paste'),
+            style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
+          ),
+        ],
         IconButton(
           tooltip: 'Full screen',
           onPressed: onFullScreen,
