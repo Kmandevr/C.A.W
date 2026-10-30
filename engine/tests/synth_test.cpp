@@ -215,8 +215,9 @@ TEST(synth_patches_report_errors_at_their_line) {
     CHECK(patchError("osc a table nope\n").find("unknown table 'nope'") != std::string::npos);
     CHECK(patchError("osc a wobble 3\n").find("unknown setting 'wobble'") != std::string::npos);
     CHECK(patchError("filter 1 lowpass cutoff 5\n").find("cutoff must be 20 to 20000") != std::string::npos);
-    CHECK(patchError("lfo 1 rate 2\n").find("later synth stage") != std::string::npos);
-    CHECK(patchError("mod env 2 -> filter 1 cutoff 0.4\n").find("later synth stage") != std::string::npos);
+    CHECK(patchError("lfo 5 rate 2\\n").find("lfo needs its number") != std::string::npos);
+    CHECK(patchError("mod env 1 -> filter 1 cutoff 0.4\\n").find("env 1 is the amplitude envelope") != std::string::npos);
+    CHECK(patchError("macro 5 Bright 0.5\\n").find("macro syntax") != std::string::npos);
     CHECK(patchError("bananas\n").find("unknown line 'bananas'") != std::string::npos);
     CHECK(patchError("voices 40\n").find("voices must be 1 to 32") != std::string::npos);
     CHECK(translateSynth("---\nkind: generator\n---\nosc a\n").error.find("kind: synth") != std::string::npos);
