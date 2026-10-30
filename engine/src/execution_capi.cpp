@@ -1,6 +1,7 @@
 // C ABI adapter for the portable execution policy. Host code owns capability detection and worker scheduling.
 #include "caw.h"
-#include "execution.h"\n#include "hardware.h"
+#include "execution.h"
+#include "hardware.h"
 
 #include <algorithm>
 
