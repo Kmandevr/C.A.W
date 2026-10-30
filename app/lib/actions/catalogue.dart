@@ -16,8 +16,9 @@ const Map<Area, List<String>> standardToolbars = {
     'roll.grid.triplets', 'roll.grid.adaptive', 'roll.view.switch',
   ],
   // Phone quick-action strips use the same editable, persistent toolbar data as the roll.
-  Area.builder: ['transport.playstop', 'edit.undo', 'edit.redo', 'project.save', 'view.actions'],
-  Area.arranger: ['transport.playstop', 'edit.undo', 'edit.redo', 'project.save', 'view.actions'],
+  Area.builder: ['transport.playstop', 'project.save', 'view.actions'],
+  Area.code: ['transport.playstop', 'project.save', 'view.actions'],
+  Area.arranger: ['transport.playstop', 'project.save', 'view.actions'],
   Area.exporter: ['transport.playstop', 'project.save', 'view.actions'],
 };
 
