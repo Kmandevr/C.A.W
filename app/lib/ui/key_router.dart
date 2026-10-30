@@ -389,6 +389,7 @@ class KeyRouterState extends State<KeyRouter> {
         ],
       _ => const ['Esc', 'Space', '?', ':', '.', 'Alt+Q', '@', 'Ctrl+Z', 'Ctrl+Shift+Z'],
     };
+    final visibleTouchKeys = vim.mode == VimMode.insert ? const ['Esc'] : touchKeys;
     final badge = <Widget>[
       if (vim.recording) Text('● @${vim.recordingSlot}', style: const TextStyle(color: Neon.pink)),
       if (vim.mode != VimMode.normal) Text(vim.mode.name.toUpperCase(), style: const TextStyle(color: Neon.yellow)),
@@ -441,7 +442,7 @@ class KeyRouterState extends State<KeyRouter> {
                     spacing: 4,
                     runSpacing: 4,
                     children: [
-                      for (final key in touchKeys)
+                      for (final key in visibleTouchKeys)
                         TextButton(
                           onPressed: () => _touchKey(key, area: touchArea),
                           style: TextButton.styleFrom(
