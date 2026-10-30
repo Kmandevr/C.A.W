@@ -146,6 +146,7 @@ struct Macro {
 struct Mod {
     std::string source, destination;
     double amount = 0;
+    int line = 0;
 };
 struct Patch {
     std::string name = "Synth", summary;
@@ -357,8 +358,8 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
                 w[2].text.size() != 1 || w[2].text[0] < '1' || w[2].text[0] > '4')
                 throw PatchError{line, head.col, "source must be env 2/3, lfo 1-4, macro 1-4 or vel"};
             mod.source = w[1].text + w[2].text;
-            if (w[1].text == "env" && w[2].text == "1")
-                throw PatchError{line, w[2].col, "env 1 is the amplitude envelope; use env 2 or 3 as a modulator"};
+            if (w[1].text == "env" && w[2].text != "2" && w[2].text != "3")
+                throw PatchError{line, w[2].col, "only env 2 and env 3 can be modulation sources"};
         }
         const size_t d = arrow + 1;
         size_t amountIndex = d;
@@ -385,6 +386,7 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
         mod.amount = std::strtod(w[amountIndex].text.c_str(), &end);
         if (!end || *end || !std::isfinite(mod.amount) || mod.amount < -1 || mod.amount > 1)
             throw PatchError{line, w[amountIndex].col, "mod amount must be -1 to 1"};
+        mod.line = line;
         p.mods.push_back(mod);
         return;
     }
@@ -652,6 +654,23 @@ SynthResult translateSynth(std::string_view src) {
             anySource = anySource || w[0].text == "osc" || w[0].text == "sub" || w[0].text == "noise";
         }
         if (!anySource) p.osc[0].on = true;
+        for (const Mod& mod : p.mods) {
+            if (mod.source.rfind("lfo", 0) == 0) {
+                const int index = mod.source[3] - '1';
+                if (index < 0 || index >= 4 || !p.lfo[index].on)
+                    throw PatchError{mod.line, 1, mod.source + " is used as a modulator but is not enabled"};
+            }
+            if (mod.destination.size() >= 3 && mod.destination[1] == '_') {
+                const int index = mod.destination[0] - 'a';
+                if (index < 0 || index >= 3 || !p.osc[index].on)
+                    throw PatchError{mod.line, 1, "modulation destination oscillator is off"};
+            }
+            if (mod.destination.rfind("f", 0) == 0) {
+                const int index = mod.destination[1] - '1';
+                if (index < 0 || index >= 2 || !p.filter[index].on)
+                    throw PatchError{mod.line, 1, "modulation destination filter is off"};
+            }
+        }
         r.name = p.name;
         r.summary = p.summary;
         r.generator = generatorCode(p);
