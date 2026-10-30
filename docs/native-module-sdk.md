@@ -14,7 +14,7 @@ Built-in modules and add-on modules share the same stable identity, typed ports,
 
 ## Entry point
 
-A module exports `caw_get_native_module_v1`, returning a static `CawNativeModuleV1`. The descriptor declares a stable reverse-domain ID, ports, parameters and a maximum serialized state size. The host validates the ABI version, struct sizes, pointer/count pairs, IDs, port directions/types/layouts, finite parameter ranges and resource limits before creating an instance.
+A module exports `caw_get_native_module_v1`, returning a static `CawNativeModuleV1`. The descriptor declares a stable reverse-domain ID, typed ports, parameters, a maximum serialized state size, optional generated UI controls (slider, toggle, dropdown, XY pad, button and curve) and an optional custom UI identifier. The internal module contract validates that UI controls refer to real parameters and stay within their ranges. The host validates the ABI version, struct sizes, pointer/count pairs, IDs, port directions/types/layouts, finite parameter ranges and resource limits before creating an instance.
 
 ## Real-time contract
 
@@ -39,7 +39,7 @@ Creation, destruction, state serialization, graph compilation and asset loading 
 
 ## User interfaces
 
-The SDK deliberately does not prescribe one UI. A module may provide a declarative control schema, a custom host-rendered view, or code-driven controls. The project/app stores UI metadata separately from DSP state so the same module works in the app, project tools and future plugin wrappers.
+The SDK deliberately does not prescribe one UI. A module may provide a declarative control schema, a custom host-rendered view identifier, or code-driven controls. This is metadata and validation only; the CAW app's UI renderer and custom-view runtime are still future integration work. The project/app stores UI metadata separately from DSP state so the same module works in the app, project tools and future plugin wrappers.
 
 ## Build stages still required
 
