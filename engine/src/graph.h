@@ -52,4 +52,31 @@ struct CompiledGraph {
 CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                            const std::vector<GraphConnection>& connections);
 
+// Prepared native stereo executor. prepare() allocates on a control thread; process() performs
+// no allocation, locking, I/O or graph traversal and is suitable for a bounded audio callback.
+class GraphExecutor {
+public:
+    GraphError prepare(const std::vector<GraphNode>& nodes,
+                       const std::vector<GraphConnection>& connections,
+                       const std::vector<ModuleProcessor*>& processors,
+                       uint32_t outputNode,
+                       uint32_t maxFrames,
+                       double sampleRate);
+    void reset() noexcept;
+    bool process(const float* inputLeft, const float* inputRight,
+                 float* outputLeft, float* outputRight, uint32_t frames) noexcept;
+    bool ready() const noexcept { return ready_; }
+
+private:
+    std::vector<ModuleProcessor*> processors_;
+    std::vector<std::vector<float>> left_, right_;
+    std::vector<int32_t> inputSource_;
+    std::vector<uint8_t> hasInput_, hasOutput_;
+    std::vector<uint32_t> order_;
+    uint32_t outputNode_ = UINT32_MAX;
+    uint32_t maxFrames_ = 0;
+    double sampleRate_ = 48000.0;
+    bool ready_ = false;
+};
+
 }  // namespace caw
