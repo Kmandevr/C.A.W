@@ -6,7 +6,7 @@ updated: 2026-10-28
 
 # Architecture
 
-The technical plan for the owner's brief in [vision](vision.md). Build order: [roadmap](roadmap.md). Why each choice was made: [decisions](decisions.md).
+The technical plan for the currently built v1 engine and app. The newer owner direction for the modular, adaptive next-generation engine is in [Modular adaptive engine](engine-next.md); where older proposals here conflict with that blueprint, the blueprint is authoritative. Product boundaries are in [vision](vision.md), build order in [roadmap](roadmap.md), and historical choices in [decisions](decisions.md).
 
 Labels used below:
 - **[Fact]** is verified, either in this repo or from a primary source. The date is noted when it matters.
