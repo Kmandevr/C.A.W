@@ -65,6 +65,7 @@ class KeyRouterState extends State<KeyRouter> {
   List<KeyHint> _hints = const [];
   Timer? _toastTimer, _prefixTimer;
   int _layer = 0; // the Arranger's keyboard-selected layer
+  final TextEditingController _commandController = TextEditingController();
 
   AppState get s => widget.state;
 
@@ -82,6 +83,7 @@ class KeyRouterState extends State<KeyRouter> {
     vim.removeListener(_changed);
     _toastTimer?.cancel();
     _prefixTimer?.cancel();
+    _commandController.dispose();
     super.dispose();
   }
 
@@ -202,8 +204,18 @@ class KeyRouterState extends State<KeyRouter> {
       vim.closeCommandLine();
     } else {
       vim.openCommandLine();
+      _commandController.clear();
     }
     setState(() {});
+  }
+
+  void _touchRecord() {
+    if (vim.recording) {
+      _touchRun('vim.record');
+    } else {
+      _show(vim.runAction('vim.record'));
+      _show(vim.handleKey(const KeyChord('a')));
+    }
   }
 
   void _show(KeyResult r) {
@@ -402,7 +414,7 @@ class KeyRouterState extends State<KeyRouter> {
                   _touchButton('VISUAL', Icons.select_all, vim.mode == VimMode.visual, () => _touchMode(VimMode.visual)),
                   _touchButton(': CMD', Icons.terminal, vim.commandLineOpen, _touchCommandLine),
                   _touchButton('.', Icons.repeat, false, () => _touchRun('vim.repeat')),
-                  _touchButton(vim.recording ? 'STOP REC' : 'REC', Icons.fiber_manual_record, vim.recording, () => _touchRun('vim.record')),
+                  _touchButton(vim.recording ? 'STOP REC' : 'REC A', Icons.fiber_manual_record, vim.recording, _touchRecord),
                   _touchButton('ACTIONS', Icons.list, false, () => showActionList(context)),
                 ]),
               ),
@@ -424,6 +436,8 @@ class KeyRouterState extends State<KeyRouter> {
                       ActionChip(
                         label: Text('${c.keys} · ${c.label}', style: Neon.code(size: 12)),
                         onPressed: () {
+                          _commandController.text = c.keys;
+                          _commandController.selection = TextSelection.collapsed(offset: c.keys.length);
                           vim.setCommandText(c.keys);
                           setState(() {});
                         },
@@ -432,11 +446,11 @@ class KeyRouterState extends State<KeyRouter> {
                   TextField(
                     autofocus: true,
                     key: const ValueKey('vim-command-line'),
-                    controller: TextEditingController(text: vim.commandText)
-                      ..selection = TextSelection.collapsed(offset: vim.commandText.length),
+                    controller: _commandController,
                     onChanged: vim.setCommandText,
                     onSubmitted: (_) {
                       _show(vim.submitCommand());
+                      _commandController.clear();
                       setState(() {});
                     },
                     decoration: InputDecoration(
