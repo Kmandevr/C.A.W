@@ -14,7 +14,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Hardware profile input and C ABI adapter for workload planning. The host supplies the profile; automatic platform capability detection is not implemented yet.
 - First-class internal module descriptors with stable IDs, typed ports, parameter metadata and validation.
 - Stereo-native borrowed-buffer processor contract. This is an interface contract; it is not yet wired into the existing VM/mixer as a universal processor path.
-- Typed DSP graph validation and deterministic topological ordering, including cycle, direction, port type, channel layout and duplicate-input checks.
+- Typed DSP graph validation and deterministic topological ordering, including cycle, direction, port type, channel layout and duplicate-input checks.\n- Bounded, fixed-capacity non-real-time worker pool with priority scheduling, worker-budget controls, queue rejection and pending-job cancellation. It is not yet connected to app/render/analysis jobs or the adaptive workload policy.
 - Public native module C ABI header and SDK contract for trusted add-ons. Dynamic loading, host adapter, state lifecycle and package signing remain unimplemented.
 - Existing note model already supports fractional MIDI pitches and per-note bend, pressure, timbre and vibrato curves. Existing MIDI import/export handles Standard MIDI Files and MIDI 2.0 Clip Files.
 - Existing synth patch compiler already supports three oscillators, sub/noise, unison, two filters, one amplitude envelope and effect chains. Several previously planned synth features remain unimplemented.
@@ -23,7 +23,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 - A real-time-safe graph executor that runs compiled graph plans through the existing engine and VM.
 - Universal state transfer, graph hot-swap and dependency-aware retirement for native module instances.
-- Bounded worker pool, job cancellation and scheduling integration. The workload policy currently returns advice only.
+- Scheduling integration: the pool and workload policy exist, but platform pressure is not yet fed into the pool automatically and engine jobs do not yet use it.
 - Automatic Android/Windows/macOS/Linux hardware, SIMD, memory, thermal and battery capability probes.
 - A true adaptive quality ladder with measurable preview-quality modes and guaranteed unchanged offline exports.
 - Full synth modulation system: three envelopes, four drawn LFOs, four macros, modulation matrix, oscillator warp modes and complete table import/draw/render pipeline.
