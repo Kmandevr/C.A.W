@@ -31,7 +31,7 @@ A project is a portable dependency graph, not a folder of unrelated files. It sh
 3. **Factory assets** shipped read-only with CAW.
 4. **Add-on modules** installed by the user or supplied by a trusted package.
 
-The native core now has an exact, scope-aware dependency resolver (`dependency.*`) for stable asset IDs, source scope, pinned version, content hash and interface version, including optional and ambiguous dependency outcomes. Project JSON serialization, embedded snapshots and the library UI still need to store and invoke these records. Updating a global library item must never silently alter the sound of an already-pinned project.
+The native core now has an exact, scope-aware dependency resolver (`dependency.*`) for stable asset IDs, source scope, pinned version, content hash and interface version, including optional and ambiguous dependency outcomes. Project JSON parsing now stores the pinned dependency records on `ProjectSpec`. Project JSON writing/round-tripping, embedded snapshots, installed-library lookup and repair UI still need to invoke the resolver. Updating a global library item must never silently alter the sound of an already-pinned project.
 
 The in-app file manager and library browser are two views of the same asset model. They must support search, categories/tags, preview, dependency inspection, version history, duplicate/fork, local-to-global publish, global-to-project copy/link, missing-dependency repair and safe delete. Factory content is never overwritten in place; edits become project-local copies or user forks.
 
