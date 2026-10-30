@@ -14,6 +14,7 @@ import '../actions/vim.dart';
 import '../model/app_state.dart';
 import '../model/settings.dart';
 import 'theme.dart';
+import 'touch_quick_actions.dart';
 
 /// Whether a focused text editor, rather than the global action router, should receive this key.
 bool shouldDeferTextEditingKey({
@@ -61,7 +62,6 @@ class KeyRouterState extends State<KeyRouter> {
   // Several editors can offer one area (the Builder's roll and a full-screen one): the focused one wins, else the newest.
   final Map<Area, List<({FocusNode focus, ActionTarget run})>> _targets = {};
   bool _keyboard = false; // the badge shows once a hardware key was pressed
-  bool _touchKeysOpen = false;
   String? _toast;
   bool _toastError = false;
   List<KeyHint> _hints = const [];
@@ -190,42 +190,6 @@ class KeyRouterState extends State<KeyRouter> {
     return r.handled ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
-  void _touchKey(String key, {Area? area}) => _handleChord(KeyChord.parse(key), area: area, fromTouch: true);
-
-  void _touchMode(VimMode mode) {
-    if (vim.area != _area) vim.area = _area;
-    vim.mode = mode;
-    _prefixTimer?.cancel();
-    setState(() {
-      _hints = const [];
-      _toast = mode == VimMode.normal ? 'Normal mode' : '${mode.name[0].toUpperCase()}${mode.name.substring(1)} mode';
-    });
-  }
-
-  void _touchRun(String id) {
-    _prefixTimer?.cancel();
-    _show(vim.runAction(id));
-  }
-
-  void _touchCommandLine() {
-    if (vim.commandLineOpen) {
-      vim.closeCommandLine();
-    } else {
-      vim.openCommandLine();
-      _commandController.clear();
-    }
-    setState(() {});
-  }
-
-  void _touchRecord() {
-    if (vim.recording) {
-      _touchRun('vim.record');
-    } else {
-      _show(vim.runAction('vim.record'));
-      _show(vim.handleKey(const KeyChord('a')));
-    }
-  }
-
   void _show(KeyResult r) {
     setState(() => _hints = r.hints);
     if (r.toast != null) _say(r.toast!, error: r.error);
@@ -351,38 +315,11 @@ class KeyRouterState extends State<KeyRouter> {
     if (ref != null) _show(vim.run(ref));
   }
 
-  Widget _touchButton(String label, IconData icon, bool active, VoidCallback onPressed) =>
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
-        child: TextButton.icon(
-          onPressed: onPressed,
-          icon: Icon(icon, size: 18),
-          label: Text(label),
-          style: TextButton.styleFrom(
-            minimumSize: const Size(0, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            backgroundColor: active ? Neon.blue.withValues(alpha: 0.18) : Colors.transparent,
-            foregroundColor: active ? Neon.blue : Neon.text,
-          ),
-        ),
-      );
-
   @override
   Widget build(BuildContext context) {
     final touchArea = _area;
-    final aIsCode = touchArea == Area.code;
     final isPhone = MediaQuery.sizeOf(context).shortestSide < 600;
-    final showTouchTools = aIsCode || isPhone;
     final viewInsets = MediaQuery.viewInsetsOf(context);
-    final touchKeys = switch (_area) {
-      Area.code => const ['Esc', 'A', 'W', 'S', 'D', 'X', 'Y', 'P', 'C', 'U', 'V', 'I', 'O', '/', 'N', '.'],
-      Area.pattern => const [
-          'Esc', 'W', 'A', 'S', 'D', 'Q', 'E', 'Delete', 'Ctrl+A', 'Ctrl+C', 'Ctrl+X', 'Ctrl+V',
-          'Ctrl+D', 'Ctrl+E', 'Ctrl+J', 'Ctrl+U', 'Shift+A', 'Shift+D', 'Shift+W', 'Shift+S', 'Tab', 'Enter'
-        ],
-      _ => const ['Esc', 'Space', '?', ':', '.', 'Alt+Q', '@', 'Ctrl+Z', 'Ctrl+Shift+Z'],
-    };
-    final visibleTouchKeys = vim.mode == VimMode.insert ? const ['Esc'] : touchKeys;
     final badge = <Widget>[
       if (vim.recording) Text('● @${vim.recordingSlot}', style: const TextStyle(color: Neon.pink)),
       if (vim.mode != VimMode.normal) Text(vim.mode.name.toUpperCase(), style: const TextStyle(color: Neon.yellow)),
@@ -419,61 +356,18 @@ class KeyRouterState extends State<KeyRouter> {
               ),
             ),
           ),
-        if (_touchKeysOpen && showTouchTools && !vim.commandLineOpen)
-          Positioned(
-            left: 8,
-            right: 8,
-            bottom: viewInsets.bottom + 64,
-            child: Material(
-              color: Neon.panelHi.withValues(alpha: 0.98),
-              borderRadius: BorderRadius.circular(12),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 148),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(6),
-                  child: Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    children: [
-                      for (final key in visibleTouchKeys)
-                        TextButton(
-                          onPressed: () => _touchKey(key, area: touchArea),
-                          style: TextButton.styleFrom(
-                            minimumSize: const Size(48, 48),
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            backgroundColor: key == 'Esc' ? Neon.pink.withValues(alpha: 0.12) : Colors.transparent,
-                            foregroundColor: key == 'Esc' ? Neon.pink : Neon.text,
-                          ),
-                          child: Text(key, style: Neon.code(size: 13)),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        if (showTouchTools)
+        if (isPhone && touchArea != Area.pattern)
           Positioned(
             left: 8,
             right: 8,
             bottom: viewInsets.bottom + 8,
-            child: Material(
-              color: Neon.panelHi.withValues(alpha: 0.98),
-              borderRadius: BorderRadius.circular(12),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  _touchButton('ESC', Icons.keyboard_return, false, () => _touchKey('Esc', area: touchArea)),
-                  _touchButton('NORMAL', Icons.keyboard, vim.mode == VimMode.normal, () => _touchMode(VimMode.normal)),
-                  _touchButton('INSERT', Icons.edit, vim.mode == VimMode.insert, () => _touchMode(VimMode.insert)),
-                  _touchButton('VISUAL', Icons.select_all, vim.mode == VimMode.visual, () => _touchMode(VimMode.visual)),
-                  _touchButton('KEYS', Icons.dialpad, _touchKeysOpen, () => setState(() => _touchKeysOpen = !_touchKeysOpen)),
-                  _touchButton(': CMD', Icons.terminal, vim.commandLineOpen, _touchCommandLine),
-                  _touchButton('.', Icons.repeat, false, () => _touchRun('vim.repeat')),
-                  _touchButton(vim.recording ? 'STOP REC' : 'REC A', Icons.fiber_manual_record, vim.recording, _touchRecord),
-                  _touchButton('ACTIONS', Icons.list, false, () => showActionList(context)),
-                ]),
-              ),
+            child: TouchQuickActions(
+              area: touchArea,
+              keymap: vim.keymap,
+              defaults: _defaults,
+              registry: registry,
+              onRun: runRef,
+              onSave: saveKeymap,
             ),
           ),
         if (vim.commandLineOpen)
