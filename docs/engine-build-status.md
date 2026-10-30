@@ -21,7 +21,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Native module registry with stable-ID lookup, factory creation, descriptor verification and reset/versioned state hooks. The registry is static/in-process only; dynamic loading, host adapter, state migration/serialization policy and package signing remain unimplemented.
 - MIDI 2.0 Channel Voice UMP decoder for note, per-note pitch, pressure, CC and channel pitch events, plus a bounded lock-free SPSC input queue. This is a host bridge primitive, not live device I/O or Engine voice routing.
 - Existing note model already supports fractional MIDI pitches and per-note bend, pressure, timbre and vibrato curves. Existing MIDI import/export handles Standard MIDI Files and MIDI 2.0 Clip Files.
-- Synth patch compiler now supports three oscillators, sub/noise, unison, two filters, three ADSR envelopes, four tempo-synced LFOs, four macros, modulation routing to oscillator position/level/pitch, filter cutoff/resonance and master volume, plus effect chains. Drawn LFO curves, warp modes and custom/imported wavetable authoring remain unimplemented.
+- Synth patch compiler now supports three oscillators, sub/noise, unison, two filters, three ADSR envelopes, four tempo-synced LFOs, four macros, modulation routing to oscillator position/level/pitch, filter cutoff/resonance and master volume, plus effect chains. A deterministic phase-distortion amount is now available per wavetable oscillator. Drawn LFO curves, additional warp modes (hard sync/FM/fold), and custom/imported wavetable authoring remain unimplemented.
 
 ## Not yet implemented
 
@@ -30,7 +30,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Host scheduling integration: the adaptive pool now applies workload plans, but platform pressure is not yet fed into it automatically and engine/app jobs do not yet use it.
 - Automatic Android/Windows/macOS/Linux hardware, SIMD, memory, thermal and battery capability probes.
 - A true adaptive quality ladder with measurable preview-quality modes and guaranteed unchanged offline exports.
-- Drawn LFO curves, oscillator warp modes and the complete custom/imported table draw/render pipeline.
+- Drawn LFO curves, additional oscillator warp modes (hard sync/FM/fold) and the complete custom/imported table draw/render pipeline.
 - MIDI 2.0 device input/output, Engine voice routing, output scheduling and full per-note controller/attribute mapping. The decoder/queue do not by themselves provide device support.
 - Project manifest writing/round-tripping, dependency snapshots, content-hash generation and library/app integration for the new resolver.
 - App-side rendering/runtime for declarative and custom module interfaces.
