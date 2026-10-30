@@ -554,4 +554,18 @@ void main() {
       expect(split.serialize().split('\n').where((l) => l.trim().startsWith('0 ')).length, 2);
     });
   });
+  group('note expression time snapping', () {
+    test('snaps positions to the note-relative grid', () {
+      expect(NoteExpression.snapTime(0.26, grid: 0.25), closeTo(0.25, 1e-9));
+      expect(NoteExpression.snapTime(0.38, grid: 0.25), closeTo(0.5, 1e-9));
+    });
+
+    test('keeps points within the note and supports snap-off', () {
+      expect(NoteExpression.snapTime(-0.2, grid: 0.25), 0);
+      expect(NoteExpression.snapTime(1.2, grid: 0.25), 1);
+      expect(NoteExpression.snapTime(0.263, grid: 0), closeTo(0.263, 1e-9));
+      expect(NoteExpression.snapTime(0.263), closeTo(0.263, 1e-9));
+    });
+  });
+
 }
