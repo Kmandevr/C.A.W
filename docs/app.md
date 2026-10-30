@@ -102,7 +102,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - A badge at the bottom right shows the mode, a recording macro, pending keys, key hints and short toasts.
   - `?` opens the action list: search, keys and run.
   - Recorded macros are saved in `keys.txt` next to `settings.json`; a user `keys.txt` is merged over the default keys.
-  - Text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X.
+  - Focused text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X. In the code editor's Vim normal mode, Backspace, Delete, cursor/navigation keys, Enter and Tab still go to the text field; ordinary Vim letters remain actions.
   - The roll, the Builder and the code editor's Vim mode each run their area's actions; the Arranger's actions work on a keyboard-selected layer.
   - **Not built yet:** editing keys in the action list and the long-press menu entries from the keymap.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
