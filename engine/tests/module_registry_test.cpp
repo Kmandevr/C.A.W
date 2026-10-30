@@ -39,3 +39,15 @@ TEST(module_registry_rejects_duplicate_and_unknown_modules) {
     CHECK(!registry.add(descriptor, &makeTest));
     CHECK(registry.create("missing") == nullptr);
 }
+
+
+TEST(module_processor_default_state_contract_is_versioned_and_stateless) {
+    TestProcessor processor;
+    uint32_t written = 99;
+    CHECK_EQ(processor.stateVersion(), 1u);
+    CHECK(processor.saveState(nullptr, 0, written));
+    CHECK_EQ(written, 0u);
+    CHECK(processor.loadState(nullptr, 0, 1));
+    CHECK(!processor.loadState(nullptr, 1, 1));
+    CHECK(!processor.loadState(nullptr, 0, 2));
+}
