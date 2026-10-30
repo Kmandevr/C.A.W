@@ -14,6 +14,26 @@ import '../model/app_state.dart';
 import '../model/settings.dart';
 import 'theme.dart';
 
+/// Whether a focused text editor, rather than the global action router, should receive this key.
+bool shouldDeferTextEditingKey({
+  required bool editingText,
+  required bool commandLineOpen,
+  required Area area,
+  required VimMode mode,
+  required KeyChord chord,
+}) {
+  if (!editingText || commandLineOpen) return false;
+
+  // Text editing/navigation keys belong to EditableText even in code-editor Vim normal mode.
+  const textEditingKeys = {'Backspace', 'Delete', 'Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Enter', 'Tab'};
+  if (chord.plain && chord.key != 'Esc' &&
+      (area != Area.code || mode == VimMode.insert || textEditingKeys.contains(chord.key))) {
+    return true;
+  }
+  // Standard text-field shortcuts belong to EditableText in every area, including the code editor.
+  return chord.ctrl && !chord.alt && const {'Z', 'Y', 'A', 'C', 'V', 'X'}.contains(chord.key);
+}
+
 /// Runs one action for a screen or editor; returns false when it doesn't do that action.
 typedef ActionTarget = bool Function(String id, int count, String? arg);
 
@@ -140,10 +160,14 @@ class KeyRouterState extends State<KeyRouter> {
     final chord = keyChordFromEvent(e, metaAsCtrl: defaultTargetPlatform == TargetPlatform.macOS);
     if (chord == null) return KeyEventResult.ignored;
     final a = area ?? _area;
-    if (!vim.commandLineOpen && a != Area.code && _editingText()) {
-      // A plain text field keeps typing and its own Ctrl shortcuts; only other shortcuts reach the actions.
-      if (chord.plain && chord.key != 'Esc') return KeyEventResult.ignored;
-      if (chord.ctrl && !chord.alt && _textKeys.contains(chord.key)) return KeyEventResult.ignored;
+    if (shouldDeferTextEditingKey(
+      editingText: _editingText(),
+      commandLineOpen: vim.commandLineOpen,
+      area: a,
+      mode: vim.mode,
+      chord: chord,
+    )) {
+      return KeyEventResult.ignored;
     }
     _keyboard = true;
     if (vim.area != a) vim.area = a;
