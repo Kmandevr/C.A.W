@@ -197,9 +197,10 @@ class KeyRouterState extends State<KeyRouter> {
     return r.handled ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
-  void _touchKey(String key) => handleTouchKey(KeyChord.parse(key));
+  void _touchKey(String key, {Area? area}) => _handleChord(KeyChord.parse(key), area: area, fromTouch: true);
 
   void _touchMode(VimMode mode) {
+    if (vim.area != _area) vim.area = _area;
     vim.mode = mode;
     _prefixTimer?.cancel();
     setState(() {
@@ -375,7 +376,8 @@ class KeyRouterState extends State<KeyRouter> {
 
   @override
   Widget build(BuildContext context) {
-    final aIsCode = _area == Area.code;
+    final touchArea = _area;
+    final aIsCode = touchArea == Area.code;
     final isPhone = MediaQuery.sizeOf(context).shortestSide < 600;
     final showTouchTools = aIsCode || isPhone;
     final viewInsets = MediaQuery.viewInsetsOf(context);
@@ -441,7 +443,7 @@ class KeyRouterState extends State<KeyRouter> {
                     children: [
                       for (final key in touchKeys)
                         TextButton(
-                          onPressed: () => _touchKey(key),
+                          onPressed: () => _touchKey(key, area: touchArea),
                           style: TextButton.styleFrom(
                             minimumSize: const Size(48, 48),
                             padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -467,7 +469,7 @@ class KeyRouterState extends State<KeyRouter> {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  _touchButton('ESC', Icons.keyboard_return, false, () => _touchKey('Esc')),
+                  _touchButton('ESC', Icons.keyboard_return, false, () => _touchKey('Esc', area: touchArea)),
                   _touchButton('NORMAL', Icons.keyboard, vim.mode == VimMode.normal, () => _touchMode(VimMode.normal)),
                   _touchButton('INSERT', Icons.edit, vim.mode == VimMode.insert, () => _touchMode(VimMode.insert)),
                   _touchButton('VISUAL', Icons.select_all, vim.mode == VimMode.visual, () => _touchMode(VimMode.visual)),
