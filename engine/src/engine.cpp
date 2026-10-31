@@ -491,7 +491,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     std::vector<Want> wants;
     int order = 0;
     if (p.auditionOnly) {
-        wants.push_back({"\x01audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000});
+        wants.push_back({"\x01audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}});
     }
     order_.clear();
     for (const LayerSpec& l : p.layers) {
@@ -521,7 +521,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     }
     int64_t projectState = 0;
     for (Want& w : wants) {
-        Planned pl{w, {}, {}, {}, nullptr};
+        Planned pl{w, {}, {}, {}, nullptr, {}};
         int64_t layerState = 0;
         for (const std::string& id : w.chain) {
             auto it = modules_.find(id);
@@ -533,6 +533,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         // Arrangement clips are compiled into an immutable absolute-time event stream here,
         // on the control thread. A layer still uses one voice pool and one instrument/effect chain.
         if (!w.clips.empty() && !pl.ids.empty()) {
+            pl.arrangementSig = std::to_string(p.beatsPerBar) + "|" + std::to_string(p.loopSteps()) + "|";
             std::map<std::string, std::shared_ptr<const Pattern>> sources;
             for (const auto& [moduleId, module] : modules_)
                 if (module.pattern) sources.emplace(moduleId, module.pattern);
