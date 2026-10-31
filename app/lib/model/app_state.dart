@@ -761,16 +761,18 @@ class AppState extends ChangeNotifier {
     final doc = PatternDoc.parse(module.runSource).doc;
     final length = doc?.lengthSteps(project.beatsPerBar) ?? project.stepsPerBar;
     final end = layer.clips.fold<int>(0, (v, c) => v > c.startSteps + c.lengthSteps ? v : c.startSteps + c.lengthSteps);
+    final requestedStart = startSteps ?? end;
+    if (requestedStart >= project.maxArrangementSteps) return;
+    final at = requestedStart.clamp(0, project.maxArrangementSteps - 1).toInt();
     final clip = ClipDoc(id: newId('c'), patternId: patternId,
-        startSteps: startSteps ?? end, lengthSteps: length);
-    final at = (startSteps ?? end).clamp(0, project.maxArrangementSteps - 1).toInt();
-    clip.startSteps = at;
-    clip.lengthSteps = length.clamp(1, project.maxArrangementSteps - at).toInt();
+        startSteps: at, lengthSteps: length.clamp(1, project.maxArrangementSteps - at).toInt());
     editLayer(layer, (l) => l.clips.add(clip));
     selectClip(layer, clip);
   }
 
   void duplicateClip(LayerDoc layer, ClipDoc clip, {bool linked = false}) {
+    final start = clip.startSteps + clip.lengthSteps;
+    if (start >= project.maxArrangementSteps) return;
     var patternId = clip.patternId;
     if (!linked) {
       final original = project.module(patternId);
@@ -781,7 +783,7 @@ class AppState extends ChangeNotifier {
       patternId = copy.id;
     }
     final next = ClipDoc(id: newId('c'), patternId: patternId,
-        startSteps: clip.startSteps + clip.lengthSteps, lengthSteps: clip.lengthSteps,
+        startSteps: start, lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
         sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, linked: linked);
     editLayer(layer, (l) => l.clips.add(next));
     selectClip(layer, next);
