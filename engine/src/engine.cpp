@@ -1217,7 +1217,11 @@ void Engine::applyCommands() noexcept {
                     s.k = -1;
                     s.epoch = -1;
                     updateSolo();
-                    s.gain = slotTarget(s);
+                    const double target = slotTarget(s);
+                    s.gain = target > 0.0
+                        ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
+                            s.volumeAutomationValue, 0.0, target)
+                        : 0.0;
                 }
                 break;
             case Cmd::Stop:
