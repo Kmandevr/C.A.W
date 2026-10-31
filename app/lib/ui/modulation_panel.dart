@@ -126,8 +126,7 @@ class _SynthModEditorState extends State<_SynthModEditor> {
   Future<void> replace(_Route route, {String? source, String? destination, double? amount}) async {
     final lines = widget.source.split('\n');
     if (route.line >= lines.length) return;
-    lines[route.line] = 'mod ' + (source ?? route.source) + ' -> ' + (destination ?? route.destination) +
-        ' ' + (amount ?? route.amount).toStringAsFixed(3);
+    lines[route.line] = 'mod \${source ?? route.source} -> \${destination ?? route.destination} \${(amount ?? route.amount).toStringAsFixed(3)}';
     await widget.onChanged(lines.join('\n'));
   }
 
@@ -143,7 +142,7 @@ class _SynthModEditorState extends State<_SynthModEditor> {
     final dst = newDestination ?? availableDestinations.firstOrNull;
     if (src == null || dst == null) return;
     final prefix = widget.source.endsWith('\n') ? widget.source : widget.source + '\n';
-    await widget.onChanged(prefix + 'mod ' + src + ' -> ' + dst + ' ' + newAmount.toStringAsFixed(3) + '\n');
+    await widget.onChanged('\${prefix}mod $src -> $dst \${newAmount.toStringAsFixed(3)}\n');
   }
 
   @override
@@ -267,8 +266,7 @@ class _ModuleModEditorState extends State<_ModuleModEditor> {
     final lines = widget.source.split('\n');
     if (route.line >= lines.length) return;
     final name = target ?? route.target;
-    lines[route.line] = 'mod $name = util.mod($name, ' + (source ?? route.source) + ', ' +
-        (amount ?? route.amount).toStringAsFixed(4) + ')';
+    lines[route.line] = 'mod $name = util.mod($name, \${source ?? route.source}, \${(amount ?? route.amount).toStringAsFixed(4)})';
     await widget.onChanged(lines.join('\n'));
   }
 
@@ -295,7 +293,7 @@ class _ModuleModEditorState extends State<_ModuleModEditor> {
     final lines = widget.source.split('\n');
     final index = _outputLine(lines);
     final amount = _amount(target, newDepth).toStringAsFixed(4);
-    lines.insert(index, 'mod ' + target.name + ' = util.mod(' + target.name + ', ' + source + ', ' + amount + ')');
+    lines.insert(index, 'mod \${target.name} = util.mod(\${target.name}, $source, $amount)');
     await widget.onChanged(lines.join('\n'));
   }
 
