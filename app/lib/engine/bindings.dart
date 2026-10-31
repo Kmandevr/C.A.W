@@ -180,6 +180,8 @@ class Bindings {
             Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, Int32),
             Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, int)>(
             'caw_worker_pool_submit_render'),
+        jobWait = lib.lookupFunction<Int32 Function(Pointer<Void>, Uint32), int Function(Pointer<Void>, int)>(
+            'caw_job_wait'),
         jobGetStatus = lib.lookupFunction<
             Int32 Function(Pointer<Void>, Pointer<CawJobStatusStruct>),
             int Function(Pointer<Void>, Pointer<CawJobStatusStruct>)>('caw_job_get_status'),
@@ -233,6 +235,7 @@ class Bindings {
   final Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Pointer<Utf8>, int) workerPoolSubmitProject;
   final Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, int)
       workerPoolSubmitRender;
+  final int Function(Pointer<Void>, int) jobWait;
   final int Function(Pointer<Void>, Pointer<CawJobStatusStruct>) jobGetStatus;
   final Pointer<Utf8> Function(Pointer<Void>) jobResult;
   final Pointer<Utf8> Function(Pointer<Void>) jobError;
