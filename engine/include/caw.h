@@ -151,6 +151,30 @@ CAW_API int32_t caw_execution_plan(const CawHardwareProfile* hardware, const Caw
                                    CawExecutionPlan* out);
 CAW_API int32_t caw_hardware_profile_detect(CawHardwareProfile* out);
 
+/* Native non-real-time job execution. Job handles own their results until caw_job_release. */
+typedef struct CawWorkerPool CawWorkerPool;
+typedef struct CawJob CawJob;
+enum { CAW_JOB_BACKGROUND = 0, CAW_JOB_OFFLINE = 1, CAW_JOB_FOREGROUND = 2 };
+enum { CAW_JOB_QUEUED = 0, CAW_JOB_RUNNING = 1, CAW_JOB_SUCCEEDED = 2, CAW_JOB_FAILED = 3, CAW_JOB_CANCELLED = 4 };
+typedef struct CawJobStatus { uint32_t struct_size; int32_t state; int32_t progress; int32_t result_code; } CawJobStatus;
+CAW_API CawWorkerPool* caw_worker_pool_create(uint32_t max_workers);
+CAW_API void caw_worker_pool_destroy(CawWorkerPool* pool);
+CAW_API int32_t caw_worker_pool_apply(CawWorkerPool* pool, const CawExecutionRequest* request, CawExecutionPlan* out);
+CAW_API CawJob* caw_worker_pool_submit_check(CawWorkerPool* pool, const char* source, int32_t priority);
+CAW_API CawJob* caw_worker_pool_submit_project(CawWorkerPool* pool, CawEngine* engine, const char* project_json,
+                                                int32_t priority);
+CAW_API CawJob* caw_worker_pool_submit_render(CawWorkerPool* pool, const char* project_json,
+                                               const CawRenderOptions* options, const char* out_path,
+                                               int32_t priority);
+/* Set status->struct_size to sizeof(CawJobStatus) before calling. */
+CAW_API int32_t caw_job_get_status(CawJob* job, CawJobStatus* out);
+CAW_API char* caw_job_result(CawJob* job);
+CAW_API char* caw_job_error(CawJob* job);
+/* Cancels queued jobs; a running render is interruptible, running checks/compiles finish. */
+CAW_API void caw_job_cancel(CawJob* job);
+CAW_API void caw_job_release(CawJob* job);
+CAW_API void caw_worker_pool_wait_idle(CawWorkerPool* pool);
+
 #ifdef __cplusplus
 }
 #endif

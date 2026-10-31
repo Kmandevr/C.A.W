@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: its three areas (Sounds, Tracks, Export), how it talks to the engine, where projects are saved, and how CI builds and signs it.
 covers: [app/]
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # App
@@ -11,9 +11,9 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 
 ## Engine integration
 
-The app calls the shared native engine only through the versioned C API in `lib/engine/bindings.dart`. Project compilation and offline renders run on worker isolates; the app also exposes scheduled async source checks for preview work. Live auto-update uses the result of its single project compile instead of compiling the same source twice. None of that work runs on the audio callback. `lib/engine/execution.dart` binds the engine's hardware-profile probe and workload planner, then uses those native plans to bound and prioritize app-side isolate jobs. Foreground audition/preview work takes priority, background/offline work yields when foreground work is pending, and total scheduled jobs stay within the detected core and conservative memory budgets.
+The app calls the shared native engine only through the versioned C API in `lib/engine/bindings.dart`. Project compilation, asynchronous source checks and offline WAV renders are submitted as native jobs to the bounded C++ `AdaptiveWorkerPool`; the app owns opaque job handles and polls status/progress, reads the result/error and releases each handle. Project submissions retain the engine handle until completion, so disposing an engine waits for its accepted project jobs rather than invalidating a worker pointer. Inputs are copied before the FFI call returns. No Dart callback is invoked from a native worker thread, and no job runs on the audio callback. `lib/engine/execution.dart` binds the native hardware-profile probe, workload planner and job API. Jobs carry foreground/offline priorities; the app starts the pool with an interactive-preview budget so a foreground job can run alongside a single offline export, and the host can apply updated workload/pressure plans through the same native policy API.
 
-Settings shows the detected logical cores, conservative work-memory budget, SIMD capability, GPU-compute capability and the interactive workload plan. The app currently supplies normal pressure because it has no verified cross-platform thermal/battery signal; it does not infer thermal state from audio CPU usage. The current engine reports GPU compute unavailable. The app-side scheduler consumes the native policy but does not yet route jobs through the engine's internal C++ `AdaptiveWorkerPool`.
+Settings shows the detected logical cores, conservative work-memory budget, SIMD capability, GPU-compute capability and the interactive workload plan. The app currently supplies no live pressure update because it has no verified cross-platform thermal/battery signal; it does not infer thermal state from audio CPU usage. The pool uses the native detected hardware budget and its default bounded plan until the host can supply verified pressure. The current engine reports GPU compute unavailable. Native project/check/render jobs now use the C++ pool; generation and analysis jobs remain future integration work.
 
 ## Areas
 

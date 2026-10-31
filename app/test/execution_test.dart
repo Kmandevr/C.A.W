@@ -1,5 +1,4 @@
 // Integration tests for the app's native hardware policy and workload scheduler.
-import 'dart:async';
 import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
@@ -39,38 +38,19 @@ void main() {
     expect(idle.allowGpu, isFalse);
   }, skip: skip);
 
-  test('interactive engine work stays serialized by the native plan', () async {
-    final scheduler = EngineWorkScheduler(maxPending: 4);
-    final gate = Completer<void>();
-    final started = <String>[];
+  test('native worker pool runs concurrent source checks and returns results', () async {
+    final pool = NativeEngineWorkPool.shared;
+    final plan = pool.apply(workload: EngineWorkload.interactivePreview);
+    expect(plan.workerThreads, greaterThanOrEqualTo(1));
+    expect(plan.maxConcurrentJobs, greaterThanOrEqualTo(1));
 
-    final first = scheduler.run(
-      workload: EngineWorkload.interactiveAudition,
-      task: () async {
-        started.add('first');
-        await gate.future;
-        return 1;
-      },
-    );
-    final second = scheduler.run(
-      workload: EngineWorkload.interactiveAudition,
-      task: () async {
-        started.add('second');
-        return 2;
-      },
-    );
-
-    await Future<void>.delayed(Duration.zero);
-    expect(started, ['first']);
-    gate.complete();
-    expect(await first, 1);
-    expect(await second, 2);
-    expect(started, ['first', 'second']);
-    expect(scheduler.active, 0);
-    expect(scheduler.queued, 0);
+    final first = pool.submitCheck('sin(t)').result;
+    final second = pool.submitCheck('square(t)').result;
+    final results = await Future.wait([first, second]);
+    expect(results.every((result) => result != null && result.contains('"ok":true')), isTrue);
   }, skip: skip);
 
-  test('module checks can run as scheduled preview work', () async {
+  test('module checks run as native preview jobs', () async {
     final checked = await Engine.checkAsync('sin(t)');
     expect(checked.ok, isTrue);
   }, skip: skip);

@@ -73,6 +73,17 @@ final class CawExecutionPlanStruct extends Struct {
   external int yieldToForeground;
 }
 
+final class CawJobStatusStruct extends Struct {
+  @Uint32()
+  external int structSize;
+  @Int32()
+  external int state;
+  @Int32()
+  external int progress;
+  @Int32()
+  external int resultCode;
+}
+
 final class CawRenderOptionsStruct extends Struct {
   @Int32()
   external int kind;
@@ -150,7 +161,36 @@ class Bindings {
             Int32 Function(Pointer<CawHardwareProfileStruct>, Pointer<CawExecutionRequestStruct>,
                 Pointer<CawExecutionPlanStruct>),
             int Function(Pointer<CawHardwareProfileStruct>, Pointer<CawExecutionRequestStruct>,
-                Pointer<CawExecutionPlanStruct>)>('caw_execution_plan');
+                Pointer<CawExecutionPlanStruct>)>('caw_execution_plan'),
+        workerPoolCreate = lib.lookupFunction<Pointer<Void> Function(Uint32), Pointer<Void> Function(int)>(
+            'caw_worker_pool_create'),
+        workerPoolDestroy = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+            'caw_worker_pool_destroy'),
+        workerPoolApply = lib.lookupFunction<
+            Int32 Function(Pointer<Void>, Pointer<CawExecutionRequestStruct>, Pointer<CawExecutionPlanStruct>),
+            int Function(Pointer<Void>, Pointer<CawExecutionRequestStruct>, Pointer<CawExecutionPlanStruct>)>(
+            'caw_worker_pool_apply'),
+        workerPoolSubmitCheck = lib.lookupFunction<
+            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Int32),
+            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, int)>('caw_worker_pool_submit_check'),
+        workerPoolSubmitProject = lib.lookupFunction<
+            Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Pointer<Utf8>, Int32),
+            Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Pointer<Utf8>, int)>('caw_worker_pool_submit_project'),
+        workerPoolSubmitRender = lib.lookupFunction<
+            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, Int32),
+            Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, int)>(
+            'caw_worker_pool_submit_render'),
+        jobGetStatus = lib.lookupFunction<
+            Int32 Function(Pointer<Void>, Pointer<CawJobStatusStruct>),
+            int Function(Pointer<Void>, Pointer<CawJobStatusStruct>)>('caw_job_get_status'),
+        jobResult = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>), Pointer<Utf8> Function(Pointer<Void>)>(
+            'caw_job_result'),
+        jobError = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>), Pointer<Utf8> Function(Pointer<Void>)>(
+            'caw_job_error'),
+        jobCancel = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_job_cancel'),
+        jobRelease = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_job_release'),
+        workerPoolWaitIdle = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+            'caw_worker_pool_wait_idle');
 
   static Bindings? _instance;
 
@@ -186,4 +226,17 @@ class Bindings {
   final int Function(Pointer<CawHardwareProfileStruct>) hardwareProfileDetect;
   final int Function(Pointer<CawHardwareProfileStruct>, Pointer<CawExecutionRequestStruct>,
       Pointer<CawExecutionPlanStruct>) executionPlan;
+  final Pointer<Void> Function(int) workerPoolCreate;
+  final void Function(Pointer<Void>) workerPoolDestroy;
+  final int Function(Pointer<Void>, Pointer<CawExecutionRequestStruct>, Pointer<CawExecutionPlanStruct>) workerPoolApply;
+  final Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, int) workerPoolSubmitCheck;
+  final Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Pointer<Utf8>, int) workerPoolSubmitProject;
+  final Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawRenderOptionsStruct>, Pointer<Utf8>, int)
+      workerPoolSubmitRender;
+  final int Function(Pointer<Void>, Pointer<CawJobStatusStruct>) jobGetStatus;
+  final Pointer<Utf8> Function(Pointer<Void>) jobResult;
+  final Pointer<Utf8> Function(Pointer<Void>) jobError;
+  final void Function(Pointer<Void>) jobCancel;
+  final void Function(Pointer<Void>) jobRelease;
+  final void Function(Pointer<Void>) workerPoolWaitIdle;
 }

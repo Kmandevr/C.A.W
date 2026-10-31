@@ -2,7 +2,7 @@
 title: Engine and language reference
 summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI and the tests.
 covers: [engine/, examples/]
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Engine and language reference
@@ -13,9 +13,9 @@ The engine in `engine/` as built. The reasons behind v1 are in [architecture](ar
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, typed module and graph validation (`module.*`, `graph.*`), dependency resolution (`dependency.*`), workload policy (`execution.*`), hardware probe (`hardware.*`) and bounded worker pool (`scheduler.*`) |
+| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, typed module and graph validation (`module.*`, `graph.*`), dependency resolution (`dependency.*`), workload policy (`execution.*`), hardware probe (`hardware.*`), bounded worker pool (`scheduler.*`) and its public job adapter (`worker_api.cpp`) |
 | `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
-| `engine/include/caw.h` | The host C API, version 1 |
+| `engine/include/caw.h` | The host C API, version 1, including bounded worker-pool job handles for source checks and offline renders |
 | `engine/include/caw_module_sdk.h` | Versioned C ABI for trusted native module authors (loading is not implemented yet) |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
 | `engine/cli/` | The `caw` tool |
@@ -315,6 +315,7 @@ The app, the CLI and exports share one format:
 - **Meters:** `caw_engine_meters`, `caw_engine_layer_meter` and `caw_engine_scope` (1024 samples per layer, for the audition at index 64, or for the master at −1).
 - **Hosts and devices:** `caw_engine_process(left, right, frames)` lets hosts such as a plugin drive the audio. `caw_audio_start` and `caw_audio_stop` open the device through miniaudio: AAudio or OpenSL ES on Android, WASAPI on Windows, Core Audio, and ALSA or PulseAudio.
 - **Exports:** `caw_render(project_json, options, path, progress, cancel, …)` writes a WAV. Progress counts 0–1000, and a non-zero cancel stops it.
+- **Native jobs:** `caw_worker_pool_create/apply/destroy` manage the bounded non-real-time pool. `caw_worker_pool_submit_check`, `caw_worker_pool_submit_project` and `caw_worker_pool_submit_render` return opaque `CawJob` handles. `caw_job_get_status` requires the caller to set `CawJobStatus.struct_size`; `caw_job_result` and `caw_job_error` return strings freed with `caw_free`; `caw_job_cancel` cancels queued jobs and can interrupt a running render; running checks/project compiles finish normally. `caw_job_release` releases the handle. Accepted project jobs retain their engine handle; `caw_engine_destroy` waits for them. Pool destruction drains accepted jobs. The Flutter app uses this path for project compilation, source checks and offline WAV renders.
 - **Templates:** `caw_template_count`, `caw_template_file` and `caw_template_source`.
 - **MIDI files:** `caw_pattern_from_midi` and `caw_pattern_export` (see [MIDI files](#midi-files)).
 - **Function library:** `caw_library()` returns JSON: `functions` (name, category, signature, doc, example and args with name, doc and optional) and `constants`. The app's Library sheet reads it.

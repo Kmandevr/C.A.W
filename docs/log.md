@@ -1,10 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Log
+
+- 2026-10-31: Added the public native worker-pool job API and routed app project compilation, source checks and offline WAV renders through it. Job handles expose status/progress, cancellation and owned results; project jobs retain engine lifetime, and pool shutdown drains accepted work. Added native C API and Flutter integration tests (Issue #38).
 
 - 2026-10-30: Connected the app's isolate work scheduling to the engine's hardware profile and workload policy; added native capability diagnostics in Settings and FFI/scheduler tests.
 
