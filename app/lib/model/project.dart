@@ -167,7 +167,28 @@ class ProjectDoc {
     List<LayerDoc>? layers,
   })  : globals = globals ?? {},
         modules = modules ?? [],
-        layers = layers ?? [];
+        layers = layers ?? [] {
+    // Keep the in-memory model canonical: a track owns clip instances, not a legacy
+    // single-pattern pointer. The stable ID makes repeated saves deterministic.
+    for (final layer in this.layers) {
+      if (layer.clips.isNotEmpty) {
+        layer.patternId = null;
+        continue;
+      }
+      final legacyPatternId = layer.patternId;
+      if (legacyPatternId == null) continue;
+      final source = this.modules.where((m) => m.id == legacyPatternId).firstOrNull;
+      final parsed = source == null ? null : PatternDoc.parse(source.runSource).doc;
+      final inferredLength = parsed?.lengthSteps(beatsPerBar) ?? layer.lengthSteps;
+      layer.clips.add(ClipDoc(
+        id: 'legacy-${layer.id}',
+        patternId: legacyPatternId,
+        startSteps: 0,
+        lengthSteps: inferredLength > 0 ? inferredLength : 64,
+      ));
+      layer.patternId = null;
+    }
+  }
 
   static const int fileVersion = 2;
 
