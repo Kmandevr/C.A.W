@@ -41,6 +41,9 @@ void main() {
 
   test('legacy pattern layers migrate once into clip instances', () {
     final old = sample().toJson()..['caw_app_project'] = 1;
+    final oldLayer = (old['layers'] as List)[1] as Map<String, dynamic>;
+    oldLayer['pattern'] = 'pat';
+    oldLayer['clips'] = [];
     final migrated = ProjectDoc.fromJson(old);
     expect(migrated.layers[1].clips, hasLength(1));
     expect(migrated.layers[1].clips.single.patternId, 'pat');
@@ -50,6 +53,9 @@ void main() {
 
     // The current file version can still contain an older pattern pointer from a partial upgrade.
     final currentVersionLegacy = sample().toJson()..['caw_app_project'] = ProjectDoc.fileVersion;
+    final currentLayer = (currentVersionLegacy['layers'] as List)[1] as Map<String, dynamic>;
+    currentLayer['pattern'] = 'pat';
+    currentLayer['clips'] = [];
     final recovered = ProjectDoc.fromJson(currentVersionLegacy);
     expect(recovered.layers[1].clips.single.patternId, 'pat');
     recovered.layers[1].clips.clear();
@@ -57,7 +63,9 @@ void main() {
     expect((emptyLayer[1] as Map).containsKey('pattern'), isFalse);
 
     final stalePointer = sample().toJson()..['caw_app_project'] = ProjectDoc.fileVersion;
-    ((stalePointer['layers'] as List)[1] as Map)['clips'] = [
+    final staleLayer = (stalePointer['layers'] as List)[1] as Map<String, dynamic>;
+    staleLayer['pattern'] = 'pat';
+    staleLayer['clips'] = [
       {'id': 'c1', 'pattern': 'pat', 'start_steps': 0, 'length_steps': 64},
     ];
     final normalized = ProjectDoc.fromJson(stalePointer);
@@ -73,7 +81,8 @@ void main() {
     expect(layer['chain'], ['m1', 'fx']);
     expect(layer['length_steps'], 48);
     expect(layer.containsKey('pattern'), isFalse);
-    expect((j['layers'] as List)[1]['pattern'], 'pat');
+    expect((j['layers'] as List)[1].containsKey('pattern'), isFalse);
+    expect(((j['layers'] as List)[1]['clips'] as List).single['pattern'], 'pat');
     expect(j['audition_only'], false);
     expect(j['globals'], {'swing': 0.2});
     expect((j['modules'] as List).first['name'], 'Lead');
