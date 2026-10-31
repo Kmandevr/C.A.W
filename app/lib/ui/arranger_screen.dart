@@ -336,9 +336,9 @@ class _AutomationLaneView extends StatelessWidget {
   Widget build(BuildContext context) => Stack(children: [
     GestureDetector(behavior: HitTestBehavior.opaque,
       onTapUp: (d) {
-        final step = (d.localPosition.dx / stepW).clamp(0.0, 4096.0);
-        final value = lane.target == 'volume' ? (1 - d.localPosition.dy / 32).clamp(0.0, 1.0)
-            : (1 - d.localPosition.dy / 16).clamp(-1.0, 1.0);
+        final step = (d.localPosition.dx / stepW).clamp(0.0, 4096.0).toDouble();
+        final value = (lane.target == 'volume' ? (1 - d.localPosition.dy / 32).clamp(0.0, 1.0)
+            : (1 - d.localPosition.dy / 16).clamp(-1.0, 1.0)).toDouble();
         state.addAutomationPoint(layer, lane, step, value);
       },
       child: CustomPaint(size: Size(width, 34), painter: _AutomationCurvePainter(lane, stepW))),
