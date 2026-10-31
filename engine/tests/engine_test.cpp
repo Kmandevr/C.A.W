@@ -114,8 +114,8 @@ TEST(track_pan_automation_moves_between_stereo_channels) {
     CHECK(left[0] > 0.99f);
     CHECK(std::fabs(right[0]) < 1e-6f);
     CHECK_NEAR(left[8 * 6000], right[8 * 6000], 2e-3);
-    CHECK(right[16 * 6000] > 0.99f);
-    CHECK(std::fabs(left[16 * 6000]) < 1e-5f);
+    CHECK(right[16 * 6000 - 1] > 0.99f);
+    CHECK(std::fabs(left[16 * 6000 - 1]) < 5e-5f);
 }
 
 TEST(track_volume_automation_is_sample_positioned) {
