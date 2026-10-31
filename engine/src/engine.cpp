@@ -729,13 +729,14 @@ std::string Engine::setProject(const ProjectSpec& p) {
             bus.slot = ls.slot;
             bus.parentSlot = ls.parentSlot;
             bus.order = w.order;
-            bus.flag = !ls.bus;
-            if (!ls.bus) ls.automationSig = "\\x01new-slot";
+            const bool newBus = !ls.bus;
+            bus.flag = newBus;
+            if (newBus) ls.automationSig = "\\x01new-slot";
             send(bus);
             ls.bus = true;
             ls.parentSlot = pl.ls.parentSlot;
             if (ls.automationSig != pl.automationSig) {
-                Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot;
+                Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot; automation.flag = newBus;
                 for (const AutomationLaneSpec& lane : w.automation) {
                     int* count = lane.target == "volume" ? &automation.volumeAutomationCount : &automation.panAutomationCount;
                     double* steps = lane.target == "volume" ? automation.volumeAutomationStep : automation.panAutomationStep;
@@ -1088,7 +1089,8 @@ void Engine::applyCommands() noexcept {
                     s.k = -1;
                     s.epoch = -1;
                     updateSolo();
-                    s.gain = slotTarget(s);
+                    const double initialTarget = slotTarget(s);
+                    s.gain = initialTarget > 0.0 && s.volumeAutomationCount > 0 ? s.volumeAutomationValue[0] : initialTarget;
                 } else if (swapMode_ > 0 && playing_ && stopFade_ == 0) {
                     // Wait for the next beat or bar; newer code replaces code still waiting.
                     retire(s.pending, -1);
@@ -1117,6 +1119,10 @@ void Engine::applyCommands() noexcept {
                 std::copy_n(c.volumeAutomationValue, s.volumeAutomationCount, s.volumeAutomationValue);
                 std::copy_n(c.panAutomationStep, s.panAutomationCount, s.panAutomationStep);
                 std::copy_n(c.panAutomationValue, s.panAutomationCount, s.panAutomationValue);
+                if (c.flag && s.bus) {
+                    const double initialTarget = slotTarget(s);
+                    s.gain = initialTarget > 0.0 && s.volumeAutomationCount > 0 ? s.volumeAutomationValue[0] : initialTarget;
+                }
                 break;
             }
             case Cmd::ConfigureBus: {
