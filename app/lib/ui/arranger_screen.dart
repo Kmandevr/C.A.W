@@ -250,7 +250,7 @@ class _TimelineClipState extends State<_TimelineClip> {
   @override
   Widget build(BuildContext context) {
     final c = widget.clip;
-    final length = (c.lengthSteps + (resizing ? (resizeDx / widget.stepW).round() : 0)).clamp(1, 4096 - c.startSteps);
+    final length = (c.lengthSteps + (resizing ? (resizeDx / widget.stepW).round() : 0)).clamp(1, 4096 - c.startSteps).toInt();
     final name = widget.state.project.module(c.patternId)?.name ?? 'Missing pattern';
     return Transform.translate(offset: Offset(dragging && !sourceDragging ? dx : 0, 0),
       child: Transform.scale(scaleX: resizing ? length / c.lengthSteps : 1.0,
