@@ -58,13 +58,18 @@ TEST(scheduler_scales_threads_only_to_simultaneous_demand) {
     std::atomic<bool> release{false};
     std::atomic<int> finished{0};
     GateTask first{&release, &finished}, second{&release, &finished};
-    CHECK(pool.submit(JobPriority::Offline, waitForGate, &first));
-    CHECK_EQ(pool.workerCount(), 1u);
-    CHECK(pool.submit(JobPriority::Foreground, waitForGate, &second));
-    CHECK_EQ(pool.workerCount(), 2u);
+    const bool firstAccepted = pool.submit(JobPriority::Offline, waitForGate, &first);
+    const uint32_t afterFirst = pool.workerCount();
+    const bool secondAccepted = pool.submit(JobPriority::Foreground, waitForGate, &second);
+    const uint32_t afterSecond = pool.workerCount();
 
+    // Always release the gates before assertions so a regression cannot hang pool destruction.
     release.store(true, std::memory_order_release);
     pool.waitIdle();
+    CHECK(firstAccepted);
+    CHECK_EQ(afterFirst, 1u);
+    CHECK(secondAccepted);
+    CHECK_EQ(afterSecond, 2u);
     CHECK_EQ(finished.load(), 2);
     CHECK_EQ(pool.workerCount(), 2u);
 }
