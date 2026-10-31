@@ -620,6 +620,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             pl.ls.slot = isAudition ? kAuditionSlot : freeSlot();
             if (isAudition) slotBusy_[kAuditionSlot] = true;
             if (pl.ls.slot < 0) continue;  // all slots busy (removals still fading)
+            pl.ls.automationSig = "\x01new-slot";  // force an empty-or-populated automation command on slot reuse
             pl.ls.sig.clear();
             pl.ls.wiring.clear();
             pl.ls.chain = nullptr;
@@ -1079,6 +1080,8 @@ void Engine::applyCommands() noexcept {
                     s.fresh = true;
                     s.contiguous = false;
                     s.overloaded = false;
+                    s.bus = false;
+                    s.volumeAutomationCount = s.panAutomationCount = 0;
                     s.overloadFlag.store(false, std::memory_order_relaxed);
                     s.k = -1;
                     s.epoch = -1;
@@ -1124,6 +1127,7 @@ void Engine::applyCommands() noexcept {
                 s.active = true;
                 s.removing = false;
                 s.bus = true;
+                s.volumeAutomationCount = s.panAutomationCount = 0;
                 s.parentSlot = c.parentSlot;
                 s.order = c.order;
                 s.gain = slotTarget(s);
