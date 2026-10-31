@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: its three areas, how it talks to the engine, where projects are saved, and how CI builds and signs it.
 covers: [app/]
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # App
@@ -44,10 +44,13 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
     - the curve tool and the `roll.gen.*` generators (euclid, random, arpeggiate, humanize, chord stamp, reverse) are not built yet
 - **Arranger** (`lib/ui/arranger_screen.dart`):
-  - project settings: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, hex seed, master volume and the seam crossfade switch
-  - **Project controls:** one control per `global` declared by any module. Its value is saved with the project and sent to the engine without recompiling.
-  - the loop stack, where each layer has a colour, name, generator, **pattern** (or none), length (from 1 beat to 16 bars, or following the project; a pattern sets it instead), an effect chain, volume, pan, M/S, a progress bar and a peak meter
-  - a banner when the engine muted layers to keep audio clean, with Unmute
+  - the main workspace is a horizontal timeline with a bar ruler and one lane per track; the former layer-card list has been replaced
+  - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
+  - clips are instances of reusable pattern sources; they can be selected, moved, resized, duplicated independently or as linked copies, deleted, and opened in the existing Builder piano roll
+  - the separate Mixer panel edits the same track volume and pan values as the engine; it does not maintain duplicate mix state
+  - project settings and global controls are available from the settings button rather than permanently occupying the timeline
+  - folders can be added and collapsed visually, but nested parent/child management and folder bus routing are not complete
+  - a banner appears when the engine muted layers to keep audio clean, with Unmute
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - the four exports from [engine](engine.md#exports), at 44.1 or 48 kHz, 24-bit or 32-bit float
   - progress and cancel while it renders
@@ -65,7 +68,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - Volume, pan, mute, solo and param changes go straight to the engine. Everything else re-sends the project, and the engine applies only what changed.
 - **Model:** `lib/model/project.dart` holds the project.
   - Each module keeps its editor text (`source`) and the code last run (`run_source`). The engine only ever gets the code last run, so other edits never compile half-typed code.
-  - The app's file format adds colours, the key and per-layer generator and effect fields to the engine's project JSON.
+  - The app's file format adds colours, the key and per-layer generator and effect fields to the engine's project JSON. Arrangement clips are serialized as references to pattern modules with start, length, source offset and loop settings.
 - **Storage:** projects are JSON files in the app's private support folder, under `projects/`. They're written 0.5 s after each change, and right away when the app goes to the background or quits. The app reopens the last project.
 - **Audio:** the device opens at start-up (48 kHz stereo, low-latency profile). When the app goes to the background while stopped, it closes the device, and it reopens it on return. Playing on in the background (an Android foreground service) is not in v1.
 - **Startup screen** (`lib/ui/startup_screen.dart`): continue the last project, start a new blank project, start from the "First loop" template, or open another saved project.
