@@ -346,6 +346,9 @@ public:
             } else if (word && head.text == "global") {
                 next();
                 paramStatement(true);
+            } else if (word && head.text == "mod") {
+                next();
+                modStatement();
             } else if (word && head.text == "fn") {
                 next();
                 fnStatement();
@@ -386,7 +389,7 @@ private:
     }
 
     static bool reserved(const std::string& name) {
-        static const char* const words[] = {"let", "param", "global", "export", "fn", "pi", "on", "off"};
+        static const char* const words[] = {"let", "param", "global", "export", "mod", "fn", "pi", "on", "off"};
         for (const char* w : words)
             if (name == w) return true;
         return false;
@@ -496,6 +499,21 @@ private:
         if (peek().kind != Tok::Num) fail(peek(), "expected a number");
         const double v = next().num;
         return neg ? -v : v;
+    }
+
+    // Rebind an earlier numeric param/global to its modulated value for all following expressions.
+    // Example: mod cutoff = util.mod(cutoff, kick.env, 1200)
+    void modStatement() {
+        const Token at = peek();
+        if (at.kind != Tok::Ident) fail(at, "write 'mod parameter = util.mod(parameter, source, amount)'");
+        const std::string name = at.text;
+        const bool isParam = std::any_of(p_.params.begin(), p_.params.end(),
+                                         [&](const ParamDef& d) { return d.name == name; });
+        if (!isParam) fail(at, "mod target '" + name + "' must be a param or global declared earlier");
+        next();
+        expectOp("=");
+        Val value = expression(0);
+        names_[name] = value;
     }
 
     void paramStatement(bool global) {
