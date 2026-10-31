@@ -9,6 +9,8 @@ option(CAW_AUDIO "Build the shared library with device audio output (miniaudio)"
 option(CAW_TOOLS "Build the caw CLI and the tests" ON)
 option(CAW_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 get_filename_component(CAW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+
+# Determinism: no fast-math and no fused multiply-add contraction (MSVC /fp:precise never contracts), so every platform rounds alike.
 if(MSVC)
   set(CAW_FLAGS /W4 /fp:precise /utf-8 /EHsc)
 else()
@@ -19,6 +21,9 @@ if(CAW_SANITIZE AND NOT MSVC)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
+
+# Embedded .caw files: starter templates (examples/*.caw) and the built-in libraries (engine/lib/*.caw) become
+# string constants inside the engine.
 function(caw_read_dir dir out_files out_srcs out_count)
   file(GLOB _list CONFIGURE_DEPENDS "${dir}/*.caw")
   list(SORT _list)
@@ -86,6 +91,8 @@ find_package(Threads REQUIRED)
 target_link_libraries(caw_core PUBLIC Threads::Threads)
 set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
+
+# The library the app loads through dart:ffi.
 if(CAW_AUDIO)
   add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
   target_include_directories(caw_engine PRIVATE third_party/miniaudio)
@@ -101,6 +108,8 @@ else()
   target_compile_options(caw_engine PRIVATE ${CAW_FLAGS})
 endif()
 target_link_libraries(caw_engine PRIVATE caw_core)
+
+# The file is libcaw.so / caw.dll; only the C API (marked CAW_API) is exported.
 set_target_properties(caw_engine PROPERTIES OUTPUT_NAME caw CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden)
 
 if(CAW_TOOLS)
@@ -117,7 +126,9 @@ if(CAW_TOOLS)
   target_link_libraries(caw_tests PRIVATE caw_core)
   enable_testing()
   add_test(NAME caw_tests COMMAND caw_tests)
-  add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
+  
+  # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
+add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_link_libraries(caw_bench PRIVATE caw_core)
 endif()
