@@ -97,6 +97,32 @@ TEST(reparenting_track_detaches_it_from_previous_folder_bus) {
     CHECK_NEAR(detached[200], directLevel, 1e-5);
 }
 
+TEST(reparenting_folder_bus_detaches_it_from_old_parent_bus) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    LayerSpec outer;
+    outer.id = "outer"; outer.folder = true; outer.busEnabled = true; outer.volume = 0.5;
+    LayerSpec inner;
+    inner.id = "inner"; inner.folder = true; inner.busEnabled = true; inner.parentId = "outer"; inner.volume = 0.5;
+    p.layers.insert(p.layers.begin(), outer);
+    p.layers.insert(p.layers.begin() + 1, inner);
+    p.layers[2].parentId = "inner";
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto nested = run(e, 256);
+    const float nestedLevel = static_cast<float>(0.8 * std::cos(kPi / 4.0) * 0.25);
+    CHECK_NEAR(nested[200], nestedLevel, 1e-5);
+
+    // Detaching the inner bus should preserve its children but remove the outer gain stage.
+    p.layers[1].parentId.clear();
+    e.setProject(p);
+    const auto detached = run(e, 256);
+    const float directBusLevel = static_cast<float>(0.8 * std::cos(kPi / 4.0) * 0.5);
+    CHECK_NEAR(detached[200], directBusLevel, 1e-5);
+}
+
 TEST(organization_only_folder_mute_propagates_to_descendants) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
     LayerSpec folder;
