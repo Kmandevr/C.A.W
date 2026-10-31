@@ -40,6 +40,8 @@ class ClipDoc {
   String patternId;
   int startSteps;
   int lengthSteps;
+  int sourceOffsetSteps;
+  bool loop;
   bool linked;
 
   Map<String, dynamic> toJson() => {
@@ -52,6 +54,8 @@ class ClipDoc {
         patternId: j['pattern'] as String,
         startSteps: (j['start_steps'] as num?)?.toInt() ?? 0,
         lengthSteps: (j['length_steps'] as num?)?.toInt() ?? 64,
+        sourceOffsetSteps: (j['source_offset_steps'] as num?)?.toInt() ?? 0,
+        loop: j['loop'] != false,
         linked: j['linked'] == true,
       );
 }
@@ -201,17 +205,7 @@ class ProjectDoc {
         if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
         'globals': globals,
         'modules': [
-          ...[
-            for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
-          ],
-          for (final l in layers)
-            if (l.clips.isNotEmpty && l.generatorId != null)
-              {
-                'id': 'arr_${l.id}',
-                'name': '${l.name} arrangement',
-                'source': _mergedPatternSource(l, beatsPerBar, patternSources),
-                'params': <String, double>{},
-              },
+          for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
         'layers': [
           for (final l in layers)
@@ -286,57 +280,3 @@ class ProjectDoc {
       );
 }
 
-String _mergedPatternSource(LayerDoc layer, int beatsPerBar, Map<String, String> patternSources) {
-  final end = layer.clips.fold<int>(0, (e, c) => max(e, c.startSteps + c.lengthSteps));
-  final out = <String>['---', 'caw: 1', 'kind: pattern', 'name: ${layer.name} arrangement',
-    'length: ${max(1, end)}', '---'];
-  for (final clip in layer.clips) {
-    final source = patternSources[clip.patternId];
-    if (source == null) continue;
-    final parsed = PatternDoc.parse(source).doc;
-    if (parsed == null) continue;
-    final sourceLength = max(1, parsed.lengthSteps(beatsPerBar));
-    final repeats = clip.lengthSteps ~/ sourceLength + (clip.lengthSteps % sourceLength == 0 ? 0 : 1);
-    for (var repeat = 0; repeat < repeats; repeat++) {
-      final offset = clip.startSteps + repeat * sourceLength;
-      for (final note in parsed.sortedNotes) {
-        final at = offset + note.at.toDouble();
-        if (at >= clip.startSteps + clip.lengthSteps) continue;
-        final len = min(note.len.toDouble(), clip.startSteps + clip.lengthSteps - at);
-        if (len <= 0) continue;
-        out.add('${formatNumber(at)} ${formatPitch(note.pitch)} ${formatNumber(len)}'
-            '${note.vel == 1 ? '' : ' ${formatNumber(note.vel)}'}'
-            '${note.prob == 1 ? '' : ' prob ${formatNumber(note.prob)}'}'
-            '${note.ratchet == 1 ? '' : ' ratchet ${note.ratchet}'}'
-            '${note.slide ? ' slide' : ''}');
-      }
-    }
-  }
-  return '${out.join('\n')}\n';
-}
-
-/// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.
-String? headerValue(String source, String key) {
-  final lines = const LineSplitter().convert(source);
-  if (lines.isEmpty || lines.first.trim() != '---') return null;
-  for (final line in lines.skip(1)) {
-    final t = line.trim();
-    if (t == '---') break;
-    final i = t.indexOf(':');
-    if (i > 0 && t.substring(0, i).trim() == key) {
-      var v = t.substring(i + 1);
-      final hash = v.indexOf('#');
-      if (hash >= 0) v = v.substring(0, hash);
-      return v.trim();
-    }
-  }
-  return null;
-}
-
-/// Layer lengths offered in the Arranger, in 16ths (0 = follow the project loop).
-List<(int, String)> lengthChoices(int stepsPerBar) => [
-      (0, 'Project'),
-      (4, '1 beat'),
-      (8, '2 beats'),
-      for (final b in [1, 2, 3, 4, 5, 6, 7, 8, 16]) (b * stepsPerBar, b == 1 ? '1 bar' : '$b bars'),
-    ];
