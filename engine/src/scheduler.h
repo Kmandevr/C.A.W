@@ -33,6 +33,7 @@ public:
 
     uint32_t queued() const noexcept;
     uint32_t active() const noexcept;
+    uint32_t workerCount() const noexcept;
 
 private:
     struct Job {
@@ -44,12 +45,14 @@ private:
 
     void workerLoop(uint32_t index) noexcept;
     bool takeJob(Job& out) noexcept;
+    bool ensureWorkersLocked(uint32_t desired) noexcept;
 
     mutable std::mutex mutex_;
     std::condition_variable wake_, idle_;
     std::array<Job, kQueueCapacity> queue_{};
     uint32_t queueCount_ = 0;
     uint32_t activeCount_ = 0;
+    uint32_t capacity_ = 1;
     uint32_t workerLimit_ = 0;
     uint64_t nextSequence_ = 0;
     bool stopping_ = false;
