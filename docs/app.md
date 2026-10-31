@@ -19,7 +19,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 - **Sounds** (the Builder area, `lib/ui/builder_screen.dart`):
   - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)
   - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth, the Wavetable pad, the Init synth patch and the Acid line and Chords patterns)
-  - a **synth patch** (`kind: synth`, [synth](synth.md)) plays wherever a sound can: its Controls panel lists every value in the patch (the effects' under Effects) and its Code view is the patch text; the synth screen itself is not built yet
+  - a **synth patch** (`kind: synth`, [synth](synth.md)) plays wherever a sound can: its Controls panel lists every value in the patch (the effects' under Effects) and its Code view is the patch text. The Modulation links panel adds, edits and removes supported source-to-destination routes with signed depth/polarity.
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
   - **Controls | Code** (a pattern: **Notes | Text**): on a phone a module opens on its controls (a pattern on its piano roll), and the code is one tap away. A blank module, one that doesn't compile, or one with no controls opens on its code; the choice is remembered per module while the app runs. A tap on an error opens the code at it. On a wide screen code and controls sit side by side, so only patterns get the switch.

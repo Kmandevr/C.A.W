@@ -63,12 +63,17 @@ Unknown header keys are ignored, so newer files still load. With no header, a fi
   - `param filter = on` (or `off`): a toggle, 1 or 0
   - `param wave = saw in [sine, saw, square]`: a dropdown. Its value is the index (here 1), and the code can compare with `wave.square`.
 - `global name = …` takes the same options as `param`, but the value belongs to the project. The app shows it once under Project controls, and every module that declares the same name reads the same value.
+- `mod name = expression` rebinds an earlier numeric `param` or `global` to a modulated value for following expressions. For example, `mod cutoff = util.mod(cutoff, kick.env, 1200)`. The source may be a local LFO/envelope or an imported module export; the amount is in the destination parameter's units. Multiple `mod` statements can be chained before the output expression.
 - `export let name = expression` shares a value. Other modules read it as `module.name`.
+  - The exported value is a sample-aligned control signal. The engine wires its buffer before playback, so a reader on another track receives the corresponding sample without a lookup or allocation in the audio callback.
+  - Missing exports read 0 and appear as warnings. Cross-track dependency cycles remain playable with bounded one-block feedback; the module diagnostics identify that delayed dependency.
+  - Sidechain ducking is available through `util.duck(input, exportedSignal, amount)`; the Builder can create a dedicated effect using this helper and choose an active export as its source.
   - `module` is the module's name in lower case, with other characters as `_`: Kick gives `kick`, and Bytebeat loop gives `bytebeat_loop`.
   - The first layer (in project order) that plays the module provides the value. A silent layer shares zeros.
   - Layers run in dependency order, so a reader hears the same sample. When two modules read each other, one of them hears the other one block (64 samples) late.
   - An effect can read the export of the generator in front of it.
   - A name that nothing exports reads 0, and the project result lists it as a warning.
+- Synth patches have a code-defined modulation matrix. The Builder's Modulation links panel edits enabled envelope/LFO/macro/velocity sources to oscillator position/level/pitch, filter cutoff/resonance and volume destinations. Amount is signed (-1..1), so polarity is editable as well.
 - `fn name(a, b) = expression` defines a function.
   - Each call is expanded in place, so oscillators, envelopes and filters inside a function get their own state per call.
   - The body sees its arguments, built-ins, and names defined above the function.
