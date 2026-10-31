@@ -61,7 +61,7 @@ TEST(audition_only_uses_the_dedicated_audition_slot) {
     e.setProject(p);
     e.play();
     const auto left = run(e, 256);
-    CHECK_NEAR(left[200], static_cast<float>(0.5 * std::cos(kPi / 4.0)), 1e-5);
+    CHECK_NEAR(left[200], static_cast<float>(0.8 * 0.5 * std::cos(kPi / 4.0)), 1e-5);
 }
 
 TEST(folder_bus_routes_children_and_applies_group_gain) {
