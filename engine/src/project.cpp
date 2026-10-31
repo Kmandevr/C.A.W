@@ -99,9 +99,10 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     ClipSpec clip;
                     clip.id = c.string("id");
                     clip.pattern = c.string("pattern");
-                    clip.startSteps = clampi(c.number("start_steps", 0), 0, 64 * 16 * 16);
-                    clip.lengthSteps = clampi(c.number("length_steps", 64), 1, 64 * 16 * 16);
-                    clip.sourceOffsetSteps = clampi(c.number("source_offset_steps", 0), 0, 64 * 16 * 16);
+                    const int maxArrangementSteps = 64 * out.beatsPerBar * 4;
+                    clip.startSteps = clampi(c.number("start_steps", 0), 0, maxArrangementSteps - 1);
+                    clip.lengthSteps = clampi(c.number("length_steps", 64), 1, maxArrangementSteps - clip.startSteps);
+                    clip.sourceOffsetSteps = clampi(c.number("source_offset_steps", 0), 0, maxArrangementSteps);
                     clip.loop = c.boolean("loop", true);
                     if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));
                 }
