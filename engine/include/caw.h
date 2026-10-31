@@ -167,6 +167,9 @@ CAW_API CawJob* caw_worker_pool_submit_render(CawWorkerPool* pool, const char* p
                                                const CawRenderOptions* options, const char* out_path,
                                                int32_t priority);
 /* Set status->struct_size to sizeof(CawJobStatus) before calling. */
+/* Blocks the calling thread until terminal; never call on the audio callback or UI thread.
+   timeout_ms == UINT32_MAX waits indefinitely; returns 0 complete, 2 timeout, 1 invalid handle, 3 wait error. */
+CAW_API int32_t caw_job_wait(CawJob* job, uint32_t timeout_ms);
 CAW_API int32_t caw_job_get_status(CawJob* job, CawJobStatus* out);
 CAW_API char* caw_job_result(CawJob* job);
 CAW_API char* caw_job_error(CawJob* job);
