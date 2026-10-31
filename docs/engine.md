@@ -62,6 +62,10 @@ Unknown header keys are ignored, so newer files still load. With no header, a fi
   - `param wave = saw in [sine, saw, square]`: a dropdown. Its value is the index (here 1), and the code can compare with `wave.square`.
 - `global name = …` takes the same options as `param`, but the value belongs to the project. The app shows it once under Project controls, and every module that declares the same name reads the same value.
 - `export let name = expression` shares a value. Other modules read it as `module.name`.
+  - The exported value is a block-rate control signal. The engine wires it before playback, so a reader on another track receives the current block's value without a lookup or allocation in the audio callback.
+  - Missing exports read 0 and appear as warnings. Cross-track dependency cycles remain playable with bounded one-block feedback; the module diagnostics identify that delayed dependency.
+  - Sidechain ducking is available through `util.duck(input, exportedSignal, amount)`; the Builder can create a dedicated effect using this helper and choose an active export as its source.
+- Synth patches have a code-defined modulation matrix. The Builder's Modulation links panel edits enabled envelope/LFO/macro/velocity sources to oscillator position/level/pitch, filter cutoff/resonance and volume destinations. Amount is signed (-1..1), so polarity is editable as well.
   - `module` is the module's name in lower case, with other characters as `_`: Kick gives `kick`, and Bytebeat loop gives `bytebeat_loop`.
   - The first layer (in project order) that plays the module provides the value. A silent layer shares zeros.
   - Layers run in dependency order, so a reader hears the same sample. When two modules read each other, one of them hears the other one block (64 samples) late.
