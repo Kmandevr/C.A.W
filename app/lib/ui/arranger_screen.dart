@@ -201,7 +201,7 @@ class _TimelineLane extends StatelessWidget {
         Positioned(left: clip.startSteps * stepW, top: 8,
           width: math.max(12.0, clip.lengthSteps * stepW), height: 60,
           child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW,
-            color: Neon.layer(layer.color), selected: selected == clip.id, onOpen: onOpen)),
+            color: Neon.layer(layer.color), selected: selectedIds.contains(clip.id), onOpen: onOpen)),
       if (layer.clips.isEmpty && !layer.isFolder)
         const Positioned(left: 10, top: 29, child: Text('Add MIDI clip with +',
           style: TextStyle(color: Neon.dim, fontSize: 10))),
