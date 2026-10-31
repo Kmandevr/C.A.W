@@ -151,7 +151,7 @@ class NativeEngineWorkPool {
   NativeEngineWorkPool._(this._bindings, this._handle);
 
   static NativeEngineWorkPool? _shared;
-  static NativeEngineWorkPool get shared => _shared ??= _create();
+  static NativeEngineWorkPool get shared => _shared ??= NativeEngineWorkPool._create();
 
   static void _refreshRuntimePlan() => _shared?._applyCurrentWorkload();
 
@@ -328,7 +328,7 @@ class NativeEngineWorkPool {
   void _trackJob(NativeEngineJob job, EngineWorkload workload) {
     job.result.then<void>(
       (_) => _finishWorkload(workload),
-      onError: (Object _, StackTrace __) => _finishWorkload(workload),
+      onError: (Object _, StackTrace _) => _finishWorkload(workload),
     );
   }
 
