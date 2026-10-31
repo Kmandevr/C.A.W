@@ -307,7 +307,9 @@ class _BuilderScreenState extends State<BuilderScreen> {
       }
       if (source.id == destination.id ||
           invalidSameLayerOrder ||
-          !s.project.layers.any((l) => l.chain.contains(source.id))) continue;
+          !s.project.layers.any((l) => l.chain.contains(source.id))) {
+        continue;
+      }
       final info = s.info[source.id];
       if (info == null || !info.ok || info.ref.isEmpty) continue;
       for (final export in info.exports) {
