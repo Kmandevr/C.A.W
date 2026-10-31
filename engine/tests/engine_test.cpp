@@ -71,6 +71,39 @@ TEST(folder_bus_routes_children_and_applies_group_gain) {
     CHECK_NEAR(right[200], expected, 1e-5);
 }
 
+TEST(nested_folder_buses_route_child_audio_once) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    LayerSpec outer;
+    outer.id = "outer"; outer.folder = true; outer.busEnabled = true; outer.volume = 0.5;
+    LayerSpec inner;
+    inner.id = "inner"; inner.folder = true; inner.busEnabled = true; inner.parentId = "outer"; inner.volume = 0.5;
+    p.layers.insert(p.layers.begin(), outer);
+    p.layers.insert(p.layers.begin() + 1, inner);
+    p.layers[2].parentId = "inner";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 256);
+    CHECK_NEAR(left[200], 0.8 * std::cos(kPi / 4.0) * 0.25, 1e-5);
+}
+
+TEST(track_pan_automation_moves_between_stereo_channels) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    p.layers[0].automation.push_back({"pan", {{0, -1}, {16, 1}}});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    std::vector<float> right;
+    const auto left = run(e, 16 * 6000 + 256, 64, &right);
+    CHECK(left[256] > 0.99f);
+    CHECK(std::fabs(right[256]) < 1e-6f);
+    CHECK_NEAR(left[8 * 6000], right[8 * 6000], 2e-3);
+    CHECK(right[16 * 6000 - 1] > 0.99f);
+    CHECK(std::fabs(left[16 * 6000 - 1]) < 1e-5f);
+}
+
 TEST(track_volume_automation_is_sample_positioned) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
     p.layers[0].lengthSteps = 8;  // the lane must follow song time, not this shorter track loop
