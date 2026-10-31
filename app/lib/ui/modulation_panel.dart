@@ -409,7 +409,10 @@ class _SidechainRoute extends StatelessWidget {
               final depth = _draftDepths[route.line] ?? _depth(param, route.amount);
               return Column(children: [
                 Row(children: [
-                  Expanded(child: _targetChoice(route.target, targetNames, (v) => _replace(route, target: v))),
+                  Expanded(child: _targetChoice(route.target, targetNames, (v) {
+                    final depth = _depth(_param(route.target), route.amount);
+                    _replace(route, target: v, amount: _amount(_param(v), depth));
+                  })),
                   const Icon(Icons.arrow_forward, size: 15, color: Neon.dim),
                   Expanded(child: _sourceChoice(route.source, widget.sources, (v) => _replace(route, source: v))),
                   IconButton(tooltip: 'Remove modulation link', visualDensity: VisualDensity.compact,
