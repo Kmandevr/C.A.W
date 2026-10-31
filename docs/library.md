@@ -956,7 +956,7 @@ util.duck(saw(55) * 0.5, ad(step % 4 == 0, 0.001, 0.3), 0.8)
 
 ### `util.mod(base, source, amount)`
 
-Adds a modulation signal to a base parameter value. Use a signed amount to set depth and polarity; the source can be an LFO, envelope or another module's export.
+Add a modulation signal to a base parameter value.
 
 - `base`: the unmodulated parameter or global value
 - `source`: a bipolar or unipolar signal
