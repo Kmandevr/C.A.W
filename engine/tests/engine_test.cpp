@@ -85,6 +85,18 @@ TEST(track_volume_automation_is_sample_positioned) {
     CHECK_NEAR(left[16 * 6000 - 1], pan, 2e-3);
 }
 
+TEST(mute_overrides_volume_automation) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    p.layers[0].automation.push_back({"volume", {{0, 1}, {16, 1}}});
+    p.layers[0].mute = true;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 512);
+    CHECK_NEAR(left[256], 0.0, 1e-7);
+}
+
 TEST(project_parser_reads_folder_and_automation_metadata) {
     const std::string json = R"({"caw_project":1,"layers":[
       {"id":"g","folder":true,"bus":true,"volume":0.5},
