@@ -160,8 +160,8 @@ class _TimelineHeader extends StatelessWidget {
               for (final folder in state.project.layers.where((f) => f.isFolder && f.id != layer.id))
                 PopupMenuItem(value: 'parent:${folder.id}', child: Text('Move into ${folder.name}')),
               if (layer.isFolder) PopupMenuItem(value: 'bus', child: Text(layer.busEnabled ? 'Disable group bus' : 'Enable group bus')),
-              if (!layer.isFolder && !layer.automation.any((a) => a.target == 'volume')) const PopupMenuItem(value: 'automation-volume', child: Text('Add volume automation')),
-              if (!layer.isFolder && !layer.automation.any((a) => a.target == 'pan')) const PopupMenuItem(value: 'automation-pan', child: Text('Add pan automation')),
+              if (!layer.automation.any((a) => a.target == 'volume')) const PopupMenuItem(value: 'automation-volume', child: Text('Add volume automation')),
+              if (!layer.automation.any((a) => a.target == 'pan')) const PopupMenuItem(value: 'automation-pan', child: Text('Add pan automation')),
               if (layer.automation.any((a) => a.target == 'volume')) const PopupMenuItem(value: 'remove-automation-volume', child: Text('Remove volume automation')),
               if (layer.automation.any((a) => a.target == 'pan')) const PopupMenuItem(value: 'remove-automation-pan', child: Text('Remove pan automation')),
               const PopupMenuItem(value: 'delete', child: Text('Delete')),
