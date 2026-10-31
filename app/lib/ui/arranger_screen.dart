@@ -259,8 +259,16 @@ class _TimelineClipState extends State<_TimelineClip> {
           borderRadius: BorderRadius.circular(5),
           child: Stack(children: [
         Positioned.fill(child: GestureDetector(
-          onTap: () => widget.state.selectClip(widget.layer, c, additive: HardwareKeyboard.instance.isShiftPressed),
-          onDoubleTap: () { widget.state.selectClip(widget.layer, c); widget.onOpen?.call(); },
+          onTap: () {
+            if (HardwareKeyboard.instance.isShiftPressed) {
+              widget.state.selectClip(widget.layer, c, additive: true);
+            } else if (widget.state.selectedClipIds.contains(c.id)) {
+              widget.state.activateClip(widget.layer, c);
+            } else {
+              widget.state.selectClip(widget.layer, c);
+            }
+          },
+          onDoubleTap: () { widget.state.activateClip(widget.layer, c); widget.onOpen?.call(); },
           onHorizontalDragStart: (_) => setState(() { dragging = true; sourceDragging = HardwareKeyboard.instance.isAltPressed; dx = 0; }),
           onHorizontalDragUpdate: (d) => setState(() => dx += d.delta.dx),
           onHorizontalDragEnd: (_) {
@@ -288,7 +296,7 @@ class _TimelineClipState extends State<_TimelineClip> {
                 PopupMenuButton<String>(padding: EdgeInsets.zero, iconSize: 14,
                   icon: Icon(Icons.more_horiz, color: widget.color),
                   onSelected: (v) {
-                    if (v == 'edit') { widget.state.selectClip(widget.layer, c); widget.onOpen?.call(); }
+                    if (v == 'edit') { widget.state.activateClip(widget.layer, c); widget.onOpen?.call(); }
                     if (v == 'copy') widget.state.duplicateClip(widget.layer, c);
                     if (v == 'linked') widget.state.duplicateClip(widget.layer, c, linked: true);
                     if (v == 'delete') widget.state.removeClip(widget.layer, c);
