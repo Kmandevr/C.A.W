@@ -109,7 +109,7 @@ class _TimelineHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = Neon.layer(layer.color);
     final gens = state.project.modules.where((m) => state.isGenerator(m.id)).toList();
-    return Container(height: 76 + layer.automation.length * 34, padding: EdgeInsets.fromLTRB(7 + depth * 13, 5, 4, 4),
+    return Container(height: 76.0 + layer.automation.length * 34.0, padding: EdgeInsets.fromLTRB(7 + depth * 13, 5, 4, 4),
       decoration: const BoxDecoration(color: Neon.panel,
         border: Border(bottom: BorderSide(color: Neon.line), right: BorderSide(color: Neon.line))),
       child: Column(children: [
