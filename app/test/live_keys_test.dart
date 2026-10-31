@@ -129,13 +129,13 @@ void main() {
     expect(kick.edited, isFalse);
     final invalidSource = '${kick.source}\n((('; // doesn't compile: waits
     s.editSource(kick.id, invalidSource);
-    // The async run temporarily copies the attempted source into runSource. Wait for
-    // the failed compile to restore the last-good source instead of guessing its duration.
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    // Wait for the compile result itself; the previous successful result remains visible
+    // until the async project sync finishes, so this cannot pass during the in-flight state.
     final failureDeadline = DateTime.now().add(const Duration(seconds: 5));
-    while (!kick.edited && DateTime.now().isBefore(failureDeadline)) {
+    while (s.info[kick.id]?.ok != false && DateTime.now().isBefore(failureDeadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
+    expect(s.info[kick.id]?.ok, isFalse);
     expect(kick.edited, isTrue);
     s.settings.lightMode = true;
     s.meters = const EngineMeters(playing: true);
