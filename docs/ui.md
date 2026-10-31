@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first composition and editing on phone and desktop: timeline, tracks, MIDI clips, mixer, editors, inspector, and performance budget.
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # UI design
