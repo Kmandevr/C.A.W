@@ -44,6 +44,9 @@ class AppState extends ChangeNotifier {
   String? selectedModuleId;
   String? selectedLayerId;
   String? selectedClipId;
+  final Set<String> selectedClipIds = {};
+  int? timeSelectionStart, timeSelectionEnd;
+  int arrangementSnapSteps = 1;
   bool previewOnly = false;
   bool ready = false;
 
@@ -458,6 +461,111 @@ class AppState extends ChangeNotifier {
 
   // ---------- layers (Arranger) ----------
 
+  List<LayerDoc> get visibleLayers => project.layers.where((layer) {
+    var parent = layer.parentId;
+    for (var depth = 0; parent != null && depth < project.layers.length; depth++) {
+      final folder = project.layers.where((x) => x.id == parent).firstOrNull;
+      if (folder == null) break;
+      if (folder.collapsed) return false;
+      parent = folder.parentId;
+    }
+    return true;
+  }).toList();
+
+  int folderDepth(LayerDoc layer) {
+    var depth = 0, parent = layer.parentId;
+    final seen = <String>{layer.id};
+    while (parent != null && seen.add(parent)) {
+      final folder = project.layers.where((x) => x.id == parent).firstOrNull;
+      if (folder == null) break;
+      depth++;
+      parent = folder.parentId;
+    }
+    return depth;
+  }
+
+  bool moveLayerIntoFolder(LayerDoc layer, String? folderId) {
+    if (folderId == layer.id) return false;
+    if (folderId != null) {
+      final folder = project.layers.where((x) => x.id == folderId).firstOrNull;
+      if (folder == null || !folder.isFolder) return false;
+      var parent = folder.parentId;
+      while (parent != null) {
+        if (parent == layer.id) return false;
+        parent = project.layers.where((x) => x.id == parent).firstOrNull?.parentId;
+      }
+    }
+    editLayer(layer, (l) => l.parentId = folderId);
+    return true;
+  }
+
+  void setFolderBus(LayerDoc folder, bool enabled) {
+    if (!folder.isFolder) return;
+    editLayer(folder, (l) => l.busEnabled = enabled);
+  }
+
+  void setFolderCollapsed(LayerDoc folder, bool collapsed) {
+    if (!folder.isFolder) return;
+    editLayer(folder, (l) => l.collapsed = collapsed);
+  }
+
+  void addAutomationLane(LayerDoc layer, String target) {
+    if (target != 'volume' && target != 'pan') return;
+    if (layer.automation.any((a) => a.target == target)) return;
+    editLayer(layer, (l) => l.automation.add(AutomationLaneDoc(target: target,
+      points: [AutomationPointDoc(step: 0, value: target == 'volume' ? l.volume : l.pan),
+        AutomationPointDoc(step: project.loopSteps.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
+  }
+
+  void removeAutomationLane(LayerDoc layer, AutomationLaneDoc lane) {
+    editLayer(layer, (l) => l.automation.remove(lane));
+  }
+
+  void updateAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index, double step, double value) {
+    if (index < 0 || index >= lane.points.length) return;
+    editLayer(layer, (l) {
+      final p = lane.points[index];
+      p.step = step.clamp(0, 4096).toDouble();
+      p.value = value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
+      l.automation.sort((a, b) => a.target.compareTo(b.target));
+      lane.points.sort((a, b) => a.step.compareTo(b.step));
+    });
+  }
+
+  void addAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, double step, double value) {
+    editLayer(layer, (l) {
+      l.automation.firstWhere((a) => a.target == lane.target).points.add(
+        AutomationPointDoc(step: step.clamp(0, 4096).toDouble(),
+          value: value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble()));
+      l.automation.firstWhere((a) => a.target == lane.target).points.sort((a, b) => a.step.compareTo(b.step));
+    });
+  }
+
+  void setTimeSelection(int start, int end) {
+    timeSelectionStart = start.clamp(0, 4096);
+    timeSelectionEnd = end.clamp(0, 4096);
+    notifyListeners();
+  }
+
+  void clearTimeSelection() {
+    timeSelectionStart = timeSelectionEnd = null;
+    notifyListeners();
+  }
+
+  void splitClipAt(LayerDoc layer, ClipDoc clip, int atStep) {
+    final offset = atStep - clip.startSteps;
+    if (offset <= 0 || offset >= clip.lengthSteps) return;
+    final right = ClipDoc(id: newId('c'), patternId: clip.patternId,
+      startSteps: atStep, lengthSteps: clip.lengthSteps - offset,
+      sourceOffsetSteps: clip.sourceOffsetSteps + offset, loop: clip.loop, linked: true);
+    editLayer(layer, (l) {
+      clip.lengthSteps = offset;
+      l.clips.add(right);
+    });
+    selectClip(layer, right);
+  }
+
+
   void addLayer() {
     final gen = project.modules.where((m) => isGenerator(m.id)).firstOrNull;
     project.layers.add(LayerDoc(
@@ -471,7 +579,11 @@ class AppState extends ChangeNotifier {
   }
 
   void removeLayer(LayerDoc l) {
+    for (final child in project.layers.where((x) => x.parentId == l.id)) {
+      child.parentId = l.parentId;
+    }
     project.layers.remove(l);
+    if (selectedLayerId == l.id) selectedLayerId = null;
     _changed();
   }
 
@@ -504,10 +616,16 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void selectClip(LayerDoc layer, ClipDoc clip) {
+  void selectClip(LayerDoc layer, ClipDoc clip, {bool additive = false}) {
     selectedLayerId = layer.id;
     selectedClipId = clip.id;
     selectedModuleId = clip.patternId;
+    if (!additive) selectedClipIds.clear();
+    if (selectedClipIds.contains(clip.id) && additive) {
+      selectedClipIds.remove(clip.id);
+    } else {
+      selectedClipIds.add(clip.id);
+    }
     notifyListeners();
   }
 
@@ -550,6 +668,7 @@ class AppState extends ChangeNotifier {
 
   void removeClip(LayerDoc layer, ClipDoc clip) {
     editLayer(layer, (l) => l.clips.remove(clip));
+    selectedClipIds.remove(clip.id);
     if (selectedClipId == clip.id) {
       selectedClipId = null;
       selectedModuleId = null;
@@ -557,9 +676,9 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  void addFolder() {
+  void addFolder({String? parentId}) {
     final folder = LayerDoc(id: newId('l'), name: 'Group', color: project.layers.length % 4,
-        isFolder: true, busEnabled: true);
+        parentId: parentId, isFolder: true, busEnabled: true);
     project.layers.add(folder);
     selectedLayerId = folder.id;
     _changed();
