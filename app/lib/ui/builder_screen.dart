@@ -693,6 +693,11 @@ class _Params extends StatelessWidget {
                   : 'Other modules can call: ${i.functions.map((f) => f.signature).join(', ')}',
               style: Neon.code(size: 13, color: Neon.blue)),
         ),
+      if (i != null && i.imports.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text('Reads: ${i.imports.join(', ')}', style: Neon.code(size: 13, color: Neon.blue)),
+        ),
       if (i != null && i.exports.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 10),
