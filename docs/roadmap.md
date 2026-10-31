@@ -55,7 +55,7 @@ Neon on near-black: neon green, pink, yellow and blue (owner), each layer in one
 - GitHub sync and AI library editing
 - the plugin and other platforms
 - audio import
-- sends and buses
+- sends and advanced routing beyond the current nested folder buses
 
 ### Acceptance test
 
@@ -89,7 +89,7 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - project `global`s in a Project Controls panel
   - `export`ed signals other modules read (sidechain)
   - **[Fact]** Built (step 1): params, globals, exports and functions, with the app's Controls and Project controls panels.
-- **Automation lanes** for globals.
+- **Automation lanes:** volume and pan automation are now supported on tracks and folder buses; automation for globals and module parameters remains future work.
 - **Pattern builder:**
   - **[Fact]** Built first (step 3a, the owner's priority): text patterns that any generator plays through voices, with chords, off-grid notes, probability, ratchets and slide ([engine](engine.md#patterns)).
   - single-sound and kit patterns, 1 step to 64 bars long
@@ -99,7 +99,7 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - chord stamping, and generator buttons (Euclid, random in key, arpeggiate, humanize)
   - procedural pattern code with optional per-repeat variation, and Freeze
   - drag a pattern onto any layer
-- **Scenes:** sets of patterns and global values per layer, switched in time with the loop.
+- **Scenes/session grid:** retired in favour of the arrangement timeline; no alternate launcher view is planned.
 - **Standard library** ([architecture](architecture.md#standard-library-and-connectors-proposal)):
   - envelopes and LFOs, filters and effects, MIDI and music theory, glitch and bit tools
   - user `fn` functions
@@ -107,7 +107,7 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - **[Fact]** Built (step 2): 69 documented built-in functions in ten categories, 12 more in the `drum`, `synth` and `util` libraries, project library modules, the [function library](library.md) and [agent guide](agent-guide.md) checked in CI, and the app's Library sheet (F1) and completion. MIDI functions come with MIDI ports.
 - **Connectors:** sidechain, modulation links (LFOs and envelopes onto any param), and MIDI ports.
 - **A UI for a light halfway DAW** ([UI design](ui.md)):
-  - a session grid (layers × scenes), a library you drag from, and an inspector sheet
+  - an arrangement-first timeline with reusable MIDI clips, nested folder buses, a separate mixer and track automation
   - one gesture vocabulary on both phone and desktop, and undo/redo
   - painted grids, with the CPU and RAM budgets
 - **Notes stored the MIDI 2.0 way.** `.mid` import and MPE export come later; DAW export isn't a priority yet.
@@ -133,7 +133,7 @@ macOS and Linux desktop apps, then iOS once its distribution question is settled
 
 ## Stage 5 — Advanced instrument
 
-- a timeline arranger
+- timeline arranger foundation is now in v2; remaining work includes more editing polish, multi-source multi-edit, clip automation and plugin/global parameter automation
 - the sequencing mini-language
 - audio import with nondestructive byte/bit mangling chains (originals are never modified)
 - sends and buses
