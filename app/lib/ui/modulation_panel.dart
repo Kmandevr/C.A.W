@@ -380,7 +380,7 @@ class _ModuleModEditorState extends State<_ModuleModEditor> {
     onChanged: choices.isEmpty ? null : (v) { if (v != null) changed(v); },
   );
 
-  Widget _sourceChoice(String value, List<SignalOption> choices, ValueChanged<String> changed) => DropdownButton<String>(
+  Widget _sourceChoice(String? value, List<SignalOption> choices, ValueChanged<String> changed) => DropdownButton<String>(
     isExpanded: true, value: choices.any((s) => s.value == value) ? value : null,
     hint: const Text('Missing source', style: TextStyle(color: Neon.yellow, fontSize: 12)),
     underline: const SizedBox.shrink(), dropdownColor: Neon.panel,
