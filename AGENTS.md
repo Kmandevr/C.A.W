@@ -1,5 +1,7 @@
 # Agent instructions
 
+summary: Entry point for coding agents, including repository rules, path-specific guidance and connector-only workflow limits.
+
 This file is the entry point for agents that do not automatically load the project's Claude configuration. It supplements, and does not replace, [`CLAUDE.md`](CLAUDE.md).
 
 ## Start here
