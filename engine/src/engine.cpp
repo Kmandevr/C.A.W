@@ -227,6 +227,22 @@ void releaseVoices(Voice* voices) {
 double bitsToDouble(uint64_t b) { return std::bit_cast<double>(b); }
 uint64_t doubleToBits(double d) { return std::bit_cast<uint64_t>(d); }
 
+double automationValue(int count, const double* steps, const double* values, double at, double fallback) noexcept {
+    if (count <= 0) return fallback;
+    if (at <= steps[0]) return values[0];
+    int lo = 0, hi = count - 1;
+    while (lo + 1 < hi) {
+        const int mid = (lo + hi) / 2;
+        if (steps[mid] <= at) lo = mid; else hi = mid;
+    }
+    if (at >= steps[count - 1]) return values[count - 1];
+    const double span = steps[hi] - steps[lo];
+    if (span <= 0.0) return values[hi];
+    const double t = (at - steps[lo]) / span;
+    return values[lo] + (values[hi] - values[lo]) * t;
+}
+
+
 void storeMax(std::atomic<float>& a, float v) {
     float cur = a.load(std::memory_order_relaxed);
     while (v > cur && !a.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
@@ -503,7 +519,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     std::vector<Want> wants;
     int order = 0;
     if (p.auditionOnly) {
-        wants.push_back({"\x01audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}});
+        wants.push_back({"\\x01audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false});
     }
     order_.clear();
     for (const LayerSpec& l : p.layers) {
