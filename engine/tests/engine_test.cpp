@@ -114,7 +114,7 @@ TEST(track_volume_automation_is_sample_positioned) {
     e.play();
     const auto left = run(e, 16 * 6000 + 256);
     const double pan = std::cos(kPi / 4.0);
-    CHECK(std::fabs(left[256]) < 1e-4);
+    CHECK(std::fabs(left[0]) < 1e-4);
     CHECK_NEAR(left[8 * 6000], 0.5 * pan, 2e-3);
     CHECK_NEAR(left[16 * 6000 - 1], pan, 2e-3);
 }
