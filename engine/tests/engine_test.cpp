@@ -566,7 +566,7 @@ TEST(arrangement_clip_source_offset_preserves_the_tail_of_a_sustained_note) {
     p.seamCrossfade = false;
     p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
     p.modules.push_back({"phrase",
-        "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 4 1\\n", {}});
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
     LayerSpec layer;
     layer.id = "track";
     layer.chain = {"tone"};
