@@ -172,9 +172,9 @@ TEST(sidechain_import_ducks_in_live_and_offline_render_deterministically) {
     ProjectSpec p;
     p.master = 1.0;
     p.seamCrossfade = false;
-    p.modules.push_back({"k", std::string(kFloat) + "export let env = 0.5\\n0", {}, "Kick"});
+    p.modules.push_back({"k", std::string(kFloat) + "export let env = 0.5\n0", {}, "Kick"});
     p.modules.push_back({"g", std::string(kFloat) + "1", {}, "Bass"});
-    p.modules.push_back({"duck", "---\\nkind: effect\\n---\\nutil.duck(in, kick.env, 0.8)", {}, "Duck"});
+    p.modules.push_back({"duck", "---\nmode: float\nkind: effect\n---\nutil.duck(in, kick.env, 0.8)", {}, "Duck"});
     LayerSpec kick, bass;
     kick.id = "kick";
     kick.chain = {"k"};
@@ -187,7 +187,7 @@ TEST(sidechain_import_ducks_in_live_and_offline_render_deterministically) {
     Engine e(48000);
     e.setMasterBypass(true);
     const std::string result = e.setProject(p);
-    CHECK(has(result, "\\"nothing exports\\"") == false);
+    CHECK(!has(result, "nothing exports"));
     e.play();
     const std::vector<float> live = run(e, 256);
     RenderResult first, second;
