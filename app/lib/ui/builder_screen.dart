@@ -317,6 +317,13 @@ class _BuilderScreenState extends State<BuilderScreen> {
     if (sourceInfo == null) return;
     final sourceModule = s.project.module(sourceInfo.key);
     if (sourceModule == null) return;
+    final targetLayers = s.project.layers.where((l) => l.chain.contains(target.id)).toList();
+    if (targetLayers.isNotEmpty && targetLayers.every((l) => l.effectIds.length >= 8)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The selected track chain already has eight effects. Remove one before adding sidechain.')),
+      );
+      return;
+    }
 
     final id = s.addBlankModule('effect');
     final name = 'Sidechain ${sourceModule.name} ${s.project.modules.length}';
@@ -328,8 +335,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
 
     var attached = 0;
     var fullChains = 0;
-    for (final layer in s.project.layers) {
-      if (!layer.chain.contains(target.id)) continue;
+    for (final layer in targetLayers) {
       if (layer.effectIds.length >= 8) {
         fullChains++;
         continue;
