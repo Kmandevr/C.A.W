@@ -287,13 +287,6 @@ class Engine {
           task: () => _spawnSetProject(address, json),
         );
         final j = jsonDecode(result) as Map<String, dynamic>;
-        // Project-level validation failures have no per-module diagnostics. Do not silently
-        // turn those into an empty module map: callers would mistake a rejected project for
-        // a successful compile with no modules.
-        if (j['ok'] == false) {
-          final message = (j['error'] as String?) ?? 'engine rejected the project';
-          throw FormatException(message);
-        }
         final mods = (j['modules'] as Map<String, dynamic>? ?? {})
             .map((k, v) => MapEntry(k, ModuleInfo.fromJson(v as Map<String, dynamic>)));
         done.complete(mods);
