@@ -49,7 +49,7 @@ class ModulationPanel extends StatelessWidget {
         sources: route == null ? const [] : sources,
         onChanged: route == null
             ? (_) async {}
-            : (value) => onSourceChanged(module.source.replaceRange(route.start(1)!, route.end(1)!, value)),
+            : (value) => onSourceChanged(module.source.replaceFirst(route.group(1)!, value)),
         onRemove: onRemoveSidechain,
       ));
     } else if (i.kind == 'generator' || i.kind == 'synth' || i.isEffect) {
@@ -90,7 +90,7 @@ class _SynthModEditorState extends State<_SynthModEditor> {
     for (final kind in ['env', 'lfo', 'macro']) {
       final max = kind == 'env' ? 3 : 4;
       for (var i = kind == 'env' ? 2 : 1; i <= max; i++) {
-        if (RegExp('^\\s*$kind\\s+$i(?:\\s|$)', multiLine: true).hasMatch(widget.source)) out.add('$kind $i');
+        if (RegExp(r'^\s*' + kind + r'\s+' + i.toString() + r'(?:\s|$)', multiLine: true).hasMatch(widget.source)) out.add('$kind $i');
       }
     }
     return out;
@@ -99,12 +99,12 @@ class _SynthModEditorState extends State<_SynthModEditor> {
   List<String> get availableDestinations {
     final out = <String>['volume'];
     for (final osc in ['a', 'b', 'c']) {
-      if (RegExp('^\\s*osc\\s+$osc(?:\\s|$)', multiLine: true).hasMatch(widget.source)) {
+      if (RegExp(r'^\s*osc\s+' + osc + r'(?:\s|$)', multiLine: true).hasMatch(widget.source)) {
         out.addAll(['osc $osc pos', 'osc $osc level', 'osc $osc pitch']);
       }
     }
     for (var i = 1; i <= 2; i++) {
-      if (RegExp('^\\s*filter\\s+$i(?:\\s|$)', multiLine: true).hasMatch(widget.source)) {
+      if (RegExp(r'^\s*filter\s+' + i.toString() + r'(?:\s|$)', multiLine: true).hasMatch(widget.source)) {
         out.addAll(['filter $i cutoff', 'filter $i res']);
       }
     }
