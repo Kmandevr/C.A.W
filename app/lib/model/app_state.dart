@@ -1,5 +1,6 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -540,7 +541,8 @@ class AppState extends ChangeNotifier {
     if (target != 'volume' && target != 'pan') return;
     if (layer.automation.any((a) => a.target == target)) return;
     final end = project.layers.fold<int>(project.loopSteps, (v, item) =>
-      item.clips.fold<int>(v, (e, clip) => e > clip.startSteps + clip.lengthSteps ? e : clip.startSteps + clip.lengthSteps));
+      item.clips.fold<int>(v, (e, clip) => e > clip.startSteps + clip.lengthSteps ? e : clip.startSteps + clip.lengthSteps))
+        .clamp(1, project.maxArrangementSteps).toInt();
     editLayer(layer, (l) => l.automation.add(AutomationLaneDoc(target: target,
       points: [AutomationPointDoc(step: 0, value: target == 'volume' ? l.volume : l.pan),
         AutomationPointDoc(step: end.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
@@ -558,23 +560,26 @@ class AppState extends ChangeNotifier {
       final position = sorted.indexOf(p);
       final lower = position > 0 ? sorted[position - 1].step + 0.01 : 0.0;
       final upper = position >= 0 && position < sorted.length - 1 ? sorted[position + 1].step - 0.01 : 4096.0;
-      p.step = step.clamp(lower, upper).toDouble();
+      p.step = step.clamp(lower, math.min(upper, project.maxArrangementSteps.toDouble())).toDouble();
       p.value = value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
       // Clamp to neighboring points instead of reordering during a drag; the dragged handle stays stable.
     });
   }
 
   void addAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, double step, double value) {
+    if (lane.points.length >= 128) return;
+    final at = step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
+    if (lane.points.any((p) => (p.step - at).abs() < 0.01)) return;
     editLayer(layer, (l) {
       l.automation.firstWhere((a) => a.target == lane.target).points.add(
-        AutomationPointDoc(step: step.clamp(0, 4096).toDouble(),
+        AutomationPointDoc(step: at,
           value: value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble()));
       l.automation.firstWhere((a) => a.target == lane.target).points.sort((a, b) => a.step.compareTo(b.step));
     });
   }
 
   void beginTimeSelection(int step) {
-    timeSelectionAnchor = step.clamp(0, 4096).toInt();
+    timeSelectionAnchor = step.clamp(0, project.maxArrangementSteps).toInt();
     setTimeSelection(step, step);
   }
 
@@ -588,8 +593,8 @@ class AppState extends ChangeNotifier {
   }
 
   void setTimeSelection(int start, int end) {
-    timeSelectionStart = start.clamp(0, 4096).toInt();
-    timeSelectionEnd = end.clamp(0, 4096).toInt();
+    timeSelectionStart = start.clamp(0, project.maxArrangementSteps).toInt();
+    timeSelectionEnd = end.clamp(0, project.maxArrangementSteps).toInt();
     notifyListeners();
   }
 
@@ -758,6 +763,9 @@ class AppState extends ChangeNotifier {
     final end = layer.clips.fold<int>(0, (v, c) => v > c.startSteps + c.lengthSteps ? v : c.startSteps + c.lengthSteps);
     final clip = ClipDoc(id: newId('c'), patternId: patternId,
         startSteps: startSteps ?? end, lengthSteps: length);
+    final at = (startSteps ?? end).clamp(0, project.maxArrangementSteps - 1).toInt();
+    clip.startSteps = at;
+    clip.lengthSteps = length.clamp(1, project.maxArrangementSteps - at).toInt();
     editLayer(layer, (l) => l.clips.add(clip));
     selectClip(layer, clip);
   }
@@ -780,15 +788,15 @@ class AppState extends ChangeNotifier {
   }
 
   void moveClip(LayerDoc layer, ClipDoc clip, int startSteps) {
-    editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, 4096 - clip.lengthSteps).toInt());
+    editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt());
   }
 
   void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {
-    editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, 4096 - clip.startSteps).toInt());
+    editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt());
   }
 
   void shiftClipSource(LayerDoc layer, ClipDoc clip, int deltaSteps) {
-    editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, 4096).toInt());
+    editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, project.maxArrangementSteps).toInt());
   }
 
   void removeClip(LayerDoc layer, ClipDoc clip) {
