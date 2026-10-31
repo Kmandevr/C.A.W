@@ -2,6 +2,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../model/app_state.dart';
 import '../model/project.dart';
@@ -164,8 +165,8 @@ class _TimelineHeader extends StatelessWidget {
             onSelected: (id) => state.addClip(layer, id),
             itemBuilder: (_) => [for (final m in patterns) PopupMenuItem(value: m.id, child: Text(m.name))],
           ),
-        ])) else const Expanded(child: Align(alignment: Alignment.centerLeft,
-          child: Row(children: [Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: TextStyle(color: Neon.dim, fontSize: 9)), const Spacer(), Icon(Icons.account_tree_outlined, size: 13, color: color)]))),
+        ])) else Expanded(child: Align(alignment: Alignment.centerLeft,
+          child: Row(children: [Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: const TextStyle(color: Neon.dim, fontSize: 9)), const Spacer(), Icon(Icons.account_tree_outlined, size: 13, color: color)])),
       ]),
     );
   }
