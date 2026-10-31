@@ -215,8 +215,18 @@ TEST(synth_patches_report_errors_at_their_line) {
     CHECK(patchError("osc a table nope\n").find("unknown table 'nope'") != std::string::npos);
     CHECK(patchError("osc a wobble 3\n").find("unknown setting 'wobble'") != std::string::npos);
     CHECK(patchError("filter 1 lowpass cutoff 5\n").find("cutoff must be 20 to 20000") != std::string::npos);
-    CHECK(patchError("lfo 1 rate 2\n").find("later synth stage") != std::string::npos);
-    CHECK(patchError("mod env 2 -> filter 1 cutoff 0.4\n").find("later synth stage") != std::string::npos);
+    CHECK(patchError("lfo 5 rate 2\n").find("lfo needs its number") != std::string::npos);
+    CHECK(patchError("mod env 1 -> filter 1 cutoff 0.4\n").find("env 1 is the amplitude envelope") != std::string::npos);
+    CHECK(patchError("mod env 2 -> volume 0.5\n").find("env2 is used as a modulator but is not enabled") != std::string::npos);
+    CHECK(patchError("mod macro 1 -> volume 0.5\n").find("macro1 is used as a modulator but is not enabled") != std::string::npos);
+    const SynthResult defaults = translateSynth(kPatch);
+    CHECK(defaults.ok);
+    CHECK(defaults.generator.find("env2") == std::string::npos);
+    CHECK(defaults.generator.find("macro1") == std::string::npos);
+    CHECK(patchError("macro 5 Bright 0.5\n").find("macro syntax") != std::string::npos);
+    CHECK(patchError("macro 1 Bad! 0.5\n").find("macro name must use only") != std::string::npos);
+    CHECK(translateSynth(kPatch + "mod lfo 1 -> volume 0.5\n").error.find("lfo1 is used as a modulator") != std::string::npos);
+    CHECK(translateSynth(kPatch + "mod macro 1 -> osc b pos 0.5\n").error.find("destination oscillator is off") != std::string::npos);
     CHECK(patchError("bananas\n").find("unknown line 'bananas'") != std::string::npos);
     CHECK(patchError("voices 40\n").find("voices must be 1 to 32") != std::string::npos);
     CHECK(translateSynth("---\nkind: generator\n---\nosc a\n").error.find("kind: synth") != std::string::npos);
@@ -225,6 +235,44 @@ TEST(synth_patches_report_errors_at_their_line) {
     CHECK(ok.ok);
     CHECK(ok.generator.find("wt(table.saw") != std::string::npos);
     CHECK(ok.generator.find("voices: 4") != std::string::npos);
+}
+
+
+TEST(synth_supports_three_envelopes_four_lfos_macros_and_modulation_routes) {
+    const std::string patch = kPatch +
+        "osc a table saw\n"
+        "filter 1 lowpass cutoff 1200\n"
+        "env 2 attack 0.1 decay 0.4 sustain 0.3 release 0.2\n"
+        "env 3 attack 0.01 decay 0.2 sustain 0.8 release 0.3\n"
+        "lfo 1 shape sine rate 2 phase 0.25\n"
+        "lfo 2 shape tri rate 1/4\n"
+        "lfo 3 shape saw rate 4\n"
+        "lfo 4 shape random rate 0.5\n"
+        "macro 1 Bright 0.5\n"
+        "macro 2 Width 0.7\n"
+        "mod env 2 -> filter 1 cutoff 0.4\n"
+        "mod macro 2 -> filter 1 cutoff 0.2\n"
+        "mod lfo 1 -> osc a pos 0.3\n"
+        "mod macro 1 -> osc a pitch 0.2\n"
+        "mod vel -> volume 0.5\n";
+    SynthResult translated = translateSynth(patch);
+    CHECK(translated.ok);
+    if (!translated.ok) return;
+    CHECK(translated.generator.find("let env2 = env.adsr") != std::string::npos);
+    CHECK(translated.generator.find("let env3 = env.adsr") != std::string::npos);
+    CHECK(translated.generator.find("lfo.sine") != std::string::npos);
+    CHECK(translated.generator.find("lfo.tri") != std::string::npos);
+    CHECK(translated.generator.find("lfo.saw") != std::string::npos);
+    CHECK(translated.generator.find("lfo.random") != std::string::npos);
+    CHECK(translated.generator.find("macro1") != std::string::npos);
+    CHECK(translated.generator.find("macro2") != std::string::npos);
+    CHECK(translated.generator.find("env2 * 0.4") != std::string::npos);
+    CHECK(translated.generator.find("(env2 * 0.4) + (macro2 * 0.2)") != std::string::npos);
+    CHECK(translated.generator.find("lfo1 * 0.3") != std::string::npos);
+    CHECK(translated.generator.find("macro1 * 0.2") != std::string::npos);
+    CHECK(translated.generator.find("vel * 0.5") != std::string::npos);
+    const CompileResult generated = compileModule(translated.generator);
+    if (!generated.program) cawtest::fail(__FILE__, __LINE__, "generated synth code does not compile: " + generated.error);
 }
 
 TEST(a_synth_patch_compiles_to_a_voice_with_its_effects) {
@@ -300,7 +348,7 @@ TEST(a_patch_cannot_grow_the_chain_or_params_past_the_limits) {
     std::string full = kPatch + "osc a\nosc b\nosc c\nsub\nnoise\nfilter 1 lowpass\nfilter 2 highpass\n";
     for (int i = 0; i < 8; ++i) full += "fx delay\n";
     CompileResult r = compileModule(full);
-    CHECK(r.program != nullptr);
+    if (!r.program) cawtest::fail(__FILE__, __LINE__, "full synth patch does not compile: " + r.error);
     if (r.program) CHECK(r.program->params.size() <= static_cast<size_t>(kMaxSynthParams));
     // Ids with control characters never reach the engine (it names hidden modules with them).
     ProjectSpec p;
@@ -341,4 +389,23 @@ TEST(effects_are_numbered_across_the_patch_and_mono_patches_steal) {
     std::vector<float> lf(1024), rf(1024);
     for (int i = 0; i < 1024; i += 64) e.process(lf.data() + i, rf.data() + i, 64);
     CHECK_NEAR(lf[500] / std::cos(kPi / 4.0), 0.1, 1e-6);
+}
+
+
+TEST(synth_oscillator_phase_warp_is_exposed_and_changes_the_waveform) {
+    const std::string plain = kPatch + "osc a table saw warp 0\n";
+    const std::string warped = kPatch + "osc a table saw warp 0.8\n";
+    const SynthResult a = translateSynth(plain);
+    const SynthResult b = translateSynth(warped);
+    CHECK(a.ok);
+    CHECK(b.ok);
+    CHECK(b.generator.find("a_warp") != std::string::npos);
+    CHECK(!translateSynth(kPatch + "osc a warp 1\n").ok);
+    const auto dry = playSynth(plain, 4096);
+    const auto shaped = playSynth(warped, 4096);
+    CHECK_EQ(dry.size(), shaped.size());
+    double difference = 0;
+    for (size_t i = 0; i < dry.size(); ++i)
+        difference = std::max(difference, std::fabs(dry[i] - shaped[i]));
+    CHECK(difference > 1e-4);
 }

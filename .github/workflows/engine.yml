@@ -5,11 +5,17 @@ on:
   pull_request:
 permissions:
   contents: read
+
+# Cancel obsolete runs for this workflow/PR when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     name: Tests (${{ matrix.name }})
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - { name: Linux x64, os: ubuntu-24.04, flags: "" }
@@ -19,16 +25,32 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Configure
+      - name: Install ccache (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ccache
+          fi
+          ccache --max-size=500M
+      - name: Restore compiler cache (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-engine-${{ matrix.name }}-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
+          restore-keys: |
+            ccache-engine-${{ matrix.name }}-
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
         run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }}
       - name: Build
         run: cmake --build engine/build --config Release --parallel
       - name: Test
-        shell: bash
-        run: |
-          bin=engine/build/caw_tests
-          [ -f engine/build/Release/caw_tests.exe ] && bin=engine/build/Release/caw_tests.exe
-          "$bin"
+        run: ctest --test-dir engine/build --build-config Release --output-on-failure --parallel 4
       - name: Check and render the examples
         if: matrix.name == 'Linux x64'
         run: |

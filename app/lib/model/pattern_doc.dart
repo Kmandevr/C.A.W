@@ -265,6 +265,14 @@ class NoteExpression {
         vibFade: vibFade ?? this.vibFade,
       );
 
+  /// Snaps a normalised position to a normalised grid, always keeping it inside this note.
+  /// A non-positive grid disables snapping; the curve can never extend the note itself.
+  static double snapTime(double t, {double grid = 0}) {
+    final position = t.clamp(0.0, 1.0).toDouble();
+    if (!grid.isFinite || grid <= 0) return position;
+    return ((position / grid).round() * grid).clamp(0.0, 1.0).toDouble();
+  }
+
   /// A curve's value at [u] 0..1, holding the first and last values outside the points (as the engine plays it).
   static double valueAt(List<NotePoint> c, double u, {double empty = 0}) {
     if (c.isEmpty) return empty;

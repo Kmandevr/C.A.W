@@ -2,12 +2,12 @@
 title: Actions, keys and macros
 summary: Every command as an action, customisable keys per area, macros and toolbars, and the full action catalogue with default keys.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart]
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Actions, keys and macros
 
-**[Fact]** Built (2026-10-28): the action catalogue, keymaps, macros and Vim core (`app/lib/actions/`) and the key router that runs them in the app ([app](app.md)). Still a draft for the owner to change; editing keys in the action list isn't built yet. The roll's toolbar can be customised (2026-10-29). The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
+**[Fact]** Built (2026-10-28): the action catalogue, keymaps, macros and Vim core (`app/lib/actions/`) and the key router that runs them in the app ([app](app.md)). Still a draft for the owner to change; editing keys in the action list isn't built yet. The roll toolbar and phone Quick Actions strips can be customised (2026-10-30). The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
 
 ## How it works
 
@@ -45,7 +45,7 @@ macro "Run of four"
   roll.notes.up
 ```
 
-- **Phone without a keyboard:** the default toolbar holds the most-used actions, and you swap in your own.
+- **Touchscreen quick actions:** phones show a compact action strip in Sounds, Tracks and Export. Buttons run actions directly through the action registry; they do not imitate key presses or enter Vim modes. Use the tune button to add actions or macros, remove them, reorder them and restore defaults. Each area's toolbar is saved in the existing `keys.txt` keymap. The piano roll keeps its own dedicated customizable toolbar. Vim remains a physical-keyboard feature.
 
 ## Vim-style control
 
@@ -84,7 +84,7 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Action list | ? |
 | Go to Sounds / Tracks / Export (the Builder, Arranger and Exporter areas) | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built) |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |
-| Tap tempo | T |
+| Tap tempo | T (updates the project BPM from repeated taps) |
 | Tempo up / down 1 BPM (Shift: 0.1) | Ctrl+= / Ctrl+- |
 | Master volume up / down | — |
 | Unmute layers the engine muted (overload) | — |

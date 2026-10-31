@@ -2,12 +2,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 import 'bindings.dart';
+import 'execution.dart';
 
 enum ParamKind { number, toggle, choice }
 
@@ -264,6 +264,7 @@ class Engine {
   final Pointer<CawLayerMeterStruct> _layer = calloc<CawLayerMeterStruct>();
   final Pointer<Float> _scope = calloc<Float>(1024);
   bool _audioOn = false;
+  bool _disposed = false;
 
   static Engine create() {
     final b = Bindings.instance;
@@ -275,13 +276,17 @@ class Engine {
     return Engine._(b, h);
   }
 
-  /// Sends a whole project. Calls run one at a time on a worker isolate, so compiling never blocks the UI.
+  /// Sends a whole project. Calls run one at a time on the native worker pool, off the UI isolate.
   Future<Map<String, ModuleInfo>> setProject(String json) {
-    final address = _handle.address;
+    if (_disposed) return Future.error(StateError('engine is disposed'));
     final done = Completer<Map<String, ModuleInfo>>();
     _queue = _queue.then((_) async {
       try {
-        final result = await _spawnSetProject(address, json);
+        if (_disposed) throw StateError('engine is disposed');
+        final result = await NativeEngineWorkPool.shared
+            .submitProject(_handle, json)
+            .result;
+        if (result == null) throw StateError('native project job returned no result');
         final j = jsonDecode(result) as Map<String, dynamic>;
         final mods = (j['modules'] as Map<String, dynamic>? ?? {})
             .map((k, v) => MapEntry(k, ModuleInfo.fromJson(v as Map<String, dynamic>)));
@@ -364,6 +369,8 @@ class Engine {
   bool get audioOn => _audioOn;
 
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     stopAudio();
     _b.destroy(_handle);
     calloc.free(_meters);
@@ -387,6 +394,13 @@ class Engine {
     final text = r.toDartString();
     b.free(r);
     return ModuleInfo.fromJson(jsonDecode(text) as Map<String, dynamic>);
+  }
+
+  /// Checks source on the native bounded pool as interactive preview work.
+  static Future<ModuleInfo> checkAsync(String source) async {
+    final result = await NativeEngineWorkPool.shared.submitCheck(source).result;
+    if (result == null) throw StateError('native module check returned no result');
+    return ModuleInfo.fromJson(jsonDecode(result) as Map<String, dynamic>);
   }
 
   /// Turns a MIDI file (.mid or MIDI 2.0 Clip) into pattern module text; throws a [FormatException] if it can't.
@@ -416,77 +430,28 @@ class Engine {
   }
 }
 
-/// A running export. Poll [progress] (0..1); [cancel] stops it.
+/// A running export. Poll [progress] (0..1); [cancel] stops the native job.
 class RenderJob {
-  RenderJob._(this._progress, this._cancel, this.result);
+  RenderJob._(this._job) : result = _job.result;
 
-  final Pointer<Int32> _progress, _cancel;
-  bool _done = false;
-
-  /// Completes with null on success, or the error message.
+  final NativeEngineJob _job;
   final Future<String?> result;
 
-  double get progress => _done ? 1.0 : _progress.value / 1000.0;
-  void cancel() {
-    if (!_done) _cancel.value = 1;
-  }
+  double get progress => _job.progress;
+  void cancel() => _job.cancel();
 
   static RenderJob start(RenderRequest req) {
-    final progress = calloc<Int32>();
-    final cancel = calloc<Int32>();
-    final pa = progress.address, ca = cancel.address;
-    final future = _spawnRender(req, pa, ca);
-    final job = RenderJob._(progress, cancel, future);
-    // The flags stay allocated until the worker is done with them.
-    future.whenComplete(() {
-      job._done = true;
-      calloc.free(progress);
-      calloc.free(cancel);
-    }).ignore();
-    return job;
+    final job = NativeEngineWorkPool.shared.submitRender(
+      projectJson: req.projectJson,
+      kind: req.kind.index,
+      outPath: req.outPath,
+      sampleRate: req.sampleRate,
+      float32: req.float32,
+      seconds: req.seconds,
+      frames: req.frames,
+      target: req.target,
+      param: req.param,
+    );
+    return RenderJob._(job);
   }
-}
-
-// Isolate entry points are top-level, and each closure is made in its own small function, so it captures only
-// plain values (a closure made inside a method would carry that method's other variables to the worker).
-
-Future<String> _spawnSetProject(int address, String json) => Isolate.run(() => _setProjectOnWorker(address, json));
-
-Future<String?> _spawnRender(RenderRequest req, int progress, int cancel) =>
-    Isolate.run(() => _renderOnWorker(req, progress, cancel));
-
-String _setProjectOnWorker(int address, String json) {
-  final b = Bindings.instance;
-  final s = json.toNativeUtf8();
-  final r = b.setProject(Pointer<Void>.fromAddress(address), s);
-  calloc.free(s);
-  final text = r.toDartString();
-  b.free(r);
-  return text;
-}
-
-String? _renderOnWorker(RenderRequest req, int progressAddress, int cancelAddress) {
-  final b = Bindings.instance;
-  final opts = calloc<CawRenderOptionsStruct>();
-  final json = req.projectJson.toNativeUtf8();
-  final path = req.outPath.toNativeUtf8();
-  final target = req.target.toNativeUtf8();
-  final param = req.param.toNativeUtf8();
-  final err = calloc<Uint8>(512).cast<Utf8>();
-  opts.ref
-    ..kind = req.kind.index
-    ..sampleRate = req.sampleRate
-    ..float32 = req.float32 ? 1 : 0
-    ..frames = req.frames
-    ..seconds = req.seconds
-    ..target = target
-    ..param = req.param.isEmpty ? nullptr : param;
-  final r = b.render(json, opts, path, Pointer<Int32>.fromAddress(progressAddress),
-      Pointer<Int32>.fromAddress(cancelAddress), err, 512);
-  final msg = r == 0 ? null : err.toDartString();
-  for (final p in [json, path, target, param, err]) {
-    calloc.free(p);
-  }
-  calloc.free(opts);
-  return msg;
 }

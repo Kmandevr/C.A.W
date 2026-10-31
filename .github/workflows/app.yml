@@ -1,4 +1,4 @@
-# App builds: Dart checks and tests, the Android APK and the Windows app, each downloadable from the run's artifacts.
+# App builds: analysis, tests, Android APK and Windows app run independently.
 name: App
 on:
   push:
@@ -8,35 +8,98 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 env:
   FLUTTER_VERSION: 3.47.7
   FLUTTER_SHA_LINUX: af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230
   FLUTTER_SHA_WINDOWS: c2c875da25a1a1448d18ee4e8f398b2f6fce888b4775d8f9130538e16d826cb4
+
 jobs:
-  checks:
-    name: Dart checks and tests
+  analyze:
+    name: Dart analysis
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Restore Flutter SDK
+        id: flutter-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter
+          key: flutter-linux-${{ env.FLUTTER_VERSION }}-${{ env.FLUTTER_SHA_LINUX }}
       - name: Install Flutter
+        if: steps.flutter-cache.outputs.cache-hit != 'true'
         run: |
           curl -sSfL -o flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
           echo "${FLUTTER_SHA_LINUX}  flutter.tar.xz" | sha256sum -c -
           tar xf flutter.tar.xz -C "$RUNNER_TEMP" && rm flutter.tar.xz
-          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
-      - name: Build the engine library for the tests
-        run: |
-          cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DCAW_TOOLS=OFF
-          cmake --build engine/build --parallel
+      - name: Add Flutter to PATH
+        run: echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Restore Dart packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-linux-
       - name: Analyze
         working-directory: app
         run: |
           flutter --disable-analytics
           flutter pub get
           flutter analyze
+
+  tests:
+    name: Dart tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore Flutter SDK
+        id: flutter-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter
+          key: flutter-linux-${{ env.FLUTTER_VERSION }}-${{ env.FLUTTER_SHA_LINUX }}
+      - name: Install Flutter
+        if: steps.flutter-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL -o flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
+          echo "${FLUTTER_SHA_LINUX}  flutter.tar.xz" | sha256sum -c -
+          tar xf flutter.tar.xz -C "$RUNNER_TEMP" && rm flutter.tar.xz
+      - name: Add Flutter to PATH
+        run: echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Restore Dart packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-linux-
+      - name: Install ccache
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ccache
+          fi
+          ccache --max-size=500M
+      - name: Restore native compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linux-app-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
+          restore-keys: ccache-linux-app-
+      - name: Build engine library for native-backed app tests
+        run: |
+          cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DCAW_TOOLS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build engine/build --parallel
+          ccache --show-stats
       - name: Test
         working-directory: app
-        run: CAW_LIB="$GITHUB_WORKSPACE/engine/build/libcaw.so" flutter test
+        env:
+          CAW_LIB: ${{ github.workspace }}/engine/build/libcaw.so
+        run: |
+          flutter pub get
+          flutter test --concurrency=4
 
   android:
     name: Android APK
@@ -47,12 +110,26 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - name: Restore Flutter SDK
+        id: flutter-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter
+          key: flutter-linux-${{ env.FLUTTER_VERSION }}-${{ env.FLUTTER_SHA_LINUX }}
       - name: Install Flutter
+        if: steps.flutter-cache.outputs.cache-hit != 'true'
         run: |
           curl -sSfL -o flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
           echo "${FLUTTER_SHA_LINUX}  flutter.tar.xz" | sha256sum -c -
           tar xf flutter.tar.xz -C "$RUNNER_TEMP" && rm flutter.tar.xz
-          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Add Flutter to PATH
+        run: echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Restore Dart packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-linux-
       - name: Signing key (when the repository has one)
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -85,14 +162,29 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+      - name: Restore Flutter SDK
+        id: flutter-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter
+          key: flutter-windows-${{ env.FLUTTER_VERSION }}-${{ env.FLUTTER_SHA_WINDOWS }}
       - name: Install Flutter
+        if: steps.flutter-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP\flutter.zip"
           Invoke-WebRequest "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_$env:FLUTTER_VERSION-stable.zip" -OutFile $zip
           if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $env:FLUTTER_SHA_WINDOWS) { throw "Flutter download checksum mismatch" }
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
-          "$env:RUNNER_TEMP\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Add Flutter to PATH
+        shell: pwsh
+        run: '"$env:RUNNER_TEMP\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8'
+      - name: Restore Dart packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\Pub\Cache
+          key: pub-windows-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-windows-
       - name: Build
         working-directory: app
         run: |

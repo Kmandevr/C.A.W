@@ -74,6 +74,27 @@ TEST(lfos_follow_the_tempo) {
     CHECK(r[100] != r[24100]);
 }
 
+TEST(modulation_helper_applies_signed_depth) {
+    CHECK_NEAR(one("util.mod(100, 0.5, 20)"), 110.0, 1e-12);
+    CHECK_NEAR(one("util.mod(100, 0.5, -20)"), 90.0, 1e-12);
+    CHECK_NEAR(one("util.mod(100, -0.5, 20)"), 90.0, 1e-12);
+}
+
+TEST(module_mod_statement_rebinds_a_numeric_param_with_signed_depth) {
+    CHECK_NEAR(one("param cutoff = 100 in 0..200\nmod cutoff = util.mod(cutoff, 0.5, 20)\ncutoff"), 110.0, 1e-12);
+    CHECK_NEAR(one("param cutoff = 100 in 0..200\nmod cutoff = util.mod(cutoff, 0.5, -20)\ncutoff"), 90.0, 1e-12);
+    CHECK(compileModule("---\nmode: float\n---\nlet cutoff = 100\nmod cutoff = util.mod(cutoff, 0.5, 20)\ncutoff").error.find("must be a param or global") != std::string::npos);
+    CHECK(compileModule("---\nmode: float\n---\nmod missing = util.mod(1, 0.5, 1)\n1").error.find("must be a param or global") != std::string::npos);
+    CHECK(compileModule("---\nmode: float\n---\nparam enabled = on\nmod enabled = util.mod(enabled, 0.5, 1)\nenabled").error.find("must be a numeric param or global") != std::string::npos);
+}
+
+TEST(sidechain_helper_ducks_in_proportion_to_the_exported_envelope) {
+    CHECK_NEAR(one("util.duck(1, 0, 0.8)"), 1.0, 1e-12);
+    CHECK_NEAR(one("util.duck(1, 0.5, 0.8)"), 0.6, 1e-12);
+    CHECK_NEAR(one("util.duck(1, 1, 0.8)"), 0.2, 1e-12);
+    CHECK_NEAR(one("util.duck(1, 2, 0.8)"), 0.2, 1e-12);
+}
+
 TEST(music_helpers) {
     // Defaults use the project key (A minor): degree 0 = A4 (69 in octave 4 from C4 = 60 + 9).
     CHECK_EQ(one("scale(0)"), 69.0);

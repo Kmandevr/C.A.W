@@ -2,20 +2,21 @@
 title: Engine and language reference
 summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI and the tests.
 covers: [engine/, examples/]
-updated: 2026-10-29
+updated: 2026-10-31
 ---
 
 # Engine and language reference
 
-The engine in `engine/` as built. The reasons behind it are in [architecture](architecture.md), and the version plan is in [roadmap](roadmap.md). All of it is **[Fact]**: it is checked by `engine/tests/`.
+The engine in `engine/` as built. The reasons behind v1 are in [architecture](architecture.md); the next-generation direction is [Modular adaptive engine](engine-next.md). The version plan is in [roadmap](roadmap.md). The new modular engine implementation ledger is [here](engine-build-status.md), and the native add-on contract is [here](native-module-sdk.md). Built implementation details are **[Fact]** and checked by `engine/tests/`.
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath`, `pattern` (note patterns), `engine` (mixer and voices), `project`, `render` (exports), `docs` (generated reference), `wav`, `json`, `capi` |
+| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, typed module and graph validation (`module.*`, `graph.*`), dependency resolution (`dependency.*`), workload policy (`execution.*`), hardware probe (`hardware.*`), bounded worker pool (`scheduler.*`) and its public job adapter (`worker_api.cpp`) |
 | `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
-| `engine/include/caw.h` | The C API, version 1 |
+| `engine/include/caw.h` | The host C API, version 1, including bounded worker-pool job handles for source checks and offline renders |
+| `engine/include/caw_module_sdk.h` | Versioned C ABI for trusted native module authors (loading is not implemented yet) |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
 | `engine/cli/` | The `caw` tool |
 | `engine/tests/` | Unit tests and golden renders (`golden.txt`) |
@@ -27,7 +28,9 @@ Build and test (Linux or macOS, CMake 3.22+ and a C++20 compiler):
 
 ```
 cmake -S engine -B engine/build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build engine/build && engine/build/caw_tests
+cmake --build engine/build && ctest --test-dir engine/build --output-on-failure --parallel 4
+# Optional direct, unsharded run:
+engine/build/caw_tests
 ```
 
 ## Module files (`.caw`)
@@ -60,12 +63,17 @@ Unknown header keys are ignored, so newer files still load. With no header, a fi
   - `param filter = on` (or `off`): a toggle, 1 or 0
   - `param wave = saw in [sine, saw, square]`: a dropdown. Its value is the index (here 1), and the code can compare with `wave.square`.
 - `global name = …` takes the same options as `param`, but the value belongs to the project. The app shows it once under Project controls, and every module that declares the same name reads the same value.
+- `mod name = expression` rebinds an earlier numeric `param` or `global` to a modulated value for following expressions. For example, `mod cutoff = util.mod(cutoff, kick.env, 1200)`. The source may be a local LFO/envelope or an imported module export; the amount is in the destination parameter's units. Multiple `mod` statements can be chained before the output expression.
 - `export let name = expression` shares a value. Other modules read it as `module.name`.
+  - The exported value is a sample-aligned control signal. The engine wires its buffer before playback, so a reader on another track receives the corresponding sample without a lookup or allocation in the audio callback.
+  - Missing exports read 0 and appear as warnings. Cross-track dependency cycles remain playable with bounded one-block feedback; the module diagnostics identify that delayed dependency.
+  - Sidechain ducking is available through `util.duck(input, exportedSignal, amount)`; the Builder can create a dedicated effect using this helper and choose an active export as its source.
   - `module` is the module's name in lower case, with other characters as `_`: Kick gives `kick`, and Bytebeat loop gives `bytebeat_loop`.
   - The first layer (in project order) that plays the module provides the value. A silent layer shares zeros.
   - Layers run in dependency order, so a reader hears the same sample. When two modules read each other, one of them hears the other one block (64 samples) late.
   - An effect can read the export of the generator in front of it.
   - A name that nothing exports reads 0, and the project result lists it as a warning.
+- Synth patches have a code-defined modulation matrix. The Builder's Modulation links panel edits enabled envelope/LFO/macro/velocity sources to oscillator position/level/pitch, filter cutoff/resonance and volume destinations. Amount is signed (-1..1), so polarity is editable as well.
 - `fn name(a, b) = expression` defines a function.
   - Each call is expanded in place, so oscillators, envelopes and filters inside a function get their own state per call.
   - The body sees its arguments, built-ins, and names defined above the function.
@@ -262,12 +270,14 @@ The app, the CLI and exports share one format:
 ```json
 { "caw_project": 1, "name": "Night Glitch", "bpm": 140, "beats_per_bar": 4, "loop_bars": 4,
   "seed": 7, "master": 0.7, "seam_crossfade": true, "voices": 8, "swap": "now", "key_root": 9, "key_scale": 1, "globals": { "swing": 0.1 },
+  "dependencies": [ { "id": "caw.fx.delay", "version": "2.1.0", "scope": "addon", "hash": "sha256:...", "interface_version": 1 } ],
   "modules": [ { "id": "m1", "name": "Kick", "source": "...the .caw text...", "params": { "shift": 6 } } ],
   "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"], "pattern": "p1", "length_steps": 48,
                 "volume": 0.8, "pan": 0, "mute": false, "solo": false } ],
   "audition": { "chain": ["m1"], "pattern": "p1", "length_steps": 0 }, "audition_only": false }
 ```
 
+- `dependencies` pins reusable assets by stable ID, exact version, scope (`project`, `global`, `factory`, `addon`), optional content hash and interface version. `optional: true` marks a dependency that may be absent. The parser stores these on `ProjectSpec`; the native resolver checks installed records without silently substituting another scope or version.
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
 - A layer's `pattern` names a pattern module; its notes play the generator, and its length replaces `length_steps`. A missing or broken pattern leaves the layer playing without one, with a warning (a broken pattern keeps its last good version playing).
@@ -305,6 +315,7 @@ The app, the CLI and exports share one format:
 - **Meters:** `caw_engine_meters`, `caw_engine_layer_meter` and `caw_engine_scope` (1024 samples per layer, for the audition at index 64, or for the master at −1).
 - **Hosts and devices:** `caw_engine_process(left, right, frames)` lets hosts such as a plugin drive the audio. `caw_audio_start` and `caw_audio_stop` open the device through miniaudio: AAudio or OpenSL ES on Android, WASAPI on Windows, Core Audio, and ALSA or PulseAudio.
 - **Exports:** `caw_render(project_json, options, path, progress, cancel, …)` writes a WAV. Progress counts 0–1000, and a non-zero cancel stops it.
+- **Native jobs:** `caw_worker_pool_create/apply/destroy` manage the bounded non-real-time pool. `caw_worker_pool_submit_check`, `caw_worker_pool_submit_project` and `caw_worker_pool_submit_render` return opaque `CawJob` handles. `caw_job_get_status` requires the caller to set `CawJobStatus.struct_size`; `caw_job_result` and `caw_job_error` return strings freed with `caw_free`; `caw_job_cancel` cancels queued jobs and can interrupt a running render; running checks/project compiles finish normally. `caw_job_release` releases the handle. Accepted project jobs retain their engine handle; `caw_engine_destroy` waits for them. Pool destruction drains accepted jobs. The Flutter app uses this path for project compilation, source checks and offline WAV renders.
 - **Templates:** `caw_template_count`, `caw_template_file` and `caw_template_source`.
 - **MIDI files:** `caw_pattern_from_midi` and `caw_pattern_export` (see [MIDI files](#midi-files)).
 - **Function library:** `caw_library()` returns JSON: `functions` (name, category, signature, doc, example and args with name, doc and optional) and `constants`. The app's Library sheet reads it.
@@ -328,7 +339,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 79 tests:
+CTest runs the complete registered suite as four deterministic, process-isolated shards. Every test is assigned to one shard, and CTest runs the shards concurrently with four workers. `engine/build/caw_tests` remains available for a direct unsharded run; use that mode for `--update-golden`. The suite covers:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.

@@ -338,6 +338,18 @@ void main() {
       expect(d.move({}, Steps.one, 1), same(d));
     });
 
+    test('moving a selected group preserves spacing, lengths and note data', () {
+      final d = body('0 C3 2 0.4 prob 0.5\n2 E3 1 0.8 ratchet 2\n');
+      final moved = d.move({1, 2}, Steps(3), 5);
+      final notes = moved.sortedNotes;
+      expect(notes.map((n) => n.at), [Steps(3), Steps(5)]);
+      expect(notes.map((n) => n.pitch), [53, 57]);
+      expect(notes.map((n) => n.len), [Steps(2), Steps.one]);
+      expect(notes.map((n) => n.vel), [0.4, 0.8]);
+      expect(notes.first.prob, 0.5);
+      expect(notes.last.ratchet, 2);
+    });
+
     test('triplet starts stay exact through moves and quantize', () {
       var d = body('13/3 C3 1/3\n');
       for (var i = 0; i < 6; i++) {
@@ -554,4 +566,18 @@ void main() {
       expect(split.serialize().split('\n').where((l) => l.trim().startsWith('0 ')).length, 2);
     });
   });
+  group('note expression time snapping', () {
+    test('snaps positions to the note-relative grid', () {
+      expect(NoteExpression.snapTime(0.26, grid: 0.25), closeTo(0.25, 1e-9));
+      expect(NoteExpression.snapTime(0.38, grid: 0.25), closeTo(0.5, 1e-9));
+    });
+
+    test('keeps points within the note and supports snap-off', () {
+      expect(NoteExpression.snapTime(-0.2, grid: 0.25), 0);
+      expect(NoteExpression.snapTime(1.2, grid: 0.25), 1);
+      expect(NoteExpression.snapTime(0.263, grid: 0), closeTo(0.263, 1e-9));
+      expect(NoteExpression.snapTime(0.263), closeTo(0.263, 1e-9));
+    });
+  });
+
 }

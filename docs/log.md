@@ -1,10 +1,26 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-10-29
+updated: 2026-10-31
 ---
 
 # Log
+
+- 2026-10-31: Native worker-pool threads are now created on demand as queued/running work requires them, rather than eagerly at pool startup; added scheduler lifecycle/scale-up tests and updated the performance audit (Issue #44).
+- 2026-10-31: Added the public native worker-pool job API and routed app project compilation, source checks and offline WAV renders through it. Job handles expose status/progress, cancellation and owned results; project jobs retain engine lifetime, and pool shutdown drains accepted work. Added native C API and Flutter integration tests (Issue #38).
+
+- 2026-10-30: Connected the app's isolate work scheduling to the engine's hardware profile and workload policy; added native capability diagnostics in Settings and FFI/scheduler tests.
+
+- 2026-10-30: Briefly added touchscreen Vim controls and an editable command line (Issue #22); the touch controls were later removed after the owner clarified Vim is for attached physical keyboards.
+- 2026-10-30: Replaced the proposed touchscreen Vim key panel with customizable touch quick actions in Sounds, Tracks and Export. Actions run directly, and per-area toolbars reuse the persistent keymap format; Vim remains for attached physical keyboards (Issue #23).
+
+- 2026-10-30: The piano-roll toolbar now exposes touch-friendly Copy and Paste for selected notes; dragging a selected note moves the entire group without accidentally resizing it (Issue #21).
+
+- 2026-10-30: Focused text fields now receive Backspace, Delete and text-navigation keys even in code-editor Vim normal mode; ordinary Vim letters and command-line handling remain with Vim (Issue #20).
+
+- 2026-10-30: Tap tempo now shares timing state between the project settings button and the global `T` shortcut; the shortcut is routed, tap timing resets after a pause, and the on-screen target is larger (Issue #19).
+
+- 2026-10-30: Note-expression curve points now snap to the piano-roll grid when enabled and stay within the note's normalised duration; snap-off remains free. Added model tests and updated the app reference (Issue #15).
 
 Newest first.
 

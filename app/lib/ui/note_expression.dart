@@ -26,10 +26,12 @@ final List<(String, NoteExpression Function(NoteExpression))> expressionPresets 
 
 /// The vibrato knobs, the presets and an editor per curve, for the notes the extras panel is showing.
 class ExpressionPanel extends StatelessWidget {
-  const ExpressionPanel({super.key, required this.expr, required this.onChanged, required this.color});
+  const ExpressionPanel({super.key, required this.expr, required this.onChanged, required this.color, this.timeSnap = 0});
   final NoteExpression expr;
   final ValueChanged<NoteExpression> onChanged;
   final Color color;
+  /// Grid spacing as a fraction of the note's duration; zero disables time snapping.
+  final double timeSnap;
 
   @override
   Widget build(BuildContext context) {
@@ -49,16 +51,16 @@ class ExpressionPanel extends StatelessWidget {
       Text('Pitch (semitones): tap to add a point, drag it, drag a line to bend it, hold to delete',
           style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
-          points: e.bend, min: -12, max: 12, zero: 0, snap: 1, color: color, onChanged: (p) => onChanged(e.copyWith(bend: p))),
+          points: e.bend, min: -12, max: 12, zero: 0, snap: 1, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(bend: p))),
       slider('Vibrato', e.vibDepth, 0, 2, (v) => v.toStringAsFixed(2), (v) => e.copyWith(vibDepth: v)),
       slider('Rate', e.vibRate, 0.5, 12, (v) => '${v.toStringAsFixed(1)} Hz', (v) => e.copyWith(vibRate: v)),
       slider('Fade-in', e.vibFade, 0, 1, (v) => '${(v * 100).round()}%', (v) => e.copyWith(vibFade: v)),
       Text('Volume over the note', style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
-          points: e.press, min: 0, max: 1, zero: 1, color: color, onChanged: (p) => onChanged(e.copyWith(press: p))),
+          points: e.press, min: 0, max: 1, zero: 1, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(press: p))),
       Text('Timbre (the sound reads it as timbre)', style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
-          points: e.timbre, min: 0, max: 1, zero: 0, color: color, onChanged: (p) => onChanged(e.copyWith(timbre: p))),
+          points: e.timbre, min: 0, max: 1, zero: 0, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(timbre: p))),
     ]);
   }
 }
@@ -76,10 +78,11 @@ class NoteCurveEditor extends StatefulWidget {
     required this.color,
     required this.onChanged,
     this.snap = 0,
+    this.timeSnap = 0,
     this.height = 72,
   });
   final List<NotePoint> points;
-  final double min, max, zero, snap, height;
+  final double min, max, zero, snap, timeSnap, height;
   final Color color;
   final ValueChanged<List<NotePoint>> onChanged;
 
@@ -93,7 +96,7 @@ class _NoteCurveEditorState extends State<NoteCurveEditor> {
 
   double _x(double t, Size s) => t * s.width;
   double _y(double v, Size s) => (1 - (v - widget.min) / (widget.max - widget.min)) * (s.height - 8) + 4;
-  double _t(double x, Size s) => (x / s.width).clamp(0.0, 1.0);
+  double _t(double x, Size s) => NoteExpression.snapTime(x / s.width, grid: widget.timeSnap);
   double _v(double y, Size s) {
     var v = widget.min + (1 - (y - 4) / (s.height - 8)) * (widget.max - widget.min);
     if (widget.snap > 0) v = (v / widget.snap).roundToDouble() * widget.snap;

@@ -2,12 +2,18 @@
 title: App
 summary: The built Flutter app: its three areas (Sounds, Tracks, Export), how it talks to the engine, where projects are saved, and how CI builds and signs it.
 covers: [app/]
-updated: 2026-10-29
+updated: 2026-10-31
 ---
 
 # App
 
 The Flutter app in `app/`. The engine it drives is described in [engine](engine.md), and v1's scope is in [roadmap](roadmap.md). Everything here is **[Fact]**, checked in the code and by its tests.
+
+## Engine integration
+
+The app calls the shared native engine only through the versioned C API in `lib/engine/bindings.dart`. Project compilation, asynchronous source checks and offline WAV renders are submitted as native jobs to the bounded C++ `AdaptiveWorkerPool`; the app owns opaque job handles and polls status/progress, reads the result/error and releases each handle. Project submissions retain the engine handle until completion, so disposing an engine waits for its accepted project jobs rather than invalidating a worker pointer. Inputs are copied before the FFI call returns. No Dart callback is invoked from a native worker thread, and no job runs on the audio callback. `lib/engine/execution.dart` binds the native hardware-profile probe, workload planner and job API. Jobs carry foreground/offline priorities; the app starts the pool with an interactive-preview budget so a foreground job can run alongside a single offline export, and the host can apply updated workload/pressure plans through the same native policy API.
+
+Settings shows the detected logical cores, conservative work-memory budget, SIMD capability, GPU-compute capability and the interactive workload plan. The app currently supplies no live pressure update because it has no verified cross-platform thermal/battery signal; it does not infer thermal state from audio CPU usage. The pool uses the native detected hardware budget and its default bounded plan until the host can supply verified pressure. The current engine reports GPU compute unavailable. Native project/check/render jobs now use the C++ pool; generation and analysis jobs remain future integration work.
 
 ## Areas
 
@@ -19,10 +25,12 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 - **Sounds** (the Builder area, `lib/ui/builder_screen.dart`):
   - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)
   - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth, the Wavetable pad, the Init synth patch and the Acid line and Chords patterns)
-  - a **synth patch** (`kind: synth`, [synth](synth.md)) plays wherever a sound can: its Controls panel lists every value in the patch (the effects' under Effects) and its Code view is the patch text; the synth screen itself is not built yet
+  - a **synth patch** (`kind: synth`, [synth](synth.md)) plays wherever a sound can: its Controls panel lists every value in the patch (the effects' under Effects) and its Code view is the patch text. The Modulation links panel adds, edits and removes supported source-to-destination routes with signed depth/polarity.
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
   - **Controls | Code** (a pattern: **Notes | Text**): on a phone a module opens on its controls (a pattern on its piano roll), and the code is one tap away. A blank module, one that doesn't compile, or one with no controls opens on its code; the choice is remembered per module while the app runs. A tap on an error opens the code at it. On a wide screen code and controls sit side by side, so only patterns get the switch.
+  - On phone layouts, Sounds, Tracks and Export show a customizable Quick Actions strip. Buttons invoke actions directly; use the tune button to add, remove, reorder or restore actions and macros. Choices are saved in `keys.txt`. Vim modes and command controls are for an attached physical keyboard, not a touchscreen keyboard.
+  - In the piano-roll toolbar, selecting notes reveals on-screen Copy and Paste controls. Dragging any selected note moves the whole selection together; a multi-note drag does not resize notes.
   - the headphones button is **Solo preview** (below)
   - a code editor with highlighting and the symbol key row
   - **completion chips** above the key row: typing two or more letters (set in Settings) offers matching functions and constants (`adsr` finds `env.adsr`), and a tap types the call with its arguments selected to type over
@@ -51,7 +59,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - **Note expression** (MPE style; owner, 2026-10-29), saved as the note's `bend`, `vib`, `press` and `timbre` extras ([engine](engine.md#patterns)):
       - a note with a bend or vibrato draws as a line following its pitch over time (MIDI Sketch style), its row faint behind it
       - with the Curve tool, a tap on a note selects it; then on that note a tap adds a pitch point, a drag moves one, a drag on the line bends that segment, and holding a point deletes it. Values snap to semitones (Shift or snap off: free), within ±12
-      - the extras panel (hold a note, I, or ⋮ → Note extras) adds presets (scoop up, fall off, bend up 2, dive, vibrato, trill, swell, fade, clear), vibrato depth, rate and fade-in, and small editors for the pitch, volume and timbre curves; the whole visit is one undo step
+      - the extras panel (hold a note, I, or ⋮ → Note extras) adds presets (scoop up, fall off, bend up 2, dive, vibrato, trill, swell, fade, clear), vibrato depth, rate and fade-in, and small editors for the pitch, volume and timbre curves; curve points snap in time to the piano-roll grid when snap is on, remain within the note, and the whole visit is one undo step
       - exported `.mid` files carry it as MPE (`app/lib/ui/note_expression.dart`)
     - not built yet: automation lanes for params and globals ([#11](https://github.com/Kmandevr/C.A.W/issues/11))
 - **Tracks** (the Arranger area, `lib/ui/arranger_screen.dart`; a track is a layer):
@@ -102,10 +110,12 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - A badge at the bottom right shows the mode, a recording macro, pending keys, key hints and short toasts.
   - `?` opens the action list: search, keys and run.
   - Recorded macros are saved in `keys.txt` next to `settings.json`; a user `keys.txt` is merged over the default keys.
-  - Text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X.
+  - Focused text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X. In the code editor's Vim normal mode, Backspace, Delete, cursor/navigation keys, Enter and Tab still go to the text field; ordinary Vim letters remain actions.
   - The roll, the Builder and the code editor's Vim mode each run their area's actions; the Arranger's actions work on a keyboard-selected layer.
   - **Not built yet:** editing keys in the action list and the long-press menu entries from the keymap.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
+
+The piano roll's toolbar exposes **Copy (N)** and **Paste** while notes are selected. Copy stores the whole selection; Paste places that group at the roll cursor and selects the new notes. Dragging any selected note moves the complete selection as a block; group drags move pitch and timing together and do not resize notes. A single selected note can still be resized from its end.
 
 ## Build
 
@@ -131,6 +141,8 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 - highlighting, editor helpers and completion
 - the pattern model (`lib/model/pattern_doc.dart`): exact step fractions, parsing with the engine's errors, comment-keeping write-back and every note edit
 - the actions core (`lib/actions/`): keymap files, conflicts, macros with their recursion guard, counts, `:` commands, `.` repeat and recording
+- key routing (`test/key_router_policy_test.dart`): focused text fields keep editing/navigation keys and standard shortcuts; Vim retains its command keys
 - settings, theme files and the startup choices
 - the Tracks area on a phone: cards, the track panel and Edit opening the sound in Sounds (with `CAW_LIB`)
 - integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.
+- native execution-policy tests: hardware-profile bounds, workload/pressure plans, serialized interactive scheduling and off-isolate module checks.

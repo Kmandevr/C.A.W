@@ -9,7 +9,7 @@ void main() {
   final lib = Platform.environment['CAW_LIB'];
   final skip = lib == null || lib.isEmpty ? 'set CAW_LIB to the built engine library' : null;
 
-  test('templates, check, project sync and render work through the C API', () async {
+  test('templates, check, native project jobs and native render jobs work through the C API', () async {
     final templates = Engine.templates();
     expect(templates.length, greaterThanOrEqualTo(7));
     final kick = templates.firstWhere((t) => t.file == 'kick.caw');

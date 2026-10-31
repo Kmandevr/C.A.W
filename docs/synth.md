@@ -1,7 +1,8 @@
 ---
 title: Synth
 summary: The house synth (kind: synth): a Vital/Serum-style instrument whose patch is a readable .caw file, its layout, file format, engine design and build stages.
-updated: 2026-10-29
+covers: [engine/src/synth.cpp, engine/tests/synth_test.cpp]
+updated: 2026-10-30
 ---
 
 # Synth
@@ -17,7 +18,7 @@ The house synth from [vision](vision.md) and [roadmap](roadmap.md#v2--variables-
 - **[Fact]** Wavetables: built-in shapes (sine, saw, square, triangle and more), tables rendered from any C.A.W code, tables drawn by hand, and imported Serum/Vital WAV tables.
 - **[Fact]** Full size (no small caps on voices or unison), heavily optimised, and the app warns on overload (the engine's overload muting and Light mode already do).
 - **[Fact]** Effects stay basic and useful first, and any slot can hold an effect module the user built.
-- **[Fact]** The owner accepted these defaults (2026-10-29): 3 wavetable oscillators plus a sub and a noise source; unison up to 16 with detune and spread; warp modes; 2 filters (serial or parallel); 3 envelopes, 4 drawn LFOs, 4 macros, a mod matrix with drag-to-modulate; drive, chorus, delay, reverb, EQ and compressor; presets as `.caw` files with tags.
+- **[Fact]** The owner accepted these defaults (2026-10-29): 3 wavetable oscillators plus a sub and a noise source; unison up to 16 with detune and spread; warp modes; 2 filters (serial or parallel); 3 envelopes, 4 tempo-synced LFOs, 4 macros, a code-editable modulation matrix with a Builder list editor for adding, changing and removing routes (drag-to-modulate remains future work); drive, chorus, delay, reverb, EQ and compressor; presets as `.caw` files with tags.
 
 ## The patch file
 
@@ -49,7 +50,7 @@ filters serial
 // --- Modulation ---
 env 1 attack 0.01 decay 0.3 sustain 0.7 release 0.4   // env 1 shapes the volume
 env 2 attack 0.2 decay 1 sustain 0 release 0.5
-lfo 1 shape tri rate 1/4 bar
+lfo 1 shape tri rate 1/4
 lfo 2 shape 0:0 0.5:1~0.4 1:0 rate 2 hz
 macro 1 Bright 0.5
 mod env 2 -> filter 1 cutoff 0.4
@@ -73,7 +74,7 @@ table vocal file vocal.wav                            // imported 2048-sample fr
 - `~k` bends the segment after a point, as in [the Curve tool](app.md) and the [curve proposal on #11](https://github.com/Kmandevr/C.A.W/issues/11).
 - **Eject to code:** the screen can turn a patch into an ordinary generator module (the code the engine runs for it, below), for sound design past what the layout offers.
 
-**[Fact]** Built (stage 1.3, 2026-10-29; `engine/src/synth.cpp`, tested in `engine/tests/synth_test.cpp`). Every value is checked against its range, and an error names the line and column. `caw check --code FILE.caw` prints the code a patch becomes, and the Init synth template (`examples/init-synth.caw`) is a starting patch.
+**[Fact]** Built (2026-10-30; `engine/src/synth.cpp`, tested in `engine/tests/synth_test.cpp`). Every value is checked against its range, and an error names the line and column. `caw check --code FILE.caw` prints the code a patch becomes, and the Init synth template (`examples/init-synth.caw`) is a starting patch. The patch compiler now supports three ADSR envelopes, four tempo-synced LFOs (sine, triangle, saw, square and stepped random shapes), four macro controls and a modulation matrix. Optional envelopes 2/3 and macro controls are emitted only when declared, so unused modulation controls do not consume parameters or VM state. Current modulation sources are envelopes 2/3, LFOs 1–4, macros 1–4 and velocity. Destinations are oscillator position/level/pitch, filter cutoff/resonance and master volume. The generated patch uses the existing native envelope/LFO/wavetable built-ins; drawn LFO curves, drag-to-modulate editing and oscillator warp modes are still future work. The Builder's Modulation links panel edits the existing matrix without changing the patch format.
 
 | Line | Settings (range, default) |
 | --- | --- |
@@ -85,12 +86,16 @@ table vocal file vocal.wav                            // imported 2048-sample fr
 | `noise …` / `noise off` | `level` 0–1 (0.2), `color` 0 dark – 1 white (1) |
 | `filter 1\|2 TYPE …` / `filter 2 off` | TYPE lowpass, highpass, bandpass or notch; `cutoff` 20–20000 Hz (2000), `res` 0–1 (0.2), `drive` 0–1 (0), `keytrack` 0–1 (0.5), `from a b c sub noise` (filter 1 takes every source by default) |
 | `filters serial\|parallel` | serial (default): filter 2 takes filter 1's output plus its own `from`; parallel: both take their sources. Sources no filter takes go straight out |
-| `env 1 …` | the volume: `attack`, `decay`, `release` 0–20 s, `sustain` 0–1. Velocity scales the volume by 0.5–1 |
+| `env 1 …` | the volume envelope: `attack`, `decay`, `release` 0–20 s, `sustain` 0–1. Velocity scales the volume by 0.5–1 |
+| `env 2\|3 …` | additional ADSR modulation envelopes with the same ranges |
+| `lfo 1..4 …` | `shape` sine/tri/saw/square/random, `rate` 0.015625–64 beats per cycle, `phase` 0–1; generated with native tempo-synced LFO functions |
+| `macro 1..4 NAME VALUE` | named 0–1 macro controls |
+| `mod SOURCE -> DESTINATION AMOUNT` | source `env 2/3`, `lfo 1..4`, `macro 1..4` or `vel`; destination oscillator `pos/level/pitch`, filter `cutoff/res`, or `volume`; amount −1..1 |
 | `fx drive\|crush\|delay\|reverb\|comp …` | drive `amount` 0–1; crush `bits` 1–24; delay `time` in beats, `feedback`, `mix`; reverb `size`, `damp`, `mix`; comp `threshold` dB, `ratio` |
 | `fx NAME` | a project effect module, by name, where its line is. At most 8 `fx` lines |
 
 - Every value becomes a `param` of the generated code, so the app's Controls panel shows them all (the effects' under Effects) and moving one doesn't recompile.
-- Lines for later stages (`lfo`, `macro`, `mod`, `env 2`/`3`, `table`, `warp`) give an error that says so, rather than being ignored. A built-in `fx chorus` and `fx eq` aren't written yet; until then `fx chorus` looks for a project module called chorus.
+- Lines for later stages (`table` and oscillator `warp`) give an explicit error rather than being ignored. Drawn LFO shapes and built-in `fx chorus`/`fx eq` aren't implemented yet; until then `fx chorus` looks for a project module called chorus.
 
 ## How the engine plays it **[Proposal]**
 
@@ -102,7 +107,7 @@ Reviewed by the `architect` agent (2026-10-29): the core fits the engine as buil
 - **Voice count:** today every pattern track has a fixed pool of 8. It becomes a per-patch setting (`voices`) up to a fixed maximum, set aside when the track is installed; the sandbox needs a fixed bound. Proposed maximum: 32.
 - **New built-ins**, each native C++ over a whole block:
   - `wt(table, freq, pos, unison, detune, …)`: a wavetable oscillator with up to 16 unison voices inside one call, morphing between frames, band-limited by mipmapped tables (one table per octave) so high notes don't alias
-  - warps: sync, bend, phase distortion, FM from another oscillator, and bit and sample crush
+  - phase distortion on each wavetable oscillator (`warp -0.95..0.95`); hard sync, FM routing and additional warp modes remain future work
   - comb and formant filters next to the existing `lpf`, `hpf`, `bpf` and `notch`; a drawn-shape LFO `lfo.shape`; `fx.chorus` and `fx.eq`
 - **Tables** are shared, read-only data owned by the compiled program (or by the engine, for the built-in shapes), never per-voice state: a 256-frame table with its mipmaps is about 5 MB of floats, loaded once.
   - In code a table is a name fixed at compile time (`table.saw`, `table.hollow`); the compiler stores its index in the call, and the VM hands the built-in a pointer to it. Tables don't count against a module's state limit; they get their own memory budget, and going over it fails closed (the module reports an error, nothing crashes).

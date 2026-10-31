@@ -120,10 +120,35 @@ void main() {
     s.settings.liveDelayMs = 50;
     final kick = s.project.modules.first;
     s.editSource(kick.id, '${kick.source}\n// edited');
-    await Future<void>.delayed(const Duration(milliseconds: 400));
+    // Engine compilation runs on the native worker pool; wait for the observable state transition
+    // instead of assuming a fixed duration that can be too short on a busy CI runner.
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (kick.edited && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
     expect(kick.edited, isFalse);
-    s.editSource(kick.id, '${kick.source}\n((('); // doesn't compile: waits
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    final lastGoodSource = kick.runSource;
+    final invalidSource = '${kick.source}\n((('; // doesn't compile: the last good sound must remain
+    s.editSource(kick.id, invalidSource);
+
+    // Wait for the live update to attempt the new source, then for its failed
+    // compile result and rollback to the last-good source.
+    final attemptDeadline = DateTime.now().add(const Duration(seconds: 5));
+    while (kick.runSource != invalidSource && DateTime.now().isBefore(attemptDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    expect(kick.runSource, invalidSource, reason: 'live update never attempted the invalid source');
+
+    final rollbackDeadline = DateTime.now().add(const Duration(seconds: 5));
+    while ((kick.runSource != lastGoodSource ||
+            s.info[kick.id]?.ok != false ||
+            s.engineError != null) &&
+        DateTime.now().isBefore(rollbackDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    expect(kick.runSource, lastGoodSource, reason: 'failed compile did not restore the last good source');
+    expect(s.engineError, isNull, reason: 'a module compile error must not reject the whole project');
+    expect(s.info[kick.id]?.ok, isFalse, reason: 'the module should expose its compile error');
     expect(kick.edited, isTrue);
     s.settings.lightMode = true;
     s.meters = const EngineMeters(playing: true);

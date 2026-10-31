@@ -1,8 +1,8 @@
 ---
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
-covers: [engine/bench/, app/lib/model/poller.dart, app/test/rebuild_test.dart]
-updated: 2026-10-28
+covers: [engine/bench/, engine/src/worker_api.cpp, engine/src/scheduler.cpp, engine/src/scheduler.h, engine/src/execution.cpp, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/model/poller.dart, app/test/rebuild_test.dart]
+updated: 2026-10-31
 ---
 
 # Performance
@@ -86,7 +86,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 ### Checked and fine
 
 - **Stopped:** the callback just writes silence; costs about 0 µs.
-- **Exports:** run on their own `Engine` instance in a worker isolate, so they never touch live playback state. They compete for CPU only, and the audio thread has the higher priority on Android.
+- **Exports:** run on their own `Engine` instance in a native worker-pool thread, so they never touch live playback state. They compete for CPU only, and the audio thread has the higher priority on Android.
   - **[Assumption]** That priority holds for AAudio's callback thread. Check it on the device under a long export.
 - **Live code edits:**
   - A swap compiles on the control thread, about 0.4–0.5 ms for 16 layers.
@@ -109,7 +109,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - So even when stopped with nothing moving, the UI thread woke up every frame. It read the meters over FFI 30 times a second and redrew every meter and scope.
    - This is from the code and Flutter's `Ticker` behaviour. Battery wasn't measured on a device here.
 3. **The audio device stayed open while stopped.** It ran a callback writing silence for as long as the app was in the foreground.
-4. **Each project update starts a worker isolate.** About 1.8 ms per update in the test VM (debug/JIT, not a release build), against 0.07 ms of engine work for an unchanged project. Updates happen on discrete edits, not per keystroke or per slider step.
+4. **Project-update worker startup (historical measurement).** The 2026-10-28 audit measured about 1.8 ms to start a worker isolate per update in the test VM (debug/JIT, not a release build), against 0.07 ms of engine work for an unchanged project. As of 2026-10-31, project compilation, source checks and offline WAV renders use the native bounded worker pool instead; the 1.8 ms isolate-startup measurement no longer describes the current path. The new queue/polling overhead has not yet been measured.
 
 ### Fixes
 
@@ -125,6 +125,15 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
 3. **The audio device closes after 30 s stopped and idle.** Play reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
 
+
+### Native worker-pool lifecycle (2026-10-31)
+
+- **[Fact]** The pool previously started every thread allowed by the hardware-derived capacity at construction, even when no jobs were queued. The app's initial preview policy only allowed two concurrent jobs, so the extra threads could never help that initial workload.
+- **[Fact]** The pool now creates threads only as outstanding queued + running demand grows, bounded by the active execution plan and pool capacity. One job starts one worker; simultaneous jobs can grow the pool; existing workers are reused rather than creating a new thread per job.
+- **[Fact]** Creating the pool and applying an execution plan no longer starts OS worker threads. With no submitted work, worker-thread count remains zero.
+- **[Fact]** Created workers sleep on the pool condition variable when idle; they do not poll. They remain available for reuse until pool destruction, so their stacks are still resident/reserved after first use. Automatic retirement is a separate follow-up requiring careful shutdown and queue-race tests.
+- **Verification boundary:** scheduler tests assert zero threads before work, one worker for one-at-a-time jobs, and scale-up to two workers for two simultaneous jobs. CI can verify lifecycle logic, but not actual phone RSS, battery or thermal behavior.
+
 ## Remaining bottlenecks and next steps
 
 - **Measure on the phone.** Build a release APK, then:
@@ -133,6 +142,6 @@ Timed release run after the fixes (same server, a single run, so noisy):
 - **Compiling, about 0.3 ms per module.** Each compile re-reads and re-checks the three built-in libraries. Caching their parsed functions would cut this to almost nothing. It only matters for auto-update while typing.
 - **Per-layer setup in `runChain`.** `step`, `beat` and `bar` are worked out with a division for every sample of every layer. They could be counted up incrementally, but only if the results stay bit-identical at step boundaries; that needs a careful proof and the golden tests.
 - **The VM's dispatch.** Fusing common operator pairs, or compiling to a tighter form, is the next big win. It's a larger change, so measure on the phone first.
-- **Project updates start a worker isolate each time** (about 1.8 ms each in the test VM). Measure it in a release build on the phone; if it shows, keep one long-lived worker isolate.
+- **Measure native job overhead on device.** Project compilation, source checks and offline renders now use the C++ bounded worker pool with Dart status polling at 16 ms intervals. Measure submission-to-start, completion delivery, UI frame time and battery impact on a release build; cloud CI cannot establish those device costs.
 - **The shell's `IndexedStack`** still builds all three screens on structural changes (adding a layer, mute, Run). Building only the visible screen would need care to keep the editor's state.
 - **Scopes** read 512 samples over FFI and redraw a path about 30 times a second while playing. That's fine on the server; check the frame time on the phone.

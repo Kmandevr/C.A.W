@@ -8,11 +8,33 @@ import 'package:flutter/material.dart';
 import '../actions/actions.dart';
 import '../actions/key_event.dart';
 import '../actions/keymap.dart';
+import '../actions/keys.dart';
 import '../actions/macro.dart';
 import '../actions/vim.dart';
 import '../model/app_state.dart';
 import '../model/settings.dart';
 import 'theme.dart';
+import 'touch_quick_actions.dart';
+
+/// Whether a focused text editor, rather than the global action router, should receive this key.
+bool shouldDeferTextEditingKey({
+  required bool editingText,
+  required bool commandLineOpen,
+  required Area area,
+  required VimMode mode,
+  required KeyChord chord,
+}) {
+  if (!editingText || commandLineOpen) return false;
+
+  // Text editing/navigation keys belong to EditableText even in code-editor Vim normal mode.
+  const textEditingKeys = {'Backspace', 'Delete', 'Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Enter', 'Tab'};
+  if (chord.plain && chord.key != 'Esc' &&
+      (area != Area.code || mode == VimMode.insert || textEditingKeys.contains(chord.key))) {
+    return true;
+  }
+  // Standard text-field shortcuts belong to EditableText in every area, including the code editor.
+  return chord.ctrl && !chord.alt && const {'Z', 'Y', 'A', 'C', 'V', 'X'}.contains(chord.key);
+}
 
 /// Runs one action for a screen or editor; returns false when it doesn't do that action.
 typedef ActionTarget = bool Function(String id, int count, String? arg);
@@ -45,6 +67,7 @@ class KeyRouterState extends State<KeyRouter> {
   List<KeyHint> _hints = const [];
   Timer? _toastTimer, _prefixTimer;
   int _layer = 0; // the Arranger's keyboard-selected layer
+  final TextEditingController _commandController = TextEditingController();
 
   AppState get s => widget.state;
 
@@ -62,6 +85,7 @@ class KeyRouterState extends State<KeyRouter> {
     vim.removeListener(_changed);
     _toastTimer?.cancel();
     _prefixTimer?.cancel();
+    _commandController.dispose();
     super.dispose();
   }
 
@@ -133,17 +157,23 @@ class KeyRouterState extends State<KeyRouter> {
     return ctx != null && (ctx.widget is EditableText || ctx.findAncestorWidgetOfExactType<EditableText>() != null);
   }
 
-  static const _textKeys = {'Z', 'Y', 'A', 'C', 'V', 'X'};
-
   /// One key press. [area] is given by an editor that asks first (the piano roll); otherwise the focus decides.
   KeyEventResult handle(KeyEvent e, {Area? area}) {
     final chord = keyChordFromEvent(e, metaAsCtrl: defaultTargetPlatform == TargetPlatform.macOS);
     if (chord == null) return KeyEventResult.ignored;
+    return _handleChord(chord, area: area);
+  }
+
+  KeyEventResult _handleChord(KeyChord chord, {Area? area}) {
     final a = area ?? _area;
-    if (!vim.commandLineOpen && a != Area.code && _editingText()) {
-      // A plain text field keeps typing and its own Ctrl shortcuts; only other shortcuts reach the actions.
-      if (chord.plain && chord.key != 'Esc') return KeyEventResult.ignored;
-      if (chord.ctrl && !chord.alt && _textKeys.contains(chord.key)) return KeyEventResult.ignored;
+    if (shouldDeferTextEditingKey(
+      editingText: _editingText(),
+      commandLineOpen: vim.commandLineOpen,
+      area: a,
+      mode: vim.mode,
+      chord: chord,
+    )) {
+      return KeyEventResult.ignored;
     }
     _keyboard = true;
     if (vim.area != a) vim.area = a;
@@ -154,7 +184,6 @@ class KeyRouterState extends State<KeyRouter> {
       // Vim's timeout: a prefix left alone for a second runs its own binding if it has one.
       _prefixTimer = Timer(const Duration(seconds: 1), () => _show(vim.flush()));
     }
-    // Vim's normal mode in the code editor: unbound plain keys do nothing instead of typing.
     if (!r.handled && a == Area.code && vim.mode != VimMode.insert && !chord.ctrl && !chord.alt && !chord.meta) {
       return KeyEventResult.handled;
     }
@@ -200,6 +229,8 @@ class KeyRouterState extends State<KeyRouter> {
     switch (id) {
       case 'transport.playstop':
         s.togglePlay();
+      case 'transport.tap':
+        s.tapTempo();
       case 'project.save':
         s.flush();
       case 'view.actions':
@@ -286,6 +317,11 @@ class KeyRouterState extends State<KeyRouter> {
 
   @override
   Widget build(BuildContext context) {
+    final touchArea = _area;
+    final isPhone = MediaQuery.sizeOf(context).shortestSide < 600;
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final quickActionsBottom = viewInsets.bottom > 0 ? viewInsets.bottom + 8 : safeBottom + 72;
     final badge = <Widget>[
       if (vim.recording) Text('● @${vim.recordingSlot}', style: const TextStyle(color: Neon.pink)),
       if (vim.mode != VimMode.normal) Text(vim.mode.name.toUpperCase(), style: const TextStyle(color: Neon.yellow)),
@@ -322,21 +358,59 @@ class KeyRouterState extends State<KeyRouter> {
               ),
             ),
           ),
+        if (isPhone && touchArea != Area.pattern)
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: quickActionsBottom,
+            child: TouchQuickActions(
+              area: touchArea,
+              keymap: vim.keymap,
+              defaults: _defaults,
+              registry: registry,
+              onRun: runRef,
+              onSave: saveKeymap,
+            ),
+          ),
         if (vim.commandLineOpen)
           Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
+            left: 8,
+            right: 8,
+            bottom: viewInsets.bottom + 68,
             child: Material(
               color: Neon.panelHi,
+              borderRadius: BorderRadius.circular(10),
               child: Padding(
                 padding: const EdgeInsets.all(10),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                   Wrap(spacing: 12, children: [
                     for (final c in vim.completions.take(8))
-                      Text('${c.keys} ${c.label}', style: Neon.code(size: 12, color: Neon.dim)),
+                      ActionChip(
+                        label: Text('${c.keys} · ${c.label}', style: Neon.code(size: 12)),
+                        onPressed: () {
+                          _commandController.text = c.keys;
+                          _commandController.selection = TextSelection.collapsed(offset: c.keys.length);
+                          vim.setCommandText(c.keys);
+                          setState(() {});
+                        },
+                      ),
                   ]),
-                  Text('${vim.prompt}${vim.commandText}▏', style: Neon.code(size: 15)),
+                  TextField(
+                    autofocus: true,
+                    key: const ValueKey('vim-command-line'),
+                    controller: _commandController,
+                    onChanged: vim.setCommandText,
+                    onSubmitted: (_) {
+                      _show(vim.submitCommand());
+                      _commandController.clear();
+                      setState(() {});
+                    },
+                    decoration: InputDecoration(
+                      isDense: true,
+                      prefixText: '${vim.prompt ?? ':'} ',
+                      hintText: 'Type a command and press Enter',
+                    ),
+                  ),
                 ]),
               ),
             ),
