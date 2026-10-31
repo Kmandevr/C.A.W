@@ -487,8 +487,8 @@ void main() {
     });
 
     test('multi-source mirroring preserves local ids while applying note deltas', () {
-      final before = body('0 C3 1\\n4 E3 2\\n8 G3 1\\n');
-      final reference = body('0 C3 1\\n4 E3 2\\n8 G3 1\\n');
+      final before = body('0 C3 1\n4 E3 2\n8 G3 1\n');
+      final reference = body('0 C3 1\n4 E3 2\n8 G3 1\n');
       var after = before.move({1}, Steps(2), 1).setVelocity({2}, 0.25).delete({3});
       after = after.insert(Steps(12), 72, Steps.one, vel: 0.4).doc;
       final mirrored = reference.mirrorChanges(before, after);
