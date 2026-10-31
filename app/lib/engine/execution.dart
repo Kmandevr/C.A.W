@@ -317,7 +317,12 @@ class NativeEngineWorkPool {
     } else {
       _previewJobs++;
     }
-    _applyCurrentWorkload();
+    try {
+      _applyCurrentWorkload();
+    } catch (_) {
+      _decrementWorkload(workload);
+      rethrow;
+    }
   }
 
   void _trackJob(NativeEngineJob job, EngineWorkload workload) {
@@ -327,12 +332,16 @@ class NativeEngineWorkPool {
     );
   }
 
-  void _finishWorkload(EngineWorkload workload) {
+  void _decrementWorkload(EngineWorkload workload) {
     if (workload == EngineWorkload.offlineRender) {
       if (_renderJobs > 0) _renderJobs--;
     } else {
       if (_previewJobs > 0) _previewJobs--;
     }
+  }
+
+  void _finishWorkload(EngineWorkload workload) {
+    _decrementWorkload(workload);
     if (!_disposed) _applyCurrentWorkload();
   }
 
