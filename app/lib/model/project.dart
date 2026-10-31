@@ -184,7 +184,7 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
-    _arrangementPatternSources = {for (final m in modules) if (headerValue(m.runSource, 'kind') == 'pattern') m.id: m.runSource};
+    final patternSources = {for (final m in modules) if (headerValue(m.runSource, 'kind') == 'pattern') m.id: m.runSource};
     final arrangementEnd = layers.fold<int>(loopSteps, (end, l) =>
         max(end, l.clips.fold<int>(0, (e, clip) => max(e, clip.startSteps + clip.lengthSteps))));
     final engineLoopBars = min(64, max(loopBars, (arrangementEnd / stepsPerBar).ceil()));
@@ -202,9 +202,6 @@ class ProjectDoc {
         if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
         'globals': globals,
         'modules': [
-          for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
-        ],
-        'modules': [
           ...[
             for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
           ],
@@ -213,7 +210,7 @@ class ProjectDoc {
               {
                 'id': 'arr_${l.id}',
                 'name': '${l.name} arrangement',
-                'source': _mergedPatternSource(l, beatsPerBar),
+                'source': _mergedPatternSource(l, beatsPerBar, patternSources),
                 'params': <String, double>{},
               },
         ],
@@ -235,7 +232,6 @@ class ProjectDoc {
         if (audition != null) 'audition': {'chain': audition, 'pattern': ?auditionPattern},
         'audition_only': auditionOnly && audition != null,
       });
-    _arrangementPatternSources = {};
     return result;
   }
 
@@ -285,12 +281,12 @@ class ProjectDoc {
       );
 }
 
-String _mergedPatternSource(LayerDoc layer, int beatsPerBar) {
+String _mergedPatternSource(LayerDoc layer, int beatsPerBar, Map<String, String> patternSources) {
   final end = layer.clips.fold<int>(0, (e, c) => max(e, c.startSteps + c.lengthSteps));
   final out = <String>['---', 'caw: 1', 'kind: pattern', 'name: ${layer.name} arrangement',
     'length: ${max(1, end)}', '---'];
   for (final clip in layer.clips) {
-    final source = _arrangementPatternSources[clip.patternId];
+    final source = patternSources[clip.patternId];
     if (source == null) continue;
     final parsed = PatternDoc.parse(source).doc;
     if (parsed == null) continue;
@@ -313,8 +309,6 @@ String _mergedPatternSource(LayerDoc layer, int beatsPerBar) {
   }
   return '${out.join('\n')}\n';
 }
-
-Map<String, String> _arrangementPatternSources = {};
 
 /// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.
 String? headerValue(String source, String key) {
