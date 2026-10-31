@@ -13,6 +13,10 @@ Labels used below:
 - **[Proposal]** is a recommendation that is open to change.
 - **[Assumption]** has not been verified yet and needs checking.
 
+## Product focus and capability
+
+C.A.W.'s primary focus is sound design and music-content creation: making, shaping, auditioning, organising and exporting sounds, instruments, patterns and reusable musical content. That focus is not a prohibition on DAW capabilities. The app should include useful recording, arranging, editing, mixing and export functionality where it helps users make complete music, and it should be capable of serving as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment. “Not primarily a DAW” describes the product's centre of gravity, not a reason to reject practical music-production features.
+
 ## 0. Current state
 
 - **[Fact]** As of 2026-10-28, v1 is built: the C++ engine (`engine/`, described in [engine](engine.md)), the Flutter app for Android and Windows (`app/`) and the starter modules (`examples/`). CI builds and tests all of it. The plugin, GitHub sync, AI library editing and the v2 synth are still plans.
@@ -195,7 +199,7 @@ The audio thread asks a pattern for the notes in a stretch of time, so procedura
   - a drum grid (rows, steps, a velocity lane) and a piano roll (pitch × time, note lengths and curves), switchable on any pattern
   - chord stamping in the project's key
   - generator buttons that write notes you can edit: Euclid, random in key, arpeggiate, humanize
-  - no recording in v2: notes are drawn or generated
+  - no live MIDI note recording in this v2 editor scope: notes are drawn or generated. This is a sequencing-stage boundary, not a permanent ban on recording features.
 - **Playing a pattern:** pick (later: drag) a pattern onto a layer and that layer's generator plays it through new variables:
   - `trig` (1 on the first sample of a note), `gate`, `note`, `freq`, `vel` and `rel`
   - the current value of each note curve: `bend` for pitch, and custom values by name
