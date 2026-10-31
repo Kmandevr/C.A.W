@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../engine/engine.dart';
 import 'poller.dart';
 import 'project.dart';
+import 'pattern_doc.dart';
 import 'settings.dart';
 import 'storage.dart';
 
