@@ -218,10 +218,12 @@ class _TimelineLane extends StatelessWidget {
     child: Stack(children: [
       CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar, playheadStep)),
       Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
+        // A plain horizontal drag belongs to the enclosing scroll view. Long-press
+        // drag creates a time selection without stealing normal timeline navigation.
         onTapUp: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
-        onHorizontalDragStart: (d) { final step = (d.localPosition.dx / stepW).round(); state.beginTimeSelection(step); },
-        onHorizontalDragUpdate: (d) => state.updateTimeSelection((d.localPosition.dx / stepW).round()),
-        onHorizontalDragEnd: (_) => state.endTimeSelection(),
+        onLongPressStart: (d) { state.beginTimeSelection((d.localPosition.dx / stepW).round()); },
+        onLongPressMoveUpdate: (d) => state.updateTimeSelection((d.localPosition.dx / stepW).round()),
+        onLongPressEnd: (_) => state.endTimeSelection(),
         child: const SizedBox.expand())),
       if (state.timeSelectionStart != null && state.timeSelectionEnd != null)
         Positioned(left: math.min(state.timeSelectionStart!, state.timeSelectionEnd!) * stepW, top: 0,
