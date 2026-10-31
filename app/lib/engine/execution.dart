@@ -120,7 +120,7 @@ class EngineExecutionPolicy {
       request.ref
         ..workload = workload.index
         ..pressure = (pressure ?? runtimePressure).index
-        ..foregroundBusy = (foregroundBusy ?? this.foregroundBusy) ? 1 : 0
+        ..foregroundBusy = (foregroundBusy ?? EngineExecutionPolicy.foregroundBusy) ? 1 : 0
         ..allowGpu = allowGpu ? 1 : 0;
 
       final result = b.executionPlan(hw, request, out);
@@ -214,12 +214,19 @@ class NativeEngineWorkPool {
 
   NativeEngineJob submitCheck(String source) {
     final text = source.toNativeUtf8();
+    const workload = EngineWorkload.interactivePreview;
+    _beginWorkload(workload);
+    var tracked = false;
     try {
       final handle = _bindings.workerPoolSubmitCheck(_handle, text, NativeJobPriority.foreground.index);
       if (handle == nullptr) throw StateError('native check queue is full or has no available capacity');
       final job = NativeEngineJob._(_bindings, handle, includeResult: true);
-      _trackJob(job, EngineWorkload.interactivePreview);
+      _trackJob(job, workload);
+      tracked = true;
       return job;
+    } catch (_) {
+      if (!tracked) _finishWorkload(workload);
+      rethrow;
     } finally {
       calloc.free(text);
     }
@@ -227,14 +234,21 @@ class NativeEngineWorkPool {
 
   NativeEngineJob submitProject(Pointer<Void> engine, String projectJson) {
     final json = projectJson.toNativeUtf8();
+    const workload = EngineWorkload.interactivePreview;
+    _beginWorkload(workload);
+    var tracked = false;
     try {
       final handle = _bindings.workerPoolSubmitProject(
         _handle, engine, json, NativeJobPriority.foreground.index,
       );
       if (handle == nullptr) throw StateError('native project queue is full or has no available capacity');
       final job = NativeEngineJob._(_bindings, handle, includeResult: true);
-      _trackJob(job, EngineWorkload.interactivePreview);
+      _trackJob(job, workload);
+      tracked = true;
       return job;
+    } catch (_) {
+      if (!tracked) _finishWorkload(workload);
+      rethrow;
     } finally {
       calloc.free(json);
     }
@@ -265,13 +279,22 @@ class NativeEngineWorkPool {
         ..seconds = seconds
         ..target = targetText
         ..param = param.isEmpty ? nullptr : paramText;
-      final handle = _bindings.workerPoolSubmitRender(
-        _handle, json, options, path, NativeJobPriority.offline.index,
-      );
-      if (handle == nullptr) throw StateError('native render queue is full or has no available capacity');
-      final job = NativeEngineJob._(_bindings, handle, includeResult: false);
-      _trackJob(job, EngineWorkload.offlineRender);
-      return job;
+      const workload = EngineWorkload.offlineRender;
+      _beginWorkload(workload);
+      var tracked = false;
+      try {
+        final handle = _bindings.workerPoolSubmitRender(
+          _handle, json, options, path, NativeJobPriority.offline.index,
+        );
+        if (handle == nullptr) throw StateError('native render queue is full or has no available capacity');
+        final job = NativeEngineJob._(_bindings, handle, includeResult: false);
+        _trackJob(job, workload);
+        tracked = true;
+        return job;
+      } catch (_) {
+        if (!tracked) _finishWorkload(workload);
+        rethrow;
+      }
     } finally {
       calloc
         ..free(options)
@@ -282,24 +305,29 @@ class NativeEngineWorkPool {
     }
   }
 
-  void _trackJob(NativeEngineJob job, EngineWorkload workload) {
+  void _beginWorkload(EngineWorkload workload) {
     if (workload == EngineWorkload.offlineRender) {
       _renderJobs++;
     } else {
       _previewJobs++;
     }
     _applyCurrentWorkload();
+  }
 
-    void finished() {
-      if (workload == EngineWorkload.offlineRender) {
-        _renderJobs = math.max(0, _renderJobs - 1);
-      } else {
-        _previewJobs = math.max(0, _previewJobs - 1);
-      }
-      if (!_disposed) _applyCurrentWorkload();
+  void _trackJob(NativeEngineJob job, EngineWorkload workload) {
+    job.result.then<void>(
+      (_) => _finishWorkload(workload),
+      onError: (Object _, StackTrace __) => _finishWorkload(workload),
+    );
+  }
+
+  void _finishWorkload(EngineWorkload workload) {
+    if (workload == EngineWorkload.offlineRender) {
+      if (_renderJobs > 0) _renderJobs--;
+    } else {
+      if (_previewJobs > 0) _previewJobs--;
     }
-
-    job.result.then<void>((_) => finished(), onError: (Object _, StackTrace __) => finished());
+    if (!_disposed) _applyCurrentWorkload();
   }
 
   void _applyCurrentWorkload() {
