@@ -1617,7 +1617,10 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
             const double step = static_cast<double>(g_ + j + i) / stepLen_;
             const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
                 s.volumeAutomationValue, step, target) : 0.0;
-            if (s.gain != desired) {
+            if (s.volumeAutomationCount > 0) {
+                // The interpolated automation curve is already continuous; don't add lag on top.
+                s.gain = desired;
+            } else if (s.gain != desired) {
                 s.gain += (desired - s.gain) * gainCoef;
                 if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
             }
@@ -1671,7 +1674,9 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                     const double step = static_cast<double>(g_ + j) / stepLen_;
                     const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
                         s.volumeAutomationValue, step, target) : 0.0;
-                    if (s.gain != desired) {
+                    if (s.volumeAutomationCount > 0) {
+                        s.gain = desired;
+                    } else if (s.gain != desired) {
                         s.gain += (desired - s.gain) * gainCoef;
                         if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
                     }
