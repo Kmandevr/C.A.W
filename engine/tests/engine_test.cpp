@@ -558,6 +558,32 @@ TEST(arrangement_clip_source_offset_trims_the_source_and_honors_non_looping) {
     CHECK_NEAR(out[33000], 0.0, 1e-5);            // non-looping clip stops after its one source segment
 }
 
+TEST(arrangement_clip_source_offset_preserves_the_tail_of_a_sustained_note) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
+    p.modules.push_back({"phrase",
+        "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 4 1\\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"trimmed-sustain", "phrase", 4, 2, 2, false});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 40000);
+    const float expected = static_cast<float>(0.5 * std::cos(kPi / 4.0));
+    CHECK_NEAR(out[27000], expected, 1e-5); // source note began before the trim, but its tail remains
+    CHECK_NEAR(out[39000], 0.0, 1e-5);      // the clip still ends at its arranged boundary
+}
+
 TEST(arrangement_clips_can_overlap_on_one_track) {
     ProjectSpec p;
     p.bpm = 120;

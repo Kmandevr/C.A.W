@@ -172,12 +172,20 @@ std::shared_ptr<const Pattern> compileArrangement(
             std::vector<int> remap(src.notes.size(), -1);
             for (size_t i = 0; i < src.notes.size() && out->notes.size() < kMaxPatternNotes; ++i) {
                 const PatternNote& original = src.notes[i];
-                if (original.at < sourcePos || original.at >= sourceEnd) continue;
+                const double originalEnd = original.at + original.len;
+                if (originalEnd <= sourcePos || original.at >= sourceEnd) continue;
+                const double clippedStart = std::max(original.at, sourcePos);
+                const double clippedEnd = std::min(originalEnd, sourceEnd);
+                const bool trimmedAtStart = clippedStart > original.at;
+                const bool trimmedAtEnd = clippedEnd < originalEnd;
+                // A clip trim into a sustained note keeps the audible tail. Ratcheted notes are
+                // only copied whole here: changing their boundaries would change their subdivision.
+                if (original.ratchet > 1 && (trimmedAtStart || trimmedAtEnd)) continue;
                 PatternNote note = original;
-                note.at = timeline + (original.at - sourcePos);
-                note.len = std::min(original.len, sourceEnd - original.at);
+                note.at = timeline + (clippedStart - sourcePos);
+                note.len = clippedEnd - clippedStart;
                 if (note.len <= 0) continue;
-                note.slideFrom = note.slideTo = -1;
+                if (trimmedAtStart || trimmedAtEnd) note.slideFrom = note.slideTo = -1;
                 remap[i] = static_cast<int>(out->notes.size());
                 out->notes.push_back(note);
                 out->lastEnd = std::max(out->lastEnd, note.at + note.len);
