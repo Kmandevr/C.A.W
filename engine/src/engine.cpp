@@ -729,6 +729,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
             bus.slot = ls.slot;
             bus.parentSlot = ls.parentSlot;
             bus.order = w.order;
+            bus.flag = !ls.bus;
+            if (!ls.bus) ls.automationSig = "\\x01new-slot";
             send(bus);
             ls.bus = true;
             ls.parentSlot = pl.ls.parentSlot;
@@ -756,6 +758,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             nextLayers[w.id] = ls;
             continue;
         }
+        if (ls.bus) ls.automationSig = "\\x01new-slot";
         if (ls.automationSig != pl.automationSig) {
             Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot;
             for (const AutomationLaneSpec& lane : w.automation) {
@@ -1081,7 +1084,6 @@ void Engine::applyCommands() noexcept {
                     s.contiguous = false;
                     s.overloaded = false;
                     s.bus = false;
-                    s.volumeAutomationCount = s.panAutomationCount = 0;
                     s.overloadFlag.store(false, std::memory_order_relaxed);
                     s.k = -1;
                     s.epoch = -1;
@@ -1127,7 +1129,7 @@ void Engine::applyCommands() noexcept {
                 s.active = true;
                 s.removing = false;
                 s.bus = true;
-                s.volumeAutomationCount = s.panAutomationCount = 0;
+                if (c.flag) s.volumeAutomationCount = s.panAutomationCount = 0;
                 s.parentSlot = c.parentSlot;
                 s.order = c.order;
                 s.gain = slotTarget(s);
