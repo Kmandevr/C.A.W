@@ -35,26 +35,25 @@ class ModulationPanel extends StatelessWidget {
         ),
       );
     }
-    if (i.kind == 'synth') return _SynthModEditor(source: module.source, onChanged: onSourceChanged);
     final panels = <Widget>[];
-    if (i.params.any((p) => p.kind == ParamKind.number && p.max > p.min)) {
+    if (i.kind == 'synth') {
+      panels.add(_SynthModEditor(source: module.source, onChanged: onSourceChanged));
+    } else if (i.params.any((p) => p.kind == ParamKind.number && p.max > p.min)) {
       panels.add(_ModuleModEditor(source: module.source, params: i.params, sources: sources, onChanged: onSourceChanged));
     }
-    if (i.isEffect) {
+    if (i.isEffect && module.source.contains('// caw:sidechain-route')) {
       final route = RegExp(r'util\.duck\s*\(\s*in\s*,\s*([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)\s*,\s*amount\s*\)')
           .firstMatch(module.source);
-      if (module.source.contains('// caw:sidechain-route')) {
-        panels.add(_SidechainRoute(
-          current: route?.group(1) ?? 'invalid sidechain route',
-          sources: route == null ? const [] : sources,
-          onChanged: route == null
-              ? (_) async {}
-              : (value) => onSourceChanged(module.source.replaceRange(route.start(1)!, route.end(1)!, value)),
-          onRemove: onRemoveSidechain,
-        ));
-      } else {
-        panels.add(_SidechainCreator(sources: sources, onCreate: onAddSidechain));
-      }
+      panels.add(_SidechainRoute(
+        current: route?.group(1) ?? 'invalid sidechain route',
+        sources: route == null ? const [] : sources,
+        onChanged: route == null
+            ? (_) async {}
+            : (value) => onSourceChanged(module.source.replaceRange(route.start(1)!, route.end(1)!, value)),
+        onRemove: onRemoveSidechain,
+      ));
+    } else if (i.kind == 'generator' || i.kind == 'synth' || i.isEffect) {
+      panels.add(_SidechainCreator(sources: sources, onCreate: onAddSidechain));
     }
     return panels.isEmpty ? const SizedBox.shrink() : Column(children: panels);
   }
