@@ -50,6 +50,58 @@ float maxStep(const std::vector<float>& v, size_t from, size_t to) {
 
 }  // namespace
 
+TEST(folder_bus_routes_children_and_applies_group_gain) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    LayerSpec folder;
+    folder.id = "bus";
+    folder.name = "Group";
+    folder.folder = true;
+    folder.busEnabled = true;
+    folder.volume = 0.5;
+    p.layers.insert(p.layers.begin(), folder);
+    p.layers[1].parentId = "bus";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    std::vector<float> right;
+    const auto left = run(e, 256, 64, &right);
+    const float expected = static_cast<float>(0.8 * std::cos(kPi / 4.0) * 0.5);
+    CHECK_NEAR(left[200], expected, 1e-5);
+    CHECK_NEAR(right[200], expected, 1e-5);
+}
+
+TEST(track_volume_automation_is_sample_positioned) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    p.layers[0].automation.push_back({"volume", {{0, 0}, {16, 1}}});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 16 * 6000 + 256);
+    const double pan = std::cos(kPi / 4.0);
+    CHECK(std::fabs(left[256]) < 1e-4);
+    CHECK_NEAR(left[8 * 6000], 0.5 * pan, 2e-3);
+    CHECK_NEAR(left[16 * 6000 - 1], pan, 2e-3);
+}
+
+TEST(project_parser_reads_folder_and_automation_metadata) {
+    const std::string json = R"({"caw_project":1,"layers":[
+      {"id":"g","folder":true,"bus":true,"volume":0.5},
+      {"id":"t","parent":"g","automation":[{"target":"pan","points":[{"step":0,"value":-1},{"step":16,"value":1}]}]}
+    ]})";
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(json, p, error));
+    CHECK_EQ(p.layers.size(), size_t{2});
+    CHECK(p.layers[0].folder);
+    CHECK(p.layers[0].busEnabled);
+    CHECK_EQ(p.layers[1].parentId, std::string("g"));
+    CHECK_EQ(p.layers[1].automation.size(), size_t{1});
+    CHECK_EQ(p.layers[1].automation[0].target, std::string("pan"));
+    CHECK_NEAR(p.layers[1].automation[0].points[1].value, 1.0, 1e-9);
+}
+
 TEST(output_does_not_depend_on_block_size) {
     ProjectSpec p = project({{"a", "t*(t>>5|t>>8)"}, {"b", std::string(kFloat) + "lpf(saw(110), 800, 3) * ad(step%4==0)"}});
     std::vector<std::vector<float>> outs;
