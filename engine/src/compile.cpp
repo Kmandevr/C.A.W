@@ -507,8 +507,9 @@ private:
         const Token at = peek();
         if (at.kind != Tok::Ident) fail(at, "write 'mod parameter = util.mod(parameter, source, amount)'");
         const std::string name = at.text;
-        const bool isParam = std::any_of(p_.params.begin(), p_.params.end(),
-                                         [&](const ParamDef& d) { return d.name == name; });
+        bool isParam = false;
+        for (const ParamDef& d : p_.params)
+            if (d.name == name) isParam = true;
         if (!isParam) fail(at, "mod target '" + name + "' must be a param or global declared earlier");
         next();
         expectOp("=");
