@@ -24,11 +24,7 @@ jobs:
       - name: Build
         run: cmake --build engine/build --config Release --parallel
       - name: Test
-        shell: bash
-        run: |
-          bin=engine/build/caw_tests
-          [ -f engine/build/Release/caw_tests.exe ] && bin=engine/build/Release/caw_tests.exe
-          "$bin"
+        run: ctest --test-dir engine/build --build-config Release --output-on-failure --parallel 4
       - name: Check and render the examples
         if: matrix.name == 'Linux x64'
         run: |
