@@ -240,7 +240,7 @@ class ProjectDoc {
         'name': name,
         'bpm': bpm,
         'beats_per_bar': beatsPerBar,
-        'loop_bars': engineLoopBars,
+        'loop_bars': loopBars,
         'key': key,
         'seed': seed,
         'master': master,
@@ -280,3 +280,28 @@ class ProjectDoc {
       );
 }
 
+/// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.
+String? headerValue(String source, String key) {
+  final lines = const LineSplitter().convert(source);
+  if (lines.isEmpty || lines.first.trim() != '---') return null;
+  for (final line in lines.skip(1)) {
+    final t = line.trim();
+    if (t == '---') break;
+    final i = t.indexOf(':');
+    if (i > 0 && t.substring(0, i).trim() == key) {
+      var v = t.substring(i + 1);
+      final hash = v.indexOf('#');
+      if (hash >= 0) v = v.substring(0, hash);
+      return v.trim();
+    }
+  }
+  return null;
+}
+
+/// Layer lengths offered in the Arranger, in 16ths (0 = follow the project loop).
+List<(int, String)> lengthChoices(int stepsPerBar) => [
+      (0, 'Project'),
+      (4, '1 beat'),
+      (8, '2 beats'),
+      for (final b in [1, 2, 3, 4, 5, 6, 7, 8, 16]) (b * stepsPerBar, b == 1 ? '1 bar' : '$b bars'),
+    ];
