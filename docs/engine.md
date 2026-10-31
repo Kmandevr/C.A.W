@@ -333,7 +333,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`ctest --test-dir engine/build --output-on-failure --parallel 4` runs the complete registered suite as four deterministic, process-isolated shards. Every test is assigned to one shard, and CTest runs the shards concurrently. `engine/build/caw_tests` remains available for a direct unsharded run; use that mode for `--update-golden`. The suite covers:
+CTest runs the complete registered suite as four deterministic, process-isolated shards. Every test is assigned to one shard, and CTest runs the shards concurrently with four workers. `engine/build/caw_tests` remains available for a direct unsharded run; use that mode for `--update-golden`. The suite covers:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
