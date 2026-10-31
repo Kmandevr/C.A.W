@@ -285,3 +285,33 @@ TEST(code_swaps_can_wait_for_the_next_bar) {
     CHECK_NEAR(y[96000 - 1024 - 1] / g, 0.1, 1e-6);
     CHECK_NEAR(y[96000 - 1024 + 2000] / g, 0.2, 1e-6);
 }
+
+TEST(arrangement_clips_schedule_reusable_patterns_on_the_project_timeline) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
+    p.modules.push_back({"phrase",
+        "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 2 1\\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.name = "Track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"clip-a", "phrase", 2, 8, 0, true});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    const std::string result = e.setProject(p);
+    CHECK(result.find("\\\"ok\\\":true") != std::string::npos);
+    e.play();
+    const std::vector<float> out = run(e, 70000);
+    const double panGain = std::cos(kPi / 4.0);
+    CHECK_NEAR(out[1000], 0.0, 1e-7);             // before the clip
+    CHECK_NEAR(out[15000], 0.5 * panGain, 1e-5);  // first source pass
+    CHECK_NEAR(out[27000], 0.0, 1e-5);            // source note has ended
+    CHECK_NEAR(out[39000], 0.5 * panGain, 1e-5);  // clip loops its source
+}
