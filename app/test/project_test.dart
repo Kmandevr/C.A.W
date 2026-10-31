@@ -108,6 +108,7 @@ void main() {
   test('loop seconds and length choices follow the meter', () {
     final p = ProjectDoc(id: 'x', name: 'x', bpm: 120, beatsPerBar: 3, loopBars: 2);
     expect(p.loopSteps, 24);
+    expect(p.maxArrangementSteps, 768);
     expect(p.loopSeconds, closeTo(3.0, 1e-9));
     final c = lengthChoices(12);
     expect(c.first.$1, 0);
