@@ -56,6 +56,13 @@ class _SynthModEditor extends StatefulWidget {
 class _SynthModEditorState extends State<_SynthModEditor> {
   String? newSource, newDestination;
   double newAmount = 0.5;
+  final Map<int, double> _draftAmounts = {};
+
+  @override
+  void didUpdateWidget(covariant _SynthModEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.source != widget.source) _draftAmounts.clear();
+  }
 
   List<String> get availableSources {
     final out = <String>['vel'];
@@ -145,8 +152,12 @@ class _SynthModEditorState extends State<_SynthModEditor> {
             ]),
             Row(children: [
               const Text('Depth / polarity', style: TextStyle(color: Neon.dim, fontSize: 11)),
-              Expanded(child: Slider(min: -1, max: 1, divisions: 200, value: route.amount.clamp(-1.0, 1.0),
-                  onChanged: (v) => replace(route, amount: v))),
+              Expanded(child: Slider(min: -1, max: 1, divisions: 200, value: (_draftAmounts[route.line] ?? route.amount).clamp(-1.0, 1.0).toDouble(),
+                  onChanged: (v) => setState(() => _draftAmounts[route.line] = v),
+                  onChangeEnd: (v) {
+                    _draftAmounts.remove(route.line);
+                    replace(route, amount: v);
+                  })),
               SizedBox(width: 38, child: Text(route.amount.toStringAsFixed(2), style: Neon.code(size: 11))),
             ]),
           ],
