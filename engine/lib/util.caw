@@ -16,7 +16,7 @@ fn duck(x, env, amount) = x * (1 - clamp(env, 0, 1) * amount)
 /// base: the unmodulated parameter or global value
 /// source: a bipolar or unipolar signal, such as an LFO or another module's export
 /// amount: signed modulation depth; a negative value reverses polarity
-/// example: util.mod(900, lfo.sine(4), 300)
+/// example: saw(util.mod(900, lfo.sine(4), 300))
 fn mod(base, source, amount) = base + source * amount
 
 /// Rhythmic gate: lets x through only while open is above 0.
