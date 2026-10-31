@@ -133,7 +133,7 @@ macOS and Linux desktop apps, then iOS once its distribution question is settled
 
 ## Stage 5 — Advanced instrument
 
-- timeline arranger foundation is now in v2; remaining work includes more editing polish, multi-source multi-edit, clip automation and plugin/global parameter automation
+- timeline arranger foundation is now in v2; remaining work includes more editing polish, clip-following automation and plugin/global parameter automation
 - the sequencing mini-language
 - audio import with nondestructive byte/bit mangling chains (originals are never modified)
 - sends and buses
