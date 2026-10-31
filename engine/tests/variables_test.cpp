@@ -168,6 +168,35 @@ TEST(exports_within_a_chain_and_missing_sources) {
     CHECK_NEAR(out[199], 0.5 * std::cos(kPi / 4.0), 1e-6);
 }
 
+TEST(cross_module_modulation_reaches_a_parameter_in_live_and_offline_render) {
+    ProjectSpec p;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"k", std::string(kFloat) + "export let env = 0.5\\n0", {}, "Kick"});
+    p.modules.push_back({"g", std::string(kFloat) +
+        "param level = 0.5 in 0..1\\nmod level = util.mod(level, kick.env, 0.4)\\nlevel", {}, "Bass"});
+    LayerSpec kick, bass;
+    kick.id = "kick";
+    kick.chain = {"k"};
+    kick.volume = 1.0;
+    bass.id = "bass";
+    bass.chain = {"g"};
+    bass.volume = 1.0;
+    p.layers = {kick, bass};
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    const std::string result = e.setProject(p);
+    CHECK(!has(result, "nothing exports"));
+    e.play();
+    const std::vector<float> live = run(e, 256);
+    RenderResult rendered;
+    CHECK(renderExport(p, ExportOptions{}, rendered));
+    const double expected = 0.7 * std::cos(kPi / 4.0);
+    CHECK_NEAR(live[200], expected, 1e-6);
+    CHECK_NEAR(rendered.samples[static_cast<size_t>(200) * 2], expected, 1e-6);
+}
+
 TEST(sidechain_import_ducks_in_live_and_offline_render_deterministically) {
     ProjectSpec p;
     p.master = 1.0;
