@@ -17,6 +17,58 @@ void addTask(void* p) noexcept {
 }
 }
 
+
+TEST(scheduler_creates_threads_only_when_jobs_need_them_and_reuses_them) {
+    WorkerPool pool(4);
+    CHECK_EQ(pool.workerCount(), 0u);
+    pool.setWorkerLimit(2);
+    CHECK_EQ(pool.workerCount(), 0u);
+
+    std::atomic<int> value{0};
+    TaskState first{&value, 1};
+    CHECK(pool.submit(JobPriority::Foreground, addTask, &first));
+    CHECK_EQ(pool.workerCount(), 1u);
+    pool.waitIdle();
+    CHECK_EQ(value.load(), 1);
+
+    TaskState second{&value, 2};
+    CHECK(pool.submit(JobPriority::Foreground, addTask, &second));
+    CHECK_EQ(pool.workerCount(), 1u);
+    pool.waitIdle();
+    CHECK_EQ(value.load(), 3);
+}
+
+namespace {
+struct GateTask {
+    std::atomic<bool>* release;
+    std::atomic<int>* finished;
+};
+void waitForGate(void* p) noexcept {
+    auto* task = static_cast<GateTask*>(p);
+    while (!task->release->load(std::memory_order_acquire)) std::this_thread::yield();
+    task->finished->fetch_add(1, std::memory_order_relaxed);
+}
+}
+
+TEST(scheduler_scales_threads_only_to_simultaneous_demand) {
+    WorkerPool pool(8);
+    pool.setWorkerLimit(4);
+    CHECK_EQ(pool.workerCount(), 0u);
+
+    std::atomic<bool> release{false};
+    std::atomic<int> finished{0};
+    GateTask first{&release, &finished}, second{&release, &finished};
+    CHECK(pool.submit(JobPriority::Offline, waitForGate, &first));
+    CHECK_EQ(pool.workerCount(), 1u);
+    CHECK(pool.submit(JobPriority::Foreground, waitForGate, &second));
+    CHECK_EQ(pool.workerCount(), 2u);
+
+    release.store(true, std::memory_order_release);
+    pool.waitIdle();
+    CHECK_EQ(finished.load(), 2);
+    CHECK_EQ(pool.workerCount(), 2u);
+}
+
 TEST(scheduler_runs_jobs_and_waits_for_idle) {
     WorkerPool pool(2);
     std::atomic<int> value{0};
