@@ -15,6 +15,10 @@ ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'s
 void main() {
   test('project file round-trips', () {
     final p = sample();
+    // Keep this round-trip focused on the current clip format. The legacy pointer
+    // migration is covered separately below.
+    p.layers[1].patternId = null;
+    p.layers[1].clips.add(ClipDoc(id: 'c1', patternId: 'pat', startSteps: 16, lengthSteps: 32));
     final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
     expect(jsonEncode(back.toJson()), jsonEncode(p.toJson()));
     expect(back.modules.first.edited, isTrue);
