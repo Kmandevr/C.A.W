@@ -291,6 +291,8 @@ class ProjectDoc {
         layers: ((j['layers'] as List?) ?? const [])
             .map((raw) {
               final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
+              // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
+              if (layer.clips.isNotEmpty) layer.patternId = null;
               // Recover any legacy single-pattern layer as a real clip, then clear the legacy pointer.
               // Clearing it matters: deleting the migrated clip must leave the track silent.
               if (layer.clips.isEmpty && layer.patternId != null) {
