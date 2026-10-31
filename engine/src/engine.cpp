@@ -1597,7 +1597,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         }
         int sp = s.scopePos.load(std::memory_order_relaxed);
         for (int i = 0; i < len; ++i) {
-            const double step = static_cast<double>(gg + i) / stepLen_;
+            const double step = static_cast<double>(g_ + j + i) / stepLen_;
             const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
                 s.volumeAutomationValue, step, target) : 0.0;
             if (s.gain != desired) {
