@@ -44,8 +44,17 @@ void main() {
     final migrated = ProjectDoc.fromJson(old);
     expect(migrated.layers[1].clips, hasLength(1));
     expect(migrated.layers[1].clips.single.patternId, 'pat');
+    expect(migrated.layers[1].patternId, isNull);
     final saved = ProjectDoc.fromJson(migrated.toJson());
     expect(saved.layers[1].clips, hasLength(1));
+
+    // The current file version can still contain an older pattern pointer from a partial upgrade.
+    final currentVersionLegacy = sample().toJson()..['caw_app_project'] = ProjectDoc.fileVersion;
+    final recovered = ProjectDoc.fromJson(currentVersionLegacy);
+    expect(recovered.layers[1].clips.single.patternId, 'pat');
+    recovered.layers[1].clips.clear();
+    final emptyLayer = (jsonDecode(recovered.toEngineJson()) as Map<String, dynamic>)['layers'] as List;
+    expect((emptyLayer[1] as Map).containsKey('pattern'), isFalse);
   });
 
   test('engine JSON carries the code last run and the layer chain', () {
