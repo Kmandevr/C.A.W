@@ -295,9 +295,9 @@ class _BuilderScreenState extends State<BuilderScreen> {
   }
 
   List<SignalOption> _signalSources(ModuleDoc destination) {
-    final options = <SignalOption>[];
+    final byValue = <String, List<SignalOption>>{};
+    final targetLayers = s.project.layers.where((l) => l.chain.contains(destination.id));
     for (final source in s.project.modules) {
-      final targetLayers = s.project.layers.where((l) => l.chain.contains(destination.id));
       final sharesTargetLayer = targetLayers.any((l) => l.chain.contains(source.id));
       if (source.id == destination.id ||
           sharesTargetLayer ||
@@ -306,10 +306,11 @@ class _BuilderScreenState extends State<BuilderScreen> {
       if (info == null || !info.ok || info.ref.isEmpty) continue;
       for (final export in info.exports) {
         final value = '${info.ref}.${export.name}';
-        options.add(SignalOption(value, '${source.name}.${export.name}'));
+        byValue.putIfAbsent(value, () => []).add(SignalOption(value, '${source.name}.${export.name}'));
       }
     }
-    return options;
+    // Duplicate module refs make the engine's first-provider rule ambiguous to the user; don't offer them.
+    return [for (final entry in byValue.entries) if (entry.value.length == 1) entry.value.single];
   }
 
   Future<void> _addSidechain(ModuleDoc target, String source, double amount) async {
