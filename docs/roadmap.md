@@ -1,7 +1,7 @@
 ---
 title: Roadmap
 summary: Staged plan from the bare-bones v1 (build sounds, stack them into loops, export) to commercial release, with v1's scope, acceptance test and build order.
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # Roadmap
