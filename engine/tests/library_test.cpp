@@ -80,6 +80,13 @@ TEST(modulation_helper_applies_signed_depth) {
     CHECK_NEAR(one("util.mod(100, -0.5, 20)"), 90.0, 1e-12);
 }
 
+TEST(sidechain_helper_ducks_in_proportion_to_the_exported_envelope) {
+    CHECK_NEAR(one("util.duck(1, 0, 0.8)"), 1.0, 1e-12);
+    CHECK_NEAR(one("util.duck(1, 0.5, 0.8)"), 0.6, 1e-12);
+    CHECK_NEAR(one("util.duck(1, 1, 0.8)"), 0.2, 1e-12);
+    CHECK_NEAR(one("util.duck(1, 2, 0.8)"), 0.2, 1e-12);
+}
+
 TEST(music_helpers) {
     // Defaults use the project key (A minor): degree 0 = A4 (69 in octave 4 from C4 = 60 + 9).
     CHECK_EQ(one("scale(0)"), 69.0);
