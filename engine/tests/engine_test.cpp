@@ -50,6 +50,220 @@ float maxStep(const std::vector<float>& v, size_t from, size_t to) {
 
 }  // namespace
 
+TEST(audition_only_uses_the_dedicated_audition_slot) {
+    ProjectSpec p = project({{"tone", std::string(kFloat) + "0.5"}});
+    p.layers.clear();
+    p.auditionChain = {"tone"};
+    p.auditionOnly = true;
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 256);
+    CHECK_NEAR(left[200], static_cast<float>(0.8 * 0.5 * std::cos(kPi / 4.0)), 1e-5);
+}
+
+TEST(folder_bus_routes_children_and_applies_group_gain) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    LayerSpec folder;
+    folder.id = "bus";
+    folder.name = "Group";
+    folder.folder = true;
+    folder.busEnabled = true;
+    folder.volume = 0.5;
+    p.layers.insert(p.layers.begin(), folder);
+    p.layers[1].parentId = "bus";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    std::vector<float> right;
+    const auto left = run(e, 256, 64, &right);
+    const float expected = static_cast<float>(0.8 * std::cos(kPi / 4.0) * 0.5);
+    CHECK_NEAR(left[200], expected, 1e-5);
+    CHECK_NEAR(right[200], expected, 1e-5);
+}
+
+TEST(reparenting_track_detaches_it_from_previous_folder_bus) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    LayerSpec folder;
+    folder.id = "bus";
+    folder.folder = true;
+    folder.busEnabled = true;
+    folder.volume = 0.5;
+    p.layers.insert(p.layers.begin(), folder);
+    p.layers[1].parentId = "bus";
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto grouped = run(e, 256);
+    const float groupedLevel = static_cast<float>(0.8 * std::cos(kPi / 4.0) * 0.5);
+    CHECK_NEAR(grouped[200], groupedLevel, 1e-5);
+
+    // Moving the track out must remove the old parent bus from its routing.
+    p.layers[1].parentId.clear();
+    e.setProject(p);
+    const auto detached = run(e, 256);
+    const float directLevel = static_cast<float>(0.8 * std::cos(kPi / 4.0));
+    CHECK_NEAR(detached[200], directLevel, 1e-5);
+}
+
+TEST(reparenting_folder_bus_detaches_it_from_old_parent_bus) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    LayerSpec outer;
+    outer.id = "outer"; outer.folder = true; outer.busEnabled = true; outer.volume = 0.5;
+    LayerSpec inner;
+    inner.id = "inner"; inner.folder = true; inner.busEnabled = true; inner.parentId = "outer"; inner.volume = 0.5;
+    p.layers.insert(p.layers.begin(), outer);
+    p.layers.insert(p.layers.begin() + 1, inner);
+    p.layers[2].parentId = "inner";
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto nested = run(e, 256);
+    const float nestedLevel = static_cast<float>(0.8 * std::cos(kPi / 4.0) * 0.25);
+    CHECK_NEAR(nested[200], nestedLevel, 1e-5);
+
+    // Detaching the inner bus should preserve its children but remove the outer gain stage.
+    p.layers[1].parentId.clear();
+    e.setProject(p);
+    const auto detached = run(e, 256);
+    const float directBusLevel = static_cast<float>(0.8 * std::cos(kPi / 4.0) * 0.5);
+    CHECK_NEAR(detached[200], directBusLevel, 1e-5);
+}
+
+TEST(organization_only_folder_mute_propagates_to_descendants) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    LayerSpec folder;
+    folder.id = "group"; folder.folder = true; folder.busEnabled = false; folder.mute = true;
+    p.layers.insert(p.layers.begin(), folder);
+    p.layers[1].parentId = "group";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 512);
+    CHECK_NEAR(left[256], 0.0, 1e-7);
+}
+
+TEST(nested_folder_buses_route_child_audio_once) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    LayerSpec outer;
+    outer.id = "outer"; outer.folder = true; outer.busEnabled = true; outer.volume = 0.5;
+    LayerSpec inner;
+    inner.id = "inner"; inner.folder = true; inner.busEnabled = true; inner.parentId = "outer"; inner.volume = 0.5;
+    p.layers.insert(p.layers.begin(), outer);
+    p.layers.insert(p.layers.begin() + 1, inner);
+    p.layers[2].parentId = "inner";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 256);
+    CHECK_NEAR(left[200], 0.8 * std::cos(kPi / 4.0) * 0.25, 1e-5);
+}
+
+TEST(track_pan_automation_moves_between_stereo_channels) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    p.layers[0].automation.push_back({"pan", {{0, -1}, {16, 1}}});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    std::vector<float> right;
+    const auto left = run(e, 16 * 6000 + 256, 64, &right);
+    CHECK(left[0] > 0.99f);
+    CHECK(std::fabs(right[0]) < 1e-6f);
+    CHECK_NEAR(left[8 * 6000], right[8 * 6000], 2e-3);
+    CHECK(right[16 * 6000 - 1] > 0.99f);
+    CHECK(std::fabs(left[16 * 6000 - 1]) < 5e-5f);
+}
+
+TEST(track_volume_automation_is_sample_positioned) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    p.layers[0].lengthSteps = 8;  // the lane must follow song time, not this shorter track loop
+    p.layers[0].automation.push_back({"volume", {{0, 0}, {16, 1}}});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 16 * 6000 + 256);
+    const double pan = std::cos(kPi / 4.0);
+    CHECK(std::fabs(left[0]) < 1e-4);
+    CHECK_NEAR(left[8 * 6000], 0.5 * pan, 2e-3);
+    CHECK_NEAR(left[16 * 6000 - 1], pan, 2e-3);
+}
+
+TEST(folder_bus_volume_automation_is_sample_positioned) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}}, 2);
+    LayerSpec folder;
+    folder.id = "bus";
+    folder.folder = true;
+    folder.busEnabled = true;
+    folder.volume = 1.0;
+    folder.automation.push_back({"volume", {{0, 0}, {16, 1}}});
+    p.layers.insert(p.layers.begin(), folder);
+    p.layers[1].parentId = "bus";
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 16 * 6000 + 256);
+    const double pan = std::cos(kPi / 4.0);
+    CHECK(std::fabs(left[0]) < 1e-6);
+    CHECK_NEAR(left[8 * 6000], 0.4 * pan, 2e-3);
+    CHECK_NEAR(left[16 * 6000], 0.8 * pan, 2e-3);
+}
+
+TEST(mute_overrides_volume_automation) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    p.layers[0].automation.push_back({"volume", {{0, 1}, {16, 1}}});
+    p.layers[0].mute = true;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 512);
+    CHECK_NEAR(left[256], 0.0, 1e-7);
+}
+
+TEST(project_parser_reads_folder_and_automation_metadata) {
+    const std::string json = R"({"caw_project":1,"layers":[
+      {"id":"g","folder":true,"bus":true,"volume":0.5},
+      {"id":"t","parent":"g","automation":[{"target":"pan","points":[{"step":0,"value":-1},{"step":16,"value":1}]}]}
+    ]})";
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(json, p, error));
+    CHECK_EQ(p.layers.size(), size_t{2});
+    CHECK(p.layers[0].folder);
+    CHECK(p.layers[0].busEnabled);
+    CHECK_EQ(p.layers[1].parentId, std::string("g"));
+    CHECK_EQ(p.layers[1].automation.size(), size_t{1});
+    CHECK_EQ(p.layers[1].automation[0].target, std::string("pan"));
+    CHECK_NEAR(p.layers[1].automation[0].points[1].value, 1.0, 1e-9);
+    const std::string bounded = R"({"caw_project":1,"beats_per_bar":3,"layers":[
+      {"id":"g","folder":true,"automation":[{"target":"volume","points":[{"step":5000,"value":0.5}]}]},
+      {"id":"t","parent":"g","clips":[{"id":"c","pattern":"p","start_steps":5000,"length_steps":20}]}
+    ]})";
+    ProjectSpec boundedProject;
+    CHECK(parseProject(bounded, boundedProject, error));
+    CHECK_EQ(boundedProject.layers[1].clips[0].startSteps, 767);
+    CHECK_EQ(boundedProject.layers[1].clips[0].lengthSteps, 1);
+    CHECK_NEAR(boundedProject.layers[0].automation[0].points[0].step, 768, 1e-9);
+    const std::string cycle = R"({"caw_project":1,"layers":[
+      {"id":"a","folder":true,"parent":"b"},{"id":"b","folder":true,"parent":"a"}
+    ]})";
+    ProjectSpec invalid;
+    CHECK(!parseProject(cycle, invalid, error));
+}
+
 TEST(output_does_not_depend_on_block_size) {
     ProjectSpec p = project({{"a", "t*(t>>5|t>>8)"}, {"b", std::string(kFloat) + "lpf(saw(110), 800, 3) * ad(step%4==0)"}});
     std::vector<std::vector<float>> outs;
@@ -284,4 +498,156 @@ TEST(code_swaps_can_wait_for_the_next_bar) {
     CHECK_NEAR(y[50000] / g, 0.1, 1e-6);
     CHECK_NEAR(y[96000 - 1024 - 1] / g, 0.1, 1e-6);
     CHECK_NEAR(y[96000 - 1024 + 2000] / g, 0.2, 1e-6);
+}
+
+TEST(arrangement_clips_schedule_reusable_patterns_on_the_project_timeline) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
+    p.modules.push_back({"phrase",
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.name = "Track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"clip-a", "phrase", 2, 8, 0, true});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    const std::string result = e.setProject(p);
+    CHECK(result.find("\"ok\":true") != std::string::npos);
+    e.play();
+    const std::vector<float> out = run(e, 70000);
+    const double panGain = std::cos(kPi / 4.0);
+    CHECK_NEAR(out[1000], 0.0, 1e-7);             // before the clip
+    CHECK_NEAR(out[15000], 0.5 * panGain, 1e-5);  // first source pass
+    CHECK_NEAR(out[27000], 0.0, 1e-5);            // source note has ended
+    CHECK_NEAR(out[39000], 0.5 * panGain, 1e-5);  // clip loops its source
+}
+
+
+TEST(arrangement_clip_source_offset_trims_the_source_and_honors_non_looping) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
+    p.modules.push_back({"phrase",
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n2 C4 1 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"trimmed", "phrase", 4, 2, 2, false});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 40000);
+    const float expected = static_cast<float>(0.5 * std::cos(kPi / 4.0));
+    CHECK_NEAR(out[18000], 0.0, 1e-7);            // before the trimmed clip
+    CHECK_NEAR(out[27000], expected, 1e-5);       // source note at offset 2 starts at timeline step 4
+    CHECK_NEAR(out[33000], 0.0, 1e-5);            // non-looping clip stops after its one source segment
+}
+
+TEST(arrangement_clip_source_offset_preserves_the_tail_of_a_sustained_note) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
+    p.modules.push_back({"phrase",
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"trimmed-sustain", "phrase", 4, 2, 2, false});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 40000);
+    const float expected = static_cast<float>(0.5 * std::cos(kPi / 4.0));
+    CHECK_NEAR(out[27000], expected, 1e-5); // source note began before the trim, but its tail remains
+    CHECK_NEAR(out[39000], 0.0, 1e-5);      // the clip still ends at its arranged boundary
+}
+
+TEST(arrangement_clip_source_offset_preserves_remaining_ratchets) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "trig", {}});
+    p.modules.push_back({"phrase",
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1 ratchet 4\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"trimmed-ratchet", "phrase", 4, 2, 2, false});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 40000);
+    CHECK(out[24000] > 0.5f); // third ratchet begins at the clip start
+    CHECK(out[30000] > 0.5f); // fourth ratchet keeps its original spacing
+    CHECK_NEAR(out[36000], 0.0, 1e-5); // clip boundary releases the final ratchet
+}
+
+TEST(arrangement_clips_can_overlap_on_one_track) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.25", {}});
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"looping", "phrase", 0, 8, 0, true});
+    layer.clips.push_back({"overlap", "phrase", 4, 4, 0, false});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 60000);
+    const float oneVoice = static_cast<float>(0.25 * std::cos(kPi / 4.0));
+    const float twoVoices = static_cast<float>(0.5 * std::cos(kPi / 4.0));
+    CHECK_NEAR(out[18000], oneVoice, 1e-5);
+    CHECK_NEAR(out[27000], twoVoices, 1e-5);       // both clips sound from step 4 to step 8
+    CHECK_NEAR(out[51000], 0.0, 1e-5);             // both clips have ended
+}
+
+
+TEST(project_parser_clamps_clips_to_the_meter_aware_song_limit) {
+    const std::string json = R"({"caw_project":1,"beats_per_bar":3,"loop_bars":64,"layers":[
+      {"id":"t","clips":[{"id":"c","pattern":"p","start_steps":760,"length_steps":64,"source_offset_steps":900}]}
+    ]})";
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(json, p, error));
+    CHECK_EQ(p.layers[0].clips.size(), size_t{1});
+    CHECK_EQ(p.layers[0].clips[0].startSteps, 760);
+    CHECK_EQ(p.layers[0].clips[0].lengthSteps, 8);
+    CHECK_EQ(p.layers[0].clips[0].sourceOffsetSteps, 768);
 }

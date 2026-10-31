@@ -2,6 +2,8 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'pattern_doc.dart';
+
 String newId(String prefix) {
   final r = Random.secure();
   return '$prefix${List.generate(8, (_) => r.nextInt(36).toRadixString(36)).join()}';
@@ -32,6 +34,50 @@ class ModuleDoc {
       );
 }
 
+class ClipDoc {
+  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0, this.loop = true, this.linked = false});
+  final String id;
+  String patternId;
+  int startSteps;
+  int lengthSteps;
+  int sourceOffsetSteps;
+  bool loop;
+  bool linked;
+
+  Map<String, dynamic> toJson() => {
+        'id': id, 'pattern': patternId, 'start_steps': startSteps,
+        'length_steps': lengthSteps, 'source_offset_steps': sourceOffsetSteps, 'loop': loop, 'linked': linked,
+      };
+
+  static ClipDoc fromJson(Map<String, dynamic> j) => ClipDoc(
+        id: j['id'] as String,
+        patternId: j['pattern'] as String,
+        startSteps: (j['start_steps'] as num?)?.toInt() ?? 0,
+        lengthSteps: (j['length_steps'] as num?)?.toInt() ?? 64,
+        sourceOffsetSteps: (j['source_offset_steps'] as num?)?.toInt() ?? 0,
+        loop: j['loop'] != false,
+        linked: j['linked'] == true,
+      );
+}
+
+class AutomationPointDoc {
+  AutomationPointDoc({required this.step, required this.value});
+  double step, value;
+  Map<String, dynamic> toJson() => {'step': step, 'value': value};
+  static AutomationPointDoc fromJson(Map<String, dynamic> j) => AutomationPointDoc(
+    step: (j['step'] as num?)?.toDouble() ?? 0, value: (j['value'] as num?)?.toDouble() ?? 0);
+}
+
+class AutomationLaneDoc {
+  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points}) : points = points ?? [];
+  String target;
+  List<AutomationPointDoc> points;
+  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()]};
+  static AutomationLaneDoc fromJson(Map<String, dynamic> j) => AutomationLaneDoc(
+    target: j['target'] as String, points: ((j['points'] as List?) ?? const [])
+      .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
+}
+
 class LayerDoc {
   LayerDoc({
     required this.id,
@@ -45,7 +91,13 @@ class LayerDoc {
     this.pan = 0,
     this.mute = false,
     this.solo = false,
-  }) : effectIds = effectIds ?? [];
+    List<ClipDoc>? clips,
+    List<AutomationLaneDoc>? automation,
+    this.parentId,
+    this.isFolder = false,
+    this.busEnabled = true,
+    this.collapsed = false,
+  }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [];
 
   final String id;
   String name;
@@ -56,6 +108,10 @@ class LayerDoc {
   int lengthSteps; // 16ths; 0 follows the project loop
   double volume, pan;
   bool mute, solo;
+  List<ClipDoc> clips;
+  List<AutomationLaneDoc> automation;
+  String? parentId;
+  bool isFolder, busEnabled, collapsed;
 
   List<String> get chain => [?generatorId, ...effectIds];
 
@@ -71,6 +127,9 @@ class LayerDoc {
         'pan': pan,
         'mute': mute,
         'solo': solo,
+        'clips': [for (final c in clips) c.toJson()],
+        'automation': [for (final a in automation) a.toJson()],
+        'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j) => LayerDoc(
@@ -85,6 +144,10 @@ class LayerDoc {
         pan: (j['pan'] as num?)?.toDouble() ?? 0,
         mute: j['mute'] == true,
         solo: j['solo'] == true,
+        clips: ((j['clips'] as List?) ?? const []).map((c) => ClipDoc.fromJson(c as Map<String, dynamic>)).toList(),
+        automation: ((j['automation'] as List?) ?? const []).map((a) => AutomationLaneDoc.fromJson(a as Map<String, dynamic>)).toList(),
+        parentId: j['parent'] as String?, isFolder: j['folder'] == true,
+        busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
       );
 }
 
@@ -104,9 +167,30 @@ class ProjectDoc {
     List<LayerDoc>? layers,
   })  : globals = globals ?? {},
         modules = modules ?? [],
-        layers = layers ?? [];
+        layers = layers ?? [] {
+    // Keep the in-memory model canonical: a track owns clip instances, not a legacy
+    // single-pattern pointer. The stable ID makes repeated saves deterministic.
+    for (final layer in this.layers) {
+      if (layer.clips.isNotEmpty) {
+        layer.patternId = null;
+        continue;
+      }
+      final legacyPatternId = layer.patternId;
+      if (legacyPatternId == null) continue;
+      final source = this.modules.where((m) => m.id == legacyPatternId).firstOrNull;
+      final parsed = source == null ? null : PatternDoc.parse(source.runSource).doc;
+      final inferredLength = parsed?.lengthSteps(beatsPerBar) ?? layer.lengthSteps;
+      layer.clips.add(ClipDoc(
+        id: 'legacy-${layer.id}',
+        patternId: legacyPatternId,
+        startSteps: 0,
+        lengthSteps: inferredLength > 0 ? inferredLength : 64,
+      ));
+      layer.patternId = null;
+    }
+  }
 
-  static const int fileVersion = 1;
+  static const int fileVersion = 2;
 
   final String id;
   String name;
@@ -123,6 +207,7 @@ class ProjectDoc {
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
+  int get maxArrangementSteps => 64 * stepsPerBar;
   double get loopSeconds => loopSteps * 15.0 / bpm;
 
   /// The key as the engine's numbers: root 0..11 from C, scale 0 = major or 1 = minor (scale.* order).
@@ -146,13 +231,16 @@ class ProjectDoc {
 
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
-          {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) =>
-      jsonEncode({
+      {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
+    final arrangementEnd = layers.fold<int>(loopSteps, (end, l) =>
+        max(end, l.clips.fold<int>(0, (e, clip) => max(e, clip.startSteps + clip.lengthSteps))));
+    final engineLoopBars = min(64, max(loopBars, (arrangementEnd / stepsPerBar).ceil()));
+    final result = jsonEncode({
         'caw_project': 1,
         'name': name,
         'bpm': bpm,
         'beats_per_bar': beatsPerBar,
-        'loop_bars': loopBars,
+        'loop_bars': engineLoopBars,
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
@@ -169,8 +257,17 @@ class ProjectDoc {
               'id': l.id,
               'name': l.name,
               'chain': l.chain,
-              'pattern': ?l.patternId,
-              'length_steps': l.lengthSteps,
+              'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
+              'automation': [for (final a in l.automation) a.toJson()],
+              if (l.clips.isEmpty && l.patternId != null) 'pattern': l.patternId,
+              if (l.clips.isNotEmpty) 'clips': [
+                for (final clip in l.clips) {
+                  'id': clip.id, 'pattern': clip.patternId, 'start_steps': clip.startSteps,
+                  'length_steps': clip.lengthSteps, 'source_offset_steps': clip.sourceOffsetSteps,
+                  'loop': clip.loop,
+                },
+              ],
+              'length_steps': l.clips.isNotEmpty ? 0 : l.lengthSteps,
               'volume': l.volume,
               'pan': l.pan,
               'mute': l.mute,
@@ -180,6 +277,8 @@ class ProjectDoc {
         if (audition != null) 'audition': {'chain': audition, 'pattern': ?auditionPattern},
         'audition_only': auditionOnly && audition != null,
       });
+    return result;
+  }
 
   Map<String, dynamic> toJson() => {
         'caw_app_project': fileVersion,
@@ -197,24 +296,57 @@ class ProjectDoc {
         'layers': [for (final l in layers) l.toJson()],
       };
 
-  static ProjectDoc fromJson(Map<String, dynamic> j) => ProjectDoc(
-        id: j['id'] as String,
-        name: (j['name'] as String?) ?? 'Untitled',
-        bpm: (j['bpm'] as num?)?.toDouble() ?? 140,
-        beatsPerBar: (j['beats_per_bar'] as num?)?.toInt() ?? 4,
-        loopBars: (j['loop_bars'] as num?)?.toInt() ?? 4,
-        key: (j['key'] as String?) ?? 'A minor',
-        seed: (j['seed'] as num?)?.toInt() ?? 0,
-        master: (j['master'] as num?)?.toDouble() ?? 0.7,
-        seamCrossfade: j['seam_crossfade'] != false,
-        globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
-        modules: ((j['modules'] as List?) ?? const [])
-            .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>))
-            .toList(),
-        layers: ((j['layers'] as List?) ?? const [])
-            .map((l) => LayerDoc.fromJson(l as Map<String, dynamic>))
-            .toList(),
-      );
+  static ProjectDoc fromJson(Map<String, dynamic> j) {
+    final project = ProjectDoc(
+      id: j['id'] as String,
+      name: (j['name'] as String?) ?? 'Untitled',
+      bpm: (j['bpm'] as num?)?.toDouble() ?? 140,
+      beatsPerBar: (j['beats_per_bar'] as num?)?.toInt() ?? 4,
+      loopBars: (j['loop_bars'] as num?)?.toInt() ?? 4,
+      key: (j['key'] as String?) ?? 'A minor',
+      seed: (j['seed'] as num?)?.toInt() ?? 0,
+      master: (j['master'] as num?)?.toDouble() ?? 0.7,
+      seamCrossfade: j['seam_crossfade'] != false,
+      globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
+      modules: ((j['modules'] as List?) ?? const [])
+          .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
+      layers: ((j['layers'] as List?) ?? const []).map((raw) {
+        final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
+        // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
+        if (layer.clips.isNotEmpty) layer.patternId = null;
+        if (layer.clips.isEmpty && layer.patternId != null) {
+          final legacyPatternId = layer.patternId!;
+          final module = ((j['modules'] as List?) ?? const [])
+              .whereType<Map>().where((m) => m['id'] == legacyPatternId).firstOrNull;
+          final parsed = module == null ? null
+              : PatternDoc.parse((module['run_source'] ?? module['source'] ?? '').toString()).doc;
+          final length = parsed?.lengthSteps((j['beats_per_bar'] as num?)?.toInt() ?? 4) ?? layer.lengthSteps;
+          layer.clips.add(ClipDoc(id: newId('c'), patternId: legacyPatternId,
+              startSteps: 0, lengthSteps: length > 0 ? length : 64));
+          layer.patternId = null;
+        }
+        return layer;
+      }).toList(),
+    );
+
+    // Keep persisted clips and automation inside the same bounds enforced by the native parser.
+    for (final layer in project.layers) {
+      for (final clip in layer.clips) {
+        clip.startSteps = clip.startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
+        clip.lengthSteps = clip.lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt();
+        clip.sourceOffsetSteps = clip.sourceOffsetSteps.clamp(0, project.maxArrangementSteps).toInt();
+      }
+      for (final lane in layer.automation) {
+        lane.points = lane.points.take(128).toList()
+          ..forEach((point) {
+            point.step = point.step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
+            point.value = point.value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
+          })
+          ..sort((a, b) => a.step.compareTo(b.step));
+      }
+    }
+    return project;
+  }
 }
 
 /// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.

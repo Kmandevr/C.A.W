@@ -15,10 +15,66 @@ ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'s
 void main() {
   test('project file round-trips', () {
     final p = sample();
+    // Keep this round-trip focused on the current clip format. The legacy pointer
+    // migration is covered separately below.
+    p.layers[1].patternId = null;
+    p.layers[1].clips.add(ClipDoc(id: 'c1', patternId: 'pat', startSteps: 16, lengthSteps: 32));
     final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
     expect(jsonEncode(back.toJson()), jsonEncode(p.toJson()));
     expect(back.modules.first.edited, isTrue);
     expect(back.layers.first.chain, ['m1', 'fx']);
+  });
+
+  test('folder hierarchy and automation survive app and engine serialization', () {
+    final p = sample();
+    p.layers.add(LayerDoc(id: 'group', name: 'Group', color: 3, isFolder: true, busEnabled: true));
+    p.layers[0].parentId = 'group';
+    p.layers[1].automation.add(AutomationLaneDoc(target: 'pan', points: [
+      AutomationPointDoc(step: 0, value: -1), AutomationPointDoc(step: 16, value: 1),
+    ]));
+    final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(back.layers[0].parentId, 'group');
+    expect(back.layers.last.isFolder, isTrue);
+    expect(back.layers[1].automation.single.points.last.value, 1);
+    final engine = jsonDecode(back.toEngineJson()) as Map<String, dynamic>;
+    final layers = engine['layers'] as List;
+    expect(layers[0]['parent'], 'group');
+    expect(layers.last['folder'], isTrue);
+    expect((layers[1]['automation'] as List).single['target'], 'pan');
+  });
+
+  test('legacy pattern layers migrate once into clip instances', () {
+    final old = sample().toJson()..['caw_app_project'] = 1;
+    final oldLayer = (old['layers'] as List)[1] as Map<String, dynamic>;
+    oldLayer['pattern'] = 'pat';
+    oldLayer['clips'] = [];
+    final migrated = ProjectDoc.fromJson(old);
+    expect(migrated.layers[1].clips, hasLength(1));
+    expect(migrated.layers[1].clips.single.patternId, 'pat');
+    expect(migrated.layers[1].patternId, isNull);
+    final saved = ProjectDoc.fromJson(migrated.toJson());
+    expect(saved.layers[1].clips, hasLength(1));
+
+    // The current file version can still contain an older pattern pointer from a partial upgrade.
+    final currentVersionLegacy = sample().toJson()..['caw_app_project'] = ProjectDoc.fileVersion;
+    final currentLayer = (currentVersionLegacy['layers'] as List)[1] as Map<String, dynamic>;
+    currentLayer['pattern'] = 'pat';
+    currentLayer['clips'] = [];
+    final recovered = ProjectDoc.fromJson(currentVersionLegacy);
+    expect(recovered.layers[1].clips.single.patternId, 'pat');
+    recovered.layers[1].clips.clear();
+    final emptyLayer = (jsonDecode(recovered.toEngineJson()) as Map<String, dynamic>)['layers'] as List;
+    expect((emptyLayer[1] as Map).containsKey('pattern'), isFalse);
+
+    final stalePointer = sample().toJson()..['caw_app_project'] = ProjectDoc.fileVersion;
+    final staleLayer = (stalePointer['layers'] as List)[1] as Map<String, dynamic>;
+    staleLayer['pattern'] = 'pat';
+    staleLayer['clips'] = [
+      {'id': 'c1', 'pattern': 'pat', 'start_steps': 0, 'length_steps': 64},
+    ];
+    final normalized = ProjectDoc.fromJson(stalePointer);
+    expect(normalized.layers[1].patternId, isNull);
+    expect(normalized.layers[1].clips, hasLength(1));
   });
 
   test('engine JSON carries the code last run and the layer chain', () {
@@ -29,7 +85,8 @@ void main() {
     expect(layer['chain'], ['m1', 'fx']);
     expect(layer['length_steps'], 48);
     expect(layer.containsKey('pattern'), isFalse);
-    expect((j['layers'] as List)[1]['pattern'], 'pat');
+    expect((j['layers'] as List)[1].containsKey('pattern'), isFalse);
+    expect(((j['layers'] as List)[1]['clips'] as List).single['pattern'], 'pat');
     expect(j['audition_only'], false);
     expect(j['globals'], {'swing': 0.2});
     expect((j['modules'] as List).first['name'], 'Lead');
@@ -45,6 +102,22 @@ void main() {
     expect(a['audition_only'], true);
   });
 
+  test('imported clips are normalized to the meter-aware song limit', () {
+    final raw = sample().toJson();
+    raw['beats_per_bar'] = 3;
+    final layers = raw['layers'] as List;
+    (layers[0] as Map)['clips'] = [
+      {'id': 'late', 'pattern': 'pat', 'start_steps': 760,
+       'length_steps': 64, 'source_offset_steps': 900},
+    ];
+    final imported = ProjectDoc.fromJson(raw);
+    final clip = imported.layers[0].clips.single;
+    expect(imported.maxArrangementSteps, 768);
+    expect(clip.startSteps, 760);
+    expect(clip.lengthSteps, 8);
+    expect(clip.sourceOffsetSteps, 768);
+  });
+
   test('header values', () {
     const src = '---\ncaw: 1\nkind: effect  # comment\nname: Fold\n---\nin';
     expect(headerValue(src, 'kind'), 'effect');
@@ -55,6 +128,7 @@ void main() {
   test('loop seconds and length choices follow the meter', () {
     final p = ProjectDoc(id: 'x', name: 'x', bpm: 120, beatsPerBar: 3, loopBars: 2);
     expect(p.loopSteps, 24);
+    expect(p.maxArrangementSteps, 768);
     expect(p.loopSeconds, closeTo(3.0, 1e-9));
     final c = lengthChoices(12);
     expect(c.first.$1, 0);

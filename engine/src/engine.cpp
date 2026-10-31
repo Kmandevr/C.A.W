@@ -21,6 +21,12 @@ struct Engine::Slot {
     bool fresh = true;       // the chain has not played yet since it was installed or play started
     bool contiguous = false; // the previous sample was processed, so a seam can crossfade
     bool overloaded = false;
+    bool bus = false;
+    int parentSlot = -1;
+    int volumeAutomationCount = 0, panAutomationCount = 0;
+    double volumeAutomationStep[128] = {}, volumeAutomationValue[128] = {};
+    double panAutomationStep[128] = {}, panAutomationValue[128] = {};
+    double outL[kBlock] = {}, outR[kBlock] = {};
     Chain* cur = nullptr;
     Chain* old = nullptr;    // previous chain, fading out after a hot swap
     Chain* pending = nullptr;  // new code waiting for the next beat or bar
@@ -93,13 +99,16 @@ struct Engine::Chain {
 };
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload, SetOrder } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     int orderList[kSlots] = {};
     int orderCount = 0;
     int slot = 0;
     Chain* chain = nullptr;
-    int steps = 0, order = 0;
+    int steps = 0, order = 0, parentSlot = -1;
+    int volumeAutomationCount = 0, panAutomationCount = 0;
+    double volumeAutomationStep[128] = {}, volumeAutomationValue[128] = {};
+    double panAutomationStep[128] = {}, panAutomationValue[128] = {};
     double bpm = 120, master = 0.7;
     int beatsPerBar = 4, loopSteps = 64, keyRoot = 9, keyScale = 1;
     uint32_t seed = 0;
@@ -133,6 +142,100 @@ constexpr double kC4 = 261.6255653005986;
 
 double mtof(double note) { return 440.0 * detPow(2.0, (note - 69.0) / 12.0); }
 
+ // Compile clip instances off the audio thread into one immutable, absolute-time event stream.
+std::shared_ptr<const Pattern> compileArrangement(
+    const std::vector<ClipSpec>& clips,
+    const std::map<std::string, std::shared_ptr<const Pattern>>& sources,
+    int beatsPerBar,
+    int projectLengthSteps) {
+    auto out = std::make_shared<Pattern>();
+    out->name = "Arrangement";
+    out->lengthSteps = projectLengthSteps;
+    for (const ClipSpec& clip : clips) {
+        const auto found = sources.find(clip.pattern);
+        if (found == sources.end() || !found->second) continue;
+        const Pattern& src = *found->second;
+        const int sourceLength = std::max(1, src.steps(beatsPerBar));
+        double sourcePos = static_cast<double>(clip.sourceOffsetSteps);
+        int consumed = 0;
+        int timeline = clip.startSteps;
+        while (consumed < clip.lengthSteps && out->notes.size() < kMaxPatternNotes) {
+            if (sourcePos >= sourceLength) {
+                if (!clip.loop) break;
+                sourcePos = std::fmod(sourcePos, static_cast<double>(sourceLength));
+            }
+            const int segment = static_cast<int>(std::min<double>(
+                clip.lengthSteps - consumed, sourceLength - sourcePos));
+            if (segment <= 0) break;
+            const double sourceEnd = sourcePos + segment;
+            const size_t noteBase = out->notes.size();
+            struct RatchetSpan { double start, end; uint16_t sub; };
+            std::vector<std::vector<RatchetSpan>> eventSpans;
+            std::vector<int> remap(src.notes.size(), -1);
+            for (size_t i = 0; i < src.notes.size() && out->notes.size() < kMaxPatternNotes; ++i) {
+                const PatternNote& original = src.notes[i];
+                const double originalEnd = original.at + original.len;
+                if (originalEnd <= sourcePos || original.at >= sourceEnd) continue;
+                const double clippedStart = std::max(original.at, sourcePos);
+                const double clippedEnd = std::min(originalEnd, sourceEnd);
+                const bool trimmedAtStart = clippedStart > original.at;
+                const bool trimmedAtEnd = clippedEnd < originalEnd;
+                // Intersect each ratchet with the source window. This preserves both sustained
+                // note tails and the original ratchet grid when a clip starts or ends mid-note.
+                std::vector<RatchetSpan> spans;
+                const double ratchetLength = original.len / original.ratchet;
+                for (int q = 0; q < original.ratchet; ++q) {
+                    const double ratchetStart = original.at + ratchetLength * q;
+                    const double ratchetEnd = original.at + ratchetLength * (q + 1);
+                    const double start = std::max(ratchetStart, sourcePos);
+                    const double end = std::min(ratchetEnd, sourceEnd);
+                    if (end > start)
+                        spans.push_back({timeline + (start - sourcePos), timeline + (end - sourcePos),
+                                         static_cast<uint16_t>(q)});
+                }
+                if (spans.empty()) continue;
+                PatternNote note = original;
+                note.at = timeline + (clippedStart - sourcePos);
+                note.len = clippedEnd - clippedStart;
+                if (trimmedAtStart || trimmedAtEnd) note.slideFrom = note.slideTo = -1;
+                remap[i] = static_cast<int>(out->notes.size());
+                out->notes.push_back(note);
+                eventSpans.push_back(std::move(spans));
+                out->lastEnd = std::max(out->lastEnd, note.at + note.len);
+            }
+            for (size_t i = 0; i < remap.size(); ++i) {
+                if (remap[i] < 0) continue;
+                const PatternNote& original = src.notes[i];
+                PatternNote& note = out->notes[static_cast<size_t>(remap[i])];
+                if (original.slideFrom >= 0 && static_cast<size_t>(original.slideFrom) < remap.size() &&
+                    remap[static_cast<size_t>(original.slideFrom)] >= 0)
+                    note.slideFrom = remap[static_cast<size_t>(original.slideFrom)];
+                if (original.slideTo >= 0 && static_cast<size_t>(original.slideTo) < remap.size() &&
+                    remap[static_cast<size_t>(original.slideTo)] >= 0)
+                    note.slideTo = remap[static_cast<size_t>(original.slideTo)];
+            }
+            for (size_t i = 0; i < eventSpans.size(); ++i) {
+                const uint32_t noteIndex = static_cast<uint32_t>(noteBase + i);
+                for (const RatchetSpan& span : eventSpans[i]) {
+                    out->events.push_back({span.start, noteIndex, span.sub, true});
+                    out->events.push_back({span.end, noteIndex, span.sub, false});
+                }
+            }
+            timeline += segment;
+            consumed += segment;
+            sourcePos = 0;
+            if (!clip.loop) break;
+        }
+    }
+    std::stable_sort(out->events.begin(), out->events.end(), [](const PatternEvent& a, const PatternEvent& b) {
+        if (a.step != b.step) return a.step < b.step;
+        // Release notes ending on this sample before starting notes at the same sample.
+        // This allows a just-freed voice to be reused at clip and note boundaries.
+        return !a.on && b.on;
+    });
+    return out;
+}
+
 // Lets every held note go into its release (at a layer restart, or when the pattern changes).
 void releaseVoices(Voice* voices) {
     for (int v = 0; v < kVoices; ++v)
@@ -145,6 +248,22 @@ void releaseVoices(Voice* voices) {
 
 double bitsToDouble(uint64_t b) { return std::bit_cast<double>(b); }
 uint64_t doubleToBits(double d) { return std::bit_cast<uint64_t>(d); }
+
+double automationValue(int count, const double* steps, const double* values, double at, double fallback) noexcept {
+    if (count <= 0) return fallback;
+    if (at <= steps[0]) return values[0];
+    int lo = 0, hi = count - 1;
+    while (lo + 1 < hi) {
+        const int mid = (lo + hi) / 2;
+        if (steps[mid] <= at) lo = mid; else hi = mid;
+    }
+    if (at >= steps[count - 1]) return values[count - 1];
+    const double span = steps[hi] - steps[lo];
+    if (span <= 0.0) return values[hi];
+    const double t = (at - steps[lo]) / span;
+    return values[lo] + (values[hi] - values[lo]) * t;
+}
+
 
 void storeMax(std::atomic<float>& a, float v) {
     float cur = a.load(std::memory_order_relaxed);
@@ -414,16 +533,20 @@ std::string Engine::setProject(const ProjectSpec& p) {
         double vol, pan;
         bool mute, solo;
         int order;
+        std::vector<ClipSpec> clips;
+        std::vector<AutomationLaneSpec> automation;
+        std::string parentId;
+        bool bus = false;
     };
     std::vector<Want> wants;
     int order = 0;
     if (p.auditionOnly) {
-        wants.push_back({"\x01audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000});
+        wants.push_back({"\1audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false});
     }
     order_.clear();
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
-        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order});
+        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled});
     }
 
     // Pass 1: which modules each layer plays, and its slot.
@@ -433,6 +556,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
         std::vector<std::string> ids;
         std::vector<const Program*> sig;
         std::shared_ptr<const Pattern> pattern;
+        std::string arrangementSig;
+        std::string automationSig;
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
@@ -446,8 +571,9 @@ std::string Engine::setProject(const ProjectSpec& p) {
                                    " after the pattern's length and never play" + (late == 1 ? "s" : ""));
     }
     int64_t projectState = 0;
+    std::vector<std::vector<int>> readsFrom(kSlots);
     for (Want& w : wants) {
-        Planned pl{w, {}, {}, {}, nullptr};
+        Planned pl{w, {}, {}, {}, nullptr, {}, {}};
         int64_t layerState = 0;
         for (const std::string& id : w.chain) {
             auto it = modules_.find(id);
@@ -456,8 +582,31 @@ std::string Engine::setProject(const ProjectSpec& p) {
             pl.sig.push_back(it->second.program.get());
             layerState += it->second.program->stateSize;
         }
-        // A pattern plays the generator as voices and sets the layer's loop length.
-        if (!w.pattern.empty() && !pl.ids.empty()) {
+        // Arrangement clips are compiled into an immutable absolute-time event stream here,
+        // on the control thread. A layer still uses one voice pool and one instrument/effect chain.
+        if (!w.clips.empty() && !pl.ids.empty()) {
+            pl.arrangementSig = std::to_string(p.beatsPerBar) + "|" + std::to_string(p.loopSteps()) + "|";
+            std::map<std::string, std::shared_ptr<const Pattern>> sources;
+            for (const auto& [moduleId, module] : modules_)
+                if (module.pattern) sources.emplace(moduleId, module.pattern);
+            for (const ClipSpec& clip : w.clips) {
+                pl.arrangementSig += clip.id + "|" + clip.pattern + "|" + std::to_string(clip.startSteps) + "|" +
+                    std::to_string(clip.lengthSteps) + "|" + std::to_string(clip.sourceOffsetSteps) + "|" +
+                    (clip.loop ? "1" : "0") + "|";
+                auto source = modules_.find(clip.pattern);
+                if (source != modules_.end()) pl.arrangementSig += source->second.source;
+                pl.arrangementSig += "\x1e";
+            }
+            auto previous = layers_.find(w.id);
+            if (previous != layers_.end() && previous->second.arrangementSig == pl.arrangementSig &&
+                previous->second.pattern) {
+                pl.pattern = previous->second.pattern;
+            } else {
+                pl.pattern = compileArrangement(w.clips, sources, p.beatsPerBar, p.loopSteps());
+            }
+            pl.w.steps = 0;  // arrangement follows the project transport, not an individual clip loop
+            layerState += static_cast<int64_t>(kVoices - 1) * modules_.at(pl.ids.front()).program->stateSize;
+        } else if (!w.pattern.empty() && !pl.ids.empty()) {
             auto it = modules_.find(w.pattern);
             if (it != modules_.end() && it->second.pattern) {
                 pl.pattern = it->second.pattern;
@@ -480,7 +629,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             layers_.erase(it);
         }
         const bool isAudition = w.id[0] == '\x01';
-        if (pl.ids.empty()) {
+        if (pl.ids.empty() && !w.bus) {
             if (pl.ls.slot >= 0) {
                 Cmd c;
                 c.type = Cmd::Remove;
@@ -493,6 +642,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             pl.ls.slot = isAudition ? kAuditionSlot : freeSlot();
             if (isAudition) slotBusy_[kAuditionSlot] = true;
             if (pl.ls.slot < 0) continue;  // all slots busy (removals still fading)
+            pl.ls.automationSig = "\x01new-slot";  // force an empty-or-populated automation command on slot reuse
             pl.ls.sig.clear();
             pl.ls.wiring.clear();
             pl.ls.chain = nullptr;
@@ -502,6 +652,49 @@ std::string Engine::setProject(const ProjectSpec& p) {
             pl.ls.volume = -1;
         }
         plan.push_back(std::move(pl));
+    }
+
+    // Resolve nested folder buses and make parents depend on their children in render order.
+    std::map<std::string, int> slotByLayer;
+    std::map<std::string, const LayerSpec*> specByLayer;
+    for (const LayerSpec& layer : p.layers) specByLayer[layer.id] = &layer;
+    for (const Planned& pl : plan) slotByLayer[pl.w.id] = pl.ls.slot;
+    for (Planned& pl : plan) {
+        // Recompute routing from the new project, not the previous snapshot.
+        pl.ls.parentSlot = -1;
+        std::string parent = pl.w.parentId;
+        for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+            auto spec = specByLayer.find(parent);
+            if (spec == specByLayer.end()) break;
+            auto bus = slotByLayer.find(parent);
+            if (spec->second->folder && spec->second->busEnabled && bus != slotByLayer.end()) {
+                pl.ls.parentSlot = bus->second;
+                break;
+            }
+            parent = spec->second->parentId;
+        }
+        if (pl.ls.parentSlot >= 0) readsFrom[pl.ls.parentSlot].push_back(pl.ls.slot);
+        // Soloing a folder solos its descendants; soloing a child keeps every ancestor bus open.
+        std::string ancestor = pl.w.parentId;
+        for (int depth = 0; !ancestor.empty() && depth < kMaxLayers; ++depth) {
+            auto spec = specByLayer.find(ancestor);
+            if (spec == specByLayer.end()) break;
+            if (spec->second->solo) pl.w.solo = true;
+            if (spec->second->folder && !spec->second->busEnabled && spec->second->mute) pl.w.mute = true;
+            ancestor = spec->second->parentId;
+        }
+        if (pl.w.bus) {
+            for (const LayerSpec& candidate : p.layers) {
+                if (!candidate.solo) continue;
+                std::string parent = candidate.parentId;
+                for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+                    if (parent == pl.w.id) { pl.w.solo = true; break; }
+                    auto spec = specByLayer.find(parent);
+                    if (spec == specByLayer.end()) break;
+                    parent = spec->second->parentId;
+                }
+            }
+        }
     }
 
     // Pass 2: where each exported value lives. The first layer (in project order) playing a module provides it.
@@ -524,7 +717,6 @@ std::string Engine::setProject(const ProjectSpec& p) {
     }
 
     // Pass 3: wire imports, install changed chains, and order layers so exporters run before their readers.
-    std::vector<std::vector<int>> readsFrom(kSlots);
     std::map<std::string, LayerState> nextLayers;
     std::vector<int> projectOrder;
     for (Planned& pl : plan) {
@@ -542,6 +734,12 @@ std::string Engine::setProject(const ProjectSpec& p) {
             }
         LayerState& ls = pl.ls;
         const Want& w = pl.w;
+        ls.arrangementSig = pl.arrangementSig;
+        for (const AutomationLaneSpec& lane : w.automation) {
+            pl.automationSig += lane.target + "|";
+            for (const AutomationPointSpec& point : lane.points)
+                pl.automationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ";";
+        }
         const bool voiced = pl.pattern != nullptr;
         if (w.vol != ls.volume || w.pan != ls.pan || w.mute != ls.mute || w.solo != ls.solo) {
             writeMix(ls.slot, w.vol, w.pan, w.mute, w.solo);
@@ -549,6 +747,66 @@ std::string Engine::setProject(const ProjectSpec& p) {
             ls.pan = w.pan;
             ls.mute = w.mute;
             ls.solo = w.solo;
+        }
+        if (w.bus) {
+            Cmd bus;
+            bus.type = Cmd::ConfigureBus;
+            bus.slot = ls.slot;
+            bus.parentSlot = pl.ls.parentSlot;
+            bus.order = w.order;
+            const bool newBus = !ls.bus;
+            bus.flag = newBus;
+            if (newBus) ls.automationSig = "\\x01new-slot";
+            send(bus);
+            ls.bus = true;
+            ls.parentSlot = pl.ls.parentSlot;
+            if (ls.automationSig != pl.automationSig) {
+                Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot; automation.flag = newBus;
+                for (const AutomationLaneSpec& lane : w.automation) {
+                    int* count = lane.target == "volume" ? &automation.volumeAutomationCount : &automation.panAutomationCount;
+                    double* steps = lane.target == "volume" ? automation.volumeAutomationStep : automation.panAutomationStep;
+                    double* values = lane.target == "volume" ? automation.volumeAutomationValue : automation.panAutomationValue;
+                    for (const AutomationPointSpec& point : lane.points) {
+                        if (*count >= 128) break;
+                        steps[*count] = point.step; values[*count] = point.value; ++*count;
+                    }
+                }
+                send(automation);
+                ls.automationSig = pl.automationSig;
+            }
+            ls.chain = nullptr;
+            ls.sig.clear();
+            ls.wiring.clear();
+            ls.pattern.reset();
+            ls.voiced = false;
+            ls.steps = 0;
+            projectOrder.push_back(ls.slot);
+            nextLayers[w.id] = ls;
+            continue;
+        }
+        if (ls.bus) ls.automationSig = "\\x01new-slot";
+        if (ls.automationSig != pl.automationSig) {
+            Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot;
+            for (const AutomationLaneSpec& lane : w.automation) {
+                int* count = lane.target == "volume" ? &automation.volumeAutomationCount : &automation.panAutomationCount;
+                double* steps = lane.target == "volume" ? automation.volumeAutomationStep : automation.panAutomationStep;
+                double* values = lane.target == "volume" ? automation.volumeAutomationValue : automation.panAutomationValue;
+                for (const AutomationPointSpec& point : lane.points) {
+                    if (*count >= 128) break;
+                    steps[*count] = point.step; values[*count] = point.value; ++*count;
+                }
+            }
+            send(automation);
+            ls.automationSig = pl.automationSig;
+        }
+        {
+            Cmd routing;
+            routing.type = Cmd::SetRouting;
+            routing.slot = ls.slot;
+            routing.parentSlot = pl.ls.parentSlot;
+            send(routing);
+            ls.bus = false;
+            ls.parentSlot = pl.ls.parentSlot;
         }
         if (pl.pattern != ls.pattern) {
             Cmd cmd;
@@ -851,11 +1109,13 @@ void Engine::applyCommands() noexcept {
                     s.fresh = true;
                     s.contiguous = false;
                     s.overloaded = false;
+                    s.bus = false;
                     s.overloadFlag.store(false, std::memory_order_relaxed);
                     s.k = -1;
                     s.epoch = -1;
                     updateSolo();
-                    s.gain = slotTarget(s);
+                    const double initialTarget = slotTarget(s);
+                    s.gain = initialTarget > 0.0 && s.volumeAutomationCount > 0 ? s.volumeAutomationValue[0] : initialTarget;
                 } else if (swapMode_ > 0 && playing_ && stopFade_ == 0) {
                     // Wait for the next beat or bar; newer code replaces code still waiting.
                     retire(s.pending, -1);
@@ -870,6 +1130,43 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetSteps:
                 slots_[c.slot].steps = c.steps;
                 break;
+            case Cmd::SetRouting: {
+                Slot& s = slots_[c.slot];
+                s.parentSlot = c.parentSlot;
+                s.bus = false;
+                break;
+            }
+            case Cmd::SetAutomation: {
+                Slot& s = slots_[c.slot];
+                s.volumeAutomationCount = c.volumeAutomationCount;
+                s.panAutomationCount = c.panAutomationCount;
+                std::copy_n(c.volumeAutomationStep, s.volumeAutomationCount, s.volumeAutomationStep);
+                std::copy_n(c.volumeAutomationValue, s.volumeAutomationCount, s.volumeAutomationValue);
+                std::copy_n(c.panAutomationStep, s.panAutomationCount, s.panAutomationStep);
+                std::copy_n(c.panAutomationValue, s.panAutomationCount, s.panAutomationValue);
+                if (c.flag && s.bus) {
+                    const double initialTarget = slotTarget(s);
+                    s.gain = initialTarget > 0.0 && s.volumeAutomationCount > 0 ? s.volumeAutomationValue[0] : initialTarget;
+                }
+                break;
+            }
+            case Cmd::ConfigureBus: {
+                Slot& s = slots_[c.slot];
+                retire(s.cur, -1, s.pattern);
+                retire(s.old, -1);
+                retire(s.pending, -1);
+                s.cur = s.old = s.pending = nullptr;
+                s.pattern = nullptr;
+                s.active = true;
+                s.removing = false;
+                s.bus = true;
+                if (c.flag) s.volumeAutomationCount = s.panAutomationCount = 0;
+                s.parentSlot = c.parentSlot;
+                s.order = c.order;
+                s.gain = slotTarget(s);
+                updateSolo();
+                break;
+            }
             case Cmd::SetPattern: {
                 Slot& s = slots_[c.slot];
                 // A sounding note finishes as the old pattern had it; the edit is heard from its next start.
@@ -944,7 +1241,11 @@ void Engine::applyCommands() noexcept {
                     s.k = -1;
                     s.epoch = -1;
                     updateSolo();
-                    s.gain = slotTarget(s);
+                    const double target = slotTarget(s);
+                    s.gain = target > 0.0
+                        ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
+                            s.volumeAutomationValue, 0.0, target)
+                        : 0.0;
                 }
                 break;
             case Cmd::Stop:
@@ -975,7 +1276,7 @@ double Engine::slotTarget(const Slot& s) const noexcept {
     if (idx == kAuditionSlot) return 0.0;
     if (s.mute.load(std::memory_order_relaxed)) return 0.0;
     if (anySolo_ && !s.solo.load(std::memory_order_relaxed)) return 0.0;
-    return bitsToDouble(s.vol.load(std::memory_order_relaxed));
+    return s.volumeAutomationCount > 0 ? 1.0 : bitsToDouble(s.vol.load(std::memory_order_relaxed));
 }
 
 void Engine::updateSolo() noexcept {
@@ -1244,7 +1545,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
     const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
     const int swapLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-    if (pan != s.panCache) {
+    if (s.panAutomationCount == 0 && pan != s.panCache) {
         s.panCache = pan;
         const double th = (pan + 1.0) * (kPi / 4.0);
         s.gl = detCos(th);
@@ -1308,7 +1609,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         double* y = tmp_;
         s.cur->layerLen = layerLen;
         const Pattern* pat = s.pattern ? s.pattern->get() : nullptr;
-        runChain(*s.cur, false, n0, len, y, &s, j, pat, k);
+        runChain(*s.cur, false, n0, len, y, &s, j, pat, free ? epoch_ : k);
         if (s.seamLeft > 0) {
             const int sl = std::min(len, s.seamLeft);
             double z[kBlock];
@@ -1337,13 +1638,26 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         }
         int sp = s.scopePos.load(std::memory_order_relaxed);
         for (int i = 0; i < len; ++i) {
-            if (s.gain != target) {
-                s.gain += (target - s.gain) * gainCoef;
-                if (std::fabs(target - s.gain) < 1e-6) s.gain = target;
+            const double step = static_cast<double>(g_ + j + i) / stepLen_;
+            const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
+                s.volumeAutomationValue, step, target) : 0.0;
+            if (s.volumeAutomationCount > 0) {
+                // The interpolated automation curve is already continuous; don't add lag on top.
+                s.gain = desired;
+            } else if (s.gain != desired) {
+                s.gain += (desired - s.gain) * gainCoef;
+                if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
             }
             const double v = finiteOr0(y[i]) * s.gain;
-            mixL_[j + i] += v * s.gl;
-            mixR_[j + i] += v * s.gr;
+            double gl = s.gl, gr = s.gr;
+            if (s.panAutomationCount > 0) {
+                const double automatedPan = automationValue(s.panAutomationCount, s.panAutomationStep,
+                    s.panAutomationValue, step, pan);
+                const double th = (automatedPan + 1.0) * (kPi / 4.0);
+                gl = detCos(th); gr = detSin(th);
+            }
+            s.outL[j + i] = v * gl;
+            s.outR[j + i] = v * gr;
             const float av = static_cast<float>(std::fabs(v));
             if (av > peak) peak = av;
             s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
@@ -1362,8 +1676,12 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
 void Engine::processChunk(float* l, float* r, int m) noexcept {
     std::fill_n(mixL_, m, 0.0);
     std::fill_n(mixR_, m, 0.0);
+    for (int i = 0; i < kSlots; ++i) {
+        std::fill_n(slots_[i].outL, m, 0.0);
+        std::fill_n(slots_[i].outR, m, 0.0);
+    }
     ++chunkId_;
-    // Layers in dependency order first, then any others (for example a layer installed before its order arrived).
+    // Child tracks are rendered before their folder buses; exporters still precede readers.
     for (int pass = 0; pass < 2; ++pass) {
         const int count = pass == 0 ? processCount_ : kSlots;
         for (int k = 0; k < count; ++k) {
@@ -1371,26 +1689,60 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
             Slot& s = slots_[i];
             if (s.visited == chunkId_) continue;
             s.visited = chunkId_;
-            if (!s.active || !s.cur) continue;
+            if (!s.active) continue;
             const double target = slotTarget(s);
-            if (target == 0.0 && s.gain == 0.0) {
-                s.contiguous = false;
-                for (auto& b : s.exportBuf) std::fill_n(b, m, 0.0);  // a silent layer shares zeros
-                if (s.pending) {  // nobody hears this layer: no need to wait for the beat
-                    swapIn(s, s.pending);
-                    s.pending = nullptr;
+            if (s.bus) {
+                const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
+                const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
+                for (int j = 0; j < m; ++j) {
+                    const double step = static_cast<double>(g_ + j) / stepLen_;
+                    const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
+                        s.volumeAutomationValue, step, target) : 0.0;
+                    if (s.volumeAutomationCount > 0) {
+                        s.gain = desired;
+                    } else if (s.gain != desired) {
+                        s.gain += (desired - s.gain) * gainCoef;
+                        if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
+                    }
+                    const double automatedPan = automationValue(s.panAutomationCount, s.panAutomationStep,
+                        s.panAutomationValue, step, pan);
+                    const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
+                    const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
+                    s.outL[j] *= s.gain * leftPan;
+                    s.outR[j] *= s.gain * rightPan;
                 }
-                if (s.removing) {
-                    retire(s.cur, -1, s.pattern);
-                    s.pattern = nullptr;
-                    retire(s.old, i);
-                    s.cur = s.old = nullptr;
-                    s.active = false;
-                    s.removing = false;
+                if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; }
+            } else {
+                if (!s.cur) continue;
+                if (target == 0.0 && s.gain == 0.0) {
+                    s.contiguous = false;
+                    for (auto& b : s.exportBuf) std::fill_n(b, m, 0.0);
+                    if (s.pending) { swapIn(s, s.pending); s.pending = nullptr; }
+                    if (s.removing) {
+                        retire(s.cur, -1, s.pattern);
+                        s.pattern = nullptr;
+                        retire(s.old, i);
+                        s.cur = s.old = nullptr;
+                        s.active = false;
+                        s.removing = false;
+                    }
+                } else {
+                    processSlot(s, m, target);
                 }
-                continue;
             }
-            processSlot(s, m, target);
+            // Route exactly once. A parent bus receives the child's stereo signal; only root tracks hit master.
+            if (s.parentSlot >= 0 && s.parentSlot < kMaxLayers && s.parentSlot != i) {
+                Slot& parent = slots_[s.parentSlot];
+                for (int j = 0; j < m; ++j) {
+                    parent.outL[j] += s.outL[j];
+                    parent.outR[j] += s.outR[j];
+                }
+            } else {
+                for (int j = 0; j < m; ++j) {
+                    mixL_[j] += s.outL[j];
+                    mixR_[j] += s.outR[j];
+                }
+            }
         }
     }
     // Master: gain, DC blocker, then the safety limiter, always last.

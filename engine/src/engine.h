@@ -150,8 +150,11 @@ private:
         int steps = -1;
         bool voiced = false;                     // plays a pattern through a pool of voices
         std::shared_ptr<const Pattern> pattern;  // what the audio thread was last sent
+        std::string arrangementSig;              // source + clip signature; keeps compiled timelines stable
         double volume = -1, pan = 0;
-        bool mute = false, solo = false;
+        bool mute = false, solo = false, bus = false;
+        int parentSlot = -1;
+        std::string automationSig;
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;

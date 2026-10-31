@@ -318,6 +318,48 @@ void main() {
     });
   });
 
+
+  test('mirrors note edits to independent selected pattern sources', () {
+    var before = PatternDoc.blank(name: 'Active');
+    final inserted = before.insert(Steps.zero, 60, Steps(4), vel: .8);
+    before = inserted.doc;
+    final activeId = inserted.id!;
+    var target = PatternDoc.blank(name: 'Target');
+    final targetNote = target.insert(Steps.zero, 60, Steps(4), vel: .5);
+    target = targetNote.doc;
+    final unrelated = target.insert(Steps(8), 67, Steps(2));
+    target = unrelated.doc;
+
+    var after = before.move({activeId}, Steps(2), 1).setVelocity({activeId}, .3);
+    final added = after.insert(Steps(12), 72, Steps(2), vel: .6);
+    after = added.doc;
+
+    final mirrored = target.mirrorChanges(before, after);
+    final moved = mirrored.notes.firstWhere((n) => n.pitch == 61);
+    expect(moved.at, Steps(2));
+    expect(moved.vel, .3);
+    expect(mirrored.notes.any((n) => n.pitch == 67 && n.at == Steps(8)), isTrue);
+    expect(mirrored.notes.any((n) => n.pitch == 72 && n.at == Steps(12)), isTrue);
+  });
+
+  test('mirrors deletions without deleting unrelated reference notes', () {
+    var before = PatternDoc.blank();
+    final note = before.insert(Steps(2), 60, Steps(4));
+    before = note.doc;
+    final other = before.insert(Steps(10), 67, Steps(2));
+    before = other.doc;
+    final after = before.delete({note.id!});
+    var target = PatternDoc.blank();
+    final targetNote = target.insert(Steps(2), 60, Steps(4));
+    target = targetNote.doc;
+    final targetOther = target.insert(Steps(10), 67, Steps(2));
+    target = targetOther.doc;
+
+    final mirrored = target.mirrorChanges(before, after);
+    expect(mirrored.notes.length, 1);
+    expect(mirrored.notes.single.pitch, 67);
+  });
+
   group('edits', () {
     test('insert clamps and gets a fresh id; delete', () {
       final d = body('0 C3 1\n');
@@ -442,6 +484,22 @@ void main() {
       expect(d.nextNoteFrom(Steps(4), 52, -1), 1);
       expect(d.nextNoteFrom(Steps(8), 0, -1), 3);
       expect(d.nextNoteFrom(Steps.zero, 48, -1), isNull);
+    });
+
+    test('multi-source mirroring preserves local ids while applying note deltas', () {
+      final before = body('0 C3 1\n4 E3 2\n8 G3 1\n');
+      final reference = body('0 C3 1\n4 E3 2\n8 G3 1\n');
+      var after = before.move({1}, Steps(2), 1).setVelocity({2}, 0.25).delete({3});
+      after = after.insert(Steps(12), 72, Steps.one, vel: 0.4).doc;
+      final mirrored = reference.mirrorChanges(before, after);
+
+      expect(mirrored.notes, hasLength(3));
+      expect((mirrored.notes[0].at, mirrored.notes[0].pitch), (Steps(2), 49.0));
+      expect(mirrored.notes[1].vel, 0.25);
+      expect((mirrored.notes[2].at, mirrored.notes[2].pitch, mirrored.notes[2].vel),
+          (Steps(12), 72.0, 0.4));
+      expect(mirrored.notes.map((n) => n.id).toSet().length, 3);
+      expect(reference.notes.first.at, Steps.zero);
     });
 
     test('edits leave the original doc alone', () {
