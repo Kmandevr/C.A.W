@@ -207,6 +207,7 @@ class ProjectDoc {
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
+  int get maxArrangementSteps => 64 * stepsPerBar;
   double get loopSeconds => loopSteps * 15.0 / bpm;
 
   /// The key as the engine's numbers: root 0..11 from C, scale 0 = major or 1 = minor (scale.* order).
