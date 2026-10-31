@@ -143,57 +143,10 @@ class _PatternEditorState extends State<PatternEditor> {
     _multiSourceIds = ids;
   }
 
-  PatternDoc _insertEquivalent(PatternDoc doc, PatternNote note) {
-    final inserted = doc.insert(note.at, note.pitch, note.len, vel: note.vel);
-    if (inserted.id == null) return inserted.doc;
-    var next = inserted.doc;
-    final id = inserted.id!;
-    if (note.prob != 1) next = next.setProb({id}, note.prob);
-    if (note.ratchet != 1) next = next.setRatchet({id}, note.ratchet);
-    if (note.slide) next = next.setSlide({id}, true);
-    return next;
-  }
-
-  PatternDoc _mirrorPatternChanges(PatternDoc before, PatternDoc after, PatternDoc target) {
-    var result = target;
-    final afterById = {for (final note in after.notes) note.id: note};
-    final beforeIds = before.notes.map((note) => note.id).toSet();
-    for (final oldNote in before.notes) {
-      final changed = afterById[oldNote.id];
-      final matches = result.notes.where((note) =>
-        note.at == oldNote.at && note.pitch == oldNote.pitch).toList()
-        ..sort((x, y) => (x.len - oldNote.len).toDouble().abs().compareTo((y.len - oldNote.len).toDouble().abs()));
-      if (matches.isEmpty) {
-        if (changed != null && !oldNote.sameAs(changed)) result = _insertEquivalent(result, changed);
-        continue;
-      }
-      final targetNote = matches.first;
-      if (changed == null) {
-        result = result.delete({targetNote.id});
-        continue;
-      }
-      final id = targetNote.id;
-      if (changed.at != oldNote.at || changed.pitch != oldNote.pitch) {
-        result = result.move({id}, changed.at - oldNote.at, changed.pitch - oldNote.pitch);
-      }
-      if (changed.len != oldNote.len) result = result.resize({id}, changed.len - oldNote.len);
-      if (changed.vel != oldNote.vel) result = result.setVelocity({id}, changed.vel);
-      if (changed.prob != oldNote.prob) result = result.setProb({id}, changed.prob);
-      if (changed.ratchet != oldNote.ratchet) result = result.setRatchet({id}, changed.ratchet);
-      if (changed.slide != oldNote.slide) result = result.setSlide({id}, changed.slide);
-    }
-    for (final note in after.notes) {
-      if (beforeIds.contains(note.id)) continue;
-      if (result.notes.any((existing) => existing.sameAs(note))) continue;
-      result = _insertEquivalent(result, note);
-    }
-    return result;
-  }
-
   void _mirrorSelectedSources(PatternDoc before, PatternDoc after) {
     if (!_multiEditEnabled) return;
     for (final id in _multiDocs.keys.toList()) {
-      _multiDocs[id] = _mirrorPatternChanges(before, after, _multiDocs[id]!);
+      _multiDocs[id] = _multiDocs[id]!.mirrorChanges(before, after);
     }
   }
 
