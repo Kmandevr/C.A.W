@@ -98,6 +98,22 @@ void main() {
     expect(a['audition_only'], true);
   });
 
+  test('imported clips are normalized to the meter-aware song limit', () {
+    final raw = sample().toJson();
+    raw['beats_per_bar'] = 3;
+    final layers = raw['layers'] as List;
+    (layers[0] as Map)['clips'] = [
+      {'id': 'late', 'pattern': 'pat', 'start_steps': 760,
+       'length_steps': 64, 'source_offset_steps': 900},
+    ];
+    final imported = ProjectDoc.fromJson(raw);
+    final clip = imported.layers[0].clips.single;
+    expect(imported.maxArrangementSteps, 768);
+    expect(clip.startSteps, 760);
+    expect(clip.lengthSteps, 8);
+    expect(clip.sourceOffsetSteps, 768);
+  });
+
   test('header values', () {
     const src = '---\ncaw: 1\nkind: effect  # comment\nname: Fold\n---\nin';
     expect(headerValue(src, 'kind'), 'effect');
