@@ -79,7 +79,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 ## How it works
 
 - **Engine access:** `lib/engine/bindings.dart` binds the C API by hand. `lib/engine/engine.dart` wraps it:
-  - Project updates and exports run on worker isolates, so compiling never blocks the UI. Updates run one at a time, in order.
+  - Project compilation, source checks and offline exports run as jobs on the bounded native C++ worker pool, so engine work does not run on the UI isolate. Project updates are serialized in order; a short-lived Dart isolate waits for each native job's completion without blocking the UI isolate.
   - Meters and scopes are read about 30 times a second, but only while playing and for 1 s after stopping, and never in the background (`lib/model/poller.dart`). Stopped and settled, the app does no periodic work, and after 30 s it closes the audio device; Play reopens it.
   - Slider drags and typing update only the widgets that show them, not the whole app ([performance](performance.md#app-audit-2026-10-28)).
   - Volume, pan, mute, solo and param changes go straight to the engine. Everything else re-sends the project, and the engine applies only what changed.
@@ -145,4 +145,5 @@ The piano roll's toolbar exposes **Copy (N)** and **Paste** while notes are sele
 - settings, theme files and the startup choices
 - the Tracks area on a phone: cards, the track panel and Edit opening the sound in Sounds (with `CAW_LIB`)
 - integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.
+- live-update integration coverage waits for the successful native compile result before editing again, then verifies that an invalid compile is actually attempted and the last successful source is restored.
 - native execution-policy tests: hardware-profile bounds, workload/pressure plans, serialized interactive scheduling and off-isolate module checks.
