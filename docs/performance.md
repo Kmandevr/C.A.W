@@ -101,7 +101,8 @@ Timed release run after the fixes (same server, a single run, so noisy):
 
 - **[Fact]** The native profile is a startup snapshot, not a polling loop. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU quota where readable. The effective core count is the tightest available limit.
 - **[Fact]** Linux/Android memory availability is bounded by both system-available memory and a finite cgroup memory limit minus current usage. A missing or unlimited cgroup value is ignored. A zero profile field means unknown; the policy uses a one-worker fallback instead of inventing a capacity.
-- **Verification boundary:** policy unit tests cover unknown profiles and explicit CPU/memory caps. The actual host probe remains platform-dependent and must be validated on representative Android and desktop devices.
+- **[Fact]** The Android host reports thermal status (Android 10+) and battery-saver changes through event-driven platform channels. Foreground/background and audio-playing transitions also refresh the active worker budget. Unsupported platforms retain an explicit `Unknown` pressure state; background/offline work reserves one core where possible and GPU work is disabled.
+- **Verification boundary:** policy unit tests cover unknown pressure, runtime foreground/audio changes, explicit CPU/memory caps and thermal/battery levels. CI verifies Android compilation and Dart mapping; actual thermal response, battery behavior and scheduling impact still require representative physical-device tests.
 
 ## App audit (2026-10-28)
 

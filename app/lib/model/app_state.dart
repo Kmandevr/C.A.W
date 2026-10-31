@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../engine/engine.dart';
 import '../engine/execution.dart';
 import 'poller.dart';
+import '../platform/resource_signals.dart';
 import 'project.dart';
 import 'settings.dart';
 import 'storage.dart';
@@ -76,6 +77,7 @@ class AppState extends ChangeNotifier {
   Timer? _syncTimer;
   Timer? _liveTimer;
   bool _disposed = false;
+  StreamSubscription<EnginePressure>? _resourcePressureSubscription;
   final Map<String, String> _lastGoodRunSources = {};
   // Meters are read only while something moves; stopped and settled, the app does no work and closes the audio
   // device after a while (Play reopens it).
@@ -87,6 +89,11 @@ class AppState extends ChangeNotifier {
   });
 
   Future<void> init() async {
+    _resourcePressureSubscription = ResourceSignals.changes.listen(
+      (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
+      onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
+    );
+    EngineExecutionPolicy.updateRuntimeSignals(pressure: await ResourceSignals.read());
     try {
       engine = Engine.create();
       hardwareProfile = EngineExecutionPolicy.hardwareProfile;
@@ -128,6 +135,9 @@ class AppState extends ChangeNotifier {
     _disposed = true;
     settings.removeListener(_settingsChanged);
     _poller.dispose();
+    final pressureSubscription = _resourcePressureSubscription;
+    _resourcePressureSubscription = null;
+    if (pressureSubscription != null) unawaited(pressureSubscription.cancel());
     _liveTimer?.cancel();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
@@ -141,6 +151,9 @@ class AppState extends ChangeNotifier {
     if (e == null) return false;
     final before = meters;
     meters = e.meters();
+    if (before.playing != meters.playing) {
+      EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
+    }
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
@@ -311,6 +324,7 @@ class AppState extends ChangeNotifier {
       e.play();
     }
     meters = e.meters();
+    EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
     _poller.wake();
     notifyListeners();
   }
@@ -323,6 +337,7 @@ class AppState extends ChangeNotifier {
 
   /// Called when the app goes to the background or returns.
   void lifecycle({required bool foreground}) {
+    EngineExecutionPolicy.updateRuntimeSignals(foreground: foreground);
     _poller.setVisible(foreground);
     final e = engine;
     if (e == null) return;

@@ -10,7 +10,7 @@ extern "C" CAW_API int32_t caw_execution_plan(const CawHardwareProfile* hardware
                                                CawExecutionPlan* out) {
     if (!hardware || !request || !out) return 1;
     if (request->workload < CAW_WORK_INTERACTIVE_AUDITION || request->workload > CAW_WORK_IDLE ||
-        request->pressure < CAW_PRESSURE_NORMAL || request->pressure > CAW_PRESSURE_THERMAL_CRITICAL) {
+        request->pressure < CAW_PRESSURE_NORMAL || request->pressure > CAW_PRESSURE_UNKNOWN) {
         return 2;
     }
 
