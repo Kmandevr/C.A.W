@@ -4,13 +4,16 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../engine/execution.dart';
 import '../model/settings.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, required this.settings});
+  const SettingsPage({super.key, required this.settings, this.engineProfile, this.executionPlan});
   final Settings settings;
+  final EngineHardwareProfile? engineProfile;
+  final EngineExecutionPlan? executionPlan;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -56,6 +59,32 @@ class SettingsPage extends StatelessWidget {
               value: settings.lightAuto,
               onChanged: (v) => settings.update((s) => s.lightAuto = v),
             ),
+            const Heading('Engine'),
+            ListTile(
+              leading: Icon(Icons.memory, color: Neon.green),
+              title: const Text('Native hardware profile'),
+              subtitle: Text(
+                engineProfile == null
+                    ? 'Unavailable: the native engine did not load'
+                    : '${engineProfile!.logicalCores} logical cores · '
+                        '${engineProfile!.memoryBudgetMiB} MiB work budget · '
+                        'SIMD ${engineProfile!.supportsSimd ? 'available' : 'unavailable'} · '
+                        'GPU compute ${engineProfile!.supportsGpuCompute ? 'available' : 'unavailable'}',
+                style: TextStyle(color: Neon.dim),
+              ),
+            ),
+            if (executionPlan != null)
+              ListTile(
+                leading: Icon(Icons.tune, color: Neon.blue),
+                title: const Text('Interactive workload plan'),
+                subtitle: Text(
+                  '${executionPlan!.workerThreads} worker(s) · '
+                      '${executionPlan!.maxConcurrentJobs} concurrent job(s) · '
+                      '${executionPlan!.preferredBatchFrames} preferred batch frames · '
+                      '${executionPlan!.latencySensitive ? 'latency-sensitive' : 'throughput-oriented'}',
+                  style: TextStyle(color: Neon.dim),
+                ),
+              ),
             const Heading('Live coding'),
             SwitchListTile(
               secondary: Icon(Icons.bolt, color: Neon.green),

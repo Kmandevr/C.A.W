@@ -9,6 +9,12 @@ updated: 2026-10-30
 
 The Flutter app in `app/`. The engine it drives is described in [engine](engine.md), and v1's scope is in [roadmap](roadmap.md). Everything here is **[Fact]**, checked in the code and by its tests.
 
+## Engine integration
+
+The app calls the shared native engine only through the versioned C API in `lib/engine/bindings.dart`. Project compilation and offline renders run on worker isolates; the app also exposes scheduled async source checks for preview work. Live auto-update uses the result of its single project compile instead of compiling the same source twice. None of that work runs on the audio callback. `lib/engine/execution.dart` binds the engine's hardware-profile probe and workload planner, then uses those native plans to bound and prioritize app-side isolate jobs. Foreground audition/preview work takes priority, background/offline work yields when foreground work is pending, and total scheduled jobs stay within the detected core and conservative memory budgets.
+
+Settings shows the detected logical cores, conservative work-memory budget, SIMD capability, GPU-compute capability and the interactive workload plan. The app currently supplies normal pressure because it has no verified cross-platform thermal/battery signal; it does not infer thermal state from audio CPU usage. The current engine reports GPU compute unavailable. The app-side scheduler consumes the native policy but does not yet route jobs through the engine's internal C++ `AdaptiveWorkerPool`.
+
 ## Areas
 
 - **Top bar:**
@@ -139,3 +145,4 @@ The piano roll's toolbar exposes **Copy (N)** and **Paste** while notes are sele
 - settings, theme files and the startup choices
 - the Tracks area on a phone: cards, the track panel and Edit opening the sound in Sounds (with `CAW_LIB`)
 - integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.
+- native execution-policy tests: hardware-profile bounds, workload/pressure plans, serialized interactive scheduling and off-isolate module checks.

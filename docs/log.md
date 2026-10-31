@@ -6,6 +6,8 @@ updated: 2026-10-30
 
 # Log
 
+- 2026-10-30: Connected the app's isolate work scheduling to the engine's hardware profile and workload policy; added native capability diagnostics in Settings and FFI/scheduler tests.
+
 - 2026-10-30: Briefly added touchscreen Vim controls and an editable command line (Issue #22); the touch controls were later removed after the owner clarified Vim is for attached physical keyboards.
 - 2026-10-30: Replaced the proposed touchscreen Vim key panel with customizable touch quick actions in Sounds, Tracks and Export. Actions run directly, and per-area toolbars reuse the persistent keymap format; Vim remains for attached physical keyboards (Issue #23).
 

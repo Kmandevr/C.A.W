@@ -34,6 +34,45 @@ final class CawLayerMeterStruct extends Struct {
   external int overloaded;
 }
 
+final class CawHardwareProfileStruct extends Struct {
+  @Uint16()
+  external int logicalCores;
+  @Uint32()
+  external int memoryBudgetMiB;
+  @Int32()
+  external int supportsSimd;
+  @Int32()
+  external int supportsGpuCompute;
+}
+
+final class CawExecutionRequestStruct extends Struct {
+  @Int32()
+  external int workload;
+  @Int32()
+  external int pressure;
+  @Int32()
+  external int foregroundBusy;
+  @Int32()
+  external int allowGpu;
+}
+
+final class CawExecutionPlanStruct extends Struct {
+  @Uint16()
+  external int workerThreads;
+  @Uint16()
+  external int maxConcurrentJobs;
+  @Uint32()
+  external int preferredBatchFrames;
+  @Int32()
+  external int latencySensitive;
+  @Int32()
+  external int useSimd;
+  @Int32()
+  external int allowGpu;
+  @Int32()
+  external int yieldToForeground;
+}
+
 final class CawRenderOptionsStruct extends Struct {
   @Int32()
   external int kind;
@@ -103,7 +142,15 @@ class Bindings {
         patternFromMidi = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Uint8>, Int32),
             Pointer<Utf8> Function(Pointer<Uint8>, int)>('caw_pattern_from_midi'),
         patternExport = lib.lookupFunction<Int32 Function(Pointer<Utf8>, Double, Int32, Int32, Pointer<Utf8>, Pointer<Utf8>, Int32),
-            int Function(Pointer<Utf8>, double, int, int, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_pattern_export');
+            int Function(Pointer<Utf8>, double, int, int, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_pattern_export'),
+        hardwareProfileDetect = lib.lookupFunction<
+            Int32 Function(Pointer<CawHardwareProfileStruct>),
+            int Function(Pointer<CawHardwareProfileStruct>)>('caw_hardware_profile_detect'),
+        executionPlan = lib.lookupFunction<
+            Int32 Function(Pointer<CawHardwareProfileStruct>, Pointer<CawExecutionRequestStruct>,
+                Pointer<CawExecutionPlanStruct>),
+            int Function(Pointer<CawHardwareProfileStruct>, Pointer<CawExecutionRequestStruct>,
+                Pointer<CawExecutionPlanStruct>)>('caw_execution_plan');
 
   static Bindings? _instance;
 
@@ -136,4 +183,7 @@ class Bindings {
   final Pointer<Utf8> Function(int) templateSource;
   final Pointer<Utf8> Function(Pointer<Uint8>, int) patternFromMidi;
   final int Function(Pointer<Utf8>, double, int, int, Pointer<Utf8>, Pointer<Utf8>, int) patternExport;
+  final int Function(Pointer<CawHardwareProfileStruct>) hardwareProfileDetect;
+  final int Function(Pointer<CawHardwareProfileStruct>, Pointer<CawExecutionRequestStruct>,
+      Pointer<CawExecutionPlanStruct>) executionPlan;
 }

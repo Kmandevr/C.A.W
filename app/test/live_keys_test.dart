@@ -123,7 +123,7 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     expect(kick.edited, isFalse);
     s.editSource(kick.id, '${kick.source}\n((('); // doesn't compile: waits
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
     expect(kick.edited, isTrue);
     s.settings.lightMode = true;
     s.meters = const EngineMeters(playing: true);
