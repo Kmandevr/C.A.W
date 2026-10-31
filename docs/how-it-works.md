@@ -1,7 +1,7 @@
 ---
 title: How it works
 summary: The path a sound takes from a .caw file to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
-covers: [engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/src/builtins.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart]
+covers: [engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/include/caw.h, engine/src/builtins.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/execution_capi.cpp, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart, app/lib/platform/resource_signals.dart, app/android/app/src/main/kotlin/com/kmandevr/caw/MainActivity.kt]
 updated: 2026-10-31
 ---
 
