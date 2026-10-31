@@ -3,20 +3,13 @@
 
 #include "caw.h"
 
-#include <chrono>
 #include <cstring>
-#include <thread>
 
 namespace {
 bool waitFor(CawJob* job, CawJobStatus& status) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (std::chrono::steady_clock::now() < deadline) {
-        status.struct_size = sizeof(status);
-        if (caw_job_get_status(job, &status) != 0) return false;
-        if (status.state >= 2) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    return false;
+    if (caw_job_wait(job, 5000) != 0) return false;
+    status.struct_size = sizeof(status);
+    return caw_job_get_status(job, &status) == 0 && status.state >= CAW_JOB_SUCCEEDED;
 }
 }
 
