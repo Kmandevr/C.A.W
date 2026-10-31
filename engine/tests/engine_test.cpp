@@ -50,6 +50,20 @@ float maxStep(const std::vector<float>& v, size_t from, size_t to) {
 
 }  // namespace
 
+TEST(audition_only_uses_the_dedicated_audition_slot) {
+    ProjectSpec p = project({{"tone", std::string(kFloat) + "0.5"}});
+    p.layers.clear();
+    p.auditionChain = {"tone"};
+    p.auditionOnly = true;
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 256);
+    CHECK_NEAR(left[200], static_cast<float>(0.5 * std::cos(kPi / 4.0)), 1e-5);
+}
+
 TEST(folder_bus_routes_children_and_applies_group_gain) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
     LayerSpec folder;
