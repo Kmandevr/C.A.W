@@ -25,6 +25,16 @@ class ModulationPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final i = info;
     if (i == null || !i.ok || i.isLibrary || i.isPattern) return const SizedBox.shrink();
+    if (module.edited) {
+      return const Card(
+        color: Neon.panel,
+        child: Padding(
+          padding: EdgeInsets.all(12),
+          child: Text('Run this module to refresh its available modulation targets and connections.',
+              style: TextStyle(color: Neon.dim, fontSize: 12)),
+        ),
+      );
+    }
     if (i.kind == 'synth') return _SynthModEditor(source: module.source, onChanged: onSourceChanged);
     final panels = <Widget>[];
     if (i.params.any((p) => p.kind == ParamKind.number && p.max > p.min)) {
