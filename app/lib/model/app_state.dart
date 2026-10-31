@@ -495,7 +495,28 @@ class AppState extends ChangeNotifier {
         parent = project.layers.where((x) => x.id == parent).firstOrNull?.parentId;
       }
     }
-    editLayer(layer, (l) => l.parentId = folderId);
+    bool inSubtree(LayerDoc candidate, String root) {
+      var parent = candidate.parentId;
+      for (var depth = 0; parent != null && depth < project.layers.length; depth++) {
+        if (parent == root) return true;
+        parent = project.layers.where((x) => x.id == parent).firstOrNull?.parentId;
+      }
+      return false;
+    }
+    final subtree = project.layers.where((candidate) =>
+      candidate.id == layer.id || inSubtree(candidate, layer.id)).toList();
+    project.layers.removeWhere((candidate) => subtree.contains(candidate));
+    layer.parentId = folderId;
+    if (folderId == null) {
+      project.layers.addAll(subtree);
+    } else {
+      var insertAt = project.layers.indexWhere((x) => x.id == folderId) + 1;
+      while (insertAt < project.layers.length && inSubtree(project.layers[insertAt], folderId)) {
+        insertAt++;
+      }
+      project.layers.insertAll(insertAt, subtree);
+    }
+    _changed();
     return true;
   }
 
