@@ -120,7 +120,7 @@ void main() {
     s.settings.liveDelayMs = 50;
     final kick = s.project.modules.first;
     s.editSource(kick.id, '${kick.source}\n// edited');
-    // Engine compilation runs on a worker isolate; wait for the observable state transition
+    // Engine compilation runs on the native worker pool; wait for the observable state transition
     // instead of assuming a fixed duration that can be too short on a busy CI runner.
     final deadline = DateTime.now().add(const Duration(seconds: 5));
     while (kick.edited && DateTime.now().isBefore(deadline)) {
@@ -128,7 +128,7 @@ void main() {
     }
     expect(kick.edited, isFalse);
     final lastGoodSource = kick.runSource;
-    final invalidSource = '${kick.source}\\n((('; // doesn't compile: the last good sound must remain
+    final invalidSource = '${kick.source}\n((('; // doesn't compile: the last good sound must remain
     s.editSource(kick.id, invalidSource);
 
     // Wait for the live update to attempt the new source, then for its failed
