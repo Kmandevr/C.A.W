@@ -698,8 +698,19 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 progress = true;
             }
         }
-        for (int slot : projectOrder)
-            if (!placed[slot]) oc.orderList[oc.orderCount++] = slot;
+        for (int slot : projectOrder) {
+            if (placed[slot]) continue;
+            oc.orderList[oc.orderCount++] = slot;
+            // Cycles are kept playable with the existing bounded one-block feedback behavior. Surface that
+            // behavior in the owning module's diagnostics instead of silently accepting a delayed connection.
+            for (const Planned& pl : plan) {
+                if (pl.ls.slot == slot && !pl.ids.empty()) {
+                    warnings[pl.ids.front()].push_back(
+                        "signal dependency cycle (or a route blocked by one): at least one source is read from the previous block");
+                    break;
+                }
+            }
+        }
         send(oc);
     }
 
