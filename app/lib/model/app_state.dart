@@ -567,8 +567,8 @@ class AppState extends ChangeNotifier {
   }
 
   void setTimeSelection(int start, int end) {
-    timeSelectionStart = start.clamp(0, 4096);
-    timeSelectionEnd = end.clamp(0, 4096);
+    timeSelectionStart = start.clamp(0, 4096).toInt();
+    timeSelectionEnd = end.clamp(0, 4096).toInt();
     notifyListeners();
   }
 
