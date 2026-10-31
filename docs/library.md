@@ -1,7 +1,7 @@
 ---
 title: Function library
 summary: Every built-in function, constant and library function the module language offers, generated from the engine.
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Function library
@@ -944,7 +944,7 @@ Mixing helpers: sidechain ducking, gating and tremolo. Written in the module lan
 
 ### `util.duck(x, env, amount)`
 
-Sidechain ducking: turns x down while an envelope is high (e.g. kick.env).
+Sidechain ducking: turns x down while an envelope is high (such as kick.env).
 
 - `x`: the sound to duck
 - `env`: 0..1, usually another module's export such as kick.env
@@ -963,7 +963,7 @@ Adds a modulation signal to a base parameter value. Use a signed amount to set d
 - `amount`: signed modulation depth; negative reverses polarity
 
 ```
-util.mod(900, lfo.sine(4), 300)
+saw(util.mod(900, lfo.sine(4), 300))
 ```
 
 ### `util.gate(x, open)`
