@@ -12,6 +12,13 @@ summary: Mixing helpers: sidechain ducking, gating and tremolo
 /// example: util.duck(saw(55) * 0.5, ad(step % 4 == 0, 0.001, 0.3), 0.8)
 fn duck(x, env, amount) = x * (1 - clamp(env, 0, 1) * amount)
 
+/// Add a modulation signal to a base parameter value.
+/// base: the unmodulated parameter or global value
+/// source: a bipolar or unipolar signal, such as an LFO or another module's export
+/// amount: signed modulation depth; a negative value reverses polarity
+/// example: util.mod(900, lfo.sine(4), 300)
+fn mod(base, source, amount) = base + source * amount
+
 /// Rhythmic gate: lets x through only while open is above 0.
 /// x: the sound
 /// open: above 0 to let sound through, e.g. euclid(5, 16, step)
