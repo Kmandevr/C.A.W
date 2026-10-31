@@ -187,7 +187,7 @@ class _TimelineLane extends StatelessWidget {
     child: Stack(children: [
       CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar)),
       Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
-        onTapDown: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
+        onTapUp: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
         onHorizontalDragStart: (d) { final step = (d.localPosition.dx / stepW).round(); state.beginTimeSelection(step); },
         onHorizontalDragUpdate: (d) => state.updateTimeSelection((d.localPosition.dx / stepW).round()),
         onHorizontalDragEnd: (_) => state.endTimeSelection(),
