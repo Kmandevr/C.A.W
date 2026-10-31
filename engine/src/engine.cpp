@@ -1118,6 +1118,7 @@ void Engine::applyCommands() noexcept {
                 Slot& s = slots_[c.slot];
                 retire(s.cur, -1, s.pattern);
                 retire(s.old, -1);
+                retire(s.pending, -1);
                 s.cur = s.old = s.pending = nullptr;
                 s.pattern = nullptr;
                 s.active = true;
@@ -1597,8 +1598,8 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         int sp = s.scopePos.load(std::memory_order_relaxed);
         for (int i = 0; i < len; ++i) {
             const double step = static_cast<double>(gg + i) / stepLen_;
-            const double desired = automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
-                s.volumeAutomationValue, step, target);
+            const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
+                s.volumeAutomationValue, step, target) : 0.0;
             if (s.gain != desired) {
                 s.gain += (desired - s.gain) * gainCoef;
                 if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
@@ -1651,8 +1652,8 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                 const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
                 for (int j = 0; j < m; ++j) {
                     const double step = static_cast<double>(g_ + j) / stepLen_;
-                    const double desired = automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
-                        s.volumeAutomationValue, step, target);
+                    const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
+                        s.volumeAutomationValue, step, target) : 0.0;
                     if (s.gain != desired) {
                         s.gain += (desired - s.gain) * gainCoef;
                         if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
