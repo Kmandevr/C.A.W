@@ -135,7 +135,9 @@ class AppState extends ChangeNotifier {
     _disposed = true;
     settings.removeListener(_settingsChanged);
     _poller.dispose();
-    _resourcePressureSubscription?.cancel();
+    final pressureSubscription = _resourcePressureSubscription;
+    _resourcePressureSubscription = null;
+    if (pressureSubscription != null) unawaited(pressureSubscription.cancel());
     _liveTimer?.cancel();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
