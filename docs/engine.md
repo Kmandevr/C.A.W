@@ -304,6 +304,10 @@ The app, the CLI and exports share one format:
 - An export refuses to run if any module or pattern it uses has an error.
 - **[Assumption]** Serum may want an extra `clm ` chunk to recognise 2048-sample frames. This isn't written yet; check before relying on Serum.
 
+## Hardware profile and execution policy
+
+The native hardware probe is a one-time, non-real-time snapshot. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU and memory limits where readable. Available memory is conservatively budgeted after accounting for a finite cgroup limit and current usage. A zero CPU or memory field means the signal is unknown; the scheduler falls back conservatively to one worker. Thermal and battery pressure are host-supplied and are not fabricated or continuously polled.
+
 ## C API (`engine/include/caw.h`)
 
 - **Checking a module:** `caw_check(source)` returns JSON: ok, error, line, col, kind, mode, name, summary, and:
