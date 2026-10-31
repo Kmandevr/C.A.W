@@ -773,7 +773,9 @@ class _PatternEditorState extends State<PatternEditor> {
 
   Color get _noteColor {
     for (final l in s.project.layers) {
-      if (l.patternId == widget.module.id) return Neon.layer(l.color);
+      if (l.patternId == widget.module.id || l.clips.any((clip) => clip.patternId == widget.module.id)) {
+        return Neon.layer(l.color);
+      }
     }
     return Neon.yellow;
   }
