@@ -61,7 +61,7 @@ The Arranger is the main composition view. It is a horizontal song timeline with
 - The track header keeps mute/solo and generator selection close to the timeline. The mixer panel edits the same track values, not a second copy of them.
 - Folders nest, can collapse, and can be organization-only or enabled as stereo group buses. Children route through the nearest enabled ancestor bus; folder volume and pan act on the summed group.
 - Volume and pan automation lanes are editable under a track. Points follow song time and are interpolated by the native engine. Clip automation and plugin/global parameter automation are not implemented yet.
-- Empty timeline space creates a time selection; selected clips can be split at its end. Snap resolution is adjustable and Shift bypasses snapping. Audio clips remain deferred, but the clip model is kept type-extensible.
+- Tapping empty timeline space sets the edit cursor; long-press-drag creates a time selection without blocking horizontal scrolling. Selected clips can be split at the selection end. Snap resolution is adjustable and Shift bypasses snapping. Audio clips remain deferred, but the clip model is kept type-extensible.
 
 ## Layout
 
