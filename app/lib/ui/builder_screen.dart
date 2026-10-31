@@ -334,12 +334,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
     s.editSource(id, sourceText);
 
     var attached = 0;
-    var fullChains = 0;
     for (final layer in targetLayers) {
-      if (layer.effectIds.length >= 8) {
-        fullChains++;
-        continue;
-      }
+      if (layer.effectIds.length >= 8) continue;
       if (layer.generatorId == target.id) {
         s.editLayer(layer, (l) => l.effectIds.insert(0, id));
         attached++;
@@ -356,10 +352,6 @@ class _BuilderScreenState extends State<BuilderScreen> {
     if (info == null || !info.ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(info?.error ?? 'Could not compile the sidechain effect')),
-      );
-    } else if (attached == 0 && fullChains > 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('The selected track chain already has eight effects. Remove one before adding sidechain.')),
       );
     } else if (attached == 0) {
       ScaffoldMessenger.of(context).showSnackBar(
