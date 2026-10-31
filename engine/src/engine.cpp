@@ -638,6 +638,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
     for (const LayerSpec& layer : p.layers) specByLayer[layer.id] = &layer;
     for (const Planned& pl : plan) slotByLayer[pl.w.id] = pl.ls.slot;
     for (Planned& pl : plan) {
+        // Recompute routing from the new project, not the previous snapshot.
+        pl.ls.parentSlot = -1;
         std::string parent = pl.w.parentId;
         for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
             auto spec = specByLayer.find(parent);
@@ -728,7 +730,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             Cmd bus;
             bus.type = Cmd::ConfigureBus;
             bus.slot = ls.slot;
-            bus.parentSlot = ls.parentSlot;
+            bus.parentSlot = pl.ls.parentSlot;
             bus.order = w.order;
             const bool newBus = !ls.bus;
             bus.flag = newBus;
