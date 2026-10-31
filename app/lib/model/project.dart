@@ -267,7 +267,7 @@ class ProjectDoc {
         layers: ((j['layers'] as List?) ?? const [])
             .map((raw) {
               final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
-              if (layer.clips.isEmpty && layer.patternId != null) {
+              if (((j['caw_app_project'] as num?)?.toInt() ?? 1) < fileVersion && layer.clips.isEmpty && layer.patternId != null) {
                 final module = ((j['modules'] as List?) ?? const [])
                     .whereType<Map>().where((m) => m['id'] == layer.patternId).firstOrNull;
                 final parsed = module == null ? null : PatternDoc.parse((module['run_source'] ?? module['source'] ?? '').toString()).doc;
