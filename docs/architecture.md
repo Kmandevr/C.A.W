@@ -174,7 +174,7 @@ export let env = ad(trig, 0.001, 0.3)                  a signal other modules re
 - the note variables, and voices (8 per layer, oldest stolen)
 - a Pattern picker per layer, and Solo preview through a layer's pattern
 
-The audio thread asks a pattern for the notes in a stretch of time, so procedural patterns can answer the same question later. Patterns reach the audio thread apart from the sound's code, so editing one doesn't restart the sound, and scenes can swap them. Notes keep room for a kit row and curves, and `bend` is reserved. Not built yet: kit patterns, procedural code, custom values and curves, swing, the editor, scenes and automation.
+The audio thread consumes pattern events separately from the sound's code, so a pattern edit can update without rebuilding the instrument/effect chain. The arrangement compiles reusable pattern sources into absolute-time clip events on the control thread; the audio callback schedules them at sample positions. Notes keep room for a kit row and curves, and `bend` is reserved. Not built yet: kit patterns, procedural code, custom values and curves, swing, clip-following automation, and plugin/global parameter automation. The session-grid scene launcher is retired; the linear Arranger is the composition view.
 - **Two shapes:**
   - A **single-sound pattern** drives one layer.
   - A **kit pattern** has named rows (kick, snare, hats …), and each row is routed to a layer, so one pattern can drive a whole kit.
