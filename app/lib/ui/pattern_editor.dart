@@ -49,7 +49,6 @@ class _PatternEditorState extends State<PatternEditor> {
   int _res = 16; // grid resolution: 1/16 of a whole note = one step
   bool _snap = true, _fixed = false, _triplet = false;
   bool _velLane = true, _extrasLane = false; // Alt+V, Alt+X
-  bool _multiEdit = false;
   double _pxPerStep = 28, _scrollX = 0, _scrollY = 0;
   final double _rowH = 16;
   Steps _cursorAt = Steps.zero;
@@ -751,7 +750,6 @@ class _PatternEditorState extends State<PatternEditor> {
     }
     final length = d.lengthSteps(s.project.beatsPerBar);
     final references = s.selectedPatternReferences;
-    if (!s.canMultiEditSelectedClips) _multiEdit = false;
     final toolbar = _Toolbar(
       tool: _tool,
       onTool: (t) => setState(() => _tool = t),
@@ -809,11 +807,12 @@ class _PatternEditorState extends State<PatternEditor> {
               Text('${s.selectedClipIds.length} CLIPS SELECTED',
                 style: const TextStyle(color: Neon.dim, fontSize: 9, letterSpacing: 1)),
               const Spacer(),
-              if (references.isNotEmpty)
-                Text('${references.length} reference source(s)', style: const TextStyle(color: Neon.blue, fontSize: 9)),
               if (s.canMultiEditSelectedClips)
-                TextButton(onPressed: () => setState(() => _multiEdit = !_multiEdit),
-                  child: Text(_multiEdit ? 'MULTI-EDIT ON' : 'EDIT ALL LINKED')),
+                const Text('SHARED SOURCE · edits affect every selected linked clip',
+                  style: TextStyle(color: Neon.blue, fontSize: 9))
+              else if (references.isNotEmpty)
+                Text('${references.length} read-only reference source(s)',
+                  style: const TextStyle(color: Neon.blue, fontSize: 9)),
             ])),
         toolbar,
         Expanded(
