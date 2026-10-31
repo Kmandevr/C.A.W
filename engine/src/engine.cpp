@@ -21,6 +21,9 @@ struct Engine::Slot {
     bool fresh = true;       // the chain has not played yet since it was installed or play started
     bool contiguous = false; // the previous sample was processed, so a seam can crossfade
     bool overloaded = false;
+    bool bus = false;
+    int parentSlot = -1;
+    double outL[kBlock] = {}, outR[kBlock] = {};
     Chain* cur = nullptr;
     Chain* old = nullptr;    // previous chain, fading out after a hot swap
     Chain* pending = nullptr;  // new code waiting for the next beat or bar
@@ -93,13 +96,13 @@ struct Engine::Chain {
 };
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload, SetOrder } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     int orderList[kSlots] = {};
     int orderCount = 0;
     int slot = 0;
     Chain* chain = nullptr;
-    int steps = 0, order = 0;
+    int steps = 0, order = 0, parentSlot = -1;
     double bpm = 120, master = 0.7;
     int beatsPerBar = 4, loopSteps = 64, keyRoot = 9, keyScale = 1;
     uint32_t seed = 0;
@@ -487,6 +490,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
         bool mute, solo;
         int order;
         std::vector<ClipSpec> clips;
+        std::string parentId;
+        bool bus = false;
     };
     std::vector<Want> wants;
     int order = 0;
@@ -496,7 +501,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     order_.clear();
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
-        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips});
+        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.parentId, l.folder && l.busEnabled});
     }
 
     // Pass 1: which modules each layer plays, and its slot.
@@ -577,7 +582,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             layers_.erase(it);
         }
         const bool isAudition = w.id[0] == '\x01';
-        if (pl.ids.empty()) {
+        if (pl.ids.empty() && !w.bus) {
             if (pl.ls.slot >= 0) {
                 Cmd c;
                 c.type = Cmd::Remove;
@@ -599,6 +604,46 @@ std::string Engine::setProject(const ProjectSpec& p) {
             pl.ls.volume = -1;
         }
         plan.push_back(std::move(pl));
+    }
+
+    // Resolve nested folder buses and make parents depend on their children in render order.
+    std::map<std::string, int> slotByLayer;
+    std::map<std::string, const LayerSpec*> specByLayer;
+    for (const LayerSpec& layer : p.layers) specByLayer[layer.id] = &layer;
+    for (const Planned& pl : plan) slotByLayer[pl.w.id] = pl.ls.slot;
+    for (Planned& pl : plan) {
+        std::string parent = pl.w.parentId;
+        for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+            auto spec = specByLayer.find(parent);
+            if (spec == specByLayer.end()) break;
+            auto bus = slotByLayer.find(parent);
+            if (spec->second->folder && spec->second->busEnabled && bus != slotByLayer.end()) {
+                pl.ls.parentSlot = bus->second;
+                break;
+            }
+            parent = spec->second->parentId;
+        }
+        if (pl.ls.parentSlot >= 0) readsFrom[pl.ls.parentSlot].push_back(pl.ls.slot);
+        // Soloing a folder solos its descendants; soloing a child keeps every ancestor bus open.
+        std::string ancestor = pl.w.parentId;
+        for (int depth = 0; !ancestor.empty() && depth < kMaxLayers; ++depth) {
+            auto spec = specByLayer.find(ancestor);
+            if (spec == specByLayer.end()) break;
+            if (spec->second->solo) pl.w.solo = true;
+            ancestor = spec->second->parentId;
+        }
+        if (pl.w.bus) {
+            for (const LayerSpec& candidate : p.layers) {
+                if (!candidate.solo) continue;
+                std::string parent = candidate.parentId;
+                for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+                    if (parent == pl.w.id) { pl.w.solo = true; break; }
+                    auto spec = specByLayer.find(parent);
+                    if (spec == specByLayer.end()) break;
+                    parent = spec->second->parentId;
+                }
+            }
+        }
     }
 
     // Pass 2: where each exported value lives. The first layer (in project order) playing a module provides it.
@@ -647,6 +692,34 @@ std::string Engine::setProject(const ProjectSpec& p) {
             ls.pan = w.pan;
             ls.mute = w.mute;
             ls.solo = w.solo;
+        }
+        if (w.bus) {
+            Cmd bus;
+            bus.type = Cmd::ConfigureBus;
+            bus.slot = ls.slot;
+            bus.parentSlot = ls.parentSlot;
+            bus.order = w.order;
+            send(bus);
+            ls.bus = true;
+            ls.parentSlot = pl.ls.parentSlot;
+            ls.chain = nullptr;
+            ls.sig.clear();
+            ls.wiring.clear();
+            ls.pattern.reset();
+            ls.voiced = false;
+            ls.steps = 0;
+            projectOrder.push_back(ls.slot);
+            nextLayers[w.id] = ls;
+            continue;
+        }
+        if (ls.bus || ls.parentSlot != pl.ls.parentSlot) {
+            Cmd routing;
+            routing.type = Cmd::SetRouting;
+            routing.slot = ls.slot;
+            routing.parentSlot = pl.ls.parentSlot;
+            send(routing);
+            ls.bus = false;
+            ls.parentSlot = pl.ls.parentSlot;
         }
         if (pl.pattern != ls.pattern) {
             Cmd cmd;
@@ -968,6 +1041,27 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetSteps:
                 slots_[c.slot].steps = c.steps;
                 break;
+            case Cmd::SetRouting: {
+                Slot& s = slots_[c.slot];
+                s.parentSlot = c.parentSlot;
+                s.bus = false;
+                break;
+            }
+            case Cmd::ConfigureBus: {
+                Slot& s = slots_[c.slot];
+                retire(s.cur, -1, s.pattern);
+                retire(s.old, -1);
+                s.cur = s.old = s.pending = nullptr;
+                s.pattern = nullptr;
+                s.active = true;
+                s.removing = false;
+                s.bus = true;
+                s.parentSlot = c.parentSlot;
+                s.order = c.order;
+                s.gain = slotTarget(s);
+                updateSolo();
+                break;
+            }
             case Cmd::SetPattern: {
                 Slot& s = slots_[c.slot];
                 // A sounding note finishes as the old pattern had it; the edit is heard from its next start.
@@ -1440,8 +1534,8 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
                 if (std::fabs(target - s.gain) < 1e-6) s.gain = target;
             }
             const double v = finiteOr0(y[i]) * s.gain;
-            mixL_[j + i] += v * s.gl;
-            mixR_[j + i] += v * s.gr;
+            s.outL[j + i] = v * s.gl;
+            s.outR[j + i] = v * s.gr;
             const float av = static_cast<float>(std::fabs(v));
             if (av > peak) peak = av;
             s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
@@ -1460,8 +1554,12 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
 void Engine::processChunk(float* l, float* r, int m) noexcept {
     std::fill_n(mixL_, m, 0.0);
     std::fill_n(mixR_, m, 0.0);
+    for (int i = 0; i < kSlots; ++i) {
+        std::fill_n(slots_[i].outL, m, 0.0);
+        std::fill_n(slots_[i].outR, m, 0.0);
+    }
     ++chunkId_;
-    // Layers in dependency order first, then any others (for example a layer installed before its order arrived).
+    // Child tracks are rendered before their folder buses; exporters still precede readers.
     for (int pass = 0; pass < 2; ++pass) {
         const int count = pass == 0 ? processCount_ : kSlots;
         for (int k = 0; k < count; ++k) {
@@ -1469,26 +1567,53 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
             Slot& s = slots_[i];
             if (s.visited == chunkId_) continue;
             s.visited = chunkId_;
-            if (!s.active || !s.cur) continue;
+            if (!s.active) continue;
             const double target = slotTarget(s);
-            if (target == 0.0 && s.gain == 0.0) {
-                s.contiguous = false;
-                for (auto& b : s.exportBuf) std::fill_n(b, m, 0.0);  // a silent layer shares zeros
-                if (s.pending) {  // nobody hears this layer: no need to wait for the beat
-                    swapIn(s, s.pending);
-                    s.pending = nullptr;
+            if (s.bus) {
+                const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
+                const double leftPan = pan > 0.0 ? 1.0 - pan : 1.0;
+                const double rightPan = pan < 0.0 ? 1.0 + pan : 1.0;
+                const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
+                for (int j = 0; j < m; ++j) {
+                    if (s.gain != target) {
+                        s.gain += (target - s.gain) * gainCoef;
+                        if (std::fabs(target - s.gain) < 1e-6) s.gain = target;
+                    }
+                    s.outL[j] *= s.gain * leftPan;
+                    s.outR[j] *= s.gain * rightPan;
                 }
-                if (s.removing) {
-                    retire(s.cur, -1, s.pattern);
-                    s.pattern = nullptr;
-                    retire(s.old, i);
-                    s.cur = s.old = nullptr;
-                    s.active = false;
-                    s.removing = false;
+                if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; }
+            } else {
+                if (!s.cur) continue;
+                if (target == 0.0 && s.gain == 0.0) {
+                    s.contiguous = false;
+                    for (auto& b : s.exportBuf) std::fill_n(b, m, 0.0);
+                    if (s.pending) { swapIn(s, s.pending); s.pending = nullptr; }
+                    if (s.removing) {
+                        retire(s.cur, -1, s.pattern);
+                        s.pattern = nullptr;
+                        retire(s.old, i);
+                        s.cur = s.old = nullptr;
+                        s.active = false;
+                        s.removing = false;
+                    }
+                } else {
+                    processSlot(s, m, target);
                 }
-                continue;
             }
-            processSlot(s, m, target);
+            // Route exactly once. A parent bus receives the child's stereo signal; only root tracks hit master.
+            if (s.parentSlot >= 0 && s.parentSlot < kMaxLayers && s.parentSlot != i) {
+                Slot& parent = slots_[s.parentSlot];
+                for (int j = 0; j < m; ++j) {
+                    parent.outL[j] += s.outL[j];
+                    parent.outR[j] += s.outR[j];
+                }
+            } else {
+                for (int j = 0; j < m; ++j) {
+                    mixL_[j] += s.outL[j];
+                    mixR_[j] += s.outR[j];
+                }
+            }
         }
     }
     // Master: gain, DC blocker, then the safety limiter, always last.
