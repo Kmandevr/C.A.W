@@ -186,8 +186,17 @@ class _TimelineHeader extends StatelessWidget {
             onSelected: (id) => state.addClip(layer, id),
             itemBuilder: (_) => [for (final m in patterns) PopupMenuItem(value: m.id, child: Text(m.name))],
           ),
-        ])) else Expanded(child: Align(alignment: Alignment.centerLeft,
-          child: Row(children: [Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: const TextStyle(color: Neon.dim, fontSize: 9)), const Spacer(), Icon(Icons.account_tree_outlined, size: 13, color: color)]))),
+        ])) else Expanded(child: Row(children: [
+          ToggleChip(label: 'M', tooltip: 'Mute folder', on: layer.mute, color: Neon.yellow,
+            onTap: () => state.mixLayer(layer, mute: !layer.mute)),
+          const SizedBox(width: 3),
+          ToggleChip(label: 'S', tooltip: 'Solo folder', on: layer.solo, color: Neon.blue,
+            onTap: () => state.mixLayer(layer, solo: !layer.solo)),
+          const SizedBox(width: 5),
+          Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: const TextStyle(color: Neon.dim, fontSize: 9)),
+          const Spacer(),
+          Icon(Icons.account_tree_outlined, size: 13, color: color),
+        ])),
       ]),
     );
   }
