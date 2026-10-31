@@ -318,6 +318,48 @@ void main() {
     });
   });
 
+
+  test('mirrors note edits to independent selected pattern sources', () {
+    var before = PatternDoc.blank(name: 'Active');
+    final inserted = before.insert(Steps.zero, 60, Steps(4), vel: .8);
+    before = inserted.doc;
+    final activeId = inserted.id!;
+    var target = PatternDoc.blank(name: 'Target');
+    final targetNote = target.insert(Steps.zero, 60, Steps(4), vel: .5);
+    target = targetNote.doc;
+    final unrelated = target.insert(Steps(8), 67, Steps(2));
+    target = unrelated.doc;
+
+    var after = before.move({activeId}, Steps(2), 1).setVelocity({activeId}, .3);
+    final added = after.insert(Steps(12), 72, Steps(2), vel: .6);
+    after = added.doc;
+
+    final mirrored = target.mirrorChanges(before, after);
+    final moved = mirrored.notes.firstWhere((n) => n.pitch == 61);
+    expect(moved.at, Steps(2));
+    expect(moved.vel, .3);
+    expect(mirrored.notes.any((n) => n.pitch == 67 && n.at == Steps(8)), isTrue);
+    expect(mirrored.notes.any((n) => n.pitch == 72 && n.at == Steps(12)), isTrue);
+  });
+
+  test('mirrors deletions without deleting unrelated reference notes', () {
+    var before = PatternDoc.blank();
+    final note = before.insert(Steps(2), 60, Steps(4));
+    before = note.doc;
+    final other = before.insert(Steps(10), 67, Steps(2));
+    before = other.doc;
+    final after = before.delete({note.id!});
+    var target = PatternDoc.blank();
+    final targetNote = target.insert(Steps(2), 60, Steps(4));
+    target = targetNote.doc;
+    final targetOther = target.insert(Steps(10), 67, Steps(2));
+    target = targetOther.doc;
+
+    final mirrored = target.mirrorChanges(before, after);
+    expect(mirrored.notes.length, 1);
+    expect(mirrored.notes.single.pitch, 67);
+  });
+
   group('edits', () {
     test('insert clamps and gets a fresh id; delete', () {
       final d = body('0 C3 1\n');
