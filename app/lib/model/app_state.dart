@@ -535,9 +535,11 @@ class AppState extends ChangeNotifier {
   void addAutomationLane(LayerDoc layer, String target) {
     if (target != 'volume' && target != 'pan') return;
     if (layer.automation.any((a) => a.target == target)) return;
+    final end = project.layers.fold<int>(project.loopSteps, (v, item) =>
+      item.clips.fold<int>(v, (e, clip) => e > clip.startSteps + clip.lengthSteps ? e : clip.startSteps + clip.lengthSteps));
     editLayer(layer, (l) => l.automation.add(AutomationLaneDoc(target: target,
       points: [AutomationPointDoc(step: 0, value: target == 'volume' ? l.volume : l.pan),
-        AutomationPointDoc(step: project.loopSteps.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
+        AutomationPointDoc(step: end.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
   }
 
   void removeAutomationLane(LayerDoc layer, AutomationLaneDoc lane) {
