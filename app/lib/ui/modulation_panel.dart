@@ -167,7 +167,7 @@ class _SynthModEditorState extends State<_SynthModEditor> {
                     _draftAmounts.remove(route.line);
                     replace(route, amount: v);
                   })),
-              SizedBox(width: 38, child: Text(route.amount.toStringAsFixed(2), style: Neon.code(size: 11))),
+              SizedBox(width: 38, child: Text((_draftAmounts[route.line] ?? route.amount).toStringAsFixed(2), style: Neon.code(size: 11))),
             ]),
           ],
           const Divider(color: Neon.line),
