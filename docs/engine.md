@@ -71,6 +71,7 @@ Unknown header keys are ignored, so newer files still load. With no header, a fi
   - Layers run in dependency order, so a reader hears the same sample. When two modules read each other, one of them hears the other one block (64 samples) late.
   - An effect can read the export of the generator in front of it.
   - A name that nothing exports reads 0, and the project result lists it as a warning.
+- Synth patches have a code-defined modulation matrix. The Builder's Modulation links panel edits enabled envelope/LFO/macro/velocity sources to oscillator position/level/pitch, filter cutoff/resonance and volume destinations. Amount is signed (-1..1), so polarity is editable as well.
 - `fn name(a, b) = expression` defines a function.
   - Each call is expanded in place, so oscillators, envelopes and filters inside a function get their own state per call.
   - The body sees its arguments, built-ins, and names defined above the function.
