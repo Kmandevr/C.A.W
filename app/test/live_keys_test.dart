@@ -120,7 +120,12 @@ void main() {
     s.settings.liveDelayMs = 50;
     final kick = s.project.modules.first;
     s.editSource(kick.id, '${kick.source}\n// edited');
-    await Future<void>.delayed(const Duration(milliseconds: 400));
+    // Engine compilation runs on a worker isolate; wait for the observable state transition
+    // instead of assuming a fixed duration that can be too short on a busy CI runner.
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (kick.edited && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
     expect(kick.edited, isFalse);
     s.editSource(kick.id, '${kick.source}\n((('); // doesn't compile: waits
     await Future<void>.delayed(const Duration(milliseconds: 300));
