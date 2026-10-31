@@ -57,59 +57,23 @@ The Arranger is the main composition view. It is a horizontal song timeline with
 
 - A track owns its generator, effects, volume, pan, mute/solo and eventual routing. Clips reference pattern sources; they do not own instruments.
 - A clip instance has a timeline start, visible length, source offset and loop setting. Moving a clip does not rewrite its source. Independent duplication clones the pattern source; linked duplication shares it.
-- Drag the clip body to move it, drag its right edge to resize it, tap to select, and double-tap to open the existing piano roll. The active clip is edited; selected companion clips can later be shown as references and explicitly enabled for multi-edit.
+- Drag the clip body to move it, Alt-drag to shift its source offset, drag its right edge to resize it, tap to select, Shift-tap to add clips to the selection, and double-tap to open the existing piano roll. Companion sources appear as faint, read-only references; clips sharing one pattern source remain linked and edit together.
 - The track header keeps mute/solo and generator selection close to the timeline. The mixer panel edits the same track values, not a second copy of them.
-- Folders are intended to nest. A folder may be organization-only or become a bus; bus routing and nested summing are an engine feature still to be implemented.
-- Automation lanes are a first-class follow-on: track automation follows song time, while clip automation can move with its clip. Audio clips are deferred, but the clip model should remain type-extensible.
+- Folders nest, can collapse, and can be organization-only or enabled as stereo group buses. Children route through the nearest enabled ancestor bus; folder volume and pan act on the summed group.
+- Volume and pan automation lanes are editable under a track. Points follow song time and are interpolated by the native engine. Clip automation and plugin/global parameter automation are not implemented yet.
+- Empty timeline space creates a time selection; selected clips can be split at its end. Snap resolution is adjustable and Shift bypasses snapping. Audio clips remain deferred, but the clip model is kept type-extensible.
 
 ## Layout
 
-The same pieces fit both screens. On a phone they stack and slide in; on a wide screen they sit side by side.
+The app keeps its three areas—Builder, Arranger and Exporter. The Arranger is the composition workspace; the old session grid is retired.
 
-**Phone (portrait):**
+**Phone (portrait):** transport at the top, then the track headers beside a horizontally scrolling song timeline. The mixer opens as a panel below the timeline. Builder and Exporter remain separate bottom-navigation destinations.
 
-```
-┌──────────────────────────────┐
-│ ▶  140 BPM  Scene B ▾   ↶ ↷  │  transport + undo/redo, always visible
-├──────────────────────────────┤
-│                              │
-│   main view (one at a time)  │  session grid · pattern editor · sound editor
-│                              │
-├──────────────────────────────┤
-│ ▔▔ inspector sheet (drag ↑) ▔│  controls for what's selected; peek / half / full
-├──────────────────────────────┤
-│  Mix   Patterns   Sounds  Export │  bottom tabs, in the thumb's reach
-└──────────────────────────────┘
-```
+**Phone (landscape):** the timeline gets the available width. Track headers stay aligned with their lanes while the song timeline scrolls horizontally. The mixer remains a separate panel.
 
-**Phone (landscape):** two-handed, like a groovebox. The tabs move to a narrow side rail. The main view gets the full width, which suits the grid and the piano roll. The inspector opens as a side panel instead of a bottom sheet.
+**Desktop / wide:** navigation rail, persistent transport, and a full-width arrangement timeline. Track headers remain fixed beside the horizontally scrolling timeline; the Mixer panel can be opened without replacing the arrangement.
 
-**Desktop / wide (≥ 900 px):**
-
-```
-┌────────┬───────────────────────────────┬─────────────┐
-│Library │  session grid (layers × scenes)│  Inspector  │
-│sounds  │                               │  (params,   │
-│patterns│                               │   globals)  │
-│        ├───────────────────────────────┤             │
-│ drag → │  editor drawer: pattern / code │             │
-└────────┴───────────────────────────────┴─────────────┘
-```
-
-- **Mix** is the session grid. Rows are layers and columns are scenes. Each cell holds the pattern that layer plays in that scene.
-  - Tapping a cell's big area plays it. A scene is launched from the narrow strip on its left edge only (the Griid lesson).
-  - Launches are queued to the next loop boundary, so they're always in time.
-  - "Commit" copies the current scene into a new one to try a variation (the EP-133 lesson).
-- **Library:** sounds and patterns are cards you drag onto a layer or a grid cell. They're organised in folders, matching the library repo's layout, with tags and a search box across all folders and favourites pinned at the top.
-  - On a phone the library is a tray that slides up from the bottom. Long-press a card to pick it up.
-  - On desktop the library is a side column, and `.mid` or `.caw` files can be dropped onto the window.
-- **Inspector:** the Unity-style panel for whatever is selected: a module's params, a layer's mix or a note's extras.
-  - Headers fold. Tooltips show on long-press on a phone and on hover on desktop.
-  - On a phone it's a bottom sheet: peek shows 3–4 controls, half shows a section, full shows everything.
-- **Progressive disclosure:**
-  - At most two levels deep.
-  - Advanced settings sit in a folded "More" section.
-  - Defaults should already sound good, as v1's templates do.
+The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 
 ## One gesture vocabulary
 
@@ -134,7 +98,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 - **Owner's answers (2026-10-28), not built yet; the owner has more input before building starts:**
   - The piano roll comes next, inside today's app (before the session-grid redesign), together with the drum grid.
-  - The piano roll and the drum grid edit the same pattern files, which stay readable text.
+  - The piano roll and the drum grid edit the same pattern files, which stay readable text. Selected arrangement clips can be shown as faint reference notes; notes in the active source retain ownership and remain the only directly editable notes unless the selected clips share a linked source.
   - **Scale:** rows in the project's key are highlighted. Notes can go anywhere, with no lock to the key.
   - **Velocity:** a lane under the roll.
   - **New notes:** a tap makes a note as long as the last one you sized; dragging while drawing sets the length directly.
@@ -210,4 +174,4 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 ## Not yet
 
-Recording audio or MIDI, audio clips and a timeline arranger stay out until the owner says otherwise ([roadmap](roadmap.md)).
+Recording audio or MIDI, audio clips, clip-following automation and automation of globals or module parameters remain out of scope for this slice ([roadmap](roadmap.md)).
