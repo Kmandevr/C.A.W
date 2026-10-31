@@ -494,7 +494,7 @@ TEST(arrangement_clip_source_offset_trims_the_source_and_honors_non_looping) {
     p.seamCrossfade = false;
     p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
     p.modules.push_back({"phrase",
-        "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 1 1\\n2 C4 1 1\\n", {}});
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 1 1\n2 C4 1 1\n", {}});
     LayerSpec layer;
     layer.id = "track";
     layer.chain = {"tone"};
@@ -520,7 +520,7 @@ TEST(arrangement_clips_can_overlap_on_one_track) {
     p.master = 1.0;
     p.seamCrossfade = false;
     p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.25", {}});
-    p.modules.push_back({"phrase", "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 4 1\\n", {}});
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
     LayerSpec layer;
     layer.id = "track";
     layer.chain = {"tone"};
