@@ -50,6 +50,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Tap tempo');
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Tap tempo'));
     await tester.pumpAndSettle();
 

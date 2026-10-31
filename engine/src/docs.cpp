@@ -180,7 +180,7 @@ std::string agentGuide(const std::string& updated) {
          "`fx drive amount 0.3`, `fx crush bits 8`, `fx delay time 0.75 feedback 0.4 mix 0.3` (time in beats), "
          "`fx reverb size 0.6 damp 0.3 mix 0.25`, `fx comp threshold -18 ratio 4`, or `fx NAME` for a project effect module. "
          "Left-out settings take defaults; errors name the line. It plays like a generator; `caw check --code FILE.caw` "
-         "prints the code it becomes. Tables for `wt` and `osc … table`: sine, tri, saw, square, basic, pwm."
+         "prints the code it becomes. Tables for `wt` and `osc … table`: sine, tri, saw, square, basic, pwm.\n"
          "- `let x = …`; `param name = 0.5 in 0..1 step 0.1 \"tip\"`, `param on1 = on`, `param w = saw in [sine, saw]` "
          "(read `w.saw`); `global name = …` (shared by the project); `export let env = …` (others read `module.env`); "
          "`fn name(a, b) = …`; `/// docs` above any of them; `// --- Header ---` groups controls.\n"
