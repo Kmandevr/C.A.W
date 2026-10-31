@@ -127,15 +127,23 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
     expect(kick.edited, isFalse);
-    final invalidSource = '${kick.source}\n((('; // doesn't compile: waits
+    final lastGoodSource = kick.runSource;
+    final invalidSource = '${kick.source}\\n((('; // doesn't compile: the last good sound must remain
     s.editSource(kick.id, invalidSource);
-    // Wait for the compile result itself; the previous successful result remains visible
-    // until the async project sync finishes, so this cannot pass during the in-flight state.
+
+    // Observe both sides of the async Run transition. The attempted source is installed
+    // immediately, then rolled back when the engine reports the compile failure.
     final failureDeadline = DateTime.now().add(const Duration(seconds: 5));
-    while (s.info[kick.id]?.ok != false && DateTime.now().isBefore(failureDeadline)) {
+    while (kick.runSource != invalidSource && DateTime.now().isBefore(failureDeadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
-    expect(s.info[kick.id]?.ok, isFalse);
+    expect(kick.runSource, invalidSource, reason: 'live update never attempted the invalid source');
+    while (kick.runSource == invalidSource && DateTime.now().isBefore(failureDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    expect(kick.runSource, lastGoodSource, reason: 'failed compile did not restore the last good source');
+    expect(s.engineError, isNull, reason: 'the project itself should remain valid');
+    expect(s.info[kick.id]?.ok, isFalse, reason: 'the module should expose its compile error');
     expect(kick.edited, isTrue);
     s.settings.lightMode = true;
     s.meters = const EngineMeters(playing: true);
