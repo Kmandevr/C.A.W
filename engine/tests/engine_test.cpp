@@ -234,6 +234,15 @@ TEST(project_parser_reads_folder_and_automation_metadata) {
     CHECK_EQ(p.layers[1].automation.size(), size_t{1});
     CHECK_EQ(p.layers[1].automation[0].target, std::string("pan"));
     CHECK_NEAR(p.layers[1].automation[0].points[1].value, 1.0, 1e-9);
+    const std::string bounded = R"({"caw_project":1,"beats_per_bar":3,"layers":[
+      {"id":"g","folder":true,"automation":[{"target":"volume","points":[{"step":5000,"value":0.5}]}]},
+      {"id":"t","parent":"g","clips":[{"id":"c","pattern":"p","start_steps":5000,"length_steps":20}]}
+    ]})";
+    ProjectSpec boundedProject;
+    CHECK(parseProject(bounded, boundedProject, error));
+    CHECK_EQ(boundedProject.layers[1].clips[0].startSteps, 767);
+    CHECK_EQ(boundedProject.layers[1].clips[0].lengthSteps, 1);
+    CHECK_NEAR(boundedProject.layers[0].automation[0].points[0].step, 768, 1e-9);
     const std::string cycle = R"({"caw_project":1,"layers":[
       {"id":"a","folder":true,"parent":"b"},{"id":"b","folder":true,"parent":"a"}
     ]})";
