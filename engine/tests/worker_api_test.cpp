@@ -128,7 +128,7 @@ TEST(worker_api_cancels_offline_render_and_keeps_released_handles_safe) {
     CawExecutionPlan plan{};
     CHECK_EQ(caw_worker_pool_apply(pool, &request, &plan), 0);
 
-    const char* project = R"CAW({"caw_project":1,"name":"cancel test","bpm":120,"beats_per_bar":4,"loop_bars":1,"modules":[{"id":"tone","name":"Tone","source":"---\nmode: float\n---\nsin(220)"}],"layers":[{"id":"track","name":"Tone","chain":["tone"],"length_steps":16}]})";
+    const char* project = R"CAW({"caw_project":1,"name":"cancel test","bpm":120,"beats_per_bar":4,"loop_bars":1,"modules":[{"id":"tone","name":"Tone","source":"---\nmode: float\n---\nsin(220)"}],"layers":[{"id":"track","name":"Tone","chain":["tone"],"length_steps":16}]})CAW";
     CawRenderOptions options{};
     options.kind = CAW_EXPORT_FREE;
     options.sample_rate = 48000;
