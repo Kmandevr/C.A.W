@@ -656,6 +656,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             auto spec = specByLayer.find(ancestor);
             if (spec == specByLayer.end()) break;
             if (spec->second->solo) pl.w.solo = true;
+            if (spec->second->folder && !spec->second->busEnabled && spec->second->mute) pl.w.mute = true;
             ancestor = spec->second->parentId;
         }
         if (pl.w.bus) {
