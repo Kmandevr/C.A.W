@@ -89,7 +89,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                   ])),
                   for (final layer in visible)
                     _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
-                      selected: s.selectedClipId, onOpen: widget.onOpenPattern),
+                      selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
                 ])))),
             ]),
           ]))),
@@ -173,11 +173,11 @@ class _TimelineHeader extends StatelessWidget {
 
 class _TimelineLane extends StatelessWidget {
   const _TimelineLane({required this.state, required this.layer, required this.width,
-    required this.stepW, required this.selected, this.onOpen});
+    required this.stepW, required this.selectedIds, this.onOpen});
   final AppState state;
   final LayerDoc layer;
   final double width, stepW;
-  final String? selected;
+  final Set<String> selectedIds;
   final VoidCallback? onOpen;
 
   @override
@@ -188,12 +188,9 @@ class _TimelineLane extends StatelessWidget {
       CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar)),
       Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
         onTapDown: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
-        onHorizontalDragStart: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
-        onHorizontalDragUpdate: (d) {
-          final start = state.timeSelectionStart ?? 0;
-          final end = (d.localPosition.dx / stepW).round();
-          state.setTimeSelection(math.min(start, end), math.max(start, end));
-        },
+        onHorizontalDragStart: (d) { final step = (d.localPosition.dx / stepW).round(); state.beginTimeSelection(step); },
+        onHorizontalDragUpdate: (d) => state.updateTimeSelection((d.localPosition.dx / stepW).round()),
+        onHorizontalDragEnd: (_) => state.endTimeSelection(),
         child: const SizedBox.expand())),
       if (state.timeSelectionStart != null && state.timeSelectionEnd != null)
         Positioned(left: math.min(state.timeSelectionStart!, state.timeSelectionEnd!) * stepW, top: 0,
