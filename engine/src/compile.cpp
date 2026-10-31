@@ -346,7 +346,9 @@ public:
             } else if (word && head.text == "global") {
                 next();
                 paramStatement(true);
-            } else if (word && head.text == "mod") {
+            } else if (word && head.text == "mod" && pos_ + 2 < t_->size() &&
+                       (*t_)[pos_ + 1].kind == Tok::Ident && (*t_)[pos_ + 2].kind == Tok::Op &&
+                       (*t_)[pos_ + 2].text == "=") {
                 next();
                 modStatement();
             } else if (word && head.text == "fn") {
@@ -389,7 +391,7 @@ private:
     }
 
     static bool reserved(const std::string& name) {
-        static const char* const words[] = {"let", "param", "global", "export", "mod", "fn", "pi", "on", "off"};
+        static const char* const words[] = {"let", "param", "global", "export", "fn", "pi", "on", "off"};
         for (const char* w : words)
             if (name == w) return true;
         return false;
