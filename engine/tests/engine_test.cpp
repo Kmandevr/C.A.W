@@ -294,7 +294,7 @@ TEST(arrangement_clips_schedule_reusable_patterns_on_the_project_timeline) {
     p.seamCrossfade = false;
     p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
     p.modules.push_back({"phrase",
-        "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 2 1\\n", {}});
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n", {}});
     LayerSpec layer;
     layer.id = "track";
     layer.name = "Track";
@@ -306,7 +306,7 @@ TEST(arrangement_clips_schedule_reusable_patterns_on_the_project_timeline) {
     Engine e(48000);
     e.setMasterBypass(true);
     const std::string result = e.setProject(p);
-    CHECK(result.find("\\\"ok\\\":true") != std::string::npos);
+    CHECK(result.find("\"ok\":true") != std::string::npos);
     e.play();
     const std::vector<float> out = run(e, 70000);
     const double panGain = std::cos(kPi / 4.0);
