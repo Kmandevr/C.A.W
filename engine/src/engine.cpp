@@ -169,6 +169,8 @@ std::shared_ptr<const Pattern> compileArrangement(
             if (segment <= 0) break;
             const double sourceEnd = sourcePos + segment;
             const size_t noteBase = out->notes.size();
+            struct RatchetSpan { double start, end; uint16_t sub; };
+            std::vector<std::vector<RatchetSpan>> eventSpans;
             std::vector<int> remap(src.notes.size(), -1);
             for (size_t i = 0; i < src.notes.size() && out->notes.size() < kMaxPatternNotes; ++i) {
                 const PatternNote& original = src.notes[i];
@@ -178,16 +180,27 @@ std::shared_ptr<const Pattern> compileArrangement(
                 const double clippedEnd = std::min(originalEnd, sourceEnd);
                 const bool trimmedAtStart = clippedStart > original.at;
                 const bool trimmedAtEnd = clippedEnd < originalEnd;
-                // A clip trim into a sustained note keeps the audible tail. Ratcheted notes are
-                // only copied whole here: changing their boundaries would change their subdivision.
-                if (original.ratchet > 1 && (trimmedAtStart || trimmedAtEnd)) continue;
+                // Intersect each ratchet with the source window. This preserves both sustained
+                // note tails and the original ratchet grid when a clip starts or ends mid-note.
+                std::vector<RatchetSpan> spans;
+                const double ratchetLength = original.len / original.ratchet;
+                for (int q = 0; q < original.ratchet; ++q) {
+                    const double ratchetStart = original.at + ratchetLength * q;
+                    const double ratchetEnd = original.at + ratchetLength * (q + 1);
+                    const double start = std::max(ratchetStart, sourcePos);
+                    const double end = std::min(ratchetEnd, sourceEnd);
+                    if (end > start)
+                        spans.push_back({timeline + (start - sourcePos), timeline + (end - sourcePos),
+                                         static_cast<uint16_t>(q)});
+                }
+                if (spans.empty()) continue;
                 PatternNote note = original;
                 note.at = timeline + (clippedStart - sourcePos);
                 note.len = clippedEnd - clippedStart;
-                if (note.len <= 0) continue;
                 if (trimmedAtStart || trimmedAtEnd) note.slideFrom = note.slideTo = -1;
                 remap[i] = static_cast<int>(out->notes.size());
                 out->notes.push_back(note);
+                eventSpans.push_back(std::move(spans));
                 out->lastEnd = std::max(out->lastEnd, note.at + note.len);
             }
             for (size_t i = 0; i < remap.size(); ++i) {
@@ -201,12 +214,11 @@ std::shared_ptr<const Pattern> compileArrangement(
                     remap[static_cast<size_t>(original.slideTo)] >= 0)
                     note.slideTo = remap[static_cast<size_t>(original.slideTo)];
             }
-            for (size_t i = noteBase; i < out->notes.size(); ++i) {
-                const PatternNote& note = out->notes[i];
-                const double part = note.len / note.ratchet;
-                for (int q = 0; q < note.ratchet; ++q) {
-                    out->events.push_back({note.at + part * q, static_cast<uint32_t>(i), static_cast<uint16_t>(q), true});
-                    out->events.push_back({note.at + part * (q + 1), static_cast<uint32_t>(i), static_cast<uint16_t>(q), false});
+            for (size_t i = 0; i < eventSpans.size(); ++i) {
+                const uint32_t noteIndex = static_cast<uint32_t>(noteBase + i);
+                for (const RatchetSpan& span : eventSpans[i]) {
+                    out->events.push_back({span.start, noteIndex, span.sub, true});
+                    out->events.push_back({span.end, noteIndex, span.sub, false});
                 }
             }
             timeline += segment;

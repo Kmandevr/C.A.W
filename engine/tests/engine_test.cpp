@@ -584,6 +584,32 @@ TEST(arrangement_clip_source_offset_preserves_the_tail_of_a_sustained_note) {
     CHECK_NEAR(out[39000], 0.0, 1e-5);      // the clip still ends at its arranged boundary
 }
 
+TEST(arrangement_clip_source_offset_preserves_remaining_ratchets) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "trig", {}});
+    p.modules.push_back({"phrase",
+        "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 4 1 ratchet 4\\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"trimmed-ratchet", "phrase", 4, 2, 2, false});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 40000);
+    CHECK(out[24000] > 0.5f); // third ratchet begins at the clip start
+    CHECK(out[30000] > 0.5f); // fourth ratchet keeps its original spacing
+    CHECK_NEAR(out[36000], 0.0, 1e-5); // clip boundary releases the final ratchet
+}
+
 TEST(arrangement_clips_can_overlap_on_one_track) {
     ProjectSpec p;
     p.bpm = 120;
