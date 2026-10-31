@@ -90,6 +90,9 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.chain = idList(l.get("chain"));
             spec.lengthSteps = clampi(l.number("length_steps", 0), 0, 64 * 16 * 16);
             spec.pattern = l.string("pattern");
+            spec.parentId = l.string("parent");
+            spec.folder = l.boolean("folder", false);
+            spec.busEnabled = l.boolean("bus", true);
             if (const Json* clips = l.get("clips"); clips && clips->type == Json::Type::Array) {
                 for (const Json& c : clips->arr) {
                     if (c.type != Json::Type::Object || spec.clips.size() >= 512) continue;
@@ -101,6 +104,22 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     clip.sourceOffsetSteps = clampi(c.number("source_offset_steps", 0), 0, 64 * 16 * 16);
                     clip.loop = c.boolean("loop", true);
                     if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));
+                }
+            }
+            if (const Json* lanes = l.get("automation"); lanes && lanes->type == Json::Type::Array) {
+                for (const Json& laneJson : lanes->arr) {
+                    if (laneJson.type != Json::Type::Object) continue;
+                    AutomationLaneSpec lane; lane.target = laneJson.string("target");
+                    if (lane.target != "volume" && lane.target != "pan") continue;
+                    if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
+                        for (const Json& point : points->arr) {
+                            if (point.type != Json::Type::Object || lane.points.size() >= 128) continue;
+                            lane.points.push_back({clampd(point.number("step", 0), 0, 64 * 16 * 16),
+                                clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1, 1)});
+                        }
+                    }
+                    std::stable_sort(lane.points.begin(), lane.points.end(), [](const auto& a, const auto& b) { return a.step < b.step; });
+                    if (!lane.points.empty()) spec.automation.push_back(std::move(lane));
                 }
             }
             spec.volume = clampd(l.number("volume", 0.8), 0, 1);
