@@ -31,6 +31,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       l.clips.fold<int>(v, (e, c) => math.max(e, c.startSteps + c.lengthSteps)));
     final width = math.max(560.0, end * stepW);
     final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
+    final visible = s.visibleLayers;
+    final selectedLayer = p.layers.where((l) => l.id == s.selectedLayerId).firstOrNull;
+    final selectedClip = selectedLayer?.clips.where((c) => c.id == s.selectedClipId).firstOrNull;
+    final splitAt = s.timeSelectionEnd;
     return Column(children: [
       if (s.meters.overloaded > 0) _OverloadBanner(state: s),
       Padding(
@@ -40,6 +44,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
           TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
             icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
+          if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
+            IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt), icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
+          DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
+            items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
+            onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
           TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
             icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
           IconButton(onPressed: () => setState(() => mixer = !mixer),
@@ -75,12 +84,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             ]),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               SizedBox(width: headW, child: Column(children: [
-                for (var i = 0; i < p.layers.length; i++)
-                  _TimelineHeader(state: s, layer: p.layers[i], index: i, patterns: patterns),
+                for (final layer in visible)
+                  _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer), depth: s.folderDepth(layer), patterns: patterns),
               ])),
               Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
                 child: SizedBox(width: width, child: Column(children: [
-                  for (final layer in p.layers)
+                  for (final layer in visible)
                     _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
                       selected: s.selectedClipId, onOpen: widget.onOpenPattern),
                 ])))),
@@ -92,17 +101,17 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
 }
 
 class _TimelineHeader extends StatelessWidget {
-  const _TimelineHeader({required this.state, required this.layer, required this.index, required this.patterns});
+  const _TimelineHeader({required this.state, required this.layer, required this.index, required this.depth, required this.patterns});
   final AppState state;
   final LayerDoc layer;
-  final int index;
+  final int index, depth;
   final List<ModuleDoc> patterns;
 
   @override
   Widget build(BuildContext context) {
     final color = Neon.layer(layer.color);
     final gens = state.project.modules.where((m) => state.isGenerator(m.id)).toList();
-    return Container(height: 76, padding: const EdgeInsets.fromLTRB(7, 5, 4, 4),
+    return Container(height: 76 + layer.automation.length * 34, padding: EdgeInsets.fromLTRB(7 + depth * 13, 5, 4, 4),
       decoration: const BoxDecoration(color: Neon.panel,
         border: Border(bottom: BorderSide(color: Neon.line), right: BorderSide(color: Neon.line))),
       child: Column(children: [
@@ -110,7 +119,7 @@ class _TimelineHeader extends StatelessWidget {
           if (layer.isFolder)
             IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints.tightFor(width: 22, height: 24),
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
-              onPressed: () => state.editLayer(layer, (l) => l.collapsed = !l.collapsed))
+              onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed))
           else Container(width: 6, height: 20, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
           const SizedBox(width: 5),
           Expanded(child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -120,10 +129,21 @@ class _TimelineHeader extends StatelessWidget {
               if (v == 'up' && index > 0) state.moveLayer(index, index - 1);
               if (v == 'down' && index < state.project.layers.length - 1) state.moveLayer(index, index + 2);
               if (v == 'delete') state.removeLayer(layer);
+              if (v == 'unparent') state.moveLayerIntoFolder(layer, null);
+              if (v.startsWith('parent:')) state.moveLayerIntoFolder(layer, v.substring(7));
+              if (v == 'bus') state.setFolderBus(layer, !layer.busEnabled);
+              if (v == 'automation-volume') state.addAutomationLane(layer, 'volume');
+              if (v == 'automation-pan') state.addAutomationLane(layer, 'pan');
             },
             itemBuilder: (_) => [
               if (index > 0) const PopupMenuItem(value: 'up', child: Text('Move up')),
               if (index < state.project.layers.length - 1) const PopupMenuItem(value: 'down', child: Text('Move down')),
+              if (layer.parentId != null) const PopupMenuItem(value: 'unparent', child: Text('Move out of folder')),
+              for (final folder in state.project.layers.where((f) => f.isFolder && f.id != layer.id))
+                PopupMenuItem(value: 'parent:${folder.id}', child: Text('Move into ${folder.name}')),
+              if (layer.isFolder) PopupMenuItem(value: 'bus', child: Text(layer.busEnabled ? 'Disable group bus' : 'Enable group bus')),
+              if (!layer.isFolder) const PopupMenuItem(value: 'automation-volume', child: Text('Add volume automation')),
+              if (!layer.isFolder) const PopupMenuItem(value: 'automation-pan', child: Text('Add pan automation')),
               const PopupMenuItem(value: 'delete', child: Text('Delete')),
             ]),
         ]),
@@ -147,7 +167,7 @@ class _TimelineHeader extends StatelessWidget {
             itemBuilder: (_) => [for (final m in patterns) PopupMenuItem(value: m.id, child: Text(m.name))],
           ),
         ])) else const Expanded(child: Align(alignment: Alignment.centerLeft,
-          child: Text('GROUP', style: TextStyle(color: Neon.dim, fontSize: 9)))),
+          child: Row(children: [Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: TextStyle(color: Neon.dim, fontSize: 9)), const Spacer(), Icon(Icons.account_tree_outlined, size: 13, color: color)]))),
       ]),
     );
   }
@@ -163,9 +183,25 @@ class _TimelineLane extends StatelessWidget {
   final VoidCallback? onOpen;
 
   @override
-  Widget build(BuildContext context) => SizedBox(width: width, height: 76,
+  Widget build(BuildContext context) {
+    final height = 76.0 + layer.automation.length * 34.0;
+    return SizedBox(width: width, height: height,
     child: Stack(children: [
-      CustomPaint(size: Size(width, 76), painter: _ArrangementGrid(stepW, state.project.stepsPerBar)),
+      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar)),
+      Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
+        onTapDown: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
+        onHorizontalDragStart: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
+        onHorizontalDragUpdate: (d) {
+          final start = state.timeSelectionStart ?? 0;
+          final end = (d.localPosition.dx / stepW).round();
+          state.setTimeSelection(math.min(start, end), math.max(start, end));
+        },
+        child: const SizedBox.expand())),
+      if (state.timeSelectionStart != null && state.timeSelectionEnd != null)
+        Positioned(left: math.min(state.timeSelectionStart!, state.timeSelectionEnd!) * stepW, top: 0,
+          width: math.max(1.0, (state.timeSelectionEnd! - state.timeSelectionStart!).abs() * stepW), height: height,
+          child: IgnorePointer(child: Container(color: Neon.blue.withValues(alpha: .09)))),
+
       for (final clip in layer.clips)
         Positioned(left: clip.startSteps * stepW, top: 8,
           width: math.max(12.0, clip.lengthSteps * stepW), height: 60,
@@ -174,8 +210,12 @@ class _TimelineLane extends StatelessWidget {
       if (layer.clips.isEmpty && !layer.isFolder)
         const Positioned(left: 10, top: 29, child: Text('Add MIDI clip with +',
           style: TextStyle(color: Neon.dim, fontSize: 10))),
+      for (var i = 0; i < layer.automation.length; i++)
+        Positioned(left: 0, right: 0, top: 76 + i * 34.0, height: 34,
+          child: _AutomationLaneView(state: state, layer: layer, lane: layer.automation[i], stepW: stepW, width: width)),
     ]),
   );
+  }
 }
 
 class _ArrangementGrid extends CustomPainter {
@@ -222,12 +262,15 @@ class _TimelineClipState extends State<_TimelineClip> {
       borderRadius: BorderRadius.circular(5),
       child: Stack(children: [
         Positioned.fill(child: GestureDetector(
-          onTap: () => widget.state.selectClip(widget.layer, c),
+          onTap: () => widget.state.selectClip(widget.layer, c, additive: HardwareKeyboard.instance.isShiftPressed),
           onDoubleTap: () { widget.state.selectClip(widget.layer, c); widget.onOpen?.call(); },
           onHorizontalDragStart: (_) => setState(() { dragging = true; dx = 0; }),
           onHorizontalDragUpdate: (d) => setState(() => dx += d.delta.dx),
           onHorizontalDragEnd: (_) {
-            widget.state.moveClip(widget.layer, c, start);
+            final raw = start;
+            final snap = widget.state.arrangementSnapSteps;
+            final finalStart = HardwareKeyboard.instance.isShiftPressed ? raw : (raw / snap).round() * snap;
+            widget.state.moveClip(widget.layer, c, finalStart);
             setState(() { dragging = false; dx = 0; });
           },
           child: Container(
@@ -265,13 +308,69 @@ class _TimelineClipState extends State<_TimelineClip> {
             onHorizontalDragStart: (_) => setState(() { resizing = true; resizeDx = 0; }),
             onHorizontalDragUpdate: (d) => setState(() => resizeDx += d.delta.dx),
             onHorizontalDragEnd: (_) {
-              widget.state.resizeClip(widget.layer, c, length);
+              final snap = widget.state.arrangementSnapSteps;
+              final finalLength = HardwareKeyboard.instance.isShiftPressed ? length : math.max(snap, (length / snap).round() * snap);
+              widget.state.resizeClip(widget.layer, c, finalLength);
               setState(() { resizing = false; resizeDx = 0; });
             },
             child: Center(child: Container(width: 2, height: 22, color: widget.color)))),
       ]),
     );
   }
+}
+
+class _AutomationLaneView extends StatelessWidget {
+  const _AutomationLaneView({required this.state, required this.layer, required this.lane, required this.stepW, required this.width});
+  final AppState state;
+  final LayerDoc layer;
+  final AutomationLaneDoc lane;
+  final double stepW, width;
+
+  double _y(double value) => lane.target == 'volume' ? 28 - value * 24 : 16 - value * 12;
+
+  @override
+  Widget build(BuildContext context) => Stack(children: [
+    GestureDetector(behavior: HitTestBehavior.opaque,
+      onTapUp: (d) {
+        final step = (d.localPosition.dx / stepW).clamp(0.0, 4096.0);
+        final value = lane.target == 'volume' ? (1 - d.localPosition.dy / 32).clamp(0.0, 1.0)
+            : (1 - d.localPosition.dy / 16).clamp(-1.0, 1.0);
+        state.addAutomationPoint(layer, lane, step, value);
+      },
+      child: CustomPaint(size: Size(width, 34), painter: _AutomationCurvePainter(lane, stepW))),
+    for (var i = 0; i < lane.points.length; i++)
+      Positioned(left: lane.points[i].step * stepW - 5, top: _y(lane.points[i].value) + 2,
+        child: GestureDetector(
+          onPanUpdate: (d) => state.updateAutomationPoint(layer, lane, i,
+            lane.points[i].step + d.delta.dx / stepW,
+            lane.points[i].value - d.delta.dy / (lane.target == 'volume' ? 24 : 12)),
+          child: Container(width: 10, height: 10, decoration: BoxDecoration(
+            color: Neon.blue, shape: BoxShape.circle, border: Border.all(color: Neon.text, width: 1))),
+        )),
+    Positioned(left: 6, top: 1, child: Text(lane.target.toUpperCase(),
+      style: const TextStyle(color: Neon.dim, fontSize: 8, letterSpacing: 1))),
+  ]);
+}
+
+class _AutomationCurvePainter extends CustomPainter {
+  _AutomationCurvePainter(this.lane, this.stepW);
+  final AutomationLaneDoc lane;
+  final double stepW;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Neon.blue.withValues(alpha: .75)..strokeWidth = 1.5..style = PaintingStyle.stroke;
+    final path = Path();
+    for (var i = 0; i < lane.points.length; i++) {
+      final p = lane.points[i];
+      final y = lane.target == 'volume' ? 28 - p.value * 24 : 16 - p.value * 12;
+      final at = Offset(p.step * stepW, y + 7);
+      if (i == 0) { path.moveTo(at.dx, at.dy); } else { path.lineTo(at.dx, at.dy); }
+    }
+    canvas.drawPath(path, paint);
+    canvas.drawLine(Offset(0, 33), Offset(size.width, 33), Paint()..color = Neon.line);
+  }
+  @override
+  bool shouldRepaint(covariant _AutomationCurvePainter old) => old.lane != lane || old.stepW != stepW;
 }
 
 class _ArrangementMixer extends StatelessWidget {
