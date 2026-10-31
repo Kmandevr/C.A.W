@@ -251,14 +251,19 @@ The app, the CLI and exports share one format:
 { "caw_project": 1, "name": "Night Glitch", "bpm": 140, "beats_per_bar": 4, "loop_bars": 4,
   "seed": 7, "master": 0.7, "seam_crossfade": true, "voices": 8, "swap": "now", "key_root": 9, "key_scale": 1, "globals": { "swing": 0.1 },
   "modules": [ { "id": "m1", "name": "Kick", "source": "...the .caw text...", "params": { "shift": 6 } } ],
-  "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"], "pattern": "p1", "length_steps": 48,
+  "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"],
+                "clips": [ { "id": "c1", "pattern": "p1", "start_steps": 0, "length_steps": 16,
+                            "source_offset_steps": 0, "loop": true } ],
                 "volume": 0.8, "pan": 0, "mute": false, "solo": false } ],
   "audition": { "chain": ["m1"], "pattern": "p1", "length_steps": 0 }, "audition_only": false }
 ```
 
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
-- A layer's `pattern` names a pattern module; its notes play the generator, and its length replaces `length_steps`. A missing or broken pattern leaves the layer playing without one, with a warning (a broken pattern keeps its last good version playing).
+- A legacy layer's \`pattern\` names one pattern module; its notes play the generator, and its length replaces \`length_steps\`.
+- An arrangement layer can instead contain \`clips\`. Each clip references a reusable pattern source and has \`start_steps\`, \`length_steps\`, \`source_offset_steps\` and \`loop\`. Clip instances may overlap; all of their notes use the track's one generator/effect chain and voice pool.
+- The control thread compiles clips into a sorted absolute-time event stream when the project changes. The audio callback does no pattern parsing or timeline allocation: it splits its current block at note boundaries and renders the events at their sample positions. The scheduler follows project transport and loop boundaries; it does not depend on Flutter timers.
+- If a clip references a missing or broken pattern, that clip contributes no notes; legacy broken patterns keep their last good version playing.
 - `voices` is how many voices each pattern layer may use for new notes, 1–8 (default 8; the app's light mode sends 4). Voices already sounding finish when it drops.
 - `swap` is when changed code is heard while playing: `now` (default), `beat` or `bar`.
 - `audition` is the Builder's preview, with an optional pattern. With `audition_only`, only that chain is heard.
@@ -316,7 +321,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 79 tests:
+`engine/build/caw_tests` runs 80 tests:
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
