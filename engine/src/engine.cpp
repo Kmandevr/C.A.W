@@ -414,6 +414,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         double vol, pan;
         bool mute, solo;
         int order;
+        std::vector<ClipSpec> clips;
     };
     std::vector<Want> wants;
     int order = 0;
@@ -423,7 +424,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     order_.clear();
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
-        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order});
+        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips});
     }
 
     // Pass 1: which modules each layer plays, and its slot.
@@ -456,8 +457,16 @@ std::string Engine::setProject(const ProjectSpec& p) {
             pl.sig.push_back(it->second.program.get());
             layerState += it->second.program->stateSize;
         }
-        // A pattern plays the generator as voices and sets the layer's loop length.
-        if (!w.pattern.empty() && !pl.ids.empty()) {
+        // Arrangement clips are compiled into an immutable absolute-time event stream here,
+        // on the control thread. A layer still uses one voice pool and one instrument/effect chain.
+        if (!w.clips.empty() && !pl.ids.empty()) {
+            std::map<std::string, std::shared_ptr<const Pattern>> sources;
+            for (const auto& [moduleId, module] : modules_)
+                if (module.pattern) sources.emplace(moduleId, module.pattern);
+            pl.pattern = compileArrangement(w.clips, sources, p.beatsPerBar, p.loopSteps());
+            pl.w.steps = 0;  // arrangement follows the project transport, not an individual clip loop
+            layerState += static_cast<int64_t>(kVoices - 1) * modules_.at(pl.ids.front()).program->stateSize;
+        } else if (!w.pattern.empty() && !pl.ids.empty()) {
             auto it = modules_.find(w.pattern);
             if (it != modules_.end() && it->second.pattern) {
                 pl.pattern = it->second.pattern;
@@ -1308,7 +1317,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         double* y = tmp_;
         s.cur->layerLen = layerLen;
         const Pattern* pat = s.pattern ? s.pattern->get() : nullptr;
-        runChain(*s.cur, false, n0, len, y, &s, j, pat, k);
+        runChain(*s.cur, false, n0, len, y, &s, j, pat, free ? epoch_ : k);
         if (s.seamLeft > 0) {
             const int sl = std::min(len, s.seamLeft);
             double z[kBlock];
