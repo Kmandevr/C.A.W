@@ -508,8 +508,11 @@ private:
         if (at.kind != Tok::Ident) fail(at, "write 'mod parameter = util.mod(parameter, source, amount)'");
         const std::string name = at.text;
         bool isParam = false;
-        for (const ParamDef& d : p_.params)
-            if (d.name == name) isParam = true;
+        for (const ParamDef& d : p_.params) {
+            if (d.name != name) continue;
+            if (d.kind != ParamKind::Number) fail(at, "mod target '" + name + "' must be a numeric param or global");
+            isParam = true;
+        }
         if (!isParam) fail(at, "mod target '" + name + "' must be a param or global declared earlier");
         next();
         expectOp("=");
