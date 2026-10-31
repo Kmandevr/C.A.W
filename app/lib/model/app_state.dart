@@ -490,7 +490,7 @@ class AppState extends ChangeNotifier {
       final folder = project.layers.where((x) => x.id == folderId).firstOrNull;
       if (folder == null || !folder.isFolder) return false;
       var parent = folder.parentId;
-      while (parent != null) {
+      for (var depth = 0; parent != null && depth < project.layers.length; depth++) {
         if (parent == layer.id) return false;
         parent = project.layers.where((x) => x.id == parent).firstOrNull?.parentId;
       }
