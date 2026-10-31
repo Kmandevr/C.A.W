@@ -172,9 +172,9 @@ TEST(cross_module_modulation_reaches_a_parameter_in_live_and_offline_render) {
     ProjectSpec p;
     p.master = 1.0;
     p.seamCrossfade = false;
-    p.modules.push_back({"k", std::string(kFloat) + "export let env = 0.5\\n0", {}, "Kick"});
+    p.modules.push_back({"k", std::string(kFloat) + "export let env = 0.5\n0", {}, "Kick"});
     p.modules.push_back({"g", std::string(kFloat) +
-        "param level = 0.5 in 0..1\\nmod level = util.mod(level, kick.env, 0.4)\\nlevel", {}, "Bass"});
+        "param level = 0.5 in 0..1\nmod level = util.mod(level, kick.env, 0.4)\nlevel", {}, "Bass"});
     LayerSpec kick, bass;
     kick.id = "kick";
     kick.chain = {"k"};
