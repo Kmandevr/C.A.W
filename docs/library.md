@@ -954,6 +954,18 @@ Sidechain ducking: turns x down while an envelope is high (e.g. kick.env).
 util.duck(saw(55) * 0.5, ad(step % 4 == 0, 0.001, 0.3), 0.8)
 ```
 
+### `util.mod(base, source, amount)`
+
+Adds a modulation signal to a base parameter value. Use a signed amount to set depth and polarity; the source can be an LFO, envelope or another module's export.
+
+- `base`: the unmodulated parameter or global value
+- `source`: a bipolar or unipolar signal
+- `amount`: signed modulation depth; negative reverses polarity
+
+```
+util.mod(900, lfo.sine(4), 300)
+```
+
 ### `util.gate(x, open)`
 
 Rhythmic gate: lets x through only while open is above 0.
