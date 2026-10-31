@@ -9,8 +9,7 @@ WorkerPool::WorkerPool(uint32_t workers, std::chrono::milliseconds idleTimeout)
     : idleTimeout_(std::max(idleTimeout, std::chrono::milliseconds::zero())) {
     capacity_ = std::clamp<uint32_t>(workers, 1, kMaxWorkers);
     workerLimit_ = capacity_;
-    // Reserve only the small thread-handle array. Actual OS threads are started on demand.
-    workers_.reserve(capacity_);
+    // Thread handles occupy fixed slots; actual OS threads are started on demand.
 }
 
 WorkerPool::~WorkerPool() {
