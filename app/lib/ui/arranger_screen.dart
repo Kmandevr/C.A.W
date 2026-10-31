@@ -69,26 +69,24 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       Expanded(child: p.layers.isEmpty
         ? const Center(child: Text('Add a track, choose a generator, then add a MIDI clip.'))
         : SingleChildScrollView(child: Column(children: [
-            Row(children: [
-              SizedBox(width: headW, height: 30, child: const Padding(
-                padding: EdgeInsets.only(left: 10, top: 8),
-                child: Text('TRACKS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3)))),
-              Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
-                child: SizedBox(width: width, height: 30, child: Row(children: [
-                  for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
-                    SizedBox(width: p.stepsPerBar * stepW,
-                      child: Align(alignment: Alignment.centerLeft,
-                        child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim))),
-                    ),
-                ])))),
-            ]),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               SizedBox(width: headW, child: Column(children: [
+                const SizedBox(height: 30, child: Padding(
+                  padding: EdgeInsets.only(left: 10, top: 8),
+                  child: Align(alignment: Alignment.centerLeft,
+                    child: Text('TRACKS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
                 for (final layer in visible)
-                  _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer), depth: s.folderDepth(layer), patterns: patterns),
+                  _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
+                    depth: s.folderDepth(layer), patterns: patterns),
               ])),
               Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
                 child: SizedBox(width: width, child: Column(children: [
+                  SizedBox(height: 30, child: Row(children: [
+                    for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
+                      SizedBox(width: p.stepsPerBar * stepW,
+                        child: Align(alignment: Alignment.centerLeft,
+                          child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim)))),
+                  ])),
                   for (final layer in visible)
                     _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
                       selected: s.selectedClipId, onOpen: widget.onOpenPattern),
