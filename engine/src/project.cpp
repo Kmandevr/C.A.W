@@ -51,6 +51,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.beatsPerBar = clampi(root.number("beats_per_bar", 4), 1, 16);
     out.voices = clampi(root.number("voices", 8), 1, 8);
     out.loopBars = clampi(root.number("loop_bars", 4), 1, 64);
+    const int maxArrangementSteps = 64 * out.beatsPerBar * 4;
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
     out.master = clampd(root.number("master", 0.7), 0, 1);
     out.seamCrossfade = root.boolean("seam_crossfade", true);
@@ -88,7 +89,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.name = l.string("name");
             if (spec.id.empty()) continue;
             spec.chain = idList(l.get("chain"));
-            spec.lengthSteps = clampi(l.number("length_steps", 0), 0, 64 * 16 * 16);
+            spec.lengthSteps = clampi(l.number("length_steps", 0), 0, maxArrangementSteps);
             spec.pattern = l.string("pattern");
             spec.parentId = l.string("parent");
             spec.folder = l.boolean("folder", false);
@@ -99,7 +100,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     ClipSpec clip;
                     clip.id = c.string("id");
                     clip.pattern = c.string("pattern");
-                    const int maxArrangementSteps = 64 * out.beatsPerBar * 4;
                     clip.startSteps = clampi(c.number("start_steps", 0), 0, maxArrangementSteps - 1);
                     clip.lengthSteps = clampi(c.number("length_steps", 64), 1, maxArrangementSteps - clip.startSteps);
                     clip.sourceOffsetSteps = clampi(c.number("source_offset_steps", 0), 0, maxArrangementSteps);
@@ -115,7 +115,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                         for (const Json& point : points->arr) {
                             if (point.type != Json::Type::Object || lane.points.size() >= 128) continue;
-                            lane.points.push_back({clampd(point.number("step", 0), 0, 64 * 16 * 16),
+                            lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
                                 clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1, 1)});
                         }
                     }
