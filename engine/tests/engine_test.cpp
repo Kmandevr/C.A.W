@@ -71,6 +71,32 @@ TEST(folder_bus_routes_children_and_applies_group_gain) {
     CHECK_NEAR(right[200], expected, 1e-5);
 }
 
+TEST(reparenting_track_detaches_it_from_previous_folder_bus) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
+    LayerSpec folder;
+    folder.id = "bus";
+    folder.folder = true;
+    folder.busEnabled = true;
+    folder.volume = 0.5;
+    p.layers.insert(p.layers.begin(), folder);
+    p.layers[1].parentId = "bus";
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto grouped = run(e, 256);
+    const float groupedLevel = static_cast<float>(0.8 * std::cos(kPi / 4.0) * 0.5);
+    CHECK_NEAR(grouped[200], groupedLevel, 1e-5);
+
+    // Moving the track out must remove the old parent bus from its routing.
+    p.layers[1].parentId.clear();
+    e.setProject(p);
+    const auto detached = run(e, 256);
+    const float directLevel = static_cast<float>(0.8 * std::cos(kPi / 4.0));
+    CHECK_NEAR(detached[200], directLevel, 1e-5);
+}
+
 TEST(organization_only_folder_mute_propagates_to_descendants) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
     LayerSpec folder;
