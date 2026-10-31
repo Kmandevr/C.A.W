@@ -45,7 +45,7 @@ class AppState extends ChangeNotifier {
   String? selectedLayerId;
   String? selectedClipId;
   final Set<String> selectedClipIds = {};
-  int? timeSelectionStart, timeSelectionEnd;
+  int? timeSelectionStart, timeSelectionEnd, timeSelectionAnchor;
   int arrangementSnapSteps = 1;
   bool previewOnly = false;
   bool ready = false;
@@ -566,6 +566,20 @@ class AppState extends ChangeNotifier {
     });
   }
 
+  void beginTimeSelection(int step) {
+    timeSelectionAnchor = step.clamp(0, 4096).toInt();
+    setTimeSelection(step, step);
+  }
+
+  void updateTimeSelection(int step) {
+    final anchor = timeSelectionAnchor ?? timeSelectionStart ?? step;
+    setTimeSelection(anchor, step);
+  }
+
+  void endTimeSelection() {
+    timeSelectionAnchor = null;
+  }
+
   void setTimeSelection(int start, int end) {
     timeSelectionStart = start.clamp(0, 4096).toInt();
     timeSelectionEnd = end.clamp(0, 4096).toInt();
@@ -573,7 +587,7 @@ class AppState extends ChangeNotifier {
   }
 
   void clearTimeSelection() {
-    timeSelectionStart = timeSelectionEnd = null;
+    timeSelectionStart = timeSelectionEnd = timeSelectionAnchor = null;
     notifyListeners();
   }
 
