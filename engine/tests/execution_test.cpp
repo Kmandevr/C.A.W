@@ -69,10 +69,11 @@ TEST(execution_thermal_and_battery_pressure_reduce_background_work) {
 }
 
 TEST(execution_unknown_pressure_reserves_one_host_core_for_offline_work) {
-    HardwareProfile hw{8, 8192, true, false};
+    HardwareProfile hw{8, 8192, true, true};
     ExecutionRequest req;
     req.workload = WorkloadClass::OfflineRender;
     req.pressure = DevicePressure::Unknown;
+    req.allowGpu = true;
     const ExecutionPlan p = makeExecutionPlan(hw, req);
     CHECK_EQ(p.workerThreads, 7);
     CHECK(p.yieldToForeground);
