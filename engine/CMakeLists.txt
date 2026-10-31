@@ -1,16 +1,13 @@
 # Builds the C.A.W engine: core library, shared library for the app (with audio output), the caw CLI and tests.
 cmake_minimum_required(VERSION 3.22)
 project(caw_engine LANGUAGES C CXX)
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
 option(CAW_AUDIO "Build the shared library with device audio output (miniaudio)" ON)
 option(CAW_TOOLS "Build the caw CLI and the tests" ON)
 option(CAW_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
-
 get_filename_component(CAW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
 # Determinism: no fast-math and no fused multiply-add contraction (MSVC /fp:precise never contracts), so every platform rounds alike.
@@ -23,6 +20,7 @@ if(CAW_SANITIZE AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
   add_link_options(-fsanitize=address,undefined)
 endif()
+
 
 # Embedded .caw files: starter templates (examples/*.caw) and the built-in libraries (engine/lib/*.caw) become
 # string constants inside the engine.
@@ -48,7 +46,6 @@ function(caw_write_if_changed path content)
   file(WRITE "${path}.tmp" "${content}")
   file(COPY_FILE "${path}.tmp" "${path}" ONLY_IF_DIFFERENT)
 endfunction()
-
 caw_read_dir("${CAW_ROOT}/examples" _tfiles _tsrcs _tcount)
 if(_tcount EQUAL 0)
   set(_tfiles "nullptr,\n")
@@ -65,7 +62,6 @@ const char* const kTemplateSources[] = {
 ${_tsrcs}};
 }  // namespace caw
 ")
-
 caw_read_dir("${CMAKE_CURRENT_SOURCE_DIR}/lib" _lfiles _lsrcs _lcount)
 set(CAW_STDLIB_CPP "${CMAKE_CURRENT_BINARY_DIR}/caw_stdlib.cpp")
 caw_write_if_changed("${CAW_STDLIB_CPP}" "// Generated from engine/lib/*.caw by engine/CMakeLists.txt; do not edit.
@@ -85,31 +81,20 @@ ${_lsrcs}nullptr};
 ")
 
 add_library(caw_core STATIC
-  src/builtins.cpp
-  src/compile.cpp
-  src/detmath.cpp
-  src/docs.cpp
-  src/pattern.cpp
-  src/engine.cpp
-  src/json.cpp
-  src/midifile.cpp
-  src/project.cpp
-  src/render.cpp
-  src/synth.cpp
-  src/tables.cpp
-  src/vm.cpp
-  src/wav.cpp
-  "${CAW_TEMPLATES_CPP}"
-  "${CAW_STDLIB_CPP}")
+  src/builtins.cpp src/compile.cpp src/detmath.cpp src/docs.cpp src/pattern.cpp
+  src/engine.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
+  "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
 target_include_directories(caw_core PUBLIC include src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
 find_package(Threads REQUIRED)
 target_link_libraries(caw_core PUBLIC Threads::Threads)
 set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
+
 # The library the app loads through dart:ffi.
 if(CAW_AUDIO)
-  add_library(caw_engine SHARED src/capi.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
+  add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
   target_include_directories(caw_engine PRIVATE third_party/miniaudio)
   target_compile_options(caw_engine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CAW_FLAGS}>)
   if(ANDROID)
@@ -119,10 +104,11 @@ if(CAW_AUDIO)
     target_link_libraries(caw_engine PRIVATE dl m)
   endif()
 else()
-  add_library(caw_engine SHARED src/capi.cpp platform/audio_none.cpp)
+  add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp platform/audio_none.cpp)
   target_compile_options(caw_engine PRIVATE ${CAW_FLAGS})
 endif()
 target_link_libraries(caw_engine PRIVATE caw_core)
+
 # The file is libcaw.so / caw.dll; only the C API (marked CAW_API) is exported.
 set_target_properties(caw_engine PROPERTIES OUTPUT_NAME caw CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden)
 
@@ -131,18 +117,18 @@ if(CAW_TOOLS)
   set_target_properties(caw_cli PROPERTIES OUTPUT_NAME caw)
   target_compile_options(caw_cli PRIVATE ${CAW_FLAGS})
   target_link_libraries(caw_cli PRIVATE caw_core)
-
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
-                           tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
-                           tests/midifile_test.cpp tests/synth_test.cpp src/capi.cpp platform/audio_none.cpp)
+    tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
+    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp
+    src/capi.cpp src/execution_capi.cpp platform/audio_none.cpp)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_tests PRIVATE caw_core)
   enable_testing()
   add_test(NAME caw_tests COMMAND caw_tests)
-
+  
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
-  add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
+add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_link_libraries(caw_bench PRIVATE caw_core)
 endif()

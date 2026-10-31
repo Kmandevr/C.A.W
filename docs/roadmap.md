@@ -1,7 +1,7 @@
 ---
 title: Roadmap
 summary: Staged plan from the bare-bones v1 (build sounds, stack them into loops, export) to commercial release, with v1's scope, acceptance test and build order.
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # Roadmap
@@ -82,6 +82,8 @@ CI runs the engine tests and golden renders, and checks the acceptance test's ti
 
 ## v2 — Variables, patterns, house synth and MIDI
 
+The next-generation engine direction is defined in [Modular adaptive engine](engine-next.md). Keep sound design and music-content creation as the primary focus, but do not treat that focus as a ban on DAW functionality: C.A.W. should include practical recording, arranging, editing, mixing and export capabilities where they help, and should be useful as a lightweight DAW in a pinch. Full parity with a dedicated DAW or a feature-rich live-performance environment is not a requirement.
+
 Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is in [architecture](architecture.md#variables-and-patterns-proposal).
 
 - **Unity-style variables:**
@@ -106,10 +108,7 @@ Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is 
   - docs generated into `docs/`, an agent guide, in-app help and inspector tips, checked in CI
   - **[Fact]** Built (step 2): 69 documented built-in functions in ten categories, 12 more in the `drum`, `synth` and `util` libraries, project library modules, the [function library](library.md) and [agent guide](agent-guide.md) checked in CI, and the app's Library sheet (F1) and completion. MIDI functions come with MIDI ports.
 - **Connectors:** sidechain, modulation links (LFOs and envelopes onto any param), and MIDI ports.
-- **A UI for a light halfway DAW** ([UI design](ui.md)):
-  - a session grid (layers × scenes), a library you drag from, and an inspector sheet
-  - one gesture vocabulary on both phone and desktop, and undo/redo
-  - painted grids, with the CPU and RAM budgets
+- **A lightweight creation/preview workbench** ([UI design](ui.md)): browse reusable assets, test combinations, inspect output and capture generated audio while it plays. This is not a full DAW arrangement or live-performance environment.
 - **Notes stored the MIDI 2.0 way.** `.mid` import and MPE export come later; DAW export isn't a priority yet.
 - **The house-built synth:** play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Its voice pool also plays chords from patterns.
 - on-screen keys
@@ -131,13 +130,14 @@ GitHub App with device-flow sign-in, a library repo template, tree-diff sync, at
 
 macOS and Linux desktop apps, then iOS once its distribution question is settled. A CLAP plugin of the engine, wrapped into VST3 and AU by clap-wrapper.
 
-## Stage 5 — Advanced instrument
+## Stage 5 — Advanced creation framework
 
-- a timeline arranger
-- the sequencing mini-language
+- adaptive execution and hardware-aware resource scheduling
+- typed modular processing graph and reusable native modules
+- custom waveform, envelope, LFO, filter and modulation editors
 - audio import with nondestructive byte/bit mangling chains (originals are never modified)
-- sends and buses
-- free module patching (modular-style)
-- spectrum display
-- performance work
+- reusable routing and modular patching for sound creation
+- spectrum and analysis tools
+- local/global asset library and factory hierarchy
+- performance work on low-end devices
 - preparing to sell through AutoStacc: signed release builds, privacy policy, install steps, and how a purchase unlocks the app

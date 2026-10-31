@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
+import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,9 +29,13 @@ void main() {
 
     final kick = s.project.layers.first;
     expect(find.text(kick.name), findsWidgets);
-    await tester.scrollUntilVisible(find.text('Add track'), 300);
+    final tracksScroll = find.descendant(
+      of: find.byType(ArrangerScreen),
+      matching: find.byType(Scrollable),
+    );
+    await tester.scrollUntilVisible(find.text('Add track'), 300, scrollable: tracksScroll.first);
     expect(find.text('Add track'), findsOneWidget);
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, 3000));
+    await tester.drag(tracksScroll.first, const Offset(0, 3000));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text(kick.name).first);

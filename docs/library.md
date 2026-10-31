@@ -1,7 +1,7 @@
 ---
 title: Function library
 summary: Every built-in function, constant and library function the module language offers, generated from the engine.
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Function library
@@ -399,7 +399,7 @@ Band-limited sawtooth, -1..1.
 saw(110) * 0.4
 ```
 
-### `wt(table, freq, pos?, unison?, detune?)`
+### `wt(table, freq, pos?, unison?, detune?, warp?)`
 
 Wavetable oscillator: plays a table (table.saw, table.basic …), morphing through its frames with pos, with up to 16 detuned unison voices. Band-limited per octave, so high notes stay clean. The table and unison count are set when a note starts.
 
@@ -408,9 +408,10 @@ Wavetable oscillator: plays a table (table.saw, table.basic …), morphing throu
 - `pos` (optional): frame position 0..1 (default 0)
 - `unison` (optional): voices 1..16 (default 1; set at the note start)
 - `detune` (optional): spread of the unison voices, 0..1 = up to +-1 semitone (default 0)
+- `warp` (optional): phase distortion amount -0.95..0.95 (default 0)
 
 ```
-wt(table.basic, mtof(A2), lfo.tri(8) * 0.5 + 0.5, 7, 0.15) * 0.3
+wt(table.basic, mtof(A2), lfo.tri(8) * 0.5 + 0.5, 7, 0.15, 0.25) * 0.3
 ```
 
 ### `square(freq, width?)`
@@ -541,6 +542,21 @@ A new random level -1..1 every cycle (stepped), synced to the tempo and the seed
 
 ```
 sine(330 + 200 * lfo.random(0.25)) * 0.5
+```
+
+### `lfo.curve(beats, phase, p0?, p1?, p2?, p3?)`
+
+Tempo-synced four-point editable curve, linearly interpolated and looped.
+
+- `beats`: length of one cycle in beats
+- `phase`: start point 0..1
+- `p0` (optional): first point -1..1
+- `p1` (optional): second point -1..1
+- `p2` (optional): third point -1..1
+- `p3` (optional): fourth point -1..1
+
+```
+sine(220 + 80 * lfo.curve(4, 0, 0, 1, 0, -1)) * 0.5
 ```
 
 ## Filters

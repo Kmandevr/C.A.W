@@ -47,6 +47,46 @@ typedef struct CawRenderOptions {
     const char* param;    /* wavetable: param to sweep, or NULL */
 } CawRenderOptions;
 
+/* Workload identifiers shared by the app, project tools and native add-ons. */
+enum {
+    CAW_WORK_INTERACTIVE_AUDITION = 0,
+    CAW_WORK_INTERACTIVE_PREVIEW = 1,
+    CAW_WORK_BACKGROUND_GENERATION = 2,
+    CAW_WORK_OFFLINE_RENDER = 3,
+    CAW_WORK_IDLE = 4
+};
+enum {
+    CAW_PRESSURE_NORMAL = 0,
+    CAW_PRESSURE_BATTERY_SAVER = 1,
+    CAW_PRESSURE_THERMAL_WARM = 2,
+    CAW_PRESSURE_THERMAL_HOT = 3,
+    CAW_PRESSURE_THERMAL_CRITICAL = 4
+};
+
+typedef struct CawHardwareProfile {
+    uint16_t logical_cores;
+    uint32_t memory_budget_mib;
+    int32_t supports_simd;
+    int32_t supports_gpu_compute;
+} CawHardwareProfile;
+
+typedef struct CawExecutionRequest {
+    int32_t workload;
+    int32_t pressure;
+    int32_t foreground_busy;
+    int32_t allow_gpu;
+} CawExecutionRequest;
+
+typedef struct CawExecutionPlan {
+    uint16_t worker_threads;
+    uint16_t max_concurrent_jobs;
+    uint32_t preferred_batch_frames;
+    int32_t latency_sensitive;
+    int32_t use_simd;
+    int32_t allow_gpu;
+    int32_t yield_to_foreground;
+} CawExecutionPlan;
+
 CAW_API int32_t caw_api_version(void);
 
 /* Strings returned by the engine are allocated; release them with caw_free. */
@@ -104,8 +144,14 @@ CAW_API int32_t caw_template_count(void);
 CAW_API const char* caw_template_file(int32_t index);
 CAW_API const char* caw_template_source(int32_t index);
 
+
+/* Pure workload policy shared by the app and add-ons. Hosts supply observed capabilities;
+   this does not query OS APIs, start workers, or alter the real-time audio callback. */
+CAW_API int32_t caw_execution_plan(const CawHardwareProfile* hardware, const CawExecutionRequest* request,
+                                   CawExecutionPlan* out);
+CAW_API int32_t caw_hardware_profile_detect(CawHardwareProfile* out);
+
 #ifdef __cplusplus
 }
 #endif
-
 #endif /* CAW_H */

@@ -25,6 +25,7 @@ There's one home for each kind of instruction; the others point to it.
 
 | Kind | Home |
 | --- | --- |
+| Portable entry point for non-Claude agents | [`../AGENTS.md`](../AGENTS.md) |
 | Project identity, global rules, how to work | `CLAUDE.md` |
 | Conventions for certain files | `rules/`, loaded when matching files are touched |
 | Repeatable procedures | `skills/` |

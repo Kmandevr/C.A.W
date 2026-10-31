@@ -109,7 +109,9 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - **Not built yet:** editing keys in the action list and the long-press menu entries from the keymap.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
-The piano roll's toolbar exposes **Copy (N)** and **Paste** while notes are selected. Copy stores the whole selection; Paste places that group at the roll cursor and selects the new notes. Dragging any selected note moves the complete selection as a block; group drags move pitch and timing together and do not resize notes. A single selected note can still be resized from its end.\n\n## Build
+The piano roll's toolbar exposes **Copy (N)** and **Paste** while notes are selected. Copy stores the whole selection; Paste places that group at the roll cursor and selects the new notes. Dragging any selected note moves the complete selection as a block; group drags move pitch and timing together and do not resize notes. A single selected note can still be resized from its end.
+
+## Build
 
 - **Flutter:** 3.47.7, pinned in `.github/workflows/app.yml`.
 - **Dependencies, all permissive:**
@@ -133,6 +135,7 @@ The piano roll's toolbar exposes **Copy (N)** and **Paste** while notes are sele
 - highlighting, editor helpers and completion
 - the pattern model (`lib/model/pattern_doc.dart`): exact step fractions, parsing with the engine's errors, comment-keeping write-back and every note edit
 - the actions core (`lib/actions/`): keymap files, conflicts, macros with their recursion guard, counts, `:` commands, `.` repeat and recording
+- key routing (`test/key_router_policy_test.dart`): focused text fields keep editing/navigation keys and standard shortcuts; Vim retains its command keys
 - settings, theme files and the startup choices
 - the Tracks area on a phone: cards, the track panel and Edit opening the sound in Sounds (with `CAW_LIB`)
 - integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.

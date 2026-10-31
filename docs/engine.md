@@ -2,20 +2,21 @@
 title: Engine and language reference
 summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI and the tests.
 covers: [engine/, examples/]
-updated: 2026-10-29
+updated: 2026-10-30
 ---
 
 # Engine and language reference
 
-The engine in `engine/` as built. The reasons behind it are in [architecture](architecture.md), and the version plan is in [roadmap](roadmap.md). All of it is **[Fact]**: it is checked by `engine/tests/`.
+The engine in `engine/` as built. The reasons behind v1 are in [architecture](architecture.md); the next-generation direction is [Modular adaptive engine](engine-next.md). The version plan is in [roadmap](roadmap.md). The new modular engine implementation ledger is [here](engine-build-status.md), and the native add-on contract is [here](native-module-sdk.md). Built implementation details are **[Fact]** and checked by `engine/tests/`.
 
 ## Layout
 
 | Path | What it is |
 | --- | --- |
-| `engine/src/` | The portable core: `compile` (header, lexer, parser, code generation), `vm`, `builtins`, `detmath`, `pattern` (note patterns), `engine` (mixer and voices), `project`, `render` (exports), `docs` (generated reference), `wav`, `json`, `capi` |
+| `engine/src/` | The portable core: compiler/VM, built-ins, deterministic math, patterns, mixer/voices, project/render/export, typed module and graph validation (`module.*`, `graph.*`), dependency resolution (`dependency.*`), workload policy (`execution.*`), hardware probe (`hardware.*`) and bounded worker pool (`scheduler.*`) |
 | `engine/lib/` | The built-in libraries, written in the module language (`drum`, `synth`, `util`). CMake builds them into the engine |
-| `engine/include/caw.h` | The C API, version 1 |
+| `engine/include/caw.h` | The host C API, version 1 |
+| `engine/include/caw_module_sdk.h` | Versioned C ABI for trusted native module authors (loading is not implemented yet) |
 | `engine/platform/` | Audio output through miniaudio, and a stand-in for builds without a device |
 | `engine/cli/` | The `caw` tool |
 | `engine/tests/` | Unit tests and golden renders (`golden.txt`) |
@@ -262,12 +263,14 @@ The app, the CLI and exports share one format:
 ```json
 { "caw_project": 1, "name": "Night Glitch", "bpm": 140, "beats_per_bar": 4, "loop_bars": 4,
   "seed": 7, "master": 0.7, "seam_crossfade": true, "voices": 8, "swap": "now", "key_root": 9, "key_scale": 1, "globals": { "swing": 0.1 },
+  "dependencies": [ { "id": "caw.fx.delay", "version": "2.1.0", "scope": "addon", "hash": "sha256:...", "interface_version": 1 } ],
   "modules": [ { "id": "m1", "name": "Kick", "source": "...the .caw text...", "params": { "shift": 6 } } ],
   "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"], "pattern": "p1", "length_steps": 48,
                 "volume": 0.8, "pan": 0, "mute": false, "solo": false } ],
   "audition": { "chain": ["m1"], "pattern": "p1", "length_steps": 0 }, "audition_only": false }
 ```
 
+- `dependencies` pins reusable assets by stable ID, exact version, scope (`project`, `global`, `factory`, `addon`), optional content hash and interface version. `optional: true` marks a dependency that may be absent. The parser stores these on `ProjectSpec`; the native resolver checks installed records without silently substituting another scope or version.
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
 - A layer's `pattern` names a pattern module; its notes play the generator, and its length replaces `length_steps`. A missing or broken pattern leaves the layer playing without one, with a warning (a broken pattern keeps its last good version playing).

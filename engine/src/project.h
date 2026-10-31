@@ -7,6 +7,8 @@
 #include <string_view>
 #include <vector>
 
+#include "dependency.h"
+
 namespace caw {
 
 constexpr int kMaxLayers = 64;
@@ -41,6 +43,7 @@ struct ProjectSpec {
     std::map<std::string, double> globals;  // project-wide control values by name
     int keyRoot = 9;                        // 0 = C … 11 = B; scale() and chord() default to this key
     int keyScale = 1;                       // a scale.* id (1 = minor)
+    std::vector<DependencyRef> dependencies;
     std::vector<ModuleSpec> modules;
     std::vector<LayerSpec> layers;
     std::vector<std::string> auditionChain;  // the Builder's preview, if any
