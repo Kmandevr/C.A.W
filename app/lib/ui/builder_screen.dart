@@ -9,9 +9,9 @@ import '../model/project.dart';
 import 'code_editor.dart';
 import 'key_router.dart';
 import 'library_sheet.dart';
+import 'modulation_panel.dart';
 import 'param_control.dart';
 import 'pattern_editor.dart';
-import 'modulation_panel.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
