@@ -90,6 +90,19 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.chain = idList(l.get("chain"));
             spec.lengthSteps = clampi(l.number("length_steps", 0), 0, 64 * 16 * 16);
             spec.pattern = l.string("pattern");
+            if (const Json* clips = l.get("clips"); clips && clips->type == Json::Type::Array) {
+                for (const Json& c : clips->arr) {
+                    if (c.type != Json::Type::Object || spec.clips.size() >= 512) continue;
+                    ClipSpec clip;
+                    clip.id = c.string("id");
+                    clip.pattern = c.string("pattern");
+                    clip.startSteps = clampi(c.number("start_steps", 0), 0, 64 * 16 * 16);
+                    clip.lengthSteps = clampi(c.number("length_steps", 64), 1, 64 * 16 * 16);
+                    clip.sourceOffsetSteps = clampi(c.number("source_offset_steps", 0), 0, 64 * 16 * 16);
+                    clip.loop = c.boolean("loop", true);
+                    if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));
+                }
+            }
             spec.volume = clampd(l.number("volume", 0.8), 0, 1);
             spec.pan = clampd(l.number("pan", 0), -1, 1);
             spec.mute = l.boolean("mute", false);
