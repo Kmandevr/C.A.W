@@ -74,6 +74,12 @@ TEST(lfos_follow_the_tempo) {
     CHECK(r[100] != r[24100]);
 }
 
+TEST(modulation_helper_applies_signed_depth) {
+    CHECK_NEAR(one("util.mod(100, 0.5, 20)"), 110.0, 1e-12);
+    CHECK_NEAR(one("util.mod(100, 0.5, -20)"), 90.0, 1e-12);
+    CHECK_NEAR(one("util.mod(100, -0.5, 20)"), 90.0, 1e-12);
+}
+
 TEST(music_helpers) {
     // Defaults use the project key (A minor): degree 0 = A4 (69 in octave 4 from C4 = 60 + 9).
     CHECK_EQ(one("scale(0)"), 69.0);
