@@ -525,7 +525,11 @@ class AppState extends ChangeNotifier {
     if (index < 0 || index >= lane.points.length) return;
     editLayer(layer, (l) {
       final p = lane.points[index];
-      p.step = step.clamp(0, 4096).toDouble();
+      final sorted = [...lane.points]..sort((a, b) => a.step.compareTo(b.step));
+      final position = sorted.indexOf(p);
+      final lower = position > 0 ? sorted[position - 1].step + 0.01 : 0.0;
+      final upper = position >= 0 && position < sorted.length - 1 ? sorted[position + 1].step - 0.01 : 4096.0;
+      p.step = step.clamp(lower, upper).toDouble();
       p.value = value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
       l.automation.sort((a, b) => a.target.compareTo(b.target));
       lane.points.sort((a, b) => a.step.compareTo(b.step));
@@ -664,6 +668,10 @@ class AppState extends ChangeNotifier {
 
   void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {
     editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, 4096 - clip.startSteps));
+  }
+
+  void shiftClipSource(LayerDoc layer, ClipDoc clip, int deltaSteps) {
+    editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, 4096));
   }
 
   void removeClip(LayerDoc layer, ClipDoc clip) {
