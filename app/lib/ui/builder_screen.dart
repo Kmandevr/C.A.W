@@ -11,6 +11,7 @@ import 'key_router.dart';
 import 'library_sheet.dart';
 import 'param_control.dart';
 import 'pattern_editor.dart';
+import 'modulation_panel.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -280,6 +281,92 @@ class _BuilderScreenState extends State<BuilderScreen> {
     if (!info.ok) _showError(m, info);
   }
 
+  Future<void> _applyConnectionSource(ModuleDoc module, String source) async {
+    s.editSource(module.id, source);
+    if (_shownId == module.id) {
+      _code.value = TextEditingValue(
+        text: source,
+        selection: TextSelection.collapsed(offset: source.length),
+      );
+    }
+    final info = await s.run(module.id);
+    if (!mounted || info == null) return;
+    if (!info.ok) _showError(module, info);
+  }
+
+  List<SignalOption> _signalSources(ModuleDoc destination) {
+    final options = <SignalOption>[];
+    for (final source in s.project.modules) {
+      if (source.id == destination.id || !s.project.layers.any((l) => l.chain.contains(source.id))) continue;
+      final info = s.info[source.id];
+      if (info == null || !info.ok || info.ref.isEmpty) continue;
+      for (final export in info.exports) {
+        final value = '${info.ref}.${export.name}';
+        options.add(SignalOption(value, '${source.name}.${export.name}'));
+      }
+    }
+    return options;
+  }
+
+  Future<void> _addSidechain(ModuleDoc target, String source, double amount) async {
+    final sourceInfo = s.info.entries.where((e) => e.value.ref.isNotEmpty && e.value.exports.any((x) => '${e.value.ref}.${x.name}' == source)).firstOrNull;
+    if (sourceInfo == null) return;
+    final sourceModule = s.project.module(sourceInfo.key);
+    if (sourceModule == null) return;
+
+    final id = s.addBlankModule('effect');
+    final name = 'Sidechain ${sourceModule.name} ${s.project.modules.length}';
+    final safeName = name.replaceAll('\n', ' ');
+    final sourceText = '---\ncaw: 1\nkind: effect\nname: $safeName\n---\n'
+        'param amount = ${amount.toStringAsFixed(2)} in 0..1 "Sidechain amount"\n'
+        'util.duck(in, $source, amount)\n';
+    s.editSource(id, sourceText);
+
+    var attached = 0;
+    for (final layer in s.project.layers) {
+      if (layer.generatorId == target.id) {
+        s.editLayer(layer, (l) => l.effectIds.insert(0, id));
+        attached++;
+      } else {
+        final index = layer.effectIds.indexOf(target.id);
+        if (index >= 0) {
+          s.editLayer(layer, (l) => l.effectIds.insert(index + 1, id));
+          attached++;
+        }
+      }
+    }
+    final info = await s.run(id);
+    if (!mounted) return;
+    if (info == null || !info.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(info?.error ?? 'Could not compile the sidechain effect')),
+      );
+    } else if (attached == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sidechain created. Add it to a track in Tracks to hear it.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sidechain added to $attached track(s).')),
+      );
+    }
+  }
+
+  Future<void> _removeSidechain(ModuleDoc module) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove sidechain?'),
+        content: const Text('This removes the sidechain effect from every track that uses it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok == true) s.deleteModule(module.id);
+  }
+
   static const _blanks = [
     ('generator', 'Sound', 'Makes sound: a formula, a synth or a drum'),
     ('effect', 'Effect', 'Changes the sound coming in'),
@@ -460,6 +547,14 @@ class _BuilderScreenState extends State<BuilderScreen> {
             state: s, index: s.previewOnly ? Engine.auditionIndex : Engine.masterIndex, color: color, height: wide ? 140 : 88),
       );
       final params = _Params(state: s, module: m, info: info, compact: look.compactControls);
+      final connections = ModulationPanel(
+        module: m,
+        info: info,
+        sources: _signalSources(m),
+        onSourceChanged: (source) => _applyConnectionSource(m, source),
+        onAddSidechain: (source, amount) => _addSidechain(m, source, amount),
+        onRemoveSidechain: () => _removeSidechain(m),
+      );
       final library = _library;
       final completion = library == null || !look.chips
           ? const SizedBox.shrink()
@@ -519,7 +614,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
                   ]),
                 ),
                 const SizedBox(width: 12),
-                Expanded(flex: 2, child: ListView(children: [scope, params])),
+                Expanded(flex: 2, child: ListView(children: [scope, connections, params])),
               ]),
             ),
           ),
@@ -544,6 +639,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
             child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 24), children: [
               ...top,
               scope,
+              connections,
               const SizedBox(height: 8),
               status,
               params,
@@ -560,6 +656,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
             status,
             const SizedBox(height: 6),
             editor,
+            const SizedBox(height: 8),
+            connections,
             const SizedBox(height: 12),
           ]),
         ),
