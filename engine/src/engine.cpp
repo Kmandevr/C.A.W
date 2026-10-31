@@ -525,6 +525,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
                                    " after the pattern's length and never play" + (late == 1 ? "s" : ""));
     }
     int64_t projectState = 0;
+    std::vector<std::vector<int>> readsFrom(kSlots);
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}, nullptr, {}};
         int64_t layerState = 0;
@@ -666,7 +667,6 @@ std::string Engine::setProject(const ProjectSpec& p) {
     }
 
     // Pass 3: wire imports, install changed chains, and order layers so exporters run before their readers.
-    std::vector<std::vector<int>> readsFrom(kSlots);
     std::map<std::string, LayerState> nextLayers;
     std::vector<int> projectOrder;
     for (Planned& pl : plan) {
@@ -712,7 +712,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             nextLayers[w.id] = ls;
             continue;
         }
-        if (ls.bus || ls.parentSlot != pl.ls.parentSlot) {
+        {
             Cmd routing;
             routing.type = Cmd::SetRouting;
             routing.slot = ls.slot;
