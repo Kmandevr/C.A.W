@@ -704,11 +704,12 @@ std::string Engine::setProject(const ProjectSpec& p) {
             // Cycles are kept playable with the existing bounded one-block feedback behavior. Surface that
             // behavior in the owning module's diagnostics instead of silently accepting a delayed connection.
             for (const Planned& pl : plan) {
-                if (pl.ls.slot == slot && !pl.ids.empty()) {
-                    warnings[pl.ids.front()].push_back(
+                if (pl.ls.slot != slot || pl.ids.empty()) continue;
+                for (const std::string& id : pl.ids) {
+                    warnings[id].push_back(
                         "signal dependency cycle (or a route blocked by one): at least one source is read from the previous block");
-                    break;
                 }
+                break;
             }
         }
         send(oc);
