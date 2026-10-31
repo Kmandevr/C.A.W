@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:math' as math;
+import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
@@ -270,13 +271,11 @@ class NativeEngineWorkPool {
 /// Dart owner for an opaque native job handle. Native input is copied at submission,
 /// and this object releases the handle after reading its terminal result.
 class NativeEngineJob {
-  NativeEngineJob._(this._bindings, this._handle, {required bool includeResult})
-      : _includeResult = includeResult {
+  NativeEngineJob._(this._bindings, this._handle, {required this._includeResult}) {
     result = _wait();
   }
 
   static const int _succeeded = 2;
-  static const int _failed = 3;
   static const int _cancelled = 4;
 
   final Bindings _bindings;
@@ -308,11 +307,14 @@ class NativeEngineJob {
 
   Future<String?> _wait() async {
     try {
-      while (true) {
-        _readStatus();
-        if (_lastState >= _succeeded) break;
-        await Future<void>.delayed(const Duration(milliseconds: 16));
-      }
+      final address = _handle.address;
+      final waitCode = await Isolate.run<int>(() {
+        final workerBindings = Bindings.instance;
+        final workerHandle = Pointer<Void>.fromAddress(address);
+        return workerBindings.jobWait(workerHandle, 0xffffffff);
+      });
+      if (waitCode != 0) throw StateError('native job wait failed ($waitCode)');
+      _readStatus();
       if (_lastState == _succeeded) {
         _lastProgress = 1000;
         if (!_includeResult) return null;
