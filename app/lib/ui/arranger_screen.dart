@@ -71,7 +71,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                       child: Align(alignment: Alignment.centerLeft,
                         child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim))),
                     ),
-                ]))),
+                ])))),
             ]),
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               SizedBox(width: headW, child: Column(children: [
