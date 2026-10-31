@@ -382,6 +382,8 @@ class _AutomationLaneView extends StatelessWidget {
     for (var i = 0; i < lane.points.length; i++)
       Positioned(left: lane.points[i].step * stepW - 5, top: _y(lane.points[i].value) + 2,
         child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {}, // Keep the lane's add-point tap recognizer from firing on an existing handle.
           onPanUpdate: (d) => state.updateAutomationPoint(layer, lane, i,
             lane.points[i].step + d.delta.dx / stepW,
             lane.points[i].value - d.delta.dy / (lane.target == 'volume' ? 24 : 12)),
