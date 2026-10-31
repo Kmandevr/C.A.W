@@ -35,7 +35,7 @@ class ModuleDoc {
 }
 
 class ClipDoc {
-  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.linked = false});
+  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0, this.loop = true, this.linked = false});
   final String id;
   String patternId;
   int startSteps;
@@ -44,7 +44,7 @@ class ClipDoc {
 
   Map<String, dynamic> toJson() => {
         'id': id, 'pattern': patternId, 'start_steps': startSteps,
-        'length_steps': lengthSteps, 'linked': linked,
+        'length_steps': lengthSteps, 'source_offset_steps': sourceOffsetSteps, 'loop': loop, 'linked': linked,
       };
 
   static ClipDoc fromJson(Map<String, dynamic> j) => ClipDoc(
@@ -184,7 +184,6 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
-    final patternSources = {for (final m in modules) if (headerValue(m.runSource, 'kind') == 'pattern') m.id: m.runSource};
     final arrangementEnd = layers.fold<int>(loopSteps, (end, l) =>
         max(end, l.clips.fold<int>(0, (e, clip) => max(e, clip.startSteps + clip.lengthSteps))));
     final engineLoopBars = min(64, max(loopBars, (arrangementEnd / stepsPerBar).ceil()));
@@ -220,8 +219,14 @@ class ProjectDoc {
               'id': l.id,
               'name': l.name,
               'chain': l.chain,
-              if (l.clips.isNotEmpty && l.generatorId != null) 'pattern': 'arr_${l.id}'
-              else if (l.patternId != null) 'pattern': l.patternId,
+              if (l.clips.isEmpty && l.patternId != null) 'pattern': l.patternId,
+              if (l.clips.isNotEmpty) 'clips': [
+                for (final clip in l.clips) {
+                  'id': clip.id, 'pattern': clip.patternId, 'start_steps': clip.startSteps,
+                  'length_steps': clip.lengthSteps, 'source_offset_steps': clip.sourceOffsetSteps,
+                  'loop': clip.loop,
+                },
+              ],
               'length_steps': l.clips.isNotEmpty ? 0 : l.lengthSteps,
               'volume': l.volume,
               'pan': l.pan,
@@ -241,7 +246,7 @@ class ProjectDoc {
         'name': name,
         'bpm': bpm,
         'beats_per_bar': beatsPerBar,
-        'loop_bars': loopBars,
+        'loop_bars': engineLoopBars,
         'key': key,
         'seed': seed,
         'master': master,
