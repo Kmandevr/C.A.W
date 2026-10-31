@@ -181,7 +181,8 @@ TEST(export_cycles_still_play) {
     }
     Engine e(48000);
     e.setMasterBypass(true);
-    e.setProject(p);
+    const std::string result = e.setProject(p);
+    CHECK(has(result, "signal dependency cycle"));
     e.play();
     std::vector<float> out = run(e, 512);
     // One side reads the other a block late, so after the first block both values are there.
