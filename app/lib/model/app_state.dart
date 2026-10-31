@@ -534,7 +534,8 @@ class AppState extends ChangeNotifier {
       patternId = copy.id;
     }
     final next = ClipDoc(id: newId('c'), patternId: patternId,
-        startSteps: clip.startSteps + clip.lengthSteps, lengthSteps: clip.lengthSteps, linked: linked);
+        startSteps: clip.startSteps + clip.lengthSteps, lengthSteps: clip.lengthSteps,
+        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, linked: linked);
     editLayer(layer, (l) => l.clips.add(next));
     selectClip(layer, next);
   }
