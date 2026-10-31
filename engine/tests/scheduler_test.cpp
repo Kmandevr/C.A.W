@@ -174,6 +174,29 @@ TEST(scheduler_runs_higher_priority_jobs_first_and_preserves_fifo_within_priorit
 }
 
 
+TEST(adaptive_policy_treats_unknown_hardware_signals_conservatively) {
+    HardwareProfile unknown{};
+    ExecutionRequest request;
+    request.workload = WorkloadClass::OfflineRender;
+    const ExecutionPlan plan = makeExecutionPlan(unknown, request);
+    CHECK_EQ(plan.workerThreads, 1);
+    CHECK_EQ(plan.maxConcurrentJobs, 1);
+    CHECK(!plan.allowGpu);
+}
+
+TEST(adaptive_policy_caps_workers_by_memory_and_effective_cpu_budget) {
+    HardwareProfile constrained{2, 128, true, false};
+    ExecutionRequest request;
+    request.workload = WorkloadClass::OfflineRender;
+    const ExecutionPlan plan = makeExecutionPlan(constrained, request);
+    CHECK_EQ(plan.workerThreads, 2);
+    CHECK_EQ(plan.maxConcurrentJobs, 2);
+
+    constrained.logicalCores = 16;
+    const ExecutionPlan memoryBound = makeExecutionPlan(constrained, request);
+    CHECK_EQ(memoryBound.workerThreads, 2);
+}
+
 TEST(adaptive_worker_pool_applies_thermal_and_idle_limits) {
     HardwareProfile hardware{8, 4096, true, false};
     AdaptiveWorkerPool pool(hardware, 8);
