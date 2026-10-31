@@ -1,8 +1,8 @@
 ---
 title: How it works
 summary: The path a sound takes from a .caw file to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
-covers: [engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/src/builtins.cpp, app/lib/engine/engine.dart, app/lib/model/app_state.dart]
-updated: 2026-10-30
+covers: [engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/src/builtins.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/model/app_state.dart]
+updated: 2026-10-31
 ---
 
 # How it works
@@ -24,6 +24,26 @@ The map for an agent new to the repo. It shows how the parts connect; the detail
 
 `AppState` also owns transport timing. Tap Tempo keeps up to five increasing tap timestamps, starts a new measurement after a pause longer than two seconds, averages the intervals and clamps the resulting project tempo to 20–400 BPM. The project update then follows the normal sync and save path.
 
+## Modular engine foundation (PR #25)
+
+The modular foundation is real native C++ code, but it is not yet the active playback path for ordinary projects. Its implementation status and remaining integration work are tracked in [engine build status](engine-build-status.md); the intended ecosystem contract is in [engine integration](engine-integration.md).
+
+| Area | Implementation | What is true today |
+| --- | --- | --- |
+| Module contract | `engine/src/module.h`, `module.cpp` | Typed audio, control, modulation and event port descriptors; parameter metadata; generated/custom UI metadata; descriptor validation; borrowed-buffer stereo processor interface. |
+| Module registry | `engine/src/module_registry.h`, `module_registry.cpp` | Static in-process registry with stable-ID lookup, factory creation, descriptor checks and reset/versioned-state hooks. It does not dynamically load third-party binaries. |
+| Processing graph | `engine/src/graph.h`, `graph.cpp` | Typed graph validation and deterministic topological ordering. The prepared executor currently supports one stereo audio input/output per node; it allocates during prepare, then processes using prepared buffers without graph traversal, allocation or locks. |
+| Graph publication | `GraphRuntime` in `graph.*` | A control-thread publication helper lets the audio thread adopt a prepared graph and defers reclamation to the control thread. It is not connected to `Engine` or `VM`. |
+| Workload policy | `engine/src/execution.*` | A deterministic, pure policy maps task class and host-supplied pressure to bounded execution advice. It does not itself query the OS or start threads. |
+| Hardware profile | `engine/src/hardware.*` | Best-effort logical-core, conservative memory-budget and CPU-SIMD probe on supported desktop/Android targets. GPU compute is deliberately reported unavailable; live thermal/battery pressure remains host-supplied. |
+| Worker pool | `engine/src/scheduler.*` | Bounded non-real-time queue (256 jobs), up to 16 workers, foreground/offline/background priorities, pending cancellation and an adaptive wrapper that applies the workload plan. The app/host does not yet feed live pressure automatically or route all compile/render/analysis jobs through it. |
+| Dependencies | `engine/src/dependency.*`, `engine/src/project.*` | Exact scope-aware resolution by stable ID, pinned version, optional hash and interface version. Project JSON parses and stores references; installed-library matching, project writing/round-tripping and repair UI are not complete. |
+| MIDI 2.0 input primitive | `engine/src/midi2.*` | Channel Voice UMP decoding and a bounded lock-free input queue. This is not live USB/Bluetooth device I/O or Engine voice routing. |
+
+**Important boundary:** these are implemented foundations and tested contracts, not proof that the old project mixer/VM now runs through the new graph. The existing engine playback, export and stereo audio path remain in place. Do not describe graph hot-swap integration, universal native-module execution, dynamic add-on loading, host scheduling integration or app-side custom UI rendering as complete.
+
+The synth and built-in language also gained concrete capabilities in this branch: `lfo.curve(...)` is a tempo-synced four-point LFO, and `wt(..., warp)` / synth `warp` settings add bounded phase distortion to wavetable oscillators. Their user-facing signatures and examples are generated into [the function library](library.md) and described in [synth](synth.md).
+
 ## Export
 
 `caw_render` (`engine/src/render.cpp`) drives the same `Engine` offline, so a file matches what was heard bit for bit, and writes it with `engine/src/wav.cpp`. The app runs it on a worker isolate with progress and cancel (the Export area). The CLI (`engine/cli/main.cpp`) uses the same calls.
@@ -33,6 +53,10 @@ The map for an agent new to the repo. It shows how the parts connect; the detail
 | To change | Edit | Then |
 | --- | --- | --- |
 | Add or change a built-in function | `engine/src/builtins.cpp` (and `builtins.h` for a new kind) | `caw docs` to regenerate [library](library.md) and [agent guide](agent-guide.md); `caw_tests` |
+| Change module descriptors, ports or parameter/UI metadata | `engine/src/module.*` | `module_test.cpp`, `module_registry_test.cpp`; update [engine build status](engine-build-status.md) |
+| Change graph validation, execution order or prepared stereo processing | `engine/src/graph.*` | `graph_test.cpp`; preserve the no-allocation/no-lock process contract |
+| Change hardware policy or background scheduling | `engine/src/execution.*`, `hardware.*`, `scheduler.*` | matching execution, hardware and scheduler tests; keep worker jobs off the audio callback |
+| Change dependency identity or resolution | `engine/src/dependency.*`, `engine/src/project.*` | `dependency_test.cpp`, project tests; document what is parsed versus actually resolved |
 | The synth's patch lines and the code they become | `engine/src/synth.cpp` | [synth](synth.md); `synth_test.cpp`; `caw check --code` |
 | Add a built-in wavetable shape | `engine/src/tables.cpp` (and its `table.*` name in `builtins.cpp`) | `caw docs`; `synth_test.cpp` |
 | Add a library function in the language | `engine/lib/*.caw` with `///` docs | `caw docs`; `caw_tests` |
