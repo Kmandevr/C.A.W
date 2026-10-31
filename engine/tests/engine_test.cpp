@@ -71,6 +71,20 @@ TEST(folder_bus_routes_children_and_applies_group_gain) {
     CHECK_NEAR(right[200], expected, 1e-5);
 }
 
+TEST(organization_only_folder_mute_propagates_to_descendants) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    LayerSpec folder;
+    folder.id = "group"; folder.folder = true; folder.busEnabled = false; folder.mute = true;
+    p.layers.insert(p.layers.begin(), folder);
+    p.layers[1].parentId = "group";
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 512);
+    CHECK_NEAR(left[256], 0.0, 1e-7);
+}
+
 TEST(nested_folder_buses_route_child_audio_once) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
     LayerSpec outer;
