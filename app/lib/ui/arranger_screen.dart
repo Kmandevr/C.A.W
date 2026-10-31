@@ -285,6 +285,7 @@ class _TimelineClipState extends State<_TimelineClip> {
           borderRadius: BorderRadius.circular(5),
           child: Stack(children: [
         Positioned.fill(child: GestureDetector(
+          onLongPress: () => widget.state.selectClip(widget.layer, c, additive: true),
           onTap: () {
             if (HardwareKeyboard.instance.isShiftPressed) {
               widget.state.selectClip(widget.layer, c, additive: true);
