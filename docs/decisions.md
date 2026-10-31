@@ -8,6 +8,13 @@ updated: 2026-10-29
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-31: GPT builds, Claude reviews (owner)
+
+- The owner runs GPT for long stretches, because it's free, to do optimisation and new features, so that existing features get used.
+- GPT's job is to get the work done. It isn't asked to tidy commit history, fix its own process problems or keep the docs current.
+- Claude's job is to check that GPT's work is implemented correctly: review its pull requests and changes for correctness, regressions and broken rules. Claude fixes or reports what it finds when the owner asks; documentation catch-up is part of that.
+
+
 ## 2026-10-29: Per-note expression, MPE style (owner)
 
 - Every note can carry its own pitch curve (drawn with points and bendable segments, like MIDI Sketch), vibrato, volume (pressure) and timbre curves. Pitch comes first in the roll; volume and timbre use the same mechanism.

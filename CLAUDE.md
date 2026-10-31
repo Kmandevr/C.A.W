@@ -32,6 +32,9 @@ Don't read every file. Go deeper only when the layer above doesn't answer, and n
 
 ## Workflow
 
+**Roles (owner, 2026-10-31):** GPT does long-running optimisation and feature work; Claude's main job is to check that GPT's work is implemented correctly and to fix or report what it finds when asked ([docs/decisions.md](docs/decisions.md)).
+
+
 One-file changes: just do them. Every file (code, notes, Claude config) has one purpose; change only the files the task needs. Independent review goes to an agent in `.claude/agents/` (`architect` before structural changes, the reviewers after), asking for findings only. Changes across areas: the saved workflow `change` (plan, build in parallel on disjoint files, verify, update docs; never commits).
 
 **Parallel by default.** Independent tool calls go in one message. Spawn subagents only for several sizeable independent parts or an independent review; small or single-area work is done inline, to keep usage down. Parallel subagents work on disjoint files, each in a worktree from the current branch (`git worktree add -b <name> .claude/worktrees/<name> HEAD`), briefed with what you already know (changed files, diff range, findings, checks run and their results) so they don't re-explore.
