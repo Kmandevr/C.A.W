@@ -669,14 +669,25 @@ class AppState extends ChangeNotifier {
   }
 
   void selectClip(LayerDoc layer, ClipDoc clip, {bool additive = false}) {
-    selectedLayerId = layer.id;
-    selectedClipId = clip.id;
-    selectedModuleId = clip.patternId;
     if (!additive) selectedClipIds.clear();
-    if (selectedClipIds.contains(clip.id) && additive) {
+    if (additive && selectedClipIds.contains(clip.id)) {
       selectedClipIds.remove(clip.id);
+      if (selectedClipIds.isEmpty) {
+        selectedClipId = null;
+        selectedLayerId = null;
+        selectedModuleId = null;
+      } else {
+        final next = project.layers.expand((l) => l.clips.map((c) => (l, c)))
+            .where((entry) => selectedClipIds.contains(entry.$2.id)).first;
+        selectedLayerId = next.$1.id;
+        selectedClipId = next.$2.id;
+        selectedModuleId = next.$2.patternId;
+      }
     } else {
       selectedClipIds.add(clip.id);
+      selectedLayerId = layer.id;
+      selectedClipId = clip.id;
+      selectedModuleId = clip.patternId;
     }
     notifyListeners();
   }
