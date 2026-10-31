@@ -197,7 +197,7 @@ TEST(cross_module_modulation_reaches_a_parameter_in_live_and_offline_render) {
     // Offline rendering uses the normal master path, matching live playback with master bypass disabled.
     CHECK_NEAR(live[200], rendered.samples[static_cast<size_t>(200) * 2], 1e-6);
     ProjectSpec unmodulated = p;
-    unmodulated.modules[1].source = std::string(kFloat) + "param level = 0.5 in 0..1\\nlevel";
+    unmodulated.modules[1].source = std::string(kFloat) + "param level = 0.5 in 0..1\nlevel";
     RenderResult baseline;
     CHECK(renderExport(unmodulated, options, baseline));
     CHECK(rendered.samples[static_cast<size_t>(200) * 2] >
