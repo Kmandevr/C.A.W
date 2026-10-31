@@ -621,7 +621,7 @@ class AppState extends ChangeNotifier {
       child.parentId = l.parentId;
     }
     project.layers.remove(l);
-    if (selectedLayerId == l.id) selectedLayerId = null;
+    _pruneClipSelection();
     _changed();
   }
 
@@ -651,6 +651,29 @@ class AppState extends ChangeNotifier {
       values.value++;
     } else {
       _changed(engine: false);
+    }
+  }
+
+  void _pruneClipSelection() {
+    final valid = {for (final layer in project.layers) for (final clip in layer.clips) clip.id};
+    selectedClipIds.removeWhere((id) => !valid.contains(id));
+    if (selectedClipId == null || !selectedClipIds.contains(selectedClipId)) {
+      if (selectedClipIds.isEmpty) {
+        selectedClipId = null;
+        selectedLayerId = null;
+        if (selectedModuleId != null && !project.modules.any((m) => m.id == selectedModuleId)) {
+          selectedModuleId = project.modules.firstOrNull?.id;
+        }
+      } else {
+        for (final layer in project.layers) {
+          final clip = layer.clips.where((c) => selectedClipIds.contains(c.id)).firstOrNull;
+          if (clip == null) continue;
+          selectedLayerId = layer.id;
+          selectedClipId = clip.id;
+          selectedModuleId = clip.patternId;
+          break;
+        }
+      }
     }
   }
 
@@ -763,11 +786,8 @@ class AppState extends ChangeNotifier {
   void removeClip(LayerDoc layer, ClipDoc clip) {
     editLayer(layer, (l) => l.clips.remove(clip));
     selectedClipIds.remove(clip.id);
-    if (selectedClipId == clip.id) {
-      selectedClipId = null;
-      selectedModuleId = null;
-      notifyListeners();
-    }
+    _pruneClipSelection();
+    notifyListeners();
   }
 
   void addFolder({String? parentId}) {
@@ -794,6 +814,10 @@ class AppState extends ChangeNotifier {
     info = {};
     blankKinds.clear();
     selectedModuleId = p.modules.isEmpty ? null : p.modules.first.id;
+    selectedLayerId = null;
+    selectedClipId = null;
+    selectedClipIds.clear();
+    clearTimeSelection();
     previewOnly = false;
     await _storage?.setLastOpened(p.id);
     await flush();
