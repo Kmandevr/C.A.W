@@ -185,13 +185,17 @@ class AppState extends ChangeNotifier {
     void layer(String name, ModuleDoc? gen, int steps, double vol,
         [List<ModuleDoc?> fx = const [], ModuleDoc? pattern, bool mute = false]) {
       if (gen == null) return;
+      final patternDoc = pattern == null ? null : PatternDoc.parse(pattern.runSource).doc;
+      final clipLength = patternDoc?.lengthSteps(p.beatsPerBar) ?? (steps > 0 ? steps : p.stepsPerBar);
       p.layers.add(LayerDoc(
           id: newId('l'),
           name: name,
           color: c++ % 4,
           generatorId: gen.id,
           effectIds: [for (final f in fx) if (f != null) f.id],
-          patternId: pattern?.id,
+          clips: pattern == null ? [] : [
+            ClipDoc(id: newId('c'), patternId: pattern.id, lengthSteps: clipLength),
+          ],
           lengthSteps: steps,
           volume: vol,
           mute: mute));
@@ -215,17 +219,17 @@ class AppState extends ChangeNotifier {
     if (m == null || isLibrary(m.id)) return null;
     String? firstGenerator() => project.modules.where((x) => isGenerator(x.id)).map((x) => x.id).firstOrNull;
     if (isPattern(m.id)) {
-      final layer = project.layers.where((l) => l.patternId == m.id && l.generatorId != null).firstOrNull;
+      final layer = project.layers.where((l) => l.clips.any((clip) => clip.patternId == m.id) && l.generatorId != null).firstOrNull;
       final gen = layer?.generatorId ?? firstGenerator();
       return gen == null ? null : (chain: layer?.chain ?? [gen], pattern: m.id);
     }
     if (!isEffect(m.id)) {
       final layer = project.layers.where((l) => l.generatorId == m.id).firstOrNull;
-      return (chain: [m.id], pattern: layer?.patternId);
+      return (chain: [m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
     }
     final layer = project.layers.where((l) => l.effectIds.contains(m.id) && l.generatorId != null).lastOrNull;
     final gen = layer?.generatorId ?? firstGenerator();
-    return (chain: [?gen, m.id], pattern: layer?.patternId);
+    return (chain: [?gen, m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
   }
 
   Future<void> _syncNow() async {
