@@ -52,7 +52,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - folders can be nested, collapsed and moved; bus folders sum child stereo audio and apply group volume/pan, while organization-only folders simply group tracks
   - volume and pan automation lanes are serialized and played by the native engine; the callback interpolates their points at song position
   - empty-lane drags make time selections; selected clips can be split, snapped, moved, resized or source-offset shifted with Alt-drag
-  - Shift-tap selects companion clips; their notes appear as read-only references in the existing piano roll, and clips sharing a pattern source stay linked
+  - Shift-tap selects companion clips; their notes appear as references in the existing piano roll. Explicit multi-edit mode mirrors note edits to selected independent sources while preserving local note IDs; clips sharing a pattern source stay linked
   - a banner appears when the engine muted layers to keep audio clean, with Unmute
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - the four exports from [engine](engine.md#exports), at 44.1 or 48 kHz, 24-bit or 32-bit float
