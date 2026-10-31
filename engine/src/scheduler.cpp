@@ -5,7 +5,8 @@
 
 namespace caw {
 
-WorkerPool::WorkerPool(uint32_t workers) {
+WorkerPool::WorkerPool(uint32_t workers, std::chrono::milliseconds idleTimeout)
+    : idleTimeout_(std::max(idleTimeout, std::chrono::milliseconds::zero())) {
     capacity_ = std::clamp<uint32_t>(workers, 1, kMaxWorkers);
     workerLimit_ = capacity_;
     // Reserve only the small thread-handle array. Actual OS threads are started on demand.
@@ -18,10 +19,10 @@ WorkerPool::~WorkerPool() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stopping_ = true;
-        workerLimit_ = static_cast<uint32_t>(workers_.size());
+        workerLimit_ = capacity_;
         // If policy kept the pool at zero workers, drain already accepted work here.
         // Destruction is non-real-time and may safely execute these jobs synchronously.
-        if (workers_.empty()) {
+        if (liveWorkerCount_ == 0) {
             pendingCount = queueCount_;
             for (uint32_t i = 0; i < pendingCount; ++i) pending[i] = queue_[i];
             for (uint32_t i = 0; i < queueCount_; ++i) queue_[i] = Job{};
@@ -36,15 +37,27 @@ WorkerPool::~WorkerPool() {
 
 bool WorkerPool::ensureWorkersLocked(uint32_t desired) noexcept {
     desired = std::min<uint32_t>(desired, std::min(workerLimit_, capacity_));
+    // A worker marks its slot exited while holding mutex_. Joining here is safe:
+    // an exited worker has released that mutex and will not touch the pool again.
+    for (uint32_t i = 0; i < capacity_; ++i) {
+        if (exited_[i]) {
+            if (workers_[i].joinable()) workers_[i].join();
+            workers_[i] = std::thread{};
+            exited_[i] = false;
+        }
+    }
     try {
-        while (workers_.size() < desired) {
-            const uint32_t index = static_cast<uint32_t>(workers_.size());
-            workers_.emplace_back([this, index] { workerLoop(index); });
+        while (liveWorkerCount_ < desired) {
+            uint32_t slot = 0;
+            while (slot < capacity_ && workers_[slot].joinable()) ++slot;
+            if (slot == capacity_) break;
+            workers_[slot] = std::thread([this, slot] { workerLoop(slot); });
+            ++liveWorkerCount_;
         }
     } catch (...) {
         return false;
     }
-    return workers_.size() >= desired;
+    return liveWorkerCount_ >= desired;
 }
 
 bool WorkerPool::submit(JobPriority priority, JobFunction function, void* context) noexcept {
@@ -55,7 +68,7 @@ bool WorkerPool::submit(JobPriority priority, JobFunction function, void* contex
         // Start only enough workers for the outstanding demand. Threads are reused
         // after the queue drains; no per-job thread creation or eager hardware fan-out.
         const uint32_t demand = activeCount_ + queueCount_ + 1;
-        if (!ensureWorkersLocked(demand) && workers_.empty()) return false;
+        if (!ensureWorkersLocked(demand) && liveWorkerCount_ == 0) return false;
         queue_[queueCount_++] = {function, context, priority, nextSequence_++};
     }
     wake_.notify_all();
@@ -100,7 +113,7 @@ uint32_t WorkerPool::active() const noexcept {
 
 uint32_t WorkerPool::workerCount() const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
-    return static_cast<uint32_t>(workers_.size());
+    return liveWorkerCount_;
 }
 
 bool WorkerPool::takeJob(Job& out) noexcept {
@@ -124,10 +137,19 @@ void WorkerPool::workerLoop(uint32_t index) noexcept {
         Job job;
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            wake_.wait(lock, [this, index] {
+            const bool signalled = wake_.wait_for(lock, idleTimeout_, [this, index] {
                 return stopping_ || (index < workerLimit_ && queueCount_ > 0);
             });
-            if (stopping_ && queueCount_ == 0) return;
+            if (!signalled && queueCount_ == 0 && !stopping_) {
+                exited_[index] = true;
+                --liveWorkerCount_;
+                return;
+            }
+            if (stopping_ && queueCount_ == 0) {
+                exited_[index] = true;
+                --liveWorkerCount_;
+                return;
+            }
             if (index >= workerLimit_ || !takeJob(job)) continue;
             ++activeCount_;
         }
