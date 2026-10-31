@@ -959,7 +959,7 @@ util.duck(saw(55) * 0.5, ad(step % 4 == 0, 0.001, 0.3), 0.8)
 Add a modulation signal to a base parameter value.
 
 - `base`: the unmodulated parameter or global value
-- `source`: a bipolar or unipolar signal
+- `source`: a bipolar or unipolar signal, such as an LFO or another module's export
 - `amount`: signed modulation depth; negative reverses polarity
 
 ```
