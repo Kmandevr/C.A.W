@@ -94,7 +94,7 @@ set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILIT
 
 # The library the app loads through dart:ffi.
 if(CAW_AUDIO)
-  add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
+  add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
   target_include_directories(caw_engine PRIVATE third_party/miniaudio)
   target_compile_options(caw_engine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CAW_FLAGS}>)
   if(ANDROID)
@@ -104,7 +104,7 @@ if(CAW_AUDIO)
     target_link_libraries(caw_engine PRIVATE dl m)
   endif()
 else()
-  add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp platform/audio_none.cpp)
+  add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_compile_options(caw_engine PRIVATE ${CAW_FLAGS})
 endif()
 target_link_libraries(caw_engine PRIVATE caw_core)
@@ -119,8 +119,8 @@ if(CAW_TOOLS)
   target_link_libraries(caw_cli PRIVATE caw_core)
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
     tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
-    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp
-    src/capi.cpp src/execution_capi.cpp platform/audio_none.cpp)
+    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp
+    src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_tests PRIVATE caw_core)

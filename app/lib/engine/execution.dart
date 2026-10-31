@@ -1,6 +1,8 @@
 // Native hardware policy and bounded scheduling for non-real-time app work.
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:math' as math;
+import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
@@ -127,150 +129,214 @@ class EngineExecutionPolicy {
   }
 }
 
-/// Queues app-side isolate work using the native engine's workload limits and priority policy.
-/// It never runs work on, or calls into, the real-time audio callback.
-class EngineWorkScheduler {
-  EngineWorkScheduler({this.maxPending = 64});
+enum NativeJobPriority { background, offline, foreground }
 
-  static final EngineWorkScheduler shared = EngineWorkScheduler();
+/// Owns the engine's bounded native pool. Work is submitted as native job types;
+/// Dart callbacks are never invoked from native worker threads.
+class NativeEngineWorkPool {
+  NativeEngineWorkPool._(this._bindings, this._handle);
 
-  final int maxPending;
-  final List<_ScheduledEngineWork<dynamic>> _pending = [];
-  final List<_ScheduledEngineWork<dynamic>> _active = [];
-  int _nextSequence = 0;
-  EngineExecutionPlan? lastPlan;
+  static final NativeEngineWorkPool shared = NativeEngineWorkPool._create();
 
-  int get queued => _pending.length;
-  int get active => _active.length;
-  EngineHardwareProfile get hardwareProfile => EngineExecutionPolicy.hardwareProfile;
+  final Bindings _bindings;
+  final Pointer<Void> _handle;
+  bool _disposed = false;
 
-  Future<T> run<T>({
+  factory NativeEngineWorkPool._create() {
+    final bindings = Bindings.instance;
+    final hardware = EngineExecutionPolicy.hardwareProfile;
+    final memoryWorkers = math.max(1, hardware.memoryBudgetMiB ~/ 64);
+    final maxWorkers = math.min(16, math.min(hardware.logicalCores, memoryWorkers)).toInt();
+    final handle = bindings.workerPoolCreate(maxWorkers);
+    if (handle == nullptr) throw StateError('could not create the native worker pool');
+    final pool = NativeEngineWorkPool._(bindings, handle);
+    try {
+      // Keep a second slot available for foreground checks/project compilation while an export runs.
+      pool.apply(workload: EngineWorkload.interactivePreview);
+      return pool;
+    } catch (_) {
+      bindings.workerPoolDestroy(handle);
+      rethrow;
+    }
+  }
+
+  EngineExecutionPlan apply({
     required EngineWorkload workload,
     EnginePressure pressure = EnginePressure.normal,
     bool foregroundBusy = false,
     bool allowGpu = false,
-    required Future<T> Function() task,
   }) {
-    if (workload == EngineWorkload.idle) {
-      return Future<T>.error(ArgumentError.value(workload, 'workload', 'idle cannot run a job'));
+    if (_disposed) throw StateError('native worker pool is disposed');
+    final request = calloc<CawExecutionRequestStruct>();
+    final out = calloc<CawExecutionPlanStruct>();
+    try {
+      request.ref
+        ..workload = workload.index
+        ..pressure = pressure.index
+        ..foregroundBusy = foregroundBusy ? 1 : 0
+        ..allowGpu = allowGpu ? 1 : 0;
+      final result = _bindings.workerPoolApply(_handle, request, out);
+      if (result != 0) throw StateError('native worker pool rejected the execution plan ($result)');
+      return EngineExecutionPlan(
+        workerThreads: out.ref.workerThreads,
+        maxConcurrentJobs: out.ref.maxConcurrentJobs,
+        preferredBatchFrames: out.ref.preferredBatchFrames,
+        latencySensitive: out.ref.latencySensitive != 0,
+        useSimd: out.ref.useSimd != 0,
+        allowGpu: out.ref.allowGpu != 0,
+        yieldToForeground: out.ref.yieldToForeground != 0,
+      );
+    } finally {
+      calloc
+        ..free(request)
+        ..free(out);
     }
-    if (_pending.length + _active.length >= maxPending) {
-      return Future<T>.error(StateError('engine work queue is full'));
-    }
-    final work = _ScheduledEngineWork<T>(
-      sequence: _nextSequence++,
-      workload: workload,
-      pressure: pressure,
-      foregroundBusy: foregroundBusy,
-      allowGpu: allowGpu,
-      task: task,
-    );
-    _pending.add(work);
-    _pump();
-    return work.result;
   }
 
-  bool _isForeground(EngineWorkload workload) =>
-      workload == EngineWorkload.interactiveAudition || workload == EngineWorkload.interactivePreview;
-
-  void _pump() {
-    _pending.sort((a, b) {
-      final priority = a.workload.index.compareTo(b.workload.index);
-      return priority != 0 ? priority : a.sequence.compareTo(b.sequence);
-    });
-
-    var started = true;
-    while (started && _pending.isNotEmpty) {
-      started = false;
-      final foregroundDemand =
-          _pending.any((work) => _isForeground(work.workload)) ||
-          _active.any((work) => _isForeground(work.workload));
-
-      for (var i = 0; i < _pending.length; i++) {
-        final next = _pending[i];
-        final foreground = _isForeground(next.workload);
-        final yieldsToForeground = !foreground && foregroundDemand;
-        final nextPlan = EngineExecutionPolicy.plan(
-          workload: next.workload,
-          pressure: next.pressure,
-          foregroundBusy: next.foregroundBusy || yieldsToForeground,
-          allowGpu: next.allowGpu,
-        );
-        lastPlan = nextPlan;
-        if (nextPlan.maxConcurrentJobs <= 0) {
-          _pending.removeAt(i);
-          next.fail(StateError('engine policy returned no capacity for ${next.workload.name}'));
-          started = true;
-          break;
-        }
-
-        final groupActive = _active.where((work) => _isForeground(work.workload) == foreground).length;
-        var groupLimit = nextPlan.maxConcurrentJobs;
-        for (final active in _active.where((work) => _isForeground(work.workload) == foreground)) {
-          final activePlan = EngineExecutionPolicy.plan(
-            workload: active.workload,
-            pressure: active.pressure,
-            foregroundBusy: active.foregroundBusy || (!foreground && foregroundDemand),
-            allowGpu: active.allowGpu,
-          );
-          if (activePlan.maxConcurrentJobs < groupLimit) groupLimit = activePlan.maxConcurrentJobs;
-        }
-
-        // Each scheduled isolate consumes one worker slot. Keep the combined
-        // foreground/background total inside both native hardware budgets.
-        final hardware = hardwareProfile;
-        final memoryLimit = hardware.memoryBudgetMiB ~/ 64;
-        final totalLimit = memoryLimit < 1
-            ? 1
-            : hardware.logicalCores < memoryLimit
-                ? hardware.logicalCores
-                : memoryLimit;
-        if (_active.length >= totalLimit) return;
-        if (groupActive >= groupLimit) {
-          if (i == 0) return;
-          continue;
-        }
-
-        _pending.removeAt(i);
-        _active.add(next);
-        next.execute().whenComplete(() {
-          _active.remove(next);
-          _pump();
-        });
-        started = true;
-        break;
-      }
+  NativeEngineJob submitCheck(String source) {
+    final text = source.toNativeUtf8();
+    try {
+      final job = _bindings.workerPoolSubmitCheck(_handle, text, NativeJobPriority.foreground.index);
+      if (job == nullptr) throw StateError('native check queue is full or has no available capacity');
+      return NativeEngineJob._(_bindings, job, includeResult: true);
+    } finally {
+      calloc.free(text);
     }
+  }
+
+  NativeEngineJob submitProject(Pointer<Void> engine, String projectJson) {
+    final json = projectJson.toNativeUtf8();
+    try {
+      final job = _bindings.workerPoolSubmitProject(
+        _handle, engine, json, NativeJobPriority.foreground.index,
+      );
+      if (job == nullptr) throw StateError('native project queue is full or has no available capacity');
+      return NativeEngineJob._(_bindings, job, includeResult: true);
+    } finally {
+      calloc.free(json);
+    }
+  }
+
+  NativeEngineJob submitRender({
+    required String projectJson,
+    required int kind,
+    required String outPath,
+    required int sampleRate,
+    required bool float32,
+    required double seconds,
+    required int frames,
+    String target = '',
+    String param = '',
+  }) {
+    final options = calloc<CawRenderOptionsStruct>();
+    final json = projectJson.toNativeUtf8();
+    final path = outPath.toNativeUtf8();
+    final targetText = target.toNativeUtf8();
+    final paramText = param.toNativeUtf8();
+    try {
+      options.ref
+        ..kind = kind
+        ..sampleRate = sampleRate
+        ..float32 = float32 ? 1 : 0
+        ..frames = frames
+        ..seconds = seconds
+        ..target = targetText
+        ..param = param.isEmpty ? nullptr : paramText;
+      final job = _bindings.workerPoolSubmitRender(
+        _handle, json, options, path, NativeJobPriority.offline.index,
+      );
+      if (job == nullptr) throw StateError('native render queue is full or has no available capacity');
+      return NativeEngineJob._(_bindings, job, includeResult: false);
+    } finally {
+      calloc
+        ..free(options)
+        ..free(json)
+        ..free(path)
+        ..free(targetText)
+        ..free(paramText);
+    }
+  }
+
+  void waitIdle() {
+    if (!_disposed) _bindings.workerPoolWaitIdle(_handle);
+  }
+
+  void dispose() {
+    if (_disposed) return;
+    _bindings.workerPoolDestroy(_handle);
+    _disposed = true;
   }
 }
 
-class _ScheduledEngineWork<T> {
-  _ScheduledEngineWork({
-    required this.sequence,
-    required this.workload,
-    required this.pressure,
-    required this.foregroundBusy,
-    required this.allowGpu,
-    required this.task,
-  });
-
-  final int sequence;
-  final EngineWorkload workload;
-  final EnginePressure pressure;
-  final bool foregroundBusy;
-  final bool allowGpu;
-  final Future<T> Function() task;
-  final Completer<T> _completer = Completer<T>();
-
-  Future<T> get result => _completer.future;
-
-  Future<void> execute() async {
-    try {
-      _completer.complete(await task());
-    } catch (error, stack) {
-      _completer.completeError(error, stack);
-    }
+/// Dart owner for an opaque native job handle. Native input is copied at submission,
+/// and this object releases the handle after reading its terminal result.
+class NativeEngineJob {
+  NativeEngineJob._(this._bindings, this._handle, {required this._includeResult}) {
+    result = _wait();
   }
 
-  void fail(Object error) => _completer.completeError(error);
+  static const int _succeeded = 2;
+  static const int _cancelled = 4;
+
+  final Bindings _bindings;
+  final Pointer<Void> _handle;
+  final bool _includeResult;
+  final Pointer<CawJobStatusStruct> _status = calloc<CawJobStatusStruct>();
+  late final Future<String?> result;
+  int _lastState = 0;
+  int _lastProgress = 0;
+  bool _done = false;
+
+  double get progress {
+    if (_done) return _lastProgress / 1000.0;
+    _readStatus();
+    return _lastProgress / 1000.0;
+  }
+
+  void cancel() {
+    if (!_done) _bindings.jobCancel(_handle);
+  }
+
+  void _readStatus() {
+    _status.ref.structSize = sizeOf<CawJobStatusStruct>();
+    final code = _bindings.jobGetStatus(_handle, _status);
+    if (code != 0) throw StateError('could not read native job status ($code)');
+    _lastState = _status.ref.state;
+    _lastProgress = _status.ref.progress.clamp(0, 1000).toInt();
+  }
+
+  Future<String?> _wait() async {
+    try {
+      final address = _handle.address;
+      final waitCode = await Isolate.run<int>(() {
+        final workerBindings = Bindings.instance;
+        final workerHandle = Pointer<Void>.fromAddress(address);
+        return workerBindings.jobWait(workerHandle, 0xffffffff);
+      });
+      if (waitCode != 0) throw StateError('native job wait failed ($waitCode)');
+      _readStatus();
+      if (_lastState == _succeeded) {
+        _lastProgress = 1000;
+        if (!_includeResult) return null;
+        final output = _bindings.jobResult(_handle);
+        if (output == nullptr) throw StateError('native job succeeded without a result');
+        try {
+          return output.toDartString();
+        } finally {
+          _bindings.free(output);
+        }
+      }
+      final error = _bindings.jobError(_handle);
+      if (error == nullptr) return _lastState == _cancelled ? 'cancelled' : 'native job failed';
+      try {
+        return error.toDartString();
+      } finally {
+        _bindings.free(error);
+      }
+    } finally {
+      _done = true;
+      _bindings.jobRelease(_handle);
+      calloc.free(_status);
+    }
+  }
 }

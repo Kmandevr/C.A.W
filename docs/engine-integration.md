@@ -1,7 +1,8 @@
 ---
 title: Engine integration contract
 summary: How CAW's shared native engine is consumed by projects, add-ons, the app, the library and external build targets.
-updated: 2026-10-30
+covers: [engine/include/caw.h, engine/src/worker_api.cpp, app/lib/engine/bindings.dart, app/lib/engine/execution.dart]
+updated: 2026-10-31
 ---
 
 # Engine integration contract
@@ -62,9 +63,9 @@ Library results should expose documentation, previews, dependencies, compatible 
 
 ## Shared adaptive execution
 
-The native core now exposes `caw_hardware_profile_detect` for a best-effort core-count, conservative memory-budget and CPU SIMD snapshot on supported desktop and Android platforms. The host supplies live battery/thermal pressure and passes the resulting profile to `caw_execution_plan`. The app, CLI and add-ons should all use the same workload vocabulary rather than each inventing a different policy. The current C ABI planner is pure advice only: it does not probe the OS or run worker threads.
+The native core now exposes `caw_hardware_profile_detect` for a best-effort core-count, conservative memory-budget and CPU SIMD snapshot on supported desktop and Android platforms. The host supplies live battery/thermal pressure and passes the resulting profile to `caw_execution_plan`. The app, CLI and add-ons should all use the same workload vocabulary rather than each inventing a different policy. The `caw_execution_plan` C ABI function remains pure advice: it does not probe the OS or run worker threads. A separate additive C ABI now exposes pool creation, workload-plan application, prioritized job submission, status/progress, cancellation, result/error retrieval and explicit handle release. The first native job types are module source checks and offline WAV renders; render progress and cancellation use the existing render path. Job inputs are copied at submission, result strings are caller-owned via `caw_free`, and destroying the pool waits for accepted work to finish.
 
-The current native core includes a bounded worker pool with fixed-capacity submission, foreground/offline/background priorities, worker-budget controls and pending-job cancellation. `AdaptiveWorkerPool` applies the workload planner's worker budget to that pool. The host does not yet feed live platform pressure into it automatically, and compile/render/analysis jobs are not all routed through it. The eventual integration adds memory limits, cache budgets and progress reporting. A project render, library preview, waveform analysis, module compile and package build are jobs with explicit workload classes. Interactive audio remains on its real-time-safe path. Background work yields to foreground use and thermal/battery pressure. Offline export can use more resources when the user permits it.
+The current native core includes a bounded worker pool with fixed-capacity submission, foreground/offline/background priorities, worker-budget controls and pending-job cancellation. `AdaptiveWorkerPool` applies the workload planner's worker budget to that pool. The Flutter host now submits project compilation, module checks and offline WAV renders through these native handles. Dart polls the versioned status structure and owns/releases each job handle; native workers never call into Dart. Project jobs retain their `CawEngine` handle until completion, and engine destruction waits for accepted project jobs. Generation and analysis jobs are not yet routed through the pool. The app must feed only observed platform pressure and preserve foreground responsiveness. Memory limits and cache budgets remain later work. A project render, library preview, waveform analysis, module compile and package build are jobs with explicit workload classes. Interactive audio remains on its real-time-safe path. Background work yields to foreground use and thermal/battery pressure. Offline export can use more resources when the user permits it.
 
 No scheduler may silently lower quality or alter deterministic output. If a job cannot fit the available budget, report the constraint and offer a deliberate choice. GPU use is per-kernel and measured; a GPU flag is not proof that a task has an efficient GPU implementation.
 
