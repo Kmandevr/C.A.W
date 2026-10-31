@@ -335,6 +335,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
     final name = 'Sidechain ${sourceModule.name} ${s.project.modules.length}';
     final safeName = name.replaceAll('\n', ' ');
     final sourceText = '---\ncaw: 1\nkind: effect\nname: $safeName\n---\n'
+        '// caw:sidechain-route\n'
         'param amount = ${amount.toStringAsFixed(2)} in 0..1 "Sidechain amount"\n'
         'util.duck(in, $source, amount)\n';
     s.editSource(id, sourceText);
