@@ -19,11 +19,21 @@ struct ModuleSpec {
     std::string name = {};  // how other modules refer to this one (module.export); falls back to the header name
 };
 
+struct ClipSpec {
+    std::string id;
+    std::string pattern;
+    int startSteps = 0;
+    int lengthSteps = 64;
+    int sourceOffsetSteps = 0;
+    bool loop = true;
+};
+
 struct LayerSpec {
     std::string id, name;
     std::vector<std::string> chain;  // module ids: generator first, then effects
     int lengthSteps = 0;             // 16th notes per loop; 0 loops with the project
-    std::string pattern;             // a pattern module whose notes play the generator; it sets the loop length
+    std::string pattern;             // legacy single-pattern layer
+    std::vector<ClipSpec> clips;      // arrangement instances, compiled before playback
     double volume = 0.8, pan = 0.0;
     bool mute = false, solo = false;
 };
