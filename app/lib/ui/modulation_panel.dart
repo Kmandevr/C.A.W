@@ -233,7 +233,7 @@ class _ModuleModEditorState extends State<_ModuleModEditor> {
 
   List<_ParamRoute> get routes {
     final lines = widget.source.split('\n');
-    final pattern = RegExp(r'^\s*mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*util\.mod\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)\s*,\s*(-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))\s*\)\s*(?://.*)?
+    final pattern = RegExp(r'^\s*mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*util\.mod\s*\(\s*\1\s*,\s*([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)\s*,\s*(-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))\s*\)\s*(?://.*)?$');
   const _SidechainCreator({required this.sources, required this.onCreate});
   final List<SignalOption> sources;
   final Future<void> Function(String, double) onCreate;
