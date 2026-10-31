@@ -251,12 +251,15 @@ The app, the CLI and exports share one format:
 { "caw_project": 1, "name": "Night Glitch", "bpm": 140, "beats_per_bar": 4, "loop_bars": 4,
   "seed": 7, "master": 0.7, "seam_crossfade": true, "voices": 8, "swap": "now", "key_root": 9, "key_scale": 1, "globals": { "swing": 0.1 },
   "modules": [ { "id": "m1", "name": "Kick", "source": "...the .caw text...", "params": { "shift": 6 } } ],
-  "layers": [ { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"],
-                "clips": [ { "id": "c1", "pattern": "p1", "start_steps": 0, "length_steps": 16,
-                            "source_offset_steps": 0, "loop": true } ],
-                "volume": 0.8, "pan": 0, "mute": false, "solo": false,
-                "parent": "g1", "folder": false, "bus": true,
-                "automation": [ { "target": "volume", "points": [ { "step": 0, "value": 0.8 }, { "step": 64, "value": 0.4 } ] } ] } ],
+  "layers": [
+    { "id": "g1", "name": "Group", "folder": true, "bus": true,
+      "volume": 0.9, "pan": 0, "mute": false, "solo": false },
+    { "id": "l1", "name": "Byte lead", "chain": ["m1", "fx1"], "parent": "g1",
+      "clips": [ { "id": "c1", "pattern": "p1", "start_steps": 0, "length_steps": 16,
+                  "source_offset_steps": 0, "loop": true } ],
+      "volume": 0.8, "pan": 0, "mute": false, "solo": false,
+      "automation": [ { "target": "volume", "points": [ { "step": 0, "value": 0.8 }, { "step": 64, "value": 0.4 } ] } ] }
+  ],
   "audition": { "chain": ["m1"], "pattern": "p1", "length_steps": 0 }, "audition_only": false }
 ```
 
