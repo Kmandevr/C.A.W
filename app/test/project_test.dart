@@ -21,6 +21,24 @@ void main() {
     expect(back.layers.first.chain, ['m1', 'fx']);
   });
 
+  test('folder hierarchy and automation survive app and engine serialization', () {
+    final p = sample();
+    p.layers.add(LayerDoc(id: 'group', name: 'Group', color: 3, isFolder: true, busEnabled: true));
+    p.layers[0].parentId = 'group';
+    p.layers[1].automation.add(AutomationLaneDoc(target: 'pan', points: [
+      AutomationPointDoc(step: 0, value: -1), AutomationPointDoc(step: 16, value: 1),
+    ]));
+    final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(back.layers[0].parentId, 'group');
+    expect(back.layers.last.isFolder, isTrue);
+    expect(back.layers[1].automation.single.points.last.value, 1);
+    final engine = jsonDecode(back.toEngineJson()) as Map<String, dynamic>;
+    final layers = engine['layers'] as List;
+    expect(layers[0]['parent'], 'group');
+    expect(layers.last['folder'], isTrue);
+    expect((layers[1]['automation'] as List).single['target'], 'pan');
+  });
+
   test('legacy pattern layers migrate once into clip instances', () {
     final old = sample().toJson()..['caw_app_project'] = 1;
     final migrated = ProjectDoc.fromJson(old);
