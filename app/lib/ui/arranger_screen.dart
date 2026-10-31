@@ -251,7 +251,7 @@ class _TimelineClip extends StatefulWidget {
 
 class _TimelineClipState extends State<_TimelineClip> {
   double dx = 0, resizeDx = 0;
-  bool dragging = false, resizing = false;
+  bool dragging = false, resizing = false, sourceDragging = false;
   @override
   Widget build(BuildContext context) {
     final c = widget.clip;
@@ -264,14 +264,20 @@ class _TimelineClipState extends State<_TimelineClip> {
         Positioned.fill(child: GestureDetector(
           onTap: () => widget.state.selectClip(widget.layer, c, additive: HardwareKeyboard.instance.isShiftPressed),
           onDoubleTap: () { widget.state.selectClip(widget.layer, c); widget.onOpen?.call(); },
-          onHorizontalDragStart: (_) => setState(() { dragging = true; dx = 0; }),
+          onHorizontalDragStart: (_) => setState(() { dragging = true; sourceDragging = HardwareKeyboard.instance.isAltPressed; dx = 0; }),
           onHorizontalDragUpdate: (d) => setState(() => dx += d.delta.dx),
           onHorizontalDragEnd: (_) {
-            final raw = start;
+            final raw = (dx / widget.stepW).round();
             final snap = widget.state.arrangementSnapSteps;
-            final finalStart = HardwareKeyboard.instance.isShiftPressed ? raw : (raw / snap).round() * snap;
-            widget.state.moveClip(widget.layer, c, finalStart);
-            setState(() { dragging = false; dx = 0; });
+            if (sourceDragging) {
+              final delta = HardwareKeyboard.instance.isShiftPressed ? raw : (raw / snap).round() * snap;
+              widget.state.shiftClipSource(widget.layer, c, delta);
+            } else {
+              final rawStart = c.startSteps + raw;
+              final finalStart = HardwareKeyboard.instance.isShiftPressed ? rawStart : (rawStart / snap).round() * snap;
+              widget.state.moveClip(widget.layer, c, finalStart);
+            }
+            setState(() { dragging = false; sourceDragging = false; dx = 0; });
           },
           child: Container(
             decoration: BoxDecoration(borderRadius: BorderRadius.circular(5),
@@ -370,7 +376,7 @@ class _AutomationCurvePainter extends CustomPainter {
     canvas.drawLine(Offset(0, 33), Offset(size.width, 33), Paint()..color = Neon.line);
   }
   @override
-  bool shouldRepaint(covariant _AutomationCurvePainter old) => old.lane != lane || old.stepW != stepW;
+  bool shouldRepaint(covariant _AutomationCurvePainter old) => true;
 }
 
 class _ArrangementMixer extends StatelessWidget {
