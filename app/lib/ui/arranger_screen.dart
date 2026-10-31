@@ -389,7 +389,7 @@ class _ArrangementMixer extends StatelessWidget {
       const Padding(padding: EdgeInsets.fromLTRB(12, 7, 12, 2),
         child: Text('MIXER', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.4))),
       Expanded(child: ListView(scrollDirection: Axis.horizontal, children: [
-        for (final l in state.project.layers.where((x) => !x.isFolder))
+        for (final l in state.project.layers.where((x) => !x.isFolder || x.busEnabled))
           SizedBox(width: 150, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 7),
             child: Column(children: [
               Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis,
