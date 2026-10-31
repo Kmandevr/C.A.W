@@ -776,15 +776,15 @@ class AppState extends ChangeNotifier {
   }
 
   void moveClip(LayerDoc layer, ClipDoc clip, int startSteps) {
-    editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, 4096 - clip.lengthSteps));
+    editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, 4096 - clip.lengthSteps).toInt());
   }
 
   void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {
-    editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, 4096 - clip.startSteps));
+    editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, 4096 - clip.startSteps).toInt());
   }
 
   void shiftClipSource(LayerDoc layer, ClipDoc clip, int deltaSteps) {
-    editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, 4096));
+    editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, 4096).toInt());
   }
 
   void removeClip(LayerDoc layer, ClipDoc clip) {
