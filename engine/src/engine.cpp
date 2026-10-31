@@ -434,6 +434,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         std::vector<std::string> ids;
         std::vector<const Program*> sig;
         std::shared_ptr<const Pattern> pattern;
+        std::string arrangementSig;
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
@@ -463,7 +464,21 @@ std::string Engine::setProject(const ProjectSpec& p) {
             std::map<std::string, std::shared_ptr<const Pattern>> sources;
             for (const auto& [moduleId, module] : modules_)
                 if (module.pattern) sources.emplace(moduleId, module.pattern);
-            pl.pattern = compileArrangement(w.clips, sources, p.beatsPerBar, p.loopSteps());
+            for (const ClipSpec& clip : w.clips) {
+                pl.arrangementSig += clip.id + "|" + clip.pattern + "|" + std::to_string(clip.startSteps) + "|" +
+                    std::to_string(clip.lengthSteps) + "|" + std::to_string(clip.sourceOffsetSteps) + "|" +
+                    (clip.loop ? "1" : "0") + "|";
+                auto source = modules_.find(clip.pattern);
+                if (source != modules_.end()) pl.arrangementSig += source->second.source;
+                pl.arrangementSig += "\x1e";
+            }
+            auto previous = layers_.find(w.id);
+            if (previous != layers_.end() && previous->second.arrangementSig == pl.arrangementSig &&
+                previous->second.pattern) {
+                pl.pattern = previous->second.pattern;
+            } else {
+                pl.pattern = compileArrangement(w.clips, sources, p.beatsPerBar, p.loopSteps());
+            }
             pl.w.steps = 0;  // arrangement follows the project transport, not an individual clip loop
             layerState += static_cast<int64_t>(kVoices - 1) * modules_.at(pl.ids.front()).program->stateSize;
         } else if (!w.pattern.empty() && !pl.ids.empty()) {
@@ -551,6 +566,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             }
         LayerState& ls = pl.ls;
         const Want& w = pl.w;
+        ls.arrangementSig = pl.arrangementSig;
         const bool voiced = pl.pattern != nullptr;
         if (w.vol != ls.volume || w.pan != ls.pan || w.mute != ls.mute || w.solo != ls.solo) {
             writeMix(ls.slot, w.vol, w.pan, w.mute, w.solo);
