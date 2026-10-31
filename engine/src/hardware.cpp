@@ -23,19 +23,20 @@
 #endif
 
 namespace caw {
+
+uint32_t conservativeMemoryBudgetMiB(uint64_t availableBytes) noexcept {
+    if (availableBytes == 0) return 0; // Unknown remains distinct from a measured low budget.
+    const uint64_t mib = availableBytes / (1024ull * 1024ull);
+    // Reserve most available memory for the OS, app, project assets and audio buffers.
+    // Do not impose a 16 MiB floor: that overstated capacity on constrained devices.
+    return static_cast<uint32_t>(std::clamp<uint64_t>(mib / 4, 1, 8192));
+}
+
 namespace {
 
 uint16_t clampCores(uint64_t value) noexcept {
     return static_cast<uint16_t>(std::clamp<uint64_t>(value ? value : 1, 1, 256));
 }
-
-uint32_t conservativeBudgetMiB(uint64_t availableBytes) noexcept {
-    if (availableBytes == 0) return 0; // Unknown is not a fabricated memory budget.
-    const uint64_t mib = availableBytes / (1024ull * 1024ull);
-    // Reserve most memory for the OS, app, project assets and audio buffers.
-    return static_cast<uint32_t>(std::clamp<uint64_t>(mib / 4, 16, 8192));
-}
-
 
 #if defined(__linux__) || defined(__ANDROID__)
 uint64_t readUnsignedFile(const char* path) noexcept {
@@ -70,7 +71,9 @@ uint16_t cgroupCpuLimit() noexcept {
     return 0;
 }
 
-uint64_t cgroupAvailableMemory() noexcept {
+// Returns false only when no finite cgroup memory limit is available. A true
+// result with zero bytes means the finite limit is exhausted, not "unknown".
+bool cgroupAvailableMemory(uint64_t& availableBytes) noexcept {
     uint64_t limit = 0, used = 0;
     FILE* file = std::fopen("/sys/fs/cgroup/memory.max", "r");
     if (file) {
@@ -87,7 +90,9 @@ uint64_t cgroupAvailableMemory() noexcept {
         used = readUnsignedFile("/sys/fs/cgroup/memory/memory.usage_in_bytes");
         if (limit >= (1ull << 60)) limit = 0; // v1 uses a very large sentinel for unlimited.
     }
-    return limit > used ? limit - used : 0;
+    if (limit == 0) return false;
+    availableBytes = limit > used ? limit - used : 0;
+    return true;
 }
 #endif
 
@@ -130,7 +135,7 @@ HardwareProfile detectHardwareProfile() noexcept {
     MEMORYSTATUSEX memory{};
     memory.dwLength = sizeof(memory);
     if (GlobalMemoryStatusEx(&memory))
-        profile.memoryBudgetMiB = conservativeBudgetMiB(memory.ullAvailPhys);
+        profile.memoryBudgetMiB = conservativeMemoryBudgetMiB(memory.ullAvailPhys);
 #elif defined(__APPLE__)
     uint32_t cores = 0;
     size_t coresSize = sizeof(cores);
@@ -142,7 +147,7 @@ HardwareProfile detectHardwareProfile() noexcept {
     uint64_t memoryBytes = 0;
     size_t memorySize = sizeof(memoryBytes);
     if (sysctlbyname("hw.memsize", &memoryBytes, &memorySize, nullptr, 0) == 0)
-        profile.memoryBudgetMiB = conservativeBudgetMiB(memoryBytes / 2);
+        profile.memoryBudgetMiB = conservativeMemoryBudgetMiB(memoryBytes / 2);
 #elif defined(__linux__) || defined(__ANDROID__)
     const long cores = sysconf(_SC_NPROCESSORS_ONLN);
     if (cores > 0) profile.logicalCores = clampCores(static_cast<uint64_t>(cores));
@@ -173,9 +178,12 @@ HardwareProfile detectHardwareProfile() noexcept {
             availableBytes = static_cast<uint64_t>(info.freeram + info.bufferram) * info.mem_unit;
     }
 #endif
-    const uint64_t cgroupBytes = cgroupAvailableMemory();
-    if (cgroupBytes > 0) availableBytes = availableBytes > 0 ? std::min(availableBytes, cgroupBytes) : cgroupBytes;
-    if (availableBytes > 0) profile.memoryBudgetMiB = conservativeBudgetMiB(availableBytes);
+    uint64_t cgroupBytes = 0;
+    if (cgroupAvailableMemory(cgroupBytes)) {
+        availableBytes = availableBytes > 0 ? std::min(availableBytes, cgroupBytes) : cgroupBytes;
+        if (availableBytes == 0) profile.memoryBudgetMiB = 1; // Known exhausted limit: choose the smallest budget.
+    }
+    if (availableBytes > 0) profile.memoryBudgetMiB = conservativeMemoryBudgetMiB(availableBytes);
 #endif
     return profile;
 }
