@@ -20,7 +20,7 @@ void main() {
     expect(audition.latencySensitive, isTrue);
     expect(audition.yieldToForeground, isTrue);
 
-    final unknown = EngineExecutionPolicy.plan(workload: EngineWorkload.offlineRender);
+    final unknown = EngineExecutionPolicy.plan(workload: EngineWorkload.offlineRender, allowGpu: true);
     final offline = EngineExecutionPolicy.plan(
       workload: EngineWorkload.offlineRender,
       pressure: EnginePressure.normal,
