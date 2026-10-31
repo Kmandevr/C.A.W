@@ -1,6 +1,6 @@
 ---
 title: UI design
-summary: How the app should look and feel as a light "halfway DAW" on phone and desktop: layout, one gesture vocabulary, the session grid, editors, inspector, and the performance budget.
+summary: Arrangement-first composition and editing on phone and desktop: timeline, tracks, MIDI clips, mixer, editors, inspector, and performance budget.
 updated: 2026-10-28
 ---
 
@@ -11,7 +11,7 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
 ## Owner's choices (2026-10-28)
 
 - **Phone orientation:** portrait and landscape matter equally, so every screen gets a proper layout for both.
-- **Mix view:** the session grid (layers × scenes).
+- **Composition view:** a horizontal arrangement timeline with tracks and reusable MIDI clips. The old session grid is retired, not retained as an alternate view.
 - **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
 - **New files and startup** (owner, 2026-10-28):
   - **New modules:** a new sound, effect, pattern or library starts as an empty file. A faint hint (not part of the file) shows an example header and first line until you start typing. Templates stay one choice away in the same New menu.
@@ -50,6 +50,17 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
 - **Curves drawn on the note.**
   - Bitwig draws micro-pitch on the note itself. Its curves are edited by adding points, moving them and bending the segments between them ([Bitwig user guide](https://www.bitwig.com/userguide/latest/inspecting_note_clips), [Admiral Bumblebee](https://www.admiralbumblebee.com/music/2017/06/16/bitwig-feature-review-note-expression)).
   - Bitwig Studio 6 edits gain and the other expressions on the notes too ([Plugin Boutique](https://www.pluginboutique.com/products/16950-Bitwig-Studio-6)). This is the model for curved notes here.
+
+## Arrangement workspace
+
+The Arranger is the main composition view. It is a horizontal song timeline with one row per track, a bar ruler, reusable MIDI clips, and a separate mixer panel. It is not a session grid or clip launcher.
+
+- A track owns its generator, effects, volume, pan, mute/solo and eventual routing. Clips reference pattern sources; they do not own instruments.
+- A clip instance has a timeline start, visible length, source offset and loop setting. Moving a clip does not rewrite its source. Independent duplication clones the pattern source; linked duplication shares it.
+- Drag the clip body to move it, drag its right edge to resize it, tap to select, and double-tap to open the existing piano roll. The active clip is edited; selected companion clips can later be shown as references and explicitly enabled for multi-edit.
+- The track header keeps mute/solo and generator selection close to the timeline. The mixer panel edits the same track values, not a second copy of them.
+- Folders are intended to nest. A folder may be organization-only or become a bus; bus routing and nested summing are an engine feature still to be implemented.
+- Automation lanes are a first-class follow-on: track automation follows song time, while clip automation can move with its clip. Audio clips are deferred, but the clip model should remain type-extensible.
 
 ## Layout
 
