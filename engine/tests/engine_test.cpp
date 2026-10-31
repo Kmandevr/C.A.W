@@ -185,6 +185,28 @@ TEST(track_volume_automation_is_sample_positioned) {
     CHECK_NEAR(left[16 * 6000 - 1], pan, 2e-3);
 }
 
+TEST(folder_bus_volume_automation_is_sample_positioned) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}}, 2);
+    LayerSpec folder;
+    folder.id = "bus";
+    folder.folder = true;
+    folder.busEnabled = true;
+    folder.volume = 1.0;
+    folder.automation.push_back({"volume", {{0, 0}, {16, 1}}});
+    p.layers.insert(p.layers.begin(), folder);
+    p.layers[1].parentId = "bus";
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const auto left = run(e, 16 * 6000 + 256);
+    const double pan = std::cos(kPi / 4.0);
+    CHECK(std::fabs(left[0]) < 1e-6);
+    CHECK_NEAR(left[8 * 6000], 0.4 * pan, 2e-3);
+    CHECK_NEAR(left[16 * 6000], 0.8 * pan, 2e-3);
+}
+
 TEST(mute_overrides_volume_automation) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
     p.layers[0].automation.push_back({"volume", {{0, 1}, {16, 1}}});
