@@ -129,6 +129,25 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             out.layers.push_back(std::move(spec));
         }
     }
+    // Reject malformed parent references and cycles before the audio thread sees routing indices.
+    for (const LayerSpec& layer : out.layers) {
+        std::string parent = layer.parentId;
+        std::vector<std::string> seen{layer.id};
+        for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+            if (std::find(seen.begin(), seen.end(), parent) != seen.end()) {
+                error = "folder hierarchy contains a cycle";
+                return false;
+            }
+            seen.push_back(parent);
+            const auto found = std::find_if(out.layers.begin(), out.layers.end(),
+                [&](const LayerSpec& candidate) { return candidate.id == parent; });
+            if (found == out.layers.end() || !found->folder) {
+                error = "a layer parent must reference an existing folder";
+                return false;
+            }
+            parent = found->parentId;
+        }
+    }
     if (const Json* g = root.get("globals"); g && g->type == Json::Type::Object)
         for (const auto& [k, v] : g->obj)
             if (v.type == Json::Type::Number && std::isfinite(v.num)) out.globals[k] = v.num;
