@@ -3,6 +3,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -15,6 +18,7 @@
 #include <unistd.h>
 #if defined(__linux__) && !defined(__ANDROID__)
 #include <sys/sysinfo.h>
+#include <sched.h>
 #endif
 #endif
 
@@ -26,10 +30,66 @@ uint16_t clampCores(uint64_t value) noexcept {
 }
 
 uint32_t conservativeBudgetMiB(uint64_t availableBytes) noexcept {
+    if (availableBytes == 0) return 0; // Unknown is not a fabricated memory budget.
     const uint64_t mib = availableBytes / (1024ull * 1024ull);
     // Reserve most memory for the OS, app, project assets and audio buffers.
-    return static_cast<uint32_t>(std::clamp<uint64_t>(mib / 4, 64, 8192));
+    return static_cast<uint32_t>(std::clamp<uint64_t>(mib / 4, 16, 8192));
 }
+
+
+#if defined(__linux__) || defined(__ANDROID__)
+uint64_t readUnsignedFile(const char* path) noexcept {
+    FILE* file = std::fopen(path, "r");
+    if (!file) return 0;
+    char text[96]{};
+    const bool read = std::fgets(text, sizeof(text), file) != nullptr;
+    std::fclose(file);
+    if (!read || text[0] == '-') return 0;
+    char* end = nullptr;
+    const unsigned long long value = std::strtoull(text, &end, 10);
+    return end == text ? 0 : static_cast<uint64_t>(value);
+}
+
+uint16_t cgroupCpuLimit() noexcept {
+    FILE* file = std::fopen("/sys/fs/cgroup/cpu.max", "r");
+    if (file) {
+        char quotaText[32]{}, periodText[32]{};
+        const bool read = std::fscanf(file, "%31s %31s", quotaText, periodText) == 2;
+        std::fclose(file);
+        if (read && std::strcmp(quotaText, "max") != 0) {
+            const uint64_t quota = std::strtoull(quotaText, nullptr, 10);
+            const uint64_t period = std::strtoull(periodText, nullptr, 10);
+            if (quota > 0 && period > 0)
+                return clampCores(std::max<uint64_t>(1, quota / period));
+        }
+    }
+    const uint64_t quota = readUnsignedFile("/sys/fs/cgroup/cpu/cpu.cfs_quota_us");
+    const uint64_t period = readUnsignedFile("/sys/fs/cgroup/cpu/cpu.cfs_period_us");
+    if (quota > 0 && quota < (1ull << 60) && period > 0)
+        return clampCores(std::max<uint64_t>(1, quota / period));
+    return 0;
+}
+
+uint64_t cgroupAvailableMemory() noexcept {
+    uint64_t limit = 0, used = 0;
+    FILE* file = std::fopen("/sys/fs/cgroup/memory.max", "r");
+    if (file) {
+        char text[96]{};
+        const bool read = std::fgets(text, sizeof(text), file) != nullptr;
+        std::fclose(file);
+        if (read && std::strncmp(text, "max", 3) != 0) {
+            limit = std::strtoull(text, nullptr, 10);
+            used = readUnsignedFile("/sys/fs/cgroup/memory.current");
+        }
+    }
+    if (limit == 0) {
+        limit = readUnsignedFile("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+        used = readUnsignedFile("/sys/fs/cgroup/memory/memory.usage_in_bytes");
+        if (limit >= (1ull << 60)) limit = 0; // v1 uses a very large sentinel for unlimited.
+    }
+    return limit > used ? limit - used : 0;
+}
+#endif
 
 bool cpuHasSimd() noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -52,8 +112,8 @@ bool cpuHasSimd() noexcept {
 
 HardwareProfile detectHardwareProfile() noexcept {
     HardwareProfile profile;
-    profile.logicalCores = 1;
-    profile.memoryBudgetMiB = 256;
+    profile.logicalCores = 0;
+    profile.memoryBudgetMiB = 0;
     profile.supportsSimd = cpuHasSimd();
     profile.supportsGpuCompute = false; // no generic GPU kernel backend is currently shipped
 
@@ -61,15 +121,24 @@ HardwareProfile detectHardwareProfile() noexcept {
     SYSTEM_INFO info{};
     GetSystemInfo(&info);
     profile.logicalCores = clampCores(info.dwNumberOfProcessors);
+    DWORD_PTR processMask = 0, systemMask = 0;
+    if (GetProcessAffinityMask(GetCurrentProcess(), &processMask, &systemMask)) {
+        uint32_t allowed = 0;
+        for (DWORD_PTR mask = processMask; mask; mask &= (mask - 1)) ++allowed;
+        if (allowed) profile.logicalCores = std::min<uint16_t>(profile.logicalCores, clampCores(allowed));
+    }
     MEMORYSTATUSEX memory{};
     memory.dwLength = sizeof(memory);
     if (GlobalMemoryStatusEx(&memory))
         profile.memoryBudgetMiB = conservativeBudgetMiB(memory.ullAvailPhys);
 #elif defined(__APPLE__)
-    uint32_t cores = 1;
+    uint32_t cores = 0;
     size_t coresSize = sizeof(cores);
-    if (sysctlbyname("hw.logicalcpu", &cores, &coresSize, nullptr, 0) == 0)
-        profile.logicalCores = clampCores(cores);
+    if (sysctlbyname("hw.activecpu", &cores, &coresSize, nullptr, 0) != 0) {
+        coresSize = sizeof(cores);
+        sysctlbyname("hw.logicalcpu", &cores, &coresSize, nullptr, 0);
+    }
+    if (cores > 0) profile.logicalCores = clampCores(cores);
     uint64_t memoryBytes = 0;
     size_t memorySize = sizeof(memoryBytes);
     if (sysctlbyname("hw.memsize", &memoryBytes, &memorySize, nullptr, 0) == 0)
@@ -77,6 +146,19 @@ HardwareProfile detectHardwareProfile() noexcept {
 #elif defined(__linux__) || defined(__ANDROID__)
     const long cores = sysconf(_SC_NPROCESSORS_ONLN);
     if (cores > 0) profile.logicalCores = clampCores(static_cast<uint64_t>(cores));
+#if defined(__linux__) && !defined(__ANDROID__)
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+        const int count = CPU_COUNT(&allowed);
+        if (count > 0) profile.logicalCores = profile.logicalCores
+            ? std::min<uint16_t>(profile.logicalCores, clampCores(static_cast<uint64_t>(count)))
+            : clampCores(static_cast<uint64_t>(count));
+    }
+#endif
+    const uint16_t quotaCores = cgroupCpuLimit();
+    if (quotaCores > 0) profile.logicalCores = profile.logicalCores
+        ? std::min(profile.logicalCores, quotaCores) : quotaCores;
     uint64_t availableBytes = 0;
 #if defined(_SC_AVPHYS_PAGES)
     const long availablePages = sysconf(_SC_AVPHYS_PAGES);
@@ -91,6 +173,8 @@ HardwareProfile detectHardwareProfile() noexcept {
             availableBytes = static_cast<uint64_t>(info.freeram + info.bufferram) * info.mem_unit;
     }
 #endif
+    const uint64_t cgroupBytes = cgroupAvailableMemory();
+    if (cgroupBytes > 0) availableBytes = availableBytes > 0 ? std::min(availableBytes, cgroupBytes) : cgroupBytes;
     if (availableBytes > 0) profile.memoryBudgetMiB = conservativeBudgetMiB(availableBytes);
 #endif
     return profile;
