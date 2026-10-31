@@ -23,6 +23,9 @@ struct Engine::Slot {
     bool overloaded = false;
     bool bus = false;
     int parentSlot = -1;
+    int volumeAutomationCount = 0, panAutomationCount = 0;
+    double volumeAutomationStep[128] = {}, volumeAutomationValue[128] = {};
+    double panAutomationStep[128] = {}, panAutomationValue[128] = {};
     double outL[kBlock] = {}, outR[kBlock] = {};
     Chain* cur = nullptr;
     Chain* old = nullptr;    // previous chain, fading out after a hot swap
@@ -96,13 +99,16 @@ struct Engine::Chain {
 };
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     int orderList[kSlots] = {};
     int orderCount = 0;
     int slot = 0;
     Chain* chain = nullptr;
     int steps = 0, order = 0, parentSlot = -1;
+    int volumeAutomationCount = 0, panAutomationCount = 0;
+    double volumeAutomationStep[128] = {}, volumeAutomationValue[128] = {};
+    double panAutomationStep[128] = {}, panAutomationValue[128] = {};
     double bpm = 120, master = 0.7;
     int beatsPerBar = 4, loopSteps = 64, keyRoot = 9, keyScale = 1;
     uint32_t seed = 0;
@@ -490,6 +496,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         bool mute, solo;
         int order;
         std::vector<ClipSpec> clips;
+        std::vector<AutomationLaneSpec> automation;
         std::string parentId;
         bool bus = false;
     };
@@ -501,7 +508,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     order_.clear();
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
-        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.parentId, l.folder && l.busEnabled});
+        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled});
     }
 
     // Pass 1: which modules each layer plays, and its slot.
@@ -512,6 +519,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         std::vector<const Program*> sig;
         std::shared_ptr<const Pattern> pattern;
         std::string arrangementSig;
+        std::string automationSig;
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
@@ -527,7 +535,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     int64_t projectState = 0;
     std::vector<std::vector<int>> readsFrom(kSlots);
     for (Want& w : wants) {
-        Planned pl{w, {}, {}, {}, nullptr, {}};
+        Planned pl{w, {}, {}, {}, nullptr, {}, {}};
         int64_t layerState = 0;
         for (const std::string& id : w.chain) {
             auto it = modules_.find(id);
@@ -685,6 +693,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
         LayerState& ls = pl.ls;
         const Want& w = pl.w;
         ls.arrangementSig = pl.arrangementSig;
+        for (const AutomationLaneSpec& lane : w.automation) {
+            pl.automationSig += lane.target + "|";
+            for (const AutomationPointSpec& point : lane.points)
+                pl.automationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ";";
+        }
         const bool voiced = pl.pattern != nullptr;
         if (w.vol != ls.volume || w.pan != ls.pan || w.mute != ls.mute || w.solo != ls.solo) {
             writeMix(ls.slot, w.vol, w.pan, w.mute, w.solo);
@@ -702,6 +715,20 @@ std::string Engine::setProject(const ProjectSpec& p) {
             send(bus);
             ls.bus = true;
             ls.parentSlot = pl.ls.parentSlot;
+            if (ls.automationSig != pl.automationSig) {
+                Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot;
+                for (const AutomationLaneSpec& lane : w.automation) {
+                    int* count = lane.target == "volume" ? &automation.volumeAutomationCount : &automation.panAutomationCount;
+                    double* steps = lane.target == "volume" ? automation.volumeAutomationStep : automation.panAutomationStep;
+                    double* values = lane.target == "volume" ? automation.volumeAutomationValue : automation.panAutomationValue;
+                    for (const AutomationPointSpec& point : lane.points) {
+                        if (*count >= 128) break;
+                        steps[*count] = point.step; values[*count] = point.value; ++*count;
+                    }
+                }
+                send(automation);
+                ls.automationSig = pl.automationSig;
+            }
             ls.chain = nullptr;
             ls.sig.clear();
             ls.wiring.clear();
@@ -711,6 +738,20 @@ std::string Engine::setProject(const ProjectSpec& p) {
             projectOrder.push_back(ls.slot);
             nextLayers[w.id] = ls;
             continue;
+        }
+        if (ls.automationSig != pl.automationSig) {
+            Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot;
+            for (const AutomationLaneSpec& lane : w.automation) {
+                int* count = lane.target == "volume" ? &automation.volumeAutomationCount : &automation.panAutomationCount;
+                double* steps = lane.target == "volume" ? automation.volumeAutomationStep : automation.panAutomationStep;
+                double* values = lane.target == "volume" ? automation.volumeAutomationValue : automation.panAutomationValue;
+                for (const AutomationPointSpec& point : lane.points) {
+                    if (*count >= 128) break;
+                    steps[*count] = point.step; values[*count] = point.value; ++*count;
+                }
+            }
+            send(automation);
+            ls.automationSig = pl.automationSig;
         }
         {
             Cmd routing;
@@ -1047,6 +1088,16 @@ void Engine::applyCommands() noexcept {
                 s.bus = false;
                 break;
             }
+            case Cmd::SetAutomation: {
+                Slot& s = slots_[c.slot];
+                s.volumeAutomationCount = c.volumeAutomationCount;
+                s.panAutomationCount = c.panAutomationCount;
+                std::copy_n(c.volumeAutomationStep, s.volumeAutomationCount, s.volumeAutomationStep);
+                std::copy_n(c.volumeAutomationValue, s.volumeAutomationCount, s.volumeAutomationValue);
+                std::copy_n(c.panAutomationStep, s.panAutomationCount, s.panAutomationStep);
+                std::copy_n(c.panAutomationValue, s.panAutomationCount, s.panAutomationValue);
+                break;
+            }
             case Cmd::ConfigureBus: {
                 Slot& s = slots_[c.slot];
                 retire(s.cur, -1, s.pattern);
@@ -1167,7 +1218,7 @@ double Engine::slotTarget(const Slot& s) const noexcept {
     if (idx == kAuditionSlot) return 0.0;
     if (s.mute.load(std::memory_order_relaxed)) return 0.0;
     if (anySolo_ && !s.solo.load(std::memory_order_relaxed)) return 0.0;
-    return bitsToDouble(s.vol.load(std::memory_order_relaxed));
+    return s.volumeAutomationCount > 0 ? 1.0 : bitsToDouble(s.vol.load(std::memory_order_relaxed));
 }
 
 void Engine::updateSolo() noexcept {
@@ -1436,7 +1487,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
     const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
     const int swapLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-    if (pan != s.panCache) {
+    if (s.panAutomationCount == 0 && pan != s.panCache) {
         s.panCache = pan;
         const double th = (pan + 1.0) * (kPi / 4.0);
         s.gl = detCos(th);
@@ -1529,13 +1580,23 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         }
         int sp = s.scopePos.load(std::memory_order_relaxed);
         for (int i = 0; i < len; ++i) {
-            if (s.gain != target) {
-                s.gain += (target - s.gain) * gainCoef;
-                if (std::fabs(target - s.gain) < 1e-6) s.gain = target;
+            const double step = static_cast<double>(gg + i) / stepLen_;
+            const double desired = automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
+                s.volumeAutomationValue, step, target);
+            if (s.gain != desired) {
+                s.gain += (desired - s.gain) * gainCoef;
+                if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
             }
             const double v = finiteOr0(y[i]) * s.gain;
-            s.outL[j + i] = v * s.gl;
-            s.outR[j + i] = v * s.gr;
+            double gl = s.gl, gr = s.gr;
+            if (s.panAutomationCount > 0) {
+                const double automatedPan = automationValue(s.panAutomationCount, s.panAutomationStep,
+                    s.panAutomationValue, step, pan);
+                const double th = (automatedPan + 1.0) * (kPi / 4.0);
+                gl = detCos(th); gr = detSin(th);
+            }
+            s.outL[j + i] = v * gl;
+            s.outR[j + i] = v * gr;
             const float av = static_cast<float>(std::fabs(v));
             if (av > peak) peak = av;
             s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
@@ -1571,14 +1632,19 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
             const double target = slotTarget(s);
             if (s.bus) {
                 const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-                const double leftPan = pan > 0.0 ? 1.0 - pan : 1.0;
-                const double rightPan = pan < 0.0 ? 1.0 + pan : 1.0;
                 const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
                 for (int j = 0; j < m; ++j) {
-                    if (s.gain != target) {
-                        s.gain += (target - s.gain) * gainCoef;
-                        if (std::fabs(target - s.gain) < 1e-6) s.gain = target;
+                    const double step = static_cast<double>(g_ + j) / stepLen_;
+                    const double desired = automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
+                        s.volumeAutomationValue, step, target);
+                    if (s.gain != desired) {
+                        s.gain += (desired - s.gain) * gainCoef;
+                        if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
                     }
+                    const double automatedPan = automationValue(s.panAutomationCount, s.panAutomationStep,
+                        s.panAutomationValue, step, pan);
+                    const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
+                    const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
                     s.outL[j] *= s.gain * leftPan;
                     s.outR[j] *= s.gain * rightPan;
                 }
