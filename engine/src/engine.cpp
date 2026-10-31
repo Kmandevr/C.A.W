@@ -133,6 +133,78 @@ constexpr double kC4 = 261.6255653005986;
 
 double mtof(double note) { return 440.0 * detPow(2.0, (note - 69.0) / 12.0); }
 
+ // Compile clip instances off the audio thread into one immutable, absolute-time event stream.
+std::shared_ptr<const Pattern> compileArrangement(
+    const std::vector<ClipSpec>& clips,
+    const std::map<std::string, std::shared_ptr<const Pattern>>& sources,
+    int beatsPerBar,
+    int projectLengthSteps) {
+    auto out = std::make_shared<Pattern>();
+    out->name = "Arrangement";
+    out->lengthSteps = projectLengthSteps;
+    for (const ClipSpec& clip : clips) {
+        const auto found = sources.find(clip.pattern);
+        if (found == sources.end() || !found->second) continue;
+        const Pattern& src = *found->second;
+        const int sourceLength = std::max(1, src.steps(beatsPerBar));
+        double sourcePos = static_cast<double>(clip.sourceOffsetSteps);
+        int consumed = 0;
+        int timeline = clip.startSteps;
+        while (consumed < clip.lengthSteps && out->notes.size() < kMaxPatternNotes) {
+            if (sourcePos >= sourceLength) {
+                if (!clip.loop) break;
+                sourcePos = std::fmod(sourcePos, static_cast<double>(sourceLength));
+            }
+            const int segment = static_cast<int>(std::min<double>(
+                clip.lengthSteps - consumed, sourceLength - sourcePos));
+            if (segment <= 0) break;
+            const double sourceEnd = sourcePos + segment;
+            const size_t noteBase = out->notes.size();
+            std::vector<int> remap(src.notes.size(), -1);
+            for (size_t i = 0; i < src.notes.size() && out->notes.size() < kMaxPatternNotes; ++i) {
+                const PatternNote& original = src.notes[i];
+                if (original.at < sourcePos || original.at >= sourceEnd) continue;
+                PatternNote note = original;
+                note.at = timeline + (original.at - sourcePos);
+                note.len = std::min(original.len, sourceEnd - original.at);
+                if (note.len <= 0) continue;
+                note.slideFrom = note.slideTo = -1;
+                remap[i] = static_cast<int>(out->notes.size());
+                out->notes.push_back(note);
+                out->lastEnd = std::max(out->lastEnd, note.at + note.len);
+            }
+            for (size_t i = 0; i < remap.size(); ++i) {
+                if (remap[i] < 0) continue;
+                const PatternNote& original = src.notes[i];
+                PatternNote& note = out->notes[static_cast<size_t>(remap[i])];
+                if (original.slideFrom >= 0 && static_cast<size_t>(original.slideFrom) < remap.size() &&
+                    remap[static_cast<size_t>(original.slideFrom)] >= 0)
+                    note.slideFrom = remap[static_cast<size_t>(original.slideFrom)];
+                if (original.slideTo >= 0 && static_cast<size_t>(original.slideTo) < remap.size() &&
+                    remap[static_cast<size_t>(original.slideTo)] >= 0)
+                    note.slideTo = remap[static_cast<size_t>(original.slideTo)];
+            }
+            for (size_t i = noteBase; i < out->notes.size(); ++i) {
+                const PatternNote& note = out->notes[i];
+                const double part = note.len / note.ratchet;
+                for (int q = 0; q < note.ratchet; ++q) {
+                    out->events.push_back({note.at + part * q, static_cast<uint32_t>(i), static_cast<uint16_t>(q), true});
+                    out->events.push_back({note.at + part * (q + 1), static_cast<uint32_t>(i), static_cast<uint16_t>(q), false});
+                }
+            }
+            timeline += segment;
+            consumed += segment;
+            sourcePos = 0;
+            if (!clip.loop) break;
+        }
+    }
+    std::stable_sort(out->events.begin(), out->events.end(), [](const PatternEvent& a, const PatternEvent& b) {
+        if (a.step != b.step) return a.step < b.step;
+        return a.on && !b.on;
+    });
+    return out;
+}
+
 // Lets every held note go into its release (at a layer restart, or when the pattern changes).
 void releaseVoices(Voice* voices) {
     for (int v = 0; v < kVoices; ++v)
