@@ -61,6 +61,7 @@ Unknown header keys are ignored, so newer files still load. With no header, a fi
   - `param filter = on` (or `off`): a toggle, 1 or 0
   - `param wave = saw in [sine, saw, square]`: a dropdown. Its value is the index (here 1), and the code can compare with `wave.square`.
 - `global name = …` takes the same options as `param`, but the value belongs to the project. The app shows it once under Project controls, and every module that declares the same name reads the same value.
+- `mod name = expression` rebinds an earlier numeric `param` or `global` to a modulated value for following expressions. For example, `mod cutoff = util.mod(cutoff, kick.env, 1200)`. The source may be a local LFO/envelope or an imported module export; the amount is in the destination parameter's units. Multiple `mod` statements can be chained before the output expression.
 - `export let name = expression` shares a value. Other modules read it as `module.name`.
   - The exported value is a block-rate control signal. The engine wires it before playback, so a reader on another track receives the current block's value without a lookup or allocation in the audio callback.
   - Missing exports read 0 and appear as warnings. Cross-track dependency cycles remain playable with bounded one-block feedback; the module diagnostics identify that delayed dependency.
