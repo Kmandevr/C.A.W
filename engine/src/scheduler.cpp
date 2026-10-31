@@ -6,31 +6,45 @@
 namespace caw {
 
 WorkerPool::WorkerPool(uint32_t workers) {
-    const uint32_t count = std::clamp<uint32_t>(workers, 1, kMaxWorkers);
-    workerLimit_ = count;
-    workers_.reserve(count);
-    try {
-        for (uint32_t i = 0; i < count; ++i)
-            workers_.emplace_back([this, i] { workerLoop(i); });
-    } catch (...) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            stopping_ = true;
-        }
-        wake_.notify_all();
-        for (std::thread& worker : workers_) if (worker.joinable()) worker.join();
-        throw;
-    }
+    capacity_ = std::clamp<uint32_t>(workers, 1, kMaxWorkers);
+    workerLimit_ = capacity_;
+    // Reserve only the small thread-handle array. Actual OS threads are started on demand.
+    workers_.reserve(capacity_);
 }
 
 WorkerPool::~WorkerPool() {
+    std::array<Job, kQueueCapacity> pending{};
+    uint32_t pendingCount = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stopping_ = true;
-        workerLimit_ = static_cast<uint32_t>(workers_.size()); // drain accepted work during orderly shutdown
+        workerLimit_ = static_cast<uint32_t>(workers_.size());
+        // If policy kept the pool at zero workers, drain already accepted work here.
+        // Destruction is non-real-time and may safely execute these jobs synchronously.
+        if (workers_.empty()) {
+            pendingCount = queueCount_;
+            for (uint32_t i = 0; i < pendingCount; ++i) pending[i] = queue_[i];
+            for (uint32_t i = 0; i < queueCount_; ++i) queue_[i] = Job{};
+            queueCount_ = 0;
+        }
     }
+    for (uint32_t i = 0; i < pendingCount; ++i)
+        if (pending[i].function) pending[i].function(pending[i].context);
     wake_.notify_all();
     for (std::thread& worker : workers_) if (worker.joinable()) worker.join();
+}
+
+bool WorkerPool::ensureWorkersLocked(uint32_t desired) noexcept {
+    desired = std::min<uint32_t>(desired, std::min(workerLimit_, capacity_));
+    try {
+        while (workers_.size() < desired) {
+            const uint32_t index = static_cast<uint32_t>(workers_.size());
+            workers_.emplace_back([this, index] { workerLoop(index); });
+        }
+    } catch (...) {
+        return false;
+    }
+    return workers_.size() >= desired;
 }
 
 bool WorkerPool::submit(JobPriority priority, JobFunction function, void* context) noexcept {
@@ -38,6 +52,10 @@ bool WorkerPool::submit(JobPriority priority, JobFunction function, void* contex
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (stopping_ || queueCount_ == kQueueCapacity) return false;
+        // Start only enough workers for the outstanding demand. Threads are reused
+        // after the queue drains; no per-job thread creation or eager hardware fan-out.
+        const uint32_t demand = activeCount_ + queueCount_ + 1;
+        if (!ensureWorkersLocked(demand) && workers_.empty()) return false;
         queue_[queueCount_++] = {function, context, priority, nextSequence_++};
     }
     wake_.notify_all();
@@ -47,7 +65,8 @@ bool WorkerPool::submit(JobPriority priority, JobFunction function, void* contex
 void WorkerPool::setWorkerLimit(uint32_t activeWorkers) noexcept {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        workerLimit_ = std::min<uint32_t>(activeWorkers, static_cast<uint32_t>(workers_.size()));
+        workerLimit_ = std::min<uint32_t>(activeWorkers, capacity_);
+        ensureWorkersLocked(activeCount_ + queueCount_);
     }
     wake_.notify_all();
 }
@@ -77,6 +96,11 @@ uint32_t WorkerPool::queued() const noexcept {
 uint32_t WorkerPool::active() const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     return activeCount_;
+}
+
+uint32_t WorkerPool::workerCount() const noexcept {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return static_cast<uint32_t>(workers_.size());
 }
 
 bool WorkerPool::takeJob(Job& out) noexcept {
