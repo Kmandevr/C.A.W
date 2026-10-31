@@ -183,7 +183,7 @@ class _TimelineHeader extends StatelessWidget {
             itemBuilder: (_) => [for (final m in patterns) PopupMenuItem(value: m.id, child: Text(m.name))],
           ),
         ])) else Expanded(child: Align(alignment: Alignment.centerLeft,
-          child: Row(children: [Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: const TextStyle(color: Neon.dim, fontSize: 9)), const Spacer(), Icon(Icons.account_tree_outlined, size: 13, color: color)])),
+          child: Row(children: [Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: const TextStyle(color: Neon.dim, fontSize: 9)), const Spacer(), Icon(Icons.account_tree_outlined, size: 13, color: color)]))),
       ]),
     );
   }
