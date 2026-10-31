@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical plan for every target platform: stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks.
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # Architecture
