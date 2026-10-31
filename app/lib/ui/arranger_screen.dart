@@ -321,12 +321,14 @@ class _TimelineClipState extends State<_TimelineClip> {
                     if (v == 'edit') { widget.state.activateClip(widget.layer, c); widget.onOpen?.call(); }
                     if (v == 'copy') widget.state.duplicateClip(widget.layer, c);
                     if (v == 'linked') widget.state.duplicateClip(widget.layer, c, linked: true);
+                    if (v == 'loop') widget.state.editLayer(widget.layer, (l) => c.loop = !c.loop);
                     if (v == 'delete') widget.state.removeClip(widget.layer, c);
                   },
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'edit', child: Text('Edit pattern')),
                     PopupMenuItem(value: 'copy', child: Text('Duplicate independently')),
                     PopupMenuItem(value: 'linked', child: Text('Duplicate linked')),
+                    PopupMenuItem(value: 'loop', child: Text(c.loop ? 'Disable clip looping' : 'Enable clip looping')),
                     PopupMenuItem(value: 'delete', child: Text('Delete')),
                   ]),
               ]),
