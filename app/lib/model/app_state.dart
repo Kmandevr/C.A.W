@@ -406,9 +406,11 @@ class AppState extends ChangeNotifier {
     for (final l in project.layers) {
       if (l.generatorId == id) l.generatorId = null;
       if (l.patternId == id) l.patternId = null;
+      l.clips.removeWhere((clip) => clip.patternId == id);
       l.effectIds.remove(id);
     }
     if (selectedModuleId == id) selectedModuleId = project.modules.isEmpty ? null : project.modules.first.id;
+    _pruneClipSelection();
     _changed();
   }
 
