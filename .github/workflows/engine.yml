@@ -41,14 +41,12 @@ jobs:
           key: ccache-engine-${{ matrix.name }}-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
           restore-keys: |
             ccache-engine-${{ matrix.name }}-
-      - name: Configure
-        shell: bash
-        run: |
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-          else
-            cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }}
-          fi
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }} -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }}
       - name: Build
         run: cmake --build engine/build --config Release --parallel
       - name: Test
