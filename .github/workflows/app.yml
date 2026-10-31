@@ -182,7 +182,7 @@ jobs:
       - name: Restore Dart packages
         uses: actions/cache@v4
         with:
-          path: ${{ env.LOCALAPPDATA }}\Pub\Cache
+          path: ~\AppData\Local\Pub\Cache
           key: pub-windows-${{ hashFiles('app/pubspec.lock') }}
           restore-keys: pub-windows-
       - name: Build
