@@ -112,6 +112,11 @@ TEST(project_parser_reads_folder_and_automation_metadata) {
     CHECK_EQ(p.layers[1].automation.size(), size_t{1});
     CHECK_EQ(p.layers[1].automation[0].target, std::string("pan"));
     CHECK_NEAR(p.layers[1].automation[0].points[1].value, 1.0, 1e-9);
+    const std::string cycle = R"({"caw_project":1,"layers":[
+      {"id":"a","folder":true,"parent":"b"},{"id":"b","folder":true,"parent":"a"}
+    ]})";
+    ProjectSpec invalid;
+    CHECK(!parseProject(cycle, invalid, error));
 }
 
 TEST(output_does_not_depend_on_block_size) {
