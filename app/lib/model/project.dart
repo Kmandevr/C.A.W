@@ -291,13 +291,17 @@ class ProjectDoc {
         layers: ((j['layers'] as List?) ?? const [])
             .map((raw) {
               final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
-              if (((j['caw_app_project'] as num?)?.toInt() ?? 1) < fileVersion && layer.clips.isEmpty && layer.patternId != null) {
+              // Recover any legacy single-pattern layer as a real clip, then clear the legacy pointer.
+              // Clearing it matters: deleting the migrated clip must leave the track silent.
+              if (layer.clips.isEmpty && layer.patternId != null) {
+                final legacyPatternId = layer.patternId!;
                 final module = ((j['modules'] as List?) ?? const [])
-                    .whereType<Map>().where((m) => m['id'] == layer.patternId).firstOrNull;
+                    .whereType<Map>().where((m) => m['id'] == legacyPatternId).firstOrNull;
                 final parsed = module == null ? null : PatternDoc.parse((module['run_source'] ?? module['source'] ?? '').toString()).doc;
                 final length = parsed?.lengthSteps((j['beats_per_bar'] as num?)?.toInt() ?? 4) ?? layer.lengthSteps;
-                layer.clips.add(ClipDoc(id: newId('c'), patternId: layer.patternId!, startSteps: 0,
+                layer.clips.add(ClipDoc(id: newId('c'), patternId: legacyPatternId, startSteps: 0,
                     lengthSteps: length > 0 ? length : 64));
+                layer.patternId = null;
               }
               return layer;
             }).toList(),
