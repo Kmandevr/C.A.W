@@ -688,6 +688,14 @@ class AppState extends ChangeNotifier {
     return refs;
   }
 
+  void activateClip(LayerDoc layer, ClipDoc clip) {
+    selectedLayerId = layer.id;
+    selectedClipId = clip.id;
+    selectedModuleId = clip.patternId;
+    selectedClipIds.add(clip.id);
+    notifyListeners();
+  }
+
   void selectClip(LayerDoc layer, ClipDoc clip, {bool additive = false}) {
     if (!additive) selectedClipIds.clear();
     if (additive && selectedClipIds.contains(clip.id)) {
