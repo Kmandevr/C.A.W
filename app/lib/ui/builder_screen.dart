@@ -570,7 +570,8 @@ class _Params extends StatelessWidget {
   final ModuleInfo? info;
 
   String _patternUse(ModuleInfo i) {
-    final users = [for (final l in state.project.layers) if (l.patternId == module.id) l.name];
+    final users = [for (final l in state.project.layers)
+      if (l.patternId == module.id || l.clips.any((clip) => clip.patternId == module.id)) l.name];
     final notes = '${i.noteCount} note${i.noteCount == 1 ? '' : 's'}';
     return users.isEmpty
         ? 'A pattern of $notes. To hear it, pick it as a layer\'s pattern in the Arranger, or use Solo preview.'
