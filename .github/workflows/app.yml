@@ -8,6 +8,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+
+# Cancel obsolete runs for this workflow/PR when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 env:
   FLUTTER_VERSION: 3.47.7
   FLUTTER_SHA_LINUX: af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230

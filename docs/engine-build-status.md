@@ -2,7 +2,7 @@
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
 covers: [engine/, app/]
-updated: 2026-10-31
+updated: 2026-10-30
 ---
 
 # Modular engine implementation status
@@ -54,4 +54,4 @@ Each item should be delivered as its own small PR, with app-facing functionality
 
 ## Verification
 
-The native CMake workflow builds the engine without a device backend and runs the full CTest suite on pushes and pull requests. Treat the checks on the current PR head as authoritative: queued or partial jobs are not passes, and a successful library build is not a test-suite pass. The modular foundation remains unverified until the complete Engine, App and Docs checks are green. Device profiling remains separate; cloud CI cannot prove phone latency, thermal behavior, battery use or drop-out resistance.
+The native CMake workflow builds the engine without a device backend and runs the full CTest suite on pushes and pull requests. The registered tests are divided into four deterministic, process-isolated shards; CTest runs those shards concurrently with four workers. Golden-file updates remain unsharded. The Engine platform/sanitizer matrix, App jobs and Docs/hygiene workflow run independently. Superseded runs are cancelled within each workflow so outdated commits do not occupy runners. Treat the checks on the current PR head as authoritative: queued or partial jobs are not passes, and a successful library build is not a test-suite pass. The modular foundation remains unverified until the complete Engine, App and Docs checks are green. Device profiling remains separate; cloud CI cannot prove phone latency, thermal behavior, battery use or drop-out resistance.

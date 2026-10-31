@@ -5,11 +5,17 @@ on:
   pull_request:
 permissions:
   contents: read
+
+# Cancel obsolete runs for this workflow/PR when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     name: Tests (${{ matrix.name }})
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - { name: Linux x64, os: ubuntu-24.04, flags: "" }
@@ -24,11 +30,7 @@ jobs:
       - name: Build
         run: cmake --build engine/build --config Release --parallel
       - name: Test
-        shell: bash
-        run: |
-          bin=engine/build/caw_tests
-          [ -f engine/build/Release/caw_tests.exe ] && bin=engine/build/Release/caw_tests.exe
-          "$bin"
+        run: ctest --test-dir engine/build --build-config Release --output-on-failure --parallel 4
       - name: Check and render the examples
         if: matrix.name == 'Linux x64'
         run: |
