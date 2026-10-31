@@ -49,6 +49,7 @@ class _PatternEditorState extends State<PatternEditor> {
   int _res = 16; // grid resolution: 1/16 of a whole note = one step
   bool _snap = true, _fixed = false, _triplet = false;
   bool _velLane = true, _extrasLane = false; // Alt+V, Alt+X
+  bool _multiEdit = false;
   double _pxPerStep = 28, _scrollX = 0, _scrollY = 0;
   final double _rowH = 16;
   Steps _cursorAt = Steps.zero;
@@ -749,6 +750,8 @@ class _PatternEditorState extends State<PatternEditor> {
       );
     }
     final length = d.lengthSteps(s.project.beatsPerBar);
+    final references = s.selectedPatternReferences;
+    if (!s.canMultiEditSelectedClips) _multiEdit = false;
     final toolbar = _Toolbar(
       tool: _tool,
       onTool: (t) => setState(() => _tool = t),
@@ -800,6 +803,18 @@ class _PatternEditorState extends State<PatternEditor> {
       focusNode: _focus,
       onKeyEvent: _onKey,
       child: Column(children: [
+        if (s.selectedClipIds.length > 1)
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            child: Row(children: [
+              Text('${s.selectedClipIds.length} CLIPS SELECTED',
+                style: const TextStyle(color: Neon.dim, fontSize: 9, letterSpacing: 1)),
+              const Spacer(),
+              if (references.isNotEmpty)
+                Text('${references.length} reference source(s)', style: const TextStyle(color: Neon.blue, fontSize: 9)),
+              if (s.canMultiEditSelectedClips)
+                TextButton(onPressed: () => setState(() => _multiEdit = !_multiEdit),
+                  child: Text(_multiEdit ? 'MULTI-EDIT ON' : 'EDIT ALL LINKED')),
+            ])),
         toolbar,
         Expanded(
           child: LayoutBuilder(builder: (context, box) {
@@ -847,6 +862,7 @@ class _PatternEditorState extends State<PatternEditor> {
                     size: Size.infinite,
                     painter: _RollPainter(
                       doc: d,
+                      references: references,
                       sel: _sel,
                       length: length,
                       beatsPerBar: s.project.beatsPerBar,
@@ -966,6 +982,7 @@ class _Toolbar extends StatelessWidget {
 class _RollPainter extends CustomPainter {
   _RollPainter({
     required this.doc,
+    required this.references,
     required this.sel,
     required this.length,
     required this.beatsPerBar,
@@ -986,6 +1003,7 @@ class _RollPainter extends CustomPainter {
   });
   final double velH, xH;
   final PatternDoc doc;
+  final List<PatternDoc> references;
   final Set<int> sel;
   final int length, beatsPerBar;
   final double pxPerStep, rowH, scrollX, scrollY, cursorPitch;
@@ -1029,6 +1047,19 @@ class _RollPainter extends CustomPainter {
     // Past the pattern's end is shaded.
     final endX = length * pxPerStep - scrollX;
     if (endX < w) canvas.drawRect(Rect.fromLTWH(endX, 0, w - endX, h), Paint()..color = const Color(0x88000000));
+    // Other selected clips are faint references; the active source remains the only editable owner.
+    for (final reference in references) {
+      for (final n in reference.notes) {
+        final x = n.at.toDouble() * pxPerStep - scrollX, nw = math.max(3.0, n.len.toDouble() * pxPerStep - 1);
+        if (x > w || x + nw < 0) continue;
+        final y = (127 - n.pitch.round()) * rowH - scrollY;
+        if (y > h || y + rowH < 0) continue;
+        final r = RRect.fromRectAndRadius(Rect.fromLTWH(x, y + 1, nw, rowH - 2), const Radius.circular(3));
+        canvas.drawRRect(r, Paint()..color = Neon.blue.withValues(alpha: 0.13));
+        canvas.drawRRect(r, Paint()..color = Neon.blue.withValues(alpha: 0.35)
+          ..style = PaintingStyle.stroke..strokeWidth = 0.8);
+      }
+    }
     // Notes: layer colour, brighter when louder; white outline when selected; a dot when it has extras.
     for (final n in doc.notes) {
       final x = n.at.toDouble() * pxPerStep - scrollX, nw = math.max(3.0, n.len.toDouble() * pxPerStep - 1);
@@ -1106,6 +1137,7 @@ class _RollPainter extends CustomPainter {
   @override
   bool shouldRepaint(_RollPainter o) =>
       !identical(o.doc, doc) ||
+      o.references != references ||
       o.sel != sel ||
       o.pxPerStep != pxPerStep ||
       o.scrollX != scrollX ||
