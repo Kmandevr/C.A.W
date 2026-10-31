@@ -960,7 +960,7 @@ Add a modulation signal to a base parameter value.
 
 - `base`: the unmodulated parameter or global value
 - `source`: a bipolar or unipolar signal, such as an LFO or another module's export
-- `amount`: signed modulation depth; negative reverses polarity
+- `amount`: signed modulation depth; a negative value reverses polarity
 
 ```
 saw(util.mod(900, lfo.sine(4), 300))
