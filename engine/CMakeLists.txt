@@ -125,7 +125,15 @@ if(CAW_TOOLS)
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_tests PRIVATE caw_core)
   enable_testing()
-  add_test(NAME caw_tests COMMAND caw_tests)
+  # Split the suite into independent processes so CTest can run shards concurrently.
+  # Process isolation avoids sharing test state while keeping every case enabled.
+  set(CAW_TEST_SHARDS 4)
+  foreach(shard RANGE 0 3)
+    add_test(NAME caw_tests_shard_${shard}
+      COMMAND caw_tests --shard-index ${shard} --shard-count ${CAW_TEST_SHARDS})
+  endforeach()
+  set_tests_properties(caw_tests_shard_0 caw_tests_shard_1 caw_tests_shard_2 caw_tests_shard_3
+    PROPERTIES PROCESSORS 1)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
 add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
