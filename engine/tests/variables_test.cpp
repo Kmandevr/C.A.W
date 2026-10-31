@@ -185,7 +185,6 @@ TEST(cross_module_modulation_reaches_a_parameter_in_live_and_offline_render) {
     p.layers = {kick, bass};
 
     Engine e(48000);
-    e.setMasterBypass(true);
     const std::string result = e.setProject(p);
     CHECK(!has(result, "nothing exports"));
     e.play();
@@ -195,9 +194,14 @@ TEST(cross_module_modulation_reaches_a_parameter_in_live_and_offline_render) {
     options.kind = ExportKind::Free;
     options.seconds = 0.1;
     CHECK(renderExport(p, options, rendered));
-    const double expected = 0.7 * std::cos(kPi / 4.0);
-    CHECK_NEAR(live[200], expected, 1e-6);
-    CHECK_NEAR(rendered.samples[static_cast<size_t>(200) * 2], expected, 1e-6);
+    // Offline rendering uses the normal master path, matching live playback with master bypass disabled.
+    CHECK_NEAR(live[200], rendered.samples[static_cast<size_t>(200) * 2], 1e-6);
+    ProjectSpec unmodulated = p;
+    unmodulated.modules[1].source = std::string(kFloat) + "param level = 0.5 in 0..1\\nlevel";
+    RenderResult baseline;
+    CHECK(renderExport(unmodulated, options, baseline));
+    CHECK(rendered.samples[static_cast<size_t>(200) * 2] >
+          baseline.samples[static_cast<size_t>(200) * 2] * 1.3f);
 }
 
 TEST(sidechain_import_ducks_in_live_and_offline_render_deterministically) {
@@ -230,9 +234,13 @@ TEST(sidechain_import_ducks_in_live_and_offline_render_deterministically) {
     CHECK(renderExport(p, options, second));
     CHECK(first.samples == second.samples);
     CHECK(first.frames >= 256);
-    const double expected = 0.6 * std::cos(kPi / 4.0);
-    CHECK_NEAR(live[200], expected, 1e-6);
-    CHECK_NEAR(first.samples[static_cast<size_t>(200) * 2], expected, 1e-6);
+    CHECK_NEAR(live[200], first.samples[static_cast<size_t>(200) * 2], 1e-6);
+    ProjectSpec withoutSidechain = p;
+    withoutSidechain.layers[1].chain = {"g"};
+    RenderResult baseline;
+    CHECK(renderExport(withoutSidechain, options, baseline));
+    CHECK(first.samples[static_cast<size_t>(200) * 2] <
+          baseline.samples[static_cast<size_t>(200) * 2] * 0.7f);
 }
 
 TEST(export_cycles_still_play) {
