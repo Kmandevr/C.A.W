@@ -41,6 +41,8 @@ class AppState extends ChangeNotifier {
   ProjectDoc project = ProjectDoc(id: newId('p'), name: 'Untitled');
   Map<String, ModuleInfo> info = {};
   String? selectedModuleId;
+  String? selectedLayerId;
+  String? selectedClipId;
   bool previewOnly = false;
   bool ready = false;
 
@@ -499,6 +501,66 @@ class AppState extends ChangeNotifier {
     } else {
       _changed(engine: false);
     }
+  }
+
+  void selectClip(LayerDoc layer, ClipDoc clip) {
+    selectedLayerId = layer.id;
+    selectedClipId = clip.id;
+    selectedModuleId = clip.patternId;
+    notifyListeners();
+  }
+
+  void addClip(LayerDoc layer, String patternId, {int? startSteps}) {
+    final module = project.module(patternId);
+    if (module == null || !isPattern(patternId)) return;
+    final doc = PatternDoc.parse(module.runSource).doc;
+    final length = doc?.lengthSteps(project.beatsPerBar) ?? project.stepsPerBar;
+    final end = layer.clips.fold<int>(0, (v, c) => v > c.startSteps + c.lengthSteps ? v : c.startSteps + c.lengthSteps);
+    final clip = ClipDoc(id: newId('c'), patternId: patternId,
+        startSteps: startSteps ?? end, lengthSteps: length);
+    editLayer(layer, (l) => l.clips.add(clip));
+    selectClip(layer, clip);
+  }
+
+  void duplicateClip(LayerDoc layer, ClipDoc clip, {bool linked = false}) {
+    var patternId = clip.patternId;
+    if (!linked) {
+      final original = project.module(patternId);
+      if (original == null) return;
+      final copy = ModuleDoc(id: newId('m'), name: '${original.name} copy',
+          source: original.source, runSource: original.runSource, params: Map.of(original.params));
+      project.modules.add(copy);
+      patternId = copy.id;
+    }
+    final next = ClipDoc(id: newId('c'), patternId: patternId,
+        startSteps: clip.startSteps + clip.lengthSteps, lengthSteps: clip.lengthSteps, linked: linked);
+    editLayer(layer, (l) => l.clips.add(next));
+    selectClip(layer, next);
+  }
+
+  void moveClip(LayerDoc layer, ClipDoc clip, int startSteps) {
+    editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, 4096 - clip.lengthSteps));
+  }
+
+  void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {
+    editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, 4096 - clip.startSteps));
+  }
+
+  void removeClip(LayerDoc layer, ClipDoc clip) {
+    editLayer(layer, (l) => l.clips.remove(clip));
+    if (selectedClipId == clip.id) {
+      selectedClipId = null;
+      selectedModuleId = null;
+      notifyListeners();
+    }
+  }
+
+  void addFolder() {
+    final folder = LayerDoc(id: newId('l'), name: 'Group', color: project.layers.length % 4,
+        isFolder: true, busEnabled: true);
+    project.layers.add(folder);
+    selectedLayerId = folder.id;
+    _changed();
   }
 
   // ---------- project settings and files ----------
