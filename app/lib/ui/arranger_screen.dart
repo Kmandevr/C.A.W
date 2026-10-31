@@ -250,12 +250,14 @@ class _TimelineClipState extends State<_TimelineClip> {
   @override
   Widget build(BuildContext context) {
     final c = widget.clip;
-    final start = (c.startSteps + (dragging ? (dx / widget.stepW).round() : 0)).clamp(0, 4096);
     final length = (c.lengthSteps + (resizing ? (resizeDx / widget.stepW).round() : 0)).clamp(1, 4096 - c.startSteps);
     final name = widget.state.project.module(c.patternId)?.name ?? 'Missing pattern';
-    return Material(color: widget.color.withValues(alpha: widget.selected ? .42 : .23),
-      borderRadius: BorderRadius.circular(5),
-      child: Stack(children: [
+    return Transform.translate(offset: Offset(dragging && !sourceDragging ? dx : 0, 0),
+      child: Transform.scale(scaleX: resizing ? length / c.lengthSteps : 1.0,
+        alignment: Alignment.centerLeft,
+        child: Material(color: widget.color.withValues(alpha: widget.selected ? .42 : .23),
+          borderRadius: BorderRadius.circular(5),
+          child: Stack(children: [
         Positioned.fill(child: GestureDetector(
           onTap: () => widget.state.selectClip(widget.layer, c, additive: HardwareKeyboard.instance.isShiftPressed),
           onDoubleTap: () { widget.state.selectClip(widget.layer, c); widget.onOpen?.call(); },
@@ -315,7 +317,8 @@ class _TimelineClipState extends State<_TimelineClip> {
               setState(() { resizing = false; resizeDx = 0; });
             },
             child: Center(child: Container(width: 2, height: 22, color: widget.color)))),
-      ]),
+          ]),
+        )),
     );
   }
 }
