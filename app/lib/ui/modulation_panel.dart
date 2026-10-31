@@ -33,10 +33,13 @@ class ModulationPanel extends StatelessWidget {
     if (i.isEffect) {
       final route = RegExp(r'util\.duck\s*\(\s*in\s*,\s*([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)\s*,\s*amount\s*\)')
           .firstMatch(module.source);
-      if (route != null && module.name.startsWith('Sidechain ')) {
+      if (module.source.contains('// caw:sidechain-route')) {
         panels.add(_SidechainRoute(
-          current: route.group(1)!, sources: sources,
-          onChanged: (value) => onSourceChanged(module.source.replaceRange(route.start(1)!, route.end(1)!, value)),
+          current: route?.group(1) ?? 'invalid sidechain route',
+          sources: route == null ? const [] : sources,
+          onChanged: route == null
+              ? (_) async {}
+              : (value) => onSourceChanged(module.source.replaceRange(route.start(1)!, route.end(1)!, value)),
           onRemove: onRemoveSidechain,
         ));
       } else {
