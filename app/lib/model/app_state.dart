@@ -552,8 +552,7 @@ class AppState extends ChangeNotifier {
       final upper = position >= 0 && position < sorted.length - 1 ? sorted[position + 1].step - 0.01 : 4096.0;
       p.step = step.clamp(lower, upper).toDouble();
       p.value = value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
-      l.automation.sort((a, b) => a.target.compareTo(b.target));
-      lane.points.sort((a, b) => a.step.compareTo(b.step));
+      // Clamp to neighboring points instead of reordering during a drag; the dragged handle stays stable.
     });
   }
 
