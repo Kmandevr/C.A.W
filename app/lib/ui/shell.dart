@@ -70,7 +70,7 @@ class _ShellState extends State<Shell> {
           if (s.starting) return StartupScreen(state: s);
           final screens = [
             BuilderScreen(state: s),
-            ArrangerScreen(state: s),
+            ArrangerScreen(state: s, onOpenPattern: () => setState(() => _tab = 0)),
             ExporterScreen(state: s),
           ];
           return LayoutBuilder(builder: (context, box) {
