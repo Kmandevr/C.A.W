@@ -21,6 +21,15 @@ void main() {
     expect(back.layers.first.chain, ['m1', 'fx']);
   });
 
+  test('legacy pattern layers migrate once into clip instances', () {
+    final old = sample().toJson()..['caw_app_project'] = 1;
+    final migrated = ProjectDoc.fromJson(old);
+    expect(migrated.layers[1].clips, hasLength(1));
+    expect(migrated.layers[1].clips.single.patternId, 'pat');
+    final saved = ProjectDoc.fromJson(migrated.toJson());
+    expect(saved.layers[1].clips, hasLength(1));
+  });
+
   test('engine JSON carries the code last run and the layer chain', () {
     final j = jsonDecode(sample().toEngineJson()) as Map<String, dynamic>;
     expect(j['caw_project'], 1);
