@@ -209,7 +209,9 @@ std::shared_ptr<const Pattern> compileArrangement(
     }
     std::stable_sort(out->events.begin(), out->events.end(), [](const PatternEvent& a, const PatternEvent& b) {
         if (a.step != b.step) return a.step < b.step;
-        return a.on && !b.on;
+        // Release notes ending on this sample before starting notes at the same sample.
+        // This allows a just-freed voice to be reused at clip and note boundaries.
+        return !a.on && b.on;
     });
     return out;
 }
