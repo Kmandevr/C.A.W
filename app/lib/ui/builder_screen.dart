@@ -298,6 +298,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
     final byValue = <String, List<SignalOption>>{};
     final targetLayers = s.project.layers.where((l) => l.chain.contains(destination.id));
     for (final source in s.project.modules) {
+      if (source.edited) continue;
       var invalidSameLayerOrder = false;
       for (final layer in targetLayers) {
         final sourceIndex = layer.chain.indexOf(source.id);
