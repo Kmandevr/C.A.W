@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../engine/engine.dart';
+import '../engine/execution.dart';
 import 'poller.dart';
 import 'project.dart';
 import 'settings.dart';
@@ -33,6 +34,8 @@ class AppState extends ChangeNotifier {
   final Settings settings;
 
   Engine? engine;
+  EngineHardwareProfile? hardwareProfile;
+  EngineExecutionPlan? auditionPlan;
   String? engineError;
   String? audioError;
   ProjectStorage? _storage;
@@ -72,6 +75,8 @@ class AppState extends ChangeNotifier {
   Timer? _saveTimer;
   Timer? _syncTimer;
   Timer? _liveTimer;
+  bool _disposed = false;
+  final Map<String, String> _lastGoodRunSources = {};
   // Meters are read only while something moves; stopped and settled, the app does no work and closes the audio
   // device after a while (Play reopens it).
   late final Poller _poller = Poller(
@@ -84,6 +89,8 @@ class AppState extends ChangeNotifier {
   Future<void> init() async {
     try {
       engine = Engine.create();
+      hardwareProfile = EngineExecutionPolicy.hardwareProfile;
+      auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
       templates = Engine.templates();
       audioError = engine!.startAudio();
     } catch (e) {
@@ -118,6 +125,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     settings.removeListener(_settingsChanged);
     _poller.dispose();
     _liveTimer?.cancel();
@@ -239,6 +247,7 @@ class AppState extends ChangeNotifier {
         swap: settings.swapTiming.name);
     try {
       info = await e.setProject(json);
+      engineError = null;
     } catch (err) {
       engineError = 'Engine error: $err';
     }
@@ -353,29 +362,40 @@ class AppState extends ChangeNotifier {
   void _scheduleLive(String id) {
     _liveTimer?.cancel();
     if (!settings.liveUpdate || engine == null) return;
-    _liveTimer = Timer(Duration(milliseconds: settings.liveDelayMs), () {
+    _liveTimer = Timer(Duration(milliseconds: settings.liveDelayMs), () async {
       final m = project.module(id);
-      if (m == null || !m.edited || (settings.lightMode && meters.playing)) return;
-      try {
-        if (!Engine.check(m.source).ok) return;
-      } catch (_) {
-        return;
-      }
-      run(id);
+      if (_disposed || m == null || !m.edited || (settings.lightMode && meters.playing)) return;
+      // The engine's project compile is the check; don't compile the same source twice.
+      await run(id);
     });
   }
 
   /// Run: the editor's code goes to the engine and hot-swaps. If it fails, the last good code keeps playing.
   Future<ModuleInfo?> run(String id) async {
     final m = project.module(id);
-    if (m == null) return null;
-    m.runSource = m.source;
-    final name = headerValue(m.source, 'name');
-    if (name != null && name.isNotEmpty) m.name = name;
-    _save();
+    if (m == null || engine == null) return null;
+    final source = m.source;
+    final key = '${project.id}:$id';
+    final lastGoodSource = _lastGoodRunSources[key] ?? m.runSource;
+    m.runSource = source;
     _syncTimer?.cancel();
     await _syncNow();
-    return info[id];
+
+    final result = info[id];
+    final current = project.module(id);
+    if (engineError == null && result?.ok == true) {
+      _lastGoodRunSources[key] = source;
+      if (current != null && current.source == source) {
+        final name = headerValue(source, 'name');
+        if (name != null && name.isNotEmpty) current.name = name;
+      }
+    } else if (current != null && current.runSource == source) {
+      // Failed compiles keep the engine's last good sound and the editor's pending edits.
+      current.runSource = lastGoodSource;
+    }
+    _save();
+    notifyListeners();
+    return result;
   }
 
   String _freeModuleName(String base) {
@@ -543,6 +563,7 @@ class AppState extends ChangeNotifier {
     if (saveCurrent) await flush();
     engine?.stop();
     project = p;
+    _lastGoodRunSources.clear();
     info = {};
     blankKinds.clear();
     selectedModuleId = p.modules.isEmpty ? null : p.modules.first.id;

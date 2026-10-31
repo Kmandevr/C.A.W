@@ -259,7 +259,13 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () async {
               final nav = Navigator.of(context);
               nav.pop();
-              await nav.push(MaterialPageRoute<void>(builder: (_) => SettingsPage(settings: s.settings)));
+              await nav.push(MaterialPageRoute<void>(
+                builder: (_) => SettingsPage(
+                  settings: s.settings,
+                  engineProfile: s.hardwareProfile,
+                  executionPlan: s.auditionPlan,
+                ),
+              ));
               s.settings.commitLook();
             },
           ),

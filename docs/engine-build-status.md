@@ -12,6 +12,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 ## Implemented in the current branch
 
 - Portable deterministic workload policy for audition, preview, background generation, offline render and idle workloads.
+- App-side workload integration: the Flutter host binds the native hardware probe and workload planner, then uses the planner to prioritize and bound project compilation, async source checks and offline-render isolates. This is app-side scheduling, not use of the internal C++ `AdaptiveWorkerPool`; live platform pressure is not yet supplied.
 - Hardware profile input and C ABI adapter for workload planning, plus a native best-effort probe for online cores, conservative available-memory budget and CPU SIMD support on Windows, macOS, Linux and Android. Thermal/battery pressure remains host supplied; GPU compute is reported unavailable until a real kernel backend exists.
 - First-class internal module descriptors with stable IDs, typed ports, parameter metadata and validation, plus framework-neutral generated UI controls and custom-view identifiers with parameter/range validation.
 - Stereo-native borrowed-buffer processor contract. This is an interface contract; it is not yet wired into the existing VM/mixer as a universal processor path.
@@ -28,8 +29,8 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 - Integration of the prepared graph executor and graph runtime into the existing Engine/VM mixer path, including project graph representation and bytecode/native processor interoperation.
 - Universal state transfer, graph hot-swap integration and dependency-aware retirement for native module instances; the graph helper currently provides only prepared-graph pointer publication and deferred reclamation.
-- Host scheduling integration: the adaptive pool now applies workload plans, but platform pressure is not yet fed into it automatically and engine/app jobs do not yet use it.
-- Automatic host/app integration of the native hardware probe and live thermal/battery pressure feeds. The core already has a best-effort logical-core, memory-budget and SIMD probe; platform accuracy and real-device behavior still need validation.
+- Native worker-pool integration: the C++ `AdaptiveWorkerPool` applies workload plans internally, but the app does not submit its isolate work to that pool, and the CLI/engine's other compile/render/analysis jobs are not routed through it.
+- Verified live thermal/battery pressure feeds from the app host. The app now consumes the native logical-core, conservative memory-budget and SIMD probe, but defaults to normal pressure until a real platform signal is connected; platform accuracy and device behavior still need validation.
 - A true adaptive quality ladder with measurable preview-quality modes and guaranteed unchanged offline exports.
 - Drawn LFO curves, additional oscillator warp modes (hard sync/FM/fold) and the complete custom/imported table draw/render pipeline.
 - MIDI 2.0 device input/output, Engine voice routing, output scheduling and full per-note controller/attribute mapping. The decoder/queue do not by themselves provide device support.

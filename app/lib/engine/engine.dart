@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'bindings.dart';
+import 'execution.dart';
 
 enum ParamKind { number, toggle, choice }
 
@@ -281,7 +282,10 @@ class Engine {
     final done = Completer<Map<String, ModuleInfo>>();
     _queue = _queue.then((_) async {
       try {
-        final result = await _spawnSetProject(address, json);
+        final result = await EngineWorkScheduler.shared.run(
+          workload: EngineWorkload.interactiveAudition,
+          task: () => _spawnSetProject(address, json),
+        );
         final j = jsonDecode(result) as Map<String, dynamic>;
         final mods = (j['modules'] as Map<String, dynamic>? ?? {})
             .map((k, v) => MapEntry(k, ModuleInfo.fromJson(v as Map<String, dynamic>)));
@@ -389,6 +393,12 @@ class Engine {
     return ModuleInfo.fromJson(jsonDecode(text) as Map<String, dynamic>);
   }
 
+  /// Checks source off the UI isolate, scheduled as interactive preview work.
+  static Future<ModuleInfo> checkAsync(String source) => EngineWorkScheduler.shared.run(
+        workload: EngineWorkload.interactivePreview,
+        task: () => Isolate.run(() => _checkOnWorker(source)),
+      );
+
   /// Turns a MIDI file (.mid or MIDI 2.0 Clip) into pattern module text; throws a [FormatException] if it can't.
   static String patternFromMidi(Uint8List bytes) {
     final b = Bindings.instance;
@@ -435,7 +445,10 @@ class RenderJob {
     final progress = calloc<Int32>();
     final cancel = calloc<Int32>();
     final pa = progress.address, ca = cancel.address;
-    final future = _spawnRender(req, pa, ca);
+    final future = EngineWorkScheduler.shared.run(
+      workload: EngineWorkload.offlineRender,
+      task: () => _spawnRender(req, pa, ca),
+    );
     final job = RenderJob._(progress, cancel, future);
     // The flags stay allocated until the worker is done with them.
     future.whenComplete(() {
@@ -454,6 +467,8 @@ Future<String> _spawnSetProject(int address, String json) => Isolate.run(() => _
 
 Future<String?> _spawnRender(RenderRequest req, int progress, int cancel) =>
     Isolate.run(() => _renderOnWorker(req, progress, cancel));
+
+ModuleInfo _checkOnWorker(String source) => Engine.check(source);
 
 String _setProjectOnWorker(int address, String json) {
   final b = Bindings.instance;
