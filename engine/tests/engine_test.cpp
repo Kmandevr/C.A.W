@@ -562,3 +562,17 @@ TEST(arrangement_clips_can_overlap_on_one_track) {
     CHECK_NEAR(out[27000], twoVoices, 1e-5);       // both clips sound from step 4 to step 8
     CHECK_NEAR(out[51000], 0.0, 1e-5);             // both clips have ended
 }
+
+
+TEST(project_parser_clamps_clips_to_the_meter_aware_song_limit) {
+    const std::string json = R"({"caw_project":1,"beats_per_bar":3,"loop_bars":64,"layers":[
+      {"id":"t","clips":[{"id":"c","pattern":"p","start_steps":760,"length_steps":64,"source_offset_steps":900}]}
+    ]})";
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(json, p, error));
+    CHECK_EQ(p.layers[0].clips.size(), size_t{1});
+    CHECK_EQ(p.layers[0].clips[0].startSteps, 760);
+    CHECK_EQ(p.layers[0].clips[0].lengthSteps, 8);
+    CHECK_EQ(p.layers[0].clips[0].sourceOffsetSteps, 768);
+}
