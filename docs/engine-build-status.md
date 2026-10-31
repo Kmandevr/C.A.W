@@ -29,8 +29,8 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 - Integration of the prepared graph executor and graph runtime into the existing Engine/VM mixer path, including project graph representation and bytecode/native processor interoperation.
 - Universal state transfer, graph hot-swap integration and dependency-aware retirement for native module instances; the graph helper currently provides only prepared-graph pointer publication and deferred reclamation.
-- Native routing for remaining generation and analysis work, plus verified live thermal/battery pressure feeds from the app host. The current app uses the native worker pool for project compilation, source checks and offline WAV renders; platform pressure still defaults to normal until a real supported signal is connected.
-- Verified thermal/battery pressure adapters for desktop and other unsupported platforms. Android is wired to `PowerManager` thermal and battery-saver signals; physical-device accuracy and response still need validation. Other platforms retain `Unknown` pressure rather than assuming normal conditions.
+- Native routing for remaining generation and analysis work. The app currently uses the native worker pool for project compilation, source checks and offline WAV renders; other job types still need integration.
+- Thermal/battery pressure adapters for desktop and other unsupported platforms remain unimplemented. Android is wired to `PowerManager` thermal and battery-saver signals; physical-device accuracy and response still need validation. Other platforms retain `Unknown` pressure rather than assuming normal conditions.
 - A true adaptive quality ladder with measurable preview-quality modes and guaranteed unchanged offline exports.
 - Drawn LFO curves, additional oscillator warp modes (hard sync/FM/fold) and the complete custom/imported table draw/render pipeline.
 - MIDI 2.0 device input/output, Engine voice routing, output scheduling and full per-note controller/attribute mapping. The decoder/queue do not by themselves provide device support.
