@@ -215,9 +215,11 @@ class NativeEngineWorkPool {
   NativeEngineJob submitCheck(String source) {
     final text = source.toNativeUtf8();
     const workload = EngineWorkload.interactivePreview;
-    _beginWorkload(workload);
+    var began = false;
     var tracked = false;
     try {
+      _beginWorkload(workload);
+      began = true;
       final handle = _bindings.workerPoolSubmitCheck(_handle, text, NativeJobPriority.foreground.index);
       if (handle == nullptr) throw StateError('native check queue is full or has no available capacity');
       final job = NativeEngineJob._(_bindings, handle, includeResult: true);
@@ -225,7 +227,7 @@ class NativeEngineWorkPool {
       tracked = true;
       return job;
     } catch (_) {
-      if (!tracked) _finishWorkload(workload);
+      if (began && !tracked) _finishWorkload(workload);
       rethrow;
     } finally {
       calloc.free(text);
@@ -235,9 +237,11 @@ class NativeEngineWorkPool {
   NativeEngineJob submitProject(Pointer<Void> engine, String projectJson) {
     final json = projectJson.toNativeUtf8();
     const workload = EngineWorkload.interactivePreview;
-    _beginWorkload(workload);
+    var began = false;
     var tracked = false;
     try {
+      _beginWorkload(workload);
+      began = true;
       final handle = _bindings.workerPoolSubmitProject(
         _handle, engine, json, NativeJobPriority.foreground.index,
       );
@@ -247,7 +251,7 @@ class NativeEngineWorkPool {
       tracked = true;
       return job;
     } catch (_) {
-      if (!tracked) _finishWorkload(workload);
+      if (began && !tracked) _finishWorkload(workload);
       rethrow;
     } finally {
       calloc.free(json);
@@ -280,9 +284,11 @@ class NativeEngineWorkPool {
         ..target = targetText
         ..param = param.isEmpty ? nullptr : paramText;
       const workload = EngineWorkload.offlineRender;
-      _beginWorkload(workload);
+      var began = false;
       var tracked = false;
       try {
+        _beginWorkload(workload);
+        began = true;
         final handle = _bindings.workerPoolSubmitRender(
           _handle, json, options, path, NativeJobPriority.offline.index,
         );
@@ -292,7 +298,7 @@ class NativeEngineWorkPool {
         tracked = true;
         return job;
       } catch (_) {
-        if (!tracked) _finishWorkload(workload);
+        if (began && !tracked) _finishWorkload(workload);
         rethrow;
       }
     } finally {
