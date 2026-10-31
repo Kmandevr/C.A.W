@@ -188,10 +188,10 @@ class _TimelineHeader extends StatelessWidget {
           ),
         ])) else Expanded(child: Row(children: [
           ToggleChip(label: 'M', tooltip: 'Mute folder', on: layer.mute, color: Neon.yellow,
-            onTap: () => state.mixLayer(layer, mute: !layer.mute)),
+            onTap: () => state.editLayer(layer, (l) => l.mute = !l.mute)),
           const SizedBox(width: 3),
           ToggleChip(label: 'S', tooltip: 'Solo folder', on: layer.solo, color: Neon.blue,
-            onTap: () => state.mixLayer(layer, solo: !layer.solo)),
+            onTap: () => state.editLayer(layer, (l) => l.solo = !l.solo)),
           const SizedBox(width: 5),
           Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: const TextStyle(color: Neon.dim, fontSize: 9)),
           const Spacer(),
