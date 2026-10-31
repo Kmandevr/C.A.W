@@ -484,3 +484,59 @@ TEST(arrangement_clips_schedule_reusable_patterns_on_the_project_timeline) {
     CHECK_NEAR(out[27000], 0.0, 1e-5);            // source note has ended
     CHECK_NEAR(out[39000], 0.5 * panGain, 1e-5);  // clip loops its source
 }
+
+
+TEST(arrangement_clip_source_offset_trims_the_source_and_honors_non_looping) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
+    p.modules.push_back({"phrase",
+        "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 1 1\\n2 C4 1 1\\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"trimmed", "phrase", 4, 2, 2, false});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\\"ok\\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 40000);
+    const float expected = static_cast<float>(0.5 * std::cos(kPi / 4.0));
+    CHECK_NEAR(out[18000], 0.0, 1e-7);            // before the trimmed clip
+    CHECK_NEAR(out[27000], expected, 1e-5);       // source note at offset 2 starts at timeline step 4
+    CHECK_NEAR(out[33000], 0.0, 1e-5);            // non-looping clip stops after its one source segment
+}
+
+TEST(arrangement_clips_can_overlap_on_one_track) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 2;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.25", {}});
+    p.modules.push_back({"phrase", "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 4 1\\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"looping", "phrase", 0, 8, 0, true});
+    layer.clips.push_back({"overlap", "phrase", 4, 4, 0, false});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\\"ok\\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 60000);
+    const float oneVoice = static_cast<float>(0.25 * std::cos(kPi / 4.0));
+    const float twoVoices = static_cast<float>(0.5 * std::cos(kPi / 4.0));
+    CHECK_NEAR(out[18000], oneVoice, 1e-5);
+    CHECK_NEAR(out[27000], twoVoices, 1e-5);       // both clips sound from step 4 to step 8
+    CHECK_NEAR(out[51000], 0.0, 1e-5);             // both clips have ended
+}
