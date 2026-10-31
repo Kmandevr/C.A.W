@@ -6,6 +6,7 @@
 #include "compile.h"
 #include "detmath.h"
 #include "engine.h"
+#include "render.h"
 #include "test.h"
 #include "vm.h"
 
@@ -165,6 +166,38 @@ TEST(exports_within_a_chain_and_missing_sources) {
     e.play();
     std::vector<float> out = run(e, 200);
     CHECK_NEAR(out[199], 0.5 * std::cos(kPi / 4.0), 1e-6);
+}
+
+TEST(sidechain_import_ducks_in_live_and_offline_render_deterministically) {
+    ProjectSpec p;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"k", std::string(kFloat) + "export let env = 0.5\\n0", {}, "Kick"});
+    p.modules.push_back({"g", std::string(kFloat) + "1", {}, "Bass"});
+    p.modules.push_back({"duck", "---\\nkind: effect\\n---\\nutil.duck(in, kick.env, 0.8)", {}, "Duck"});
+    LayerSpec kick, bass;
+    kick.id = "kick";
+    kick.chain = {"k"};
+    kick.volume = 1.0;
+    bass.id = "bass";
+    bass.chain = {"g", "duck"};
+    bass.volume = 1.0;
+    p.layers = {kick, bass};
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    const std::string result = e.setProject(p);
+    CHECK(has(result, "\\"nothing exports\\"") == false);
+    e.play();
+    const std::vector<float> live = run(e, 256);
+    RenderResult first, second;
+    CHECK(renderExport(p, ExportOptions{}, first));
+    CHECK(renderExport(p, ExportOptions{}, second));
+    CHECK(first.samples == second.samples);
+    CHECK(first.frames >= 256);
+    const double expected = 0.6 * std::cos(kPi / 4.0);
+    CHECK_NEAR(live[200], expected, 1e-6);
+    CHECK_NEAR(first.samples[static_cast<size_t>(200) * 2], expected, 1e-6);
 }
 
 TEST(export_cycles_still_play) {
