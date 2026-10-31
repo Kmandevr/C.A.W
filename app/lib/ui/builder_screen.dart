@@ -298,9 +298,14 @@ class _BuilderScreenState extends State<BuilderScreen> {
     final byValue = <String, List<SignalOption>>{};
     final targetLayers = s.project.layers.where((l) => l.chain.contains(destination.id));
     for (final source in s.project.modules) {
-      final sharesTargetLayer = targetLayers.any((l) => l.chain.contains(source.id));
+      var invalidSameLayerOrder = false;
+      for (final layer in targetLayers) {
+        final sourceIndex = layer.chain.indexOf(source.id);
+        final targetIndex = layer.chain.indexOf(destination.id);
+        if (sourceIndex >= targetIndex && sourceIndex >= 0) invalidSameLayerOrder = true;
+      }
       if (source.id == destination.id ||
-          sharesTargetLayer ||
+          invalidSameLayerOrder ||
           !s.project.layers.any((l) => l.chain.contains(source.id))) continue;
       final info = s.info[source.id];
       if (info == null || !info.ok || info.ref.isEmpty) continue;
