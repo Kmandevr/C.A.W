@@ -333,7 +333,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
     }
 
     final id = s.addBlankModule('effect');
-    final name = 'Sidechain ${sourceModule.name} ${s.project.modules.length}';
+    final name = 'Sidechain ${sourceModule.name} $id';
     final safeName = name.replaceAll('\n', ' ');
     final sourceText = '---\ncaw: 1\nkind: effect\nname: $safeName\n---\n'
         '// caw:sidechain-route\n'
