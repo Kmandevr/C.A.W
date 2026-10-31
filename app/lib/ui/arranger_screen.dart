@@ -57,8 +57,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
           if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
             IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt), icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0)), icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0)), icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
+          IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0).toDouble()), icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
+          IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()), icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
           IconButton(onPressed: () => setState(() => compactTracks = !compactTracks),
             icon: Icon(compactTracks ? Icons.view_agenda_outlined : Icons.view_stream_outlined),
             color: compactTracks ? Neon.blue : Neon.dim, tooltip: 'Toggle track density'),
