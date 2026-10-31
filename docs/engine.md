@@ -306,7 +306,7 @@ The app, the CLI and exports share one format:
 
 ## Hardware profile and execution policy
 
-The native hardware probe is a one-time, non-real-time snapshot. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU and memory limits where readable. Available memory is conservatively budgeted after accounting for a finite cgroup limit and current usage. A zero CPU or memory field means the signal is unknown; the scheduler falls back conservatively to one worker. Thermal and battery pressure are host-supplied and are not fabricated or continuously polled.
+The native hardware probe is a one-time, non-real-time snapshot. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU and memory limits where readable. Available memory is conservatively budgeted after accounting for a finite cgroup limit and current usage. A zero CPU or memory field means the signal is unknown; the scheduler falls back conservatively to one worker. The Android app host supplies live pressure from `PowerManager`: thermal status is available on Android 10+ and battery-saver state is available on supported Android versions. It reads once and subscribes to thermal and power-save change events; it does not poll. The app also feeds foreground/background and audio-playing transitions into the scheduler. On platforms without a verified adapter, pressure remains explicitly `Unknown`; the policy reserves one host core for background/offline work where possible and disables GPU work. Physical-device thermal response still requires validation.
 
 ## C API (`engine/include/caw.h`)
 
