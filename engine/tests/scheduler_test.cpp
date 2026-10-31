@@ -50,6 +50,27 @@ void waitForGate(void* p) noexcept {
 }
 }
 
+TEST(scheduler_retires_idle_workers_and_restarts_on_demand) {
+    WorkerPool pool(2, std::chrono::milliseconds(40));
+    pool.setWorkerLimit(2);
+    std::atomic<int> value{0};
+    TaskState first{&value, 1};
+    CHECK(pool.submit(JobPriority::Foreground, addTask, &first));
+    pool.waitIdle();
+    CHECK_EQ(pool.workerCount(), 1u);
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (pool.workerCount() != 0 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    CHECK_EQ(pool.workerCount(), 0u);
+
+    TaskState second{&value, 2};
+    CHECK(pool.submit(JobPriority::Foreground, addTask, &second));
+    CHECK_EQ(pool.workerCount(), 1u);
+    pool.waitIdle();
+    CHECK_EQ(value.load(), 3);
+}
+
 TEST(scheduler_scales_threads_only_to_simultaneous_demand) {
     WorkerPool pool(8);
     pool.setWorkerLimit(4);
@@ -152,6 +173,29 @@ TEST(scheduler_runs_higher_priority_jobs_first_and_preserves_fifo_within_priorit
     CHECK(order[3] == 1);
 }
 
+
+TEST(adaptive_policy_treats_unknown_hardware_signals_conservatively) {
+    HardwareProfile unknown{};
+    ExecutionRequest request;
+    request.workload = WorkloadClass::OfflineRender;
+    const ExecutionPlan plan = makeExecutionPlan(unknown, request);
+    CHECK_EQ(plan.workerThreads, 1);
+    CHECK_EQ(plan.maxConcurrentJobs, 1);
+    CHECK(!plan.allowGpu);
+}
+
+TEST(adaptive_policy_caps_workers_by_memory_and_effective_cpu_budget) {
+    HardwareProfile constrained{2, 128, true, false};
+    ExecutionRequest request;
+    request.workload = WorkloadClass::OfflineRender;
+    const ExecutionPlan plan = makeExecutionPlan(constrained, request);
+    CHECK_EQ(plan.workerThreads, 2);
+    CHECK_EQ(plan.maxConcurrentJobs, 2);
+
+    constrained.logicalCores = 16;
+    const ExecutionPlan memoryBound = makeExecutionPlan(constrained, request);
+    CHECK_EQ(memoryBound.workerThreads, 2);
+}
 
 TEST(adaptive_worker_pool_applies_thermal_and_idle_limits) {
     HardwareProfile hardware{8, 4096, true, false};

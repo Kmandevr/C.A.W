@@ -97,6 +97,12 @@ Timed release run after the fixes (same server, a single run, so noisy):
   - Big effect buffers are cleared lazily ([engine](engine.md#built-ins-and-libraries)).
   - The project memory budget is 64 MB.
 
+### Hardware limits used by the scheduler
+
+- **[Fact]** The native profile is a startup snapshot, not a polling loop. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU quota where readable. The effective core count is the tightest available limit.
+- **[Fact]** Linux/Android memory availability is bounded by both system-available memory and a finite cgroup memory limit minus current usage. A missing or unlimited cgroup value is ignored. A zero profile field means unknown; the policy uses a one-worker fallback instead of inventing a capacity.
+- **Verification boundary:** policy unit tests cover unknown profiles and explicit CPU/memory caps. The actual host probe remains platform-dependent and must be validated on representative Android and desktop devices.
+
 ## App audit (2026-10-28)
 
 ### Bottlenecks, ranked by evidence
@@ -131,8 +137,9 @@ Timed release run after the fixes (same server, a single run, so noisy):
 - **[Fact]** The pool previously started every thread allowed by the hardware-derived capacity at construction, even when no jobs were queued. The app's initial preview policy only allowed two concurrent jobs, so the extra threads could never help that initial workload.
 - **[Fact]** The pool now creates threads only as outstanding queued + running demand grows, bounded by the active execution plan and pool capacity. One job starts one worker; simultaneous jobs can grow the pool; existing workers are reused rather than creating a new thread per job.
 - **[Fact]** Creating the pool and applying an execution plan no longer starts OS worker threads. With no submitted work, worker-thread count remains zero.
-- **[Fact]** Created workers sleep on the pool condition variable when idle; they do not poll. They remain available for reuse until pool destruction, so their stacks are still resident/reserved after first use. Automatic retirement is a separate follow-up requiring careful shutdown and queue-race tests.
-- **Verification boundary:** scheduler tests assert zero threads before work, one worker for one-at-a-time jobs, and scale-up to two workers for two simultaneous jobs. CI can verify lifecycle logic, but not actual phone RSS, battery or thermal behavior.
+- **[Fact]** Created workers sleep on the pool condition variable when idle; they do not poll. After the configurable idle timeout (30 seconds by default), an idle worker exits and releases its thread resources. Its completed thread handle is joined and its slot reused before later growth; queued or active work prevents retirement.
+- **[Fact]** Worker retirement is entirely outside the audio callback. The pool remains lazy at startup, grows only to outstanding demand and the active budget, and can return to zero native workers after sustained idleness.
+- **Verification boundary:** scheduler tests assert zero threads before work, worker reuse, scale-up to two workers for simultaneous demand, idle retirement and restart after retirement. CI can verify lifecycle logic, but not actual phone RSS, battery or thermal behavior.
 
 ## Remaining bottlenecks and next steps
 

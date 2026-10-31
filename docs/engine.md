@@ -255,6 +255,7 @@ Errors give a line and column, counting the header lines, for example `line 5, c
 - **Mix:** each layer has volume, constant-power pan, mute and solo, smoothed over 5 ms. The master chain is master volume, then a 5 Hz DC blocker, then a safety limiter with a ceiling of −0.2 dBFS, always last.
 - **Overload:** the host reports how much of each audio callback was used. If the average stays above 85% for 20 callbacks, the engine mutes the newest audible layer, flags it in the meters and waits 100 callbacks before it would mute another. Clearing the overload unmutes them.
 - **Threads:** the control thread compiles code and sends messages to the audio thread through a lock-free queue. The audio thread hands retired programs back the same way, so it never allocates, locks or frees. Parameter and mix values are atomics.
+- **Background workers:** compilation, checks and offline exports use a bounded non-real-time pool. It creates workers only for outstanding demand, sleeps on a condition variable while idle, and retires idle threads after 30 seconds by default. Slots are joined and reused when new work arrives. This pool never runs from or blocks the real-time audio callback.
 - **Globals and exports:**
   - A global's value comes from the project's `globals` (or its default), and changes take effect without recompiling.
   - Each layer has 16 export buffers. They're filled while its chain runs, so they're also ready for the effects later in that chain.
@@ -302,6 +303,10 @@ The app, the CLI and exports share one format:
 - Files are WAV at 44.1 or 48 kHz, as 24-bit PCM or 32-bit float.
 - An export refuses to run if any module or pattern it uses has an error.
 - **[Assumption]** Serum may want an extra `clm ` chunk to recognise 2048-sample frames. This isn't written yet; check before relying on Serum.
+
+## Hardware profile and execution policy
+
+The native hardware probe is a one-time, non-real-time snapshot. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU and memory limits where readable. Available memory is conservatively budgeted after accounting for a finite cgroup limit and current usage. A zero CPU or memory field means the signal is unknown; the scheduler falls back conservatively to one worker. Thermal and battery pressure are host-supplied and are not fabricated or continuously polled.
 
 ## C API (`engine/include/caw.h`)
 
