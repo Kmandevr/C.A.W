@@ -127,8 +127,15 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
     expect(kick.edited, isFalse);
-    s.editSource(kick.id, '${kick.source}\n((('); // doesn't compile: waits
+    final invalidSource = '${kick.source}\n((('; // doesn't compile: waits
+    s.editSource(kick.id, invalidSource);
+    // The async run temporarily copies the attempted source into runSource. Wait for
+    // the failed compile to restore the last-good source instead of guessing its duration.
     await Future<void>.delayed(const Duration(milliseconds: 300));
+    final failureDeadline = DateTime.now().add(const Duration(seconds: 5));
+    while (!kick.edited && DateTime.now().isBefore(failureDeadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
     expect(kick.edited, isTrue);
     s.settings.lightMode = true;
     s.meters = const EngineMeters(playing: true);
