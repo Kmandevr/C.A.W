@@ -60,6 +60,24 @@ class ClipDoc {
       );
 }
 
+class AutomationPointDoc {
+  AutomationPointDoc({required this.step, required this.value});
+  double step, value;
+  Map<String, dynamic> toJson() => {'step': step, 'value': value};
+  static AutomationPointDoc fromJson(Map<String, dynamic> j) => AutomationPointDoc(
+    step: (j['step'] as num?)?.toDouble() ?? 0, value: (j['value'] as num?)?.toDouble() ?? 0);
+}
+
+class AutomationLaneDoc {
+  AutomationLaneDoc({required this.target, List<AutomationPointDoc>? points}) : points = points ?? [];
+  String target;
+  List<AutomationPointDoc> points;
+  Map<String, dynamic> toJson() => {'target': target, 'points': [for (final p in points) p.toJson()]};
+  static AutomationLaneDoc fromJson(Map<String, dynamic> j) => AutomationLaneDoc(
+    target: j['target'] as String, points: ((j['points'] as List?) ?? const [])
+      .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
+}
+
 class LayerDoc {
   LayerDoc({
     required this.id,
@@ -74,11 +92,12 @@ class LayerDoc {
     this.mute = false,
     this.solo = false,
     List<ClipDoc>? clips,
+    List<AutomationLaneDoc>? automation,
     this.parentId,
     this.isFolder = false,
     this.busEnabled = true,
     this.collapsed = false,
-  }) : effectIds = effectIds ?? [], clips = clips ?? [];
+  }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [];
 
   final String id;
   String name;
@@ -90,6 +109,7 @@ class LayerDoc {
   double volume, pan;
   bool mute, solo;
   List<ClipDoc> clips;
+  List<AutomationLaneDoc> automation;
   String? parentId;
   bool isFolder, busEnabled, collapsed;
 
@@ -108,6 +128,7 @@ class LayerDoc {
         'mute': mute,
         'solo': solo,
         'clips': [for (final c in clips) c.toJson()],
+        'automation': [for (final a in automation) a.toJson()],
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
       };
 
@@ -124,6 +145,7 @@ class LayerDoc {
         mute: j['mute'] == true,
         solo: j['solo'] == true,
         clips: ((j['clips'] as List?) ?? const []).map((c) => ClipDoc.fromJson(c as Map<String, dynamic>)).toList(),
+        automation: ((j['automation'] as List?) ?? const []).map((a) => AutomationLaneDoc.fromJson(a as Map<String, dynamic>)).toList(),
         parentId: j['parent'] as String?, isFolder: j['folder'] == true,
         busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
       );
@@ -213,6 +235,8 @@ class ProjectDoc {
               'id': l.id,
               'name': l.name,
               'chain': l.chain,
+              'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
+              'automation': [for (final a in l.automation) a.toJson()],
               if (l.clips.isEmpty && l.patternId != null) 'pattern': l.patternId,
               if (l.clips.isNotEmpty) 'clips': [
                 for (final clip in l.clips) {
