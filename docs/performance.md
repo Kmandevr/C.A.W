@@ -1,7 +1,7 @@
 ---
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
-covers: [engine/bench/, engine/src/worker_api.cpp, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/model/poller.dart, app/test/rebuild_test.dart]
+covers: [engine/bench/, engine/src/worker_api.cpp, engine/src/scheduler.cpp, engine/src/scheduler.h, engine/src/execution.cpp, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/model/poller.dart, app/test/rebuild_test.dart]
 updated: 2026-10-31
 ---
 
@@ -124,6 +124,15 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - nothing at all while the app is in the background
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
 3. **The audio device closes after 30 s stopped and idle.** Play reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
+
+
+### Native worker-pool lifecycle (2026-10-31)
+
+- **[Fact]** The pool previously started every thread allowed by the hardware-derived capacity at construction, even when no jobs were queued. The app's initial preview policy only allowed two concurrent jobs, so the extra threads could never help that initial workload.
+- **[Fact]** The pool now creates threads only as outstanding queued + running demand grows, bounded by the active execution plan and pool capacity. One job starts one worker; simultaneous jobs can grow the pool; existing workers are reused rather than creating a new thread per job.
+- **[Fact]** Creating the pool and applying an execution plan no longer starts OS worker threads. With no submitted work, worker-thread count remains zero.
+- **[Fact]** Created workers sleep on the pool condition variable when idle; they do not poll. They remain available for reuse until pool destruction, so their stacks are still resident/reserved after first use. Automatic retirement is a separate follow-up requiring careful shutdown and queue-race tests.
+- **Verification boundary:** scheduler tests assert zero threads before work, one worker for one-at-a-time jobs, and scale-up to two workers for two simultaneous jobs. CI can verify lifecycle logic, but not actual phone RSS, battery or thermal behavior.
 
 ## Remaining bottlenecks and next steps
 
