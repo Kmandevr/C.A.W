@@ -666,6 +666,12 @@ class AppState extends ChangeNotifier {
     return ids.length == 1;
   }
 
+  Set<String> get selectedPatternModuleIds => {
+    for (final layer in project.layers)
+      for (final clip in layer.clips)
+        if (selectedClipIds.contains(clip.id)) clip.patternId,
+  };
+
   List<PatternDoc> get selectedPatternReferences {
     final active = selectedModuleId;
     final refs = <PatternDoc>[];
