@@ -5,6 +5,7 @@
 #include "scheduler.h"
 
 #include <algorithm>
+#include <chrono>
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
@@ -25,6 +26,8 @@ struct JobState {
     alignas(4) int32_t cancel = 0;
     std::atomic<int32_t> resultCode{0};
     std::mutex mutex;
+    std::mutex waitMutex;
+    std::condition_variable waitCv;
     std::string result;
     std::string error;
 };
@@ -65,7 +68,13 @@ void atomicStore(int32_t* value, int32_t next) {
 }
 
 void finish(const std::shared_ptr<JobState>& state, State result) noexcept {
-    state->state.store(static_cast<int32_t>(result), std::memory_order_release);
+    try {
+        std::lock_guard<std::mutex> lock(state->waitMutex);
+        state->state.store(static_cast<int32_t>(result), std::memory_order_release);
+    } catch (...) {
+        state->state.store(static_cast<int32_t>(result), std::memory_order_release);
+    }
+    state->waitCv.notify_all();
 }
 
 void execute(void* raw) noexcept {
@@ -307,12 +316,38 @@ char* caw_job_error(CawJob* job) try {
     return nullptr;
 }
 
+int32_t caw_job_wait(CawJob* job, uint32_t timeout_ms) try {
+    if (!job || !job->state) return 1;
+    std::unique_lock<std::mutex> lock(job->state->waitMutex);
+    const auto done = [&] { return job->state->state.load(std::memory_order_acquire) >= static_cast<int32_t>(State::Succeeded); };
+    if (timeout_ms == 0xffffffffu) {
+        job->state->waitCv.wait(lock, done);
+        return 0;
+    }
+    return job->state->waitCv.wait_for(lock, std::chrono::milliseconds(timeout_ms), done) ? 0 : 2;
+} catch (...) {
+    return 3;
+}
+
 void caw_job_cancel(CawJob* job) {
     if (!job || !job->state) return;
     int32_t current = job->state->state.load(std::memory_order_acquire);
-    while (current == static_cast<int32_t>(State::Queued)) {
-        if (job->state->state.compare_exchange_weak(current, static_cast<int32_t>(State::Cancelled),
-                                                     std::memory_order_acq_rel)) return;
+    bool cancelledWhileQueued = false;
+    try {
+        std::lock_guard<std::mutex> lock(job->state->waitMutex);
+        while (current == static_cast<int32_t>(State::Queued)) {
+            if (job->state->state.compare_exchange_weak(current, static_cast<int32_t>(State::Cancelled),
+                                                         std::memory_order_acq_rel)) {
+                cancelledWhileQueued = true;
+                break;
+            }
+        }
+    } catch (...) {
+        return;
+    }
+    if (cancelledWhileQueued) {
+        job->state->waitCv.notify_all();
+        return;
     }
     // A running render checks its cancellation flag between render blocks. Running
     // compilation/check jobs are intentionally non-interruptible; queued jobs can cancel.
