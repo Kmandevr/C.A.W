@@ -55,6 +55,14 @@ void main() {
     recovered.layers[1].clips.clear();
     final emptyLayer = (jsonDecode(recovered.toEngineJson()) as Map<String, dynamic>)['layers'] as List;
     expect((emptyLayer[1] as Map).containsKey('pattern'), isFalse);
+
+    final stalePointer = sample().toJson()..['caw_app_project'] = ProjectDoc.fileVersion;
+    ((stalePointer['layers'] as List)[1] as Map)['clips'] = [
+      {'id': 'c1', 'pattern': 'pat', 'start_steps': 0, 'length_steps': 64},
+    ];
+    final normalized = ProjectDoc.fromJson(stalePointer);
+    expect(normalized.layers[1].patternId, isNull);
+    expect(normalized.layers[1].clips, hasLength(1));
   });
 
   test('engine JSON carries the code last run and the layer chain', () {
