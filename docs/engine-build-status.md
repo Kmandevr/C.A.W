@@ -1,7 +1,8 @@
 ---
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
-updated: 2026-10-30
+covers: [engine/, app/]
+updated: 2026-10-31
 ---
 
 # Modular engine implementation status
@@ -28,7 +29,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Integration of the prepared graph executor and graph runtime into the existing Engine/VM mixer path, including project graph representation and bytecode/native processor interoperation.
 - Universal state transfer, graph hot-swap integration and dependency-aware retirement for native module instances; the graph helper currently provides only prepared-graph pointer publication and deferred reclamation.
 - Host scheduling integration: the adaptive pool now applies workload plans, but platform pressure is not yet fed into it automatically and engine/app jobs do not yet use it.
-- Automatic Android/Windows/macOS/Linux hardware, SIMD, memory, thermal and battery capability probes.
+- Automatic host/app integration of the native hardware probe and live thermal/battery pressure feeds. The core already has a best-effort logical-core, memory-budget and SIMD probe; platform accuracy and real-device behavior still need validation.
 - A true adaptive quality ladder with measurable preview-quality modes and guaranteed unchanged offline exports.
 - Drawn LFO curves, additional oscillator warp modes (hard sync/FM/fold) and the complete custom/imported table draw/render pipeline.
 - MIDI 2.0 device input/output, Engine voice routing, output scheduling and full per-note controller/attribute mapping. The decoder/queue do not by themselves provide device support.
@@ -37,17 +38,20 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Dynamic native module loading, package verification, crash containment and optional out-of-process isolation.
 - CLAP/VST3 export wrappers.
 
-## Engineering order
+## Current implementation order
 
-1. Integrate the prepared graph into the existing Engine/VM path and add safe graph replacement/state migration.
-2. Add the bounded non-real-time worker scheduler and platform capability providers.
-3. Expand the synth parser/code generator with modulation primitives while retaining the readable patch format.
-4. Connect graph/module identity and pinned dependencies to project serialization and the asset library.
-5. Complete the native SDK host adapter and module UI contract.
-6. Add MIDI 2.0 device I/O and full controller mapping.
-7. Profile low-end Android and desktop hardware; use measured results to tune adaptive policies.
-8. Add plugin wrappers only after the module lifecycle and state contract are stable.
+Stage 5 graph-to-Engine/VM/mixer integration is paused by the owner. The graph executor, runtime publication helper, native module lifecycle and their remaining integration work remain documented technical backlog, but they are not the active implementation sequence. Do not resume that work or add speculative framework layers unless the owner explicitly asks.
+
+The current app-usable v2 order is:
+
+1. Connect the existing MIDI 2.0 decoder and bounded queue to real USB/Bluetooth MIDI device input and the live instrument path.
+2. Add modulation links and sidechain routing.
+3. Add automation lanes for module parameters and project globals.
+4. Add scenes.
+5. Add SFZ and stems export.
+
+Each item should be delivered as its own small PR, with app-facing functionality, tests and CI. Hardware validation must be documented separately from cloud CI. This sequence supersedes the older Stage 5-first order; the implementation ledger above still records what is built, what remains unintegrated and what is paused.
 
 ## Verification
 
-The new native CMake workflow builds the engine without a device backend and runs the full CTest suite on pushes and pull requests. The latest observed Engine, App and Docs workflow runs for this branch were queued; no passing build is claimed. CI must pass before the new foundation is treated as verified. Device profiling remains a separate requirement; cloud CI cannot prove phone latency, thermal behavior, battery use or drop-out resistance.
+The native CMake workflow builds the engine without a device backend and runs the full CTest suite on pushes and pull requests. Treat the checks on the current PR head as authoritative: queued or partial jobs are not passes, and a successful library build is not a test-suite pass. The modular foundation remains unverified until the complete Engine, App and Docs checks are green. Device profiling remains separate; cloud CI cannot prove phone latency, thermal behavior, battery use or drop-out resistance.

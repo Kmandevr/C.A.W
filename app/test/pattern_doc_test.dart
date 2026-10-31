@@ -339,14 +339,14 @@ void main() {
     });
 
     test('moving a selected group preserves spacing, lengths and note data', () {
-      final d = body('0 C3 2 0.4 prob 0.5\\n2 E3 1 0.8 ratchet 2\\n');
+      final d = body('0 C3 2 0.4 prob 0.5\n2 E3 1 0.8 ratchet 2\n');
       final moved = d.move({1, 2}, Steps(3), 5);
       final notes = moved.sortedNotes;
       expect(notes.map((n) => n.at), [Steps(3), Steps(5)]);
       expect(notes.map((n) => n.pitch), [53, 57]);
       expect(notes.map((n) => n.len), [Steps(2), Steps.one]);
       expect(notes.map((n) => n.vel), [0.4, 0.8]);
-      expect(notes.first.probability, 0.5);
+      expect(notes.first.prob, 0.5);
       expect(notes.last.ratchet, 2);
     });
 

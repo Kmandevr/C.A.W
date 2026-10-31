@@ -1,7 +1,6 @@
 ---
 title: Modular adaptive engine blueprint
 summary: Owner direction for CAW's native sound engine, reusable modules, interactive creation interfaces, portable assets, expressive MIDI, exports and adaptive hardware use.
-covers: [engine/, app/, examples/]
 updated: 2026-10-30
 ---
 
@@ -13,7 +12,7 @@ updated: 2026-10-30
 
 C.A.W (Code Auditioning Workspace) is a programmable sound-design and content-creation environment. It creates sound assets and reusable audio capabilities for other applications.
 
-**CAW is not a DAW and must not gradually turn into one.** It does not need a full arrangement, recording, mixing or mastering environment, general plugin hosting, or feature-rich live-performance workflow. Lightweight preview and combination tools are useful. Recording/capturing generated audio while sound is playing remains supported. The purpose is to create, audition, refine, package and export content—not replace REAPER or another DAW.
+C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful recording, arranging, editing, mixing and export tools where they help users make complete music, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Recording/capturing generated audio while sound is playing remains supported. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
 
 CAW should natively create bytebeat and deterministic mathematical audio; procedural sounds, drums, instruments, effects, samples and wavetables; custom synthesizers and processing modules; MIDI patterns and expressive per-note data including MPE; reusable building blocks; and eventually distributable plugins. It should export content other software can consume, rather than recreate those applications' entire workflows.
 
@@ -46,7 +45,8 @@ Core layers:
 - **Voice/expression engine:** polyphony, per-note state, MIDI events, MPE-style expression and shared post-voice processing.
 - **Existing .caw compiler and VM:** preserve as a first-class, sandboxed creation path. Do not replace it with a mandatory visual graph.
 - **Asset/project layer:** versioned serialization, local/global references, dependency resolution and portability.
-- **Host/API layer:** versioned C ABI for Flutter, CLI, future plugins and other clients. No UI types or C++ ABI cross this boundary.\n- **Unified module contract:** typed port metadata, stable IDs, parameter descriptors, state/version rules and a borrowed-buffer processing contract shared by built-in and third-party modules.
+- **Host/API layer:** versioned C ABI for Flutter, CLI, future plugins and other clients. No UI types or C++ ABI cross this boundary.
+- **Unified module contract:** typed port metadata, stable IDs, parameter descriptors, state/version rules and a borrowed-buffer processing contract shared by built-in and third-party modules.
 
 ### Stereo and typed connections
 
@@ -95,7 +95,7 @@ The previously accepted starting synth configuration remains a useful first impl
 
 ## 6. MIDI and expression
 
-MIDI is a native event and asset model, not a DAW arrangement feature. Preserve and extend the existing pattern engine:
+MIDI is a native event and asset model. Preserve and extend the existing pattern engine, while supporting practical arranging and editing without requiring a traditional-DAW workflow:
 - Independent polyphonic voices and per-note expression.
 - Pitch bend (editor default ±12 semitones; file range up to ±48), pressure/volume, timbre and vibrato curves.
 - Multiple editable expression lanes, bounded by explicit resource budgets.
@@ -103,7 +103,7 @@ MIDI is a native event and asset model, not a DAW arrangement feature. Preserve 
 - MPE-compatible export and MIDI 2.0-oriented internal precision, including fractional pitches.
 - Shared expensive effects after voices are summed where routing permits, rather than duplicating reverb/delay per note.
 - Equation-generated modulation and procedural MIDI generation.
-- Pattern editing and preview, not a full DAW timeline or live-performance workstation.
+- Pattern editing and preview come first; a lightweight arrangement/timeline and practical recording or editing can be added where they help complete music-making, without requiring full DAW parity or a feature-rich live-performance workstation.
 
 ## 7. Factory, projects and asset scope
 
@@ -207,8 +207,12 @@ No one can promise bugs are impossible. The engineering commitment is explicit i
 
 Do not attempt a one-shot rewrite. Keep existing project files, .caw modules and C API working through versioned migration. Each stage must leave a buildable, testable product.
 
-## 13. First implementation slice (2026-10-30)\n\n**[Fact]** A pure, deterministic workload-policy helper now exists in engine/src/execution.h and engine/src/execution.cpp, with tests in engine/tests/execution_test.cpp. It maps interactive audition/preview, background generation, offline render and idle workloads to bounded worker/batch recommendations using host-supplied core, memory, SIMD, GPU and pressure hints. It does not query the OS, start a worker pool, change the audio callback, select an audio backend profile or perform GPU work yet. Those integrations require platform-specific measurement and separate review. CI must pass before this slice is considered verified.\n\n## 14. Existing work to preserve
+## 13. Implementation status
 
-This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, AI-friendly files, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities without expanding them into a full DAW, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, factory content under caw/factory, local/global assets, optional direct AI project editing, CLAP-first plugin generation, VST3 later, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
+This blueprint describes direction and proposed architecture, not a claim that every capability is built. The [implementation ledger](engine-build-status.md) records what exists, what remains unintegrated, and the verification state. The [engine reference](engine.md) documents the established v1 runtime.
 
-See [vision](vision.md), [architecture](architecture.md), [synth](synth.md), [performance](performance.md), [decisions](decisions.md) and [roadmap](roadmap.md). Where those notes conflict with this clarified product boundary and adaptive-engine direction, this blueprint records the newer owner direction; owning notes must be reconciled as implementation proceeds.
+## 14. Existing work to preserve
+
+This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, AI-friendly files, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities while keeping sound design and content creation primary and adding useful lightweight DAW capabilities where they help, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, factory content under caw/factory, local/global assets, optional direct AI project editing, CLAP-first plugin generation, VST3 later, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
+
+See [vision](vision.md), [architecture](architecture.md), [synth](synth.md), [performance](performance.md), [decisions](decisions.md) and [roadmap](roadmap.md). Where those notes conflict with this clarified product focus and capability boundary or adaptive-engine direction, reconcile them as implementation proceeds.

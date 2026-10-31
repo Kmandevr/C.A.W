@@ -126,6 +126,7 @@ struct Filter {
     bool fromSet = false;
 };
 struct Env {
+    bool on = false;
     double attack = 0.005, decay = 0.3, sustain = 0.8, release = 0.3;
 };
 struct Fx {
@@ -142,6 +143,7 @@ struct Lfo {
     double points[4] = {0, 1, 0, -1};
 };
 struct Macro {
+    bool on = false;
     std::string name = "Macro";
     double value = 0.5;
 };
@@ -303,6 +305,7 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
         if (w.size() < 2 || (w[1].text != "1" && w[1].text != "2" && w[1].text != "3"))
             throw PatchError{line, head.col, "env needs its number: 1, 2 or 3"};
         Env& env = w[1].text == "1" ? p.env : (w[1].text == "2" ? p.env2 : p.env3);
+        env.on = true;
         Fields f(w, 2, line);
         while (!f.done()) {
             const Word& key = f.take();
@@ -341,6 +344,7 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
         if (w.size() != 4 || w[1].text.size() != 1 || w[1].text[0] < '1' || w[1].text[0] > '4')
             throw PatchError{line, head.col, "macro syntax: macro 1 Name 0.5 (numbers 1 to 4)"};
         Macro& macro = p.macro[w[1].text[0] - '1'];
+        macro.on = true;
         if (w[2].text.empty() || w[2].text.size() > 32)
             throw PatchError{line, w[2].col, "macro name must be 1 to 32 letters, numbers, _ or -"};
         for (unsigned char ch : w[2].text)
@@ -367,8 +371,8 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
                 w[2].text.size() != 1 || w[2].text[0] < '1' || w[2].text[0] > '4')
                 throw PatchError{line, head.col, "source must be env 2/3, lfo 1-4, macro 1-4 or vel"};
             mod.source = w[1].text + w[2].text;
-            if (w[1].text == "env" && w[2].text != "2" && w[2].text != "3")
-                throw PatchError{line, w[2].col, "only env 2 and env 3 can be modulation sources"};
+            if (w[1].text == "env" && w[2].text == "1")
+                throw PatchError{line, w[2].col, "env 1 is the amplitude envelope and cannot be a modulation source"};
         }
         const size_t d = arrow + 1;
         size_t amountIndex = d;
@@ -463,7 +467,7 @@ std::string generatorCode(const Patch& p) {
     auto modExpr = [&](const std::string& destination) {
         std::string expr;
         for (const Mod& m : p.mods) if (m.destination == destination) {
-            expr += (expr.empty() ? "" : " + ") + "(" + m.source + " * " + num(m.amount) + ")";
+            expr += (expr.empty() ? std::string() : " + ") + "(" + m.source + " * " + num(m.amount) + ")";
         }
         return expr.empty() ? std::string("0") : expr;
     };
@@ -475,8 +479,8 @@ std::string generatorCode(const Patch& p) {
         c += param(n + "_release", e.release, 0, 20, n + " release");
         c += "let " + n + " = env.adsr(gate, " + n + "_attack, " + n + "_decay, " + n + "_sustain, " + n + "_release)\n";
     };
-    addEnv(2, p.env2);
-    addEnv(3, p.env3);
+    if (p.env2.on) addEnv(2, p.env2);
+    if (p.env3.on) addEnv(3, p.env3);
     for (int i = 0; i < 4; ++i) if (p.lfo[i].on) {
         const std::string n = "lfo" + std::to_string(i + 1);
         c += param(n + "_rate", p.lfo[i].rate, 0.015625, 64, n + " cycle length in beats");
@@ -489,7 +493,7 @@ std::string generatorCode(const Patch& p) {
             c += "let " + n + " = lfo." + p.lfo[i].shape + "(" + n + "_rate, " + n + "_phase)\n";
         }
     }
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i) if (p.macro[i].on) {
         const std::string n = "macro" + std::to_string(i + 1);
         c += param(n, p.macro[i].value, 0, 1, p.macro[i].name);
     }
@@ -671,11 +675,7 @@ SynthResult translateSynth(std::string_view src) {
         }
         if (!anySource) p.osc[0].on = true;
         for (const Mod& mod : p.mods) {
-            if (mod.source.rfind("lfo", 0) == 0) {
-                const int index = mod.source[3] - '1';
-                if (index < 0 || index >= 4 || !p.lfo[index].on)
-                    throw PatchError{mod.line, 1, mod.source + " is used as a modulator but is not enabled"};
-            }
+            // Report an invalid destination before a missing macro source; the destination is the more direct error.
             if (mod.destination.size() >= 3 && mod.destination[0] >= 'a' && mod.destination[0] <= 'c' && mod.destination[1] == '_') {
                 const int index = mod.destination[0] - 'a';
                 if (index < 0 || index >= 3 || !p.osc[index].on)
@@ -685,6 +685,19 @@ SynthResult translateSynth(std::string_view src) {
                 const int index = mod.destination[1] - '1';
                 if (index < 0 || index >= 2 || !p.filter[index].on)
                     throw PatchError{mod.line, 1, "modulation destination filter is off"};
+            }
+            if (mod.source.rfind("lfo", 0) == 0) {
+                const int index = mod.source[3] - '1';
+                if (index < 0 || index >= 4 || !p.lfo[index].on)
+                    throw PatchError{mod.line, 1, mod.source + " is used as a modulator but is not enabled"};
+            } else if (mod.source == "env2" && !p.env2.on) {
+                throw PatchError{mod.line, 1, "env2 is used as a modulator but is not enabled"};
+            } else if (mod.source == "env3" && !p.env3.on) {
+                throw PatchError{mod.line, 1, "env3 is used as a modulator but is not enabled"};
+            } else if (mod.source.rfind("macro", 0) == 0) {
+                const int index = mod.source[5] - '1';
+                if (index < 0 || index >= 4 || !p.macro[index].on)
+                    throw PatchError{mod.line, 1, mod.source + " is used as a modulator but is not enabled"};
             }
         }
         r.name = p.name;

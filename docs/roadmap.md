@@ -1,7 +1,7 @@
 ---
 title: Roadmap
 summary: Staged plan from the bare-bones v1 (build sounds, stack them into loops, export) to commercial release, with v1's scope, acceptance test and build order.
-updated: 2026-10-30
+updated: 2026-10-31
 ---
 
 # Roadmap
@@ -82,7 +82,7 @@ CI runs the engine tests and golden renders, and checks the acceptance test's ti
 
 ## v2 — Variables, patterns, house synth and MIDI
 
-The next-generation engine direction is now defined in [Modular adaptive engine](engine-next.md). Keep the creation workbench focused on making, previewing and exporting content; do not expand it into a DAW.
+The next-generation engine direction is defined in [Modular adaptive engine](engine-next.md). Keep sound design and music-content creation as the primary focus, but do not treat that focus as a ban on DAW functionality: C.A.W. should include practical recording, arranging, editing, mixing and export capabilities where they help, and should be useful as a lightweight DAW in a pinch. Full parity with a dedicated DAW or a feature-rich live-performance environment is not a requirement.
 
 Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is in [architecture](architecture.md#variables-and-patterns-proposal).
 

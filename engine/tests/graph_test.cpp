@@ -55,8 +55,7 @@ TEST(graph_rejects_control_audio_connection) {
 
 TEST(graph_rejects_duplicate_drivers) {
     const std::vector<GraphNode> nodes{{"a", &source}, {"b", &source}, {"sink", &sink}};
-    CHECK_EQ(compileGraph(nodes, {{0, 0, 2, 0}, {1, 0, 2, 0}}).error,
-             GraphError::InputAlreadyConnected);
+    CHECK(compileGraph(nodes, {{0, 0, 2, 0}, {1, 0, 2, 0}}).error == GraphError::InputAlreadyConnected);
 }
 
 TEST(graph_rejects_cycles) {
