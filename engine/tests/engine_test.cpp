@@ -592,7 +592,7 @@ TEST(arrangement_clip_source_offset_preserves_remaining_ratchets) {
     p.seamCrossfade = false;
     p.modules.push_back({"tone", std::string(kFloat) + "trig", {}});
     p.modules.push_back({"phrase",
-        "---\\nkind: pattern\\nlength: 4\\n---\\n0 A4 4 1 ratchet 4\\n", {}});
+        "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1 ratchet 4\n", {}});
     LayerSpec layer;
     layer.id = "track";
     layer.chain = {"tone"};
