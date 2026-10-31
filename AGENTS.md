@@ -1,3 +1,8 @@
+---
+title: Agent instructions
+summary: Portable entry point for agents that do not automatically load the project's Claude configuration.
+---
+
 # Agent instructions
 
 This file is the entry point for agents that do not automatically load the project's Claude configuration. It supplements, and does not replace, [`CLAUDE.md`](CLAUDE.md).
