@@ -620,6 +620,33 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  bool get canMultiEditSelectedClips {
+    if (selectedClipIds.length < 2) return false;
+    final ids = <String>{};
+    for (final layer in project.layers) {
+      for (final clip in layer.clips) {
+        if (selectedClipIds.contains(clip.id)) ids.add(clip.patternId);
+      }
+    }
+    return ids.length == 1;
+  }
+
+  List<PatternDoc> get selectedPatternReferences {
+    final active = selectedModuleId;
+    final refs = <PatternDoc>[];
+    final seen = <String>{};
+    for (final layer in project.layers) {
+      for (final clip in layer.clips) {
+        if (!selectedClipIds.contains(clip.id) || clip.patternId == active || !seen.add(clip.patternId)) continue;
+        final module = project.module(clip.patternId);
+        if (module == null) continue;
+        final parsed = PatternDoc.parse(module.runSource);
+        if (parsed.ok && parsed.doc != null) refs.add(parsed.doc!);
+      }
+    }
+    return refs;
+  }
+
   void selectClip(LayerDoc layer, ClipDoc clip, {bool additive = false}) {
     selectedLayerId = layer.id;
     selectedClipId = clip.id;
