@@ -73,6 +73,7 @@ TEST(folder_bus_routes_children_and_applies_group_gain) {
 
 TEST(track_volume_automation_is_sample_positioned) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
+    p.layers[0].lengthSteps = 8;  // the lane must follow song time, not this shorter track loop
     p.layers[0].automation.push_back({"volume", {{0, 0}, {16, 1}}});
     Engine e(48000);
     e.setMasterBypass(true);
