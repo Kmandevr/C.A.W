@@ -521,7 +521,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     std::vector<Want> wants;
     int order = 0;
     if (p.auditionOnly) {
-        wants.push_back({"\x01audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false});
+        wants.push_back({"\1audition", p.auditionChain, p.auditionPattern, p.auditionSteps, 0.8, 0.0, false, false, 100000, {}, {}, "", false});
     }
     order_.clear();
     for (const LayerSpec& l : p.layers) {
