@@ -22,7 +22,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Native module registry with stable-ID lookup, factory creation, descriptor verification and reset/versioned state hooks. The registry is static/in-process only; dynamic loading, host adapter, state migration/serialization policy and package signing remain unimplemented.
 - MIDI 2.0 Channel Voice UMP decoder for note, per-note pitch, pressure, CC and channel pitch events, plus a bounded lock-free SPSC input queue. This is a host bridge primitive, not live device I/O or Engine voice routing.
 - Existing note model already supports fractional MIDI pitches and per-note bend, pressure, timbre and vibrato curves. Existing MIDI import/export handles Standard MIDI Files and MIDI 2.0 Clip Files.
-- Synth patch compiler now supports three oscillators, sub/noise, unison, two filters, three ADSR envelopes, four tempo-synced LFOs, four macros, modulation routing to oscillator position/level/pitch, filter cutoff/resonance and master volume, plus effect chains. A deterministic phase-distortion amount is now available per wavetable oscillator. Drawn LFO curves, additional warp modes (hard sync/FM/fold), and custom/imported wavetable authoring remain unimplemented.
+- Synth patch compiler now supports three oscillators, sub/noise, unison, two filters, three ADSR envelopes, four tempo-synced LFOs, four macros, modulation routing to oscillator position/level/pitch, filter cutoff/resonance and master volume, plus effect chains. A deterministic phase-distortion amount is now available per wavetable oscillator. The Builder includes a synth modulation-matrix editor and a general numeric parameter/global modulation editor using `mod name = expression` and `util.mod`; dedicated sidechain ducking effects can be created, routed from active exports, retargeted and removed. Missing exports warn and read zero; dependency cycles remain bounded with one-block feedback and diagnostics. Drawn LFO curves, additional warp modes (hard sync/FM/fold), and custom/imported wavetable authoring remain unimplemented.
 
 ## Not yet implemented
 
@@ -44,11 +44,10 @@ Stage 5 graph-to-Engine/VM/mixer integration is paused by the owner. The graph e
 
 The current app-usable v2 order is:
 
-1. Connect the existing MIDI 2.0 decoder and bounded queue to real USB/Bluetooth MIDI device input and the live instrument path.
-2. Add modulation links and sidechain routing.
-3. Add automation lanes for module parameters and project globals.
-4. Add scenes.
-5. Add SFZ and stems export.
+1. Add automation lanes for module parameters and project globals.
+2. Add SFZ and stems export.
+
+Scenes and MIDI 2.0 device input/output remain deferred backlog items; the existing MIDI 2.0 decoder and bounded queue are not live device support.
 
 Each item should be delivered as its own small PR, with app-facing functionality, tests and CI. Hardware validation must be documented separately from cloud CI. This sequence supersedes the older Stage 5-first order; the implementation ledger above still records what is built, what remains unintegrated and what is paused.
 
