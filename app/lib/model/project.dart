@@ -2,6 +2,8 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'pattern_doc.dart';
+
 String newId(String prefix) {
   final r = Random.secure();
   return '$prefix${List.generate(8, (_) => r.nextInt(36).toRadixString(36)).join()}';
@@ -32,6 +34,28 @@ class ModuleDoc {
       );
 }
 
+class ClipDoc {
+  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.linked = false});
+  final String id;
+  String patternId;
+  int startSteps;
+  int lengthSteps;
+  bool linked;
+
+  Map<String, dynamic> toJson() => {
+        'id': id, 'pattern': patternId, 'start_steps': startSteps,
+        'length_steps': lengthSteps, 'linked': linked,
+      };
+
+  static ClipDoc fromJson(Map<String, dynamic> j) => ClipDoc(
+        id: j['id'] as String,
+        patternId: j['pattern'] as String,
+        startSteps: (j['start_steps'] as num?)?.toInt() ?? 0,
+        lengthSteps: (j['length_steps'] as num?)?.toInt() ?? 64,
+        linked: j['linked'] == true,
+      );
+}
+
 class LayerDoc {
   LayerDoc({
     required this.id,
@@ -45,7 +69,12 @@ class LayerDoc {
     this.pan = 0,
     this.mute = false,
     this.solo = false,
-  }) : effectIds = effectIds ?? [];
+    List<ClipDoc>? clips,
+    this.parentId,
+    this.isFolder = false,
+    this.busEnabled = true,
+    this.collapsed = false,
+  }) : effectIds = effectIds ?? [], clips = clips ?? [];
 
   final String id;
   String name;
@@ -56,6 +85,9 @@ class LayerDoc {
   int lengthSteps; // 16ths; 0 follows the project loop
   double volume, pan;
   bool mute, solo;
+  List<ClipDoc> clips;
+  String? parentId;
+  bool isFolder, busEnabled, collapsed;
 
   List<String> get chain => [?generatorId, ...effectIds];
 
@@ -71,6 +103,8 @@ class LayerDoc {
         'pan': pan,
         'mute': mute,
         'solo': solo,
+        'clips': [for (final c in clips) c.toJson()],
+        'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j) => LayerDoc(
@@ -85,6 +119,9 @@ class LayerDoc {
         pan: (j['pan'] as num?)?.toDouble() ?? 0,
         mute: j['mute'] == true,
         solo: j['solo'] == true,
+        clips: ((j['clips'] as List?) ?? const []).map((c) => ClipDoc.fromJson(c as Map<String, dynamic>)).toList(),
+        parentId: j['parent'] as String?, isFolder: j['folder'] == true,
+        busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
       );
 }
 
@@ -106,7 +143,7 @@ class ProjectDoc {
         modules = modules ?? [],
         layers = layers ?? [];
 
-  static const int fileVersion = 1;
+  static const int fileVersion = 2;
 
   final String id;
   String name;
@@ -146,13 +183,17 @@ class ProjectDoc {
 
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
-          {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) =>
-      jsonEncode({
+      {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
+    _arrangementPatternSources = {for (final m in modules) if (headerValue(m.runSource, 'kind') == 'pattern') m.id: m.runSource};
+    final arrangementEnd = layers.fold<int>(loopSteps, (end, l) =>
+        max(end, l.clips.fold<int>(0, (e, clip) => max(e, clip.startSteps + clip.lengthSteps))));
+    final engineLoopBars = min(64, max(loopBars, (arrangementEnd / stepsPerBar).ceil()));
+    final result = jsonEncode({
         'caw_project': 1,
         'name': name,
         'bpm': bpm,
         'beats_per_bar': beatsPerBar,
-        'loop_bars': loopBars,
+        'loop_bars': engineLoopBars,
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
@@ -163,14 +204,28 @@ class ProjectDoc {
         'modules': [
           for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
+        'modules': [
+          ...[
+            for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
+          ],
+          for (final l in layers)
+            if (l.clips.isNotEmpty && l.generatorId != null)
+              {
+                'id': 'arr_${l.id}',
+                'name': '${l.name} arrangement',
+                'source': _mergedPatternSource(l, beatsPerBar),
+                'params': <String, double>{},
+              },
+        ],
         'layers': [
           for (final l in layers)
             {
               'id': l.id,
               'name': l.name,
               'chain': l.chain,
-              'pattern': ?l.patternId,
-              'length_steps': l.lengthSteps,
+              if (l.clips.isNotEmpty && l.generatorId != null) 'pattern': 'arr_${l.id}'
+              else if (l.patternId != null) 'pattern': l.patternId,
+              'length_steps': l.clips.isNotEmpty ? 0 : l.lengthSteps,
               'volume': l.volume,
               'pan': l.pan,
               'mute': l.mute,
@@ -180,6 +235,9 @@ class ProjectDoc {
         if (audition != null) 'audition': {'chain': audition, 'pattern': ?auditionPattern},
         'audition_only': auditionOnly && audition != null,
       });
+    _arrangementPatternSources = {};
+    return result;
+  }
 
   Map<String, dynamic> toJson() => {
         'caw_app_project': fileVersion,
@@ -212,10 +270,51 @@ class ProjectDoc {
             .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>))
             .toList(),
         layers: ((j['layers'] as List?) ?? const [])
-            .map((l) => LayerDoc.fromJson(l as Map<String, dynamic>))
-            .toList(),
+            .map((raw) {
+              final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
+              if (layer.clips.isEmpty && layer.patternId != null) {
+                final module = ((j['modules'] as List?) ?? const [])
+                    .whereType<Map>().where((m) => m['id'] == layer.patternId).firstOrNull;
+                final parsed = module == null ? null : PatternDoc.parse((module['run_source'] ?? module['source'] ?? '').toString()).doc;
+                final length = parsed?.lengthSteps((j['beats_per_bar'] as num?)?.toInt() ?? 4) ?? layer.lengthSteps;
+                layer.clips.add(ClipDoc(id: newId('c'), patternId: layer.patternId!, startSteps: 0,
+                    lengthSteps: length > 0 ? length : 64));
+              }
+              return layer;
+            }).toList(),
       );
 }
+
+String _mergedPatternSource(LayerDoc layer, int beatsPerBar) {
+  final end = layer.clips.fold<int>(0, (e, c) => max(e, c.startSteps + c.lengthSteps));
+  final out = <String>['---', 'caw: 1', 'kind: pattern', 'name: ${layer.name} arrangement',
+    'length: ${max(1, end)}', '---'];
+  for (final clip in layer.clips) {
+    final source = _arrangementPatternSources[clip.patternId];
+    if (source == null) continue;
+    final parsed = PatternDoc.parse(source).doc;
+    if (parsed == null) continue;
+    final sourceLength = max(1, parsed.lengthSteps(beatsPerBar));
+    final repeats = clip.lengthSteps ~/ sourceLength + (clip.lengthSteps % sourceLength == 0 ? 0 : 1);
+    for (var repeat = 0; repeat < repeats; repeat++) {
+      final offset = clip.startSteps + repeat * sourceLength;
+      for (final note in parsed.sortedNotes) {
+        final at = offset + note.at.toDouble();
+        if (at >= clip.startSteps + clip.lengthSteps) continue;
+        final len = min(note.len.toDouble(), clip.startSteps + clip.lengthSteps - at);
+        if (len <= 0) continue;
+        out.add('${formatNumber(at)} ${formatPitch(note.pitch)} ${formatNumber(len)}'
+            '${note.vel == 1 ? '' : ' ${formatNumber(note.vel)}'}'
+            '${note.prob == 1 ? '' : ' prob ${formatNumber(note.prob)}'}'
+            '${note.ratchet == 1 ? '' : ' ratchet ${note.ratchet}'}'
+            '${note.slide ? ' slide' : ''}');
+      }
+    }
+  }
+  return '${out.join('\n')}\n';
+}
+
+Map<String, String> _arrangementPatternSources = {};
 
 /// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.
 String? headerValue(String source, String key) {
