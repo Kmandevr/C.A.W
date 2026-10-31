@@ -141,7 +141,7 @@ class _SynthModEditorState extends State<_SynthModEditor> {
     final src = newSource ?? availableSources.firstOrNull;
     final dst = newDestination ?? availableDestinations.firstOrNull;
     if (src == null || dst == null) return;
-    final prefix = widget.source.endsWith('\n') ? widget.source : widget.source + '\n';
+    final prefix = widget.source.endsWith('\n') ? widget.source : '${widget.source}\n';
     await widget.onChanged('${prefix}mod $src -> $dst ${newAmount.toStringAsFixed(3)}\n');
   }
 
