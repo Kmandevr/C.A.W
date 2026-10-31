@@ -221,7 +221,6 @@ TEST(sidechain_import_ducks_in_live_and_offline_render_deterministically) {
     p.layers = {kick, bass};
 
     Engine e(48000);
-    e.setMasterBypass(true);
     const std::string result = e.setProject(p);
     CHECK(!has(result, "nothing exports"));
     e.play();
