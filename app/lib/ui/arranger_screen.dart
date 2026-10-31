@@ -11,6 +11,12 @@ import 'theme.dart';
 import 'widgets.dart';
 
 
+double endPosition(AppState state, ProjectDoc project, int loopLength) {
+  final end = project.layers.fold<int>(project.loopSteps, (v, layer) =>
+    layer.clips.fold<int>(v, (e, clip) => math.max(e, clip.startSteps + clip.lengthSteps)));
+  return end * state.meters.position / loopLength;
+}
+
 class ArrangerScreen extends StatefulWidget {
   const ArrangerScreen({super.key, required this.state, this.onOpenPattern});
   final AppState state;
@@ -20,13 +26,17 @@ class ArrangerScreen extends StatefulWidget {
 }
 
 class _ArrangerScreenState extends State<ArrangerScreen> {
-  bool mixer = false, settings = false;
+  bool mixer = false, settings = false, compactTracks = false;
+  double zoom = 18.0;
 
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
     final p = s.project;
-    final stepW = Neon.compact(context) ? 14.0 : 18.0;
+    final stepW = zoom * (Neon.compact(context) ? 0.85 : 1.0);
+    final trackHeight = compactTracks ? 54.0 : 76.0;
+    final playheadStep = s.meters.playing && s.meters.loopLength > 0
+        ? endPosition(s, p, s.meters.loopLength) : -1.0;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
     final end = p.layers.fold<int>(p.loopSteps, (v, l) =>
       l.clips.fold<int>(v, (e, c) => math.max(e, c.startSteps + c.lengthSteps)));
@@ -47,6 +57,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
           if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
             IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt), icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
+          IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0)), icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
+          IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0)), icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
+          IconButton(onPressed: () => setState(() => compactTracks = !compactTracks),
+            icon: Icon(compactTracks ? Icons.view_agenda_outlined : Icons.view_stream_outlined),
+            color: compactTracks ? Neon.blue : Neon.dim, tooltip: 'Toggle track density'),
           DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
             items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
             onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
@@ -78,7 +93,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                     child: Text('TRACKS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
                 for (final layer in visible)
                   _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
-                    depth: s.folderDepth(layer), patterns: patterns),
+                    depth: s.folderDepth(layer), patterns: patterns, trackHeight: trackHeight),
               ])),
               Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
                 child: SizedBox(width: width, child: Column(children: [
@@ -90,6 +105,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                   ])),
                   for (final layer in visible)
                     _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
+                      trackHeight: trackHeight, playheadStep: playheadStep,
                       selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
                 ])))),
             ]),
@@ -100,17 +116,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
 }
 
 class _TimelineHeader extends StatelessWidget {
-  const _TimelineHeader({required this.state, required this.layer, required this.index, required this.depth, required this.patterns});
+  const _TimelineHeader({required this.state, required this.layer, required this.index, required this.depth, required this.patterns, required this.trackHeight});
   final AppState state;
   final LayerDoc layer;
   final int index, depth;
+  final double trackHeight;
   final List<ModuleDoc> patterns;
 
   @override
   Widget build(BuildContext context) {
     final color = Neon.layer(layer.color);
     final gens = state.project.modules.where((m) => state.isGenerator(m.id)).toList();
-    return Container(height: 76.0 + layer.automation.length * 34.0, padding: EdgeInsets.fromLTRB(7 + depth * 13, 5, 4, 4),
+    return Container(height: trackHeight + layer.automation.length * 34.0, padding: EdgeInsets.fromLTRB(7 + depth * 13, 5, 4, 4),
       decoration: const BoxDecoration(color: Neon.panel,
         border: Border(bottom: BorderSide(color: Neon.line), right: BorderSide(color: Neon.line))),
       child: Column(children: [
@@ -174,19 +191,19 @@ class _TimelineHeader extends StatelessWidget {
 
 class _TimelineLane extends StatelessWidget {
   const _TimelineLane({required this.state, required this.layer, required this.width,
-    required this.stepW, required this.selectedIds, this.onOpen});
+    required this.stepW, required this.trackHeight, required this.playheadStep, required this.selectedIds, this.onOpen});
   final AppState state;
   final LayerDoc layer;
-  final double width, stepW;
+  final double width, stepW, trackHeight, playheadStep;
   final Set<String> selectedIds;
   final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final height = 76.0 + layer.automation.length * 34.0;
+    final height = trackHeight + layer.automation.length * 34.0;
     return SizedBox(width: width, height: height,
     child: Stack(children: [
-      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar)),
+      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar, playheadStep)),
       Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
         onTapUp: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
         onHorizontalDragStart: (d) { final step = (d.localPosition.dx / stepW).round(); state.beginTimeSelection(step); },
@@ -199,15 +216,15 @@ class _TimelineLane extends StatelessWidget {
           child: IgnorePointer(child: Container(color: Neon.blue.withValues(alpha: .09)))),
 
       for (final clip in layer.clips)
-        Positioned(left: clip.startSteps * stepW, top: 8,
-          width: math.max(12.0, clip.lengthSteps * stepW), height: 60,
+        Positioned(left: clip.startSteps * stepW, top: trackHeight == 54.0 ? 5 : 8,
+          width: math.max(12.0, clip.lengthSteps * stepW), height: trackHeight == 54.0 ? 42 : 60,
           child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW,
             color: Neon.layer(layer.color), selected: selectedIds.contains(clip.id), onOpen: onOpen)),
       if (layer.clips.isEmpty && !layer.isFolder)
-        const Positioned(left: 10, top: 29, child: Text('Add MIDI clip with +',
+        Positioned(left: 10, top: trackHeight * 0.38, child: const Text('Add MIDI clip with +',
           style: TextStyle(color: Neon.dim, fontSize: 10))),
       for (var i = 0; i < layer.automation.length; i++)
-        Positioned(left: 0, right: 0, top: 76 + i * 34.0, height: 34,
+        Positioned(left: 0, right: 0, top: trackHeight + i * 34.0, height: 34,
           child: _AutomationLaneView(state: state, layer: layer, lane: layer.automation[i], stepW: stepW, width: width)),
     ]),
   );
@@ -215,8 +232,8 @@ class _TimelineLane extends StatelessWidget {
 }
 
 class _ArrangementGrid extends CustomPainter {
-  _ArrangementGrid(this.stepW, this.barSteps);
-  final double stepW;
+  _ArrangementGrid(this.stepW, this.barSteps, this.playheadStep);
+  final double stepW, playheadStep;
   final int barSteps;
   @override
   void paint(Canvas canvas, Size size) {
@@ -226,9 +243,13 @@ class _ArrangementGrid extends CustomPainter {
       final n = (x / stepW).round();
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
     }
+    if (playheadStep >= 0) {
+      final x = playheadStep * stepW;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), Paint()..color = Neon.blue..strokeWidth = 1.6);
+    }
   }
   @override
-  bool shouldRepaint(covariant _ArrangementGrid old) => old.stepW != stepW || old.barSteps != barSteps;
+  bool shouldRepaint(covariant _ArrangementGrid old) => old.stepW != stepW || old.barSteps != barSteps || old.playheadStep != playheadStep;
 }
 
 class _TimelineClip extends StatefulWidget {
