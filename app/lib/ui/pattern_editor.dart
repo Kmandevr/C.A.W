@@ -857,7 +857,7 @@ class _PatternEditorState extends State<PatternEditor> {
               if (references.isNotEmpty && !s.canMultiEditSelectedClips)
                 TextButton(onPressed: () => setState(() {
                   _multiEditEnabled = !_multiEditEnabled;
-                  if (_multiEditEnabled) _loadMultiDocs(s); else { _multiDocs.clear(); _multiSourceIds = []; }
+                  if (_multiEditEnabled) { _loadMultiDocs(s); } else { _multiDocs.clear(); _multiSourceIds = []; }
                 }), child: Text(_multiEditEnabled ? 'MULTI-EDIT ON' : 'EDIT ALL SELECTED')),
 
             ])),
