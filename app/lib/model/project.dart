@@ -296,40 +296,57 @@ class ProjectDoc {
         'layers': [for (final l in layers) l.toJson()],
       };
 
-  static ProjectDoc fromJson(Map<String, dynamic> j) => ProjectDoc(
-        id: j['id'] as String,
-        name: (j['name'] as String?) ?? 'Untitled',
-        bpm: (j['bpm'] as num?)?.toDouble() ?? 140,
-        beatsPerBar: (j['beats_per_bar'] as num?)?.toInt() ?? 4,
-        loopBars: (j['loop_bars'] as num?)?.toInt() ?? 4,
-        key: (j['key'] as String?) ?? 'A minor',
-        seed: (j['seed'] as num?)?.toInt() ?? 0,
-        master: (j['master'] as num?)?.toDouble() ?? 0.7,
-        seamCrossfade: j['seam_crossfade'] != false,
-        globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
-        modules: ((j['modules'] as List?) ?? const [])
-            .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>))
-            .toList(),
-        layers: ((j['layers'] as List?) ?? const [])
-            .map((raw) {
-              final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
-              // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
-              if (layer.clips.isNotEmpty) layer.patternId = null;
-              // Recover any legacy single-pattern layer as a real clip, then clear the legacy pointer.
-              // Clearing it matters: deleting the migrated clip must leave the track silent.
-              if (layer.clips.isEmpty && layer.patternId != null) {
-                final legacyPatternId = layer.patternId!;
-                final module = ((j['modules'] as List?) ?? const [])
-                    .whereType<Map>().where((m) => m['id'] == legacyPatternId).firstOrNull;
-                final parsed = module == null ? null : PatternDoc.parse((module['run_source'] ?? module['source'] ?? '').toString()).doc;
-                final length = parsed?.lengthSteps((j['beats_per_bar'] as num?)?.toInt() ?? 4) ?? layer.lengthSteps;
-                layer.clips.add(ClipDoc(id: newId('c'), patternId: legacyPatternId, startSteps: 0,
-                    lengthSteps: length > 0 ? length : 64));
-                layer.patternId = null;
-              }
-              return layer;
-            }).toList(),
-      );
+  static ProjectDoc fromJson(Map<String, dynamic> j) {
+    final project = ProjectDoc(
+      id: j['id'] as String,
+      name: (j['name'] as String?) ?? 'Untitled',
+      bpm: (j['bpm'] as num?)?.toDouble() ?? 140,
+      beatsPerBar: (j['beats_per_bar'] as num?)?.toInt() ?? 4,
+      loopBars: (j['loop_bars'] as num?)?.toInt() ?? 4,
+      key: (j['key'] as String?) ?? 'A minor',
+      seed: (j['seed'] as num?)?.toInt() ?? 0,
+      master: (j['master'] as num?)?.toDouble() ?? 0.7,
+      seamCrossfade: j['seam_crossfade'] != false,
+      globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
+      modules: ((j['modules'] as List?) ?? const [])
+          .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
+      layers: ((j['layers'] as List?) ?? const []).map((raw) {
+        final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
+        // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
+        if (layer.clips.isNotEmpty) layer.patternId = null;
+        if (layer.clips.isEmpty && layer.patternId != null) {
+          final legacyPatternId = layer.patternId!;
+          final module = ((j['modules'] as List?) ?? const [])
+              .whereType<Map>().where((m) => m['id'] == legacyPatternId).firstOrNull;
+          final parsed = module == null ? null
+              : PatternDoc.parse((module['run_source'] ?? module['source'] ?? '').toString()).doc;
+          final length = parsed?.lengthSteps((j['beats_per_bar'] as num?)?.toInt() ?? 4) ?? layer.lengthSteps;
+          layer.clips.add(ClipDoc(id: newId('c'), patternId: legacyPatternId,
+              startSteps: 0, lengthSteps: length > 0 ? length : 64));
+          layer.patternId = null;
+        }
+        return layer;
+      }).toList(),
+    );
+
+    // Keep persisted clips and automation inside the same bounds enforced by the native parser.
+    for (final layer in project.layers) {
+      for (final clip in layer.clips) {
+        clip.startSteps = clip.startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
+        clip.lengthSteps = clip.lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt();
+        clip.sourceOffsetSteps = clip.sourceOffsetSteps.clamp(0, project.maxArrangementSteps).toInt();
+      }
+      for (final lane in layer.automation) {
+        lane.points = lane.points.take(128).toList()
+          ..forEach((point) {
+            point.step = point.step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
+            point.value = point.value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
+          })
+          ..sort((a, b) => a.step.compareTo(b.step));
+      }
+    }
+    return project;
+  }
 }
 
 /// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.
