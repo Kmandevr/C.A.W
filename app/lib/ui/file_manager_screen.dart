@@ -396,7 +396,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   tooltip: 'Solo preview in Builder',
                   onPressed: state.isLibrary(module.id) ? null : () {
                     state.selectModule(module.id);
-                    state.setPreviewOnly(true);
+                    if (!state.previewOnly) state.setPreviewOnly(true);
                     widget.onOpenBuilder();
                   },
                   icon: const Icon(Icons.play_arrow, color: Neon.green),
