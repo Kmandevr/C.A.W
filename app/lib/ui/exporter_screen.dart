@@ -295,6 +295,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
           float32: item.float32,
           seconds: item.seconds,
           frames: item.frames,
+          target: item.target,
+          param: item.param,
         ));
       } catch (e) {
         warning = 'Export saved, but history could not be updated: $e';
