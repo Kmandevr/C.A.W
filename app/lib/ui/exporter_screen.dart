@@ -226,8 +226,11 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final outputFile = File(path);
       file = outputFile;
       if (item.kind == ExportKind.midi) {
-        final error = await Isolate.run(() => Engine.exportPattern(item.patternSource, path,
-          bpm: item.bpm, beatsPerBar: item.beatsPerBar));
+        final source = item.patternSource;
+        final bpm = item.bpm;
+        final beatsPerBar = item.beatsPerBar;
+        final error = await Isolate.run(() => Engine.exportPattern(source, path,
+          bpm: bpm, beatsPerBar: beatsPerBar));
         if (error != null) throw StateError(error);
       } else {
         final job = RenderJob.start(RenderRequest(
@@ -464,8 +467,12 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final tmp = await getTemporaryDirectory();
       final name = _fileName();
       file = File('${tmp.path}${Platform.pathSeparator}$name');
-      final error = await Isolate.run(() => Engine.exportPattern(module.source, file.path,
-        bpm: s.project.bpm, beatsPerBar: s.project.beatsPerBar));
+      final source = module.source;
+      final bpm = s.project.bpm;
+      final beatsPerBar = s.project.beatsPerBar;
+      final outputPath = file.path;
+      final error = await Isolate.run(() => Engine.exportPattern(source, outputPath,
+        bpm: bpm, beatsPerBar: beatsPerBar));
       if (error != null) throw StateError(error);
       final bytes = await file.readAsBytes();
       final saved = await FilePicker.saveFile(fileName: name, bytes: bytes,
