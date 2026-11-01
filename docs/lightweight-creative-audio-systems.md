@@ -40,14 +40,14 @@ Scores are planning estimates, not measured benchmarks.
 
 | Candidate | Impact | Priority | Effort | Runtime / memory expectation | Decision |
 |---|---:|---|---|---|---|
-| Deterministic math modulation | 4 | P0 | XS–S | Very low; constant state | Keep |
+| Extend deterministic math modulation | 4 | P0 | XS–S | Very low; constant state | Keep; existing math, seeded noise, LFO and parameter/global modulation are the foundation |
 | Compact cellular/bit-pattern generators | 4 | P0 | S–M | Very low with fixed-size state | Keep, bounded version |
-| Waveshaping and waveform morphing | 5 | P0 | S–M | Low per sample; small tables if used | Keep |
+| Extend waveshaping and waveform morphing | 5 | P0 | S–M | Low per sample; small tables if used | Keep; existing drive/fold/tanh and wavetable frame morph/phase warp are foundations |
 | Small seeded variation explorer | 5 | P0 | M | Background/offline render; capped candidate count | Keep |
 | Sound lineage/family metadata | 3 | P1 | S | Negligible DSP; small project metadata | Keep |
 | Non-destructive operation history | 4 | P1 | M | Small metadata; avoid duplicate audio buffers | Keep |
 | Basic waveform/transient inspection | 4 | P1 | S–M | On-demand background analysis; small cache | Keep |
-| Basic spectrum view | 3 | P1 | M | On-demand FFT; bounded scratch buffer | Keep, optional |
+| Expand spectrum and asset inspection | 3 | P1 | M | On-demand FFT; bounded scratch buffer | Keep, optional; Engine Lab already has a 512-point master FFT view |
 | Lightweight resonator models | 4 | P1 | M | Low–medium, fixed voice/state limits | Keep, small library |
 | Bounded granular/stutter processor | 4 | P2 | M–L | Medium; fixed grain and buffer limits | Prototype later |
 | Audio transformation stack / compositing | 4 | P2 | M–L | Depends on processing graph; reuse existing chains | Keep only as simple reusable modules |
@@ -204,12 +204,12 @@ Scores are planning estimates, not measured benchmarks.
 
 **Acceptance:** tests use known impulses, drum hits, sustained tones and noisy material; false positives are visible/editable; analysis never blocks playback or file browsing.
 
-### 3.8 Basic spectrum inspection
+### 3.8 Expanded spectrum and asset inspection
 
-**Purpose:** give users a simple frequency view to understand brightness, low-frequency content and harmonics.
+**Current foundation:** Engine Lab already displays a read-only 512-point Hann-window FFT of the mono master scope, spanning 0–24 kHz. This proposal is for extending analysis to captured selections or imported assets, not adding C.A.W.'s first spectrum display.
 
 **First version**
-- Provide a single on-demand FFT spectrum view, with logarithmic frequency axis and peak hold.
+- Reuse the existing FFT implementation and add an on-demand logarithmic-frequency view with peak hold for a captured selection or asset, if the workflow proves useful.
 - Use a fixed maximum FFT size and preallocated scratch storage.
 - Compute on a worker from a captured preview/render block or asset, not in the callback.
 - Refresh only while the inspector is open and at a low, bounded rate.
