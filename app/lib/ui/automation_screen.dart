@@ -100,7 +100,7 @@ class _PointEditor extends StatelessWidget {
   Widget build(BuildContext context) {
     final point = lane.points[index];
     return Row(children: [
-      SizedBox(width: 28, child: Text('P' + (index + 1).toString(), style: Neon.code(size: 10, color: color))),
+      SizedBox(width: 28, child: Text('P${index + 1}', style: Neon.code(size: 10, color: color))),
       Expanded(child: Slider(value: point.step.clamp(0.0, maxStep).toDouble(), min: 0, max: maxStep, activeColor: color,
         onChanged: (v) => state.updateAutomationPoint(layer, lane, index, v, point.value))),
       SizedBox(width: 38, child: Text(point.step.toStringAsFixed(0), textAlign: TextAlign.end,
