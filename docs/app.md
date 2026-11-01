@@ -72,7 +72,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - it is an inspector for existing engine capabilities, not yet an editable universal processing graph or sample/buffer debugger
 - **Automation** (`lib/ui/automation_screen.dart`):
   - edits the existing track volume and pan lanes stored on each `LayerDoc`
-  - adds/removes lanes and edits point positions and values, with a curve preview
+  - adds/removes lanes; tap the curve to add points, drag existing points directly, remove individual points or use precise step/value sliders
   - the same serialized points are consumed by the Arranger and native engine; plugin parameter, modulation-link and processing-behavior automation remain engine/API dependencies
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - Quick Export renders the current project loop; Advanced offers loop, free-length, one-shot, wavetable and MIDI pattern exports
