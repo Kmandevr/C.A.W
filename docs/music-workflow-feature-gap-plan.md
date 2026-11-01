@@ -27,7 +27,6 @@ Where documentation conflicts, the app and engine implementation are authoritati
 - **[Fact] Implemented:** the Curve tool edits velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
 - **[Fact] Implemented:** pattern actions include Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion. These are implemented in the piano-roll action path and pattern model.
 - **[Proposal] Extend:** add advanced quantization controls (strength, timing and note-length handling), reusable groove/swing templates, note chop/glue and strum. These are enhancements, not missing implementations of the existing generators or curve tools.
-- **[Proposal] Extend:** add advanced quantization controls (strength, timing and note-length handling), groove/swing templates, note chop/glue, legato and strum. These must complement—not replace—the existing grid and note model.
 - **[Proposal] Extend:** add scale/chord assistance and ghost-note/reference editing where it improves composition, while retaining free notes outside the project key.
 
 ### Arrangement
@@ -78,7 +77,7 @@ Where documentation conflicts, the app and engine implementation are authoritati
 
 ### MIDI hardware and performance
 
-- **[Fact] Implemented:** MIDI 2.0/UMP decoding foundations, MIDI ports/functions and MIDI pattern file import/export.
+- **[Fact] Implemented:** MIDI 2.0 UMP decoding and bounded input-queue foundations, plus MIDI pattern file import/export. These primitives do not provide physical USB/Bluetooth port discovery or device connection.
 - **[Fact] Not implemented:** complete USB/Bluetooth MIDI device discovery/connection, controller learn/mapping and external MIDI clock/sync.
 - **[Proposal] Build:** reliable USB and Bluetooth MIDI input, device selection/status, note and CC routing, controller learn, clock input/output and clear disconnect/reconnect behavior.
 - **[Proposal] Build:** on-screen performance keys and a metronome/count-in where they support live pattern entry.
