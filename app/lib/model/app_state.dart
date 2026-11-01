@@ -207,7 +207,6 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
-    _disposed = true;
     settings.removeListener(_settingsChanged);
     final pressureSubscription = _resourcePressureSubscription;
     _resourcePressureSubscription = null;
