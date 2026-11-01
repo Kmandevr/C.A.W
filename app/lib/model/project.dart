@@ -349,6 +349,31 @@ class ProjectDoc {
       }).toList(),
     );
 
+    // Rebuild a safe, complete virtual-folder tree from both the folder list and module assignments.
+    final safeFolders = <String>{};
+    void addFolderPath(String raw) {
+      final normalized = _normalizeProjectFolderPath(raw);
+      if (normalized == null) return;
+      final parts = normalized.split('/');
+      for (var i = 1; i <= parts.length; i++) {
+        safeFolders.add(parts.take(i).join('/'));
+      }
+    }
+    for (final folder in project.libraryFolders) {
+      addFolderPath(folder);
+    }
+    for (final module in project.modules) {
+      final normalized = _normalizeProjectFolderPath(module.folderPath);
+      if (normalized == null) {
+        module.folderPath = '';
+      } else {
+        module.folderPath = normalized;
+        addFolderPath(normalized);
+      }
+      module.tags = module.tags.where((tag) => tag.trim().isNotEmpty).take(16).toList();
+    }
+    project.libraryFolders = safeFolders.toList()..sort();
+
     // Keep persisted clips and automation inside the same bounds enforced by the native parser.
     for (final layer in project.layers) {
       for (final clip in layer.clips) {
@@ -367,6 +392,17 @@ class ProjectDoc {
     }
     return project;
   }
+}
+
+/// Normalizes project-local virtual folder paths; these are metadata, never OS filesystem paths.
+String? _normalizeProjectFolderPath(String raw) {
+  if (raw.length > 512) return null;
+  final parts = raw.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).toList();
+  if (parts.isEmpty || parts.length > 32 ||
+      parts.any((part) => part == '.' || part == '..' || part.length > 64 || part.contains(String.fromCharCode(92)))) {
+    return null;
+  }
+  return parts.join('/');
 }
 
 /// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.
