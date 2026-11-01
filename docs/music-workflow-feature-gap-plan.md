@@ -7,7 +7,7 @@ updated: 2026-11-01
 
 # Music workflow feature-gap plan
 
-This is the feature-gap companion to the [roadmap](roadmap.md), not a replacement for it. It compares CAW's implemented workflows with useful capabilities found in established music creation and audio-editing software. The purpose is to extend CAW's existing systems, not rebuild them or copy a full conventional DAW.
+This is the feature-gap companion to the [roadmap](roadmap.md), not a replacement for it. It compares CAW's implemented workflows with useful capabilities found in established music creation and audio-editing software. The purpose is to extend CAW's existing systems, not rebuild them or copy a full conventional DAW. For unconventional, non-AI sound-generation and transformation ideas filtered for low-end hardware, see the separate [lightweight creative audio systems plan](lightweight-creative-audio-systems.md).
 
 ## Status key
 
