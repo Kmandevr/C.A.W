@@ -36,23 +36,26 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   Future<void> _createFolder() async {
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
+    var name = '';
+    final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('New library folder'),
-        content: TextField(controller: controller, autofocus: true,
-          decoration: const InputDecoration(labelText: 'Folder name', hintText: 'Drums / Kicks')),
+        content: TextFormField(
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Folder name', hintText: 'Drums / Kicks'),
+          onChanged: (value) => name = value,
+          onFieldSubmitted: (value) => Navigator.pop(context, value.trim()),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()),
+          FilledButton(onPressed: () => Navigator.pop(context, name.trim()),
             child: const Text('Create')),
         ],
       ),
     );
-    controller.dispose();
-    if (!mounted || name == null || name.trim().isEmpty) return;
-    final path = _folderPath.isEmpty ? name.trim() : '$_folderPath/${name.trim()}';
+    if (!mounted || result == null || result.trim().isEmpty) return;
+    final path = _folderPath.isEmpty ? result.trim() : '$_folderPath/${result.trim()}';
     try {
       state.createLibraryFolder(path);
       setState(() => _folderPath = path);
@@ -62,22 +65,27 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   Future<void> _renameFolder(String path) async {
-    final controller = TextEditingController(text: path.split('/').last);
-    final name = await showDialog<String>(
+    var name = path.split('/').last;
+    final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Rename folder'),
-        content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(labelText: 'New name')),
+        content: TextFormField(
+          initialValue: name,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'New name'),
+          onChanged: (value) => name = value,
+          onFieldSubmitted: (value) => Navigator.pop(context, value.trim()),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Rename')),
+          FilledButton(onPressed: () => Navigator.pop(context, name.trim()), child: const Text('Rename')),
         ],
       ),
     );
-    controller.dispose();
-    if (!mounted || name == null || name.trim().isEmpty) return;
+    if (!mounted || result == null || result.trim().isEmpty) return;
     final parent = path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-    final next = parent.isEmpty ? name.trim() : '$parent/${name.trim()}';
+    final next = parent.isEmpty ? result.trim() : '$parent/${result.trim()}';
     try {
       if (!state.renameLibraryFolder(path, next)) {
         _notice('Folder name is invalid or already in use.', error: true);
@@ -117,28 +125,28 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   Future<void> _renameModule(ModuleDoc module) async {
-    final controller = TextEditingController(text: module.name);
-    final name = await showDialog<String>(
+    var name = module.name;
+    final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Rename module'),
-        content: TextField(
-          controller: controller,
+        content: TextFormField(
+          initialValue: name,
           autofocus: true,
           maxLength: 80,
           decoration: const InputDecoration(labelText: 'Module name'),
-          onSubmitted: (value) => Navigator.pop(context, value.trim()),
+          onChanged: (value) => name = value,
+          onFieldSubmitted: (value) => Navigator.pop(context, value.trim()),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()),
+          FilledButton(onPressed: () => Navigator.pop(context, name.trim()),
             child: const Text('Rename')),
         ],
       ),
     );
-    controller.dispose();
-    if (!mounted || name == null || name.trim().isEmpty) return;
-    state.renameModule(module.id, name);
+    if (!mounted || result == null || result.trim().isEmpty) return;
+    state.renameModule(module.id, result);
   }
 
   Future<void> _deleteModule(ModuleDoc module) async {
@@ -160,44 +168,51 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   Future<void> _editTags(ModuleDoc module) async {
-    final controller = TextEditingController(text: module.tags.join(', '));
-    final value = await showDialog<String>(
+    var value = module.tags.join(', ');
+    final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Tags · ${module.name}'),
-        content: TextField(controller: controller, autofocus: true,
-          decoration: const InputDecoration(labelText: 'Comma-separated tags', hintText: 'bass, analog, lead')),
+        content: TextFormField(
+          initialValue: value,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Comma-separated tags', hintText: 'bass, analog, lead'),
+          onChanged: (next) => value = next,
+          onFieldSubmitted: (next) => Navigator.pop(context, next),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Save tags')),
+          FilledButton(onPressed: () => Navigator.pop(context, value), child: const Text('Save tags')),
         ],
       ),
     );
-    controller.dispose();
-    if (!mounted || value == null) return;
-    state.setModuleTags(module.id, value.split(','));
+    if (!mounted || result == null) return;
+    state.setModuleTags(module.id, result.split(','));
   }
 
   Future<void> _editSelectedTags() async {
     final count = _selectedModuleIds.length;
     if (count == 0) return;
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
+    var value = '';
+    final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Tags · $count modules'),
-        content: TextField(controller: controller, autofocus: true,
+        content: TextFormField(
+          autofocus: true,
           decoration: const InputDecoration(labelText: 'Replace tags on selected modules',
-            hintText: 'bass, analog, lead')),
+            hintText: 'bass, analog, lead'),
+          onChanged: (next) => value = next,
+          onFieldSubmitted: (next) => Navigator.pop(context, next),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Apply tags')),
+          FilledButton(onPressed: () => Navigator.pop(context, value), child: const Text('Apply tags')),
         ],
       ),
     );
-    controller.dispose();
-    if (!mounted || value == null) return;
-    if (state.setModulesTags(_selectedModuleIds, value.split(','))) {
+    if (!mounted || result == null) return;
+    if (state.setModulesTags(_selectedModuleIds, result.split(','))) {
       _notice('Updated tags on $count modules.');
     }
     setState(() => _selectedModuleIds.clear());
@@ -205,23 +220,26 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
 
   Future<void> _saveSearch() async {
     if (_query.trim().isEmpty) return;
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
+    var name = '';
+    final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Save library search'),
-        content: TextField(controller: controller, autofocus: true,
-          decoration: const InputDecoration(labelText: 'Search name')),
+        content: TextFormField(
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Search name'),
+          onChanged: (value) => name = value,
+          onFieldSubmitted: (value) => Navigator.pop(context, value.trim()),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()),
+          FilledButton(onPressed: () => Navigator.pop(context, name.trim()),
             child: const Text('Save')),
         ],
       ),
     );
-    controller.dispose();
     if (!mounted) return;
-    if (name != null && name.trim().isNotEmpty && !state.saveLibrarySearch(name, _query)) {
+    if (result != null && result.trim().isNotEmpty && !state.saveLibrarySearch(result, _query)) {
       _notice('Search name/query is too long or the 32-search limit has been reached.', error: true);
     }
   }

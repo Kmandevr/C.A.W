@@ -4,6 +4,13 @@ summary: Current implementation state, branch and CI evidence for the C.A.W. Mas
 updated: 2026-11-01
 ---
 
+## Files dialog lifecycle fix at head 8601beb3
+
+- The new rename regression exposed a real Flutter lifecycle bug: locally owned TextEditingControllers were disposed immediately after a dialog popped, while the dialog's exit transition could still rebuild its TextField. The resulting disposed-controller exception then contaminated following widget tests.
+- Replaced dialog-local controllers in folder creation/rename, module tags, bulk tags, saved searches and module rename with TextFormField initial values and internal lifecycle management. This removes the premature-disposal race across the Files workspace, not only the newly added rename action.
+- The next exact-head App workflow must confirm all widget tests and analyzer output.
+
+
 
 ## Files workspace workflow completion at head aa0a0cb0
 
