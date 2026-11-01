@@ -130,7 +130,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       ),
     );
     controller.dispose();
-    if (value == null) return;
+    if (!mounted || value == null) return;
     state.setModuleTags(module.id, value.split(','));
   }
 
@@ -152,7 +152,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       ),
     );
     controller.dispose();
-    if (value == null) return;
+    if (!mounted || value == null) return;
     if (state.setModulesTags(_selectedModuleIds, value.split(','))) {
       _notice('Updated tags on $count modules.');
     }
@@ -176,6 +176,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       ),
     );
     controller.dispose();
+    if (!mounted) return;
     if (name != null && name.trim().isNotEmpty && !state.saveLibrarySearch(name, _query)) {
       _notice('Search name/query is too long or the 32-search limit has been reached.', error: true);
     }
