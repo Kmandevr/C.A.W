@@ -45,7 +45,8 @@ class ModuleDoc {
     runSource: j['run_source'] as String?,
     params: ((j['params'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
     folderPath: (j['folder_path'] as String?) ?? '',
-    tags: ((j['tags'] as List?) ?? const []).whereType<String>().toList(),
+    tags: ((j['tags'] as List?) ?? const []).whereType<String>().take(16)
+        .map((tag) => _boundedProjectText(tag, 48)).where((tag) => tag.isNotEmpty).toList(),
   );
 }
 
@@ -339,7 +340,7 @@ class ProjectDoc {
       globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
       modules: ((j['modules'] as List?) ?? const [])
           .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
-      libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().toList(),
+      libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().take(512).toList(),
       savedLibrarySearches: {
         for (final entry in ((j['saved_library_searches'] as Map?) ?? const {}).entries.take(32))
           if (_boundedProjectText(entry.key, 64).isNotEmpty && _boundedProjectText(entry.value, 256).isNotEmpty)
@@ -385,7 +386,8 @@ class ProjectDoc {
         module.folderPath = normalized;
         addFolderPath(normalized);
       }
-      module.tags = module.tags.where((tag) => tag.trim().isNotEmpty).take(16).toList();
+      module.tags = module.tags.map((tag) => _boundedProjectText(tag, 48))
+          .where((tag) => tag.isNotEmpty).take(16).toList();
     }
     project.libraryFolders = safeFolders.toList()..sort();
 
