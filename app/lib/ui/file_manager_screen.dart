@@ -115,6 +115,25 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     }
   }
 
+  void _auditionModule(ModuleDoc module) {
+    if (state.engine == null) {
+      _notice('The audio engine is unavailable; this module cannot be auditioned.', error: true);
+      return;
+    }
+    if (state.isLibrary(module.id)) {
+      _notice('Library modules do not produce audio on their own.', error: true);
+      return;
+    }
+    state.selectModule(module.id);
+    state.setPreviewOnly(true);
+    if (!state.meters.playing) state.togglePlay();
+  }
+
+  void _stopAudition() {
+    if (state.meters.playing) state.togglePlay();
+    state.setPreviewOnly(false);
+  }
+
   Future<void> _editTags(ModuleDoc module) async {
     final controller = TextEditingController(text: module.tags.join(', '));
     final value = await showDialog<String>(
@@ -323,6 +342,14 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                     onDeleted: () => state.deleteLibrarySearch(entry.key),
                   ),
               ])),
+          if (state.previewOnly) Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: OutlinedButton.icon(
+              onPressed: _stopAudition,
+              icon: const Icon(Icons.stop_circle_outlined),
+              label: const Text('Stop module audition'),
+            ),
+          ),
           if (_selectionMode) Padding(padding: const EdgeInsets.only(top: 8),
             child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
               Text('${_selectedModuleIds.length} selected', style: Neon.code(size: 11, color: Neon.blue)),
@@ -399,6 +426,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                 PopupMenuButton<String>(
                   tooltip: 'Module actions',
                   onSelected: (action) {
+                    if (action == 'audition') _auditionModule(module);
                     if (action == 'tags') _editTags(module);
                     if (action == 'export') _exportModule(context, module);
                     if (action == 'root') state.moveModuleToFolder(module.id, '');
@@ -407,6 +435,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                     }
                   },
                   itemBuilder: (_) => [
+                    if (!state.isLibrary(module.id))
+                      const PopupMenuItem(value: 'audition', child: Text('Audition')),
                     const PopupMenuItem(value: 'tags', child: Text('Edit tags')),
                     const PopupMenuItem(value: 'export', child: Text('Export .caw')),
                     const PopupMenuDivider(),
