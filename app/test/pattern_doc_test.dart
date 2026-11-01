@@ -178,7 +178,7 @@ void main() {
       expect(err('${head}0 A1 0\n'), 'line 4, col 6: the length (in steps) must be 0.001 to 4096');
       expect(err('${head}0 A1 1 2\n'), 'line 4, col 8: velocity must be 0 to 1');
       expect(
-          err('${head}0 A1 1 1 wobble\n'), "line 4, col 10: unknown extra 'wobble' (try prob 0.5, ratchet 3 or slide)");
+          err('${head}0 A1 1 1 wobble\n'), "line 4, col 10: unknown extra 'wobble' (try prob 0.5, ratchet 3, slide, bend, vib, press or timbre)");
       expect(err('${head}0 A1 1 prob\n'), "line 4, col 8: 'prob' needs a number after it");
       expect(err('${head}0 A1 1 ratchet 2.5\n'), 'line 4, col 16: ratchet must be a whole number');
       expect(err('${head}0 A1 1 ratchet 9\n'), 'line 4, col 16: ratchet must be 1 to 8');
@@ -380,6 +380,18 @@ void main() {
       expect(d.move({}, Steps.one, 1), same(d));
     });
 
+    test('moving a selected group preserves spacing, lengths and note data', () {
+      final d = body('0 C3 2 0.4 prob 0.5\n2 E3 1 0.8 ratchet 2\n');
+      final moved = d.move({1, 2}, Steps(3), 5);
+      final notes = moved.sortedNotes;
+      expect(notes.map((n) => n.at), [Steps(3), Steps(5)]);
+      expect(notes.map((n) => n.pitch), [53, 57]);
+      expect(notes.map((n) => n.len), [Steps(2), Steps.one]);
+      expect(notes.map((n) => n.vel), [0.4, 0.8]);
+      expect(notes.first.prob, 0.5);
+      expect(notes.last.ratchet, 2);
+    });
+
     test('triplet starts stay exact through moves and quantize', () {
       var d = body('13/3 C3 1/3\n');
       for (var i = 0; i < 6; i++) {
@@ -509,4 +521,121 @@ void main() {
       expect(d.serialize(), before);
     });
   });
+
+  group('generators', () {
+    const aMinor = (root: 9, scale: [0, 2, 3, 5, 7, 8, 10]);
+
+    test('euclid spreads pulses evenly and rotates', () {
+      final d = body('');
+      final e = d.euclid(at: Steps.zero, pulses: 3, steps: 8, cell: Steps.one, pitch: 36);
+      expect(e.doc.notes.map((n) => n.at.toDouble()), [0, 3, 6]);
+      expect(e.ids.length, 3);
+      final r = d.euclid(at: Steps(4), pulses: 3, steps: 8, cell: Steps.one, pitch: 36, rotate: 1);
+      expect(r.doc.notes.map((n) => n.at.toDouble()), [5, 8, 11]);
+    });
+
+    test('random in key keeps to the key and the seed', () {
+      final d = body('');
+      final a = d.randomInKey(
+          at: Steps.zero, span: Steps(16), cell: Steps.one, lo: 57, hi: 69, density: 0.6, key: aMinor, seed: 3);
+      final b = d.randomInKey(
+          at: Steps.zero, span: Steps(16), cell: Steps.one, lo: 57, hi: 69, density: 0.6, key: aMinor, seed: 3);
+      expect(a.doc.serialize(), b.doc.serialize());
+      expect(a.doc.notes, isNotEmpty);
+      for (final n in a.doc.notes) {
+        expect(aMinor.scale.contains((n.pitch.round() - 9) % 12), isTrue);
+        expect(n.pitch, inInclusiveRange(57, 69));
+      }
+    });
+
+    test('arpeggiate turns a chord into a run', () {
+      final d = body('0 C3,E3,G3 4\n4 A3 1\n');
+      final a = d.arpeggiate({1, 2, 3, 4}, Steps.one);
+      expect(a.doc.notes.map((n) => (n.at.toDouble(), n.pitch)).toList(),
+          [(4.0, 57.0), (0.0, 48.0), (1.0, 52.0), (2.0, 55.0), (3.0, 48.0)]);
+      final ud = d.arpeggiate({1, 2, 3}, Steps.one, order: 'updown');
+      expect(ud.doc.notes.where((n) => n.at < Steps(4)).map((n) => n.pitch), [48, 52, 55, 52]);
+    });
+
+    test('humanize stays near the note and is repeatable', () {
+      final d = body('0 C3 1 0.8\n4 D3 1 0.8\n');
+      final h = d.humanize({1, 2}, timing: 0.25, velocity: 0.1, seed: 5);
+      expect(h.serialize(), d.humanize({1, 2}, timing: 0.25, velocity: 0.1, seed: 5).serialize());
+      for (final n in h.notes) {
+        expect(n.at.toDouble(), greaterThanOrEqualTo(0));
+        expect(n.vel, inInclusiveRange(0.7, 0.9));
+      }
+      expect((h.notes[1].at.toDouble() - 4).abs(), lessThanOrEqualTo(0.25));
+    });
+
+    test('chord stamp follows the key', () {
+      final d = body('0 A2 2\n');
+      expect(d.chordStamp({1}, key: aMinor).doc.notes.map((n) => n.pitch), [45, 48, 52]); // A C E
+      expect(d.chordStamp({1}).doc.notes.map((n) => n.pitch), [45, 49, 52]); // A C# E
+      expect(d.chordStamp({1}, key: aMinor, seventh: true).doc.notes.length, 4);
+      expect(body('0 C3,E3,G3 1\n').chordStamp({1, 2, 3}).doc.notes.length, 6, reason: 'no doubled pitches');
+      expect(body('0 G9 1\n').chordStamp({1}).doc.notes.length, 1, reason: 'nothing past 127');
+    });
+
+    test('shape sets velocity or chance per note, and changes nothing when the values match', () {
+      final d = body('0 C3 1 0.5\n4 D3 1 0.5\n');
+      final v = d.shape({1, 2}, (n) => n.at.toDouble() / 4);
+      expect(v.notes.map((n) => n.vel), [0, 1]);
+      expect(d.shape({2}, (n) => 0.25, chance: true).notes[1].prob, 0.25);
+      expect(identical(d.shape({1, 2}, (n) => 0.5), d), isTrue);
+    });
+
+    test('reverse and invert pitch', () {
+      final d = body('0 C3 1\n2 D3 2\n');
+      expect(d.reverse({1, 2}).notes.map((n) => n.at.toDouble()), [3, 0]);
+      expect(d.invertPitch({1, 2}, 49).notes.map((n) => n.pitch), [50, 48]);
+    });
+  });
+
+  group('note expression', () {
+    test('reads and writes bend, vib, press and timbre like the engine', () {
+      final d = body('0 C3 4 1 bend 0:0~0.5 0.5:12 1:-2 vib 0.3 5.5 0.25 press 0:1 1:0.2 timbre 0:0 1:1\n4 D3 4\n');
+      final e = d.notes.first.expr;
+      expect(e.bend, [const NotePoint(0, 0, 0.5), const NotePoint(0.5, 12), const NotePoint(1, -2)]);
+      expect(e.vibDepth, 0.3);
+      expect(e.vibFade, 0.25);
+      expect(e.press.last.v, 0.2);
+      expect(d.notes[1].expr.isEmpty, isTrue);
+      expect(NoteExpression.valueAt(e.bend, 0.5), 12);
+      expect(NoteExpression.valueAt(e.bend, 0.25), lessThan(6)); // eased in
+      // An edited note writes its expression back after the other extras.
+      final changed = d.setExpression({d.notes[1].id}, const NoteExpression(bend: [NotePoint(0, 0), NotePoint(1, 2)], vibDepth: 0.5, vibRate: 6));
+      expect(changed.serialize(), contains('bend 0:0 1:2  vib 0.5 6'));
+      final again = PatternDoc.parse(changed.serialize()).doc!;
+      expect(again.notes[1].expr, changed.notes[1].expr);
+    });
+
+    test('errors match the engine', () {
+      expect(PatternDoc.parse('${head}0 C3 1 bend\n').error, contains('needs points'));
+      expect(PatternDoc.parse('${head}0 C3 1 bend 0.5:1 0.2:0\n').error, contains('rising'));
+      expect(PatternDoc.parse('${head}0 C3 1 press 0:2\n').error, contains('press values must be 0 to 1'));
+      expect(PatternDoc.parse('${head}0 C3 1 vib 0.3\n').error, contains('vib needs depth and rate'));
+    });
+
+    test('a chord line shares its expression; different expressions split the line', () {
+      final d = body('0 C3,E3 2 1 bend 0:0 1:1\n');
+      expect(d.notes[0].expr, d.notes[1].expr);
+      final split = d.setExpression({d.notes[1].id}, NoteExpression.none);
+      expect(split.serialize().split('\n').where((l) => l.trim().startsWith('0 ')).length, 2);
+    });
+  });
+  group('note expression time snapping', () {
+    test('snaps positions to the note-relative grid', () {
+      expect(NoteExpression.snapTime(0.26, grid: 0.25), closeTo(0.25, 1e-9));
+      expect(NoteExpression.snapTime(0.38, grid: 0.25), closeTo(0.5, 1e-9));
+    });
+
+    test('keeps points within the note and supports snap-off', () {
+      expect(NoteExpression.snapTime(-0.2, grid: 0.25), 0);
+      expect(NoteExpression.snapTime(1.2, grid: 0.25), 1);
+      expect(NoteExpression.snapTime(0.263, grid: 0), closeTo(0.263, 1e-9));
+      expect(NoteExpression.snapTime(0.263), closeTo(0.263, 1e-9));
+    });
+  });
+
 }
