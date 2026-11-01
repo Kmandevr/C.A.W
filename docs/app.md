@@ -1,6 +1,6 @@
 ---
 title: App
-summary: The built Flutter app: Builder, Arranger, Mixer, Engine Lab, Automation and Exporter, engine integration, project storage and CI.
+summary: The built Flutter app: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter and Files, engine integration, project storage and CI.
 covers: [app/]
 updated: 2026-10-31
 ---
