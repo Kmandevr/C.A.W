@@ -92,7 +92,7 @@ Planned capabilities:
 - Stereo-native sources, filters, effects and routing.
 - Custom modules in effect slots and composite instruments.
 
-The implemented synth patch currently supports three wavetable oscillator slots, sub/noise, unison up to 16, two serial/parallel filters, three ADSR envelopes, four tempo-synced LFOs (built-in shapes; drawn curves are not implemented), four macros and a modulation matrix. A single bounded phase-distortion warp parameter is implemented; additional warp modes, custom table authoring, built-in chorus and EQ are not. Voice and resource limits are explicit (voices 1–32, subject to project cap); see [Synth](synth.md).
+The implemented synth patch currently supports three wavetable oscillator slots, sub/noise, unison up to 16, two serial/parallel filters, three ADSR envelopes, four tempo-synced LFOs (built-in shapes plus four-point curve parameters; a graphical curve editor is not implemented), four macros and a modulation matrix. A single bounded phase-distortion warp parameter is implemented; additional warp modes, custom table authoring, built-in chorus and EQ are not. Voice and resource limits are explicit (voices 1–32, subject to project cap); see [Synth](synth.md).
 
 ## 6. MIDI and expression
 
