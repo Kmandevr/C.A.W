@@ -97,7 +97,7 @@ class ExportHistoryEntry {
   Map<String, dynamic> toJson() => {
     'file_name': fileName, 'kind': kind, 'created_at_ms': createdAtMs,
     'sample_rate': sampleRate, 'float32': float32, 'seconds': seconds, 'frames': frames,
-    'target': target, 'param': param,
+    'target_id': target, 'param': param,
   };
 
   static ExportHistoryEntry? fromJson(Object? raw) {
@@ -117,8 +117,8 @@ class ExportHistoryEntry {
       float32: raw['float32'] == true,
       seconds: _settingDouble(raw['seconds'], 8).clamp(1.0, 120.0).toDouble(),
       frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
-      target: _settingText(raw['target'], 128),
-      param: _settingText(raw['param'], 128),
+      target: _settingText(rawTarget, 128),
+      param: _settingText(rawParam, 128),
     );
   }
 }
