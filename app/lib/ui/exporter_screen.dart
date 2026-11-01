@@ -21,6 +21,7 @@ class ExporterScreen extends StatefulWidget {
 
 class _ExporterScreenState extends State<ExporterScreen> {
   ExportKind _kind = ExportKind.loop;
+  bool _advanced = false;
   int _rate = 48000;
   bool _float = false;
   double _seconds = 8;
@@ -176,19 +177,35 @@ class _ExporterScreenState extends State<ExporterScreen> {
     if (_param != null && !params.any((x) => x.name == _param)) _param = null;
     final busy = _job != null;
     return ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 96), children: [
-      const Heading('What to export'),
-      SegmentedButton<ExportKind>(
+      const Heading('Export mode'),
+      SegmentedButton<bool>(
         segments: const [
-          ButtonSegment(value: ExportKind.loop, label: Text('Loop')),
-          ButtonSegment(value: ExportKind.free, label: Text('Length')),
-          ButtonSegment(value: ExportKind.oneShot, label: Text('One-shot')),
-          ButtonSegment(value: ExportKind.wavetable, label: Text('Table')),
-          ButtonSegment(value: ExportKind.midi, label: Text('MIDI')), 
+          ButtonSegment(value: false, label: Text('Quick Export'), icon: Icon(Icons.bolt)),
+          ButtonSegment(value: true, label: Text('Advanced'), icon: Icon(Icons.tune)),
         ],
-        selected: {_kind},
+        selected: {_advanced},
         showSelectedIcon: false,
-        onSelectionChanged: busy ? null : (v) => setState(() => _kind = v.first),
+        onSelectionChanged: busy ? null : (v) => setState(() {
+          _advanced = v.first;
+          if (!_advanced) _kind = ExportKind.loop;
+        }),
       ),
+      if (_advanced) ...[
+        const SizedBox(height: 12),
+        const Heading('What to export'),
+        SegmentedButton<ExportKind>(
+          segments: const [
+            ButtonSegment(value: ExportKind.loop, label: Text('Loop')),
+            ButtonSegment(value: ExportKind.free, label: Text('Length')),
+            ButtonSegment(value: ExportKind.oneShot, label: Text('One-shot')),
+            ButtonSegment(value: ExportKind.wavetable, label: Text('Table')),
+            ButtonSegment(value: ExportKind.midi, label: Text('MIDI')),
+          ],
+          selected: {_kind},
+          showSelectedIcon: false,
+          onSelectionChanged: busy ? null : (v) => setState(() => _kind = v.first),
+        ),
+      ],
       const SizedBox(height: 12),
       NeonPanel(
         color: Neon.yellow,
@@ -284,7 +301,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
               backgroundColor: Neon.yellow, foregroundColor: Neon.bg, minimumSize: const Size.fromHeight(52)),
           onPressed: _export,
           icon: const Icon(Icons.download),
-          label: Text(_kind == ExportKind.midi ? 'Export MIDI' : 'Export WAV',
+          label: Text(!_advanced ? 'Quick Export' : _kind == ExportKind.midi ? 'Export MIDI' : 'Export WAV',
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
         ),
       if (_message != null)
