@@ -127,8 +127,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   Future<void> _createRestorePoint() async {
     try {
       final created = await state.createRestorePoint();
-      if (mounted) _notice(created ? 'Created a restore point for this project.' :
-        'Project storage is not ready; restore points are unavailable.', error: !created);
+      if (mounted) {
+        _notice(created ? 'Created a restore point for this project.' :
+          'Project storage is not ready; restore points are unavailable.', error: !created);
+      }
     } catch (e) {
       if (mounted) _notice('Restore point could not be created: $e', error: true);
     }
@@ -180,8 +182,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       );
       if (proceed != true || !mounted) return;
       final restored = await state.restoreProjectVersion(selected);
-      if (mounted) _notice(restored ? 'Project version restored.' :
-        'That restore point is no longer available.', error: !restored);
+      if (mounted) {
+        _notice(restored ? 'Project version restored.' :
+          'That restore point is no longer available.', error: !restored);
+      }
     } catch (e) {
       if (mounted) _notice('Restore history could not be opened: $e', error: true);
     }

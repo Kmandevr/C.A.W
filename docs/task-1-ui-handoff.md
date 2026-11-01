@@ -4,13 +4,13 @@ summary: Current implementation state, branch and CI evidence for the C.A.W. Mas
 updated: 2026-11-01
 ---
 
-## Durable project restore points at head 527a01e7
+## Durable project restore points (implemented at 0081a61b)
 
 - Added explicit, persistent project restore points to app-private storage. Snapshots use atomic temporary-file writes, are scoped to a validated project ID, and retain the newest 20 versions per project.
 - Added restore-point listing and safe loading that skips malformed snapshots and rejects snapshots belonging to another project. Deleting a project also deletes its restore-point history.
 - Added Files workspace actions to create a restore point and inspect/restore prior versions. Restoring first snapshots the current project, then reloads the selected version through the existing AppState project-switch path so the engine is resynchronized.
 - Added storage-level regression tests in `app/test/storage_test.dart` for snapshot round-trip, ordering, cross-project rejection, retention and history cleanup.
-- Exact-head CI is pending; no passing claim is made yet.
+- Exact-head verification is tracked in the CI section below. Restore-point storage and UI are implemented; do not claim them verified until the latest App workflow passes.
 
 
 ## Files autosave-timer regression fix at head 7d6f337e
@@ -41,7 +41,7 @@ updated: 2026-11-01
 
 - Repository: `Kmandevr/C.A.W`
 - Implementation branch: `feature/task-1-ui-workflow`
-- Latest verified implementation head before the Files workflow completion commit: `aa0a0cb012725bae68fabd1a1af3768aace50757`.
+- Latest branch head at this handoff edit: `0081a61bb6b4d52b831b18a459b2706bf5492433`; CI cleanup and final verification are in progress.
 - PR: [#56 — Task 1 UI workspaces](https://github.com/Kmandevr/C.A.W/pull/56), open and draft.
 - PR base branch: `ccr-395682a8-dthizd` (base SHA at the last inspection: `b919994b6a583e4531438630eee08d4c642ef7db`). The branch is diverged from base; do not rebase or change its base silently.
 - PR remains unmerged. Do not merge without explicit authorization.
@@ -60,7 +60,7 @@ updated: 2026-11-01
   - Up to 50 export jobs can be queued in-session; each snapshots the project and options at queue time. Jobs run sequentially, can be removed/cancelled, and pause on render/save failure. The queue is not persisted across restarts.
   - Up to 32 named export profiles and the last 20 successful exports persist in settings. History records kind, sample rate, bit depth, length/frame settings, target and parameter so settings can be reapplied when the target still exists.
 - **Plugin Builder:** guided blank/template creation and advanced selection/cloning of existing native modules; validates with the existing engine, exposes generated parameters and packages native `.caw` source. CLAP/VST3 binary builds, sandboxing and host I/O testing require a native plugin SDK/host backend not present in the repository.
-- **Files:** portable `.cawproj` project and `.caw` module import/export; project-local nested folders, tags, saved searches, name/type sorting, duplicate-source indicators, bulk move and bulk tag operations, and bounded in-session undo/redo (50 metadata snapshots). Imports get a new project identity and malformed/future project versions are rejected. Non-library modules can be sent to the existing Builder Solo preview path.
+- **Files:** portable `.cawproj` project and `.caw` module import/export; project-local nested folders, tags, saved searches, name/type sorting, duplicate-source indicators, bulk move and bulk tag operations, and bounded in-session undo/redo (50 metadata snapshots). Imports get a new project identity and malformed/future project versions are rejected. Explicit atomic project restore points and version history are available from Files (newest 20 retained per project); restore snapshots the current version before switching. Non-library modules can be sent to the existing Builder Solo preview path.
 - **Navigation and touch:** eight workspaces are available on desktop and mobile; mobile uses focused More navigation. Global shortcuts cover all eight workspaces. Custom toggle targets are at least 48 dp.
 - **Performance profiles:** Full Experience, Balanced, Lightweight and Minimal. Visual effects are reduced before feedback cadence; meter polling remains at 30 Hz in every profile. Arranger playhead and scope/FFT work use retained buffers and scoped update paths.
 
@@ -109,14 +109,14 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Added a widget regression test asserting the Arranger control updates the shared project value, emits one value tick, emits no app-wide notification, and redraws the slider from the updated value.
 - Verification for this correction is pending the new exact-head App workflow; no passing claim is made until that run completes.
 
-## Remaining Task 1 work
+## Not implemented / deferred Task 1 work
 
 - Finish Mixer capabilities only where the native engine API supports them; missing routing, stereo analysis and master-FX features above remain Task 2 dependencies.
 - Integrate universal editable Engine Lab graphs, low-level data inspection and programmable engine modules after Task 2 provides stable APIs.
 - Extend automation to parameters, modulation connections and processing behavior on the shared engine graph.
 - Extend Exporter with durable queue persistence if needed, stems/batch rendering, additional formats/bit depths/channel layouts, normalization/dither and dependency portability only when backend support exists.
 - Complete CLAP plugin build/validation/packaging after native host/SDK integration and license review.
-- Complete Files audio/MIDI previews and preview caching, durable version history/restore points, dependency collection/relinking, project consolidation and OS-level folder browsing. Current Solo preview is a handoff to Builder, not a background preview player.
+- Complete Files audio/MIDI previews and preview caching, dependency collection/relinking, project consolidation and OS-level folder browsing. Current Solo preview is a handoff to Builder, not a background preview player.
 - Complete desktop docking/panel persistence and full responsive/touch/keyboard/accessibility review.
 - Verify all workspaces on physical mobile and desktop hardware; capture frame-time, CPU, memory, thermal and audio-dropout measurements before making performance claims.
 - Run the latest queued CI for the current PR head, fix remaining failures, then update this handoff and PR description with exact results.
