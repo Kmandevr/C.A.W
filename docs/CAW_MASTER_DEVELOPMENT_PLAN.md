@@ -1,16 +1,16 @@
 ---
 title: C.A.W. master development plan
-summary: Approved coordinated scope for the complete UI and workflow overhaul and the audio engine integration and optimization.
-updated: 2026-10-31
+summary: Design specification for the UI/workflow overhaul and engine integration; current implementation status is tracked separately.
+updated: 2026-11-01
 ---
 
 # C.A.W. — Master Development Plan
 
-**Status:** Approved plan; Task 1 implementation authorized by the user on 2026-10-31. Task 2 remains architectural context for this workstream.  
+**Status:** This is an owner-approved design specification, not a current implementation report. Task 1 implementation was authorized on 2026-10-31; the current shipped UI and remaining gaps are recorded in [App](app.md), [UI design](ui.md) and the [core development plan](core-and-feature-plan.md). Task 2 remains architectural context; its graph-to-Engine/VM integration is paused as recorded in [engine implementation status](engine-build-status.md).  
 **Project:** C.A.W. (Code Auditioning Workspace), repository `Kmandevr/C.A.W`.  
-**Purpose:** Preserve the agreed scope from the design session as two coordinated master tasks for future contributors and development sessions.
+**Purpose:** Preserve the agreed design scope for future contributors without implying that every requirement below is implemented.
 
- > This is C.A.W., not AutoStacc. This is the authoritative planning specification. Implementation requires explicit user authorization; Task 1 has now been authorized in the active development session. Audit the repository before making changes.
+> This is C.A.W., not AutoStacc. The requirements below are design intent unless the current app/engine references explicitly mark them implemented. The owner has directed no in-app AI integration for now; AI-related proposals in this design are deferred and must not be built without a new explicit decision. Always audit the repository before changing code.
 
 # Master Task 1 — Complete UI and Workflow Overhaul
 
