@@ -20,8 +20,8 @@ An experimental, code-driven glitch-sound instrument for Android, iOS, Windows, 
 
 Workflows:
 - `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push and pull request; superseded runs are cancelled per branch/PR.
-- `.github/workflows/app.yml`: Dart checks and tests, then the Android APK (`caw-android-apk`) and the Windows app (`caw-windows`) as downloadable artifacts; superseded runs are cancelled.
-- `.github/workflows/engine.yml`: builds the engine and runs its tests and golden renders on Linux (x64 and Arm64) and Windows, plus a sanitizer run, checks that the generated function docs are current, and renders each example except patterns (they need a sound to play them); superseded runs are cancelled.
+- `.github/workflows/app.yml`: runs Dart analysis, Dart tests, Android APK and Windows app as independent jobs. Flutter SDK and Dart packages are cached; native test builds use ccache; Dart tests run with bounded parallelism. The APK (`caw-android-apk`) and Windows app (`caw-windows`) are downloadable artifacts; superseded runs are cancelled.
+- `.github/workflows/engine.yml`: builds and tests Linux x64, Linux Arm64, Windows x64 and Linux sanitizers in a four-job matrix. Linux native builds cache compiler outputs; CTest runs the native suite in four deterministic parallel shards. The Linux x64 job also checks generated function docs and renders each example except patterns (they need a sound to play); superseded runs are cancelled.
 - `.github/workflows/clear-status-on-close.yml`: removes `status:` labels when an issue closes.
 
 ## Working on it
