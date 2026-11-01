@@ -13,6 +13,10 @@ Labels used below:
 - **[Proposal]** is a recommendation that is open to change.
 - **[Assumption]** has not been verified yet and needs checking.
 
+## Product focus and capability
+
+C.A.W.'s primary focus is sound design and music-content creation: making, shaping, auditioning, organising and exporting sounds, instruments, patterns and reusable musical content. That focus is not a prohibition on DAW capabilities. The app should include useful recording, arranging, editing, mixing and export functionality where it helps users make complete music, and it should be capable of serving as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment. “Not primarily a DAW” describes the product's centre of gravity, not a reason to reject practical music-production features.
+
 ## 0. Current state
 
 - **[Fact]** As of 2026-10-28, v1 is built: the C++ engine (`engine/`, described in [engine](engine.md)), the Flutter app for Android and Windows (`app/`) and the starter modules (`examples/`). CI builds and tests all of it. The plugin, GitHub sync, AI library editing and the v2 synth are still plans.
@@ -360,6 +364,18 @@ Any agent that can edit files in git works with this setup. There's no provider-
 | Licensing | Use only permissive dependencies (miniaudio public domain/MIT-0, Flutter BSD-3, any NKIDO use MIT), avoid GPL. Don't bundle community bytebeat formulas without permission. Choose the app license and library license (e.g. CC0/MIT for modules) **before** accepting outside contributions |
 | Selling only through AutoStacc (owner) | **[Proposal]** Android: one release signing key kept for good in repository secrets (every update must be signed with it), plus clear install steps on the AutoStacc page. Windows: code-sign installers so SmartScreen doesn't block them. macOS: sign and notarize with an Apple Developer account. A privacy policy is needed everywhere (the app stores GitHub tokens) |
 | iOS can't be sold only through AutoStacc | **[Fact]** Outside the App Store, iOS apps can only be distributed through alternative marketplaces in the EU (and now Japan). That requires Apple's approval, notarization and an organization account ([Apple](https://developer.apple.com/support/alternative-app-marketplace-in-the-eu), 2026-10-28). iOS realistically means the App Store, so it's an open question in [vision](vision.md#open-questions) |
+
+## Proposed module and interface extensions
+
+The following are **[Proposal]**, not settled requirements or claims of implementation:
+
+- Keep readable `.caw` source as the authoritative module definition. Visual assembly and generated controls should edit the same underlying module and parameter model rather than creating a second, incompatible representation.
+- Allow modules to describe their ordinary controls from parameter metadata, while permitting a specialised hand-built interface when generated controls are insufficient. UI code remains outside the audio-processing callback.
+- Use typed signal/port metadata and stable module identifiers where visual connections are needed. Keep code-defined module chains usable without requiring a graph editor.
+- Distinguish project-local assets from reusable global assets. Local references should travel with the project; global references should resolve through stable IDs and explicit versions.
+- Keep platform-specific device access behind adapters. The same portable native core should remain usable by the Flutter app, CLI, offline renderer and any later plugin host.
+
+These proposals should be implemented only when a concrete v2 feature needs them; they are not a reason to introduce framework layers in advance.
 
 ## Sources
 

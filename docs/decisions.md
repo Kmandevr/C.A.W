@@ -17,6 +17,28 @@ updated: 2026-10-28
 
 Newest first. A later entry wins over an earlier one on the same topic.
 
+## 2026-10-31: GPT builds, Claude reviews (owner)
+
+- The owner runs GPT for long stretches, because it's free, to do optimisation and new features, so that existing features get used.
+- GPT's job is to get the work done. It isn't asked to tidy commit history, fix its own process problems or keep the docs current.
+- Claude's job is to check that GPT's work is implemented correctly: review its pull requests and changes for correctness, regressions and broken rules. Claude fixes or reports what it finds when the owner asks; documentation catch-up is part of that.
+
+
+## 2026-10-29: Per-note expression, MPE style (owner)
+
+- Every note can carry its own pitch curve (drawn with points and bendable segments, like MIDI Sketch), vibrato, volume (pressure) and timbre curves. Pitch comes first in the roll; volume and timbre use the same mechanism.
+- **Bend range:** ±12 semitones by default (the file allows ±48).
+- **Vibrato:** drawn by hand, and also a per-note knob (depth, rate, fade-in) and shape presets.
+- **MIDI export:** as MPE, for Reaper and MPE synths.
+- Syntax as proposed on [#11](https://github.com/Kmandevr/C.A.W/issues/11): `bend`, `vib`, `press` and `timbre` extras on a note line ([engine](engine.md#patterns)). Automation lanes for params and globals (the rest of #11) are still open.
+
+## 2026-10-29: Roll touch, agent docs, and the next editor work (owner)
+
+- **Roll touch:** one finger dragged on empty grid scrolls; a tap there draws. Drawing by dragging out a new note is dropped, so a stray swipe never adds notes. The roll must work inline in the Builder, not only full screen.
+- **Agent docs:** a note on how the code connects end to end ([how it works](how-it-works.md)), on top of each file's purpose line.
+- **Next, in this order** (each a GitHub issue): roll customisation (own toolbar, sizes and look, gestures, bigger targets, the `roll.gen.*` generators); the code editor (customisable Controls panel, key row, chips and toolbar; new controls declared from code: buttons, XY pad, knobs on desktop, a step/table editor); curves with points and bendable segments, for velocity and chance shapes, param and global automation, per-note pitch bend and MIDI CC export.
+- The syntax for new controls and for curves in pattern files is proposed to the owner before it is built.
+
 ## 2026-10-28: Light mode, and this branch becomes main (owner)
 
 - The owner approved the proposed Light mode ([UI design](ui.md#light-on-cpu-and-ram)). It is built as proposed, plus a switch for turning on by itself.
