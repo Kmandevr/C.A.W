@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Retro-neon, arrangement-first creative UI across eight shared-state workspaces on desktop and mobile.
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # UI design
@@ -96,40 +96,20 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 ## Editors
 
-- **Owner's answers (2026-10-28), not built yet; the owner has more input before building starts:**
-  - The piano roll comes next, inside today's app (before the session-grid redesign), together with the drum grid.
-  - The piano roll and the drum grid edit the same pattern files, which stay readable text. Selected arrangement clips can be shown as faint reference notes; notes in the active source retain ownership and remain the only directly editable notes unless the selected clips share a linked source.
-  - **Scale:** rows in the project's key are highlighted. Notes can go anywhere, with no lock to the key.
-  - **Velocity:** a lane under the roll.
-  - **New notes:** a tap makes a note as long as the last one you sized; dragging while drawing sets the length directly.
-  - **Extras** (probability, ratchet, slide): both a long-press panel (right-click or the Menu key on PC) and lanes you can switch on under the roll. Notes with extras show a dot.
-  - **Saving:** the editor rewrites the pattern's text but keeps the header and comment lines; note lines are rewritten in time order, and a comment at the end of a note line stays with that note.
-  - **Where:** selecting a pattern in Builder shows the roll or grid in place of the code, with the text one tap away, plus a button to go full screen.
-  - **Adaptive grid:**
-    - Zooming in adds finer grid lines between the existing ones, and zooming out removes them.
-    - Ableton works the same way. It also has a fixed mode ([Live shortcuts](https://www.ableton.com/en/manual/live-keyboard-shortcuts)).
-    - **Resolution:** you choose one, from 1 (a whole note) through 1/2, 1/4 and so on down to 1/128, or off. It's the finest the grid ever goes: with 1/8 chosen, zooming in stops adding lines at 1/8.
-    - **Snapping:** moving notes and changing their length snap to the resolution. Holding Shift while dragging a length ignores the grid.
-    - **Spacing:** tapping to place a note uses cells at least 48 dp wide, so on the phone a tap lands on the finest level that is still that wide. Dragging a length can use finer lines that are closer together, down to the chosen resolution. The owner confirmed this reading (2026-10-28).
-    - **Fixed:** a switch fixes the grid at its current size, so zooming no longer changes it.
-  - **Look:** notes glow in their layer's colour, and louder notes glow brighter. Selected notes get a white outline, and notes with extras get a dot.
-  - **Keys on the roll** work the same on PC and with a keyboard on the phone. When no keyboard is connected, the phone shows its touch tools.
-    - **W A S D** move the selected notes: A/D one grid step earlier or later, W/S one semitone up or down. The arrow keys do the same.
-    - **Ctrl + W A S D** moves the cursor instead, like Reaper's or Ableton's: one grid step in time or one note in pitch. The note it lands on is selected. **[Assumption]** The owner also mentioned jumping to the next note in that direction; confirm which one they mean.
-    - **Q** inserts a note at the cursor, with the last length used.
-    - **E** copies the selected note or chord to start right where the selection ends, and selects the copy, so pressing E again keeps extending the line.
-    - **Shift + A / D** shortens or lengthens the selected notes by one grid step.
-    - **Shift + W / S** inverts a selected chord: W moves the lowest note up an octave above the highest, and S moves the highest note down an octave below the lowest. **[Proposal]** On a single note, Shift + W / S moves it an octave.
-- **Drum grid:**
-  - cells at least 48 dp, scrolling one bar at a time, with a velocity lane under the steps
-  - notes with extras (probability, ratchets, custom values) show a small dot, like Elektron's blinking locked steps
-- **Piano roll:**
-  - **Modes:** a thumb tool bar switches between Draw, Select, Curve and Erase. That replaces the modifier keys a phone doesn't have.
-  - **Zoom:** two fingers zoom and scroll. One finger always edits, so editing and navigating never clash.
-  - **Feedback:** moving a note plays it, and moving a chord plays the chord.
-  - **Snap:** follows the grid setting, with a magnet toggle for free timing.
-  - **Curve mode:** draw on a note freehand, and it smooths into points and handles. Pitch bends show as a bent note. Other value curves are lines in a lane under the roll.
-- **Sound editor:** opens on the inspector (sliders, toggles, tips). The code editor from v1's Builder is a tab or drawer one tap away, for changing the sound itself.
+**Current implementation (checked 2026-11-01):** the pattern editor is implemented in Builder. It includes a piano roll and drum grid over the same text-backed pattern model, Draw/Select/Curve/Erase tools, adaptive grid and snapping, velocity/chance lanes, note extras, per-note expression editors, live note preview, multi-selection and generator actions. See [App](app.md) for the current interaction details and [music workflow gaps](music-workflow-feature-gap-plan.md) for what remains.
+
+Implemented pattern editing includes:
+- Draw, select, erase and curve tools; undo/redo; adaptive/fixed grid, triplets and snap/free timing.
+- Note velocity, chance, ratchet and slide extras.
+- Per-note pitch bend, pressure/volume, timbre and vibrato; editable points and segment bends.
+- Velocity and chance lane curves.
+- Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion actions.
+- Multi-selection, linked/independent clip references and multi-edit behavior.
+- MIDI pattern import/export through the pattern editor.
+
+**Remaining pattern work:** kit-row pattern routing, code-generated procedural patterns/Freeze, advanced quantization and groove tools, and any further editing improvements justified by tested gaps. Do not describe the existing curve tools or pattern generators as unimplemented.
+
+The broader UI specification below records design intent as well as current behavior. Where it differs from the app reference, [App](app.md) is authoritative for what currently ships.
 
 ## Keyboard (PC)
 
