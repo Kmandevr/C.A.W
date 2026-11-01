@@ -91,7 +91,6 @@ class _ExporterScreenState extends State<ExporterScreen> {
     }
 
     File? file;
-    RenderJob? job;
     try {
       final tmp = await getTemporaryDirectory();
       final name = _fileName();
@@ -109,7 +108,6 @@ class _ExporterScreenState extends State<ExporterScreen> {
         param: _param ?? '',
         frames: _frames,
       ));
-      job = startedJob;
       if (!mounted) {
         startedJob.cancel();
         return;
