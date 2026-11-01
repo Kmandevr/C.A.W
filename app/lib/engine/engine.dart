@@ -312,6 +312,8 @@ class Engine {
     calloc.free(id);
   }
 
+  void setMaster(double volume) => _b.setMaster(_handle, volume);
+
   void play() => _b.play(_handle);
   void stop() => _b.stop(_handle);
   void clearOverload() => _b.clearOverload(_handle);
