@@ -180,7 +180,7 @@ class _MasterScopeState extends State<_MasterScope> {
       const SizedBox(height: 8),
       ValueListenableBuilder<int>(
         valueListenable: widget.state.tick,
-        builder: (context, _, _) {
+        builder: (context, revision, _) {
           widget.state.engine?.scope(Engine.masterIndex, _samples);
           return SizedBox(
             height: 92,
