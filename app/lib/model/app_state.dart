@@ -5,6 +5,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../engine/engine.dart';
+import '../engine/execution.dart';
+import '../platform/resource_signals.dart';
 import 'poller.dart';
 import 'project.dart';
 import 'pattern_doc.dart';
@@ -63,6 +65,10 @@ class AppState extends ChangeNotifier {
   final Settings settings;
 
   Engine? engine;
+  EngineHardwareProfile? hardwareProfile;
+  EngineExecutionPlan? auditionPlan;
+  bool _disposed = false;
+  StreamSubscription<EnginePressure>? _resourcePressureSubscription;
   String? engineError;
   String? audioError;
   ProjectStorage? _storage;
@@ -155,8 +161,15 @@ class AppState extends ChangeNotifier {
   });
 
   Future<void> init() async {
+    _resourcePressureSubscription = ResourceSignals.changes.listen(
+      (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
+      onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
+    );
+    EngineExecutionPolicy.updateRuntimeSignals(pressure: await ResourceSignals.read());
     try {
       engine = Engine.create();
+      hardwareProfile = EngineExecutionPolicy.hardwareProfile;
+      auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
       templates = Engine.templates();
       audioError = engine!.startAudio();
     } catch (e) {
@@ -191,7 +204,11 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     settings.removeListener(_settingsChanged);
+    final pressureSubscription = _resourcePressureSubscription;
+    _resourcePressureSubscription = null;
+    if (pressureSubscription != null) unawaited(pressureSubscription.cancel());
     _poller.dispose();
     _liveTimer?.cancel();
     _saveTimer?.cancel();
@@ -211,6 +228,9 @@ class AppState extends ChangeNotifier {
     if (e == null) return false;
     final before = meters;
     meters = e.meters();
+    if (before.playing != meters.playing) {
+      EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
+    }
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
@@ -317,7 +337,7 @@ class AppState extends ChangeNotifier {
         audition: pv?.chain,
         auditionPattern: pv?.pattern,
         auditionOnly: previewOnly,
-        voices: settings.lightMode ? 4 : 8,
+        voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
         swap: settings.swapTiming.name);
     try {
       info = await e.setProject(json);
