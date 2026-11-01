@@ -143,10 +143,13 @@ class _ExporterScreenState extends State<ExporterScreen> {
       setState(() { _message = 'Choose a valid MIDI pattern first.'; _messageIsError = true; });
       return;
     }
-    final tmp = await getTemporaryDirectory();
-    final name = _fileName();
-    final file = File('${tmp.path}${Platform.pathSeparator}$name');
+    if (_busy) return;
+    setState(() { _busy = true; _message = null; });
+    File? file;
     try {
+      final tmp = await getTemporaryDirectory();
+      final name = _fileName();
+      file = File('${tmp.path}${Platform.pathSeparator}$name');
       final error = Engine.exportPattern(module.source, file.path,
         bpm: s.project.bpm, beatsPerBar: s.project.beatsPerBar);
       if (error != null) throw StateError(error);
@@ -158,7 +161,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
     } catch (e) {
       if (mounted) setState(() { _message = 'MIDI export failed: $e'; _messageIsError = true; });
     } finally {
-      if (await file.exists()) await file.delete();
+      if (file != null && await file.exists()) await file.delete();
+      if (mounted) setState(() => _busy = false);
     }
   }
 
