@@ -77,7 +77,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - Quick Export renders the current project loop; Advanced offers loop, free-length, one-shot, wavetable and MIDI pattern exports
   - audio renders use the native offline render job, with progress and cancellation, at 44.1 or 48 kHz and 24-bit or 32-bit float
-  - MIDI patterns use the native MIDI writer and preserve the project tempo and time signature
+  - MIDI patterns use the native MIDI writer in a worker isolate and preserve the project tempo and time signature
   - named export profiles persist in settings; the last 20 successful exports are recorded with reproducible settings that can be reapplied
   - a sequential in-memory queue holds up to 50 snapshot jobs, supports removal/clear, runs one render at a time and can cancel the current job while preserving remaining items
   - each queued item uses the native offline renderer or MIDI writer and asks for its own destination; the queue itself is not persisted across restarts. Batch/stem rendering and multi-destination automation remain incomplete
