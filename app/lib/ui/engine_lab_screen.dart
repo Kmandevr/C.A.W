@@ -1,5 +1,7 @@
 // Engine Lab: live diagnostics and inspectable relationships from the compiled project.
 // Only capabilities returned by the current engine API are presented; unsupported graph operations are not simulated.
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import '../model/app_state.dart';
 import '../model/project.dart';
@@ -25,6 +27,8 @@ class EngineLabScreen extends StatelessWidget {
           _Readout('STATUS', state.meters.playing ? 'RUNNING' : 'IDLE'),
           _Readout('OVERLOADS', state.meters.overloaded.toString()),
         ]))),
+      const SizedBox(height: 14),
+      _MasterScope(state: state),
       const SizedBox(height: 14),
       const Text('TRACK SIGNAL PATHS', style: TextStyle(color: Neon.green, fontWeight: FontWeight.w800)),
       const SizedBox(height: 8),
@@ -122,4 +126,75 @@ class _Readout extends StatelessWidget {
     Text(label, style: Neon.code(size: 10, color: Neon.dim)),
     Text(value, style: Neon.code(size: 16, color: Neon.blue)),
   ]);
+}
+
+
+/// Reads the engine's existing 1024-sample mono master scope only when the meter poller ticks.
+class _MasterScope extends StatefulWidget {
+  const _MasterScope({required this.state});
+  final AppState state;
+
+  @override
+  State<_MasterScope> createState() => _MasterScopeState();
+}
+
+class _MasterScopeState extends State<_MasterScope> {
+  final Float32List _samples = Float32List(512);
+
+  @override
+  Widget build(BuildContext context) => NeonPanel(color: Neon.blue, child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('MASTER SCOPE · MONO SUM', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      ValueListenableBuilder<int>(
+        valueListenable: widget.state.tick,
+        builder: (context, _, _) {
+          widget.state.engine?.scope(Engine.masterIndex, _samples);
+          return SizedBox(
+            height: 92,
+            width: double.infinity,
+            child: CustomPaint(painter: _ScopePainter(_samples)),
+          );
+        },
+      ),
+      const Text('Read-only view of the engine scope buffer. Left/right peak meters remain independent.',
+        style: TextStyle(color: Neon.dim, fontSize: 11)),
+    ],
+  ));
+}
+
+class _ScopePainter extends CustomPainter {
+  const _ScopePainter(this.samples);
+  final Float32List samples;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final mid = size.height / 2;
+    final grid = Paint()..color = Neon.line..strokeWidth = 1;
+    canvas.drawLine(Offset(0, mid), Offset(size.width, mid), grid);
+    for (var i = 1; i < 4; i++) {
+      final x = size.width * i / 4;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), grid);
+    }
+    if (samples.isEmpty) return;
+    final path = Path();
+    for (var i = 0; i < samples.length; i++) {
+      final x = i / (samples.length - 1) * size.width;
+      final y = mid - samples[i].clamp(-1.0, 1.0) * mid * 0.9;
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(path, Paint()
+      ..color = Neon.green
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeJoin = StrokeJoin.round);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScopePainter old) => !identical(old.samples, samples);
 }
