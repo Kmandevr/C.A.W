@@ -139,7 +139,7 @@ The owner wants proper synthesis, MIDI and musical helpers alongside raw bit-lev
   - CC and pitch bend mapped to `param`s ("MIDI learn")
   - MIDI clock in, so the tempo follows external gear
   - MIDI files imported to play a sound, and the sequencer's patterns exported as MIDI files for Reaper
-  - MPE later
+  - MPE-style per-note expression is supported in the note model and MIDI export; live MIDI hardware remains future work
 - **Musical time is built in:** `bpm` (project setting, or the host's when it's a plugin), `beat`, `bar`, `step` (16ths), and `pos` (0–1 through the loop). Code can say `(beat & 1) ? kick : 0` instead of working out sample counts.
 - **Loops that repeat cleanly:** a project has a loop length in bars at its BPM. Playback wraps at exactly that length, the waveform shows the loop, and export cuts at exactly that length, with loop points set. A bytebeat formula that doesn't repeat on its own gets a short crossfade at the seam, which can be turned off. For classic formulas the engine can also *find* their natural repeat length (powers of two of `t`) and offer it.
 - **Notes and scales:** note names (`C4`, `A#2`) and `mtof()`, plus `scale("minor", i)` and `chord("m7", i)` helpers. Quantizing a pitch to the project's key is one call.
@@ -210,7 +210,7 @@ The audio thread consumes pattern events separately from the sound's code, so a 
   - the current value of each note curve: `bend` for pitch, and custom values by name
 
   Polyphony (chords) uses the voice pool from the house synth's voice mode ([Instruments, wavetables and samples](#instruments-wavetables-and-samples)), each voice with its own curves. The built-in default pattern, for a layer without one, is one C4 note held through each layer loop (`trig` on its first sample), so templates written with `step % 4 == 0` keep working unchanged. **[Proposal]** Slide becomes a generated pitch curve once note curves exist, so there's one glide mechanism.
-- **Scenes** (owner, moved from Stage 5 into v2): a scene is a saved set of which pattern each layer plays, plus global values. Switching scenes happens at the next loop boundary, so it stays in time.
+- **Scenes/session grid:** retired by the owner in the 2026-10-31 arrangement-first decision. Do not treat the earlier scene proposal as active roadmap scope.
 - **MIDI 2.0 scope** (owner, 2026-10-28): MIDI 2.0 is how C.A.W stores notes, plus MIDI files. Connecting MIDI devices (controllers in, notes out) comes later.
 - **MIDI files** (owner chose them over device connections):
   - import of ordinary `.mid` files into patterns
