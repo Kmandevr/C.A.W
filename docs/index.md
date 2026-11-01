@@ -10,12 +10,13 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 
 ## Agent entry point
 
-- [Repository agent instructions](../AGENTS.md): portable starting point for non-Claude agents; links to project rules and skills without duplicating them. Claude-specific setup is documented in [../.claude/README.md](../.claude/README.md).
+- [Repository agent instructions](../AGENTS.md): portable starting point for non-Claude agents; links to project-wide guidance, area rules and skills. Claude-specific setup is documented in [../.claude/README.md](../.claude/README.md).
 
 ## Notes
 
 - [Task 1 UI implementation handoff](task-1-ui-handoff.md): current branch, implementation, CI evidence and next steps.
 - [Master development plan](CAW_MASTER_DEVELOPMENT_PLAN.md): approved Task 1 and Task 2 scope.
+- [Core development plan and complete feature list](core-and-feature-plan.md): the two-part master plan; ordered core build sequence followed by the complete owner-discussed feature inventory.
 - [Vision](vision.md): the owner's brief, condensed, and the open-questions register; read before planning a feature
 - [Architecture](architecture.md): current technical architecture and execution model
 - [Modular adaptive engine](engine-next.md): owner direction for the next native engine, modular creation, UI extensions, adaptive hardware use and implementation order
@@ -32,7 +33,7 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [Synth](synth.md): the house synth (kind: synth): owner's choices, the patch file, how the engine plays it, open questions and build stages
 - [UI design](ui.md): v2 layout and interactions for phone and desktop, gestures, editors, and the CPU and RAM budget
 - [Roadmap](roadmap.md): v1 (build, arrange, export) and later stages, with v1's acceptance test and build order
-- [Music workflow feature-gap plan](music-workflow-feature-gap-plan.md): verified implemented/partial/missing status and recommended build order for piano roll, mixer, audio editing, sampling, MIDI hardware, arrangement and export
-- [Lightweight creative audio systems plan](lightweight-creative-audio-systems.md): impact-ranked, performance-filtered plan for non-AI mathematical sound, cellular patterns, waveform transformation, variation, inspection and lightweight physical models
+- [Music workflow feature-gap plan](music-workflow-feature-gap-plan.md): verified implemented/partial/missing status and detailed build order for pattern editing, mixer, audio editing, sampling, MIDI hardware, arrangement and export
+- [Lightweight creative audio systems plan](lightweight-creative-audio-systems.md): detailed impact-ranked, performance-filtered designs for non-AI mathematical sound, cellular patterns, waveform transformation, variation, inspection and lightweight physical models
 - [Decisions](decisions.md): what was chosen and why
 - [Log](log.md): dated history of changes
