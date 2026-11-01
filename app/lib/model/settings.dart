@@ -249,9 +249,11 @@ class Settings extends ChangeNotifier {
     _shownLook = activeTheme.toFile();
   }
 
-  Future<void> saveExportProfile(ExportProfile profile) async {
+  Future<bool> saveExportProfile(ExportProfile profile) async {
     final name = profile.name.trim();
-    if (name.isEmpty || name.length > 64) return;
+    if (name.isEmpty || name.length > 64) return false;
+    final exists = exportProfiles.any((item) => item.name.toLowerCase() == name.toLowerCase());
+    if (!exists && exportProfiles.length >= 32) return false;
     exportProfiles = [
       ...exportProfiles.where((item) => item.name.toLowerCase() != name.toLowerCase()),
       ExportProfile(name: name, kind: profile.kind, sampleRate: profile.sampleRate,
@@ -259,6 +261,7 @@ class Settings extends ChangeNotifier {
     ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     notifyListeners();
     await save();
+    return true;
   }
 
   Future<void> deleteExportProfile(String name) async {
