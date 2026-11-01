@@ -30,6 +30,9 @@ extension PerformanceModeDetails on PerformanceMode {
   };
 }
 
+int _settingInt(Object? value, int fallback) => value is num ? value.toInt() : fallback;
+double _settingDouble(Object? value, double fallback) => value is num ? value.toDouble() : fallback;
+
 class ExportProfile {
   const ExportProfile({
     required this.name,
@@ -56,14 +59,14 @@ class ExportProfile {
     final kind = raw['kind'] as String;
     if (name.isEmpty || name.length > 64 ||
         !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) return null;
-    final rate = (raw['sample_rate'] as num?)?.toInt() ?? 48000;
-    final frames = (raw['frames'] as num?)?.toInt() ?? 64;
+    final rate = _settingInt(raw['sample_rate'], 48000);
+    final frames = _settingInt(raw['frames'], 64);
     return ExportProfile(
       name: name,
       kind: kind,
       sampleRate: rate == 44100 ? 44100 : 48000,
       float32: raw['float32'] == true,
-      seconds: ((raw['seconds'] as num?)?.toDouble() ?? 8).clamp(1.0, 120.0).toDouble(),
+      seconds: _settingDouble(raw['seconds'], 8).clamp(1.0, 120.0).toDouble(),
       frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
     );
   }
@@ -97,15 +100,15 @@ class ExportHistoryEntry {
     final kind = raw['kind'] as String;
     if (fileName.isEmpty || fileName.length > 160 ||
         !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) return null;
-    final rate = (raw['sample_rate'] as num?)?.toInt() ?? 48000;
-    final frames = (raw['frames'] as num?)?.toInt() ?? 64;
+    final rate = _settingInt(raw['sample_rate'], 48000);
+    final frames = _settingInt(raw['frames'], 64);
     return ExportHistoryEntry(
       fileName: fileName,
       kind: kind,
       createdAtMs: (raw['created_at_ms'] as num).toInt().clamp(0, 4102444800000),
       sampleRate: rate == 44100 ? 44100 : 48000,
       float32: raw['float32'] == true,
-      seconds: ((raw['seconds'] as num?)?.toDouble() ?? 8).clamp(1.0, 120.0).toDouble(),
+      seconds: _settingDouble(raw['seconds'], 8).clamp(1.0, 120.0).toDouble(),
       frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
     );
   }
