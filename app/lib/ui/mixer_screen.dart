@@ -35,7 +35,7 @@ class _MixerScreenState extends State<MixerScreen> {
             crossAxisCount: columns,
             crossAxisSpacing: 10,
             mainAxisSpacing: 10,
-            mainAxisExtent: 224,
+            mainAxisExtent: 280,
           ),
           itemBuilder: (context, index) => _ChannelStrip(
             state: widget.state,
@@ -111,45 +111,95 @@ class _ChannelStrip extends StatelessWidget {
   final int index;
 
   @override
-  Widget build(BuildContext context) => NeonPanel(color: Neon.layer(layer.color), padding: const EdgeInsets.all(10),
-    child: ValueListenableBuilder<int>(valueListenable: state.values, builder: (context, _, _) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w800))),
-          IconButton(tooltip: layer.mute ? 'Unmute' : 'Mute', visualDensity: VisualDensity.compact,
-            onPressed: () => state.mixLayer(layer, mute: !layer.mute),
-            icon: Icon(Icons.volume_off, color: layer.mute ? Neon.pink : Neon.dim)),
-          IconButton(tooltip: layer.solo ? 'Unsolo' : 'Solo', visualDensity: VisualDensity.compact,
-            onPressed: () => state.mixLayer(layer, solo: !layer.solo),
-            icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim)),
-        ]),
-        Text(layer.generatorId == null ? 'No generator' : (state.project.module(layer.generatorId)?.name ?? 'Missing generator'),
-          maxLines: 1, overflow: TextOverflow.ellipsis, style: Neon.code(size: 11, color: Neon.dim)),
-        const SizedBox(height: 6),
-        ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
-          final meter = index < state.layerMeters.length ? state.layerMeters[index] : null;
-          return Bar(value: meter?.peak ?? 0, color: Neon.green, height: 6);
-        }),
-        const Spacer(),
-        Row(children: [
-          const SizedBox(width: 48, child: Text('LEVEL', style: TextStyle(color: Neon.dim, fontSize: 10))),
-          Expanded(child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1, activeColor: Neon.green,
-            onChanged: (v) => state.mixLayer(layer, volume: v))),
-          SizedBox(width: 38, child: Text((layer.volume * 100).round().toString(),
-            textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.green))),
-        ]),
-        Row(children: [
-          const SizedBox(width: 48, child: Text('PAN', style: TextStyle(color: Neon.dim, fontSize: 10))),
-          Expanded(child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1, activeColor: Neon.blue,
-            onChanged: (v) => state.mixLayer(layer, pan: v))),
-          SizedBox(width: 38, child: Text(layer.pan.abs() < .01 ? 'C' :
-            (layer.pan.abs() * 100).round().toString() + (layer.pan < 0 ? 'L' : 'R'),
-            textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.blue))),
-        ]),
-      ],
-    )),
-  );
+  Widget build(BuildContext context) {
+    final folders = state.project.layers.where((item) => item.isFolder && item.id != layer.id).toList();
+    return NeonPanel(
+      color: state.selectedLayerId == layer.id ? Neon.blue : Neon.layer(layer.color),
+      padding: const EdgeInsets.all(10),
+      child: ValueListenableBuilder<int>(
+        valueListenable: state.values,
+        builder: (context, _, _) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Expanded(child: InkWell(
+                onTap: () => state.selectLayer(layer),
+                child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+              )),
+              IconButton(tooltip: layer.mute ? 'Unmute' : 'Mute', visualDensity: VisualDensity.compact,
+                onPressed: () => state.mixLayer(layer, mute: !layer.mute),
+                icon: Icon(Icons.volume_off, color: layer.mute ? Neon.pink : Neon.dim)),
+              IconButton(tooltip: layer.solo ? 'Unsolo' : 'Solo', visualDensity: VisualDensity.compact,
+                onPressed: () => state.mixLayer(layer, solo: !layer.solo),
+                icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim)),
+            ]),
+            if (layer.isFolder)
+              Row(children: [
+                const Expanded(child: Text('GROUP BUS', style: TextStyle(color: Neon.dim, fontSize: 10))),
+                Switch.adaptive(
+                  value: layer.busEnabled,
+                  onChanged: (v) => state.setFolderBus(layer, v),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ])
+            else ...[
+              if (layer.chain.isEmpty)
+                const Text('No generator or effects', style: TextStyle(color: Neon.dim, fontSize: 11))
+              else
+                Wrap(spacing: 4, runSpacing: 2, children: [
+                  for (final id in layer.chain)
+                    ActionChip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text(state.project.module(id)?.name ?? 'Missing module',
+                        maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
+                      onPressed: () { state.selectLayer(layer); state.selectModule(id); },
+                      side: const BorderSide(color: Neon.line),
+                      backgroundColor: Neon.panelHi,
+                    ),
+                ]),
+              Row(children: [
+                const SizedBox(width: 48, child: Text('ROUTE', style: TextStyle(color: Neon.dim, fontSize: 10))),
+                Expanded(child: DropdownButton<String?>(
+                  value: layer.parentId,
+                  isExpanded: true,
+                  underline: const SizedBox.shrink(),
+                  items: [
+                    const DropdownMenuItem<String?>(value: null, child: Text('Master')),
+                    for (final folder in folders)
+                      DropdownMenuItem<String?>(value: folder.id, child: Text(folder.name,
+                        maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  ],
+                  onChanged: (id) { state.moveLayerIntoFolder(layer, id); },
+                )),
+              ]),
+            ],
+            const SizedBox(height: 6),
+            ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
+              final meter = index < state.layerMeters.length ? state.layerMeters[index] : null;
+              return Bar(value: meter?.peak ?? 0, color: meter?.overloaded == true ? Neon.pink : Neon.green, height: 6);
+            }),
+            const Spacer(),
+            Row(children: [
+              const SizedBox(width: 48, child: Text('LEVEL', style: TextStyle(color: Neon.dim, fontSize: 10))),
+              Expanded(child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
+                activeColor: Neon.green, onChanged: (v) => state.mixLayer(layer, volume: v))),
+              SizedBox(width: 38, child: Text((layer.volume * 100).round().toString(),
+                textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.green))),
+            ]),
+            Row(children: [
+              const SizedBox(width: 48, child: Text('PAN', style: TextStyle(color: Neon.dim, fontSize: 10))),
+              Expanded(child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
+                activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v))),
+              SizedBox(width: 38, child: Text(layer.pan.abs() < .01 ? 'C' :
+                (layer.pan.abs() * 100).round().toString() + (layer.pan < 0 ? 'L' : 'R'),
+                textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.blue))),
+            ]),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ModuleInspector extends StatelessWidget {
