@@ -27,7 +27,7 @@ void main() {
     final module = ModuleDoc(id: 'gen-1', name: 'Bass synth', source: '');
     final layer = LayerDoc(id: 'layer-1', name: 'Bass', color: 0, generatorId: module.id, volume: 0.5);
     state.project = ProjectDoc(id: 'project-1', name: 'Workspace test', modules: [module], layers: [layer]);
-    state.selectedModuleId = module.id;
+    state.selectedModuleId = null;
     state.info[module.id] = const ModuleInfo(ok: true, kind: 'generator');
 
     await tester.pumpWidget(MaterialApp(
@@ -36,6 +36,9 @@ void main() {
 
     expect(find.text('MIXER / EDITOR'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
+    await tester.tap(find.text('Bass'));
+    expect(state.selectedLayerId, 'layer-1');
+    expect(state.selectedModuleId, module.id);
     final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
     expect(sliders.length, greaterThanOrEqualTo(3));
     sliders[1].onChanged!(0.72);
