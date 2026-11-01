@@ -49,6 +49,7 @@ public:
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
+    void setMaster(double volume);
     void play();
     void stop();
     void clearOverload();
@@ -100,6 +101,8 @@ private:
     int loopSteps_ = 64;
     uint32_t seed_ = 0;
     double master_ = 0.7;
+    double masterTarget_ = 0.7, masterStep_ = 0.0;
+    int masterRamp_ = 0;
     bool seamXf_ = true;
     int keyRoot_ = 9, keyScale_ = 1;
     int swapMode_ = 0;  // 0 at once, 1 next beat, 2 next bar
