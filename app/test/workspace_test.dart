@@ -256,7 +256,7 @@ void main() {
       home: Scaffold(body: ExporterScreen(state: state)),
     ));
 
-    expect(find.text('Master WAV'), findsOneWidget);
+    expect(find.text('Choose a saved profile'), findsOneWidget);
     expect(find.text('Recent_take.wav'), findsOneWidget);
     await tester.tap(find.text('Choose a saved profile'));
     await tester.pumpAndSettle();
