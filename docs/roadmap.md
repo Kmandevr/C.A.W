@@ -21,7 +21,7 @@ The Android app for the S22+, and a Windows app beside Reaper. Both are Flutter 
 1. **Builder: make modules.** A module is a file of code, either a **generator** (makes sound) or an **effect** (processes the sound coming into it). The screen has:
    - code editor with highlighting, the symbol key row and a one-line error display
    - scope
-   - auto-generated sliders for each `param`
+   - auto-generated sliders for each param
    - Run, which hot-swaps the module without stopping audio
    - starter templates: bytebeat loop, kick, bass, hats, glitch fx, and bit-crush and fold effects
 2. **Arranger: use modules (loop stack).** Any number of layers, each one a generator followed by a chain of effects.
@@ -33,16 +33,16 @@ The Android app for the S22+, and a Windows app beside Reaper. Both are Flutter 
    - **loop WAV:** exact length at the BPM, with loop points
    - **free-length WAV:** any number of seconds
    - **one-shot WAV:** one layer until it goes silent, end trimmed
-   - **wavetable:** 2048-sample single-cycle frames, sweeping a `param`, for Serum/Vital-style synths
+   - **wavetable:** 2048-sample single-cycle frames, sweeping a param, for Serum/Vital-style synths
 
    Everything exports at 44.1 or 48 kHz, 24-bit or 32-bit float. You pick where files are saved through the system file picker.
 
 ### Language in v1
 
 - bytebeat semantics and bit tools ([architecture](architecture.md#bits-and-determinism))
-- `let`, `param`, and `bpm`, `beat`, `bar`, `step`, `pos`
+- let, param, and bpm, beat, bar, step, pos
 - synth basics: sine, saw, square and triangle oscillators, noise, one envelope, one multimode filter
-- `in`, the incoming signal, so a module can work as an effect
+- in, the incoming signal, so a module can work as an effect
 
 ### Look
 
@@ -84,40 +84,18 @@ CI runs the engine tests and golden renders, and checks the acceptance test's ti
 
 Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is in [architecture](architecture.md#variables-and-patterns-proposal).
 
-- **Unity-style variables:**
-  - local `param`s with steps, tooltips, dropdowns, toggles and headers
-  - project `global`s in a Project Controls panel
-  - `export`ed signals other modules read (sidechain)
-  - **[Fact]** Built (step 1): params, globals, exports and functions, with the app's Controls and Project controls panels.
-- **Automation lanes:** volume and pan automation are now supported on tracks and folder buses; automation for globals and module parameters remains future work.
-- **Pattern builder:**
-  - **[Fact]** Built first (step 3a, the owner's priority): text patterns that any generator plays through voices, with chords, off-grid notes, probability, ratchets and slide ([engine](engine.md#patterns)).
-  - single-sound and kit patterns, 1 step to 64 bars long
-  - a drum grid and a piano roll, with snap (1/16, 1/32, triplets) or free timing
-  - notes with probability, ratchets, slide and custom values
-  - curves on notes, drawn freehand and then refined with handles: bent pitch shows as a curved note
-  - chord stamping, and generator buttons (Euclid, random in key, arpeggiate, humanize)
-  - procedural pattern code with optional per-repeat variation, and Freeze
-  - drag a pattern onto any layer
+- **Unity-style variables:** local params with steps, tooltips, dropdowns, toggles and headers; project globals; exported signals for sidechain. Existing params, globals, exports and functions are built.
+- **Automation lanes:** volume and pan automation are supported on tracks and folder buses; automation for globals and module parameters remains future work.
+- **Pattern builder:** text patterns played through voices, chords, off-grid notes, probability, ratchets and slide; single-sound and kit patterns, drum grid and piano roll; expression curves; chord stamping and generators (Euclid, random in key, arpeggiate, humanize); procedural variation and Freeze.
 - **Scenes/session grid:** retired in favour of the arrangement timeline; no alternate launcher view is planned.
-- **Standard library** ([architecture](architecture.md#standard-library-and-connectors-proposal)):
-  - envelopes and LFOs, filters and effects, MIDI and music theory, glitch and bit tools
-  - user `fn` functions
-  - docs generated into `docs/`, an agent guide, in-app help and inspector tips, checked in CI
-  - **[Fact]** Built (step 2): 69 documented built-in functions in ten categories, 12 more in the `drum`, `synth` and `util` libraries, project library modules, the [function library](library.md) and [agent guide](agent-guide.md) checked in CI, and the app's Library sheet (F1) and completion. MIDI functions come with MIDI ports.
+- **Standard library:** envelopes and LFOs, filters and effects, MIDI and music theory, glitch and bit tools, user functions, generated docs and in-app help. Existing built-ins and library are documented in [library](library.md).
 - **Connectors:** sidechain, modulation links (LFOs and envelopes onto any param), and MIDI ports.
-- **A UI for a light halfway DAW** ([UI design](ui.md)):
-  - an arrangement-first timeline with reusable MIDI clips, nested folder buses, a separate mixer and track automation
-  - one gesture vocabulary on both phone and desktop, and undo/redo
-  - painted grids, with the CPU and RAM budgets
-- **Notes stored the MIDI 2.0 way.** `.mid` import and MPE export come later; DAW export isn't a priority yet.
-- **The house-built synth:** play any generator you built as an instrument (voice mode, [architecture](architecture.md#instruments-wavetables-and-samples)). Its voice pool also plays chords from patterns.
-- on-screen keys
-- USB/Bluetooth MIDI: notes, CC learn, clock, MIDI file import and export
-- note and scale helpers
-- multisample (WAV + SFZ) and stems export
-- more synthesis built-ins ([architecture](architecture.md#synthesis-midi-and-musical-helpers))
-- a 1-day NKIDO/Cedar spike
+- **UI:** arrangement-first timeline with reusable MIDI clips, nested folder buses, a separate mixer and track automation; one gesture vocabulary on phone/desktop; undo/redo and painted grids.
+- **MIDI:** MIDI 2.0 note representation, on-screen keys, USB/Bluetooth MIDI, CC learn, clock, MIDI file import and export.
+- **House synth:** play any generator as an instrument with voice mode and chord patterns.
+- **Multisample (WAV + SFZ) and stems export.**
+- More synthesis built-ins and instrument support.
+- A 1-day NKIDO/Cedar spike.
 
 ## Stage 3 — GitHub integration
 
@@ -125,23 +103,22 @@ GitHub App with device-flow sign-in, a library repo template, tree-diff sync, at
 
 ## Stage 4 — AI-assisted editing
 
-`AGENTS.md` language guide in the library repo, library CI running `caw check` / `caw render` with preview WAVs on PRs, and in-app preview, merge and revert.
+The earlier roadmap label describes a separate, owner-directed library-editing stage. It is not authorization to add AI to the current audio/creative feature plan. The current creative-audio plan explicitly excludes AI generation, editing, separation, inference and cloud audio processing.
 
 ## Stage 4b — More platforms and plugins
 
 macOS and Linux desktop apps, then iOS once its distribution question is settled. A CLAP plugin of the engine, wrapped into VST3 and AU by clap-wrapper.
 
-## Stage 5 — Advanced instrument
+## Stage 5 — Advanced instrument and complete workflow
 
-The detailed, code-checked status and recommended sequence for music-production workflows lives in the [music workflow feature-gap plan](music-workflow-feature-gap-plan.md). It distinguishes what the app already implements from partial foundations and future work. Follow that plan before duplicating existing systems. In brief: finish piano-roll expression/generator tools; complete mixer routing; add basic non-destructive audio clips; build sample editing and multisample mapping; complete USB/Bluetooth MIDI connectivity; then improve arrangement, stems and batch export. Recording and comping remain deferred unless the owner changes scope.
+The detailed order and implementation gaps are tracked in the [core development plan and complete feature list](core-and-feature-plan.md), supported by the [music workflow feature-gap plan](music-workflow-feature-gap-plan.md). In brief: complete approved v2 commitments; finish piano-roll expression/generator tools; complete mixer routing; add basic non-destructive audio clips; build sample editing and multisample mapping; complete USB/Bluetooth MIDI connectivity; improve arrangement, automation and export; then add lightweight creative sound systems after their performance gates.
 
-The separate [lightweight creative audio systems plan](lightweight-creative-audio-systems.md) covers distinctive non-AI sound generation, transformation, variation and inspection. It ranks ideas by creative impact, implementation effort and expected device cost, and explicitly removes heavyweight proposals. It is a filtered research plan, not an instruction to start every feature: verify existing code, complete the current v2 priorities and pass each phase's performance gates before expanding.
+The [lightweight creative audio systems plan](lightweight-creative-audio-systems.md) remains the detailed design reference for non-AI mathematical sound, cellular patterns, waveform transformation, variation, inspection and lightweight physical models. It is a filtered proposal, not an instruction to implement every idea at once.
 
-- timeline arranger foundation is now in v2; remaining work includes more editing polish, clip-following automation and plugin/global parameter automation
-- the sequencing mini-language
-- audio import with nondestructive byte/bit mangling chains (originals are never modified)
-- sends and buses
-- free module patching (modular-style)
-- spectrum display
-- performance work
-- preparing to sell through AutoStacc: signed release builds, privacy policy, install steps, and how a purchase unlocks the app
+## Release and performance direction
+
+- Maintain local/offline operation, phone-first usability and a shared native engine.
+- Support weak hardware with low idle overhead and bounded callback work; use stronger hardware only when extra resources improve the active workload.
+- Use adaptive workload planning and the existing worker pool rather than introducing parallel schedulers.
+- Measure real CPU, memory, callback timing, frame time, battery/thermal behavior and audio dropouts before making performance claims.
+- Complete signing, privacy/install documentation and commercial distribution readiness before release.
