@@ -478,6 +478,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
       if (m == null) {
         return Column(children: [
           picker,
+          trackControls,
           const Expanded(child: Center(child: Text('No modules yet: tap New to start one'))),
         ]);
       }
@@ -878,7 +879,7 @@ class _Params extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Heading('Controls'),
       ValueListenableBuilder<int>(
-        valueListenable: state.values,
+        valueListenable: state.moduleValueTick(module.id),
         builder: (context, _, _) => ParamGroups(
           compact: compact,
           params: params,

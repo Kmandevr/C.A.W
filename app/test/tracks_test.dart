@@ -26,6 +26,9 @@ void main() {
     await tester.runAsync(() async => s.info = await s.engine!.setProject(s.project.toEngineJson()));
     await tester.pumpWidget(MaterialApp(home: Shell(state: s)));
     await tester.pump();
+    // The detailed timeline remains the default; select the compact track-card view for this test.
+    await tester.tap(find.byTooltip('Track cards'));
+    await tester.pumpAndSettle();
 
     final kick = s.project.layers.first;
     expect(find.text(kick.name), findsWidgets);

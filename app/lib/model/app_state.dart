@@ -68,6 +68,8 @@ class AppState extends ChangeNotifier {
   EngineHardwareProfile? hardwareProfile;
   EngineExecutionPlan? auditionPlan;
   StreamSubscription<EnginePressure>? _resourcePressureSubscription;
+  bool _disposed = false;
+  final Map<String, String> _lastGoodRunSources = {};
   String? engineError;
   String? audioError;
   ProjectStorage? _storage;
@@ -207,6 +209,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     settings.removeListener(_settingsChanged);
     final pressureSubscription = _resourcePressureSubscription;
     _resourcePressureSubscription = null;
@@ -343,6 +346,7 @@ class AppState extends ChangeNotifier {
         swap: settings.swapTiming.name);
     try {
       info = await e.setProject(json);
+      engineError = null;
     } catch (err) {
       engineError = 'Engine error: $err';
     }
@@ -489,29 +493,40 @@ class AppState extends ChangeNotifier {
   void _scheduleLive(String id) {
     _liveTimer?.cancel();
     if (!settings.liveUpdate || engine == null) return;
-    _liveTimer = Timer(Duration(milliseconds: settings.liveDelayMs), () {
+    _liveTimer = Timer(Duration(milliseconds: settings.liveDelayMs), () async {
       final m = project.module(id);
-      if (m == null || !m.edited || (settings.lightMode && meters.playing)) return;
-      try {
-        if (!Engine.check(m.source).ok) return;
-      } catch (_) {
-        return;
-      }
-      run(id);
+      if (_disposed || m == null || !m.edited || (settings.lightMode && meters.playing)) return;
+      // The project compile is the check; avoid compiling the same source twice.
+      await run(id);
     });
   }
 
-  /// Run: the editor's code goes to the engine and hot-swaps. If it fails, the last good code keeps playing.
+  /// Run: hot-swap valid code; on failure keep the last good engine source and expose the module error.
   Future<ModuleInfo?> run(String id) async {
     final m = project.module(id);
-    if (m == null) return null;
-    m.runSource = m.source;
-    final name = headerValue(m.source, 'name');
-    if (name != null && name.isNotEmpty) m.name = name;
-    _save();
+    if (m == null || engine == null) return null;
+    final source = m.source;
+    final key = '${project.id}:$id';
+    final lastGoodSource = _lastGoodRunSources[key] ?? m.runSource;
+    m.runSource = source;
     _syncTimer?.cancel();
     await _syncNow();
-    return info[id];
+
+    final result = info[id];
+    final current = project.module(id);
+    if (engineError == null && result?.ok == true) {
+      _lastGoodRunSources[key] = source;
+      if (current != null && current.source == source) {
+        final name = headerValue(source, 'name');
+        if (name != null && name.isNotEmpty) current.name = name;
+      }
+    } else if (current != null && current.runSource == source) {
+      // Keep invalid editor text pending while the engine continues with the previous good source.
+      current.runSource = lastGoodSource;
+    }
+    _save();
+    notifyListeners();
+    return result;
   }
 
   String _freeModuleName(String base) {
@@ -1168,6 +1183,7 @@ class AppState extends ChangeNotifier {
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
     if (saveCurrent) await flush();
     engine?.stop();
+    _lastGoodRunSources.clear();
     _libraryUndo.clear();
     _libraryRedo.clear();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
