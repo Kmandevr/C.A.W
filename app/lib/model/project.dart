@@ -181,10 +181,12 @@ class ProjectDoc {
     List<ModuleDoc>? modules,
     List<LayerDoc>? layers,
     List<String>? libraryFolders,
+    Map<String, String>? savedLibrarySearches,
   })  : globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
-        libraryFolders = libraryFolders ?? [] {
+        libraryFolders = libraryFolders ?? [],
+        savedLibrarySearches = savedLibrarySearches ?? {} {
     // Keep the in-memory model canonical: a track owns clip instances, not a legacy
     // single-pattern pointer. The stable ID makes repeated saves deterministic.
     for (final layer in this.layers) {
@@ -222,6 +224,7 @@ class ProjectDoc {
   List<ModuleDoc> modules;
   List<LayerDoc> layers;
   List<String> libraryFolders;
+  Map<String, String> savedLibrarySearches;
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
@@ -313,6 +316,7 @@ class ProjectDoc {
         'modules': [for (final m in modules) m.toJson()],
         'layers': [for (final l in layers) l.toJson()],
         'library_folders': libraryFolders,
+        'saved_library_searches': savedLibrarySearches,
       };
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
@@ -330,6 +334,7 @@ class ProjectDoc {
       modules: ((j['modules'] as List?) ?? const [])
           .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().toList(),
+      savedLibrarySearches: ((j['saved_library_searches'] as Map?) ?? const {}).map((k, v) => MapEntry(k.toString(), v.toString())),
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
