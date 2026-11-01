@@ -63,6 +63,11 @@ void main() {
     expect(back.lightMode, isTrue);
     expect(Neon.showScopes, isFalse);
 
+    await back.update((x) => x.performanceMode = PerformanceMode.lightweight);
+    expect(Neon.showScopes, isTrue);
+    expect(Neon.light, isTrue);
+    expect(Neon.glow(Neon.green), isEmpty);
+
     final legacy = Settings();
     legacy.fromJson({'light_mode': true});
     expect(legacy.performanceMode, PerformanceMode.lightweight);
