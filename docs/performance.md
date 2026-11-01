@@ -116,7 +116,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - So even when stopped with nothing moving, the UI thread woke up every frame. It read the meters over FFI 30 times a second and redrew every meter and scope.
    - This is from the code and Flutter's `Ticker` behaviour. Battery wasn't measured on a device here.
 3. **The audio device stayed open while stopped.** It ran a callback writing silence for as long as the app was in the foreground.
-4. **Each project update starts a worker isolate.** About 1.8 ms per update in the test VM (debug/JIT, not a release build), against 0.07 ms of engine work for an unchanged project. Updates happen on discrete edits, not per keystroke or per slider step.
+4. **Historical baseline (superseded 2026-10-31):** each project update started a worker isolate, about 1.8 ms in the test VM. Project compilation, async source checks and offline WAV renders now use the native bounded worker pool; this is no longer the current execution path. Release-device latency still needs measurement.
 
 ### Fixes
 
@@ -177,6 +177,6 @@ No phone frame-time, battery or thermal measurements have been made for these pr
 - **Compiling, about 0.3 ms per module.** Each compile re-reads and re-checks the three built-in libraries. Caching their parsed functions would cut this to almost nothing. It only matters for auto-update while typing.
 - **Per-layer setup in `runChain`.** `step`, `beat` and `bar` are worked out with a division for every sample of every layer. They could be counted up incrementally, but only if the results stay bit-identical at step boundaries; that needs a careful proof and the golden tests.
 - **The VM's dispatch.** Fusing common operator pairs, or compiling to a tighter form, is the next big win. It's a larger change, so measure on the phone first.
-- **Project updates start a worker isolate each time** (about 1.8 ms each in the test VM). Measure it in a release build on the phone; if it shows, keep one long-lived worker isolate.
-- **The shell's `IndexedStack`** still builds all three screens on structural changes (adding a layer, mute, Run). Building only the visible screen would need care to keep the editor's state.
+- **Measure native project-job latency on the phone.** Project compilation now uses the shared native worker pool rather than starting a Dart worker isolate per update. Measure queue wait, compile duration, UI responsiveness and audio callback impact in a release build.
+- **The shell's `IndexedStack`** retains all eight workspace destinations and may rebuild/layout them on structural project changes. Measure this on device before changing it; preserving editor state is a constraint.
 - **Scopes** read 512 samples over FFI and redraw a path about 30 times a second while playing. That's fine on the server; check the frame time on the phone.
