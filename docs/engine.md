@@ -293,6 +293,10 @@ The app, the CLI and exports share one format:
 - An export refuses to run if any module or pattern it uses has an error.
 - **[Assumption]** Serum may want an extra `clm ` chunk to recognise 2048-sample frames. This isn't written yet; check before relying on Serum.
 
+## Hardware profile and execution policy
+
+The native hardware probe is a one-time, non-real-time snapshot. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU and memory limits where readable. Windows uses available physical memory; Linux/Android combine system-available memory with a finite cgroup limit minus current usage. An exhausted finite cgroup limit is represented by a 1 MiB scheduler budget; a zero field means the signal is unavailable. Positive measurements are budgeted at one quarter, capped at 8192 MiB. macOS/iOS currently use half of reported physical memory as a conservative fallback, not live available memory. The scheduler falls back to one worker for unknown or very low memory. On Android, the host reads thermal status (Android 10+) and battery-saver state once, then listens for changes through event-driven platform channels; foreground/background and audio-playing transitions also refresh the worker budget. Unsupported platforms retain an explicit `Unknown` pressure state; background/offline work reserves one host core where possible and GPU work is disabled. Physical-device behavior still requires validation.
+
 ## C API (`engine/include/caw.h`)
 
 - **Checking a module:** `caw_check(source)` returns JSON: ok, error, line, col, kind, mode, name, summary, and:
