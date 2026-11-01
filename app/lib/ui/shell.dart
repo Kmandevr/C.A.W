@@ -1,4 +1,4 @@
-// App shell: transport, project menu and six workspaces. Mobile groups advanced destinations under More.
+// App shell: transport, project menu and eight workspaces. Mobile groups advanced destinations under More.
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
