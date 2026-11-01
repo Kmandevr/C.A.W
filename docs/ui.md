@@ -2,6 +2,7 @@
 title: UI design
 summary: Retro-neon, arrangement-first creative UI across eight shared-state workspaces on desktop and mobile.
 updated: 2026-11-01
+covers: [app/lib/ui/, app/lib/actions/]
 ---
 
 # UI design
