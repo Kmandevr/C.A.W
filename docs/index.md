@@ -1,8 +1,11 @@
 ---
 title: C.A.W vault
 summary: Vault home: links to every note.
-updated: 2026-10-30
+updated: 2026-10-31
 ---
+
+
+- [Master development plan](CAW_MASTER_DEVELOPMENT_PLAN.md) — approved Task 1 and Task 2 scope.
 
 # C.A.W vault
 
