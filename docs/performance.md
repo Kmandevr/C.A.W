@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
 covers: [engine/bench/, app/lib/model/poller.dart, app/test/rebuild_test.dart]
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Performance
