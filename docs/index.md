@@ -15,6 +15,7 @@ Project memory for C.A.W. Open this `docs/` folder as a vault in Obsidian, or re
 
 ## Notes
 
+- [Task 1 UI implementation handoff](task-1-ui-handoff.md): current branch, implementation, CI evidence and next steps.
 - [Master development plan](CAW_MASTER_DEVELOPMENT_PLAN.md): approved Task 1 and Task 2 scope.
 - [Vision](vision.md): the owner's brief, condensed, and the open-questions register; read before planning a feature
 - [Architecture](architecture.md): stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks
