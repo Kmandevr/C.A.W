@@ -121,6 +121,13 @@ class _ExporterScreenState extends State<ExporterScreen> {
       _float = entry.float32;
       _seconds = entry.seconds;
       _frames = entry.frames;
+      if (entry.kind == ExportKind.oneShot.name &&
+          s.project.layers.any((layer) => layer.id == entry.target)) _layerId = entry.target;
+      if (entry.kind == ExportKind.wavetable.name &&
+          s.project.modules.any((module) => module.id == entry.target)) _moduleId = entry.target;
+      if (entry.kind == ExportKind.midi.name &&
+          s.project.module(entry.target) != null && s.isPattern(entry.target)) _patternId = entry.target;
+      _param = entry.param.isEmpty ? null : entry.param;
     });
   }
 
@@ -244,6 +251,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
           target: item.target,
           param: item.param,
           frames: item.frames,
+          target: item.target,
+          param: item.param,
         ));
         if (!mounted) {
           job.cancel();
@@ -353,6 +362,13 @@ class _ExporterScreenState extends State<ExporterScreen> {
         float32: _float,
         seconds: _seconds,
         frames: _frames,
+        target: switch (_kind) {
+          ExportKind.oneShot => _layerId ?? '',
+          ExportKind.wavetable => _moduleId ?? '',
+          ExportKind.midi => _patternId ?? '',
+          _ => '',
+        },
+        param: _param ?? '',
       ));
       return null;
     } catch (e) {
