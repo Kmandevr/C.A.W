@@ -237,6 +237,10 @@ void main() {
     expect(find.text('Import .caw module'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('Bass search'), findsOneWidget);
+    expect(find.byTooltip('Solo preview in Builder'), findsOneWidget);
+    await tester.tap(find.byTooltip('Solo preview in Builder'));
+    expect(state.previewOnly, isTrue);
+    state.setPreviewOnly(false);
     expect(find.byTooltip('Undo library operation'), findsOneWidget);
     expect(find.byTooltip('Redo library operation'), findsOneWidget);
     await tester.tap(find.text('Bass search'));
