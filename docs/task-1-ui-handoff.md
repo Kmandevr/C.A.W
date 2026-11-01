@@ -115,6 +115,15 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Final widget-test corrections and accuracy fixes at head 8d375872
+
+- The last three test failures were narrowed to an Automation slider index (the new point is the third point, after the two existing points), an off-screen Files action, and a second Exporter test still tapping the hint text. Corrected those selectors and ensured the Files action is scrolled into view.
+- Extended the narrow Exporter test to actually select Wavetable and verify both Sweep and Frames controls render without overflow.
+- Increased the mobile Mixer focused editor's channel-strip viewport height to accommodate longer effect chains; add a dedicated phone-width regression test in the next pass.
+- Corrected master-value notification ordering on project switches so the new project's master value is published after the new project is installed.
+- Removed the unsupported bit-exact/cross-device guarantee from the Exporter explanation; the UI now describes the native offline renderer and the factors that can affect exact reproducibility.
+- Exact-head App and platform builds are pending. No final pass is claimed yet.
+
 ## Widget-test repair pass at head 6a128270
 
 - The scoped value notifier and compact Arranger track header removed the global rebuild benchmark failure and the 3 px track-header overflow. The suite improved from 112 passing / 13 failing to 115 passing / 10 failing.

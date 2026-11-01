@@ -271,7 +271,7 @@ class _MobileFocusedEditor extends StatelessWidget {
           },
         )),
         const SizedBox(height: 10),
-        SizedBox(height: 280, child: _ChannelStrip(state: state, layer: selected, index: index)),
+        SizedBox(height: 340, child: _ChannelStrip(state: state, layer: selected, index: index)),
         const SizedBox(height: 12),
         _ModuleInspector(state: state, onOpenBuilder: onOpenBuilder),
       ]);

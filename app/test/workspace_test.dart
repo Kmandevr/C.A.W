@@ -239,13 +239,13 @@ void main() {
     await tester.pump();
     expect(lane.points, hasLength(3));
     final pointSliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
-    pointSliders[2].onChanged!(700);
+    pointSliders[4].onChanged!(700);
     await tester.pump();
     final updatedPointSliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
-    updatedPointSliders[3].onChanged!(0.6);
+    updatedPointSliders[5].onChanged!(0.6);
     await tester.pump();
-    expect(lane.points[1].step, greaterThan(512));
-    expect(lane.points[1].value, greaterThan(0.5));
+    expect(lane.points.last.step, greaterThan(512));
+    expect(lane.points.last.value, greaterThan(0.5));
 
     await tester.tap(find.byTooltip('Remove automation point').last);
     await tester.pump();
@@ -381,8 +381,10 @@ void main() {
     expect(find.byTooltip('Import .caw module into this folder'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('Bass search'), findsOneWidget);
-    expect(find.byTooltip('Solo preview in Builder'), findsOneWidget);
-    await tester.tap(find.byTooltip('Solo preview in Builder'));
+    final soloPreview = find.byTooltip('Solo preview in Builder');
+    expect(soloPreview, findsOneWidget);
+    await tester.ensureVisible(soloPreview);
+    await tester.tap(soloPreview);
     expect(state.previewOnly, isTrue);
     state.setPreviewOnly(false);
     expect(find.byTooltip('Undo library operation'), findsOneWidget);
@@ -465,6 +467,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Export MIDI'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButton<ExportKind>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wavetable').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Sweep'), findsOneWidget);
+    expect(find.text('Frames'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -515,7 +523,9 @@ void main() {
 
     expect(find.text('RECENT EXPORTS'), findsOneWidget);
     expect(find.text('Earlier.mid'), findsOneWidget);
-    await tester.tap(find.text('Choose a saved profile'));
+    final profilePicker = find.byType(DropdownButton<String>);
+    await tester.ensureVisible(profilePicker);
+    await tester.tap(profilePicker);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Pattern MIDI').last);
     await tester.pumpAndSettle();

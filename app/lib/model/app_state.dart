@@ -128,8 +128,8 @@ class AppState extends ChangeNotifier {
   /// Bumped on every meter poll (about 30 times a second) so meters can repaint without rebuilding screens.
   final ValueNotifier<int> tick = ValueNotifier(0);
 
-  /// Bumped when a param, global, volume or pan changes. Only the controls showing those values listen, so a slider
-  /// drag doesn't rebuild the whole app (it rebuilt about 3,500 widgets per step before).
+  /// Aggregate value tick retained for diagnostics and external listeners. Workspaces use the scoped ticks below
+  /// so parameter, track and master drags don't rebuild unrelated controls.
   final ValueNotifier<int> values = ValueNotifier(0);
   final ValueNotifier<int> masterValueTick = ValueNotifier(0);
   final Map<String, ValueNotifier<int>> _moduleValueTicks = {};
@@ -1106,8 +1106,8 @@ class AppState extends ChangeNotifier {
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
     _moduleValueTicks.clear();
     _layerValueTicks.clear();
-    masterValueTick.value++;
     project = p;
+    masterValueTick.value++;
     info = {};
     blankKinds.clear();
     selectedModuleId = p.modules.isEmpty ? null : p.modules.first.id;

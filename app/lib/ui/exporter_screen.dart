@@ -811,7 +811,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
           child: Text(_message!, style: TextStyle(color: _messageIsError ? Neon.pink : Neon.green)),
         ),
       const SizedBox(height: 12),
-      const Text('Exports are bit-exact with playback: same code, seed and settings give the same file on any device.',
+      const Text('Offline exports use the native C.A.W. renderer with captured project settings. Exact output reproducibility can depend on engine version, platform and module implementation.',
           style: TextStyle(color: Neon.dim, fontSize: 12)),
     ]);
   }
