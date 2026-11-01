@@ -47,8 +47,7 @@ class Settings extends ChangeNotifier {
   int liveDelayMs = 400;
   SwapTiming swapTiming = SwapTiming.now;
 
-  /// Light mode for slow devices: no glow or scopes, meters at 15 fps, 4 voices per pattern layer, and auto-update
-  /// waits while playing. [lightAuto] turns it on by itself the first time the engine reports an overload.
+  /// Legacy compatibility: true for Lightweight/Minimal profiles. [lightAuto] selects Lightweight after overload.
   PerformanceMode performanceMode = PerformanceMode.balanced;
   bool get lightMode => performanceMode == PerformanceMode.lightweight || performanceMode == PerformanceMode.minimal;
   set lightMode(bool value) => performanceMode = value ? PerformanceMode.lightweight : PerformanceMode.balanced;
