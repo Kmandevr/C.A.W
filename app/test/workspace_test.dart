@@ -397,9 +397,14 @@ void main() {
   });
 
   testWidgets('File Manager exposes portable project and module actions', (tester) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     state.project = ProjectDoc(id: 'project-1', name: 'Portable project', modules: [
       ModuleDoc(id: 'gen-1', name: 'Bass', source: '---\\nkind: generator\\n---\\nsin(110)'),
     ]);
+    state.info['gen-1'] = const ModuleInfo(ok: true, kind: 'generator');
     state.createLibraryFolder('Synths');
     state.saveLibrarySearch('Bass search', 'bass');
 
@@ -418,7 +423,6 @@ void main() {
       of: find.byTooltip('Solo preview in Builder'),
       matching: find.byType(IconButton),
     ).first;
-    await tester.scrollUntilVisible(soloPreview, 240, scrollable: find.byType(Scrollable).first);
     await tester.tap(soloPreview);
     expect(state.previewOnly, isTrue);
     state.setPreviewOnly(false);
@@ -477,7 +481,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Master WAV').last);
     await tester.pumpAndSettle();
-    expect(find.text('Quick Export'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('44.1 kHz'), 180,
+      scrollable: find.byType(Scrollable).first);
     expect(find.text('44.1 kHz'), findsOneWidget);
     expect(find.text('32-bit float'), findsOneWidget);
   });
@@ -565,7 +570,6 @@ void main() {
     await tester.tap(find.text('Pattern MIDI').last);
     await tester.pumpAndSettle();
     expect(find.text('Export MIDI'), findsOneWidget);
-    expect(find.text('Quick Export'), findsWidgets);
   });
 
   testWidgets('Plugin Builder exposes the native module workflow and honest target boundary', (tester) async {

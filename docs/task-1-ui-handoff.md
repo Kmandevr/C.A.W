@@ -115,6 +115,12 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Mobile Mixer and final test adjustments at head 42ad7afa
+
+- The long-effect-chain phone test found a 30 px vertical overflow in the focused Mixer channel strip. Its viewport now grows with effect-chain length rather than relying on one fixed height.
+- The Files test now provides a compiled generator and a realistic taller desktop viewport, so the Solo Preview action is enabled and visible. Export profile tests scroll to the selected sample-rate control instead of asserting offscreen toggle labels.
+- Exact-head CI must confirm the responsive Mixer and all workspace tests.
+
 ## Final App test refinements at head 93865908
 
 - The remaining test run passed 122 tests and isolated three stale assertions/interactions. Automation's point index is now correct; Files scrolls the actual IconButton into view rather than attempting to tap its Tooltip proxy; Exporter profile application is correctly asserted to switch the toggle label to Quick Export.
