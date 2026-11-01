@@ -126,6 +126,8 @@ Timed release run after the fixes (same server, a single run, so noisy):
 3. **The audio device closes after 30 s stopped and idle.** Play reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
 
 ## UI update isolation
+- Mixer master gain now uses a dedicated native command (`caw_engine_set_master`) with a 5 ms audio-thread ramp. Dragging the master slider no longer serializes and recompiles the entire project; the UI updates through the scoped `values` notifier. This removes project-compilation work from the master-gain gesture, but device-level latency and CPU savings have not yet been benchmarked.
+
 
 - The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
 - Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; the UI does not allocate a new sample buffer each frame.
