@@ -88,8 +88,13 @@ void main() {
     ));
 
     expect(find.text('MIXER / EDITOR'), findsOneWidget);
+    expect(find.text('Channels'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
+    expect(find.text('MODULE INSPECTOR'), findsNothing);
     await tester.tap(find.text('Bass'));
+    await tester.pump();
+    expect(find.text('MODULE INSPECTOR'), findsOneWidget);
+    expect(find.text('Focused editor'), findsOneWidget);
     expect(state.selectedLayerId, 'layer-1');
     expect(state.selectedModuleId, module.id);
     final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
