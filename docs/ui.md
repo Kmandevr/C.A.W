@@ -150,7 +150,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 - **[Assumption]** For testing, a "potato" means:
   - an Android 8 phone (the app's minimum, `minSdk` 26) with 2 GB of RAM and an old 4-core ARM CPU
   - an old dual-core Windows laptop
-- **[Fact]** **Light mode** (owner OK and built, 2026-10-28): a setting that turns itself on at the first overload. It turns glow and scopes off, runs meters at 15 fps, plays 4 voices per pattern layer instead of 8, and pauses auto-update while playing, so swaps happen on Run only ([app](app.md)).
+- **[Fact]** Performance profiles are Full Experience, Balanced, Lightweight and Minimal. All retain 30 Hz meter cadence; Lightweight/Minimal use the reduced voice budget, and Minimal hides scope panels. Overload auto-response selects Lightweight once when enabled ([app](app.md)).
 - **Editors:**
   - The piano roll and grid repaint only when something changes, plus the playhead's small region while playing.
   - The pattern model stays the source of truth while editing. It's turned into text only when saving or sending to the engine, not on every touch.
@@ -159,7 +159,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 - **The audio never depends on the UI.** The C++ engine runs on its own thread ([engine](engine.md)), so a slow frame can't cause a dropout.
 - **Repaint only what moves:**
-  - Meters, the playhead and scopes each sit in a small repaint region of their own, driven by one 30 fps ticker. The ticker runs only while playing and visible, and stops when the app is in the background.
+  - Meters, the playhead and scopes each sit in a small repaint region of their own, driven by the existing 30 Hz meter ticker. Engine Lab's mono master scope and spectrum are read from the native scope buffer. The ticker runs only while playing and visible, and stops when the app is in the background.
   - **[Fact]** Fixed 2026-10-28: the meters are read only while playing, and the app does nothing periodic when stopped ([performance](performance.md)).
   - Community advice warns that a repaint boundary around something that changes every frame only adds cost, so measure ([blog](https://omr.it.com/blog/flutter-engine-raster-cache-tuning/)).
 - **Draw grids, not widgets:** the session grid, drum grid and piano roll are each one painter that draws only the visible area, not one widget per cell. Lists are built lazily.
