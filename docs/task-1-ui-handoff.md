@@ -4,6 +4,12 @@ summary: Current implementation state, branch and CI evidence for the C.A.W. Mas
 updated: 2026-11-01
 ---
 
+## Files autosave-timer regression fix at head 7d6f337e
+
+- The controller lifecycle issue is resolved. The next test run exposed the expected 500 ms AppState autosave debounce after module deletion; the test now advances the fake clock past that debounce so it verifies the save path without leaving a pending timer at teardown.
+- Exact-head CI must confirm the updated Files workflow, Builder routing, and full app/platform/engine matrix.
+
+
 ## Files dialog lifecycle fix at head 8601beb3
 
 - The new rename regression exposed a real Flutter lifecycle bug: locally owned TextEditingControllers were disposed immediately after a dialog popped, while the dialog's exit transition could still rebuild its TextField. The resulting disposed-controller exception then contaminated following widget tests.
