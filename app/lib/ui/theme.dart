@@ -149,8 +149,10 @@ class Neon {
   /// The theme every Neon colour reads from. Settings sets it; widgets built earlier repaint when the app remounts.
   static CawTheme active = calmNeon;
 
-  /// Light mode (for slow devices) turns glow off whatever the theme says.
+  /// Performance profile: 0 full, 1 balanced, 2 lightweight, 3 minimal.
+  static int performanceMode = 1;
   static bool light = false;
+  static bool showScopes = true;
 
   static const Color bg = _ThemeColor('bg');
   static const Color panel = _ThemeColor('panel');
@@ -181,9 +183,12 @@ class Neon {
       TextStyle(fontFamily: mono, fontFamilyFallback: monoFallback, fontSize: size, color: color, height: 1.45);
 
   /// The glow around active things; nothing when the theme turns glow off.
-  static List<BoxShadow> glow(Color c, {double strength = 0.55}) => active.glow && !light
-      ? [BoxShadow(color: c.withValues(alpha: strength), blurRadius: 12, spreadRadius: -2)]
-      : const [];
+  static List<BoxShadow> glow(Color c, {double strength = 0.55}) {
+    final scale = performanceMode == 0 ? 1.0 : performanceMode == 1 ? 0.55 : 0.0;
+    return active.glow && !light && scale > 0
+        ? [BoxShadow(color: c.withValues(alpha: strength * scale), blurRadius: 12, spreadRadius: -2)]
+        : const [];
+  }
 
   /// True when the compact density is on.
   static bool compact(BuildContext context) => Theme.of(context).visualDensity == VisualDensity.compact;
