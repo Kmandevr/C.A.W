@@ -141,11 +141,9 @@ class _ChannelStrip extends StatelessWidget {
                 child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w800)),
               )),
-              IconButton(tooltip: layer.mute ? 'Unmute' : 'Mute', visualDensity: VisualDensity.compact,
-                onPressed: () => state.mixLayer(layer, mute: !layer.mute),
+              IconButton(tooltip: layer.mute ? 'Unmute' : 'Mute', onPressed: () => state.mixLayer(layer, mute: !layer.mute),
                 icon: Icon(Icons.volume_off, color: layer.mute ? Neon.pink : Neon.dim)),
-              IconButton(tooltip: layer.solo ? 'Unsolo' : 'Solo', visualDensity: VisualDensity.compact,
-                onPressed: () => state.mixLayer(layer, solo: !layer.solo),
+              IconButton(tooltip: layer.solo ? 'Unsolo' : 'Solo', onPressed: () => state.mixLayer(layer, solo: !layer.solo),
                 icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim)),
             ]),
             if (layer.isFolder)
@@ -163,7 +161,6 @@ class _ChannelStrip extends StatelessWidget {
                 Wrap(spacing: 4, runSpacing: 2, children: [
                   for (final id in layer.chain)
                     ActionChip(
-                      visualDensity: VisualDensity.compact,
                       label: Text(state.project.module(id)?.name ?? 'Missing module',
                         maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
                       onPressed: () { state.selectLayer(layer); state.selectModule(id); },
