@@ -76,7 +76,7 @@ A new instrument, effect, editor, asset type, device backend or algorithm should
 
 Existing unrelated workspaces and subsystems should not need edits. If a feature requires broad changes, document the actual dependency and consider whether the boundary is wrong.
 
-### 3.3 Capability-based architecture
+### 3.4 Capability-based architecture
 
 **[Proposal]** Use explicit capability descriptions and negotiation as the common way to decide what a device, host, module, algorithm or UI workspace can do. Do not scatter platform-name checks or infer support from a version string alone.
 
@@ -97,7 +97,7 @@ Negotiation should produce a concrete, immutable execution/configuration choice 
 
 Avoid turning this into a central runtime service that every subsystem polls. Capability providers publish snapshots; consumers request a scoped negotiation when configuration changes. Cache the result with a clear invalidation trigger. Unknown is not equivalent to supported, and fallback is allowed only when it preserves documented semantics.
 
-### 3.4 Module and extension contract
+### 3.5 Module and extension contract
 
 The existing native SDK is a useful starting contract, not a completed plugin ecosystem. Keep one shared module identity, typed-port, parameter, state and processing model across built-in modules, bytecode modules and future native add-ons.
 
@@ -467,6 +467,11 @@ C.A.W. meets this direction when:
 - Idle overhead is minimal, and weak devices remain supported.
 - Performance claims are backed by repeatable measurements on the hardware named.
 - Tests prove both that the failing component is contained and that unrelated functionality continues working.
+- Capabilities are negotiated explicitly before use; unavailable features fail clearly rather than through scattered platform checks.
+- Audio, MIDI and capture timing have documented clock/latency behavior, with measured drift and alignment where synchronization is supported.
+- Project saves and exports recover to a known-good state after injected failures; recovery guarantees are documented rather than assumed.
+- Trusted native extensions and untrusted bytecode have distinct, enforced security boundaries.
+- Diagnostics explain performance and recovery problems while remaining bounded, privacy-conscious and low overhead.
 
 ## 14. Open technical decisions
 
@@ -479,5 +484,10 @@ These require repository/source verification and, where they affect product beha
 - Which DSP algorithm families have enough measured cost to justify interchangeable implementations first?
 - What performance budgets should be enforced for low-end Android, mid-range Android and desktop reference machines?
 - Which platform/backend combinations can be tested in CI, and which require a physical-device release checklist?
+- Which capability metadata belongs in the existing module descriptor versus a host/device capability snapshot?
+- What clock domains and timestamp precision can each supported audio, MIDI and capture adapter actually expose?
+- What recovery-point objective should autosave/journaling meet, and what storage/latency overhead is acceptable?
+- Which native modules may run in-process, and what process protocol is required for untrusted binaries?
+- Which diagnostics are always enabled versus opt-in, and what measured overhead/privacy limits apply?
 
 Do not treat these open decisions as settled by this plan.
