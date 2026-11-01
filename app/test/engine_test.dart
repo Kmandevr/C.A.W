@@ -81,6 +81,10 @@ void main() {
     expect(result['s']!.warnings, isEmpty);
     e.dispose();
     final dir = await Directory.systemTemp.createTemp('caw');
+    final midiOut = '${dir.path}/acid.mid';
+    expect(Engine.exportPattern(line.source, midiOut, bpm: 140, beatsPerBar: 4), isNull);
+    final midiBytes = await File(midiOut).readAsBytes();
+    expect(String.fromCharCodes(midiBytes.sublist(0, 4)), 'MThd');
     final out = '${dir.path}/acid.wav';
     final job = RenderJob.start(RenderRequest(projectJson: p.toEngineJson(), kind: ExportKind.loop, outPath: out));
     expect(await job.result, isNull);
