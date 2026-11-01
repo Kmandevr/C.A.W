@@ -48,37 +48,53 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       if (s.meters.overloaded > 0) _OverloadBanner(state: s),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(children: [
-          const Expanded(child: Text('ARRANGEMENT', style: TextStyle(
-            color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
-          TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
-            icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
-          if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
-            IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt), icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0).toDouble()), icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()), icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
-          PopupMenuButton<double>(
-            tooltip: 'Track height',
-            initialValue: _trackHeight,
-            onSelected: (value) => setState(() => _trackHeight = value),
-            icon: Icon(Icons.height, color: _trackHeight == 76 ? Neon.dim : Neon.blue),
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 54, child: Text('Compact · 54 px')),
-              PopupMenuItem(value: 76, child: Text('Standard · 76 px')),
-              PopupMenuItem(value: 96, child: Text('Tall · 96 px')),
-              PopupMenuItem(value: 120, child: Text('Extra tall · 120 px')),
-            ],
-          ),
-          DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
-            items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
-            onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
-          TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
-            icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
-          IconButton(onPressed: () => setState(() => mixer = !mixer),
-            color: mixer ? Neon.blue : Neon.dim, icon: const Icon(Icons.tune), tooltip: 'Mixer'),
-          IconButton(onPressed: () => setState(() => settings = !settings),
-            color: settings ? Neon.blue : Neon.dim, icon: const Icon(Icons.settings_outlined), tooltip: 'Settings'),
-        ]),
+        child: LayoutBuilder(builder: (context, constraints) {
+          final controls = <Widget>[
+            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
+              icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
+            if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
+              IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt),
+                icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
+            IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0).toDouble()),
+              icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
+            IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()),
+              icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
+            PopupMenuButton<double>(
+              tooltip: 'Track height',
+              initialValue: _trackHeight,
+              onSelected: (value) => setState(() => _trackHeight = value),
+              icon: Icon(Icons.height, color: _trackHeight == 76 ? Neon.dim : Neon.blue),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 54, child: Text('Compact · 54 px')),
+                PopupMenuItem(value: 76, child: Text('Standard · 76 px')),
+                PopupMenuItem(value: 96, child: Text('Tall · 96 px')),
+                PopupMenuItem(value: 120, child: Text('Extra tall · 120 px')),
+              ],
+            ),
+            DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
+              items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
+              onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
+            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
+              icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
+            IconButton(onPressed: () => setState(() => mixer = !mixer),
+              color: mixer ? Neon.blue : Neon.dim, icon: const Icon(Icons.tune), tooltip: 'Mixer'),
+            IconButton(onPressed: () => setState(() => settings = !settings),
+              color: settings ? Neon.blue : Neon.dim, icon: const Icon(Icons.settings_outlined), tooltip: 'Settings'),
+          ];
+          if (constraints.maxWidth < 760) {
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Padding(padding: EdgeInsets.only(left: 4, bottom: 2),
+                child: Text('ARRANGEMENT', style: TextStyle(
+                  color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
+              Wrap(spacing: 2, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: controls),
+            ]);
+          }
+          return Row(children: [
+            const Expanded(child: Text('ARRANGEMENT', style: TextStyle(
+              color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
+            ...controls,
+          ]);
+        }),
       ),
       if (settings) Padding(
         padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),

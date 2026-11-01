@@ -676,24 +676,34 @@ class _ExporterScreenState extends State<ExporterScreen> {
               items: [for (final m in modules) DropdownMenuItem(value: m.id, child: Text(m.name))],
               onChanged: busy ? null : (v) => setState(() => _moduleId = v),
             ),
-            Row(children: [
-              const Text('Sweep '),
-              DropdownButton<String?>(
+            LayoutBuilder(builder: (context, constraints) {
+              final sweep = DropdownButton<String?>(
                 value: _param,
+                isExpanded: constraints.maxWidth < 560,
                 items: [
                   const DropdownMenuItem<String?>(value: null, child: Text('nothing')),
-                  for (final x in params) DropdownMenuItem<String?>(value: x.name, child: Text(x.name)),
+                  for (final x in params) DropdownMenuItem<String?>(value: x.name,
+                    child: Text(x.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: busy ? null : (v) => setState(() => _param = v),
-              ),
-              const SizedBox(width: 16),
-              const Text('Frames '),
-              DropdownButton<int>(
+              );
+              final frames = DropdownButton<int>(
                 value: _frames,
+                isExpanded: constraints.maxWidth < 560,
                 items: [for (final f in [1, 8, 16, 32, 64, 128, 256]) DropdownMenuItem(value: f, child: Text('$f'))],
                 onChanged: busy ? null : (v) => setState(() => _frames = v!),
-              ),
-            ]),
+              );
+              if (constraints.maxWidth < 560) {
+                return Column(children: [
+                  Row(children: [const SizedBox(width: 54, child: Text('Sweep')),
+                    Expanded(child: sweep)]),
+                  Row(children: [const SizedBox(width: 54, child: Text('Frames')),
+                    Expanded(child: frames)]),
+                ]);
+              }
+              return Row(children: [const Text('Sweep '), sweep, const SizedBox(width: 16),
+                const Text('Frames '), frames]);
+            }),
           ],
           Wrap(spacing: 16, crossAxisAlignment: WrapCrossAlignment.center, children: [
             DropdownButton<int>(

@@ -115,6 +115,13 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Additional audit finding at head a8d9ef5d
+
+- A narrow-screen audit found the Arranger toolbar kept its complete control set in a single horizontal row, which could overflow phone widths. It now wraps the controls beneath the section label below 760 px while retaining the desktop row.
+- The Exporter's wavetable sweep and frame selectors also shared one fixed horizontal row. They now stack into full-width labelled selectors on narrow layouts and retain the compact desktop row.
+- Added a 360 px Arranger regression test for toolbar layout and overflow. The existing Exporter phone-width test exercises format selection; the wavetable selector's narrow layout is covered by the new responsive implementation and will receive a dedicated interaction assertion in the next pass.
+- Exact-head CI is pending for these changes; no pass is claimed yet.
+
 ## Additional audit finding at head 3a6593b6
 
 - Extended the Mixer splitter beyond screen-reader actions: it now participates in keyboard focus traversal and responds to Left/Right arrow keys, with a regression test for focus-driven resizing.

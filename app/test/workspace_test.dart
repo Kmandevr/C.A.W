@@ -453,6 +453,24 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Arranger toolbar wraps cleanly on phone widths', (tester) async {
+    tester.view.physicalSize = const Size(360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    state.project = ProjectDoc(id: 'mobile-arranger', name: 'Mobile arrangement', layers: [
+      LayerDoc(id: 'mobile-track', name: 'Mobile track', color: 0),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ArrangerScreen(state: state)),
+    ));
+
+    expect(find.text('ARRANGEMENT'), findsOneWidget);
+    expect(find.text('Track'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Exporter switches between quick loop and advanced MIDI options', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: ExporterScreen(state: state)),
