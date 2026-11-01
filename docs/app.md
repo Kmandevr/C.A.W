@@ -96,12 +96,10 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - The built-in themes are Calm neon (the default), Night (dimmer, no glow) and Amber terminal.
     - Custom themes are `kind: theme` text files in `themes/`.
   - **Density:** comfortable or compact.
-  - **Light mode** for slow devices (owner OK, 2026-10-28). It:
-    - turns glow and the Builder's scope off
-    - reads meters 15 times a second instead of 30
-    - plays 4 voices per pattern layer instead of 8 (the project's `voices`)
-    - stops auto-update while playing
-    - Unless that switch is off, it turns itself on the first time the engine reports an overload, and the Arranger's overload banner says so.
+  - **Performance profiles:** Full Experience (full glow), Balanced (55% glow), Lightweight (no glow, 4 voices per pattern layer) and Minimal (Lightweight plus hidden scope panels). All profiles keep meter polling at 30 Hz; Minimal does not slow down editing or meters.
+    - Existing `light_mode` settings migrate to Lightweight/ Balanced; the legacy key is still written for older builds.
+    - Automatic overload response selects Lightweight once, unless disabled.
+    - Lightweight/Minimal retain the existing behavior of pausing auto-update while playback is running.
   - **Live coding:** auto-update (on by default) runs code that compiles the set pause (100–2000 ms) after the last edit. Code with an error waits for the next edit. Swaps land at the swap timing: now, the next beat or the next bar.
   - **Vim keys in the code editor:** off by default.
 - **Keys** (`lib/ui/key_router.dart`): with a keyboard, every key goes through the action system in [actions](actions.md): per-area keymaps, Vim modes, counts, `:` commands, `.` and macros.
