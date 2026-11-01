@@ -69,10 +69,8 @@ class _AutomationLane extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(child: Text(volume ? 'VOLUME' : 'PAN', style: Neon.code(size: 12, color: color))),
-          IconButton(tooltip: 'Remove lane', visualDensity: VisualDensity.compact,
-            onPressed: () => state.removeAutomationLane(layer, lane), icon: const Icon(Icons.close, size: 18)),
-          IconButton(tooltip: 'Add midpoint point', visualDensity: VisualDensity.compact,
-            onPressed: lane.points.length >= 128 ? null : () =>
+          IconButton(tooltip: 'Remove lane', onPressed: () => state.removeAutomationLane(layer, lane), icon: const Icon(Icons.close, size: 18)),
+          IconButton(tooltip: 'Add midpoint point', onPressed: lane.points.length >= 128 ? null : () =>
               state.addAutomationPoint(layer, lane, (maxStep / 2).roundToDouble(), volume ? layer.volume : layer.pan),
             icon: const Icon(Icons.add_circle_outline, size: 18)),
         ]),
