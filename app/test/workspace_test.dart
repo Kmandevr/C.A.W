@@ -152,6 +152,20 @@ void main() {
     sliders[1].onChanged!(0.55);
     await tester.pump();
     expect(lane.points.first.value, closeTo(0.55, 0.0001));
+
+    final curve = tester.getRect(find.byType(CustomPaint).first);
+    await tester.tapAt(curve.center);
+    await tester.pump();
+    expect(lane.points, hasLength(3));
+    final movedCurve = tester.getRect(find.byType(CustomPaint).first);
+    await tester.dragFrom(movedCurve.center, const Offset(12, -10));
+    await tester.pump();
+    expect(lane.points.last.step, greaterThan(2048));
+    expect(lane.points.last.value, greaterThan(0.5));
+
+    await tester.tap(find.byTooltip('Remove automation point').last);
+    await tester.pump();
+    expect(lane.points, hasLength(2));
   });
 
   testWidgets('Engine Lab reports compiled modules and track signal paths', (tester) async {
