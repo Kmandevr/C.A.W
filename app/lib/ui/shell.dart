@@ -8,6 +8,9 @@ import '../model/app_state.dart';
 import 'arranger_screen.dart';
 import 'builder_screen.dart';
 import 'exporter_screen.dart';
+import 'mixer_screen.dart';
+import 'automation_screen.dart';
+import 'engine_lab_screen.dart';
 import 'key_router.dart';
 import 'startup_screen.dart';
 import 'theme.dart';
@@ -58,7 +61,10 @@ class _ShellState extends State<Shell> {
 
   static const _dest = [
     (Icons.code, 'Builder'),
-    (Icons.layers, 'Arranger'),
+    (Icons.view_timeline, 'Arranger'),
+    (Icons.tune, 'Mixer'),
+    (Icons.account_tree, 'Engine Lab'),
+    (Icons.show_chart, 'Automation'),
     (Icons.ios_share, 'Exporter'),
   ];
 
@@ -71,6 +77,9 @@ class _ShellState extends State<Shell> {
           final screens = [
             BuilderScreen(state: s),
             ArrangerScreen(state: s, onOpenPattern: () => setState(() => _tab = 0)),
+            MixerScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
+            EngineLabScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
+            AutomationScreen(state: s),
             ExporterScreen(state: s),
           ];
           return LayoutBuilder(builder: (context, box) {
@@ -88,7 +97,7 @@ class _ShellState extends State<Shell> {
             ]);
             return KeyRouter(
               state: s,
-              screenArea: const [Area.builder, Area.arranger, Area.exporter][_tab],
+              screenArea: const [Area.builder, Area.arranger, Area.global, Area.global, Area.global, Area.exporter][_tab],
               onView: (i) => setState(() => _tab = i),
               child: Scaffold(
                 body: SafeArea(
@@ -113,6 +122,7 @@ class _ShellState extends State<Shell> {
                         height: Neon.compact(context) ? 52 : 64,
                         selectedIndex: _tab,
                         onDestinationSelected: (i) => setState(() => _tab = i),
+                        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
                         destinations: [for (final d in _dest) NavigationDestination(icon: Icon(d.$1), label: d.$2)],
                       ),
               ),
