@@ -12,6 +12,7 @@ import 'mixer_screen.dart';
 import 'automation_screen.dart';
 import 'engine_lab_screen.dart';
 import 'file_manager_screen.dart';
+import 'plugin_builder_screen.dart';
 import 'key_router.dart';
 import 'startup_screen.dart';
 import 'theme.dart';
@@ -68,6 +69,7 @@ class _ShellState extends State<Shell> {
     (Icons.show_chart, 'Automation'),
     (Icons.ios_share, 'Exporter'),
     (Icons.folder_open, 'Files'),
+    (Icons.extension, 'Plugin Builder'),
   ];
 
   @override
@@ -84,6 +86,7 @@ class _ShellState extends State<Shell> {
             AutomationScreen(state: s),
             ExporterScreen(state: s),
             FileManagerScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
+            PluginBuilderScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
           ];
           return LayoutBuilder(builder: (context, box) {
             final wide = box.maxWidth >= 900;
@@ -100,7 +103,7 @@ class _ShellState extends State<Shell> {
             ]);
             return KeyRouter(
               state: s,
-              screenArea: const [Area.builder, Area.arranger, Area.global, Area.global, Area.global, Area.exporter, Area.global][_tab],
+              screenArea: const [Area.builder, Area.arranger, Area.global, Area.global, Area.global, Area.exporter, Area.global, Area.global][_tab],
               onView: (i) => setState(() => _tab = i),
               child: Scaffold(
                 body: SafeArea(
@@ -139,6 +142,7 @@ class _ShellState extends State<Shell> {
                                     (4, Icons.show_chart, 'Automation'),
                                     (5, Icons.ios_share, 'Exporter'),
                                     (6, Icons.folder_open, 'Files'),
+                                    (7, Icons.extension, 'Plugin Builder'),
                                   ])
                                     ListTile(
                                       leading: Icon(entry.$2, color: _tab == entry.$1 ? Neon.green : Neon.dim),
