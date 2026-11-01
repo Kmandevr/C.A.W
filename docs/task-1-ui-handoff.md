@@ -115,6 +115,12 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Performance and phone-layout fixes at head 3e47ed8a
+
+- Replaced broad UI subscriptions to the shared value tick with scoped per-module and per-track ticks plus a master-output tick. Parameter drags now rebuild only the selected module's parameter controls; level/pan drags rebuild only that track's controls in Builder, Mixer and Arranger. The aggregate tick remains for compatibility but is no longer subscribed to by the workspaces.
+- Moved MIDI clip creation into the existing track context menu and compacted the generator selector in the narrow track header. This removes the 3 px DropdownButton overflow found by the widget suite without removing the ability to assign generators or add clips.
+- Added notifier disposal and project-switch cleanup. Exact-head widget tests and rebuild benchmark must verify the new scopes; not yet claimed passing.
+
 ## Analyzer style cleanup correction at head 785b1331
 
 - The first automated brace pass was too broad and malformed nested Exporter callbacks. Restored the two affected UI files from the previous known-good commit and reapplied each lint fix with explicit block boundaries. The new exact-head App workflow must validate syntax and analyzer output before proceeding.

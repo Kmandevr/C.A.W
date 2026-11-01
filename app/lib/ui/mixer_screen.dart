@@ -72,7 +72,7 @@ class _MixerScreenState extends State<MixerScreen> {
       const SizedBox(height: 12),
       NeonPanel(color: Neon.pink, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         ValueListenableBuilder<int>(
-          valueListenable: s.values,
+          valueListenable: s.masterValueTick,
           builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Expanded(child: Text('MASTER OUTPUT', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800))),
@@ -200,7 +200,7 @@ class _MobileChannelRow extends StatelessWidget {
       color: selected ? Neon.blue : Neon.layer(layer.color),
       padding: const EdgeInsets.all(10),
       child: ValueListenableBuilder<int>(
-        valueListenable: state.values,
+        valueListenable: state.layerValueTick(layer.id),
         builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(child: InkWell(
@@ -293,7 +293,7 @@ class _ChannelStrip extends StatelessWidget {
       color: state.selectedLayerId == layer.id ? Neon.blue : Neon.layer(layer.color),
       padding: const EdgeInsets.all(10),
       child: ValueListenableBuilder<int>(
-        valueListenable: state.values,
+        valueListenable: state.layerValueTick(layer.id),
         builder: (context, _, _) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -404,7 +404,7 @@ class _ModuleInspector extends StatelessWidget {
         else if (info.params.isEmpty)
           const Text('This module exposes no parameters.', style: TextStyle(color: Neon.dim))
         else
-          ValueListenableBuilder<int>(valueListenable: state.values, builder: (context, _, _) => ParamGroups(
+          ValueListenableBuilder<int>(valueListenable: state.moduleValueTick(module.id), builder: (context, _, _) => ParamGroups(
             params: info.params, valueOf: (p) => module.params[p.name] ?? p.defaultValue,
             color: state.isEffect(module.id) ? Neon.pink : Neon.green,
             onChanged: (p, v) => state.setParam(module.id, p.name, v))),

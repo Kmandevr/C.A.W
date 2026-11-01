@@ -544,7 +544,7 @@ class _BuilderTrackControls extends StatelessWidget {
               icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim),
             ),
           ]),
-          ValueListenableBuilder<int>(valueListenable: state.values, builder: (context, _, _) => Row(children: [
+          ValueListenableBuilder<int>(valueListenable: state.layerValueTick(layer.id), builder: (context, _, _) => Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('LEVEL · ${(layer.volume * 100).round()}%', style: Neon.code(size: 10, color: Neon.green)),
               Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
@@ -665,7 +665,7 @@ class _Params extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Heading('Controls'),
       ValueListenableBuilder<int>(
-        valueListenable: state.values,
+        valueListenable: state.moduleValueTick(module.id),
         builder: (context, _, _) => ParamGroups(
           params: params,
           color: color,

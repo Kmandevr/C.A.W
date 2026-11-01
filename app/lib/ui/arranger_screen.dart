@@ -177,6 +177,7 @@ class _TimelineHeader extends StatelessWidget {
               if (v == 'up' && index > 0) state.moveLayer(index, index - 1);
               if (v == 'down' && index < state.project.layers.length - 1) state.moveLayer(index, index + 2);
               if (v == 'delete') state.removeLayer(layer);
+              if (v.startsWith('clip:')) state.addClip(layer, v.substring(5));
               if (v == 'unparent') state.moveLayerIntoFolder(layer, null);
               if (v.startsWith('parent:')) state.moveLayerIntoFolder(layer, v.substring(7));
               if (v == 'bus') state.setFolderBus(layer, !layer.busEnabled);
@@ -196,6 +197,11 @@ class _TimelineHeader extends StatelessWidget {
               if ((!layer.isFolder || layer.busEnabled) && !layer.automation.any((a) => a.target == 'pan')) const PopupMenuItem(value: 'automation-pan', child: Text('Add pan automation')),
               if (layer.automation.any((a) => a.target == 'volume')) const PopupMenuItem(value: 'remove-automation-volume', child: Text('Remove volume automation')),
               if (layer.automation.any((a) => a.target == 'pan')) const PopupMenuItem(value: 'remove-automation-pan', child: Text('Remove pan automation')),
+              if (patterns.isNotEmpty) ...[
+                const PopupMenuDivider(),
+                for (final pattern in patterns)
+                  PopupMenuItem(value: 'clip:${pattern.id}', child: Text('Add clip · ${pattern.name}')),
+              ],
               const PopupMenuItem(value: 'delete', child: Text('Delete')),
             ]),
         ]),
@@ -206,18 +212,20 @@ class _TimelineHeader extends StatelessWidget {
           ToggleChip(label: 'S', tooltip: 'Solo', on: layer.solo, color: Neon.blue,
             onTap: () => state.mixLayer(layer, solo: !layer.solo)),
           const SizedBox(width: 4),
-          Expanded(child: DropdownButton<String?>(
-            isExpanded: true, value: gens.any((g) => g.id == layer.generatorId) ? layer.generatorId : null,
-            hint: const Text('Generator', style: TextStyle(fontSize: 9)),
-            underline: const SizedBox.shrink(),
-            items: [for (final g in gens) DropdownMenuItem(value: g.id,
-              child: Text(g.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9)))],
-            onChanged: (id) => state.editLayer(layer, (l) => l.generatorId = id))),
-          PopupMenuButton<String>(padding: EdgeInsets.zero, tooltip: 'Add MIDI clip',
-            icon: const Icon(Icons.add_box_outlined, color: Neon.blue, size: 17),
-            onSelected: (id) => state.addClip(layer, id),
-            itemBuilder: (_) => [for (final m in patterns) PopupMenuItem(value: m.id, child: Text(m.name))],
-          ),
+          Expanded(child: Tooltip(
+            message: 'Generator: ${gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'None'} · choose generator',
+            child: DropdownButton<String?>(
+              isExpanded: true, isDense: true, iconSize: 10,
+              icon: const SizedBox.shrink(), padding: EdgeInsets.zero,
+              value: gens.any((g) => g.id == layer.generatorId) ? layer.generatorId : null,
+              hint: const Icon(Icons.graphic_eq, size: 12),
+              underline: const SizedBox.shrink(),
+              items: [for (final g in gens) DropdownMenuItem(value: g.id,
+                child: Text(g.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 9)))],
+              onChanged: (id) => state.editLayer(layer, (l) => l.generatorId = id),
+            ),
+          )),
         ])) else Expanded(child: Row(children: [
           ToggleChip(label: 'M', tooltip: 'Mute folder', on: layer.mute, color: Neon.yellow,
             onTap: () => state.editLayer(layer, (l) => l.mute = !l.mute)),
@@ -486,7 +494,7 @@ class _ArrangementMixer extends StatelessWidget {
             child: Column(children: [
               Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: Neon.layer(l.color), fontSize: 11)),
-              Expanded(child: ValueListenableBuilder<int>(valueListenable: state.values,
+              Expanded(child: ValueListenableBuilder<int>(valueListenable: state.layerValueTick(l.id),
                 builder: (context, _, _) => Column(children: [
                   Row(children: [const Icon(Icons.volume_up, size: 13, color: Neon.dim),
                     Expanded(child: Slider(value: l.volume, onChanged: (v) => state.mixLayer(l, volume: v)))]),
@@ -650,7 +658,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
           const SizedBox(width: 56, child: Text('Master', style: TextStyle(color: Neon.dim))),
           Expanded(
             child: ValueListenableBuilder<int>(
-              valueListenable: s.values,
+              valueListenable: s.masterValueTick,
               builder: (context, _, _) => Slider(
                 value: s.project.master.clamp(0.0, 1.0).toDouble(),
                 activeColor: Neon.blue,

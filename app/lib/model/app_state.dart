@@ -131,6 +131,11 @@ class AppState extends ChangeNotifier {
   /// Bumped when a param, global, volume or pan changes. Only the controls showing those values listen, so a slider
   /// drag doesn't rebuild the whole app (it rebuilt about 3,500 widgets per step before).
   final ValueNotifier<int> values = ValueNotifier(0);
+  final ValueNotifier<int> masterValueTick = ValueNotifier(0);
+  final Map<String, ValueNotifier<int>> _moduleValueTicks = {};
+  final Map<String, ValueNotifier<int>> _layerValueTicks = {};
+  ValueNotifier<int> moduleValueTick(String id) => _moduleValueTicks.putIfAbsent(id, () => ValueNotifier(0));
+  ValueNotifier<int> layerValueTick(String id) => _layerValueTicks.putIfAbsent(id, () => ValueNotifier(0));
   EngineMeters meters = const EngineMeters();
 
   /// Set when an overload switched light mode on, so the app can say so once.
@@ -191,6 +196,11 @@ class AppState extends ChangeNotifier {
     _liveTimer?.cancel();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
+    masterValueTick.dispose();
+    values.dispose();
+    tick.dispose();
+    for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
+    for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
     engine?.dispose();
     super.dispose();
   }
@@ -663,6 +673,7 @@ class AppState extends ChangeNotifier {
     m.params[name] = value;
     engine?.setParam(moduleId, name, value);
     _save();
+    moduleValueTick(moduleId).value++;
     values.value++;
   }
 
@@ -684,6 +695,11 @@ class AppState extends ChangeNotifier {
     project.globals[name] = value;
     engine?.setGlobal(name, value);
     _save();
+    for (final module in project.modules) {
+      if ((info[module.id]?.params ?? const <ParamInfo>[]).any((param) => param.global && param.name == name)) {
+        moduleValueTick(module.id).value++;
+      }
+    }
     values.value++;
   }
 
@@ -903,6 +919,7 @@ class AppState extends ChangeNotifier {
     project.master = value.clamp(0.0, 1.0).toDouble();
     engine?.setMaster(project.master);
     _save();
+    masterValueTick.value++;
     values.value++;
   }
 
@@ -915,6 +932,7 @@ class AppState extends ChangeNotifier {
     // Volume and pan drags only redraw their sliders; mute and solo change how the whole layer list looks.
     if (mute == null && solo == null) {
       _save();
+      layerValueTick(l.id).value++;
       values.value++;
     } else {
       _changed(engine: false);
@@ -1084,6 +1102,11 @@ class AppState extends ChangeNotifier {
     engine?.stop();
     _libraryUndo.clear();
     _libraryRedo.clear();
+    for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
+    for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
+    _moduleValueTicks.clear();
+    _layerValueTicks.clear();
+    masterValueTick.value++;
     project = p;
     info = {};
     blankKinds.clear();
