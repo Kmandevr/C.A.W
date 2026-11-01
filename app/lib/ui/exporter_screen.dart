@@ -1,6 +1,7 @@
 // Exporter: render a loop, a free-length take, a one-shot or a wavetable to WAV, then save it with the system picker.
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -225,8 +226,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final outputFile = File(path);
       file = outputFile;
       if (item.kind == ExportKind.midi) {
-        final error = Engine.exportPattern(item.patternSource, path,
-          bpm: item.bpm, beatsPerBar: item.beatsPerBar);
+        final error = await Isolate.run(() => Engine.exportPattern(item.patternSource, path,
+          bpm: item.bpm, beatsPerBar: item.beatsPerBar));
         if (error != null) throw StateError(error);
       } else {
         final job = RenderJob.start(RenderRequest(
@@ -463,8 +464,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final tmp = await getTemporaryDirectory();
       final name = _fileName();
       file = File('${tmp.path}${Platform.pathSeparator}$name');
-      final error = Engine.exportPattern(module.source, file.path,
-        bpm: s.project.bpm, beatsPerBar: s.project.beatsPerBar);
+      final error = await Isolate.run(() => Engine.exportPattern(module.source, file.path,
+        bpm: s.project.bpm, beatsPerBar: s.project.beatsPerBar));
       if (error != null) throw StateError(error);
       final bytes = await file.readAsBytes();
       final saved = await FilePicker.saveFile(fileName: name, bytes: bytes,
