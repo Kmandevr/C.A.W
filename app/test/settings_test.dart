@@ -84,6 +84,7 @@ void main() {
     await settings.recordExport(ExportHistoryEntry(
       fileName: 'Song_120bpm_4bars.wav', kind: 'loop', createdAtMs: now,
       sampleRate: 44100, float32: true, seconds: 12, frames: 32,
+      target: 'pattern-1', param: 'cutoff',
     ));
 
     final back = await Settings.open(base: dir);
@@ -94,6 +95,8 @@ void main() {
     expect(back.exportHistory, hasLength(1));
     expect(back.exportHistory.single.fileName, 'Song_120bpm_4bars.wav');
     expect(back.exportHistory.single.createdAtMs, now);
+    expect(back.exportHistory.single.target, 'pattern-1');
+    expect(back.exportHistory.single.param, 'cutoff');
 
     final malformed = Settings();
     malformed.fromJson({
