@@ -197,7 +197,7 @@ void main() {
     });
 
     expect(imported.libraryFolders, containsAll(['Good', 'Good/Child']));
-    expect(imported.libraryFolders.any((path) => path.contains('..') || path.contains('\\\\')), isFalse);
+    expect(imported.libraryFolders.any((path) => path.contains('..') || path.contains(String.fromCharCode(92))), isFalse);
     expect(imported.module('safe')?.folderPath, 'Good/Child');
     expect(imported.module('unsafe')?.folderPath, '');
   });
