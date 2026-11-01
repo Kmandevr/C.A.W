@@ -101,7 +101,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete folder?'),
-        content: Text('Delete "$path"? Its modules and subfolders will move to the parent folder; no module source will be deleted.'),
+        content: Text('Delete "$path"? Modules in this folder and its subfolders will move to the parent folder. Folder nodes are removed; module source is never deleted.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete folder')),
