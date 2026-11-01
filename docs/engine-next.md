@@ -2,6 +2,7 @@
 title: Modular adaptive engine blueprint
 summary: Deferred native-engine blueprint with implementation boundaries; current code status is tracked separately.
 updated: 2026-11-01
+covers: [engine/, app/]
 ---
 
 # Modular adaptive engine blueprint
