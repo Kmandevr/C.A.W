@@ -62,6 +62,20 @@ void main() {
     expect(selectedView, 2);
   });
 
+  test('master gain updates shared state without a full app notification', () {
+    state.project = ProjectDoc(id: 'project-1', name: 'Master test', master: 0.7);
+    var valueTicks = 0;
+    var appNotifications = 0;
+    state.values.addListener(() => valueTicks++);
+    state.addListener(() => appNotifications++);
+
+    state.setMaster(0.42);
+
+    expect(state.project.master, closeTo(0.42, 0.0001));
+    expect(valueTicks, 1);
+    expect(appNotifications, 0);
+  });
+
   testWidgets('Mixer channel controls update the shared project model', (tester) async {
     final module = ModuleDoc(id: 'gen-1', name: 'Bass synth', source: '');
     final layer = LayerDoc(id: 'layer-1', name: 'Bass', color: 0, generatorId: module.id, volume: 0.5);
