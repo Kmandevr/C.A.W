@@ -104,7 +104,9 @@ class _SignalPath extends StatelessWidget {
       ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
         final peak = index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0;
         return Row(children: [
-          Expanded(child: Bar(value: peak, color: Neon.green, height: 5)),
+          Expanded(child: PeakMeter(state: state,
+            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
+            color: Neon.green)),
           const SizedBox(width: 8),
           Text(peak.toStringAsFixed(3), style: Neon.code(size: 10, color: Neon.green)),
         ]);
