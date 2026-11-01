@@ -109,8 +109,12 @@ Future<void> _importProject(BuildContext context, AppState state) async {
     );
     if (file == null) return;
     final decoded = jsonDecode(await file.xFile.readAsString());
-    if (decoded is! Map<String, dynamic> || decoded['caw_app_project'] == null) {
+    if (decoded is! Map<String, dynamic> || decoded['caw_app_project'] is! num) {
       throw const FormatException('This is not a C.A.W. project file.');
+    }
+    final version = (decoded['caw_app_project'] as num).toInt();
+    if (version > ProjectDoc.fileVersion) {
+      throw FormatException('This project uses a newer format (v$version); this app supports v${ProjectDoc.fileVersion}.');
     }
     final project = ProjectDoc.fromJson(decoded);
     if (!context.mounted) return;
