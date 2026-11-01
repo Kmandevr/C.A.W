@@ -49,7 +49,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.name = root.string("name");
     out.bpm = clampd(root.number("bpm", 120), 20, 400);
     out.beatsPerBar = clampi(root.number("beats_per_bar", 4), 1, 16);
-    out.voices = clampi(root.number("voices", 8), 1, 8);
+    out.voices = clampi(root.number("voices", 32), 1, 32);  // a cap: each generator plays its own voices: count
     out.loopBars = clampi(root.number("loop_bars", 4), 1, 64);
     const int maxArrangementSteps = 64 * out.beatsPerBar * 4;
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
@@ -62,6 +62,41 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.keyRoot = clampi(root.number("key_root", 9), 0, 11);
     out.keyScale = clampi(root.number("key_scale", 1), 0, 13);
 
+    if (const Json* deps = root.get("dependencies"); deps && deps->type == Json::Type::Array) {
+        if (deps->arr.size() > 4096) {
+            error = "a project can reference at most 4096 dependencies";
+            return false;
+        }
+        for (const Json& d : deps->arr) {
+            if (d.type != Json::Type::Object) {
+                error = "each project dependency must be an object";
+                return false;
+            }
+            DependencyRef dep;
+            dep.stableId = d.string("id");
+            dep.version = d.string("version");
+            dep.contentHash = d.string("hash");
+            const std::string scope = d.string("scope", "project");
+            if (scope == "project") dep.scope = AssetScope::ProjectLocal;
+            else if (scope == "global") dep.scope = AssetScope::UserGlobal;
+            else if (scope == "factory") dep.scope = AssetScope::Factory;
+            else if (scope == "addon") dep.scope = AssetScope::AddOn;
+            else {
+                error = "dependency scope must be project, global, factory or addon";
+                return false;
+            }
+            const double interfaceVersion = d.number("interface_version", 1);
+            if (dep.stableId.empty() || dep.version.empty() || !std::isfinite(interfaceVersion) ||
+                interfaceVersion < 1 || interfaceVersion > 65535 || std::floor(interfaceVersion) != interfaceVersion) {
+                error = "each project dependency needs a stable id, exact version and positive integer interface_version";
+                return false;
+            }
+            dep.interfaceVersion = static_cast<uint32_t>(interfaceVersion);
+            dep.optional = d.boolean("optional", false);
+            out.dependencies.push_back(std::move(dep));
+        }
+    }
+
     if (const Json* mods = root.get("modules"); mods && mods->type == Json::Type::Array) {
         for (const Json& m : mods->arr) {
             if (m.type != Json::Type::Object) continue;
@@ -69,7 +104,10 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.id = m.string("id");
             spec.name = m.string("name");
             spec.source = m.string("source");
-            if (spec.id.empty()) continue;
+            // Ids with control characters are left out: the engine names its hidden modules with them.
+            bool control = false;
+            for (unsigned char ch : spec.id) control = control || ch < 0x20;
+            if (spec.id.empty() || control) continue;
             if (const Json* ps = m.get("params"); ps && ps->type == Json::Type::Object)
                 for (const auto& [k, v] : ps->obj)
                     if (v.type == Json::Type::Number && std::isfinite(v.num)) spec.params[k] = v.num;
