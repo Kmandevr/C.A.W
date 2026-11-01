@@ -98,6 +98,10 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: ArrangerScreen(state: state)),
     ));
+    await tester.tap(find.byTooltip('Track height'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Extra tall · 120 px'));
+    await tester.pumpAndSettle();
 
     CustomPaint painted(String name) => tester.widgetList<CustomPaint>(find.byType(CustomPaint))
       .firstWhere((w) => w.painter.runtimeType.toString().contains(name));
