@@ -26,15 +26,15 @@ class ArrangerScreen extends StatefulWidget {
 }
 
 class _ArrangerScreenState extends State<ArrangerScreen> {
-  bool mixer = false, settings = false, compactTracks = false;
-  double zoom = 18.0;
+  bool mixer = false, settings = false;
+  double zoom = 18.0, _trackHeight = 76.0;
 
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
     final p = s.project;
     final stepW = zoom * (Neon.compact(context) ? 0.85 : 1.0);
-    final trackHeight = compactTracks ? 54.0 : 76.0;
+    final trackHeight = _trackHeight;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
     final end = p.layers.fold<int>(p.loopSteps, (v, l) =>
       l.clips.fold<int>(v, (e, c) => math.max(e, c.startSteps + c.lengthSteps)));
@@ -57,9 +57,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt), icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
           IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0).toDouble()), icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
           IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()), icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
-          IconButton(onPressed: () => setState(() => compactTracks = !compactTracks),
-            icon: Icon(compactTracks ? Icons.view_agenda_outlined : Icons.view_stream_outlined),
-            color: compactTracks ? Neon.blue : Neon.dim, tooltip: 'Toggle track density'),
+          PopupMenuButton<double>(
+            tooltip: 'Track height',
+            initialValue: _trackHeight,
+            onSelected: (value) => setState(() => _trackHeight = value),
+            icon: Icon(Icons.height, color: _trackHeight == 76 ? Neon.dim : Neon.blue),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 54, child: Text('Compact · 54 px')),
+              PopupMenuItem(value: 76, child: Text('Standard · 76 px')),
+              PopupMenuItem(value: 96, child: Text('Tall · 96 px')),
+              PopupMenuItem(value: 120, child: Text('Extra tall · 120 px')),
+            ],
+          ),
           DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
             items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
             onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
