@@ -7,6 +7,7 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
+import 'package:caw/ui/file_manager_screen.dart';
 import 'package:caw/ui/mixer_screen.dart';
 
 void main() {
@@ -82,4 +83,41 @@ void main() {
     expect(find.text('Noise core'), findsNWidgets(2));
     expect(find.text('Noise generator'), findsOneWidget);
   });
+  testWidgets('File Manager exposes portable project and module actions', (tester) async {
+    state.project = ProjectDoc(id: 'project-1', name: 'Portable project', modules: [
+      ModuleDoc(id: 'gen-1', name: 'Bass', source: '---\\nkind: generator\\n---\\nsin(110)'),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
+    ));
+
+    expect(find.text('FILES / LIBRARY'), findsOneWidget);
+    expect(find.text('Portable project'), findsOneWidget);
+    expect(find.text('Export .cawproj'), findsOneWidget);
+    expect(find.text('Import project'), findsOneWidget);
+    expect(find.text('Import .caw module'), findsOneWidget);
+    expect(find.text('Bass'), findsOneWidget);
+  });
+
+  test('imported projects receive a new identity and preserve project content', () async {
+    state.starting = false;
+    final imported = ProjectDoc(id: 'external-id', name: 'Imported session', bpm: 128);
+    await state.importProject(imported);
+
+    expect(state.project.id, isNot('external-id'));
+    expect(state.project.name, 'Imported session');
+    expect(state.project.bpm, 128);
+  });
+
+  test('imported module source becomes a new project module', () {
+    final id = state.importModuleSource(
+      '---\\nkind: generator\\nname: Imported bass\\n---\\nsin(110)',
+      fileName: 'Bass.caw',
+    );
+
+    expect(state.project.module(id)?.name, 'Imported bass');
+    expect(state.project.module(id)?.source, contains('sin(110)'));
+  });
+
 }
