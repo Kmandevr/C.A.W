@@ -18,7 +18,8 @@ enum class DevicePressure : uint8_t {
     BatterySaver,
     ThermalWarm,
     ThermalHot,
-    ThermalCritical
+    ThermalCritical,
+    Unknown
 };
 
 // Supplied by the platform host from supported OS APIs and measured probes.
@@ -33,7 +34,7 @@ struct HardwareProfile {
 
 struct ExecutionRequest {
     WorkloadClass workload = WorkloadClass::InteractivePreview;
-    DevicePressure pressure = DevicePressure::Normal;
+    DevicePressure pressure = DevicePressure::Unknown;
     bool foregroundBusy = false;
     bool allowGpu = true;
 };

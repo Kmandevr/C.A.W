@@ -13,6 +13,23 @@ bool waitFor(CawJob* job, CawJobStatus& status) {
 }
 }
 
+TEST(worker_api_accepts_unknown_pressure_and_keeps_a_conservative_plan) {
+    CawWorkerPool* pool = caw_worker_pool_create(4);
+    CHECK(pool != nullptr);
+    if (!pool) return;
+    CawExecutionRequest request{};
+    request.workload = CAW_WORK_OFFLINE_RENDER;
+    request.pressure = CAW_PRESSURE_UNKNOWN;
+    request.allow_gpu = 1;
+    CawExecutionPlan plan{};
+    CHECK_EQ(caw_worker_pool_apply(pool, &request, &plan), 0);
+    CHECK(plan.worker_threads >= 1);
+    CHECK(plan.worker_threads <= 4);
+    CHECK_EQ(plan.max_concurrent_jobs, plan.worker_threads);
+    CHECK_EQ(plan.allow_gpu, 0);
+    caw_worker_pool_destroy(pool);
+}
+
 TEST(worker_api_submits_checks_and_returns_owned_results) {
     CawWorkerPool* pool = caw_worker_pool_create(2);
     CHECK(pool != nullptr);

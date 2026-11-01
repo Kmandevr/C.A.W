@@ -50,13 +50,25 @@ ExecutionPlan makeExecutionPlan(const HardwareProfile& hardware, const Execution
             return plan;
     }
 
-    if (request.foregroundBusy && request.workload != WorkloadClass::InteractiveAudition &&
-        request.workload != WorkloadClass::InteractivePreview) {
+    if (request.foregroundBusy && request.workload == WorkloadClass::InteractivePreview) {
+        plan.workerThreads = 1;
+        plan.yieldToForeground = true;
+    } else if (request.foregroundBusy && request.workload != WorkloadClass::InteractiveAudition &&
+               request.pressure != DevicePressure::Unknown) {
         plan.workerThreads = std::max<uint16_t>(1, static_cast<uint16_t>(plan.workerThreads - 1));
         plan.yieldToForeground = true;
     }
 
     switch (request.pressure) {
+        case DevicePressure::Unknown:
+            // No verified pressure feed: reserve one core for the host/audio/UI when possible.
+            if (request.workload != WorkloadClass::InteractiveAudition &&
+                request.workload != WorkloadClass::InteractivePreview) {
+                plan.workerThreads = std::max<uint16_t>(1, std::min<uint16_t>(plan.workerThreads,
+                    cores > 1 ? static_cast<uint16_t>(cores - 1) : 1));
+            }
+            plan.yieldToForeground = true;
+            break;
         case DevicePressure::Normal:
             break;
         case DevicePressure::BatterySaver:
@@ -85,7 +97,8 @@ ExecutionPlan makeExecutionPlan(const HardwareProfile& hardware, const Execution
                     hardware.memoryBudgetMiB >= 1024 &&
                     request.pressure != DevicePressure::ThermalHot &&
                     request.pressure != DevicePressure::ThermalCritical &&
-                    request.pressure != DevicePressure::BatterySaver;
+                    request.pressure != DevicePressure::BatterySaver &&
+                    request.pressure != DevicePressure::Unknown;
     return plan;
 }
 

@@ -188,6 +188,7 @@ TEST(adaptive_policy_caps_workers_by_memory_and_effective_cpu_budget) {
     HardwareProfile constrained{2, 128, true, false};
     ExecutionRequest request;
     request.workload = WorkloadClass::OfflineRender;
+    request.pressure = DevicePressure::Normal; // This test isolates CPU and memory caps from unknown-pressure policy.
     const ExecutionPlan plan = makeExecutionPlan(constrained, request);
     CHECK_EQ(plan.workerThreads, 2);
     CHECK_EQ(plan.maxConcurrentJobs, 2);
