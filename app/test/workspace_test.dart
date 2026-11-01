@@ -126,6 +126,7 @@ void main() {
     state.project = ProjectDoc(id: 'project-1', name: 'Portable project', modules: [
       ModuleDoc(id: 'gen-1', name: 'Bass', source: '---\\nkind: generator\\n---\\nsin(110)'),
     ]);
+    state.createLibraryFolder('Synths');
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
@@ -137,6 +138,17 @@ void main() {
     expect(find.text('Import project'), findsOneWidget);
     expect(find.text('Import .caw module'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Select modules'));
+    await tester.pump();
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pump();
+    expect(find.text('1 selected'), findsOneWidget);
+    await tester.tap(find.byTooltip('Move selected modules'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Move to Synths'));
+    await tester.pumpAndSettle();
+    expect(state.project.module('gen-1')?.folderPath, 'Synths');
   });
 
 
