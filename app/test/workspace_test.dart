@@ -240,6 +240,13 @@ void main() {
     await tester.pump();
     expect(state.project.modules, hasLength(1));
     expect(state.kindOf(state.project.modules.single.id), 'effect');
+    await tester.tap(find.text('Advanced'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clone as new module'), findsOneWidget);
+    await tester.tap(find.text('Clone as new module'));
+    await tester.pumpAndSettle();
+    expect(state.project.modules, hasLength(2));
+    expect(state.kindOf(state.project.modules.last.id), 'effect');
   });
 
   test('imported projects receive a new identity and preserve project content', () async {
