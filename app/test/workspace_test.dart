@@ -213,6 +213,8 @@ void main() {
 
     state.setModuleTags(id, ['bass', 'Analog', 'bass']);
     expect(state.project.module(id)?.tags, ['bass', 'Analog']);
+    state.saveLibrarySearch('Bass modules', 'bass');
+    expect(state.project.savedLibrarySearches['Bass modules'], 'bass');
 
     state.createLibraryFolder('Synths');
     expect(state.moveModuleToFolder(id, 'Synths'), isTrue);
@@ -222,6 +224,7 @@ void main() {
     final restored = ProjectDoc.fromJson(state.project.toJson());
     expect(restored.libraryFolders, containsAll(['Sounds', 'Sounds/Synths']));
     expect(restored.module(id)?.tags, ['bass', 'Analog']);
+    expect(restored.savedLibrarySearches['Bass modules'], 'bass');
 
     expect(state.deleteLibraryFolder('Sounds'), isTrue);
     expect(state.project.module(id)?.folderPath, '');
