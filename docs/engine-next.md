@@ -1,7 +1,7 @@
 ---
 title: Modular adaptive engine blueprint
-summary: Owner direction for CAW's native sound engine, reusable modules, interactive creation interfaces, portable assets, expressive MIDI, exports and adaptive hardware use.
-updated: 2026-10-30
+summary: Deferred native-engine blueprint with implementation boundaries; current code status is tracked separately.
+updated: 2026-11-01
 ---
 
 # Modular adaptive engine blueprint
@@ -12,7 +12,7 @@ updated: 2026-10-30
 
 C.A.W (Code Auditioning Workspace) is a programmable sound-design and content-creation environment. It creates sound assets and reusable audio capabilities for other applications.
 
-C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful recording, arranging, editing, mixing and export tools where they help users make complete music, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Recording/capturing generated audio while sound is playing remains supported. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
+C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful recording, arranging, editing, mixing and export tools where they help users make complete music, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Audio recording/capture is not implemented; recording remains deferred in the current workflow plan. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
 
 CAW should natively create bytebeat and deterministic mathematical audio; procedural sounds, drums, instruments, effects, samples and wavetables; custom synthesizers and processing modules; MIDI patterns and expressive per-note data including MPE; reusable building blocks; and eventually distributable plugins. It should export content other software can consume, rather than recreate those applications' entire workflows.
 
@@ -24,7 +24,7 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 4. **Deterministic experimentation.** Seeded procedural and bitwise sound remains repeatable. Optimizations preserve defined semantics; golden renders protect intentional sound.
 5. **Native and local.** Core creation works offline and does not require a server, account, AI provider or DAW.
 6. **Reusable and composable.** A waveform, LFO, envelope, filter, effect, MIDI curve or generator can be reused outside its first intended purpose.
-7. **AI is optional.** The longer-term goal may let an LLM/agent work directly with CAW projects and files (Claude-Code/GitHub-like), rather than copy/paste prompts. CAW remains fully useful without AI.
+7. **No in-app AI integration in current scope.** External coding assistants may be used as development tools, but do not add an LLM, model inference, AI generation/editing or cloud-audio feature to the shipped product without a new owner decision.
 8. **Factory is a starting point.** Starter content remains under caw/factory. Users can start blank, modify a template, write code, use visual tools or hand-build a specialized implementation.
 9. **Local/global assets are explicit.** Local assets belong to a project; global assets are reusable across projects. Stable IDs and versions prevent path changes breaking projects.
 10. **Other applications are the destination.** CAW creates portable content for DAWs, games, custom software and plugin formats. It is not a general plugin host.
@@ -213,6 +213,6 @@ This blueprint describes direction and proposed architecture, not a claim that e
 
 ## 14. Existing work to preserve
 
-This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, AI-friendly files, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities while keeping sound design and content creation primary and adding useful lightweight DAW capabilities where they help, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, factory content under caw/factory, local/global assets, optional direct AI project editing, CLAP-first plugin generation, VST3 later, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
+This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, AI-friendly files, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities while keeping sound design and content creation primary and adding useful lightweight DAW capabilities where they help, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, existing starter modules under examples/, local/offline project assets, no in-app AI integration, and future plugin work only after a real native host/SDK and release checks, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
 
 See [vision](vision.md), [architecture](architecture.md), [synth](synth.md), [performance](performance.md), [decisions](decisions.md) and [roadmap](roadmap.md). Where those notes conflict with this clarified product focus and capability boundary or adaptive-engine direction, reconcile them as implementation proceeds.
