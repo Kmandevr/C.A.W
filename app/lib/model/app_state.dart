@@ -564,17 +564,22 @@ class AppState extends ChangeNotifier {
     return changed;
   }
 
-  void setModuleTags(String moduleId, List<String> tags) {
-    final module = project.module(moduleId);
-    if (module == null) return;
+  void setModuleTags(String moduleId, List<String> tags) => setModulesTags([moduleId], tags);
+
+  void setModulesTags(Iterable<String> moduleIds, List<String> tags) {
+    final ids = moduleIds.toSet();
     final seen = <String>{};
     final nextTags = [
       for (final raw in tags)
         if (raw.trim().isNotEmpty && raw.trim().length <= 48 && seen.add(raw.trim().toLowerCase())) raw.trim(),
     ].take(16).toList();
-    if (listEquals(module.tags, nextTags)) return;
+    final targets = project.modules.where((module) =>
+      ids.contains(module.id) && !listEquals(module.tags, nextTags)).toList();
+    if (targets.isEmpty) return;
     _recordLibraryUndo();
-    module.tags = nextTags;
+    for (final module in targets) {
+      module.tags = List.of(nextTags);
+    }
     _changed(engine: false);
   }
 
