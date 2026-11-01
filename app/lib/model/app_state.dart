@@ -486,7 +486,8 @@ class AppState extends ChangeNotifier {
   String kindOf(String moduleId) {
     final m = project.module(moduleId);
     if (m == null) return 'generator';
-    return info[moduleId]?.kind ?? headerValue(m.runSource, 'kind') ?? 'generator';
+    final emptyHint = m.source.isEmpty ? blankKinds[moduleId] : null;
+    return info[moduleId]?.kind ?? headerValue(m.runSource, 'kind') ?? emptyHint ?? 'generator';
   }
 
   bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
