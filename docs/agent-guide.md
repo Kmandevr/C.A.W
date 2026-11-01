@@ -2,6 +2,7 @@
 title: Agent guide
 summary: Compact guide for AI agents writing C.A.W sound modules: the language in brief and every function on one line.
 updated: 2026-10-31
+covers: [engine/src/builtins.cpp, engine/lib/, engine/src/synth.cpp]
 ---
 
 # Agent guide
