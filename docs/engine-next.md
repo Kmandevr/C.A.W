@@ -13,7 +13,7 @@ covers: [engine/, app/]
 
 C.A.W (Code Auditioning Workspace) is a programmable sound-design and content-creation environment. It creates sound assets and reusable audio capabilities for other applications.
 
-C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful recording, arranging, editing, mixing and export tools where they help users make complete music, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Audio recording/capture is not implemented; recording remains deferred in the current workflow plan. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
+C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful arranging, editing, mixing and export tools where they help users make complete music; audio recording remains deferred unless the owner reprioritizes it, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Audio recording/capture is not implemented; recording remains deferred in the current workflow plan. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
 
 CAW should natively create bytebeat and deterministic mathematical audio; procedural sounds, drums, instruments, effects, samples and wavetables; custom synthesizers and processing modules; MIDI patterns and expressive per-note data including MPE; reusable building blocks; and eventually distributable plugins. It should export content other software can consume, rather than recreate those applications' entire workflows.
 
@@ -104,7 +104,7 @@ MIDI is a native event and asset model. Preserve and extend the existing pattern
 - MPE-compatible export and MIDI 2.0-oriented internal precision, including fractional pitches.
 - Shared expensive effects after voices are summed where routing permits, rather than duplicating reverb/delay per note.
 - Equation-generated modulation and procedural MIDI generation.
-- Pattern editing and preview come first; a lightweight arrangement/timeline and practical recording or editing can be added where they help complete music-making, without requiring full DAW parity or a feature-rich live-performance workstation.
+- Pattern editing and preview come first; a lightweight arrangement/timeline and practical audio editing can be added where they help complete music-making, without requiring full DAW parity. Audio recording remains deferred in the current workflow plan.
 
 ## 7. Factory, projects and asset scope
 
