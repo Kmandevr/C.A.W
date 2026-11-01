@@ -1,3 +1,11 @@
+## Files workspace workflow completion at head aa0a0cb0
+
+- The audit found that the library supported folder-scoped search, organization and import/export, but lacked a way to rename or remove an individual module from the Files workspace. It also could not search nested folders without navigating into each one.
+- Added a "Search all folders" scope chip when a query is active; matching modules show their folder path so results remain navigable and unambiguous.
+- Added module rename and confirmed delete actions. Deletion uses the existing AppState operation, which removes track references and dependent clips/effects consistently; the confirmation explicitly warns that this action is not undoable.
+- Added a widget test covering cross-folder search, path display, rename and confirmed deletion.
+- Exact-head App, Engine, platform and docs CI are pending; no pass is claimed for this change yet.
+
 ---
 title: Task 1 UI implementation handoff
 summary: Current implementation state, branch and CI evidence for the C.A.W. Master Task 1 UI overhaul.
@@ -10,9 +18,9 @@ updated: 2026-11-01
 
 - Repository: `Kmandevr/C.A.W`
 - Implementation branch: `feature/task-1-ui-workflow`
-- Latest implementation-code head before this checkpoint update: `bc021ea92164e0b3998488527d71693e3121656c`.
+- Latest verified implementation head before the Files workflow completion commit: `aa0a0cb012725bae68fabd1a1af3768aace50757`.
 - PR: [#56 — Task 1 UI workspaces](https://github.com/Kmandevr/C.A.W/pull/56), open and draft.
-- PR base: `ccr-395682a8-dthizd`; the branch is 276 commits ahead and 2 behind at the latest comparison (status: diverged). GitHub reported it mergeable. Do not rebase or change its base silently.
+- PR base branch: `ccr-395682a8-dthizd` (base SHA at the last inspection: `b919994b6a583e4531438630eee08d4c642ef7db`). The branch is diverged from base; do not rebase or change its base silently.
 - PR remains unmerged. Do not merge without explicit authorization.
 - The repository's `main` branch was previously found to be substantially divergent and does not contain the authoritative master plan or current arrangement-first UI. Re-check branch relationships before changing the PR base.
 
@@ -55,9 +63,9 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Regression/widget tests cover master-gain update isolation, native smooth master gain, peak hold/release timing, 48 dp toggle targets, mobile focused Mixer navigation, shared Mixer state, Arranger playhead/track sizing, Engine Lab signal/spectrum, Exporter queue/profile/history/navigation, Plugin Builder cloning, library folder/tag/search operations, bulk move/tag undo/redo, project import identity and malformed library metadata bounds.
 - Audio export catches render/save failures and cleans temporary files; MIDI export has independent busy/error handling and worker-isolate generation.
 - CI workflow files cancel superseded runs per branch/PR to avoid spending runner time on stale commits.
-- **The latest App, Engine and Docs/hygiene workflows for head `bc021ea9` (run IDs `41320549040`, `41320549038` and `41320549049`) were queued when checked; all their individual jobs were still queued. These runs do not verify the subsequent handoff-document commit. Re-check the newest exact-head runs before claiming success.** Do not claim the latest head passes until those exact runs complete.
+- **Verified exact-head checkpoint `aa0a0cb012725bae68fabd1a1af3768aace50757`: App CI passed Dart analysis and 126 widget tests; Windows desktop and Android APK builds passed; Engine CI passed Windows x64, Linux x64, Linux Arm64 and Linux sanitizers; Docs/hygiene passed.** These results apply to that exact head, not to subsequent commits.
 - The GitHub Actions queue had a large backlog of older runs when checked, and rapid commits caused superseded runs to be cancelled. Allow the newest runs to execute, then inspect any failed job logs before considering the branch verified.
-- No local Flutter SDK execution, physical Android/desktop interaction audit, accessibility audit, screenshot comparison or current-device performance benchmark has been completed in this GitHub-only session.
+- No local Flutter SDK execution, physical Android/desktop interaction audit, full accessibility audit, screenshot comparison or current-device performance benchmark has been completed in this GitHub-only session.
 
 
 ## Checkpoint additions after the earlier handoff

@@ -446,6 +446,44 @@ void main() {
 
 
 
+  testWidgets('Files can search across folders and rename or delete a module safely', (tester) async {
+    final module = ModuleDoc(id: 'nested-module', name: 'Old bass', source: 'sine(110)',
+      folderPath: 'Synths/Bass', tags: ['low']);
+    state.project = ProjectDoc(id: 'files-search', name: 'Files search',
+      modules: [module], libraryFolders: ['Synths', 'Synths/Bass']);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
+    ));
+
+    await tester.enterText(find.byType(TextField).first, 'bass');
+    await tester.pump();
+    expect(find.text('No modules match this search.'), findsOneWidget);
+    await tester.tap(find.text('Search all folders'));
+    await tester.pump();
+    expect(find.text('Old bass'), findsOneWidget);
+    expect(find.text('Synths/Bass'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Module actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rename module'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'Sub bass');
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+    expect(module.name, 'Sub bass');
+
+    await tester.tap(find.byTooltip('Module actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete module'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete module?'), findsOneWidget);
+    await tester.tap(find.text('Delete module').last);
+    await tester.pumpAndSettle();
+    expect(state.project.module('nested-module'), isNull);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Exporter queues and removes a reproducible quick-export snapshot', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: ExporterScreen(state: state)),

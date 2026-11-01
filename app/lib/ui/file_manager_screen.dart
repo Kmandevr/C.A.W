@@ -23,6 +23,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   String _query = '';
   String _sort = 'name';
   bool _selectionMode = false;
+  bool _searchAllFolders = false;
   final Set<String> _selectedModuleIds = {};
   final TextEditingController _searchController = TextEditingController();
 
@@ -115,6 +116,49 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     }
   }
 
+  Future<void> _renameModule(ModuleDoc module) async {
+    final controller = TextEditingController(text: module.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename module'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 80,
+          decoration: const InputDecoration(labelText: 'Module name'),
+          onSubmitted: (value) => Navigator.pop(context, value.trim()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Rename')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || name == null || name.trim().isEmpty) return;
+    state.renameModule(module.id, name);
+  }
+
+  Future<void> _deleteModule(ModuleDoc module) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete module?'),
+        content: Text('Delete "${module.name}"? Tracks using it will have the generator/effect reference removed. This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete module')),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
+    state.deleteModule(module.id);
+    setState(() => _selectedModuleIds.remove(module.id));
+    _notice('Deleted "${module.name}".');
+  }
+
   Future<void> _editTags(ModuleDoc module) async {
     final controller = TextEditingController(text: module.tags.join(', '));
     final value = await showDialog<String>(
@@ -195,7 +239,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     builder: (context, _) {
       final folders = state.project.libraryFolders.toList()..sort();
       final modules = state.project.modules.where((module) {
-        if (module.folderPath != _folderPath) return false;
+        if (!_searchAllFolders && module.folderPath != _folderPath) return false;
         if (_query.trim().isEmpty) return true;
         final q = _query.trim().toLowerCase();
         return module.name.toLowerCase().contains(q) ||
@@ -310,6 +354,15 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               onChanged: (value) { if (value != null) setState(() => _sort = value); },
             ),
           ]),
+          if (_query.trim().isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilterChip(
+                label: const Text('Search all folders'),
+                selected: _searchAllFolders,
+                onSelected: (value) => setState(() => _searchAllFolders = value),
+              ),
+            ),
           if (state.project.savedLibrarySearches.isNotEmpty)
             Padding(padding: const EdgeInsets.only(top: 6),
               child: Wrap(spacing: 6, runSpacing: 4, children: [
@@ -375,6 +428,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               ]),
               subtitle: Wrap(spacing: 4, runSpacing: 2, children: [
                 Text(state.kindOf(module.id).toUpperCase(), style: Neon.code(size: 9, color: Neon.dim)),
+                if (_searchAllFolders && module.folderPath.isNotEmpty)
+                  Text(module.folderPath, style: const TextStyle(color: Neon.dim, fontSize: 9)),
                 for (final tag in module.tags)
                   Chip(label: Text(tag, style: const TextStyle(fontSize: 9)),
                     visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
@@ -409,7 +464,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                 PopupMenuButton<String>(
                   tooltip: 'Module actions',
                   onSelected: (action) {
+                    if (action == 'rename') _renameModule(module);
                     if (action == 'tags') _editTags(module);
+                    if (action == 'delete') _deleteModule(module);
                     if (action == 'export') _exportModule(context, module);
                     if (action == 'root') state.moveModuleToFolder(module.id, '');
                     if (action.startsWith('folder:')) {
@@ -417,8 +474,11 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                     }
                   },
                   itemBuilder: (_) => [
+                    const PopupMenuItem(value: 'rename', child: Text('Rename module')),
                     const PopupMenuItem(value: 'tags', child: Text('Edit tags')),
                     const PopupMenuItem(value: 'export', child: Text('Export .caw')),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(value: 'delete', child: Text('Delete module')),
                     const PopupMenuDivider(),
                     const PopupMenuItem(value: 'root', child: Text('Move to project root')),
                     for (final folder in folders)
