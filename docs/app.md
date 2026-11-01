@@ -18,6 +18,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - Play/Stop (the space bar on desktop)
 - **Builder** (`lib/ui/builder_screen.dart`):
   - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)
+  - a compact active-track panel shared with the Mixer for track selection, volume, pan, mute and solo
   - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth and the Acid line and Chords patterns)
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
@@ -46,6 +47,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - the main workspace is a horizontal timeline with a bar ruler and one lane per track; the former layer-card list has been replaced
   - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
+  - track height can be set to 54, 76, 96 or 120 px from the timeline toolbar
   - clips are instances of reusable pattern sources; they can be selected, moved, resized, duplicated independently or as linked copies, deleted, and opened in the existing Builder piano roll
   - the separate Mixer panel edits the same track volume and pan values as the engine; it does not maintain duplicate mix state
   - project settings and global controls are available from the settings button rather than permanently occupying the timeline
@@ -53,6 +55,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - volume and pan automation lanes are serialized and played by the native engine; the callback interpolates their points at song position
   - empty-lane drags make time selections; selected clips can be split, snapped, moved, resized or source-offset shifted with Alt-drag
   - Shift-tap selects companion clips; their notes appear as references in the existing piano roll. Explicit multi-edit mode mirrors note edits to selected independent sources while preserving local note IDs; clips sharing a pattern source stay linked
+  - the playhead overlay reads the 30 Hz meter tick independently, so the moving line repaints without rebuilding the clip grid or track layout
   - a banner appears when the engine muted layers to keep audio clean, with Unmute
 - **Mixer / Editor** (`lib/ui/mixer_screen.dart`):
   - a dedicated channel-strip workspace with shared track volume, pan, mute and solo controls
@@ -82,7 +85,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - validates the project format version and reports malformed or future-version files instead of opening them
   - WAV, MIDI and wavetable exports remain in Exporter; this workspace does not force a folder hierarchy
 - **Plugin Builder** (`lib/ui/plugin_builder_screen.dart`):
-  - guided creation from existing generator/effect templates and an advanced workflow for project modules
+  - guided creation from blank generators/effects or existing generator/effect templates and an advanced workflow for project modules
   - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source
   - CLAP/VST3 binary targets, host sandboxing and per-plugin CPU/memory tests are not available until a native plugin SDK/host backend is integrated
 - **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a four-item bottom bar (Builder, Arranger, Mixer, More); More opens Engine Lab, Automation, Exporter, Files and Plugin Builder. Desktop uses a navigation rail for all eight destinations. All workspaces share the same AppState. Ctrl+1/2/3 remain the current registered view shortcuts.
