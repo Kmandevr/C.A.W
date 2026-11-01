@@ -6,6 +6,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/automation_screen.dart';
+import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
 import 'package:caw/ui/file_manager_screen.dart';
@@ -88,6 +89,29 @@ void main() {
     expect(find.text('Noise core'), findsNWidgets(2));
     expect(find.text('Noise generator'), findsOneWidget);
   });
+
+  testWidgets('Arranger playhead updates from meter ticks without rebuilding the grid', (tester) async {
+    final layer = LayerDoc(id: 'layer-1', name: 'Lead', color: 0);
+    state.project = ProjectDoc(id: 'project-1', name: 'Timeline test', layers: [layer]);
+    state.meters = const EngineMeters(playing: true, position: 0, loopLength: 256);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ArrangerScreen(state: state)),
+    ));
+
+    CustomPaint painted(String name) => tester.widgetList<CustomPaint>(find.byType(CustomPaint))
+      .firstWhere((w) => w.painter.runtimeType.toString().contains(name));
+    final gridBefore = painted('ArrangementGrid').painter;
+    final playheadBefore = painted('PlayheadPainter').painter;
+
+    state.meters = const EngineMeters(playing: true, position: 32, loopLength: 256);
+    state.tick.value++;
+    await tester.pump();
+
+    expect(identical(gridBefore, painted('ArrangementGrid').painter), isTrue);
+    expect(identical(playheadBefore, painted('PlayheadPainter').painter), isFalse);
+  });
+
   testWidgets('File Manager exposes portable project and module actions', (tester) async {
     state.project = ProjectDoc(id: 'project-1', name: 'Portable project', modules: [
       ModuleDoc(id: 'gen-1', name: 'Bass', source: '---\\nkind: generator\\n---\\nsin(110)'),
