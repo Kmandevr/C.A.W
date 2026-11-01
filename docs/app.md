@@ -56,12 +56,15 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - a banner appears when the engine muted layers to keep audio clean, with Unmute
 - **Mixer / Editor** (`lib/ui/mixer_screen.dart`):
   - a dedicated channel-strip workspace with shared track volume, pan, mute and solo controls
+  - channel strips expose existing generator/effect chains, folder-bus enablement and track-to-folder routing
   - master output level, live per-channel peak bars and an inspector for the selected compiled module's real engine parameters
+  - desktop widths above 1200 px show channels and the module inspector side-by-side; drag the divider to resize. Mobile stacks the inspector below the channels
   - parameter edits use the same module parameter map and engine calls as Builder; the Mixer does not own a separate state model
   - the current engine does not yet expose sends, arbitrary buses, stereo width, correlation, loudness, phase or master effect chains through this screen
 - **Engine Lab** (`lib/ui/engine_lab_screen.dart`):
   - live CPU, left/right peak, playback and overload telemetry
   - track signal-chain inspection from the project's generator/effect assignments, with direct navigation to the selected module in Builder
+  - a read-only 512-sample display from the native master scope (mono sum); left/right peak readouts remain independent
   - compiler summaries, errors, warnings, imports and exports from the engine's module information
   - it is an inspector for existing engine capabilities, not yet an editable universal processing graph or sample/buffer debugger
 - **Automation** (`lib/ui/automation_screen.dart`):
