@@ -20,7 +20,7 @@ class FileManagerScreen extends StatelessWidget {
     builder: (context, _) => ListView(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
       children: [
-        const Text('FILES / LIBRARY', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
+        const Text('FILES / PORTABILITY', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
         const Text('Portable files · user-chosen locations · no forced folder layout',
           style: TextStyle(color: Neon.dim, fontSize: 11)),
         const SizedBox(height: 14),
