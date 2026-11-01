@@ -56,18 +56,17 @@ These remain ahead of the new creative-systems track unless the owner explicitly
 
 **Exit gate:** each commitment is usable through the app, covered by tests, documented accurately and verified by applicable CI. A design or partial engine API does not count as complete integration.
 
-### Phase 1 — Finish pattern and piano-roll workflow
+### Phase 1 — Extend the existing pattern and piano-roll workflow
 
-- Finish expression curves for pitch and other supported note values, with fixed points, editable handles, snapping and a clear curve-editing mode.
-- Keep curves and expression lanes accessible both on-note and in stacked lanes below the piano roll where appropriate.
-- Support live preview while drawing, moving, resizing and editing notes.
-- Complete note selection and multi-selection, copy/paste, move, resize, duplicate and chord workflows using visible touch actions as well as keyboard shortcuts.
-- Keep useful Reaper-like timeline/piano-roll interaction: arrangement timeline, reusable MIDI clips, double-click to open the roll, drag note length, clear selection and editing modes.
-- Add or finish chord stamping, Euclidean patterns, random-in-key generation, arpeggiation, humanize, quantization/groove and other agreed pattern utilities.
-- Keep the drum grid and piano roll editing the same underlying pattern source.
-- Preserve the phone-first gesture model, minimum touch targets, keyboard-only access and the owner's VIM/custom quick-action direction.
+**Already implemented:** shared text-backed pattern model; piano roll and drum grid; draw/select/curve/erase tools; adaptive grid and snap; note preview; velocity/chance lanes; per-note pitch, pressure/volume, timbre and vibrato expression; multi-selection and linked/independent clip multi-edit; touch and keyboard actions; Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion. See [App](app.md) and the [music workflow gap plan](music-workflow-feature-gap-plan.md).
 
-**Exit gate:** pattern data survives save/reopen; edits are reflected consistently in Builder, Arranger and playback; multi-edit and expression changes have regression tests; phone layouts do not overflow.
+**Remaining extensions, not missing foundations:**
+- Improve advanced quantization, groove/swing templates and note chop/glue/strum only where a concrete workflow justifies them.
+- Continue refining curve editing, live preview, touch ergonomics and keyboard access based on tested gaps.
+- Keep drum grid, piano roll and text editing on the same pattern model.
+- Preserve arrangement-to-roll navigation and linked/independent source semantics.
+
+**Exit gate:** any remaining extension has model/serialization, engine and UI regression coverage as appropriate; existing pattern data remains compatible; phone layouts do not overflow.
 
 ### Phase 2 — Complete mixer and routing
 
@@ -135,7 +134,7 @@ Build only after Phase 0 commitments and without blocking Phases 1–6 when a wo
 5. **Sound lineage/family metadata** — S; impact 3/5; creative P1.
 6. **Non-destructive processing history/checkpoints** — M; impact 4/5; creative P1; store recipes/metadata rather than duplicate audio buffers.
 7. **Waveform and transient inspection** — S–M; impact 4/5; creative P1; on-demand background analysis.
-8. **Basic spectrum inspection** — M; impact 3/5; creative P1; bounded on-demand FFT.
+8. **Extend spectrum inspection to asset/selection analysis** — M; impact 3/5; creative P1; the Engine Lab already has a bounded 512-point master FFT view, so any expansion must reuse it rather than claim the first spectrum display is missing.
 9. **Small resonator/physical-model library** — M; impact 4/5; creative P1; fixed voices/state and simple comb, modal or digital-waveguide models.
 
 Each item gets its own implementation issue, code audit, acceptance criteria and measured performance review before work starts. Do not implement the whole phase as one oversized change.
@@ -183,10 +182,10 @@ This inventory preserves the features and directions discussed. Status terms are
 | Code-defined generators and effects; reusable modules | Existing foundation; extend, do not replace | 5 | — | Core |
 | Module parameters, project globals, exported signals and functions | Existing foundation; finish automation integration | 5 | M | Phase 0 |
 | Bytebeat, bit tools, procedural synthesis and raw audio mangling | Existing foundation; preserve deterministic semantics | 5 | — | Core |
-| Deterministic math modulation and seeded pseudo-random sequences | Planned; bounded equations/primitives | 4 | XS–S | Creative P0 |
+| Extended deterministic math modulation and seeded pseudo-random sequences | Existing foundation: deterministic math, seeded noise, LFOs and parameter/global modulation; proposed additions must identify a specific missing primitive | 4 | XS–S | Creative P0 |
 | Compact cellular automata / bit-register generators | Planned; fixed-width, one-dimensional first version | 4 | S–M | Creative P0 |
-| Waveshaping: saturation, fold, rectify, asymmetry and transfer curves | Planned; reuse existing module/oscillator path | 5 | S–M | Creative P0 |
-| Analytic waveform morphing and wavetable reuse | Planned; optional oversampling only if measured necessary | 5 | S–M | Creative P0 |
+| Expanded waveshaping: saturation, fold, rectify, asymmetry and bounded transfer curves | Existing foundation: tanh, drive, fold and wavetable phase distortion; custom transfer curves remain proposed | 5 | S–M | Creative P0 |
+| Expanded analytic waveform morphing and wavetable authoring | Existing foundation: built-in wavetable playback, frame morphing and phase warp; custom/imported table authoring remains incomplete | 5 | S–M | Creative P0 |
 | Seeded sound-variation explorer | Planned; 8–16 bounded candidates, user-directed | 5 | M | Creative P0 |
 | Sound lineage/family metadata | Planned; parent, seed, changed parameters and source identity | 3 | S | Creative P1 |
 | Non-destructive processing history/checkpoints | Planned; operation recipes, bounded metadata and A/B | 4 | M | Creative P1 |
