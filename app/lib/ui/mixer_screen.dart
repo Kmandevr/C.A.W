@@ -55,19 +55,33 @@ class _MixerScreenState extends State<MixerScreen> {
       const Text('MIXER / EDITOR', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
       const Text('Shared project channels · live engine controls', style: TextStyle(color: Neon.dim, fontSize: 11)),
       const SizedBox(height: 12),
-      NeonPanel(color: Neon.pink, child: ValueListenableBuilder<int>(
-        valueListenable: s.values,
-        builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Expanded(child: Text('MASTER OUTPUT', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800))),
-            Text('${(s.project.master * 100).round()}%', style: Neon.code(color: Neon.pink)),
+      NeonPanel(color: Neon.pink, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ValueListenableBuilder<int>(
+          valueListenable: s.values,
+          builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Expanded(child: Text('MASTER OUTPUT', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800))),
+              Text('${(s.project.master * 100).round()}%', style: Neon.code(color: Neon.pink)),
+            ]),
+            Slider(value: s.project.master.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
+              activeColor: Neon.pink, onChanged: s.setMaster),
           ]),
-          Slider(value: s.project.master.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
-            activeColor: Neon.pink, onChanged: (v) => s.editProject((p) => p.master = v)),
-          Text('Peak L ${s.meters.peakL.toStringAsFixed(3)}   Peak R ${s.meters.peakR.toStringAsFixed(3)}',
-            style: Neon.code(size: 12, color: Neon.dim)),
-        ]),
-      )),
+        ),
+        const SizedBox(height: 4),
+        ValueListenableBuilder<int>(
+          valueListenable: s.tick,
+          builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const SizedBox(width: 20, child: Text('L', style: TextStyle(color: Neon.blue, fontSize: 10))),
+              Expanded(child: PeakMeter(state: s, read: () => s.meters.peakL, color: Neon.blue)),
+              const SizedBox(width: 48, child: Text('R', style: TextStyle(color: Neon.green, fontSize: 10))),
+              Expanded(child: PeakMeter(state: s, read: () => s.meters.peakR, color: Neon.green)),
+            ]),
+            Text('Peak L ${s.meters.peakL.toStringAsFixed(3)}   Peak R ${s.meters.peakR.toStringAsFixed(3)}',
+              style: Neon.code(size: 11, color: Neon.dim)),
+          ]),
+        ),
+      ])),
       const SizedBox(height: 14),
       if (wide)
         LayoutBuilder(builder: (context, inner) {
