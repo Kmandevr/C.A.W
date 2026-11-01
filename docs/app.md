@@ -67,7 +67,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 - **Engine Lab** (`lib/ui/engine_lab_screen.dart`):
   - live CPU, left/right peak, playback and overload telemetry
   - track signal-chain inspection from the project's generator/effect assignments, with direct navigation to the selected module in Builder
-  - a read-only 512-sample display from the native master scope (mono sum); left/right peak readouts remain independent
+  - a read-only 512-sample native master scope (mono sum) and a 512-point Hann-window FFT spectrum spanning 0–24 kHz; left/right peak readouts remain independent
   - compiler summaries, errors, warnings, imports and exports from the engine's module information
   - it is an inspector for existing engine capabilities, not yet an editable universal processing graph or sample/buffer debugger
 - **Automation** (`lib/ui/automation_screen.dart`):
@@ -87,10 +87,10 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - imported projects receive a new ID so they cannot overwrite an existing saved project; imported modules are added as new items
   - validates the project format version and reports malformed or future-version files instead of opening them
   - WAV, MIDI and wavetable exports remain in Exporter
-  - virtual library folders are stored in the project; saved searches, bulk operations, audio/MIDI preview caching, file-operation undo/version history, dependency relinking and OS-level folder browsing remain incomplete
+  - virtual folders, tags and saved searches are stored in the project; folder/tag/search/move operations have bounded in-session undo/redo (50 snapshots). Audio/MIDI preview caching, durable version history, dependency relinking and OS-level folder browsing remain incomplete
 - **Plugin Builder** (`lib/ui/plugin_builder_screen.dart`):
-  - guided creation from blank generators/effects or existing generator/effect templates and an advanced workflow for project modules
-  - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source
+  - guided creation from blank generators/effects or existing generator/effect templates; advanced workflow can select, clone, validate and package project modules
+  - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source; cloning preserves the original and creates an independent project module
   - CLAP/VST3 binary targets, host sandboxing and per-plugin CPU/memory tests are not available until a native plugin SDK/host backend is integrated
 - **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a four-item bottom bar (Builder, Arranger, Mixer, More); More opens Engine Lab, Automation, Exporter, Files and Plugin Builder. Desktop uses a navigation rail for all eight destinations. All workspaces share the same AppState. Global shortcuts navigate all workspaces: Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
