@@ -192,6 +192,10 @@ class KeyRouterState extends State<KeyRouter> {
         s.flush();
       case 'view.actions':
         showActionList(context);
+      case 'focus.next':
+        FocusManager.instance.primaryFocus?.nextFocus();
+      case 'focus.prev':
+        FocusManager.instance.primaryFocus?.previousFocus();
       case 'view.builder':
         widget.onView(0);
       case 'view.arranger':
