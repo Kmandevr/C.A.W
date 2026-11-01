@@ -25,7 +25,7 @@ class AppState extends ChangeNotifier {
   late bool _light;
   late PerformanceMode _performanceMode;
 
-  // Light mode changes the engine's voice count and the meter rate.
+  // Lightweight/Minimal change the engine's voice budget; UI meter cadence stays fixed.
   void _settingsChanged() {
     final nextMode = settings.performanceMode;
     if (nextMode == _performanceMode) return;
@@ -144,7 +144,7 @@ class AppState extends ChangeNotifier {
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
-      // The device can't keep up: light mode turns on by itself, once (the setting can turn it back off).
+      // The device can't keep up: Lightweight turns on by itself once (the user can choose another profile).
       lightTurnedOnBySelf = true;
       settings.update((s) {
         s.lightMode = true;
