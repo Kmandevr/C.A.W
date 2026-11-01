@@ -184,7 +184,7 @@ Scores are planning estimates, not measured benchmarks.
 
 **Acceptance:** undo/redo survives save/reopen as specified; restoring a checkpoint reproduces its sound; history pruning never deletes a source asset still in use.
 
-### 3.7 Basic waveform and transient inspection
+### 3.7 Asset waveform and transient inspection
 
 **Current foundation:** Engine Lab already shows a read-only live master scope. This proposal extends waveform inspection to selected renders or imported assets and adds optional transient markers; it does not claim that C.A.W. has no waveform display.
 
@@ -242,7 +242,7 @@ Scores are planning estimates, not measured benchmarks.
 
 **Research basis:** digital waveguides are a well-established, comparatively efficient way to model acoustic propagation and have enabled real-time physical instruments and effects. This supports investigating a small waveguide/resonator family, not a broad simulation framework. [AES review, 2026](https://doi.org/10.17743/jaes.2026.0283).
 
-### 3.10 Bounded granular and stutter processing
+### 3.10 Expanded granular processing beyond existing stutter
 
 **Purpose:** add controlled micro-rearrangement, repeat, freeze and texture effects.
 
@@ -291,7 +291,7 @@ This is a priority order for the creative-systems work only. Complete or explici
 | 3 | Lineage metadata and bounded history/checkpoints | Makes exploration safe and reusable | Save/load, undo/redo and history tests |
 | 4 | Waveform/transient inspection and expanded spectrum/asset analysis | Helps users understand and edit results | On-demand analysis, bounded cache, phone UI validation |
 | 5 | Small resonator/waveguide library | Distinctive instruments after state/voice budget patterns are proven | Several useful models, fixed state/voice caps, benchmark |
-| 6 | Granular/stutter prototype | Higher processing cost; only proceed if demand and headroom justify it | Measured worst-case profile and safe quality limit |
+| 6 | Expanded granular prototype beyond existing glitch.stutter | Higher processing cost; only proceed if demand and headroom justify it | Measured worst-case profile and safe quality limit |
 
 Do not start a later phase merely because an earlier phase is documented. Each phase must pass its exit condition and the owner can reprioritize based on actual use.
 
