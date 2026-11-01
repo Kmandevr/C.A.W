@@ -18,7 +18,7 @@ jobs:
           - { name: Linux sanitizers, os: ubuntu-24.04, flags: "-DCAW_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug" }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure
         run: cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release ${{ matrix.flags }}
       - name: Build
@@ -38,7 +38,7 @@ jobs:
           for f in examples/*.caw; do grep -q "^kind: pattern" "$f" && continue; engine/build/caw render "$f" -o "renders/$(basename "$f" .caw).wav" --bpm 140; done
       - name: Upload example renders
         if: matrix.name == 'Linux x64'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: example-renders
           path: renders/
