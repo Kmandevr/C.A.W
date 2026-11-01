@@ -81,6 +81,10 @@ class AppState extends ChangeNotifier {
   final List<_LibrarySnapshot> _libraryRedo = [];
 
   bool get canUndoLibrary => _libraryUndo.isNotEmpty;
+
+  // Shared tap history keeps the toolbar and keyboard action on the same tempo measurement.
+  final List<DateTime> _tempoTaps = [];
+  int get tempoTapCount => _tempoTaps.length;
   bool get canRedoLibrary => _libraryRedo.isNotEmpty;
 
   void _recordLibraryUndo() {
@@ -393,6 +397,28 @@ class AppState extends ChangeNotifier {
   }
 
   // ---------- transport ----------
+
+  /// Records a tempo tap; pauses over two seconds restart the measurement.
+  /// [at] is injectable for deterministic tests.
+  void tapTempo({DateTime? at}) {
+    final now = at ?? DateTime.now();
+    if (_tempoTaps.isNotEmpty && now.difference(_tempoTaps.last) > const Duration(seconds: 2)) {
+      _tempoTaps.clear();
+    }
+    if (_tempoTaps.isNotEmpty && !now.isAfter(_tempoTaps.last)) return;
+    _tempoTaps.add(now);
+    if (_tempoTaps.length > 5) _tempoTaps.removeAt(0);
+    if (_tempoTaps.length >= 2) {
+      final elapsed = now.difference(_tempoTaps.first).inMicroseconds;
+      final intervals = _tempoTaps.length - 1;
+      if (elapsed > 0) {
+        final bpm = (60000000.0 * intervals / elapsed).clamp(20.0, 400.0);
+        editProject((p) => p.bpm = double.parse(bpm.toStringAsFixed(1)));
+        return;
+      }
+    }
+    notifyListeners();
+  }
 
   void togglePlay() {
     final e = engine;
@@ -761,7 +787,8 @@ class AppState extends ChangeNotifier {
   bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
   bool isLibrary(String moduleId) => kindOf(moduleId) == 'library';
   bool isPattern(String moduleId) => kindOf(moduleId) == 'pattern';
-  bool isGenerator(String moduleId) => kindOf(moduleId) == 'generator';
+  /// A sound a track can play: a generator or a synth patch played as one instrument.
+  bool isGenerator(String moduleId) => const {'generator', 'synth'}.contains(kindOf(moduleId));
 
   // ---------- layers (Arranger) ----------
 
@@ -921,8 +948,9 @@ class AppState extends ChangeNotifier {
   }
 
 
-  void addLayer() {
-    final gen = project.modules.where((m) => isGenerator(m.id)).firstOrNull;
+  /// Adds a track using [soundId], the first available sound, or no sound when [empty] is true.
+  void addLayer({String? soundId, bool empty = false}) {
+    final gen = empty ? null : project.module(soundId) ?? project.modules.where((m) => isGenerator(m.id)).firstOrNull;
     project.layers.add(LayerDoc(
       id: newId('l'),
       name: gen?.name ?? 'Layer ${project.layers.length + 1}',
