@@ -339,7 +339,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             Expanded(child: TextField(
               controller: _searchController,
               decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search name, type or tags'),
-              onChanged: (value) => setState(() => _query = value),
+              onChanged: (value) => setState(() {
+                _query = value;
+                if (value.trim().isEmpty) _searchAllFolders = false;
+              }),
             )),
             IconButton(tooltip: 'Save current search', onPressed: _query.trim().isEmpty ? null : _saveSearch,
               icon: const Icon(Icons.bookmark_add_outlined)),

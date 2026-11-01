@@ -1,16 +1,17 @@
+---
+title: Task 1 UI implementation handoff
+summary: Current implementation state, branch and CI evidence for the C.A.W. Master Task 1 UI overhaul.
+updated: 2026-11-01
+---
+
+
 ## Files workspace workflow completion at head aa0a0cb0
 
 - The audit found that the library supported folder-scoped search, organization and import/export, but lacked a way to rename or remove an individual module from the Files workspace. It also could not search nested folders without navigating into each one.
 - Added a "Search all folders" scope chip when a query is active; matching modules show their folder path so results remain navigable and unambiguous.
 - Added module rename and confirmed delete actions. Deletion uses the existing AppState operation, which removes track references and dependent clips/effects consistently; the confirmation explicitly warns that this action is not undoable.
 - Added a widget test covering cross-folder search, path display, rename and confirmed deletion.
-- Exact-head App, Engine, platform and docs CI are pending; no pass is claimed for this change yet.
-
----
-title: Task 1 UI implementation handoff
-summary: Current implementation state, branch and CI evidence for the C.A.W. Master Task 1 UI overhaul.
-updated: 2026-11-01
----
+- Initial exact-head CI caught one off-screen test tap and incorrect handoff frontmatter ordering; both are corrected for the next exact-head run.
 
 # Task 1 UI implementation handoff
 
