@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/]
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # App
