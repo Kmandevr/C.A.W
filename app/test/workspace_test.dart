@@ -131,7 +131,7 @@ void main() {
       home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    expect(find.text('FILES / LIBRARY'), findsOneWidget);
+    expect(find.text('FILES / PORTABILITY'), findsOneWidget);
     expect(find.text('Portable project'), findsOneWidget);
     expect(find.text('Export .cawproj'), findsOneWidget);
     expect(find.text('Import project'), findsOneWidget);
