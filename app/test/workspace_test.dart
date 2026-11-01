@@ -197,6 +197,7 @@ void main() {
     expect(find.text('MIDI'), findsOneWidget);
     expect(find.text('SPECTRUM · 0–24 kHz'), findsOneWidget);
     expect(find.text('512-POINT HANN / FFT'), findsOneWidget);
+    expect(tester.widgetList<CustomPaint>(find.byType(CustomPaint)).length, greaterThanOrEqualTo(3));
     expect(find.text('Beat pattern'), findsNWidgets(2));
     await tester.tap(find.text('Beat pattern').first);
     expect(state.selectedModuleId, pattern.id);
