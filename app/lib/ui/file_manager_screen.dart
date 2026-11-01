@@ -22,6 +22,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   String _folderPath = '';
   String _query = '';
   String _sort = 'name';
+  bool _selectionMode = false;
+  final Set<String> _selectedModuleIds = {};
 
   AppState get state => widget.state;
 
@@ -236,6 +238,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           Row(children: [
             Expanded(child: Text(_folderPath.isEmpty ? 'PROJECT MODULES' : _folderPath.toUpperCase(),
               style: const TextStyle(color: Neon.green, fontWeight: FontWeight.w800))),
+            IconButton(tooltip: _selectionMode ? 'Exit bulk selection' : 'Select modules',
+              onPressed: () => setState(() { _selectionMode = !_selectionMode; _selectedModuleIds.clear(); }),
+              icon: Icon(_selectionMode ? Icons.close : Icons.checklist)),
             IconButton(tooltip: 'Import .caw module into this folder', onPressed: () => _importModule(context, state, _folderPath),
               icon: const Icon(Icons.file_open_outlined)),
           ]),
@@ -268,6 +273,36 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                     onDeleted: () => state.deleteLibrarySearch(entry.key),
                   ),
               ])),
+          if (_selectionMode) Padding(padding: const EdgeInsets.only(top: 8),
+            child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              Text('${_selectedModuleIds.length} selected', style: Neon.code(size: 11, color: Neon.blue)),
+              TextButton(
+                onPressed: modules.isEmpty ? null : () => setState(() {
+                  final visible = modules.map((m) => m.id).toSet();
+                  if (_selectedModuleIds.containsAll(visible)) {
+                    _selectedModuleIds.removeAll(visible);
+                  } else {
+                    _selectedModuleIds.addAll(visible);
+                  }
+                }),
+                child: const Text('Select all / none'),
+              ),
+              PopupMenuButton<String>(
+                tooltip: 'Move selected modules',
+                enabled: _selectedModuleIds.isNotEmpty,
+                onSelected: (destination) {
+                  final folder = destination == 'root' ? '' : destination.substring('folder:'.length);
+                  state.moveModulesToFolder(_selectedModuleIds, folder);
+                  setState(() => _selectedModuleIds.clear());
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'root', child: Text('Move to project root')),
+                  for (final folder in folders)
+                    PopupMenuItem(value: 'folder:$folder', child: Text('Move to $folder')),
+                ],
+                child: const Chip(avatar: Icon(Icons.drive_file_move_outlined, size: 16), label: Text('Move selected')),
+              ),
+            ])),
           if (modules.isEmpty)
             Padding(padding: const EdgeInsets.only(top: 12),
               child: Text(_query.isEmpty ? 'This folder is empty.' : 'No modules match this search.',
@@ -288,9 +323,20 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   Chip(label: Text(tag, style: const TextStyle(fontSize: 9)),
                     visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
               ]),
-              leading: Icon(Icons.description_outlined,
-                color: state.isEffect(module.id) ? Neon.pink : state.isPattern(module.id) ? Neon.yellow : Neon.green),
-              trailing: Wrap(mainAxisSize: MainAxisSize.min, children: [
+              leading: _selectionMode
+                ? Checkbox(
+                    value: _selectedModuleIds.contains(module.id),
+                    onChanged: (selected) => setState(() {
+                      if (selected == true) {
+                        _selectedModuleIds.add(module.id);
+                      } else {
+                        _selectedModuleIds.remove(module.id);
+                      }
+                    }),
+                  )
+                : Icon(Icons.description_outlined,
+                    color: state.isEffect(module.id) ? Neon.pink : state.isPattern(module.id) ? Neon.yellow : Neon.green),
+              trailing: _selectionMode ? null : Wrap(mainAxisSize: MainAxisSize.min, children: [
                 IconButton(tooltip: 'Open in Builder', onPressed: () {
                   state.selectModule(module.id);
                   widget.onOpenBuilder();
@@ -315,8 +361,16 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   ],
                 ),
               ]),
-              onTap: () => state.selectModule(module.id),
-              onLongPress: () => _editTags(module),
+              onTap: () {
+                if (_selectionMode) {
+                  setState(() {
+                    if (!_selectedModuleIds.add(module.id)) _selectedModuleIds.remove(module.id);
+                  });
+                } else {
+                  state.selectModule(module.id);
+                }
+              },
+              onLongPress: _selectionMode ? null : () => _editTags(module),
             ),
         ])),
         const SizedBox(height: 12),
