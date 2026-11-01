@@ -182,6 +182,26 @@ void main() {
   });
 
 
+
+  test('project import sanitizes virtual folder metadata', () {
+    final imported = ProjectDoc.fromJson({
+      'caw_app_project': 2,
+      'id': 'unsafe-project',
+      'name': 'Imported',
+      'library_folders': ['Good/Child', '../outside', 'Bad\\\\Path'],
+      'modules': [
+        {'id': 'safe', 'name': 'Safe', 'source': '', 'folder_path': 'Good/Child'},
+        {'id': 'unsafe', 'name': 'Unsafe', 'source': '', 'folder_path': '../../outside'},
+      ],
+      'layers': [],
+    });
+
+    expect(imported.libraryFolders, containsAll(['Good', 'Good/Child']));
+    expect(imported.libraryFolders.any((path) => path.contains('..') || path.contains('\\\\')), isFalse);
+    expect(imported.module('safe')?.folderPath, 'Good/Child');
+    expect(imported.module('unsafe')?.folderPath, '');
+  });
+
   test('library folder operations preserve modules through rename and delete', () {
     final id = state.importModuleSource(
       '---\\nkind: generator\\nname: Folder test\\n---\\nsin(220)',
