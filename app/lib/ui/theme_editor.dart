@@ -43,17 +43,19 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             const Heading('Performance'),
-            DropdownButtonFormField<PerformanceMode>(
-              value: settings.performanceMode,
-              isExpanded: true,
+            InputDecorator(
               decoration: const InputDecoration(labelText: 'Performance profile'),
-              items: [
-                for (final mode in PerformanceMode.values)
-                  DropdownMenuItem(value: mode, child: Text(mode.label)),
-              ],
-              onChanged: (mode) {
-                if (mode != null) settings.update((s) => s.performanceMode = mode);
-              },
+              child: DropdownButtonHideUnderline(child: DropdownButton<PerformanceMode>(
+                value: settings.performanceMode,
+                isExpanded: true,
+                items: [
+                  for (final mode in PerformanceMode.values)
+                    DropdownMenuItem(value: mode, child: Text(mode.label)),
+                ],
+                onChanged: (mode) {
+                  if (mode != null) settings.update((s) => s.performanceMode = mode);
+                },
+              )),
             ),
             Padding(
               padding: const EdgeInsets.only(top: 6, bottom: 8),
