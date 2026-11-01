@@ -49,7 +49,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
     - triplets (Alt+0) make every grid size 2/3 as long
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
-    - the curve tool and the `roll.gen.*` generators (euclid, random, arpeggiate, humanize, chord stamp, reverse) are not built yet
+    - Curve mode edits velocity/chance lane curves and per-note expression curves (pitch bend, pressure/volume and timbre); point and segment-bend editing is implemented. Pattern actions include Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - the main workspace is a horizontal timeline with a bar ruler and one lane per track; the former layer-card list has been replaced
   - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
@@ -138,7 +138,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - Recorded macros are saved in `keys.txt` next to `settings.json`; a user `keys.txt` is merged over the default keys.
   - Text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X.
   - The roll, the Builder and the code editor's Vim mode each run their area's actions; the Arranger's actions work on a keyboard-selected layer.
-  - **Not built yet:** editing keys in the action list, custom toolbars and the long-press menu entries from the keymap.
+  - **Not built yet:** editing key bindings directly in the action list and keymap-driven long-press menu entries. The piano-roll toolbar and phone Quick Actions strips are configurable.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
 ## Build
