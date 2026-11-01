@@ -93,6 +93,10 @@ void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume,
     if (e && layer_id) e->engine->setLayerMix(layer_id, volume, pan, mute != 0, solo != 0);
 }
 
+void caw_engine_set_master(CawEngine* e, double volume) {
+    if (e) e->engine->setMaster(volume);
+}
+
 void caw_engine_play(CawEngine* e) {
     if (e) e->engine->play();
 }
