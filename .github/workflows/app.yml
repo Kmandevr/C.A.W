@@ -20,7 +20,7 @@ jobs:
     name: Dart checks and tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Flutter
         run: |
           curl -sSfL -o flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
@@ -45,8 +45,8 @@ jobs:
     name: Android APK
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17
@@ -77,7 +77,7 @@ jobs:
           flutter --disable-analytics
           flutter build apk --release
           mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: caw-android-apk
           path: caw-android.apk
@@ -87,7 +87,7 @@ jobs:
     name: Windows app
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Flutter
         shell: pwsh
         run: |
@@ -101,7 +101,7 @@ jobs:
         run: |
           flutter --disable-analytics
           flutter build windows --release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: caw-windows
           path: app/build/windows/x64/runner/Release/
