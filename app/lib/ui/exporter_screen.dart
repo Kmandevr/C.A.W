@@ -162,8 +162,15 @@ class _ExporterScreenState extends State<ExporterScreen> {
   Future<void> _deleteProfile() async {
     final name = _profileName;
     if (name == null) return;
-    await s.settings.deleteExportProfile(name);
-    if (mounted) setState(() => _profileName = null);
+    try {
+      await s.settings.deleteExportProfile(name);
+      if (mounted) setState(() => _profileName = null);
+    } catch (e) {
+      if (mounted) setState(() {
+        _message = 'Profile could not be deleted: $e';
+        _messageIsError = true;
+      });
+    }
   }
 
   void _addToQueue() {
