@@ -1,6 +1,6 @@
 # C.A.W
 
-**C.A.W** (Code Auditioning Workspace; the logo is a crow) is an experimental, code-driven glitch-sound instrument for Android, iOS, Windows, macOS and Linux (Android first): bytebeat, procedural synthesis, raw byte and audio mangling, and compact sequencing. Code is the source of truth, all audio renders locally on the phone, and WAV export feeds the owner's Reaper projects. Sound modules live as plain files in git, so any AI agent can make sounds without driving the phone's UI. It will be sold only through AutoStacc; until then it's the owner's tool for making AutoStacc samples. The owner's brief: [docs/vision.md](docs/vision.md). The plan: [docs/architecture.md](docs/architecture.md) and [docs/roadmap.md](docs/roadmap.md). **Status:** v1 is built: engine ([docs/engine.md](docs/engine.md)) and app ([docs/app.md](docs/app.md)).
+**C.A.W** (Code Auditioning Workspace; crow logo) is an experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine is also built and tested by Linux/Windows CI. The app currently has eight workspaces. Do not infer that every roadmap feature is implemented: [docs/app.md](docs/app.md) describes shipped app behavior, [docs/engine-build-status.md](docs/engine-build-status.md) describes native implementation and integration boundaries, and [docs/core-and-feature-plan.md](docs/core-and-feature-plan.md) records planned work. Audio processing is local. There is no current in-app AI, model-inference or cloud-audio integration. AI coding assistants may be used as development tools; that is not a C.A.W product feature. The owner's product direction is in [docs/vision.md](docs/vision.md).
 
 ## Start of every session
 
@@ -11,9 +11,9 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 - Keep facts, proposals, assumptions and open questions apart, as `docs/vision.md` and `docs/architecture.md` label them. Never present a proposal as built, and never build an open question as settled: ask the owner.
 - Never invent facts about libraries, versions, licences, platform behaviour or devices. Check a primary source and date it, or label it an assumption.
 - The audio callback never allocates, locks, logs, does I/O or calls into the UI layer (details: `.claude/rules/engine.md`).
-- Downloaded and AI-written modules are untrusted: they run only inside the engine's sandbox, with no I/O and fixed limits. Never ship a GitHub token or other secret in the app.
+- `.caw` source modules execute in the constrained module language, which has no filesystem, network or system-call access and is subject to engine limits. Native SDK modules are trusted in-process code, not sandboxed; do not load third-party native binaries until a real isolation/host policy exists. Never ship a GitHub token or other secret in the app.
 - Dependencies must have permissive licences (no GPL) unless the owner decides otherwise. Record each new one in `docs/decisions.md`.
-- The owner works from an Android phone (Galaxy S22+): every build, test and installable comes from GitHub Actions, and no step needs a PC or IDE.
+- The owner primarily works from an Android phone (Galaxy S22+). Use GitHub Actions for repository CI and installable artifacts; do not assume a local PC/IDE is available to the owner.
 - Record decisions and new facts in `docs/` before ending a session, and rewrite superseded text where it stands instead of appending (details: `.claude/rules/docs.md`).
 
 ## Layout
@@ -32,7 +32,7 @@ Don't read every file. Go deeper only when the layer above doesn't answer, and n
 
 ## Workflow
 
-**Roles (owner, 2026-10-31):** GPT does long-running optimisation and feature work; Claude's main job is to check that GPT's work is implemented correctly and to fix or report what it finds when asked ([docs/decisions.md](docs/decisions.md)).
+**Roles (owner, 2026-10-31):** GPT does long-running optimisation and feature work; Claude's main job is to check that GPT's work is implemented correctly and to fix or report what it finds when asked ([docs/decisions.md](docs/decisions.md)). Treat this as a workflow preference, not a product or architecture requirement.
 
 
 One-file changes: just do them. Every file (code, notes, Claude config) has one purpose; change only the files the task needs. Independent review goes to an agent in `.claude/agents/` (`architect` before structural changes, the reviewers after), asking for findings only. Changes across areas: the saved workflow `change` (plan, build in parallel on disjoint files, verify, update docs; never commits).
