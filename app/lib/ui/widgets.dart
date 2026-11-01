@@ -166,8 +166,8 @@ class ToggleChip extends StatelessWidget {
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            width: 40,
-            height: 40,
+            width: 48,
+            height: 48,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: on ? color : Colors.transparent,
