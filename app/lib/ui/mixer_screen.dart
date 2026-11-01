@@ -198,11 +198,9 @@ class _MobileChannelRow extends StatelessWidget {
               '${(layer.pan.abs() * 100).round()}${layer.pan < 0 ? 'L' : 'R'}',
               textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.blue))),
           ]),
-          ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
-            final meter = index < state.layerMeters.length ? state.layerMeters[index] : null;
-            return Bar(value: meter?.peak ?? 0,
-              color: meter?.overloaded == true ? Neon.pink : Neon.green, height: 5);
-          }),
+          PeakMeter(state: state,
+            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
+            color: Neon.green),
         ]),
       ),
     ),
@@ -312,10 +310,9 @@ class _ChannelStrip extends StatelessWidget {
               ]),
             ],
             const SizedBox(height: 6),
-            ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
-              final meter = index < state.layerMeters.length ? state.layerMeters[index] : null;
-              return Bar(value: meter?.peak ?? 0, color: meter?.overloaded == true ? Neon.pink : Neon.green, height: 6);
-            }),
+            PeakMeter(state: state,
+              read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
+              color: Neon.green),
             const Spacer(),
             Row(children: [
               const SizedBox(width: 48, child: Text('LEVEL', style: TextStyle(color: Neon.dim, fontSize: 10))),
