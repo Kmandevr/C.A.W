@@ -134,7 +134,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
     if (mounted) setState(() => _profileName = null);
   }
 
-  Future<void> _recordExport(String fileName) async {
+  Future<String?> _recordExport(String fileName) async {
     try {
       await s.settings.recordExport(ExportHistoryEntry(
         fileName: fileName,
@@ -145,11 +145,9 @@ class _ExporterScreenState extends State<ExporterScreen> {
         seconds: _seconds,
         frames: _frames,
       ));
+      return null;
     } catch (e) {
-      if (mounted) setState(() {
-        _message = 'Export saved, but history could not be updated: $e';
-        _messageIsError = true;
-      });
+      return 'Export saved, but history could not be updated: $e';
     }
   }
 
@@ -223,11 +221,11 @@ class _ExporterScreenState extends State<ExporterScreen> {
         mimeType: 'audio/wav',
         type: FileType.audio,
       );
-      if (saved != null) await _recordExport(name);
+      final historyWarning = saved == null ? null : await _recordExport(name);
       if (!mounted) return;
       setState(() {
-        _message = saved == null ? 'Not saved (picker closed).' : 'Saved $name';
-        _messageIsError = false;
+        _message = historyWarning ?? (saved == null ? 'Not saved (picker closed).' : 'Saved $name');
+        _messageIsError = historyWarning != null;
       });
     } catch (e) {
       if (mounted) setState(() {
@@ -267,9 +265,12 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final bytes = await file.readAsBytes();
       final saved = await FilePicker.saveFile(fileName: name, bytes: bytes,
         mimeType: 'audio/midi', type: FileType.custom, allowedExtensions: const ['mid']);
-      if (saved != null) await _recordExport(name);
+      final historyWarning = saved == null ? null : await _recordExport(name);
       if (!mounted) return;
-      setState(() { _message = saved == null ? 'Not saved (picker closed).' : 'Saved $name'; _messageIsError = false; });
+      setState(() {
+        _message = historyWarning ?? (saved == null ? 'Not saved (picker closed).' : 'Saved $name');
+        _messageIsError = historyWarning != null;
+      });
     } catch (e) {
       if (mounted) setState(() { _message = 'MIDI export failed: $e'; _messageIsError = true; });
     } finally {
