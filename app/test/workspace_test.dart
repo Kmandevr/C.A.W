@@ -302,6 +302,14 @@ void main() {
 
     state.setModuleTags(id, ['bass', 'Analog', 'bass']);
     expect(state.project.module(id)?.tags, ['bass', 'Analog']);
+    expect(state.setModulesTags([id, secondId], ['synth', 'analog', 'synth']), isTrue);
+    expect(state.project.module(id)?.tags, ['synth', 'analog']);
+    expect(state.project.module(secondId)?.tags, ['synth', 'analog']);
+    expect(state.undoLibraryOperation(), isTrue);
+    expect(state.project.module(id)?.tags, ['bass', 'Analog']);
+    expect(state.project.module(secondId)?.tags, isEmpty);
+    expect(state.redoLibraryOperation(), isTrue);
+    expect(state.project.module(id)?.tags, ['synth', 'analog']);
     state.saveLibrarySearch('Bass modules', 'bass');
     expect(state.project.savedLibrarySearches['Bass modules'], 'bass');
 
