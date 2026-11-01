@@ -34,4 +34,13 @@ void main() {
       EnginePressure.thermalHot,
     );
   });
+
+  test('malformed thermal values remain unknown and battery saver still applies', () {
+    expect(ResourceSignals.decode(const {'thermalStatus': -1}), EnginePressure.unknown);
+    expect(ResourceSignals.decode(const {'thermalStatus': 'hot'}), EnginePressure.unknown);
+    expect(
+      ResourceSignals.decode(const {'thermalStatus': -1, 'batterySaver': true}),
+      EnginePressure.batterySaver,
+    );
+  });
 }
