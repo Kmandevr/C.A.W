@@ -26,6 +26,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   double _seconds = 8;
   String? _layerId;
   String? _moduleId;
+  String? _patternId;
   String? _param;
   int _frames = 64;
   RenderJob? _job;
@@ -59,14 +60,22 @@ class _ExporterScreenState extends State<ExporterScreen> {
       case ExportKind.wavetable:
         final m = p.module(_moduleId);
         return '${base}_${_safe(m?.name ?? 'table')}_${_frames}f.wav';
+      case ExportKind.midi:
+        final m = p.module(_patternId);
+        return '${base}_${_safe(m?.name ?? 'pattern')}.mid';
     }
   }
 
   Future<void> _export() async {
+    if (_kind == ExportKind.midi) {
+      await _exportMidi();
+      return;
+    }
     final p = s.project;
     final target = switch (_kind) {
       ExportKind.oneShot => _layerId ?? '',
       ExportKind.wavetable => _moduleId ?? '',
+      ExportKind.midi => _patternId ?? '',
       _ => '',
     };
     if ((_kind == ExportKind.oneShot || _kind == ExportKind.wavetable) && target.isEmpty) {
@@ -127,12 +136,39 @@ class _ExporterScreenState extends State<ExporterScreen> {
     });
   }
 
+  Future<void> _exportMidi() async {
+    final module = s.project.module(_patternId);
+    if (module == null || !s.isPattern(module.id)) {
+      setState(() { _message = 'Choose a valid MIDI pattern first.'; _messageIsError = true; });
+      return;
+    }
+    final tmp = await getTemporaryDirectory();
+    final name = _fileName();
+    final file = File('${tmp.path}${Platform.pathSeparator}$name');
+    try {
+      final error = Engine.exportPattern(module.runSource, file.path,
+        bpm: s.project.bpm, beatsPerBar: s.project.beatsPerBar);
+      if (error != null) throw StateError(error);
+      final bytes = await file.readAsBytes();
+      final saved = await FilePicker.saveFile(fileName: name, bytes: bytes,
+        mimeType: 'audio/midi', type: FileType.audio);
+      if (!mounted) return;
+      setState(() { _message = saved == null ? 'Not saved (picker closed).' : 'Saved $name'; _messageIsError = false; });
+    } catch (e) {
+      if (mounted) setState(() { _message = 'MIDI export failed: $e'; _messageIsError = true; });
+    } finally {
+      if (await file.exists()) await file.delete();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = s.project;
     final layers = p.layers.where((l) => l.generatorId != null).toList();
     if (_layerId == null || !layers.any((l) => l.id == _layerId)) _layerId = layers.firstOrNull?.id;
     final modules = p.modules.where((m) => (s.info[m.id]?.ok ?? false) && !s.isLibrary(m.id)).toList();
+    final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
+    if (_patternId == null || !patterns.any((m) => m.id == _patternId)) _patternId = patterns.firstOrNull?.id;
     if (_moduleId == null || !modules.any((m) => m.id == _moduleId)) {
       _moduleId = (modules.where((m) => s.isGenerator(m.id)).firstOrNull ?? modules.firstOrNull)?.id;
     }
@@ -147,6 +183,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
           ButtonSegment(value: ExportKind.free, label: Text('Length')),
           ButtonSegment(value: ExportKind.oneShot, label: Text('One-shot')),
           ButtonSegment(value: ExportKind.wavetable, label: Text('Table')),
+          ButtonSegment(value: ExportKind.midi, label: Text('MIDI')), 
         ],
         selected: {_kind},
         showSelectedIcon: false,
@@ -179,6 +216,13 @@ class _ExporterScreenState extends State<ExporterScreen> {
               hint: const Text('No layers with a generator'),
               items: [for (final l in layers) DropdownMenuItem(value: l.id, child: Text(l.name))],
               onChanged: (v) => setState(() => _layerId = v),
+            ),
+          if (_kind == ExportKind.midi)
+            DropdownButton<String>(
+              value: _patternId,
+              hint: const Text('No MIDI patterns in this project'),
+              items: [for (final m in patterns) DropdownMenuItem(value: m.id, child: Text(m.name))],
+              onChanged: busy ? null : (v) => setState(() => _patternId = v),
             ),
           if (_kind == ExportKind.wavetable) ...[
             DropdownButton<String>(
@@ -215,7 +259,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
               ],
               onChanged: busy ? null : (v) => setState(() => _rate = v!),
             ),
-            if (_kind != ExportKind.wavetable)
+            if (_kind != ExportKind.wavetable && _kind != ExportKind.midi)
               DropdownButton<bool>(
                 value: _float,
                 items: const [
@@ -240,7 +284,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
               backgroundColor: Neon.yellow, foregroundColor: Neon.bg, minimumSize: const Size.fromHeight(52)),
           onPressed: _export,
           icon: const Icon(Icons.download),
-          label: const Text('Export WAV', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          label: Text(_kind == ExportKind.midi ? 'Export MIDI' : 'Export WAV',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
         ),
       if (_message != null)
         Padding(
@@ -265,6 +310,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
         return 'One pass of one layer on its own, with the silent end trimmed.';
       case ExportKind.wavetable:
         return 'Single-cycle frames of 2048 samples for wavetable synths, sweeping a param across the frames.';
+      case ExportKind.midi:
+        return 'Export a project pattern as a standard MIDI file using the project tempo and time signature.';
     }
   }
 }
