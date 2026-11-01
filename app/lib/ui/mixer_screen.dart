@@ -19,6 +19,13 @@ class MixerScreen extends StatefulWidget {
 class _MixerScreenState extends State<MixerScreen> {
   double _inspectorFraction = 0.34;
   int _mobilePage = 0;
+  final FocusNode _dividerFocusNode = FocusNode(debugLabel: 'Mixer inspector width');
+
+  @override
+  void dispose() {
+    _dividerFocusNode.dispose();
+    super.dispose();
+  }
 
   void _adjustInspector(double delta) {
     setState(() {
@@ -97,23 +104,38 @@ class _MixerScreenState extends State<MixerScreen> {
           final channelWidth = available - inspectorWidth;
           return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             SizedBox(width: channelWidth, child: _channelPanel(columns)),
-            Semantics(
-              container: true,
-              focusable: true,
-              label: 'Mixer inspector width',
-              value: '${(_inspectorFraction * 100).round()} percent',
-              increasedValue: '${((_inspectorFraction + 0.02).clamp(0.24, 0.52) * 100).round()} percent',
-              decreasedValue: '${((_inspectorFraction - 0.02).clamp(0.24, 0.52) * 100).round()} percent',
-              onIncrease: () => _adjustInspector(0.02),
-              onDecrease: () => _adjustInspector(-0.02),
-              child: MouseRegion(
-                cursor: SystemMouseCursors.resizeColumn,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onHorizontalDragUpdate: (details) => _adjustInspector(-details.delta.dx / available),
-                  child: SizedBox(width: dividerWidth, height: 520,
-                    child: Center(child: Container(width: 2, height: 72,
-                      decoration: BoxDecoration(color: Neon.blue, borderRadius: BorderRadius.circular(2)))),
+            Focus(
+              focusNode: _dividerFocusNode,
+              onKeyEvent: (node, event) {
+                if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                  _adjustInspector(0.02);
+                  return KeyEventResult.handled;
+                }
+                if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                  _adjustInspector(-0.02);
+                  return KeyEventResult.handled;
+                }
+                return KeyEventResult.ignored;
+              },
+              child: Semantics(
+                container: true,
+                focusable: true,
+                label: 'Mixer inspector width',
+                value: '${(_inspectorFraction * 100).round()} percent',
+                increasedValue: '${((_inspectorFraction + 0.02).clamp(0.24, 0.52) * 100).round()} percent',
+                decreasedValue: '${((_inspectorFraction - 0.02).clamp(0.24, 0.52) * 100).round()} percent',
+                onIncrease: () => _adjustInspector(0.02),
+                onDecrease: () => _adjustInspector(-0.02),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeColumn,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragUpdate: (details) => _adjustInspector(-details.delta.dx / available),
+                    child: SizedBox(width: dividerWidth, height: 520,
+                      child: Center(child: Container(width: 2, height: 72,
+                        decoration: BoxDecoration(color: Neon.blue, borderRadius: BorderRadius.circular(2)))),
+                    ),
                   ),
                 ),
               ),

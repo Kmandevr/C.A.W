@@ -113,3 +113,10 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Reworked point rows responsively: narrow layouts stack time and value controls with clear labels, while wider layouts retain the compact horizontal editor.
 - Added semantic slider value descriptions and a 360 px widget regression test covering layout, value edits and overflow detection.
 - Verification is pending the exact-head App workflow for this commit.
+
+
+## Additional audit finding at head 3a6593b6
+
+- Extended the Mixer splitter beyond screen-reader actions: it now participates in keyboard focus traversal and responds to Left/Right arrow keys, with a regression test for focus-driven resizing.
+- Replaced the Exporter's five-way horizontal format selector with a compact dropdown on narrow layouts while retaining the segmented desktop selector. One-shot, MIDI and wavetable target dropdowns expand to the available width.
+- Added phone-width Exporter selection coverage and keyboard resizing coverage. Exact-head CI is pending.

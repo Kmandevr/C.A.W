@@ -142,6 +142,40 @@ void main() {
     expect(restored.properties.value, '34 percent');
   });
 
+  testWidgets('Mixer inspector divider supports keyboard resizing', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    state.project = ProjectDoc(id: 'project-1', name: 'Keyboard mixer', layers: [
+      LayerDoc(id: 'layer-1', name: 'Lead', color: 0),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
+    ));
+
+    final focusFinder = find.ancestor(
+      of: find.byWidgetPredicate((widget) =>
+        widget is Semantics && widget.properties.label == 'Mixer inspector width'),
+      matching: find.byType(Focus),
+    ).first;
+    final focus = tester.widget<Focus>(focusFinder);
+    focus.focusNode!.requestFocus();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+
+    final divider = tester.widgetList<Semantics>(find.byType(Semantics))
+      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
+    expect(divider.properties.value, '36 percent');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    final restored = tester.widgetList<Semantics>(find.byType(Semantics))
+      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
+    expect(restored.properties.value, '34 percent');
+  });
+
   testWidgets('Mixer channel controls update the shared project model', (tester) async {
     final module = ModuleDoc(id: 'gen-1', name: 'Bass synth', source: '');
     final layer = LayerDoc(id: 'layer-1', name: 'Bass', color: 0, generatorId: module.id, volume: 0.5);
@@ -394,6 +428,29 @@ void main() {
     expect(find.text('Advanced'), findsOneWidget);
     expect(find.text('44.1 kHz'), findsOneWidget);
     expect(find.text('32-bit float'), findsOneWidget);
+  });
+
+  testWidgets('Exporter uses a compact format selector on phone widths', (tester) async {
+    tester.view.physicalSize = const Size(360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ExporterScreen(state: state)),
+    ));
+    await tester.tap(find.text('Advanced'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DropdownButton<ExportKind>), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byType(DropdownButton<ExportKind>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MIDI').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Export MIDI'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Exporter switches between quick loop and advanced MIDI options', (tester) async {

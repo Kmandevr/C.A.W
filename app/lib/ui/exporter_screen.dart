@@ -597,18 +597,39 @@ class _ExporterScreenState extends State<ExporterScreen> {
       if (_advanced) ...[
         const SizedBox(height: 12),
         const Heading('What to export'),
-        SegmentedButton<ExportKind>(
-          segments: const [
-            ButtonSegment(value: ExportKind.loop, label: Text('Loop')),
-            ButtonSegment(value: ExportKind.free, label: Text('Length')),
-            ButtonSegment(value: ExportKind.oneShot, label: Text('One-shot')),
-            ButtonSegment(value: ExportKind.wavetable, label: Text('Table')),
-            ButtonSegment(value: ExportKind.midi, label: Text('MIDI')),
-          ],
-          selected: {_kind},
-          showSelectedIcon: false,
-          onSelectionChanged: busy ? null : (v) => setState(() => _kind = v.first),
-        ),
+        LayoutBuilder(builder: (context, constraints) {
+          if (constraints.maxWidth < 560) {
+            return InputDecorator(
+              decoration: const InputDecoration(labelText: 'Export type'),
+              child: DropdownButtonHideUnderline(child: DropdownButton<ExportKind>(
+                value: _kind,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(value: ExportKind.loop, child: Text('Loop')),
+                  DropdownMenuItem(value: ExportKind.free, child: Text('Length')),
+                  DropdownMenuItem(value: ExportKind.oneShot, child: Text('One-shot')),
+                  DropdownMenuItem(value: ExportKind.wavetable, child: Text('Wavetable')),
+                  DropdownMenuItem(value: ExportKind.midi, child: Text('MIDI')),
+                ],
+                onChanged: busy ? null : (value) {
+                  if (value != null) setState(() => _kind = value);
+                },
+              )),
+            );
+          }
+          return SegmentedButton<ExportKind>(
+            segments: const [
+              ButtonSegment(value: ExportKind.loop, label: Text('Loop')),
+              ButtonSegment(value: ExportKind.free, label: Text('Length')),
+              ButtonSegment(value: ExportKind.oneShot, label: Text('One-shot')),
+              ButtonSegment(value: ExportKind.wavetable, label: Text('Table')),
+              ButtonSegment(value: ExportKind.midi, label: Text('MIDI')),
+            ],
+            selected: {_kind},
+            showSelectedIcon: false,
+            onSelectionChanged: busy ? null : (value) => setState(() => _kind = value.first),
+          );
+        }),
       ],
       const SizedBox(height: 12),
       NeonPanel(
@@ -634,6 +655,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
           if (_kind == ExportKind.oneShot)
             DropdownButton<String>(
               value: _layerId,
+              isExpanded: true,
               hint: const Text('No layers with a generator'),
               items: [for (final l in layers) DropdownMenuItem(value: l.id, child: Text(l.name))],
               onChanged: busy ? null : (v) => setState(() => _layerId = v),
@@ -641,6 +663,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
           if (_kind == ExportKind.midi)
             DropdownButton<String>(
               value: _patternId,
+              isExpanded: true,
               hint: const Text('No MIDI patterns in this project'),
               items: [for (final m in patterns) DropdownMenuItem(value: m.id, child: Text(m.name))],
               onChanged: busy ? null : (v) => setState(() => _patternId = v),
@@ -648,6 +671,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
           if (_kind == ExportKind.wavetable) ...[
             DropdownButton<String>(
               value: _moduleId,
+              isExpanded: true,
               hint: const Text('No compiled modules'),
               items: [for (final m in modules) DropdownMenuItem(value: m.id, child: Text(m.name))],
               onChanged: busy ? null : (v) => setState(() => _moduleId = v),
