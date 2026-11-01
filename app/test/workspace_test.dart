@@ -253,12 +253,16 @@ void main() {
 
   test('imported projects receive a new identity and preserve project content', () async {
     state.starting = false;
+    state.createLibraryFolder('Previous project folder');
+    expect(state.canUndoLibrary, isTrue);
     final imported = ProjectDoc(id: 'external-id', name: 'Imported session', bpm: 128);
     await state.importProject(imported);
 
     expect(state.project.id, isNot('external-id'));
     expect(state.project.name, 'Imported session');
     expect(state.project.bpm, 128);
+    expect(state.canUndoLibrary, isFalse);
+    expect(state.canRedoLibrary, isFalse);
   });
 
 
