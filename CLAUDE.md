@@ -18,7 +18,7 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 
 ## Layout
 
-`docs/` is the plan and memory, `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (starter modules). Conventions for each kind of file load from `.claude/rules/` when you touch it.
+`docs/` is the plan and memory ([docs/how-it-works.md](docs/how-it-works.md) shows how the code connects), `scripts/` holds repository tooling and `.claude/` the agent setup ([.claude/README.md](.claude/README.md)). Code: `engine/` (C++ engine and `caw` CLI), `app/` (Flutter) and `examples/` (starter modules). Conventions for each kind of file load from `.claude/rules/` when you touch it.
 
 ## Read in layers
 
@@ -31,6 +31,9 @@ Don't read every file. Go deeper only when the layer above doesn't answer, and n
 5. **File:** open only what the layers above named, with Grep or Read `offset`/`limit`.
 
 ## Workflow
+
+**Roles (owner, 2026-10-31):** GPT does long-running optimisation and feature work; Claude's main job is to check that GPT's work is implemented correctly and to fix or report what it finds when asked ([docs/decisions.md](docs/decisions.md)).
+
 
 One-file changes: just do them. Every file (code, notes, Claude config) has one purpose; change only the files the task needs. Independent review goes to an agent in `.claude/agents/` (`architect` before structural changes, the reviewers after), asking for findings only. Changes across areas: the saved workflow `change` (plan, build in parallel on disjoint files, verify, update docs; never commits).
 

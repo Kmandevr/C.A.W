@@ -1,0 +1,20 @@
+---
+caw: 1
+kind: generator
+name: Wavetable pad
+summary: Wide unison pad morphing through the basic table; plays a pattern's notes, try the Chords pattern
+mode: float
+---
+// wt() plays a wavetable: table.basic morphs from sine through triangle and saw to square as its position goes 0..1.
+// Unison stacks detuned copies of each note for width.
+// --- Oscillator ---
+param shape = 0.45 in 0..1 "Where in the table: sine, triangle, saw, square"
+param drift = 0.25 in 0..1 "How far a slow LFO moves the shape"
+param voices = 7 in 1..16 step 1 "Unison voices per note"
+param detune = 0.18 in 0..1 "Spread of the unison voices"
+// --- Filter ---
+param cutoff = 1800 in 200..8000 step 10 "Brightness"
+param res = 1.2 in 0.5..8 "Resonance"
+let p = clamp(shape + drift * lfo.sine(16), 0, 1)
+let amp = env.adsr(gate, 0.3, 0.5, 0.8, 0.8)
+lpf(wt(table.basic, freq, p, voices, detune), cutoff, res) * amp * (0.5 + 0.5 * vel) * 0.3

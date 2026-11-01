@@ -1,6 +1,7 @@
 // Code editor for modules: syntax highlighting, the symbol key row for phone typing, and jump-to-error.
 import 'package:flutter/material.dart';
 
+import '../model/settings.dart';
 import 'theme.dart';
 
 const _keywords = {'let', 'param', 'in', 'global', 'export', 'fn', 'on', 'off', 'slide', 'prob', 'ratchet'};
@@ -154,10 +155,11 @@ class CodeField extends StatelessWidget {
 
 /// Buttons for the symbols bytebeat code needs most, which phone keyboards hide.
 class SymbolRow extends StatelessWidget {
-  const SymbolRow({super.key, required this.onInsert});
+  const SymbolRow({super.key, required this.onInsert, this.symbols = EditorLook.defaultKeyRow});
   final ValueChanged<String> onInsert;
 
-  static const symbols = ['t', '>>', '<<', '&', '|', '^', '%', '(', ')', '?', ':', '~', '*', '+', '-', '/', '=', '255', 'let ', 'param '];
+  /// The keys, from the settings (Settings → Code editor → Key row).
+  final List<String> symbols;
 
   @override
   Widget build(BuildContext context) => SizedBox(

@@ -22,7 +22,8 @@ namespace {
 
 const char* kUsage =
     "usage:\n"
-    "  caw check FILE.caw...                 compile modules; prints errors, exits 1 if any fail\n"
+    "  caw check [--code] FILE.caw...        compile modules; prints errors, exits 1 if any fail; --code prints\n"
+    "                                        the code a synth patch becomes\n"
     "  caw render INPUT -o OUT.wav [options] render a module (.caw) or project (.json)\n"
     "      --loop (default)  one exact project loop      --seconds S   free length\n"
     "      --oneshot LAYER   one pass of a layer, trimmed --wavetable MODULE [--param P] [--frames N]\n"
@@ -56,8 +57,14 @@ bool endsWith(const std::string& s, const char* suffix) {
 }
 
 int check(int argc, char** argv) {
-    int failed = 0;
+    int failed = 0, files = 0;
+    bool code = false;
     for (int i = 2; i < argc; ++i) {
+        if (std::string(argv[i]) == "--code") {
+            code = true;
+            continue;
+        }
+        ++files;
         std::string src;
         if (!readFile(argv[i], src)) {
             std::printf("%s: can't read the file\n", argv[i]);
@@ -80,7 +87,16 @@ int check(int argc, char** argv) {
             if (r.program->kind == caw::ModuleKind::Library)
                 std::printf("%s: ok (library %s, %zu functions)\n", argv[i], r.program->ns.c_str(),
                             r.program->functions.size());
-            else
+            else if (r.program->synth) {
+                const size_t steps = r.program->synthFx.size();
+                std::printf("%s: ok (synth, %zu params, %zu effect step%s)\n", argv[i], r.program->params.size(), steps,
+                            steps == 1 ? "" : "s");
+                if (code) {
+                    std::printf("%s", r.program->synthCode.c_str());
+                    for (const std::string& fx : r.program->synthFx)
+                        std::printf(fx[0] == '@' ? "\n# then the project module %s\n" : "\n%s", fx[0] == '@' ? fx.c_str() + 1 : fx.c_str());
+                }
+            } else
                 std::printf("%s: ok (%s, %zu params)\n", argv[i],
                             r.program->kind == caw::ModuleKind::Effect ? "effect" : "generator",
                             r.program->params.size());
@@ -89,8 +105,8 @@ int check(int argc, char** argv) {
             ++failed;
         }
     }
-    if (argc < 3) std::fputs(kUsage, stderr);
-    return failed || argc < 3 ? 1 : 0;
+    if (files == 0) std::fputs(kUsage, stderr);
+    return failed || files == 0 ? 1 : 0;
 }
 
 double db(double v) { return v > 0 ? 20.0 * std::log10(v) : -999.0; }
