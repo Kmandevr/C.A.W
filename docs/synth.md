@@ -1,6 +1,6 @@
 ---
 title: Synth
-summary: Implemented kind: synth patch compiler, supported patch features, app behavior and verified gaps.
+summary: Implemented synth patch compiler, supported patch features, app behavior and verified gaps.
 covers: [engine/src/synth.cpp, engine/tests/synth_test.cpp, app/lib/ui/builder_screen.dart, app/lib/ui/modulation_panel.dart]
 updated: 2026-11-01
 ---
