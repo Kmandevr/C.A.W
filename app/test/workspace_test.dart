@@ -79,7 +79,7 @@ void main() {
     expect(find.text('ENGINE LAB'), findsOneWidget);
     expect(find.text('TRACK SIGNAL PATHS'), findsOneWidget);
     expect(find.text('COMPILED MODULES'), findsOneWidget);
-    expect(find.text('Noise core'), findsOneWidget);
+    expect(find.text('Noise core'), findsNWidgets(2));
     expect(find.text('Noise generator'), findsOneWidget);
   });
 }
