@@ -68,8 +68,13 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     if (!mounted || name == null || name.trim().isEmpty) return;
     final parent = path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : '';
     final next = parent.isEmpty ? name.trim() : '$parent/${name.trim()}';
-    if (!state.renameLibraryFolder(path, next)) {
-      _notice('Folder name is invalid or already in use.', error: true);
+    try {
+      if (!state.renameLibraryFolder(path, next)) {
+        _notice('Folder name is invalid or already in use.', error: true);
+        return;
+      }
+    } catch (e) {
+      _notice('Folder name is invalid: $e', error: true);
       return;
     }
     setState(() {
