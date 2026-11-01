@@ -5,8 +5,6 @@ updated: 2026-10-31
 ---
 
 
-- [Master development plan](CAW_MASTER_DEVELOPMENT_PLAN.md) — approved Task 1 and Task 2 scope.
-
 # C.A.W vault
 
 Project memory for C.A.W. Open this `docs/` folder as a vault in Obsidian, or read it on GitHub. A note that documents code lists the paths it describes in its `covers:` frontmatter; re-check the note when those change.
@@ -17,6 +15,7 @@ Project memory for C.A.W. Open this `docs/` folder as a vault in Obsidian, or re
 
 ## Notes
 
+- [Master development plan](CAW_MASTER_DEVELOPMENT_PLAN.md): approved Task 1 and Task 2 scope.
 - [Vision](vision.md): the owner's brief, condensed, and the open-questions register; read before planning a feature
 - [Architecture](architecture.md): stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks
 - [Engine and language reference](engine.md): the built engine: module language, playback, project file, exports, C API, CLI, tests
