@@ -127,6 +127,7 @@ void main() {
       ModuleDoc(id: 'gen-1', name: 'Bass', source: '---\\nkind: generator\\n---\\nsin(110)'),
     ]);
     state.createLibraryFolder('Synths');
+    state.saveLibrarySearch('Bass search', 'bass');
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
@@ -138,6 +139,10 @@ void main() {
     expect(find.text('Import project'), findsOneWidget);
     expect(find.text('Import .caw module'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
+    expect(find.text('Bass search'), findsOneWidget);
+    await tester.tap(find.text('Bass search'));
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byType(TextField)).controller?.text, 'bass');
 
     await tester.tap(find.byTooltip('Select modules'));
     await tester.pump();
