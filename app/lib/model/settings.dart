@@ -30,6 +30,87 @@ extension PerformanceModeDetails on PerformanceMode {
   };
 }
 
+class ExportProfile {
+  const ExportProfile({
+    required this.name,
+    required this.kind,
+    this.sampleRate = 48000,
+    this.float32 = false,
+    this.seconds = 8,
+    this.frames = 64,
+  });
+
+  final String name, kind;
+  final int sampleRate, frames;
+  final bool float32;
+  final double seconds;
+
+  Map<String, dynamic> toJson() => {
+    'name': name, 'kind': kind, 'sample_rate': sampleRate,
+    'float32': float32, 'seconds': seconds, 'frames': frames,
+  };
+
+  static ExportProfile? fromJson(Object? raw) {
+    if (raw is! Map || raw['name'] is! String || raw['kind'] is! String) return null;
+    final name = (raw['name'] as String).trim();
+    final kind = raw['kind'] as String;
+    if (name.isEmpty || name.length > 64 ||
+        !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) return null;
+    final rate = (raw['sample_rate'] as num?)?.toInt() ?? 48000;
+    final frames = (raw['frames'] as num?)?.toInt() ?? 64;
+    return ExportProfile(
+      name: name,
+      kind: kind,
+      sampleRate: rate == 44100 ? 44100 : 48000,
+      float32: raw['float32'] == true,
+      seconds: ((raw['seconds'] as num?)?.toDouble() ?? 8).clamp(1.0, 120.0).toDouble(),
+      frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
+    );
+  }
+}
+
+class ExportHistoryEntry {
+  const ExportHistoryEntry({
+    required this.fileName,
+    required this.kind,
+    required this.createdAtMs,
+    this.sampleRate = 48000,
+    this.float32 = false,
+    this.seconds = 8,
+    this.frames = 64,
+  });
+
+  final String fileName, kind;
+  final int createdAtMs, sampleRate, frames;
+  final bool float32;
+  final double seconds;
+
+  Map<String, dynamic> toJson() => {
+    'file_name': fileName, 'kind': kind, 'created_at_ms': createdAtMs,
+    'sample_rate': sampleRate, 'float32': float32, 'seconds': seconds, 'frames': frames,
+  };
+
+  static ExportHistoryEntry? fromJson(Object? raw) {
+    if (raw is! Map || raw['file_name'] is! String || raw['kind'] is! String ||
+        raw['created_at_ms'] is! num) return null;
+    final fileName = (raw['file_name'] as String).trim();
+    final kind = raw['kind'] as String;
+    if (fileName.isEmpty || fileName.length > 160 ||
+        !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) return null;
+    final rate = (raw['sample_rate'] as num?)?.toInt() ?? 48000;
+    final frames = (raw['frames'] as num?)?.toInt() ?? 64;
+    return ExportHistoryEntry(
+      fileName: fileName,
+      kind: kind,
+      createdAtMs: (raw['created_at_ms'] as num).toInt().clamp(0, 4102444800000),
+      sampleRate: rate == 44100 ? 44100 : 48000,
+      float32: raw['float32'] == true,
+      seconds: ((raw['seconds'] as num?)?.toDouble() ?? 8).clamp(1.0, 120.0).toDouble(),
+      frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
+    );
+  }
+}
+
 class Settings extends ChangeNotifier {
   /// Settings kept in [dir] (settings.json and themes/); with no folder they live in memory only.
   Settings({this.dir}) {
@@ -107,7 +188,7 @@ class Settings extends ChangeNotifier {
         'performance_mode': performanceMode.name,
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
-        'vim_code': vimCode,
+        'vim_code': vimCode,\n        'export_profiles': [for (final profile in exportProfiles) profile.toJson()],\n        'export_history': [for (final entry in exportHistory) entry.toJson()],
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -125,7 +206,7 @@ class Settings extends ChangeNotifier {
       performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
-    vimCode = (j['vim_code'] as bool?) ?? vimCode;
+    vimCode = (j['vim_code'] as bool?) ?? vimCode;\n    exportProfiles = ((j['export_profiles'] as List?) ?? const [])\n        .map(ExportProfile.fromJson).whereType<ExportProfile>().take(32).toList();\n    exportHistory = ((j['export_history'] as List?) ?? const [])\n        .map(ExportHistoryEntry.fromJson).whereType<ExportHistoryEntry>().take(20).toList();
   }
 
   Future<void> _load() async {
@@ -153,6 +234,33 @@ class Settings extends ChangeNotifier {
     Neon.active = activeTheme;
     _applyPerformanceMode();
     _shownLook = activeTheme.toFile();
+  }
+
+  Future<void> saveExportProfile(ExportProfile profile) async {
+    final name = profile.name.trim();
+    if (name.isEmpty || name.length > 64) return;
+    exportProfiles = [
+      ...exportProfiles.where((item) => item.name.toLowerCase() != name.toLowerCase()),
+      ExportProfile(name: name, kind: profile.kind, sampleRate: profile.sampleRate,
+        float32: profile.float32, seconds: profile.seconds, frames: profile.frames),
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    notifyListeners();
+    await save();
+  }
+
+  Future<void> deleteExportProfile(String name) async {
+    final next = exportProfiles.where((profile) => profile.name != name).toList();
+    if (next.length == exportProfiles.length) return;
+    exportProfiles = next;
+    notifyListeners();
+    await save();
+  }
+
+  Future<void> recordExport(ExportHistoryEntry entry) async {
+    exportHistory = [entry, ...exportHistory.where((item) =>
+      item.fileName != entry.fileName || item.createdAtMs != entry.createdAtMs)].take(20).toList();
+    notifyListeners();
+    await save();
   }
 
   /// Writes through a temporary file so a crash mid-save never leaves half a file.
