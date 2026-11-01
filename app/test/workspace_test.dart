@@ -53,6 +53,9 @@ void main() {
     routerKey.currentState!.vim.run(const ActionRef.action('focus.next'));
     await tester.pump();
     expect(second.hasFocus, isTrue);
+    routerKey.currentState!.vim.run(const ActionRef.action('focus.prev'));
+    await tester.pump();
+    expect(first.hasFocus, isTrue);
 
     routerKey.currentState!.vim.run(const ActionRef.action('view.mixer'));
     expect(selectedView, 2);
