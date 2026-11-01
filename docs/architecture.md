@@ -2,6 +2,7 @@
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
 updated: 2026-11-01
+covers: [engine/, app/]
 ---
 
 # Architecture
