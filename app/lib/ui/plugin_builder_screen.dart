@@ -110,12 +110,14 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
             const Text('Choose an existing engine template. The source and generated parameters remain editable in Builder.',
               style: TextStyle(color: Neon.dim, fontSize: 12)),
             const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              value: _templateFile ?? _templates.firstOrNull?.file,
-              isExpanded: true,
+            InputDecorator(
               decoration: const InputDecoration(labelText: 'Starter module'),
-              items: [for (final t in _templates) DropdownMenuItem(value: t.file, child: Text(t.file))],
-              onChanged: _busy ? null : (v) => setState(() => _templateFile = v),
+              child: DropdownButtonHideUnderline(child: DropdownButton<String>(
+                value: _templateFile ?? _templates.firstOrNull?.file,
+                isExpanded: true,
+                items: [for (final t in _templates) DropdownMenuItem(value: t.file, child: Text(t.file))],
+                onChanged: _busy ? null : (v) => setState(() => _templateFile = v),
+              )),
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
@@ -129,12 +131,14 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('EXISTING MODULE', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
-            DropdownButtonFormField<String>(
-              value: _moduleId,
-              isExpanded: true,
+            InputDecorator(
               decoration: const InputDecoration(labelText: 'Generator / effect'),
-              items: [for (final m in modules) DropdownMenuItem(value: m.id, child: Text(m.name))],
-              onChanged: (v) => setState(() { _moduleId = v; _message = null; }),
+              child: DropdownButtonHideUnderline(child: DropdownButton<String>(
+                value: _moduleId,
+                isExpanded: true,
+                items: [for (final m in modules) DropdownMenuItem(value: m.id, child: Text(m.name))],
+                onChanged: (v) => setState(() { _moduleId = v; _message = null; }),
+              )),
             ),
             const SizedBox(height: 8),
             if (module == null) const Text('Create a module from a starter template first.',
