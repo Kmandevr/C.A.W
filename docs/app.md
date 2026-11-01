@@ -87,7 +87,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - imported projects receive a new ID so they cannot overwrite an existing saved project; imported modules are added as new items
   - validates the project format version and reports malformed or future-version files instead of opening them
   - WAV, MIDI and wavetable exports remain in Exporter
-  - virtual folders, tags and saved searches are stored in the project; folder/tag/search/move operations have bounded in-session undo/redo (50 snapshots). Audio/MIDI preview caching, durable version history, dependency relinking and OS-level folder browsing remain incomplete
+  - virtual folders, tags and saved searches are stored in the project; bulk move/tag and folder/tag/search operations have bounded in-session undo/redo (50 snapshots). Audio/MIDI preview caching, durable version history, dependency relinking and OS-level folder browsing remain incomplete
 - **Plugin Builder** (`lib/ui/plugin_builder_screen.dart`):
   - guided creation from blank generators/effects or existing generator/effect templates; advanced workflow can select, clone, validate and package project modules
   - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source; cloning preserves the original and creates an independent project module
