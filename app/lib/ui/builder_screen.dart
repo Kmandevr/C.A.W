@@ -1,4 +1,4 @@
-// Builder: pick or create a module, edit its code, hear it, Run to hot-swap it, and tweak its params.
+// Sounds (the Builder area): pick or create a module, tweak its controls, and one tap away edit its code or notes and Run it.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,15 +9,17 @@ import '../model/project.dart';
 import 'code_editor.dart';
 import 'key_router.dart';
 import 'library_sheet.dart';
+import 'modulation_panel.dart';
 import 'param_control.dart';
 import 'pattern_editor.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-/// Generators are green, effects pink, libraries blue and patterns yellow.
+/// Generators and synths are green, effects pink, libraries blue and patterns yellow.
 Color kindColor(String kind) =>
     switch (kind) { 'effect' => Neon.pink, 'library' => Neon.blue, 'pattern' => Neon.yellow, _ => Neon.green };
 IconData kindIcon(String kind) => switch (kind) {
+  'synth' => Icons.waves,
   'effect' => Icons.tune,
   'library' => Icons.menu_book,
   'pattern' => Icons.piano,
@@ -33,7 +35,8 @@ class BuilderScreen extends StatefulWidget {
 }
 
 class _BuilderScreenState extends State<BuilderScreen> {
-  bool _showCode = false; // pattern modules open in the piano roll; this shows their text instead
+  /// Per module: true shows its code (a pattern's text), false its controls (a pattern's piano roll).
+  final Map<String, bool> _codeView = {};
   final CodeController _code = CodeController();
   final FocusNode _focus = FocusNode();
   String? _shownId;
@@ -82,7 +85,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
             _openLibrary(m);
           case 'builder.jumpError':
             final info = s.info[m.id];
-            if (info != null && !info.ok) _code.jumpTo(info.line, info.col);
+            if (info != null && !info.ok) _showError(m, info);
           case 'builder.solo':
             s.setPreviewOnly(!s.previewOnly);
           case 'builder.module.rename':
@@ -91,7 +94,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
             _delete(m);
           case 'builder.pattern.text':
             if (!s.isPattern(m.id)) return false;
-            setState(() => _showCode = !_showCode);
+            setState(() => _codeView[m.id] = !_showingCode(m));
           default:
             return false;
         }
@@ -225,6 +228,15 @@ class _BuilderScreenState extends State<BuilderScreen> {
     super.dispose();
   }
 
+  /// A module opens on its controls (a pattern on its notes); an empty one, or one with nothing to control, on its code.
+  bool _showingCode(ModuleDoc m) {
+    final remembered = _codeView[m.id];
+    if (remembered != null) return remembered;
+    if (s.isPattern(m.id)) return false;
+    final info = s.info[m.id];
+    return m.source.isEmpty || info == null || !info.ok || (info.params.isEmpty && !info.isLibrary);
+  }
+
   void _syncEditor(ModuleDoc? m) {
     if (m?.id == _shownId) return;
     _shownId = m?.id;
@@ -246,16 +258,135 @@ class _BuilderScreenState extends State<BuilderScreen> {
     _focus.requestFocus();
   }
 
+  /// Opens the code (a pattern's text) if it's hidden, so jumps and inserts land where they can be seen.
+  void _showCode(ModuleDoc m) {
+    if (!_showingCode(m)) setState(() => _codeView[m.id] = true);
+  }
+
+  void _showError(ModuleDoc m, ModuleInfo info) {
+    _showCode(m);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _code.jumpTo(info.line, info.col));
+  }
+
   void _openLibrary(ModuleDoc m) {
     final lib = _library;
     if (lib == null) return;
+    _showCode(m);
     showLibrarySheet(context, library: lib, query: _code.wordAtCursor, onInsert: (t) => _type(m, t, completing: true));
   }
 
   Future<void> _run(ModuleDoc m) async {
     final info = await s.run(m.id);
     if (!mounted || info == null) return;
-    if (!info.ok) _code.jumpTo(info.line, info.col);
+    if (!info.ok) _showError(m, info);
+  }
+
+  Future<void> _applyConnectionSource(ModuleDoc module, String source) async {
+    s.editSource(module.id, source);
+    if (_shownId == module.id) {
+      _code.value = TextEditingValue(
+        text: source,
+        selection: TextSelection.collapsed(offset: source.length),
+      );
+    }
+    final info = await s.run(module.id);
+    if (!mounted || info == null) return;
+    if (!info.ok) _showError(module, info);
+  }
+
+  List<SignalOption> _signalSources(ModuleDoc destination) {
+    final byValue = <String, List<SignalOption>>{};
+    final targetLayers = s.project.layers.where((l) => l.chain.contains(destination.id));
+    for (final source in s.project.modules) {
+      if (source.edited) continue;
+      var invalidSameLayerOrder = false;
+      for (final layer in targetLayers) {
+        final sourceIndex = layer.chain.indexOf(source.id);
+        final targetIndex = layer.chain.indexOf(destination.id);
+        if (sourceIndex >= targetIndex && sourceIndex >= 0) invalidSameLayerOrder = true;
+      }
+      if (source.id == destination.id ||
+          invalidSameLayerOrder ||
+          !s.project.layers.any((l) => l.chain.contains(source.id))) {
+        continue;
+      }
+      final info = s.info[source.id];
+      if (info == null || !info.ok || info.ref.isEmpty) continue;
+      for (final export in info.exports) {
+        final value = '${info.ref}.${export.name}';
+        byValue.putIfAbsent(value, () => []).add(SignalOption(value, '${source.name}.${export.name}'));
+      }
+    }
+    // Duplicate module refs make the engine's first-provider rule ambiguous to the user; don't offer them.
+    return [for (final entry in byValue.entries) if (entry.value.length == 1) entry.value.single];
+  }
+
+  Future<void> _addSidechain(ModuleDoc target, String source, double amount) async {
+    final sourceInfo = s.info.entries.where((e) => e.value.ref.isNotEmpty && e.value.exports.any((x) => '${e.value.ref}.${x.name}' == source)).firstOrNull;
+    if (sourceInfo == null) return;
+    final sourceModule = s.project.module(sourceInfo.key);
+    if (sourceModule == null) return;
+    final targetLayers = s.project.layers.where((l) => l.chain.contains(target.id)).toList();
+    if (targetLayers.isNotEmpty && targetLayers.every((l) => l.effectIds.length >= 8)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The selected track chain already has eight effects. Remove one before adding sidechain.')),
+      );
+      return;
+    }
+
+    final id = s.addBlankModule('effect');
+    final name = 'Sidechain ${sourceModule.name} $id';
+    final safeName = name.replaceAll('\n', ' ');
+    final sourceText = '---\ncaw: 1\nkind: effect\nname: $safeName\n---\n'
+        '// caw:sidechain-route\n'
+        'param amount = ${amount.toStringAsFixed(2)} in 0..1 "Sidechain amount"\n'
+        'util.duck(in, $source, amount)\n';
+    s.editSource(id, sourceText);
+
+    var attached = 0;
+    for (final layer in targetLayers) {
+      if (layer.effectIds.length >= 8) continue;
+      if (layer.generatorId == target.id) {
+        s.editLayer(layer, (l) => l.effectIds.insert(0, id));
+        attached++;
+      } else {
+        final index = layer.effectIds.indexOf(target.id);
+        if (index >= 0) {
+          s.editLayer(layer, (l) => l.effectIds.insert(index + 1, id));
+          attached++;
+        }
+      }
+    }
+    final info = await s.run(id);
+    if (!mounted) return;
+    if (info == null || !info.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(info?.error ?? 'Could not compile the sidechain effect')),
+      );
+    } else if (attached == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sidechain created. Add it to a track in Tracks to hear it.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sidechain added to $attached track(s).')),
+      );
+    }
+  }
+
+  Future<void> _removeSidechain(ModuleDoc module) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove sidechain?'),
+        content: const Text('This removes the sidechain effect from every track that uses it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok == true) s.deleteModule(module.id);
   }
 
   static const _blanks = [
@@ -347,24 +478,35 @@ class _BuilderScreenState extends State<BuilderScreen> {
       if (m == null) {
         return Column(children: [
           picker,
-          trackControls,
           const Expanded(child: Center(child: Text('No modules yet: tap New to start one'))),
         ]);
       }
       final info = s.info[m.id];
+      final look = s.settings.editor;
       // An empty module shows the kind picked for it until its header says otherwise.
       final kind = s.hintKindOf(m.id) ?? s.kindOf(m.id);
       final color = kindColor(kind);
-      final roll = s.isPattern(m.id) && !_showCode ? PatternEditor(key: ValueKey(m.id), state: s, module: m) : null;
-      final rollToggle = s.isPattern(m.id)
-          ? Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => setState(() => _showCode = !_showCode),
-                child: Text(_showCode ? 'Piano roll' : 'Text'),
-              ),
-            )
-          : const SizedBox();
+      final pattern = s.isPattern(m.id);
+      final showCode = _showingCode(m);
+      final roll = pattern && !showCode ? PatternEditor(key: ValueKey(m.id), state: s, module: m) : null;
+      // On a wide screen code and controls sit side by side, so only a pattern needs the switch there.
+      final viewSwitch = wide && !pattern
+          ? const SizedBox.shrink()
+          : SegmentedButton<bool>(
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                  selectedBackgroundColor: color.withValues(alpha: 0.2), selectedForegroundColor: Neon.text),
+              segments: [
+                ButtonSegment(
+                    value: false,
+                    icon: Icon(pattern ? Icons.piano : Icons.tune, size: 18),
+                    label: Text(pattern ? 'Notes' : 'Controls')),
+                ButtonSegment(
+                    value: true, icon: const Icon(Icons.code, size: 18), label: Text(pattern ? 'Text' : 'Code')),
+              ],
+              selected: {showCode},
+              onSelectionChanged: (v) => setState(() => _codeView[m.id] = v.first),
+            );
       final editor = CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _run(m),
@@ -378,7 +520,10 @@ class _BuilderScreenState extends State<BuilderScreen> {
           hint: s.hintKindOf(m.id) == null ? null : codeHint(s.hintKindOf(m.id)!),
         ),
       );
-      final status = _StatusLine(module: m, info: info, onJump: () => _code.jumpTo(info!.line, info.col));
+      final status = _StatusLine(
+          module: m,
+          info: info,
+          onJump: () => _showError(m, info!));
       final header = Row(children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -393,25 +538,30 @@ class _BuilderScreenState extends State<BuilderScreen> {
             child: Text(m.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           ),
         ),
-        Tooltip(
-          message: 'Hear only this module',
-          child: FilterChip(
-            label: const Text('Solo preview'),
-            selected: s.previewOnly,
-            onSelected: s.setPreviewOnly,
-            selectedColor: Neon.blue.withValues(alpha: 0.25),
-            checkmarkColor: Neon.blue,
+        if (look.soloButton)
+          IconButton(
+            tooltip: s.previewOnly ? 'Hearing only this (tap for the whole project)' : 'Hear only this',
+            isSelected: s.previewOnly,
+            onPressed: () => s.setPreviewOnly(!s.previewOnly),
+            icon: const Icon(Icons.headphones_outlined, color: Neon.dim),
+            selectedIcon: const Icon(Icons.headphones, color: Neon.blue),
           ),
-        ),
         PopupMenuButton<String>(
-          onSelected: (v) => v == 'rename' ? _rename(m) : _delete(m),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'rename', child: Text('Rename')),
-            PopupMenuItem(value: 'delete', child: Text('Delete')),
+          onSelected: (v) => switch (v) {
+            'rename' => _rename(m),
+            'solo' => s.setPreviewOnly(!s.previewOnly),
+            _ => _delete(m),
+          },
+          itemBuilder: (_) => [
+            // With the Solo button hidden (Settings → Code editor), Solo preview stays here.
+            if (!look.soloButton)
+              CheckedPopupMenuItem(value: 'solo', checked: s.previewOnly, child: const Text('Solo preview')),
+            const PopupMenuItem(value: 'rename', child: Text('Rename')),
+            const PopupMenuItem(value: 'delete', child: Text('Delete')),
           ],
         ),
       ]);
-      final scope = !Neon.showScopes
+      final scope = s.settings.lightMode || !look.scope || !Neon.showScopes
           ? const SizedBox.shrink()
           : NeonPanel(
         color: color,
@@ -419,23 +569,36 @@ class _BuilderScreenState extends State<BuilderScreen> {
         child: ScopeView(
             state: s, index: s.previewOnly ? Engine.auditionIndex : Engine.masterIndex, color: color, height: wide ? 140 : 88),
       );
-      final params = _Params(state: s, module: m, info: info);
+      final params = _Params(state: s, module: m, info: info, compact: look.compactControls);
+      final connections = ModulationPanel(
+        module: m,
+        info: info,
+        sources: _signalSources(m),
+        onSourceChanged: (source) => _applyConnectionSource(m, source),
+        onAddSidechain: (source, amount) => _addSidechain(m, source, amount),
+        onRemoveSidechain: () => _removeSidechain(m),
+      );
       final library = _library;
-      final completion = library == null
+      final completion = library == null || !look.chips
           ? const SizedBox.shrink()
           : ListenableBuilder(
               listenable: _code,
               builder: (context, _) => CompletionChips(
-                  library: library, word: _code.wordAtCursor, onPick: (t) => _type(m, t, completing: true)),
+                  library: library,
+                  word: _code.wordAtCursor,
+                  minLetters: look.chipLetters,
+                  limit: look.chipCount,
+                  onPick: (t) => _type(m, t, completing: true)),
             );
       final runBar = Row(children: [
-        Expanded(child: SymbolRow(onInsert: (t) => _type(m, t))),
+        Expanded(child: SymbolRow(symbols: look.keyRow, onInsert: (t) => _type(m, t))),
         const SizedBox(width: 4),
-        IconButton(
-          tooltip: 'Function library (F1)',
-          onPressed: library == null ? null : () => _openLibrary(m),
-          icon: const Icon(Icons.menu_book, color: Neon.blue),
-        ),
+        if (look.libraryButton)
+          IconButton(
+            tooltip: 'Function library (F1)',
+            onPressed: library == null ? null : () => _openLibrary(m),
+            icon: const Icon(Icons.menu_book, color: Neon.blue),
+          ),
         const SizedBox(width: 4),
         FilledButton.icon(
           style: FilledButton.styleFrom(
@@ -449,10 +612,15 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ),
       ]);
 
+      // The key row and Run bar sit under the code (by the keyboard) or above it, as set in Settings → Code editor.
+      final bar = Padding(
+          padding: look.barOnTop ? const EdgeInsets.fromLTRB(12, 6, 12, 6) : const EdgeInsets.fromLTRB(12, 6, 12, 10),
+          child: Column(children: look.barOnTop ? [runBar, completion] : [completion, runBar]));
       if (wide) {
         return Column(children: [
           picker,
           trackControls,
+          if (look.barOnTop) bar,
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -464,36 +632,63 @@ class _BuilderScreenState extends State<BuilderScreen> {
                     const SizedBox(height: 8),
                     status,
                     const SizedBox(height: 6),
-                    rollToggle,
+                    if (pattern) Align(alignment: Alignment.centerLeft, child: viewSwitch),
+                    if (pattern) const SizedBox(height: 6),
                     Expanded(child: roll ?? SingleChildScrollView(child: editor)),
                   ]),
                 ),
                 const SizedBox(width: 12),
-                Expanded(flex: 2, child: ListView(children: [scope, params])),
+                Expanded(flex: 2, child: ListView(children: [scope, connections, params])),
               ]),
             ),
           ),
-          Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 12), child: Column(children: [completion, runBar])),
+          if (!look.barOnTop) bar,
+        ]);
+      }
+      // Phone: one view at a time. Controls (or a pattern's notes) first; the code is one tap away.
+      final top = [header, const SizedBox(height: 8), Center(child: viewSwitch), const SizedBox(height: 10)];
+      if (roll != null) {
+        return Column(children: [
+          picker,
+          trackControls,
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Column(children: [...top, status])),
+          const SizedBox(height: 6),
+          Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: roll)),
+          const SizedBox(height: 8),
+        ]);
+      }
+      if (!showCode) {
+        return Column(children: [
+          picker,
+          trackControls,
+          Expanded(
+            child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 24), children: [
+              ...top,
+              scope,
+              connections,
+              const SizedBox(height: 8),
+              status,
+              params,
+            ]),
+          ),
         ]);
       }
       return Column(children: [
         picker,
         trackControls,
+        if (look.barOnTop) bar,
         Expanded(
           child: ListView(padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-            header,
-            const SizedBox(height: 8),
-            scope,
-            const SizedBox(height: 8),
+            ...top,
             status,
             const SizedBox(height: 6),
-            rollToggle,
-            roll == null ? editor : SizedBox(height: 440, child: roll),
-            params,
+            editor,
+            const SizedBox(height: 8),
+            connections,
             const SizedBox(height: 12),
           ]),
         ),
-        Padding(padding: const EdgeInsets.fromLTRB(12, 6, 12, 10), child: Column(children: [completion, runBar])),
+        if (!look.barOnTop) bar,
       ]);
     });
   }
@@ -581,6 +776,7 @@ class _BuilderTrackControls extends StatelessWidget {
   }
 }
 
+
 class _ModulePicker extends StatelessWidget {
   const _ModulePicker({required this.state, required this.onNew});
   final AppState state;
@@ -650,17 +846,17 @@ class _StatusLine extends StatelessWidget {
 }
 
 class _Params extends StatelessWidget {
-  const _Params({required this.state, required this.module, required this.info});
+  const _Params({required this.state, required this.module, required this.info, this.compact = false});
   final AppState state;
   final ModuleDoc module;
   final ModuleInfo? info;
+  final bool compact;
 
   String _patternUse(ModuleInfo i) {
-    final users = [for (final l in state.project.layers)
-      if (l.patternId == module.id || l.clips.any((clip) => clip.patternId == module.id)) l.name];
+    final users = [for (final l in state.project.layers) if (l.patternId == module.id) l.name];
     final notes = '${i.noteCount} note${i.noteCount == 1 ? '' : 's'}';
     return users.isEmpty
-        ? 'A pattern of $notes. To hear it, add it as a MIDI clip on a track in the Arranger, or use Solo preview.'
+        ? 'A pattern of $notes. To hear it, pick it as a track\'s notes in Tracks, or tap the headphones.'
         : 'A pattern of $notes, played by ${users.join(', ')}.';
   }
 
@@ -682,8 +878,9 @@ class _Params extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Heading('Controls'),
       ValueListenableBuilder<int>(
-        valueListenable: state.moduleValueTick(module.id),
+        valueListenable: state.values,
         builder: (context, _, _) => ParamGroups(
+          compact: compact,
           params: params,
           color: color,
           valueOf: (p) => p.global ? state.globalValue(p) : (module.params[p.name] ?? p.defaultValue),
@@ -703,6 +900,11 @@ class _Params extends StatelessWidget {
                   ? 'A library: add `fn name(a) = …` and other modules can call ${i.namespace}.name.'
                   : 'Other modules can call: ${i.functions.map((f) => f.signature).join(', ')}',
               style: Neon.code(size: 13, color: Neon.blue)),
+        ),
+      if (i != null && i.imports.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text('Reads: ${i.imports.join(', ')}', style: Neon.code(size: 13, color: Neon.blue)),
         ),
       if (i != null && i.exports.isNotEmpty)
         Padding(
