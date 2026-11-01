@@ -344,6 +344,28 @@ class AppState extends ChangeNotifier {
     await _storage?.save(project);
   }
 
+  Future<bool> createRestorePoint() async {
+    final storage = _storage;
+    if (storage == null || starting) return false;
+    await flush();
+    await storage.createRestorePoint(project);
+    return true;
+  }
+
+  Future<List<RestorePointSummary>> listRestorePoints() async =>
+      await _storage?.listRestorePoints(project.id) ?? const [];
+
+  Future<bool> restoreProjectVersion(String restorePointId) async {
+    final storage = _storage;
+    if (storage == null || starting) return false;
+    final snapshot = await storage.loadRestorePoint(project.id, restorePointId);
+    if (snapshot == null) return false;
+    await storage.createRestorePoint(project);
+    await _switchTo(snapshot);
+    return true;
+  }
+
+
   void _changed({bool engine = true}) {
     if (engine) _sync();
     _save();

@@ -124,6 +124,69 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     }
   }
 
+  Future<void> _createRestorePoint() async {
+    try {
+      final created = await state.createRestorePoint();
+      if (mounted) _notice(created ? 'Created a restore point for this project.' :
+        'Project storage is not ready; restore points are unavailable.', error: !created);
+    } catch (e) {
+      if (mounted) _notice('Restore point could not be created: $e', error: true);
+    }
+  }
+
+  Future<void> _showRestorePoints() async {
+    try {
+      final points = await state.listRestorePoints();
+      if (!mounted) return;
+      final selected = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Project restore points'),
+          content: SizedBox(
+            width: 420,
+            height: 360,
+            child: points.isEmpty
+              ? const Center(child: Text('No restore points yet. Create one before major changes.'))
+              : ListView.builder(
+                  itemCount: points.length,
+                  itemBuilder: (context, index) {
+                    final point = points[index];
+                    final stamp = point.createdAt.toLocal().toString();
+                    return ListTile(
+                      title: Text(point.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(stamp.length > 16 ? stamp.substring(0, 16) : stamp),
+                      trailing: TextButton(
+                        onPressed: () => Navigator.pop(context, point.id),
+                        child: const Text('Restore'),
+                      ),
+                    );
+                  },
+                ),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        ),
+      );
+      if (!mounted || selected == null) return;
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Restore this version?'),
+          content: const Text('The current project will first be saved as a restore point. The selected version will then replace the current project.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restore version')),
+          ],
+        ),
+      );
+      if (proceed != true || !mounted) return;
+      final restored = await state.restoreProjectVersion(selected);
+      if (mounted) _notice(restored ? 'Project version restored.' :
+        'That restore point is no longer available.', error: !restored);
+    } catch (e) {
+      if (mounted) _notice('Restore history could not be opened: $e', error: true);
+    }
+  }
+
   Future<void> _renameModule(ModuleDoc module) async {
     var name = module.name;
     final result = await showDialog<String>(
@@ -299,6 +362,16 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                 });
               }
             }, icon: const Icon(Icons.file_open_outlined), label: const Text('Import project')),
+            OutlinedButton.icon(
+              onPressed: _createRestorePoint,
+              icon: const Icon(Icons.bookmark_add_outlined),
+              label: const Text('Create restore point'),
+            ),
+            TextButton.icon(
+              onPressed: _showRestorePoints,
+              icon: const Icon(Icons.history),
+              label: const Text('Version history'),
+            ),
           ]),
         ])),
         const SizedBox(height: 14),

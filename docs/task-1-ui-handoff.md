@@ -4,6 +4,15 @@ summary: Current implementation state, branch and CI evidence for the C.A.W. Mas
 updated: 2026-11-01
 ---
 
+## Durable project restore points at head 527a01e7
+
+- Added explicit, persistent project restore points to app-private storage. Snapshots use atomic temporary-file writes, are scoped to a validated project ID, and retain the newest 20 versions per project.
+- Added restore-point listing and safe loading that skips malformed snapshots and rejects snapshots belonging to another project. Deleting a project also deletes its restore-point history.
+- Added Files workspace actions to create a restore point and inspect/restore prior versions. Restoring first snapshots the current project, then reloads the selected version through the existing AppState project-switch path so the engine is resynchronized.
+- Added storage-level regression tests in `app/test/storage_test.dart` for snapshot round-trip, ordering, cross-project rejection, retention and history cleanup.
+- Exact-head CI is pending; no passing claim is made yet.
+
+
 ## Files autosave-timer regression fix at head 7d6f337e
 
 - The controller lifecycle issue is resolved. The next test run exposed the expected 500 ms AppState autosave debounce after module deletion; the test now advances the fake clock past that debounce so it verifies the save path without leaving a pending timer at teardown.
