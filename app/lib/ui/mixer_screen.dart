@@ -113,6 +113,7 @@ class _ChannelStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final folders = state.project.layers.where((item) => item.isFolder && item.id != layer.id).toList();
+    final routeId = folders.any((folder) => folder.id == layer.parentId) ? layer.parentId : null;
     return NeonPanel(
       color: state.selectedLayerId == layer.id ? Neon.blue : Neon.layer(layer.color),
       padding: const EdgeInsets.all(10),
@@ -160,7 +161,7 @@ class _ChannelStrip extends StatelessWidget {
               Row(children: [
                 const SizedBox(width: 48, child: Text('ROUTE', style: TextStyle(color: Neon.dim, fontSize: 10))),
                 Expanded(child: DropdownButton<String?>(
-                  value: layer.parentId,
+                  value: routeId,
                   isExpanded: true,
                   underline: const SizedBox.shrink(),
                   items: [
