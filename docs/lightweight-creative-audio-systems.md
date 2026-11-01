@@ -46,10 +46,10 @@ Scores are planning estimates, not measured benchmarks.
 | Small seeded variation explorer | 5 | P0 | M | Background/offline render; capped candidate count | Keep |
 | Sound lineage/family metadata | 3 | P1 | S | Negligible DSP; small project metadata | Keep |
 | Non-destructive operation history | 4 | P1 | M | Small metadata; avoid duplicate audio buffers | Keep |
-| Basic waveform/transient inspection | 4 | P1 | S–M | On-demand background analysis; small cache | Keep |
+| Asset/selection waveform and transient analysis | 4 | P1 | S–M | On-demand background analysis; small cache | Keep; Engine Lab already has a live master scope |
 | Expand spectrum and asset inspection | 3 | P1 | M | On-demand FFT; bounded scratch buffer | Keep, optional; Engine Lab already has a 512-point master FFT view |
 | Lightweight resonator models | 4 | P1 | M | Low–medium, fixed voice/state limits | Keep, small library |
-| Bounded granular/stutter processor | 4 | P2 | M–L | Medium; fixed grain and buffer limits | Prototype later |
+| Expanded granular processor beyond existing glitch.stutter | 4 | P2 | M–L | Medium; fixed grain and buffer limits | Prototype later; basic bounded stutter is already implemented |
 | Audio transformation stack / compositing | 4 | P2 | M–L | Depends on processing graph; reuse existing chains | Keep only as simple reusable modules |
 | Full spectral painting / arbitrary spectral masks | 4 | P3 | XL | High CPU, memory and UI complexity | Drop from current plan |
 | Full wavelet/reassignment editor | 2 | P3 | L–XL | High analysis and visualization complexity | Drop |
@@ -186,7 +186,7 @@ Scores are planning estimates, not measured benchmarks.
 
 ### 3.7 Basic waveform and transient inspection
 
-**Purpose:** make it easier to understand what a sound contains and locate useful attacks without building a scientific analysis suite.
+**Current foundation:** Engine Lab already shows a read-only live master scope. This proposal extends waveform inspection to selected renders or imported assets and adds optional transient markers; it does not claim that C.A.W. has no waveform display.
 
 **First version**
 - Reuse waveform data already available from preview/render when possible.
@@ -247,7 +247,7 @@ Scores are planning estimates, not measured benchmarks.
 **Purpose:** add controlled micro-rearrangement, repeat, freeze and texture effects.
 
 **First version, only after earlier work**
-- Start with stutter/repeat and short fixed-window grain playback.
+- Start with short fixed-window grain playback and only add repeat variants if they are meaningfully different from the existing glitch.stutter.
 - Set hard limits for grain count, duration, overlap and buffer size.
 - Preallocate all buffers during preparation.
 - Provide a quality/voice limit that can be reduced under device pressure.
