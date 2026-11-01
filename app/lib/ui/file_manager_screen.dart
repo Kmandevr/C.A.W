@@ -201,7 +201,13 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               icon: const Icon(Icons.file_upload_outlined), label: const Text('Export .cawproj')),
             OutlinedButton.icon(onPressed: () async {
               await _importProject(context, state);
-              if (mounted) setState(() => _folderPath = '');
+              if (mounted) setState(() {
+                _folderPath = '';
+                _query = '';
+                _searchController.clear();
+                _selectedModuleIds.clear();
+                _selectionMode = false;
+              });
             }, icon: const Icon(Icons.file_open_outlined), label: const Text('Import project')),
           ]),
         ])),
