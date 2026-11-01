@@ -151,7 +151,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       ),
     );
     controller.dispose();
-    if (name != null && name.trim().isNotEmpty) state.saveLibrarySearch(name, _query);
+    if (name != null && name.trim().isNotEmpty && !state.saveLibrarySearch(name, _query)) {
+      _notice('Search name/query is too long or the 32-search limit has been reached.', error: true);
+    }
   }
 
   void _notice(String message, {bool error = false}) {
