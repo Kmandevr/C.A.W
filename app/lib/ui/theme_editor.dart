@@ -42,17 +42,31 @@ class SettingsPage extends StatelessWidget {
                 onSelectionChanged: (v) => settings.update((s) => s.density = v.first),
               ),
             ),
-            SwitchListTile(
-              secondary: Icon(Icons.speed, color: Neon.green),
-              title: const Text('Light mode'),
-              subtitle: Text('For slow devices: no glow or scopes, slower meters, 4 voices per pattern layer, '
-                  'and auto-update waits while playing', style: TextStyle(color: Neon.dim)),
-              value: settings.lightMode,
-              onChanged: (v) => settings.update((s) => s.lightMode = v),
+            const Heading('Performance'),
+            InputDecorator(
+              decoration: const InputDecoration(labelText: 'Performance profile'),
+              child: DropdownButtonHideUnderline(child: DropdownButton<PerformanceMode>(
+                value: settings.performanceMode,
+                isExpanded: true,
+                items: [
+                  for (final mode in PerformanceMode.values)
+                    DropdownMenuItem(value: mode, child: Text(mode.label)),
+                ],
+                onChanged: (mode) {
+                  if (mode != null) settings.update((s) => s.performanceMode = mode);
+                },
+              )),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 8),
+              child: Text(settings.performanceMode.description,
+                style: const TextStyle(color: Neon.dim, fontSize: 12)),
             ),
             SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               secondary: Icon(Icons.auto_mode, color: Neon.blue),
-              title: const Text('Turn light mode on when the sound stutters'),
+              title: const Text('Automatically switch to Lightweight on overload'),
+              subtitle: const Text('Keeps the interface responsive while reducing the voice budget.'),
               value: settings.lightAuto,
               onChanged: (v) => settings.update((s) => s.lightAuto = v),
             ),

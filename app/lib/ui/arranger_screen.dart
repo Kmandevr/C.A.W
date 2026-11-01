@@ -26,17 +26,15 @@ class ArrangerScreen extends StatefulWidget {
 }
 
 class _ArrangerScreenState extends State<ArrangerScreen> {
-  bool mixer = false, settings = false, compactTracks = false;
-  double zoom = 18.0;
+  bool mixer = false, settings = false;
+  double zoom = 18.0, _trackHeight = 76.0;
 
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
     final p = s.project;
     final stepW = zoom * (Neon.compact(context) ? 0.85 : 1.0);
-    final trackHeight = compactTracks ? 54.0 : 76.0;
-    final playheadStep = s.meters.playing && s.meters.loopLength > 0
-        ? endPosition(s, p, s.meters.loopLength) : -1.0;
+    final trackHeight = _trackHeight;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
     final end = p.layers.fold<int>(p.loopSteps, (v, l) =>
       l.clips.fold<int>(v, (e, c) => math.max(e, c.startSteps + c.lengthSteps)));
@@ -50,28 +48,53 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       if (s.meters.overloaded > 0) _OverloadBanner(state: s),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(children: [
-          const Expanded(child: Text('ARRANGEMENT', style: TextStyle(
-            color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
-          TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
-            icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
-          if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
-            IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt), icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0).toDouble()), icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()), icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
-          IconButton(onPressed: () => setState(() => compactTracks = !compactTracks),
-            icon: Icon(compactTracks ? Icons.view_agenda_outlined : Icons.view_stream_outlined),
-            color: compactTracks ? Neon.blue : Neon.dim, tooltip: 'Toggle track density'),
-          DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
-            items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
-            onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
-          TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
-            icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
-          IconButton(onPressed: () => setState(() => mixer = !mixer),
-            color: mixer ? Neon.blue : Neon.dim, icon: const Icon(Icons.tune), tooltip: 'Mixer'),
-          IconButton(onPressed: () => setState(() => settings = !settings),
-            color: settings ? Neon.blue : Neon.dim, icon: const Icon(Icons.settings_outlined), tooltip: 'Settings'),
-        ]),
+        child: LayoutBuilder(builder: (context, constraints) {
+          final controls = <Widget>[
+            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
+              icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
+            if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
+              IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt),
+                icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
+            IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0).toDouble()),
+              icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
+            IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()),
+              icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
+            PopupMenuButton<double>(
+              tooltip: 'Track height',
+              initialValue: _trackHeight,
+              onSelected: (value) => setState(() => _trackHeight = value),
+              icon: Icon(Icons.height, color: _trackHeight == 76 ? Neon.dim : Neon.blue),
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 54, child: Text('Compact · 54 px')),
+                PopupMenuItem(value: 76, child: Text('Standard · 76 px')),
+                PopupMenuItem(value: 96, child: Text('Tall · 96 px')),
+                PopupMenuItem(value: 120, child: Text('Extra tall · 120 px')),
+              ],
+            ),
+            DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
+              items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
+              onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
+            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
+              icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
+            IconButton(onPressed: () => setState(() => mixer = !mixer),
+              color: mixer ? Neon.blue : Neon.dim, icon: const Icon(Icons.tune), tooltip: 'Mixer'),
+            IconButton(onPressed: () => setState(() => settings = !settings),
+              color: settings ? Neon.blue : Neon.dim, icon: const Icon(Icons.settings_outlined), tooltip: 'Settings'),
+          ];
+          if (constraints.maxWidth < 760) {
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Padding(padding: EdgeInsets.only(left: 4, bottom: 2),
+                child: Text('ARRANGEMENT', style: TextStyle(
+                  color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
+              Wrap(spacing: 2, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: controls),
+            ]);
+          }
+          return Row(children: [
+            const Expanded(child: Text('ARRANGEMENT', style: TextStyle(
+              color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
+            ...controls,
+          ]);
+        }),
       ),
       if (settings) Padding(
         padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
@@ -96,17 +119,26 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                     depth: s.folderDepth(layer), patterns: patterns, trackHeight: trackHeight),
               ])),
               Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
-                child: SizedBox(width: width, child: Column(children: [
-                  SizedBox(height: 30, child: Row(children: [
-                    for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
-                      SizedBox(width: p.stepsPerBar * stepW,
-                        child: Align(alignment: Alignment.centerLeft,
-                          child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim)))),
-                  ])),
-                  for (final layer in visible)
-                    _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
-                      trackHeight: trackHeight, playheadStep: playheadStep,
-                      selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
+                child: SizedBox(width: width, child: Stack(children: [
+                  Column(children: [
+                    SizedBox(height: 30, child: Row(children: [
+                      for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
+                        SizedBox(width: p.stepsPerBar * stepW,
+                          child: Align(alignment: Alignment.centerLeft,
+                            child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim)))),
+                    ])),
+                    for (final layer in visible)
+                      _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
+                        trackHeight: trackHeight, selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
+                  ]),
+                  Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
+                    valueListenable: s.tick,
+                    builder: (context, _, _) {
+                      final playheadStep = s.meters.playing && s.meters.loopLength > 0
+                          ? endPosition(s, p, s.meters.loopLength) : -1.0;
+                      return CustomPaint(painter: _PlayheadPainter(stepW, playheadStep));
+                    },
+                  ))),
                 ])))),
             ]),
           ]))),
@@ -133,7 +165,7 @@ class _TimelineHeader extends StatelessWidget {
       child: Column(children: [
         Row(children: [
           if (layer.isFolder)
-            IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints.tightFor(width: 22, height: 24),
+            IconButton(padding: const EdgeInsets.all(8), constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
               onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed))
           else Container(width: 6, height: 20, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
@@ -145,6 +177,7 @@ class _TimelineHeader extends StatelessWidget {
               if (v == 'up' && index > 0) state.moveLayer(index, index - 1);
               if (v == 'down' && index < state.project.layers.length - 1) state.moveLayer(index, index + 2);
               if (v == 'delete') state.removeLayer(layer);
+              if (v.startsWith('clip:')) state.addClip(layer, v.substring(5));
               if (v == 'unparent') state.moveLayerIntoFolder(layer, null);
               if (v.startsWith('parent:')) state.moveLayerIntoFolder(layer, v.substring(7));
               if (v == 'bus') state.setFolderBus(layer, !layer.busEnabled);
@@ -164,6 +197,11 @@ class _TimelineHeader extends StatelessWidget {
               if ((!layer.isFolder || layer.busEnabled) && !layer.automation.any((a) => a.target == 'pan')) const PopupMenuItem(value: 'automation-pan', child: Text('Add pan automation')),
               if (layer.automation.any((a) => a.target == 'volume')) const PopupMenuItem(value: 'remove-automation-volume', child: Text('Remove volume automation')),
               if (layer.automation.any((a) => a.target == 'pan')) const PopupMenuItem(value: 'remove-automation-pan', child: Text('Remove pan automation')),
+              if (patterns.isNotEmpty) ...[
+                const PopupMenuDivider(),
+                for (final pattern in patterns)
+                  PopupMenuItem(value: 'clip:${pattern.id}', child: Text('Add clip · ${pattern.name}')),
+              ],
               const PopupMenuItem(value: 'delete', child: Text('Delete')),
             ]),
         ]),
@@ -174,18 +212,20 @@ class _TimelineHeader extends StatelessWidget {
           ToggleChip(label: 'S', tooltip: 'Solo', on: layer.solo, color: Neon.blue,
             onTap: () => state.mixLayer(layer, solo: !layer.solo)),
           const SizedBox(width: 4),
-          Expanded(child: DropdownButton<String?>(
-            isExpanded: true, value: gens.any((g) => g.id == layer.generatorId) ? layer.generatorId : null,
-            hint: const Text('Generator', style: TextStyle(fontSize: 9)),
-            underline: const SizedBox.shrink(),
-            items: [for (final g in gens) DropdownMenuItem(value: g.id,
-              child: Text(g.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9)))],
-            onChanged: (id) => state.editLayer(layer, (l) => l.generatorId = id))),
-          PopupMenuButton<String>(padding: EdgeInsets.zero, tooltip: 'Add MIDI clip',
-            icon: const Icon(Icons.add_box_outlined, color: Neon.blue, size: 17),
-            onSelected: (id) => state.addClip(layer, id),
-            itemBuilder: (_) => [for (final m in patterns) PopupMenuItem(value: m.id, child: Text(m.name))],
-          ),
+          Expanded(child: Tooltip(
+            message: 'Generator: ${gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'None'} · choose generator',
+            child: DropdownButton<String?>(
+              isExpanded: true, isDense: true, iconSize: 10,
+              icon: const SizedBox.shrink(), padding: EdgeInsets.zero,
+              value: gens.any((g) => g.id == layer.generatorId) ? layer.generatorId : null,
+              hint: const Icon(Icons.graphic_eq, size: 12),
+              underline: const SizedBox.shrink(),
+              items: [for (final g in gens) DropdownMenuItem(value: g.id,
+                child: Text(g.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 9)))],
+              onChanged: (id) => state.editLayer(layer, (l) => l.generatorId = id),
+            ),
+          )),
         ])) else Expanded(child: Row(children: [
           ToggleChip(label: 'M', tooltip: 'Mute folder', on: layer.mute, color: Neon.yellow,
             onTap: () => state.editLayer(layer, (l) => l.mute = !l.mute)),
@@ -204,10 +244,10 @@ class _TimelineHeader extends StatelessWidget {
 
 class _TimelineLane extends StatelessWidget {
   const _TimelineLane({required this.state, required this.layer, required this.width,
-    required this.stepW, required this.trackHeight, required this.playheadStep, required this.selectedIds, this.onOpen});
+    required this.stepW, required this.trackHeight, required this.selectedIds, this.onOpen});
   final AppState state;
   final LayerDoc layer;
-  final double width, stepW, trackHeight, playheadStep;
+  final double width, stepW, trackHeight;
   final Set<String> selectedIds;
   final VoidCallback? onOpen;
 
@@ -216,7 +256,7 @@ class _TimelineLane extends StatelessWidget {
     final height = trackHeight + layer.automation.length * 34.0;
     return SizedBox(width: width, height: height,
     child: Stack(children: [
-      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar, playheadStep)),
+      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar)),
       Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
         // A plain horizontal drag belongs to the enclosing scroll view. Long-press
         // drag creates a time selection without stealing normal timeline navigation.
@@ -247,8 +287,8 @@ class _TimelineLane extends StatelessWidget {
 }
 
 class _ArrangementGrid extends CustomPainter {
-  _ArrangementGrid(this.stepW, this.barSteps, this.playheadStep);
-  final double stepW, playheadStep;
+  _ArrangementGrid(this.stepW, this.barSteps);
+  final double stepW;
   final int barSteps;
   @override
   void paint(Canvas canvas, Size size) {
@@ -258,13 +298,25 @@ class _ArrangementGrid extends CustomPainter {
       final n = (x / stepW).round();
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
     }
-    if (playheadStep >= 0) {
-      final x = playheadStep * stepW;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), Paint()..color = Neon.blue..strokeWidth = 1.6);
-    }
   }
   @override
-  bool shouldRepaint(covariant _ArrangementGrid old) => old.stepW != stepW || old.barSteps != barSteps || old.playheadStep != playheadStep;
+  bool shouldRepaint(covariant _ArrangementGrid old) => old.stepW != stepW || old.barSteps != barSteps;
+}
+
+class _PlayheadPainter extends CustomPainter {
+  const _PlayheadPainter(this.stepW, this.step);
+  final double stepW, step;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (step < 0) return;
+    final x = step * stepW;
+    canvas.drawLine(Offset(x, 0), Offset(x, size.height),
+      Paint()..color = Neon.blue..strokeWidth = 1.6);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PlayheadPainter old) => old.step != step || old.stepW != stepW;
 }
 
 class _TimelineClip extends StatefulWidget {
@@ -442,7 +494,7 @@ class _ArrangementMixer extends StatelessWidget {
             child: Column(children: [
               Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: Neon.layer(l.color), fontSize: 11)),
-              Expanded(child: ValueListenableBuilder<int>(valueListenable: state.values,
+              Expanded(child: ValueListenableBuilder<int>(valueListenable: state.layerValueTick(l.id),
                 builder: (context, _, _) => Column(children: [
                   Row(children: [const Icon(Icons.volume_up, size: 13, color: Neon.dim),
                     Expanded(child: Slider(value: l.volume, onChanged: (v) => state.mixLayer(l, volume: v)))]),
@@ -472,7 +524,7 @@ class _OverloadBanner extends StatelessWidget {
             Expanded(
               child: Text(
                   'Out of headroom: the newest layer${state.meters.overloaded > 1 ? 's were' : ' was'} muted to keep audio clean.'
-                  '${state.lightTurnedOnBySelf ? ' Light mode is now on (Settings).' : ''}'),
+                  '${state.lightTurnedOnBySelf ? ' Lightweight profile is now active (Settings).' : ''}'),
             ),
             TextButton(onPressed: state.clearOverload, child: const Text('Unmute')),
           ]),
@@ -605,10 +657,13 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
         Row(children: [
           const SizedBox(width: 56, child: Text('Master', style: TextStyle(color: Neon.dim))),
           Expanded(
-            child: Slider(
-              value: p.master,
-              activeColor: Neon.blue,
-              onChanged: (v) => s.editProject((p) => p.master = v),
+            child: ValueListenableBuilder<int>(
+              valueListenable: s.masterValueTick,
+              builder: (context, _, _) => Slider(
+                value: s.project.master.clamp(0.0, 1.0).toDouble(),
+                activeColor: Neon.blue,
+                onChanged: s.setMaster,
+              ),
             ),
           ),
           SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.meters.peakL > s.meters.peakR ? s.meters.peakL : s.meters.peakR, color: Neon.blue)),

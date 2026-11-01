@@ -118,6 +118,23 @@ void main() {
     expect(clip.sourceOffsetSteps, 768);
   });
 
+  test('imported library metadata rejects unsafe paths and bounds tags', () {
+    final raw = sample().toJson();
+    final modules = raw['modules'] as List;
+    final module = modules.first as Map<String, dynamic>;
+    module['folder_path'] = '../../outside';
+    module['tags'] = ['  clean  ', List.filled(100, 'x').join(), ...List.generate(40, (i) => 'tag$i')];
+    raw['library_folders'] = ['Synths/Kicks', '../outside', 'x' * 600];
+    final imported = ProjectDoc.fromJson(raw);
+
+    expect(imported.modules.first.folderPath, isEmpty);
+    expect(imported.modules.first.tags, hasLength(16));
+    expect(imported.modules.first.tags.first, 'clean');
+    expect(imported.modules.first.tags.every((tag) => tag.length <= 48), isTrue);
+    expect(imported.libraryFolders, containsAll(['Synths', 'Synths/Kicks']));
+    expect(imported.libraryFolders.any((path) => path.contains('..')), isFalse);
+  });
+
   test('header values', () {
     const src = '---\ncaw: 1\nkind: effect  # comment\nname: Fold\n---\nin';
     expect(headerValue(src, 'kind'), 'effect');

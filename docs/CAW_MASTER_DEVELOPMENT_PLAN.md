@@ -1,10 +1,16 @@
+---
+title: C.A.W. master development plan
+summary: Approved coordinated scope for the complete UI and workflow overhaul and the audio engine integration and optimization.
+updated: 2026-10-31
+---
+
 # C.A.W. — Master Development Plan
 
-**Status:** Approved plan; implementation not yet authorized.  
+**Status:** Approved plan; Task 1 implementation authorized by the user on 2026-10-31. Task 2 remains architectural context for this workstream.  
 **Project:** C.A.W. (Code Auditioning Workspace), repository `Kmandevr/C.A.W`.  
 **Purpose:** Preserve the agreed scope from the design session as two coordinated master tasks for future contributors and development sessions.
 
-> This is C.A.W., not AutoStacc. This document is a planning specification, not permission to begin implementation. A future session must audit the repository first and obtain explicit approval before modifying code.
+ > This is C.A.W., not AutoStacc. This is the authoritative planning specification. Implementation requires explicit user authorization; Task 1 has now been authorized in the active development session. Audit the repository before making changes.
 
 # Master Task 1 — Complete UI and Workflow Overhaul
 

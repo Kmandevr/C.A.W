@@ -12,11 +12,128 @@ enum Density { comfortable, compact }
 /// When a code change swaps into the playing sound.
 enum SwapTiming { now, beat, bar }
 
+enum PerformanceMode { fullExperience, balanced, lightweight, minimal }
+
+extension PerformanceModeDetails on PerformanceMode {
+  String get label => switch (this) {
+    PerformanceMode.fullExperience => 'Full Experience',
+    PerformanceMode.balanced => 'Balanced',
+    PerformanceMode.lightweight => 'Lightweight',
+    PerformanceMode.minimal => 'Minimal',
+  };
+
+  String get description => switch (this) {
+    PerformanceMode.fullExperience => 'All visual features and full-strength active glow.',
+    PerformanceMode.balanced => 'Reduced decorative glow with full editing and meter responsiveness.',
+    PerformanceMode.lightweight => 'No decorative glow and a smaller voice budget; editing and meters stay responsive.',
+    PerformanceMode.minimal => 'Minimal visual effects and no scope panels; audio and editing responsiveness are preserved.',
+  };
+}
+
+int _settingInt(Object? value, int fallback) => value is num ? value.toInt() : fallback;
+double _settingDouble(Object? value, double fallback) => value is num ? value.toDouble() : fallback;
+String _settingText(Object? value, int maxLength) {
+  if (value is! String) return '';
+  return value.substring(0, value.length > maxLength ? maxLength : value.length);
+}
+
+class ExportProfile {
+  const ExportProfile({
+    required this.name,
+    required this.kind,
+    this.sampleRate = 48000,
+    this.float32 = false,
+    this.seconds = 8,
+    this.frames = 64,
+  });
+
+  final String name, kind;
+  final int sampleRate, frames;
+  final bool float32;
+  final double seconds;
+
+  Map<String, dynamic> toJson() => {
+    'name': name, 'kind': kind, 'sample_rate': sampleRate,
+    'float32': float32, 'seconds': seconds, 'frames': frames,
+  };
+
+  static ExportProfile? fromJson(Object? raw) {
+    if (raw is! Map || raw['name'] is! String || raw['kind'] is! String) return null;
+    final name = (raw['name'] as String).trim();
+    final kind = raw['kind'] as String;
+    if (name.isEmpty || name.length > 64 ||
+        !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) {
+      return null;
+    }
+    final rate = _settingInt(raw['sample_rate'], 48000);
+    final frames = _settingInt(raw['frames'], 64);
+    return ExportProfile(
+      name: name,
+      kind: kind,
+      sampleRate: rate == 44100 ? 44100 : 48000,
+      float32: raw['float32'] == true,
+      seconds: _settingDouble(raw['seconds'], 8).clamp(1.0, 120.0).toDouble(),
+      frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
+    );
+  }
+}
+
+class ExportHistoryEntry {
+  const ExportHistoryEntry({
+    required this.fileName,
+    required this.kind,
+    required this.createdAtMs,
+    this.sampleRate = 48000,
+    this.float32 = false,
+    this.seconds = 8,
+    this.frames = 64,
+    this.target = '',
+    this.param = '',
+  });
+
+  final String fileName, kind, target, param;
+  final int createdAtMs, sampleRate, frames;
+  final bool float32;
+  final double seconds;
+
+  Map<String, dynamic> toJson() => {
+    'file_name': fileName, 'kind': kind, 'created_at_ms': createdAtMs,
+    'sample_rate': sampleRate, 'float32': float32, 'seconds': seconds, 'frames': frames,
+    'target_id': target, 'param': param,
+  };
+
+  static ExportHistoryEntry? fromJson(Object? raw) {
+    if (raw is! Map || raw['file_name'] is! String || raw['kind'] is! String ||
+        raw['created_at_ms'] is! num) {
+      return null;
+    }
+    final fileName = (raw['file_name'] as String).trim();
+    final kind = raw['kind'] as String;
+    if (fileName.isEmpty || fileName.length > 160 ||
+        !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) {
+      return null;
+    }
+    final rate = _settingInt(raw['sample_rate'], 48000);
+    final frames = _settingInt(raw['frames'], 64);
+    return ExportHistoryEntry(
+      fileName: fileName,
+      kind: kind,
+      createdAtMs: (raw['created_at_ms'] as num).toInt().clamp(0, 4102444800000).toInt(),
+      sampleRate: rate == 44100 ? 44100 : 48000,
+      float32: raw['float32'] == true,
+      seconds: _settingDouble(raw['seconds'], 8).clamp(1.0, 120.0).toDouble(),
+      frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
+      target: _settingText(raw['target_id'], 128),
+      param: _settingText(raw['param'], 128),
+    );
+  }
+}
+
 class Settings extends ChangeNotifier {
   /// Settings kept in [dir] (settings.json and themes/); with no folder they live in memory only.
   Settings({this.dir}) {
     Neon.active = activeTheme;
-    Neon.light = lightMode;
+    _applyPerformanceMode();
   }
 
   final Directory? dir;
@@ -29,15 +146,26 @@ class Settings extends ChangeNotifier {
   int liveDelayMs = 400;
   SwapTiming swapTiming = SwapTiming.now;
 
-  /// Light mode for slow devices: no glow or scopes, meters at 15 fps, 4 voices per pattern layer, and auto-update
-  /// waits while playing. [lightAuto] turns it on by itself the first time the engine reports an overload.
-  bool lightMode = false;
+  /// Legacy compatibility: true for Lightweight/Minimal profiles. [lightAuto] selects Lightweight after overload.
+  PerformanceMode performanceMode = PerformanceMode.balanced;
+  bool get lightMode => performanceMode == PerformanceMode.lightweight || performanceMode == PerformanceMode.minimal;
+  set lightMode(bool value) => performanceMode = value ? PerformanceMode.lightweight : PerformanceMode.balanced;
   bool lightAuto = true;
+
+  void _applyPerformanceMode() {
+    Neon.performanceMode = performanceMode.index;
+    Neon.light = lightMode;
+    Neon.showScopes = performanceMode != PerformanceMode.minimal;
+  }
 
   /// Vim editing in the code editor (WASD moves; I types). Off by default.
   bool vimCode = false;
 
   /// Themes the user made or imported, saved one file each in themes/.
+  /// User-saved export presets and the most recent successful exports.
+  List<ExportProfile> exportProfiles = [];
+  List<ExportHistoryEntry> exportHistory = [];
+
   List<CawTheme> customThemes = [];
 
   /// A theme being edited, shown live instead of the chosen one until it is saved or dropped.
@@ -79,9 +207,12 @@ class Settings extends ChangeNotifier {
         'live_update': liveUpdate,
         'live_delay_ms': liveDelayMs,
         'swap_timing': swapTiming.name,
-        'light_mode': lightMode,
+        'performance_mode': performanceMode.name,
+        'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
         'vim_code': vimCode,
+        'export_profiles': [for (final profile in exportProfiles) profile.toJson()],
+        'export_history': [for (final entry in exportHistory) entry.toJson()],
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -92,9 +223,18 @@ class Settings extends ChangeNotifier {
     liveUpdate = (j['live_update'] as bool?) ?? liveUpdate;
     liveDelayMs = ((j['live_delay_ms'] as num?)?.toInt() ?? liveDelayMs).clamp(0, 10000);
     swapTiming = pick(SwapTiming.values, j['swap_timing'], swapTiming);
-    lightMode = (j['light_mode'] as bool?) ?? lightMode;
+    final savedMode = j['performance_mode'];
+    if (savedMode is String) {
+      performanceMode = PerformanceMode.values.where((m) => m.name == savedMode).firstOrNull ?? performanceMode;
+    } else if (j['light_mode'] is bool) {
+      performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
+    }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
+    exportProfiles = ((j['export_profiles'] is List ? j['export_profiles'] as List : const []))
+        .map(ExportProfile.fromJson).whereType<ExportProfile>().take(32).toList();
+    exportHistory = ((j['export_history'] is List ? j['export_history'] as List : const []))
+        .map(ExportHistoryEntry.fromJson).whereType<ExportHistoryEntry>().take(20).toList();
   }
 
   Future<void> _load() async {
@@ -120,8 +260,38 @@ class Settings extends ChangeNotifier {
       // Damaged settings fall back to the defaults.
     }
     Neon.active = activeTheme;
-    Neon.light = lightMode;
+    _applyPerformanceMode();
     _shownLook = activeTheme.toFile();
+  }
+
+  Future<bool> saveExportProfile(ExportProfile profile) async {
+    final name = profile.name.trim();
+    if (name.isEmpty || name.length > 64) return false;
+    final exists = exportProfiles.any((item) => item.name.toLowerCase() == name.toLowerCase());
+    if (!exists && exportProfiles.length >= 32) return false;
+    exportProfiles = [
+      ...exportProfiles.where((item) => item.name.toLowerCase() != name.toLowerCase()),
+      ExportProfile(name: name, kind: profile.kind, sampleRate: profile.sampleRate,
+        float32: profile.float32, seconds: profile.seconds, frames: profile.frames),
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    notifyListeners();
+    await save();
+    return true;
+  }
+
+  Future<void> deleteExportProfile(String name) async {
+    final next = exportProfiles.where((profile) => profile.name != name).toList();
+    if (next.length == exportProfiles.length) return;
+    exportProfiles = next;
+    notifyListeners();
+    await save();
+  }
+
+  Future<void> recordExport(ExportHistoryEntry entry) async {
+    exportHistory = [entry, ...exportHistory.where((item) =>
+      item.fileName != entry.fileName || item.createdAtMs != entry.createdAtMs)].take(20).toList();
+    notifyListeners();
+    await save();
   }
 
   /// Writes through a temporary file so a crash mid-save never leaves half a file.
@@ -138,7 +308,7 @@ class Settings extends ChangeNotifier {
   Future<void> update(void Function(Settings) change) async {
     change(this);
     Neon.active = activeTheme;
-    Neon.light = lightMode;
+    _applyPerformanceMode();
     notifyListeners();
     await save();
   }

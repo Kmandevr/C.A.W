@@ -639,6 +639,25 @@ TEST(arrangement_clips_can_overlap_on_one_track) {
 }
 
 
+TEST(master_gain_updates_without_recompiling_and_ramps_smoothly) {
+    ProjectSpec p = project({{"tone", std::string(kFloat) + "0.5"}});
+    p.master = 1.0;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    run(e, 256);
+
+    e.setMaster(0.0);
+    const auto faded = run(e, 512);
+    CHECK_NEAR(faded.back(), 0.0, 1e-7);
+    CHECK(maxStep(faded, 0, faded.size()) < 0.01f);
+
+    e.setMaster(2.0); // Control API clamps invalid gain ranges.
+    const auto restored = run(e, 512);
+    CHECK(restored.back() > 0.34f);
+}
+
 TEST(project_parser_clamps_clips_to_the_meter_aware_song_limit) {
     const std::string json = R"({"caw_project":1,"beats_per_bar":3,"loop_bars":64,"layers":[
       {"id":"t","clips":[{"id":"c","pattern":"p","start_steps":760,"length_steps":64,"source_offset_steps":900}]}

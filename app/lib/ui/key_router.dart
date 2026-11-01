@@ -192,8 +192,26 @@ class KeyRouterState extends State<KeyRouter> {
         s.flush();
       case 'view.actions':
         showActionList(context);
-      case 'view.builder' || 'view.arranger' || 'view.exporter':
-        widget.onView(const ['view.builder', 'view.arranger', 'view.exporter'].indexOf(id));
+      case 'focus.next':
+        FocusManager.instance.primaryFocus?.nextFocus();
+      case 'focus.prev':
+        FocusManager.instance.primaryFocus?.previousFocus();
+      case 'view.builder':
+        widget.onView(0);
+      case 'view.arranger':
+        widget.onView(1);
+      case 'view.exporter':
+        widget.onView(5);
+      case 'view.mixer':
+        widget.onView(2);
+      case 'view.engineLab':
+        widget.onView(3);
+      case 'view.automation':
+        widget.onView(4);
+      case 'view.files':
+        widget.onView(6);
+      case 'view.pluginBuilder':
+        widget.onView(7);
       case 'transport.tempoUp':
         bpm(1);
       case 'transport.tempoDown':

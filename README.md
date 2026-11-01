@@ -19,9 +19,9 @@ An experimental, code-driven glitch-sound instrument for Android, iOS, Windows, 
 | `CLAUDE.md` | Instructions every AI session follows |
 
 Workflows:
-- `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push and pull request.
-- `.github/workflows/app.yml`: Dart checks and tests, then the Android APK (`caw-android-apk`) and the Windows app (`caw-windows`) as downloadable artifacts.
-- `.github/workflows/engine.yml`: builds the engine and runs its tests and golden renders on Linux (x64 and Arm64) and Windows, plus a sanitizer run, checks that the generated function docs are current, and renders each example except patterns (they need a sound to play them).
+- `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push and pull request; superseded runs are cancelled per branch/PR.
+- `.github/workflows/app.yml`: Dart checks and tests, then the Android APK (`caw-android-apk`) and the Windows app (`caw-windows`) as downloadable artifacts; superseded runs are cancelled.
+- `.github/workflows/engine.yml`: builds the engine and runs its tests and golden renders on Linux (x64 and Arm64) and Windows, plus a sanitizer run, checks that the generated function docs are current, and renders each example except patterns (they need a sound to play them); superseded runs are cancelled.
 - `.github/workflows/clear-status-on-close.yml`: removes `status:` labels when an issue closes.
 
 ## Working on it

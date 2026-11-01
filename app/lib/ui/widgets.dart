@@ -128,13 +128,22 @@ class PeakMeter extends StatefulWidget {
 
 class _PeakMeterState extends State<PeakMeter> {
   double _shown = 0;
+  int _holdTicks = 0;
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<int>(
         valueListenable: widget.state.tick,
         builder: (context, _, _) {
-          final p = widget.read();
-          _shown = p > _shown ? p : _shown * 0.85;
+          final peak = widget.read().clamp(0.0, 1.0).toDouble();
+          if (peak > 0 && peak >= _shown) {
+            _shown = peak;
+            _holdTicks = 12; // 400 ms at the engine's 30 Hz meter cadence.
+          } else if (_holdTicks > 0) {
+            _holdTicks--;
+          } else {
+            _shown *= 0.92;
+            if (_shown < 0.001) _shown = 0;
+          }
           return Bar(value: _shown, color: _shown > 0.95 ? Neon.pink : widget.color);
         },
       );
@@ -157,8 +166,8 @@ class ToggleChip extends StatelessWidget {
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            width: 40,
-            height: 40,
+            width: 48,
+            height: 48,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: on ? color : Colors.transparent,

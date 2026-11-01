@@ -15,20 +15,48 @@ import 'storage.dart';
 ({ProjectSummary? last, List<ProjectSummary> projects}) startupChoices(String? lastId, List<ProjectSummary> projects) =>
     (last: projects.where((p) => p.id == lastId).firstOrNull, projects: projects);
 
+class _LibrarySnapshot {
+  _LibrarySnapshot(ProjectDoc project)
+      : folders = List.of(project.libraryFolders),
+        searches = Map.of(project.savedLibrarySearches),
+        moduleFolders = {for (final module in project.modules) module.id: module.folderPath},
+        moduleTags = {for (final module in project.modules) module.id: List.of(module.tags)};
+
+  final List<String> folders;
+  final Map<String, String> searches;
+  final Map<String, String> moduleFolders;
+  final Map<String, List<String>> moduleTags;
+}
+
 class AppState extends ChangeNotifier {
   AppState({Settings? settings}) : settings = settings ?? Settings() {
     _light = this.settings.lightMode;
+    _performanceMode = this.settings.performanceMode;
+    _density = this.settings.density;
+    _lookRevision = this.settings.lookRevision;
     this.settings.addListener(_settingsChanged);
   }
 
   late bool _light;
+  late PerformanceMode _performanceMode;
+  late Density _density;
+  late int _lookRevision;
 
-  // Light mode changes the engine's voice count and the meter rate.
+  // Lightweight/Minimal change the engine's voice budget; UI meter cadence stays fixed.
   void _settingsChanged() {
-    if (settings.lightMode == _light) return;
+    final nextMode = settings.performanceMode;
+    final nextDensity = settings.density;
+    final nextLook = settings.lookRevision;
+    final modeChanged = nextMode != _performanceMode;
+    if (!modeChanged && nextDensity == _density && nextLook == _lookRevision) return;
+    final voiceBudgetChanged = settings.lightMode != _light;
+    _performanceMode = nextMode;
+    _density = nextDensity;
+    _lookRevision = nextLook;
     _light = settings.lightMode;
-    _poller.interval = Duration(milliseconds: _light ? 66 : 33);
-    _sync();
+    // Visual profiles never lower meter cadence; editing and meter feedback stay at 30 Hz.
+    if (voiceBudgetChanged) _sync();
+    notifyListeners();
   }
 
   /// App-wide settings (theme, density, live coding).
@@ -43,6 +71,44 @@ class AppState extends ChangeNotifier {
   ProjectDoc project = ProjectDoc(id: newId('p'), name: 'Untitled');
   Map<String, ModuleInfo> info = {};
   String? selectedModuleId;
+  final List<_LibrarySnapshot> _libraryUndo = [];
+  final List<_LibrarySnapshot> _libraryRedo = [];
+
+  bool get canUndoLibrary => _libraryUndo.isNotEmpty;
+  bool get canRedoLibrary => _libraryRedo.isNotEmpty;
+
+  void _recordLibraryUndo() {
+    _libraryUndo.add(_LibrarySnapshot(project));
+    if (_libraryUndo.length > 50) _libraryUndo.removeAt(0);
+    _libraryRedo.clear();
+  }
+
+  void _restoreLibrarySnapshot(_LibrarySnapshot snapshot) {
+    project.libraryFolders = List.of(snapshot.folders);
+    project.savedLibrarySearches = Map.of(snapshot.searches);
+    for (final module in project.modules) {
+      final folder = snapshot.moduleFolders[module.id];
+      if (folder != null) module.folderPath = folder;
+      final tags = snapshot.moduleTags[module.id];
+      if (tags != null) module.tags = List.of(tags);
+    }
+  }
+
+  bool undoLibraryOperation() {
+    if (_libraryUndo.isEmpty) return false;
+    _libraryRedo.add(_LibrarySnapshot(project));
+    _restoreLibrarySnapshot(_libraryUndo.removeLast());
+    _changed(engine: false);
+    return true;
+  }
+
+  bool redoLibraryOperation() {
+    if (_libraryRedo.isEmpty) return false;
+    _libraryUndo.add(_LibrarySnapshot(project));
+    _restoreLibrarySnapshot(_libraryRedo.removeLast());
+    _changed(engine: false);
+    return true;
+  }
   String? selectedLayerId;
   String? selectedClipId;
   final Set<String> selectedClipIds = {};
@@ -62,9 +128,14 @@ class AppState extends ChangeNotifier {
   /// Bumped on every meter poll (about 30 times a second) so meters can repaint without rebuilding screens.
   final ValueNotifier<int> tick = ValueNotifier(0);
 
-  /// Bumped when a param, global, volume or pan changes. Only the controls showing those values listen, so a slider
-  /// drag doesn't rebuild the whole app (it rebuilt about 3,500 widgets per step before).
+  /// Aggregate value tick retained for diagnostics and external listeners. Workspaces use the scoped ticks below
+  /// so parameter, track and master drags don't rebuild unrelated controls.
   final ValueNotifier<int> values = ValueNotifier(0);
+  final ValueNotifier<int> masterValueTick = ValueNotifier(0);
+  final Map<String, ValueNotifier<int>> _moduleValueTicks = {};
+  final Map<String, ValueNotifier<int>> _layerValueTicks = {};
+  ValueNotifier<int> moduleValueTick(String id) => _moduleValueTicks.putIfAbsent(id, () => ValueNotifier(0));
+  ValueNotifier<int> layerValueTick(String id) => _layerValueTicks.putIfAbsent(id, () => ValueNotifier(0));
   EngineMeters meters = const EngineMeters();
 
   /// Set when an overload switched light mode on, so the app can say so once.
@@ -78,7 +149,7 @@ class AppState extends ChangeNotifier {
   // device after a while (Play reopens it).
   late final Poller _poller = Poller(
       poll: _poll,
-      interval: Duration(milliseconds: settings.lightMode ? 66 : 33),
+      interval: const Duration(milliseconds: 33),
       onIdle: () {
     if (!meters.playing) engine?.stopAudio();
   });
@@ -125,6 +196,11 @@ class AppState extends ChangeNotifier {
     _liveTimer?.cancel();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
+    masterValueTick.dispose();
+    values.dispose();
+    tick.dispose();
+    for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
+    for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
     engine?.dispose();
     super.dispose();
   }
@@ -138,7 +214,7 @@ class AppState extends ChangeNotifier {
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
-      // The device can't keep up: light mode turns on by itself, once (the setting can turn it back off).
+      // The device can't keep up: Lightweight turns on by itself once (the user can choose another profile).
       lightTurnedOnBySelf = true;
       settings.update((s) {
         s.lightMode = true;
@@ -268,6 +344,28 @@ class AppState extends ChangeNotifier {
     await _storage?.save(project);
   }
 
+  Future<bool> createRestorePoint() async {
+    final storage = _storage;
+    if (storage == null || starting) return false;
+    await flush();
+    await storage.createRestorePoint(project);
+    return true;
+  }
+
+  Future<List<RestorePointSummary>> listRestorePoints() async =>
+      await _storage?.listRestorePoints(project.id) ?? const [];
+
+  Future<bool> restoreProjectVersion(String restorePointId) async {
+    final storage = _storage;
+    if (storage == null || starting) return false;
+    final snapshot = await storage.loadRestorePoint(project.id, restorePointId);
+    if (snapshot == null) return false;
+    await storage.createRestorePoint(project);
+    await _switchTo(snapshot);
+    return true;
+  }
+
+
   void _changed({bool engine = true}) {
     if (engine) _sync();
     _save();
@@ -315,6 +413,16 @@ class AppState extends ChangeNotifier {
   void selectModule(String id) {
     selectedModuleId = id;
     if (previewOnly) _sync();
+    notifyListeners();
+  }
+
+  /// Selects a channel for shared workspace inspectors without changing its processing state.
+  void selectLayer(LayerDoc layer) {
+    selectedLayerId = layer.id;
+    selectedClipId = null;
+    selectedClipIds.clear();
+    selectedModuleId = layer.generatorId ?? layer.effectIds.firstOrNull;
+    if (previewOnly && selectedModuleId != null) _sync();
     notifyListeners();
   }
 
@@ -380,6 +488,168 @@ class AppState extends ChangeNotifier {
     return m.id;
   }
 
+  String _normalizeLibraryPath(String path) {
+    if (path.length > 512) throw ArgumentError.value(path, 'path', 'Folder path is too long.');
+    final parts = path.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).toList();
+    if (parts.length > 32 || parts.any((part) => part == '.' || part == '..' || part.length > 64 || part.contains(String.fromCharCode(92)))) {
+      throw ArgumentError.value(path, 'path', 'Folder paths cannot contain traversal segments.');
+    }
+    return parts.join('/');
+  }
+
+  /// Creates a user-named virtual library folder and any missing parents.
+  bool createLibraryFolder(String path) {
+    final normalized = _normalizeLibraryPath(path);
+    if (normalized.isEmpty) return false;
+    final parts = normalized.split('/');
+    if (parts.asMap().entries.every((entry) => project.libraryFolders.contains(parts.take(entry.key + 1).join('/')))) {
+      return false;
+    }
+    _recordLibraryUndo();
+    var changed = false;
+    for (var i = 1; i <= parts.length; i++) {
+      final parent = parts.take(i).join('/');
+      if (!project.libraryFolders.contains(parent)) {
+        project.libraryFolders.add(parent);
+        changed = true;
+      }
+    }
+    if (changed) {
+      project.libraryFolders.sort();
+      _changed(engine: false);
+    }
+    return changed;
+  }
+
+  /// Renames a folder and all descendants without moving or deleting their modules.
+  bool renameLibraryFolder(String oldPath, String newPath) {
+    final oldValue = _normalizeLibraryPath(oldPath);
+    final newValue = _normalizeLibraryPath(newPath);
+    if (oldValue.isEmpty || newValue.isEmpty || !project.libraryFolders.contains(oldValue)) return false;
+    if (oldValue == newValue) return true;
+    if (newValue.startsWith('$oldValue/') || project.libraryFolders.contains(newValue)) return false;
+    _recordLibraryUndo();
+    project.libraryFolders = project.libraryFolders.map((path) =>
+      path == oldValue ? newValue : path.startsWith('$oldValue/') ? '$newValue${path.substring(oldValue.length)}' : path
+    ).toSet().toList();
+    final newParts = newValue.split('/');
+    for (var i = 1; i < newParts.length; i++) {
+      final parentPath = newParts.take(i).join('/');
+      if (!project.libraryFolders.contains(parentPath)) project.libraryFolders.add(parentPath);
+    }
+    project.libraryFolders.sort();
+    for (final module in project.modules) {
+      if (module.folderPath == oldValue) {
+        module.folderPath = newValue;
+      } else if (module.folderPath.startsWith('$oldValue/')) {
+        module.folderPath = '$newValue${module.folderPath.substring(oldValue.length)}';
+      }
+    }
+    _changed(engine: false);
+    return true;
+  }
+
+  /// Deletes a folder node and returns its modules/children to its parent folder.
+  bool deleteLibraryFolder(String path) {
+    final normalized = _normalizeLibraryPath(path);
+    if (normalized.isEmpty || !project.libraryFolders.contains(normalized)) return false;
+    final parent = normalized.contains('/') ? normalized.substring(0, normalized.lastIndexOf('/')) : '';
+    _recordLibraryUndo();
+    project.libraryFolders.removeWhere((folder) => folder == normalized || folder.startsWith('$normalized/'));
+    for (final module in project.modules) {
+      if (module.folderPath == normalized || module.folderPath.startsWith('$normalized/')) {
+        module.folderPath = parent;
+      }
+    }
+    _changed(engine: false);
+    return true;
+  }
+
+  /// Moves a module into a user-owned library folder; an empty path means the project root.
+  bool moveModuleToFolder(String moduleId, String folderPath) {
+    final module = project.module(moduleId);
+    if (module == null) return false;
+    final normalized = _normalizeLibraryPath(folderPath);
+    if (normalized.isNotEmpty && !project.libraryFolders.contains(normalized)) return false;
+    if (module.folderPath == normalized) return true;
+    _recordLibraryUndo();
+    module.folderPath = normalized;
+    _changed(engine: false);
+    return true;
+  }
+
+  bool moveModulesToFolder(Iterable<String> moduleIds, String folderPath) {
+    final normalized = _normalizeLibraryPath(folderPath);
+    if (normalized.isNotEmpty && !project.libraryFolders.contains(normalized)) return false;
+    final ids = moduleIds.toSet();
+    final targets = project.modules.where((module) => ids.contains(module.id) && module.folderPath != normalized).toList();
+    if (targets.isEmpty) return false;
+    _recordLibraryUndo();
+    var changed = false;
+    for (final module in project.modules) {
+      if (ids.contains(module.id) && module.folderPath != normalized) {
+        module.folderPath = normalized;
+        changed = true;
+      }
+    }
+    if (changed) _changed(engine: false);
+    return changed;
+  }
+
+  void setModuleTags(String moduleId, List<String> tags) => setModulesTags([moduleId], tags);
+
+  /// Applies one tag set to multiple modules as a single undoable library operation.
+  bool setModulesTags(Iterable<String> moduleIds, List<String> tags) {
+    final ids = moduleIds.toSet();
+    final seen = <String>{};
+    final nextTags = [
+      for (final raw in tags)
+        if (raw.trim().isNotEmpty && raw.trim().length <= 48 && seen.add(raw.trim().toLowerCase()))
+          raw.trim(),
+    ].take(16).toList();
+    final targets = project.modules.where((module) => ids.contains(module.id) &&
+        !listEquals(module.tags, nextTags)).toList();
+    if (targets.isEmpty) return false;
+    _recordLibraryUndo();
+    for (final module in targets) {
+      module.tags = List.of(nextTags);
+    }
+    _changed(engine: false);
+    return true;
+  }
+
+  bool saveLibrarySearch(String name, String query) {
+    final key = name.trim();
+    final value = query.trim();
+    if (key.isEmpty || value.isEmpty || key.length > 64 || value.length > 256) return false;
+    if (!project.savedLibrarySearches.containsKey(key) && project.savedLibrarySearches.length >= 32) return false;
+    if (project.savedLibrarySearches[key] == value) return true;
+    _recordLibraryUndo();
+    project.savedLibrarySearches[key] = value;
+    _changed(engine: false);
+    return true;
+  }
+
+  void deleteLibrarySearch(String name) {
+    if (!project.savedLibrarySearches.containsKey(name)) return;
+    _recordLibraryUndo();
+    project.savedLibrarySearches.remove(name);
+    _changed(engine: false);
+  }
+
+  /// Imports an ordinary .caw module as a new project item; existing modules are never overwritten.
+  String importModuleSource(String source, {String fileName = 'Imported.caw', String folderPath = ''}) {
+    final folder = _normalizeLibraryPath(folderPath);
+    if (folder.isNotEmpty && !project.libraryFolders.contains(folder)) createLibraryFolder(folder);
+    final module = moduleFromTemplate(Template(fileName, source));
+    module.name = _freeModuleName(module.name);
+    module.folderPath = folder;
+    project.modules.add(module);
+    selectedModuleId = module.id;
+    _changed();
+    return module.id;
+  }
+
   /// A new, truly empty module. Until it has a header it compiles as a byte-mode generator, so the picked [kind]
   /// (generator, effect, pattern or library) is remembered only for the editor's hint and badge.
   String addBlankModule(String kind) {
@@ -425,6 +695,7 @@ class AppState extends ChangeNotifier {
     m.params[name] = value;
     engine?.setParam(moduleId, name, value);
     _save();
+    moduleValueTick(moduleId).value++;
     values.value++;
   }
 
@@ -446,6 +717,11 @@ class AppState extends ChangeNotifier {
     project.globals[name] = value;
     engine?.setGlobal(name, value);
     _save();
+    for (final module in project.modules) {
+      if ((info[module.id]?.params ?? const <ParamInfo>[]).any((param) => param.global && param.name == name)) {
+        moduleValueTick(module.id).value++;
+      }
+    }
     values.value++;
   }
 
@@ -458,7 +734,8 @@ class AppState extends ChangeNotifier {
   String kindOf(String moduleId) {
     final m = project.module(moduleId);
     if (m == null) return 'generator';
-    return info[moduleId]?.kind ?? headerValue(m.runSource, 'kind') ?? 'generator';
+    final emptyHint = m.source.isEmpty ? blankKinds[moduleId] : null;
+    return info[moduleId]?.kind ?? headerValue(m.runSource, 'kind') ?? emptyHint ?? 'generator';
   }
 
   bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
@@ -550,6 +827,13 @@ class AppState extends ChangeNotifier {
 
   void removeAutomationLane(LayerDoc layer, AutomationLaneDoc lane) {
     editLayer(layer, (l) => l.automation.remove(lane));
+  }
+
+  void removeAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index) {
+    if (index < 0 || index >= lane.points.length) return;
+    editLayer(layer, (l) {
+      l.automation.firstWhere((a) => a.target == lane.target).points.removeAt(index);
+    });
   }
 
   void updateAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index, double step, double value) {
@@ -652,6 +936,15 @@ class AppState extends ChangeNotifier {
   }
 
   /// Volume, pan, mute and solo go straight to the audio thread.
+  /// Master gain shares the same project/engine state but updates only value listeners during a drag.
+  void setMaster(double value) {
+    project.master = value.clamp(0.0, 1.0).toDouble();
+    engine?.setMaster(project.master);
+    _save();
+    masterValueTick.value++;
+    values.value++;
+  }
+
   void mixLayer(LayerDoc l, {double? volume, double? pan, bool? mute, bool? solo}) {
     if (volume != null) l.volume = volume;
     if (pan != null) l.pan = pan;
@@ -661,6 +954,7 @@ class AppState extends ChangeNotifier {
     // Volume and pan drags only redraw their sliders; mute and solo change how the whole layer list looks.
     if (mute == null && solo == null) {
       _save();
+      layerValueTick(l.id).value++;
       values.value++;
     } else {
       _changed(engine: false);
@@ -828,7 +1122,14 @@ class AppState extends ChangeNotifier {
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
     if (saveCurrent) await flush();
     engine?.stop();
+    _libraryUndo.clear();
+    _libraryRedo.clear();
+    for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
+    for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
+    _moduleValueTicks.clear();
+    _layerValueTicks.clear();
     project = p;
+    masterValueTick.value++;
     info = {};
     blankKinds.clear();
     selectedModuleId = p.modules.isEmpty ? null : p.modules.first.id;
@@ -850,6 +1151,12 @@ class AppState extends ChangeNotifier {
   Future<void> openProject(String id) async {
     final p = await _storage?.load(id);
     if (p != null) await _switchTo(p);
+  }
+
+  /// Imports a portable project as a new project ID so it cannot overwrite an existing saved project.
+  Future<void> importProject(ProjectDoc imported) {
+    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = newId('p'));
+    return _switchTo(copy);
   }
 
   Future<void> duplicateProject() async {

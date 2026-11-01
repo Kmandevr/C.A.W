@@ -11,27 +11,43 @@ String newId(String prefix) {
 
 /// A sound module: its code in the editor, and the code last sent to the engine with Run.
 class ModuleDoc {
-  ModuleDoc({required this.id, required this.name, required this.source, String? runSource, Map<String, double>? params})
-      : runSource = runSource ?? source,
-        params = params ?? {};
+  ModuleDoc({
+    required this.id,
+    required this.name,
+    required this.source,
+    String? runSource,
+    Map<String, double>? params,
+    this.folderPath = '',
+    List<String>? tags,
+  })  : runSource = runSource ?? source,
+        params = params ?? {},
+        tags = tags ?? [];
 
   final String id;
   String name;
   String source;
   String runSource;
   Map<String, double> params;
+  String folderPath;
+  List<String> tags;
 
   bool get edited => source != runSource;
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'source': source, 'run_source': runSource, 'params': params};
+  Map<String, dynamic> toJson() => {
+    'id': id, 'name': name, 'source': source, 'run_source': runSource, 'params': params,
+    'folder_path': folderPath, 'tags': tags,
+  };
 
   static ModuleDoc fromJson(Map<String, dynamic> j) => ModuleDoc(
-        id: j['id'] as String,
-        name: (j['name'] as String?) ?? 'Module',
-        source: (j['source'] as String?) ?? '',
-        runSource: j['run_source'] as String?,
-        params: ((j['params'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
-      );
+    id: j['id'] as String,
+    name: (j['name'] as String?) ?? 'Module',
+    source: (j['source'] as String?) ?? '',
+    runSource: j['run_source'] as String?,
+    params: ((j['params'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
+    folderPath: (j['folder_path'] as String?) ?? '',
+    tags: ((j['tags'] as List?) ?? const []).whereType<String>().take(16)
+        .map((tag) => _boundedProjectText(tag, 48)).where((tag) => tag.isNotEmpty).toList(),
+  );
 }
 
 class ClipDoc {
@@ -151,6 +167,12 @@ class LayerDoc {
       );
 }
 
+String _boundedProjectText(Object? raw, int maxLength) {
+  if (raw is! String) return '';
+  final value = raw.trim();
+  return value.length > maxLength ? value.substring(0, maxLength) : value;
+}
+
 class ProjectDoc {
   ProjectDoc({
     required this.id,
@@ -165,9 +187,13 @@ class ProjectDoc {
     Map<String, double>? globals,
     List<ModuleDoc>? modules,
     List<LayerDoc>? layers,
+    List<String>? libraryFolders,
+    Map<String, String>? savedLibrarySearches,
   })  : globals = globals ?? {},
         modules = modules ?? [],
-        layers = layers ?? [] {
+        layers = layers ?? [],
+        libraryFolders = libraryFolders ?? [],
+        savedLibrarySearches = savedLibrarySearches ?? {} {
     // Keep the in-memory model canonical: a track owns clip instances, not a legacy
     // single-pattern pointer. The stable ID makes repeated saves deterministic.
     for (final layer in this.layers) {
@@ -204,6 +230,8 @@ class ProjectDoc {
   Map<String, double> globals; // project-wide control values by name
   List<ModuleDoc> modules;
   List<LayerDoc> layers;
+  List<String> libraryFolders;
+  Map<String, String> savedLibrarySearches;
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
@@ -294,6 +322,8 @@ class ProjectDoc {
         'globals': globals,
         'modules': [for (final m in modules) m.toJson()],
         'layers': [for (final l in layers) l.toJson()],
+        'library_folders': libraryFolders,
+        'saved_library_searches': savedLibrarySearches,
       };
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
@@ -310,6 +340,12 @@ class ProjectDoc {
       globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
       modules: ((j['modules'] as List?) ?? const [])
           .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
+      libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().take(512).toList(),
+      savedLibrarySearches: {
+        for (final entry in ((j['saved_library_searches'] as Map?) ?? const {}).entries.take(32))
+          if (_boundedProjectText(entry.key, 64).isNotEmpty && _boundedProjectText(entry.value, 256).isNotEmpty)
+            _boundedProjectText(entry.key, 64): _boundedProjectText(entry.value, 256),
+      },
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
@@ -329,6 +365,32 @@ class ProjectDoc {
       }).toList(),
     );
 
+    // Rebuild a safe, complete virtual-folder tree from both the folder list and module assignments.
+    final safeFolders = <String>{};
+    void addFolderPath(String raw) {
+      final normalized = _normalizeProjectFolderPath(raw);
+      if (normalized == null) return;
+      final parts = normalized.split('/');
+      for (var i = 1; i <= parts.length; i++) {
+        safeFolders.add(parts.take(i).join('/'));
+      }
+    }
+    for (final folder in project.libraryFolders) {
+      addFolderPath(folder);
+    }
+    for (final module in project.modules) {
+      final normalized = _normalizeProjectFolderPath(module.folderPath);
+      if (normalized == null) {
+        module.folderPath = '';
+      } else {
+        module.folderPath = normalized;
+        addFolderPath(normalized);
+      }
+      module.tags = module.tags.map((tag) => _boundedProjectText(tag, 48))
+          .where((tag) => tag.isNotEmpty).take(16).toList();
+    }
+    project.libraryFolders = safeFolders.toList()..sort();
+
     // Keep persisted clips and automation inside the same bounds enforced by the native parser.
     for (final layer in project.layers) {
       for (final clip in layer.clips) {
@@ -347,6 +409,17 @@ class ProjectDoc {
     }
     return project;
   }
+}
+
+/// Normalizes project-local virtual folder paths; these are metadata, never OS filesystem paths.
+String? _normalizeProjectFolderPath(String raw) {
+  if (raw.length > 512) return null;
+  final parts = raw.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).toList();
+  if (parts.isEmpty || parts.length > 32 ||
+      parts.any((part) => part == '.' || part == '..' || part.length > 64 || part.contains(String.fromCharCode(92)))) {
+    return null;
+  }
+  return parts.join('/');
 }
 
 /// Reads a header value (name, summary, kind) straight from module source, for display before it compiles.
