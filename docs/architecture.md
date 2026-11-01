@@ -1,7 +1,7 @@
 ---
 title: Architecture
-summary: Technical plan for every target platform: stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks.
-updated: 2026-10-31
+summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
+updated: 2026-11-01
 ---
 
 # Architecture
@@ -19,7 +19,9 @@ C.A.W.'s primary focus is sound design and music-content creation: making, shapi
 
 ## 0. Current state
 
-- **[Fact]** As of 2026-10-28, v1 is built: the C++ engine (`engine/`, described in [engine](engine.md)), the Flutter app for Android and Windows (`app/`) and the starter modules (`examples/`). CI builds and tests all of it. The plugin, GitHub sync, AI library editing and the v2 synth are still plans.
+**[Fact, checked 2026-11-01]** The Flutter app has eight workspaces and CI build artifacts for Android and Windows. Linux is used for app analysis/tests and has a local runner, but is not a shipped app artifact. The portable C++20 engine is built/tested by CI on Linux x64, Linux Arm64 and Windows x64, plus Linux sanitizers. iOS and macOS app builds are not currently in the app workflow.
+
+The current app and native implementation are documented in [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). The house synth, piano-roll expression editing, pattern generators, MIDI file import/export, native worker pool, adaptive workload planner and Engine Lab spectrum view have working implementations. Module/global parameter automation, SFZ and stems export remain the current approved app-usable v2 priorities. USB/Bluetooth device I/O, audio import/editing, complete mixer routing and external binary plugin hosting are not implemented. GitHub sync and in-app AI features are not implemented or in the current product scope.
 
 ## 1. Technology stack
 
@@ -108,9 +110,9 @@ The owner's requirement: code works directly on the bits, so sounds come out cha
 - **Randomness is seeded, never live:** `hash(x)` and `noise(seed, t)` are counter-based hash functions (no hidden state, so jumping to any `t` gives the same value), and a project-level `seed` changes all of them at once. There's no clock or system randomness anywhere in the language.
 - **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits.
 
-### Instruments, wavetables and samples **[Proposal]**
+### Instruments, wavetables and samples — current status and remaining design
 
-The owner's requirement: any sound code can become a **playable synth**, a **waveform for other synths** or a **sample**. All of them come from the same code and the same deterministic VM, so they're simply different ways of running it.
+The owner wants code-defined sounds to become playable instruments and exportable audio assets. **[Fact, checked 2026-11-01]** C.A.W. already has generator voice playback, a house synth patch format, built-in wavetable playback/frame morphing and WAV loop/free-length/one-shot/wavetable export. A sample editor, imported audio assets, multisample mapping and SFZ export are not implemented. The design details below are proposals for remaining extensions, not a claim that every output path exists.
 
 - **Voice mode (playable synth):** the program runs once per note, from a fixed pool of pre-allocated voices (no allocation on note-on; the oldest voice is stolen when the pool is full). Each voice sees:
   - `t`: samples since note-on, scaled so pitch follows the note. Classic bytebeat runs at its formula rate when the note is the module's base note (default C4), and an octave up doubles the rate.
@@ -122,9 +124,9 @@ The owner's requirement: any sound code can become a **playable synth**, a **wav
 - **Sample export:** one-shots and loops as WAV (24-bit or 32-bit float). Loops get loop points in a `smpl` chunk, set at exactly repeating lengths where the code repeats. Multisample sets render a range of notes and velocities, plus an SFZ mapping file (an open text format).
 - **Aliasing is a choice:** bit-twiddled waveforms alias when pitched up, which is part of their sound. Voice mode and export offer optional oversampling (2× or 4×) for a cleaner result.
 
-### Synthesis, MIDI and musical helpers **[Proposal]**
+### Synthesis, MIDI and musical helpers — current status and remaining design
 
-The owner's requirement: proper synthesis and MIDI, and helpers that make musical results (such as a loop that fits a beat) easy, without taking away raw bit code.
+The owner wants proper synthesis, MIDI and musical helpers alongside raw bit-level code. **[Fact, checked 2026-11-01]** The synth patch compiler and app synth workflow are implemented; MIDI pattern files import/export as Standard MIDI Files and MIDI 2.0 Clip Files; the engine has a MIDI 2.0 UMP decoder and bounded input queue. USB/Bluetooth device discovery, connection, MIDI clock and live Engine voice routing are not implemented.
 
 - **Synthesis built-ins** (basics in v1, the rest in v2, on top of Signalsmith DSP and DaisySP):
   - oscillators: sine, saw, square, triangle, band-limited and raw
@@ -178,7 +180,7 @@ export let env = ad(trig, 0.001, 0.3)                  a signal other modules re
 - the note variables, and voices (8 per layer, oldest stolen)
 - a Pattern picker per layer, and Solo preview through a layer's pattern
 
-The audio thread consumes pattern events separately from the sound's code, so a pattern edit can update without rebuilding the instrument/effect chain. The arrangement compiles reusable pattern sources into absolute-time clip events on the control thread; the audio callback schedules them at sample positions. Notes keep room for a kit row and curves, and `bend` is reserved. Not built yet: kit patterns, procedural code, custom values and curves, swing, clip-following automation, and plugin/global parameter automation. The session-grid scene launcher is retired; the linear Arranger is the composition view.
+The audio thread consumes pattern events separately from the sound's code, so a pattern edit can update without rebuilding the instrument/effect chain. The arrangement compiles reusable pattern sources into absolute-time clip events on the control thread; the audio callback schedules them at sample positions. **[Fact, checked 2026-11-01]** The piano roll now has editable pitch/pressure/timbre/vibrato note expressions, velocity/chance lane curves, and generator actions (Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion). Remaining gaps include kit-row pattern routing, code-generated procedural patterns, arbitrary custom per-note values, swing/global automation, clip-following automation and plugin/global parameter automation. The session-grid scene launcher is retired; the linear Arranger is the composition view.
 - **Two shapes:**
   - A **single-sound pattern** drives one layer.
   - A **kit pattern** has named rows (kick, snare, hats …), and each row is routed to a layer, so one pattern can drive a whole kit.
@@ -225,7 +227,7 @@ The audio thread consumes pattern events separately from the sound's code, so a 
 
 The owner's requirement (2026-10-28): edit notes and code while the music plays, with changes heard as soon as reasonably possible.
 
-**[Fact]** The engine side is built: swap timing, pattern edits that let sounding notes finish, and state carried across code swaps ([engine](engine.md#playback)). Auto-update in the app comes with the editor work.
+**[Fact]** The engine side is built: swap timing, pattern edits that let sounding notes finish, and state carried across code swaps ([engine](engine.md#playback)). The app also implements delayed auto-update, an enable/disable switch and selectable swap timing; see [App](app.md).
 
 - **[Fact]** Built already:
   - Run hot-swaps code with a 20 ms crossfade, and code that fails keeps the old sound.
@@ -339,14 +341,11 @@ GitHub stores and versions files. It never executes audio code.
 - **Offline-first:** the local copy is the working copy. Playback never waits on the network.
 - **Separate updates:** App updates come from release builds (later delivered through AutoStacc). Library updates come from git. Neither requires the other.
 
-## 5. AI-assisted editing (no phone UI control)
+## 5. AI and GitHub integration — deferred, not implemented
 
-1. You ask Claude (or another agent) for a sound.
-2. The agent edits `.caw` files in the library repo on a branch or PR, guided by `AGENTS.md`.
-3. **CI on the library repo** runs the same engine as a Linux CLI: `caw check` (parse, compile, enforce limits) and `caw render` (a short WAV plus checks for silence, clipping, NaN and CPU cost). The agent can verify its own work without a phone, and the PR includes a preview WAV.
-4. In the app, a **source picker** chooses `main` or any branch or PR. You hear the change, then merge or discard. Reverting means picking an earlier commit or using `git revert`.
+**Current owner direction (2026-11-01): no in-app AI integration.** Do not build AI generation, editing, model inference, source separation or cloud audio processing. AI coding assistants may be used externally as development tools; that does not make them a C.A.W. product feature.
 
-Any agent that can edit files in git works with this setup. There's no provider-specific integration.
+The GitHub library-sync/source-picker workflow described in earlier proposals is also not implemented. The app currently works with local project files and operating-system import/export. Any future GitHub integration requires a separate owner decision, security review and implementation plan.
 
 ## 6. Biggest risks and simplest mitigations
 
