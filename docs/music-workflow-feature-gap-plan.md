@@ -1,6 +1,7 @@
 ---
 title: Music workflow feature-gap plan
 summary: Evidence-based status and build order for extending CAW's piano roll, arrangement, mixer, audio editing, sampling, MIDI and export workflows.
+covers: [app/lib/ui/, app/lib/model/, engine/]
 updated: 2026-11-01
 ---
 
