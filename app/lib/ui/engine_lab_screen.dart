@@ -19,7 +19,7 @@ class EngineLabScreen extends StatelessWidget {
       const SizedBox(height: 12),
       ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) =>
         NeonPanel(color: Neon.blue, child: Wrap(spacing: 20, runSpacing: 12, children: [
-          _Readout('CPU', (state.meters.cpu * 100).toStringAsFixed(1) + '%'),
+          _Readout('CPU', '${(state.meters.cpu * 100).toStringAsFixed(1)}%'),
           _Readout('PEAK L', state.meters.peakL.toStringAsFixed(3)),
           _Readout('PEAK R', state.meters.peakR.toStringAsFixed(3)),
           _Readout('STATUS', state.meters.playing ? 'RUNNING' : 'IDLE'),
@@ -105,10 +105,10 @@ class _ModuleReport extends StatelessWidget {
         ]),
         if (info?.summary.isNotEmpty == true) Text(info!.summary, style: const TextStyle(color: Neon.dim, fontSize: 12)),
         if (info?.error.isNotEmpty == true) Text(info!.error, style: const TextStyle(color: Neon.pink, fontSize: 12)),
-        if (info?.imports.isNotEmpty == true) Text('Imports: ' + info!.imports.join(', '), style: Neon.code(size: 11, color: Neon.dim)),
-        if (info?.exports.isNotEmpty == true) Text('Exports: ' + info!.exports.map((e) => e.name).join(', '), style: Neon.code(size: 11, color: Neon.dim)),
+        if (info?.imports.isNotEmpty == true) Text('Imports: ${info!.imports.join(', ')}', style: Neon.code(size: 11, color: Neon.dim)),
+        if (info?.exports.isNotEmpty == true) Text('Exports: ${info!.exports.map((e) => e.name).join(', ')}', style: Neon.code(size: 11, color: Neon.dim)),
         if (info?.warnings.isNotEmpty == true)
-          for (final warning in info!.warnings) Text('Warning: ' + warning, style: const TextStyle(color: Neon.yellow, fontSize: 11)),
+          for (final warning in info!.warnings) Text('Warning: $warning', style: const TextStyle(color: Neon.yellow, fontSize: 11)),
         if (module.edited) const Text('Unrun source edits', style: TextStyle(color: Neon.yellow, fontSize: 11)),
       ])));
   }
