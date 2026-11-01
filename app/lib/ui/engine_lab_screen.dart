@@ -89,13 +89,14 @@ class _SignalPath extends StatelessWidget {
       Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 6, children: [
         const Text('AUDIO', style: TextStyle(color: Neon.green, fontSize: 10, fontWeight: FontWeight.w800)),
         for (var i = 0; i < layer.chain.length; i++) ...[
-          if (i > 0) const Icon(Icons.arrow_forward, size: 14, color: Neon.dim),
+          if (i > 0) _SignalPulse(state: state, index: index, color: Neon.green),
           ActionChip(
             label: Text(state.project.module(layer.chain[i])?.name ?? 'Missing module', style: const TextStyle(fontSize: 11)),
             onPressed: () { state.selectLayer(layer); state.selectModule(layer.chain[i]); onOpenBuilder(); },
             side: const BorderSide(color: Neon.line), backgroundColor: Neon.panelHi),
         ],
         if (layer.chain.isEmpty) const Text('No generator or effects assigned', style: TextStyle(color: Neon.dim, fontSize: 12)),
+        _SignalPulse(state: state, index: index, color: Neon.green),
         const Icon(Icons.arrow_forward, size: 14, color: Neon.dim),
         Text(outputLabel,
           style: Neon.code(size: 10, color: Neon.blue)),
@@ -113,6 +114,49 @@ class _SignalPath extends StatelessWidget {
       ]),
     ])));
   }
+}
+
+class _SignalPulse extends StatelessWidget {
+  const _SignalPulse({required this.state, required this.index, required this.color});
+  final AppState state;
+  final int index;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 24,
+    height: 12,
+    child: CustomPaint(painter: _SignalPulsePainter(state, index, color)),
+  );
+}
+
+class _SignalPulsePainter extends CustomPainter {
+  _SignalPulsePainter(this.state, this.index, this.color) : super(repaint: state.tick);
+  final AppState state;
+  final int index;
+  final Color color;
+  final Paint _line = Paint()..strokeWidth = 1.5;
+  final Paint _pulse = Paint();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final y = size.height / 2;
+    _line.color = Neon.line;
+    canvas.drawLine(Offset(0, y), Offset(size.width, y), _line);
+    final peak = index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0;
+    if (!state.meters.playing || peak <= 0.001) {
+      _pulse.color = color.withValues(alpha: 0.35);
+      canvas.drawCircle(Offset(size.width / 2, y), 1.6, _pulse);
+      return;
+    }
+    final phase = (state.tick.value % 18) / 18;
+    _pulse.color = color.withValues(alpha: peak.clamp(0.2, 1.0).toDouble());
+    canvas.drawCircle(Offset(phase * size.width, y), 2.8, _pulse);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SignalPulsePainter old) =>
+      old.state != state || old.index != index || old.color != color;
 }
 
 class _ModuleReport extends StatelessWidget {
