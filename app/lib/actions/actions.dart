@@ -9,10 +9,10 @@ enum VimMode { normal, insert, visual }
 /// Where an action or key binding applies, like Reaper's sections. [code] is the code editor's Vim mode.
 enum Area {
   global('global', 'Global'),
-  builder('builder', 'Builder'),
+  builder('builder', 'Sounds'),
   pattern('roll', 'Pattern editor'),
-  arranger('arranger', 'Arranger'),
-  exporter('exporter', 'Exporter'),
+  arranger('arranger', 'Tracks'),
+  exporter('exporter', 'Export'),
   code('code', 'Code editor (Vim)');
 
   /// The name used in keymap files.

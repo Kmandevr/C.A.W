@@ -8,6 +8,8 @@
 #include <map>
 #include <numeric>
 
+#include "detmath.h"
+
 namespace caw {
 
 namespace {
@@ -386,6 +388,8 @@ constexpr int64_t kSlideOverlap = kStepTicks / 16;  // a slide overlaps the next
 struct Segment {
     int64_t on, off;
     double pitch, vel;
+    int extra = -1;        // the note's expression (Pattern::expressions), or -1
+    int64_t sounding = 1;  // ticks the note itself lasts (its curves run over this), before any slide overlap
 };
 
 std::vector<Segment> segments(const Pattern& p, int beatsPerBar, int64_t& lengthTicks) {
@@ -402,6 +406,8 @@ std::vector<Segment> segments(const Pattern& p, int beatsPerBar, int64_t& length
             s.off = std::llround((n.at + part * (q + 1)) * kStepTicks);
             s.pitch = std::clamp(n.pitch, 0.0, 127.0);
             s.vel = std::clamp(n.vel, 0.0, 1.0);
+            s.extra = n.extra;
+            s.sounding = std::max<int64_t>(1, s.off - s.on);
             if (q == r - 1 && n.slideTo >= 0 &&
                 std::lround(p.notes[n.slideTo].pitch) != std::lround(n.pitch))
                 s.off += kSlideOverlap;
@@ -501,6 +507,100 @@ std::string patternFromMidi(const uint8_t* data, size_t size, const MidiImportOp
     }
 }
 
+// MPE (MIDI Polyphonic Expression, lower zone): channel 1 manages, channels 2-16 each carry one note at a time with its
+// own pitch bend, channel pressure and CC74 (timbre). Used when any note has a bend, vibrato, press or timbre.
+std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& segs, double bpm) {
+    std::vector<MidiEvent> ev;
+    // The bend range covers the widest bend in the pattern: 12 semitones, else 48 (MPE's own default).
+    double widest = 0;
+    for (const Segment& sg : segs) {
+        double w = std::fabs(sg.pitch - std::lround(sg.pitch));  // a microtonal pitch bends from its nearest key
+        if (sg.extra >= 0 && static_cast<size_t>(sg.extra) < p.expressions.size()) {
+            const NoteExpression& x = p.expressions[static_cast<size_t>(sg.extra)];
+            double most = 0;
+            for (int i = 0; i < x.bend.count; ++i) most = std::max(most, std::fabs(static_cast<double>(x.bend.v[i])));
+            w += most + x.vibDepth;
+        }
+        widest = std::max(widest, w);
+    }
+    const int range = widest <= 12.0 + 1e-9 ? 12 : 48;
+    // MPE Configuration Message on the manager channel: RPN 6 = 15 member channels.
+    const uint8_t mcm[][2] = {{101, 0}, {100, 6}, {6, 15}, {101, 127}, {100, 127}};
+    for (const auto& m : mcm) ev.push_back({0, 0, {0xB0, m[0], m[1]}, 3});
+    // Each member channel: pitch bend range (RPN 0) in semitones.
+    for (int ch = 1; ch < 16; ++ch) {
+        const uint8_t cc = static_cast<uint8_t>(0xB0 | ch);
+        const uint8_t rpn[][2] = {{101, 0}, {100, 0}, {6, static_cast<uint8_t>(range)}, {38, 0}, {101, 127}, {100, 127}};
+        for (const auto& m : rpn) ev.push_back({0, 0, {cc, m[0], m[1]}, 3});
+    }
+    const double ticksPerSecond = kMidiExportPpq * bpm / 60.0;
+    const int64_t every = kStepTicks / 8;  // a 1/32 note: smooth enough for bends and vibrato up to ~8 Hz at 120 BPM
+    int64_t busyUntil[16] = {};
+    int next = 1;
+    for (const Segment& s : segs) {
+        // The free member channel that has rested longest (round robin), else the one that frees soonest.
+        int ch = -1;
+        for (int k = 0; k < 15 && ch < 0; ++k) {
+            const int c = 1 + (next - 1 + k) % 15;
+            if (busyUntil[c] <= s.on) ch = c;
+        }
+        if (ch < 0) {
+            ch = 1;
+            for (int c = 2; c < 16; ++c)
+                if (busyUntil[c] < busyUntil[ch]) ch = c;
+        }
+        next = ch % 15 + 1;
+        busyUntil[ch] = s.off;
+        const int key = static_cast<int>(std::lround(s.pitch));
+        const NoteExpression* x = s.extra >= 0 && static_cast<size_t>(s.extra) < p.expressions.size()
+                                      ? &p.expressions[static_cast<size_t>(s.extra)] : nullptr;
+        // The note's offset from its key at a tick inside it: microtonal pitch + bend curve + vibrato.
+        auto bendAt = [&](int64_t tick) {
+            const double into = static_cast<double>(tick - s.on);
+            const double u = std::clamp(into / static_cast<double>(s.sounding), 0.0, 1.0);
+            double b = s.pitch - key;
+            if (x) {
+                if (x->bend.count) b += x->bend.at(u);
+                if (x->vibDepth > 0) {
+                    const double fade = x->vibDelay > 0 ? std::min(1.0, u / x->vibDelay) : 1.0;
+                    b += x->vibDepth * fade * detSin(kTwoPi * x->vibRate * into / ticksPerSecond);
+                }
+            }
+            return static_cast<int>(std::clamp<long>(std::lround(8192 + b / range * 8192), 0, 16383));
+        };
+        auto to7 = [](double v) { return static_cast<uint8_t>(std::clamp<long>(std::lround(v * 127), 0, 127)); };
+        const uint8_t pb = static_cast<uint8_t>(0xE0 | ch), cp = static_cast<uint8_t>(0xD0 | ch), cc = static_cast<uint8_t>(0xB0 | ch);
+        // Before the note on: where its expression starts (MPE sends these first so the attack is already right).
+        int lastPb = bendAt(s.on);
+        uint8_t lastPress = to7(x && x->press.count ? x->press.at(0) : 1.0);
+        uint8_t lastTimbre = to7(x && x->timbre.count ? x->timbre.at(0) : 0.0);
+        ev.push_back({s.on, 2, {pb, static_cast<uint8_t>(lastPb & 0x7F), static_cast<uint8_t>(lastPb >> 7)}, 3});
+        ev.push_back({s.on, 2, {cc, 74, lastTimbre}, 3});
+        ev.push_back({s.on, 2, {cp, lastPress, 0}, 2});
+        const uint8_t vel = static_cast<uint8_t>(std::clamp<long>(std::lround(s.vel * 127), 1, 127));
+        ev.push_back({s.on, 3, {static_cast<uint8_t>(0x90 | ch), static_cast<uint8_t>(key), vel}, 3});
+        if (x)
+            for (int64_t t = s.on + every; t < s.off; t += every) {
+                const double u = std::clamp(static_cast<double>(t - s.on) / static_cast<double>(s.sounding), 0.0, 1.0);
+                const int b = bendAt(t);
+                if (b != lastPb) ev.push_back({t, 2, {pb, static_cast<uint8_t>(b & 0x7F), static_cast<uint8_t>(b >> 7)}, 3});
+                lastPb = b;
+                if (x->press.count) {
+                    const uint8_t v = to7(x->press.at(u));
+                    if (v != lastPress) ev.push_back({t, 2, {cp, v, 0}, 2});
+                    lastPress = v;
+                }
+                if (x->timbre.count) {
+                    const uint8_t v = to7(x->timbre.at(u));
+                    if (v != lastTimbre) ev.push_back({t, 2, {cc, 74, v}, 3});
+                    lastTimbre = v;
+                }
+            }
+        ev.push_back({s.off, 1, {static_cast<uint8_t>(0x80 | ch), static_cast<uint8_t>(key), 64}, 3});
+    }
+    return ev;
+}
+
 std::vector<uint8_t> patternToSmf(const Pattern& p, double bpm, int beatsPerBar) {
     bpm = safeBpm(bpm);
     beatsPerBar = safeBeats(beatsPerBar);
@@ -515,6 +615,15 @@ std::vector<uint8_t> patternToSmf(const Pattern& p, double bpm, int beatsPerBar)
                              static_cast<uint8_t>(usPerQuarter >> 8), static_cast<uint8_t>(usPerQuarter)});
     head.insert(head.end(), {0x00, 0xFF, 0x58, 0x04, static_cast<uint8_t>(beatsPerBar), 0x02, 24, 8});
     std::vector<uint8_t> conductor = trackChunk(name, {}, head, lengthTicks);
+
+    if (!p.expressions.empty()) {
+        std::vector<uint8_t> notes = trackChunk(name, mpeEvents(p, segs, bpm), {}, lengthTicks);
+        std::vector<uint8_t> out = {'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 1, 0, 2};
+        put16(out, kMidiExportPpq);
+        out.insert(out.end(), conductor.begin(), conductor.end());
+        out.insert(out.end(), notes.begin(), notes.end());
+        return out;
+    }
 
     // Note track. Whole-number pitches play on channel 1. A microtonal pitch rounds to the nearest note and plays on
     // a channel of its own (2-9, 11-16), with a pitch bend just before the note on (bend range +-2 semitones, set

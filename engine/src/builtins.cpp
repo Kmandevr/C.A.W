@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "detmath.h"
+#include "tables.h"
 
 namespace caw {
 
@@ -153,6 +154,86 @@ void runOsc(const CallArgs& c) {
 
 // ad / env.ar: starts on each rise of trig above 0, linear attack, decay to -60 dB in `decay` seconds.
 enum { AdPrev, AdLevel, AdStage, AdA, AdD, AdInc, AdCoef, AdSize };
+// ---------- wavetables (synth) ----------
+
+constexpr int kMaxUnison = 16;
+constexpr double kSemitone = 0.69314718055994530942 / 12.0;  // ln(2) / 12
+
+// State: [0] call site, [1..16] each unison voice's phase, then the values latched at the note's start (table and
+// unison count, read on the first sample after a reset so live playback and exports agree on every device), the
+// detune and pitch last used (so their maths runs only when they change), and the unison ratios.
+enum WtState { WtSite = 0, WtPhase = 1, WtTable = 1 + kMaxUnison, WtUnison, WtDetune, WtFreq, WtLevel, WtTop, WtRatio, WtSize = WtRatio + kMaxUnison };
+
+void wtInit(double* s, uint32_t site) {
+    s[WtSite] = static_cast<double>(site);
+    for (int v = 1; v < kMaxUnison; ++v)
+        s[WtPhase + v] = static_cast<double>(hash32(site * 0x9E3779B9U + static_cast<uint32_t>(v) * 0x85EBCA6BU)) / 4294967296.0;
+    s[WtTable] = -1.0;  // not latched yet
+    s[WtDetune] = -1.0;
+    s[WtFreq] = -1.0;
+}
+
+// wt(table, freq, pos, unison, detune): the table and unison count hold for the whole note; freq, pos and detune
+// follow every sample. Unison voices spread evenly over +-detune semitones.
+void runWt(const CallArgs& c) {
+    double* s = c.state;
+    if (s[WtTable] < 0) {
+        s[WtTable] = clampd(std::floor(finiteOr0(c.a[0][0])), 0.0, 255.0);
+        s[WtUnison] = clampd(std::floor(finiteOr0(c.a[3][0])), 1.0, kMaxUnison);
+    }
+    const Table& t = *builtinTable(static_cast<int>(s[WtTable]));
+    const int uni = static_cast<int>(s[WtUnison]);
+    const double gain = 1.0 / std::sqrt(static_cast<double>(uni));
+    const double inv = 1.0 / c.ctx->sr;
+    const int last = t.frames - 1;
+    double* ph = s + WtPhase;
+    double* ratio = s + WtRatio;
+    for (int i = 0; i < c.n; ++i) {
+        const double det = clampd(finiteOr0(c.a[4][i]), 0.0, 1.0);
+        if (det != s[WtDetune]) {
+            s[WtDetune] = det;
+            double top = 1.0;
+            for (int v = 0; v < uni; ++v) {
+                const double off = uni == 1 ? 0.0 : det * (2.0 * v / (uni - 1) - 1.0);
+                ratio[v] = detExp(off * kSemitone);
+                if (ratio[v] > top) top = ratio[v];
+            }
+            s[WtTop] = top;
+            s[WtFreq] = -1.0;  // the level depends on the top voice
+        }
+        const double f = std::fabs(finiteOr0(c.a[1][i])) * inv;
+        if (f != s[WtFreq]) {
+            // One band-limit level for the whole stack, chosen by its highest voice.
+            s[WtFreq] = f;
+            s[WtLevel] = Table::levelFor(f * s[WtTop]);
+        }
+        const int level = static_cast<int>(s[WtLevel]);
+        const int size = Table::levelSize(level);
+        const double pos = clampd(finiteOr0(c.a[2][i]), 0.0, 1.0) * last;
+        const int f0 = static_cast<int>(pos), f1 = f0 < last ? f0 + 1 : last;
+        const double mix = pos - f0;
+        const double warp = clampd(finiteOr0(c.a[5][i]), -0.95, 0.95);
+        const float* a = t.frame(level, f0);
+        const float* b = t.frame(level, f1);
+        double acc = 0.0;
+        for (int v = 0; v < uni; ++v) {
+            double phase = ph[v];
+            if (warp != 0.0) phase += warp * detSin(kTwoPi * phase) / kTwoPi;
+            const double x = phase * size;
+            const int k = static_cast<int>(x);
+            const double fr = x - k;
+            const double sa = a[k] + (a[k + 1] - a[k]) * fr, sb = b[k] + (b[k + 1] - b[k]) * fr;
+            acc += sa + (sb - sa) * mix;
+            double dt = f * ratio[v];
+            if (dt > 0.5) dt = 0.5;
+            double p = ph[v] + dt;
+            if (p >= 1.0) p -= 1.0;
+            ph[v] = p;
+        }
+        c.out[i] = acc * gain;
+    }
+}
+
 void adInit(double* s, uint32_t) {
     s[AdA] = -1.0;
     s[AdD] = -1.0;
@@ -277,6 +358,27 @@ void runSlew(const CallArgs& c) {
 }
 
 // ---------- LFOs (tempo-synced, from the layer's time) ----------
+
+void runLfoCurve(const CallArgs& c) {
+    const double* time = c.ctx->vars[static_cast<int>(Var::Time)];
+    const double bps = c.ctx->bpm / 60.0;
+    for (int i = 0; i < c.n; ++i) {
+        const double beats = c.a[0][i];
+        if (!(beats > 0.0) || !std::isfinite(beats) || !time) {
+            c.out[i] = 0.0;
+            continue;
+        }
+        const double cycles = time[i] * bps / beats + c.a[1][i];
+        const double phase = cycles - std::floor(cycles);
+        const double scaled = phase * 4.0;
+        const int segment = static_cast<int>(scaled);
+        const double mix = scaled - segment;
+        const int next = (segment + 1) & 3;
+        const double a = clampd(finiteOr0(c.a[2 + segment][i]), -1.0, 1.0);
+        const double b = clampd(finiteOr0(c.a[2 + next][i]), -1.0, 1.0);
+        c.out[i] = a + (b - a) * mix;
+    }
+}
 
 template <int Shape>
 void runLfo(const CallArgs& c) {
@@ -714,6 +816,10 @@ const Builtin kBuiltins[] = {
     // Oscillators
     {"sine", 1, 1, {}, 1, kNone, noInit, runOsc<0>, "Oscillators", "Sine wave, -1..1.", {"freq: Hz"}, "sine(220) * 0.5"},
     {"saw", 1, 1, {}, 1, kNone, noInit, runOsc<1>, "Oscillators", "Band-limited sawtooth, -1..1.", {"freq: Hz"}, "saw(110) * 0.4"},
+    {"wt", 2, 6, {0, 0, 0, 1, 0, 0}, WtSize, kNone, wtInit, runWt, "Oscillators",
+     "Wavetable oscillator: plays a table (table.saw, table.basic …), morphing through its frames with pos, with up to 16 detuned unison voices. Band-limited per octave, so high notes stay clean. The table and unison count are set when a note starts.",
+     {"table: which table, e.g. table.basic (set at the note start)", "freq: Hz", "pos: frame position 0..1 (default 0)", "unison: voices 1..16 (default 1; set at the note start)", "detune: spread of the unison voices, 0..1 = up to +-1 semitone (default 0)", "warp: phase distortion amount -0.95..0.95 (default 0)"},
+     "wt(table.basic, mtof(A2), lfo.tri(8) * 0.5 + 0.5, 7, 0.15, 0.25) * 0.3"},
     {"square", 1, 2, {0, 0.5}, 1, kNone, noInit, runOsc<2>, "Oscillators", "Band-limited square/pulse wave, -1..1.", {"freq: Hz", "width: pulse width 0.01..0.99 (default 0.5)"}, "square(110, 0.25) * 0.3"},
     {"tri", 1, 1, {}, 1, kNone, noInit, runOsc<3>, "Oscillators", "Triangle wave, -1..1.", {"freq: Hz"}, "tri(220) * 0.5"},
     // Envelopes and LFOs
@@ -726,6 +832,7 @@ const Builtin kBuiltins[] = {
     {"lfo.saw", 1, 2, {1, 0}, 0, Var::Time, noInit, runLfo<2>, "LFOs", "Rising saw LFO -1..1 synced to the tempo.", {"beats: length of one cycle in beats", "phase: start point 0..1 (default 0)"}, "sine(220 + 100 * lfo.saw(2)) * 0.5"},
     {"lfo.square", 1, 2, {1, 0}, 0, Var::Time, noInit, runLfo<3>, "LFOs", "Square LFO (1 then -1) synced to the tempo.", {"beats: length of one cycle in beats", "phase: start point 0..1 (default 0)"}, "sine(220 * (1.5 + 0.5 * lfo.square(1))) * 0.5"},
     {"lfo.random", 1, 2, {1, 0}, 1, Var::Time, siteInit, runLfo<4>, "LFOs", "A new random level -1..1 every cycle (stepped), synced to the tempo and the seed.", {"beats: how long each level lasts, in beats", "phase: start point 0..1 (default 0)"}, "sine(330 + 200 * lfo.random(0.25)) * 0.5"},
+    {"lfo.curve", 2, 6, {1, 0, 0, 1, 0, -1}, 0, Var::Time, noInit, runLfoCurve, "LFOs", "Tempo-synced four-point editable curve, linearly interpolated and looped.", {"beats: length of one cycle in beats", "phase: start point 0..1", "p0: first point -1..1", "p1: second point -1..1", "p2: third point -1..1", "p3: fourth point -1..1"}, "sine(220 + 80 * lfo.curve(4, 0, 0, 1, 0, -1)) * 0.5"},
     // Filters
     {"lpf", 2, 3, {0, 0, 0.707}, SvSize, kNone, svfInit, runSvf<0>, "Filters", "Low-pass state-variable filter (12 dB/octave).", {"x: input", "cutoff: Hz", "q: resonance 0.1..40 (default 0.707)"}, "lpf(saw(55), 800, 4) * 0.5"},
     {"hpf", 2, 3, {0, 0, 0.707}, SvSize, kNone, svfInit, runSvf<1>, "Filters", "High-pass state-variable filter (12 dB/octave).", {"x: input", "cutoff: Hz", "q: resonance 0.1..40 (default 0.707)"}, "hpf(noise(), 6000) * 0.3"},
@@ -761,6 +868,7 @@ const ConstantGroup kGroups[] = {
     {"scale", "Scales for scale() and quantize(): major, natural minor, the modes, harmonic and melodic minor, major and minor pentatonic, blues, chromatic and whole-tone.", kScaleNames, kScaleCount},
     {"chord", "Chord shapes for chord() and arp().", kChordNames, kChordCount},
     {"arp", "Arpeggio directions for arp().", kArpModes, 4},
+    {"table", "Wavetables for wt(): sine, tri, saw and square (one frame each), basic (sine, triangle, saw, square to morph through) and pwm (a pulse narrowing from 50% to 5% over 32 frames).", builtinTableNames(), 6},
 };
 
 }  // namespace

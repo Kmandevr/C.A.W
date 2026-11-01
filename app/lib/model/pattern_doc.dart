@@ -214,6 +214,120 @@ String formatPitch(double p) {
 const Object _keep = Object();
 
 /// One note. A chord line becomes one note per pitch with the same [line].
+/// One point of a note's curve: [t] 0..1 through the note, a value, and [k] the bend of the segment after it (-1..1;
+/// the shape is u^(4^k), as in the engine).
+class NotePoint {
+  const NotePoint(this.t, this.v, [this.k = 0]);
+  final double t, v, k;
+
+  @override
+  bool operator ==(Object other) => other is NotePoint && other.t == t && other.v == v && other.k == k;
+  @override
+  int get hashCode => Object.hash(t, v, k);
+
+  String format() => '${formatNumber(t)}:${formatNumber(v)}${k != 0 ? '~${formatNumber(k)}' : ''}';
+}
+
+/// A note's own expression, MPE style (engine/src/pattern.h): pitch bend in semitones, pressure (volume) and timbre
+/// curves 0..1, and vibrato. Written after a note's other extras: `bend 0:0 1:2 vib 0.3 5.5 0.25 press … timbre …`.
+class NoteExpression {
+  const NoteExpression({
+    this.bend = const [],
+    this.press = const [],
+    this.timbre = const [],
+    this.vibDepth = 0,
+    this.vibRate = 5,
+    this.vibFade = 0,
+  });
+  final List<NotePoint> bend, press, timbre;
+  final double vibDepth, vibRate, vibFade;
+
+  static const none = NoteExpression();
+  static const maxPoints = 16;
+  static const maxBend = 48.0;
+
+  bool get isEmpty => bend.isEmpty && press.isEmpty && timbre.isEmpty && vibDepth == 0;
+
+  NoteExpression copyWith({
+    List<NotePoint>? bend,
+    List<NotePoint>? press,
+    List<NotePoint>? timbre,
+    double? vibDepth,
+    double? vibRate,
+    double? vibFade,
+  }) =>
+      NoteExpression(
+        bend: bend ?? this.bend,
+        press: press ?? this.press,
+        timbre: timbre ?? this.timbre,
+        vibDepth: vibDepth ?? this.vibDepth,
+        vibRate: vibRate ?? this.vibRate,
+        vibFade: vibFade ?? this.vibFade,
+      );
+
+  /// Snaps a normalised position to a normalised grid, always keeping it inside this note.
+  /// A non-positive grid disables snapping; the curve can never extend the note itself.
+  static double snapTime(double t, {double grid = 0}) {
+    final position = t.clamp(0.0, 1.0).toDouble();
+    if (!grid.isFinite || grid <= 0) return position;
+    return ((position / grid).round() * grid).clamp(0.0, 1.0).toDouble();
+  }
+
+  /// A curve's value at [u] 0..1, holding the first and last values outside the points (as the engine plays it).
+  static double valueAt(List<NotePoint> c, double u, {double empty = 0}) {
+    if (c.isEmpty) return empty;
+    if (u <= c.first.t) return c.first.v;
+    for (var i = 0; i + 1 < c.length; i++) {
+      final a = c[i], b = c[i + 1];
+      if (u <= b.t) {
+        final span = b.t - a.t;
+        var x = span > 0 ? (u - a.t) / span : 1.0;
+        if (a.k != 0) x = math.pow(x, math.pow(4, a.k)).toDouble();
+        return a.v + (b.v - a.v) * x;
+      }
+    }
+    return c.last.v;
+  }
+
+  /// The note's pitch offset in semitones at [u] through it, [seconds] after it started: curve plus vibrato.
+  double pitchAt(double u, double seconds) {
+    var b = valueAt(bend, u);
+    if (vibDepth > 0) {
+      final fade = vibFade > 0 ? math.min(1.0, u / vibFade) : 1.0;
+      b += vibDepth * fade * math.sin(2 * math.pi * vibRate * seconds);
+    }
+    return b;
+  }
+
+  String format() => [
+        if (bend.isNotEmpty) 'bend ${bend.map((p) => p.format()).join(' ')}',
+        if (vibDepth > 0)
+          'vib ${formatNumber(vibDepth)} ${formatNumber(vibRate)}${vibFade > 0 ? ' ${formatNumber(vibFade)}' : ''}',
+        if (press.isNotEmpty) 'press ${press.map((p) => p.format()).join(' ')}',
+        if (timbre.isNotEmpty) 'timbre ${timbre.map((p) => p.format()).join(' ')}',
+      ].join('  ');
+
+  static bool _same(List<NotePoint> a, List<NotePoint> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is NoteExpression &&
+      _same(other.bend, bend) &&
+      _same(other.press, press) &&
+      _same(other.timbre, timbre) &&
+      other.vibDepth == vibDepth &&
+      other.vibRate == vibRate &&
+      other.vibFade == vibFade;
+  @override
+  int get hashCode => Object.hash(Object.hashAll(bend), Object.hashAll(press), Object.hashAll(timbre), vibDepth, vibRate, vibFade);
+}
+
 class PatternNote {
   const PatternNote({
     required this.id,
@@ -224,6 +338,7 @@ class PatternNote {
     this.prob = 1,
     this.ratchet = 1,
     this.slide = false,
+    this.expr = NoteExpression.none,
     this.trailingComment,
     this.line,
   });
@@ -234,6 +349,7 @@ class PatternNote {
   final double vel, prob; // 0..1
   final int ratchet; // 1..8
   final bool slide;
+  final NoteExpression expr; // its own bend, vibrato, pressure and timbre
   final String? trailingComment; // the text after `//` on the note's line, trimmed; only on a line's first note
   final int? line; // the source line it was read from; null for notes made by edits
 
@@ -248,6 +364,7 @@ class PatternNote {
     double? prob,
     int? ratchet,
     bool? slide,
+    NoteExpression? expr,
     Object? trailingComment = _keep,
     Object? line = _keep,
   }) =>
@@ -260,13 +377,20 @@ class PatternNote {
         prob: prob ?? this.prob,
         ratchet: ratchet ?? this.ratchet,
         slide: slide ?? this.slide,
+        expr: expr ?? this.expr,
         trailingComment: identical(trailingComment, _keep) ? this.trailingComment : trailingComment as String?,
         line: identical(line, _keep) ? this.line : line as int?,
       );
 
   /// Same start, length, velocity and extras: notes that can share one chord line.
   bool sameShape(PatternNote o) =>
-      at == o.at && len == o.len && vel == o.vel && prob == o.prob && ratchet == o.ratchet && slide == o.slide;
+      at == o.at &&
+      len == o.len &&
+      vel == o.vel &&
+      prob == o.prob &&
+      ratchet == o.ratchet &&
+      slide == o.slide &&
+      expr == o.expr;
 
   /// Same musical content and comment, ignoring [id] and [line].
   bool sameAs(PatternNote o) => sameShape(o) && pitch == o.pitch && trailingComment == o.trailingComment;
@@ -274,7 +398,7 @@ class PatternNote {
   @override
   String toString() =>
       'PatternNote($id: $at ${formatPitch(pitch)} $len vel ${formatNumber(vel)}${prob != 1 ? ' prob $prob' : ''}'
-      '${ratchet != 1 ? ' ratchet $ratchet' : ''}${slide ? ' slide' : ''}${trailingComment != null ? ' // $trailingComment' : ''})';
+      '${ratchet != 1 ? ' ratchet $ratchet' : ''}${slide ? ' slide' : ''}${expr.isEmpty ? '' : ' ${expr.format()}'}${trailingComment != null ? ' // $trailingComment' : ''})';
 }
 
 /// Notes cut or copied, with starts relative to the earliest one.
@@ -360,6 +484,35 @@ double _needNumber(_Word w, int line, String what, double lo, double hi, String 
   if (v == null) throw _PatternError(line, w.col, "expected $what, found '${w.text}'");
   if (v < lo || v > hi) throw _PatternError(line, w.col, '$what must be $range');
   return v;
+}
+
+// A curve's points after its keyword: `t:v` or `t:v~k`, 1..16, times rising 0..1 (the engine's rules and messages).
+(List<NotePoint>, int) _curve(List<_Word> w, int k, int line, _Word key, double lo, double hi) {
+  final pts = <NotePoint>[];
+  var last = -1.0;
+  while (k < w.length) {
+    final s = w[k].text;
+    final colon = s.indexOf(':');
+    if (colon < 0) break;
+    final tilde = s.indexOf('~', colon);
+    final t = _number(s.substring(0, colon));
+    final v = _number(s.substring(colon + 1, tilde < 0 ? null : tilde));
+    final b = tilde < 0 ? 0.0 : _number(s.substring(tilde + 1));
+    if (t == null || v == null || b == null) {
+      throw _PatternError(line, w[k].col, 'a curve point looks like 0.5:2 or 0.5:2~0.3 (time:value~bend)');
+    }
+    if (t < 0 || t > 1 || t < last) throw _PatternError(line, w[k].col, 'curve times go from 0 to 1, rising');
+    if (v < lo || v > hi) {
+      throw _PatternError(line, w[k].col, '${key.text} values must be ${formatNumber(lo)} to ${formatNumber(hi)}');
+    }
+    if (b < -1 || b > 1) throw _PatternError(line, w[k].col, 'a bend (after ~) must be -1 to 1');
+    if (pts.length >= NoteExpression.maxPoints) throw _PatternError(line, w[k].col, 'a curve has at most 16 points');
+    pts.add(NotePoint(t, v, b));
+    last = t;
+    k++;
+  }
+  if (pts.isEmpty) throw _PatternError(line, key.col, "'${key.text}' needs points such as 0:0 0.5:2 1:0");
+  return (List.unmodifiable(pts), k);
 }
 
 Steps _needSteps(_Word w, int line, String what, double lo, String range) {
@@ -464,11 +617,30 @@ class PatternDoc {
       final chord = _pitches(w[1], lineNo);
       final len = _needSteps(w[2], lineNo, 'the length (in steps)', 1e-3, '0.001 to 4096');
       var vel = 1.0, prob = 1.0, ratchet = 1, slide = false;
+      var expr = NoteExpression.none;
       var k = 3;
       if (k < w.length && _number(w[k].text) != null) vel = _needNumber(w[k++], lineNo, 'velocity', 0, 1, '0 to 1');
       while (k < w.length) {
         final x = w[k++];
-        if (x.text == 'slide') {
+        if (x.text == 'bend' || x.text == 'press' || x.text == 'timbre') {
+          final bend = x.text == 'bend';
+          final (pts, next) = _curve(w, k, lineNo, x, bend ? -NoteExpression.maxBend : 0, bend ? NoteExpression.maxBend : 1);
+          k = next;
+          expr = switch (x.text) {
+            'bend' => expr.copyWith(bend: pts),
+            'press' => expr.copyWith(press: pts),
+            _ => expr.copyWith(timbre: pts),
+          };
+        } else if (x.text == 'vib') {
+          if (k + 1 >= w.length) {
+            throw _PatternError(lineNo, x.col, 'vib needs depth and rate: vib 0.3 5.5 (and a fade-in, 0..1)');
+          }
+          final depth = _needNumber(w[k++], lineNo, 'vib depth (semitones)', 0, 12, '0 to 12');
+          final rate = _needNumber(w[k++], lineNo, 'vib rate (Hz)', 0.1, 30, '0.1 to 30');
+          var fade = 0.0;
+          if (k < w.length && _number(w[k].text) != null) fade = _needNumber(w[k++], lineNo, 'vib fade-in', 0, 1, '0 to 1');
+          expr = expr.copyWith(vibDepth: depth, vibRate: rate, vibFade: fade);
+        } else if (x.text == 'slide') {
           slide = true;
         } else if (x.text == 'prob' || x.text == 'ratchet') {
           if (k >= w.length) throw _PatternError(lineNo, x.col, "'${x.text}' needs a number after it");
@@ -481,7 +653,8 @@ class PatternDoc {
             k++;
           }
         } else {
-          throw _PatternError(lineNo, x.col, "unknown extra '${x.text}' (try prob 0.5, ratchet 3 or slide)");
+          throw _PatternError(
+              lineNo, x.col, "unknown extra '${x.text}' (try prob 0.5, ratchet 3, slide, bend, vib, press or timbre)");
         }
       }
       final comment = cut >= 0 ? _trim(raw.substring(cut + 2)) : null;
@@ -499,6 +672,7 @@ class PatternDoc {
           prob: prob,
           ratchet: ratchet,
           slide: slide,
+          expr: expr,
           trailingComment: group.isEmpty ? comment : null,
           line: lineNo,
         );
@@ -666,7 +840,7 @@ class PatternDoc {
     final a = g.first;
     final c = g.map((n) => n.trailingComment).firstWhere((c) => c != null, orElse: () => null);
     return '${a.at.numerator}/${a.at.denominator} ${a.len.numerator}/${a.len.denominator} ${a.vel} ${a.prob} '
-        '${a.ratchet} ${a.slide} ${g.map((n) => n.pitch).join(',')} ${c == null ? '-' : '// $c'}';
+        '${a.ratchet} ${a.slide} ${a.expr.format()} ${g.map((n) => n.pitch).join(',')} ${c == null ? '-' : '// $c'}';
   }
 
   /// The notes sorted by start, stable (a chord keeps its written order).
@@ -739,6 +913,7 @@ class PatternDoc {
       if (a.ratchet != 1) 'ratchet ${a.ratchet}',
       if (a.prob != 1) 'prob ${formatNumber(a.prob)}',
       if (a.slide) 'slide',
+      if (!a.expr.isEmpty) a.expr.format(),
     ];
     final comment = g.map((n) => n.trailingComment).firstWhere((c) => c != null, orElse: () => null);
     final b = StringBuffer(' ' * _src.indent);
@@ -968,6 +1143,17 @@ class PatternDoc {
     });
   }
 
+  /// Sets each selected note's velocity, or chance, from [f] of the note (the Curve tool's shapes). Returns this
+  /// same doc when no value changes, so a gesture that changes nothing makes no undo step.
+  PatternDoc shape(Set<int> sel, double Function(PatternNote n) f, {bool chance = false}) {
+    double v(PatternNote n) => _round3(f(n).clamp(0, 1).toDouble());
+    if (_selected(sel).every((n) => v(n) == (chance ? n.prob : n.vel))) return this;
+    return _map(sel, (n) => chance ? n.copyWith(prob: v(n)) : n.copyWith(vel: v(n)));
+  }
+
+  /// Sets the selected notes' expression (bend, vibrato, pressure, timbre).
+  PatternDoc setExpression(Set<int> sel, NoteExpression e) => _map(sel, (n) => n.copyWith(expr: e));
+
   PatternDoc setVelocity(Set<int> sel, double vel) =>
       _map(sel, (n) => n.copyWith(vel: _round3(vel.clamp(0, 1).toDouble())));
 
@@ -1088,4 +1274,142 @@ class PatternDoc {
     }
     return best?.id;
   }
+
+  // ---------- generators (roll.gen.*) ----------
+
+  /// Adds notes, each clamped like [insert]; stops at the note limit. Returns the new notes' ids.
+  ({PatternDoc doc, Set<int> ids}) _addAll(Iterable<({Steps at, double pitch, Steps len, double vel})> add,
+      {Set<int> remove = const {}}) {
+    final out = [
+      for (final n in notes)
+        if (!remove.contains(n.id)) n
+    ];
+    final ids = <int>{};
+    var id = _nextId;
+    for (final a in add) {
+      if (out.length >= kPatternMaxNotes || a.at >= Steps(kPatternMaxSteps)) continue;
+      out.add(PatternNote(
+        id: id,
+        at: a.at.clamp(Steps.zero, Steps(kPatternMaxSteps)),
+        len: a.len.clamp(kMinNoteLength, Steps(kPatternMaxSteps)),
+        pitch: a.pitch.clamp(0, 127).toDouble(),
+        vel: _round3(a.vel.clamp(0, 1).toDouble()),
+      ));
+      ids.add(id++);
+    }
+    return (doc: _withNotes(out, id), ids: ids);
+  }
+
+  /// A Euclidean rhythm: [pulses] hits spread as evenly as they go over [steps] cells of [cell] each, from [at],
+  /// turned [rotate] cells later. Each hit is a note of one cell at [pitch].
+  ({PatternDoc doc, Set<int> ids}) euclid(
+      {required Steps at, required int pulses, required int steps, required Steps cell, required double pitch,
+      int rotate = 0, double vel = 1}) {
+    final n = steps.clamp(1, 64), k = pulses.clamp(0, n);
+    return _addAll([
+      for (var i = 0; i < n; i++)
+        if (((i - rotate) % n * k) % n < k) (at: at + cell.times(i), pitch: pitch, len: cell, vel: vel)
+    ]);
+  }
+
+  /// Random notes in [key] (every pitch when null): each [cell] from [at] over [span] gets a note with chance
+  /// [density], at a pitch from [lo] to [hi]. The same [seed] gives the same notes.
+  ({PatternDoc doc, Set<int> ids}) randomInKey(
+      {required Steps at, required Steps span, required Steps cell, required int lo, required int hi,
+      required double density, ({int root, List<int> scale})? key, int seed = 1}) {
+    final r = math.Random(seed);
+    final pitches = [
+      for (var p = math.min(lo, hi); p <= math.max(lo, hi); p++)
+        if (key == null || key.scale.contains((p - key.root) % 12)) p
+    ];
+    if (pitches.isEmpty || cell <= Steps.zero) return (doc: this, ids: <int>{});
+    final cells = (span / cell).floor().clamp(0, kPatternMaxNotes);
+    return _addAll([
+      for (var i = 0; i < cells; i++)
+        if (r.nextDouble() < density)
+          (at: at + cell.times(i), pitch: pitches[r.nextInt(pitches.length)].toDouble(), len: cell, vel: 0.6 + 0.4 * r.nextDouble())
+    ]);
+  }
+
+  /// Turns each chord in the selection (notes starting together) into a run of its notes, one every [rate], over the
+  /// chord's length: up, down, or up then down. Single notes stay.
+  ({PatternDoc doc, Set<int> ids}) arpeggiate(Set<int> sel, Steps rate, {String order = 'up'}) {
+    final chords = <Steps, List<PatternNote>>{};
+    for (final n in _selected(sel)) {
+      (chords[n.at] ??= []).add(n);
+    }
+    final remove = <int>{};
+    final add = <({Steps at, double pitch, Steps len, double vel})>[];
+    if (rate <= Steps.zero) return (doc: this, ids: <int>{});
+    for (final c in chords.values) {
+      if (c.length < 2) continue;
+      c.sort((a, b) => a.pitch.compareTo(b.pitch));
+      final run = switch (order) {
+        'down' => c.reversed.toList(),
+        'updown' => [...c, ...c.reversed.skip(1).take(c.length - 2)],
+        _ => c,
+      };
+      final len = c.map((n) => n.len).reduce(Steps.max), start = c.first.at;
+      final count = math.max(1, (len / rate).ceil()).clamp(1, kPatternMaxNotes);
+      for (var i = 0; i < count; i++) {
+        final t = start + rate.times(i), n = run[i % run.length];
+        add.add((at: t, pitch: n.pitch, len: Steps.min(rate, start + len - t), vel: n.vel));
+      }
+      remove.addAll(c.map((n) => n.id));
+    }
+    return _addAll(add, remove: remove);
+  }
+
+  /// Nudges each selected note's start by up to [timing] steps either way (to 1/96 of a step, never before 0) and
+  /// its velocity by up to [velocity]. The same [seed] gives the same result.
+  PatternDoc humanize(Set<int> sel, {double timing = 0.1, double velocity = 0.1, int seed = 1}) {
+    final r = math.Random(seed);
+    return _map(sel, (n) {
+      final dt = Steps.fromDouble((r.nextDouble() * 2 - 1) * timing, maxDenominator: 96);
+      final dv = (r.nextDouble() * 2 - 1) * velocity;
+      return n.copyWith(
+          at: (n.at + dt).clamp(Steps.zero, Steps(kPatternMaxSteps)), vel: _round3((n.vel + dv).clamp(0.05, 1).toDouble()));
+    });
+  }
+
+  /// Stacks a chord on each selected note: the 3rd and 5th above it in [key] (and the 7th with [seventh]), or a
+  /// major triad when there is no key. A pitch past 127 or one already sounding at that start is left out. Returns
+  /// the added notes' ids.
+  ({PatternDoc doc, Set<int> ids}) chordStamp(Set<int> sel, {({int root, List<int> scale})? key, bool seventh = false}) {
+    double above(double p, int degrees) {
+      if (key == null) return p + const [0, 0, 4, 0, 7, 0, 11][degrees];
+      final scale = key.scale;
+      // Walk up the scale from the note (a note outside the key starts from the scale note below it).
+      var q = p.round();
+      var walked = 0;
+      while (walked < degrees && q < 128) {
+        q++;
+        if (scale.contains((q - key.root) % 12)) walked++;
+      }
+      return q.toDouble();
+    }
+
+    final taken = {for (final n in notes) (n.at, n.pitch)};
+    final add = <({Steps at, double pitch, Steps len, double vel})>[];
+    for (final n in _selected(sel)) {
+      for (final d in [2, 4, if (seventh) 6]) {
+        final p = above(n.pitch, d);
+        if (p > 127 || !taken.add((n.at, p))) continue;
+        add.add((at: n.at, pitch: p, len: n.len, vel: n.vel));
+      }
+    }
+    return _addAll(add);
+  }
+
+  /// Mirrors the selection in time inside its own span, so the last note comes first.
+  PatternDoc reverse(Set<int> sel) {
+    final s = _selected(sel);
+    if (s.isEmpty) return this;
+    final start = s.map((n) => n.at).reduce(Steps.min), end = s.map((n) => n.end).reduce(Steps.max);
+    return _map(sel, (n) => n.copyWith(at: start + end - n.end));
+  }
+
+  /// Mirrors the selection's pitches around [center].
+  PatternDoc invertPitch(Set<int> sel, double center) =>
+      _map(sel, (n) => n.copyWith(pitch: (2 * center - n.pitch).clamp(0, 127).toDouble()));
 }

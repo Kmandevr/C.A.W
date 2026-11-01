@@ -198,6 +198,8 @@ bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult&
             ctx.vars[static_cast<int>(Var::Vel)] = ones;
             ctx.vars[static_cast<int>(Var::Rel)] = zero;
             ctx.vars[static_cast<int>(Var::Bend)] = zero;
+            ctx.vars[static_cast<int>(Var::Press)] = ones;
+            ctx.vars[static_cast<int>(Var::Timbre)] = zero;
             const double* y = inst.process(ctx);
             for (int i = 0; i < kBlock; ++i) table[static_cast<size_t>(f) * kWavetableFrame + b + i] = y[i];
         }

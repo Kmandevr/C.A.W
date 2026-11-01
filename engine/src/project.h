@@ -7,6 +7,8 @@
 #include <string_view>
 #include <vector>
 
+#include "dependency.h"
+
 namespace caw {
 
 constexpr int kMaxLayers = 64;
@@ -52,11 +54,12 @@ struct ProjectSpec {
     uint32_t seed = 0;
     double master = 0.7;
     bool seamCrossfade = true;
-    int voices = 8;  // voices per pattern layer (1..8); light mode uses 4
+    int voices = 32;  // the most voices any pattern layer may use (1..32); light mode sends 4
     int swapMode = 0;  // when new code is heard while playing: 0 at once, 1 at the next beat, 2 at the next bar
     std::map<std::string, double> globals;  // project-wide control values by name
     int keyRoot = 9;                        // 0 = C … 11 = B; scale() and chord() default to this key
     int keyScale = 1;                       // a scale.* id (1 = minor)
+    std::vector<DependencyRef> dependencies;
     std::vector<ModuleSpec> modules;
     std::vector<LayerSpec> layers;
     std::vector<std::string> auditionChain;  // the Builder's preview, if any

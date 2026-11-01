@@ -41,6 +41,12 @@ class Rig {
 }
 
 void main() {
+  test('T runs the global tap-tempo action from every area', () {
+    final r = Rig(area: Area.arranger);
+    expect(r.key('T').handled, isTrue);
+    expect(r.calls, ['transport.tap*1']);
+  });
+
   test('a key runs its action in the current area', () {
     final r = Rig();
     expect(r.key('W').handled, isTrue);
@@ -64,6 +70,23 @@ void main() {
     r.vim.area = Area.arranger;
     r.keys('4 ]');
     expect(r.calls.last, 'arranger.layer.longer*4');
+  });
+
+  test('touch quick-action toolbars have defaults and persist custom order', () {
+    final reg = ActionRegistry.standard();
+    final keymap = Keymap.defaults(reg);
+    expect(keymap.toolbars[Area.builder], contains(ActionRef.action('transport.playstop')));
+    expect(keymap.toolbars[Area.arranger], contains(ActionRef.action('project.save')));
+    keymap.toolbars[Area.builder] = [
+      ActionRef.action('project.save'),
+      ActionRef.action('transport.playstop'),
+    ];
+    final saved = keymap.serialize(base: Keymap.defaults(reg));
+    final restored = Keymap.parse(saved, registry: reg).mergedOver(Keymap.defaults(reg));
+    expect(restored.toolbars[Area.builder], [
+      ActionRef.action('project.save'),
+      ActionRef.action('transport.playstop'),
+    ]);
   });
 
   test('multi-key sequences show hints and run on the last key', () {

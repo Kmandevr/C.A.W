@@ -5,12 +5,19 @@ namespace: util
 name: Utilities
 summary: Mixing helpers: sidechain ducking, gating and tremolo
 ---
-/// Sidechain ducking: turns x down while an envelope is high (e.g. kick.env).
+/// Sidechain ducking: turns x down while an envelope is high (such as kick.env).
 /// x: the sound to duck
 /// env: 0..1, usually another module's export such as kick.env
 /// amount: 0 = no ducking, 1 = silent at the peak
 /// example: util.duck(saw(55) * 0.5, ad(step % 4 == 0, 0.001, 0.3), 0.8)
 fn duck(x, env, amount) = x * (1 - clamp(env, 0, 1) * amount)
+
+/// Add a modulation signal to a base parameter value.
+/// base: the unmodulated parameter or global value
+/// source: a bipolar or unipolar signal, such as an LFO or another module's export
+/// amount: signed modulation depth; a negative value reverses polarity
+/// example: saw(util.mod(900, lfo.sine(4), 300))
+fn mod(base, source, amount) = base + source * amount
 
 /// Rhythmic gate: lets x through only while open is above 0.
 /// x: the sound

@@ -7,12 +7,12 @@ updated: 2026-10-31
 
 # Actions, keys and macros
 
-**[Fact]** Built (2026-10-28): the action catalogue, keymaps, macros and Vim core (`app/lib/actions/`) and the key router that runs them in the app ([app](app.md)). Still a draft for the owner to change; editing keys in the action list and custom toolbars aren't built yet. The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
+**[Fact]** The action catalogue, keymaps, macros, Vim core, configurable piano-roll toolbar and phone Quick Actions strips are implemented (`app/lib/actions/`, `app/lib/ui/key_router.dart`). The owner can still revise the defaults and open points below. The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
 
 ## How it works
 
 - **Everything is an action.** Each command the app can do has an id (`roll.notes.up`), a name and a description. Buttons, menus, keys and macros all run actions, so anything you can tap, you can bind. Reaper works the same way ([Sound on Sound](https://www.soundonsound.com/techniques/automate-anything-reapers-custom-actions)).
-- **Areas, like Reaper's sections:** Global, Builder, Pattern editor (roll and grid), Arranger and Exporter. The new Mixer, Engine Lab, Automation, Files and Plugin Builder screens use global actions for workspace navigation. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
+- **Areas, like Reaper's sections:** Global, Sounds (Builder), Tracks (Arranger), Pattern editor (roll and grid), Mixer, Engine Lab, Automation, Export, Files and Plugin Builder. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
 - **The action list** (`?`, or Help → Actions):
   - search every action by name, with its keys
   - add or remove keys, with a warning when a key is already taken in that area
@@ -45,7 +45,7 @@ macro "Run of four"
   roll.notes.up
 ```
 
-- **Phone without a keyboard:** the default toolbar holds the most-used actions, and you swap in your own.
+- **Phone without a keyboard:** the Quick Actions strip is available in Sounds, Tracks and Export. The tune control lets you add actions or macros, remove them, reorder them and restore defaults. The piano roll keeps its own dedicated toolbar. Buttons dispatch through the action registry; they do not simulate key presses. Vim remains a physical-keyboard feature.
 
 ## Vim-style control
 
@@ -82,7 +82,7 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
-| Go to Builder / Arranger / Exporter | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built) |
+| Go to Sounds / Tracks / Export | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built) |
 | Go to Mixer / Engine Lab / Automation | Ctrl+4 / Ctrl+5 / Ctrl+6 |
 | Go to Files / Plugin Builder | Ctrl+7 / Ctrl+8 |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |
@@ -207,5 +207,6 @@ The piano roll's default toolbar (owner, 2026-10-28) holds:
 - the tools: Draw, Select, Curve and Erase
 - undo and redo
 - grid size and the snap magnet
+- triplets, adaptive grid and the notes/text view switch
 
-You can add your own actions and macros or remove any of these.
+You can add your own actions and macros, reorder or remove them, and restore the defaults. The Curve tool also shapes the velocity and chance lanes ([app](app.md)).

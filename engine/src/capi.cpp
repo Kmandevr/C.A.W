@@ -70,6 +70,7 @@ CawEngine* caw_engine_create(int32_t sample_rate) {
 void caw_engine_destroy(CawEngine* e) {
     if (!e) return;
     caw_audio_stop(e);
+    e->waitAsync();
     delete e;
 }
 

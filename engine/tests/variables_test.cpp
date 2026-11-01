@@ -6,6 +6,7 @@
 #include "compile.h"
 #include "detmath.h"
 #include "engine.h"
+#include "render.h"
 #include "test.h"
 #include "vm.h"
 
@@ -167,6 +168,80 @@ TEST(exports_within_a_chain_and_missing_sources) {
     CHECK_NEAR(out[199], 0.5 * std::cos(kPi / 4.0), 1e-6);
 }
 
+TEST(cross_module_modulation_reaches_a_parameter_in_live_and_offline_render) {
+    ProjectSpec p;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"k", std::string(kFloat) + "export let env = 0.5\n0", {}, "Kick"});
+    p.modules.push_back({"g", std::string(kFloat) +
+        "param level = 0.5 in 0..1\nmod level = util.mod(level, kick.env, 0.4)\nlevel", {}, "Bass"});
+    LayerSpec kick, bass;
+    kick.id = "kick";
+    kick.chain = {"k"};
+    kick.volume = 1.0;
+    bass.id = "bass";
+    bass.chain = {"g"};
+    bass.volume = 1.0;
+    p.layers = {kick, bass};
+
+    Engine e(48000);
+    const std::string result = e.setProject(p);
+    CHECK(!has(result, "nothing exports"));
+    e.play();
+    const std::vector<float> live = run(e, 256);
+    RenderResult rendered;
+    ExportOptions options;
+    options.kind = ExportKind::Free;
+    options.seconds = 0.1;
+    CHECK(renderExport(p, options, rendered));
+    // Offline rendering uses the normal master path, matching live playback with master bypass disabled.
+    CHECK_NEAR(live[200], rendered.samples[static_cast<size_t>(200) * 2], 1e-6);
+    ProjectSpec unmodulated = p;
+    unmodulated.modules[1].source = std::string(kFloat) + "param level = 0.5 in 0..1\nlevel";
+    RenderResult baseline;
+    CHECK(renderExport(unmodulated, options, baseline));
+    CHECK(rendered.samples[static_cast<size_t>(200) * 2] >
+          baseline.samples[static_cast<size_t>(200) * 2] * 1.3f);
+}
+
+TEST(sidechain_import_ducks_in_live_and_offline_render_deterministically) {
+    ProjectSpec p;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"k", std::string(kFloat) + "export let env = 0.5\n0", {}, "Kick"});
+    p.modules.push_back({"g", std::string(kFloat) + "1", {}, "Bass"});
+    p.modules.push_back({"duck", "---\nmode: float\nkind: effect\n---\nutil.duck(in, kick.env, 0.8)", {}, "Duck"});
+    LayerSpec kick, bass;
+    kick.id = "kick";
+    kick.chain = {"k"};
+    kick.volume = 1.0;
+    bass.id = "bass";
+    bass.chain = {"g", "duck"};
+    bass.volume = 1.0;
+    p.layers = {kick, bass};
+
+    Engine e(48000);
+    const std::string result = e.setProject(p);
+    CHECK(!has(result, "nothing exports"));
+    e.play();
+    const std::vector<float> live = run(e, 256);
+    RenderResult first, second;
+    ExportOptions options;
+    options.kind = ExportKind::Free;
+    options.seconds = 0.1;
+    CHECK(renderExport(p, options, first));
+    CHECK(renderExport(p, options, second));
+    CHECK(first.samples == second.samples);
+    CHECK(first.frames >= 256);
+    CHECK_NEAR(live[200], first.samples[static_cast<size_t>(200) * 2], 1e-6);
+    ProjectSpec withoutSidechain = p;
+    withoutSidechain.layers[1].chain = {"g"};
+    RenderResult baseline;
+    CHECK(renderExport(withoutSidechain, options, baseline));
+    CHECK(first.samples[static_cast<size_t>(200) * 2] <
+          baseline.samples[static_cast<size_t>(200) * 2] * 0.7f);
+}
+
 TEST(export_cycles_still_play) {
     ProjectSpec p;
     p.master = 1.0;
@@ -181,7 +256,8 @@ TEST(export_cycles_still_play) {
     }
     Engine e(48000);
     e.setMasterBypass(true);
-    e.setProject(p);
+    const std::string result = e.setProject(p);
+    CHECK(has(result, "signal dependency cycle"));
     e.play();
     std::vector<float> out = run(e, 512);
     // One side reads the other a block late, so after the first block both values are there.

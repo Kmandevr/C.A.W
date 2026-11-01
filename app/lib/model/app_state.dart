@@ -5,6 +5,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../engine/engine.dart';
+import '../engine/execution.dart';
+import '../platform/resource_signals.dart';
 import 'poller.dart';
 import 'project.dart';
 import 'pattern_doc.dart';
@@ -63,6 +65,11 @@ class AppState extends ChangeNotifier {
   final Settings settings;
 
   Engine? engine;
+  EngineHardwareProfile? hardwareProfile;
+  EngineExecutionPlan? auditionPlan;
+  StreamSubscription<EnginePressure>? _resourcePressureSubscription;
+  bool _disposed = false;
+  final Map<String, String> _lastGoodRunSources = {};
   String? engineError;
   String? audioError;
   ProjectStorage? _storage;
@@ -75,6 +82,10 @@ class AppState extends ChangeNotifier {
   final List<_LibrarySnapshot> _libraryRedo = [];
 
   bool get canUndoLibrary => _libraryUndo.isNotEmpty;
+
+  // Shared tap history keeps the toolbar and keyboard action on the same tempo measurement.
+  final List<DateTime> _tempoTaps = [];
+  int get tempoTapCount => _tempoTaps.length;
   bool get canRedoLibrary => _libraryRedo.isNotEmpty;
 
   void _recordLibraryUndo() {
@@ -155,8 +166,15 @@ class AppState extends ChangeNotifier {
   });
 
   Future<void> init() async {
+    _resourcePressureSubscription = ResourceSignals.changes.listen(
+      (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
+      onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
+    );
+    EngineExecutionPolicy.updateRuntimeSignals(pressure: await ResourceSignals.read());
     try {
       engine = Engine.create();
+      hardwareProfile = EngineExecutionPolicy.hardwareProfile;
+      auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
       templates = Engine.templates();
       audioError = engine!.startAudio();
     } catch (e) {
@@ -191,7 +209,11 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     settings.removeListener(_settingsChanged);
+    final pressureSubscription = _resourcePressureSubscription;
+    _resourcePressureSubscription = null;
+    if (pressureSubscription != null) unawaited(pressureSubscription.cancel());
     _poller.dispose();
     _liveTimer?.cancel();
     _saveTimer?.cancel();
@@ -211,6 +233,9 @@ class AppState extends ChangeNotifier {
     if (e == null) return false;
     final before = meters;
     meters = e.meters();
+    if (before.playing != meters.playing) {
+      EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
+    }
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
@@ -317,10 +342,11 @@ class AppState extends ChangeNotifier {
         audition: pv?.chain,
         auditionPattern: pv?.pattern,
         auditionOnly: previewOnly,
-        voices: settings.lightMode ? 4 : 8,
+        voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
         swap: settings.swapTiming.name);
     try {
       info = await e.setProject(json);
+      engineError = null;
     } catch (err) {
       engineError = 'Engine error: $err';
     }
@@ -373,6 +399,28 @@ class AppState extends ChangeNotifier {
   }
 
   // ---------- transport ----------
+
+  /// Records a tempo tap; pauses over two seconds restart the measurement.
+  /// [at] is injectable for deterministic tests.
+  void tapTempo({DateTime? at}) {
+    final now = at ?? DateTime.now();
+    if (_tempoTaps.isNotEmpty && now.difference(_tempoTaps.last) > const Duration(seconds: 2)) {
+      _tempoTaps.clear();
+    }
+    if (_tempoTaps.isNotEmpty && !now.isAfter(_tempoTaps.last)) return;
+    _tempoTaps.add(now);
+    if (_tempoTaps.length > 5) _tempoTaps.removeAt(0);
+    if (_tempoTaps.length >= 2) {
+      final elapsed = now.difference(_tempoTaps.first).inMicroseconds;
+      final intervals = _tempoTaps.length - 1;
+      if (elapsed > 0) {
+        final bpm = (60000000.0 * intervals / elapsed).clamp(20.0, 400.0);
+        editProject((p) => p.bpm = double.parse(bpm.toStringAsFixed(1)));
+        return;
+      }
+    }
+    notifyListeners();
+  }
 
   void togglePlay() {
     final e = engine;
@@ -445,29 +493,40 @@ class AppState extends ChangeNotifier {
   void _scheduleLive(String id) {
     _liveTimer?.cancel();
     if (!settings.liveUpdate || engine == null) return;
-    _liveTimer = Timer(Duration(milliseconds: settings.liveDelayMs), () {
+    _liveTimer = Timer(Duration(milliseconds: settings.liveDelayMs), () async {
       final m = project.module(id);
-      if (m == null || !m.edited || (settings.lightMode && meters.playing)) return;
-      try {
-        if (!Engine.check(m.source).ok) return;
-      } catch (_) {
-        return;
-      }
-      run(id);
+      if (_disposed || m == null || !m.edited || (settings.lightMode && meters.playing)) return;
+      // The project compile is the check; avoid compiling the same source twice.
+      await run(id);
     });
   }
 
-  /// Run: the editor's code goes to the engine and hot-swaps. If it fails, the last good code keeps playing.
+  /// Run: hot-swap valid code; on failure keep the last good engine source and expose the module error.
   Future<ModuleInfo?> run(String id) async {
     final m = project.module(id);
-    if (m == null) return null;
-    m.runSource = m.source;
-    final name = headerValue(m.source, 'name');
-    if (name != null && name.isNotEmpty) m.name = name;
-    _save();
+    if (m == null || engine == null) return null;
+    final source = m.source;
+    final key = '${project.id}:$id';
+    final lastGoodSource = _lastGoodRunSources[key] ?? m.runSource;
+    m.runSource = source;
     _syncTimer?.cancel();
     await _syncNow();
-    return info[id];
+
+    final result = info[id];
+    final current = project.module(id);
+    if (engineError == null && result?.ok == true) {
+      _lastGoodRunSources[key] = source;
+      if (current != null && current.source == source) {
+        final name = headerValue(source, 'name');
+        if (name != null && name.isNotEmpty) current.name = name;
+      }
+    } else if (current != null && current.runSource == source) {
+      // Keep invalid editor text pending while the engine continues with the previous good source.
+      current.runSource = lastGoodSource;
+    }
+    _save();
+    notifyListeners();
+    return result;
   }
 
   String _freeModuleName(String base) {
@@ -741,7 +800,8 @@ class AppState extends ChangeNotifier {
   bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
   bool isLibrary(String moduleId) => kindOf(moduleId) == 'library';
   bool isPattern(String moduleId) => kindOf(moduleId) == 'pattern';
-  bool isGenerator(String moduleId) => kindOf(moduleId) == 'generator';
+  /// A sound a track can play: a generator or a synth patch played as one instrument.
+  bool isGenerator(String moduleId) => const {'generator', 'synth'}.contains(kindOf(moduleId));
 
   // ---------- layers (Arranger) ----------
 
@@ -901,8 +961,9 @@ class AppState extends ChangeNotifier {
   }
 
 
-  void addLayer() {
-    final gen = project.modules.where((m) => isGenerator(m.id)).firstOrNull;
+  /// Adds a track using [soundId], the first available sound, or no sound when [empty] is true.
+  void addLayer({String? soundId, bool empty = false}) {
+    final gen = empty ? null : project.module(soundId) ?? project.modules.where((m) => isGenerator(m.id)).firstOrNull;
     project.layers.add(LayerDoc(
       id: newId('l'),
       name: gen?.name ?? 'Layer ${project.layers.length + 1}',
@@ -1122,6 +1183,7 @@ class AppState extends ChangeNotifier {
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
     if (saveCurrent) await flush();
     engine?.stop();
+    _lastGoodRunSources.clear();
     _libraryUndo.clear();
     _libraryRedo.clear();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
