@@ -228,7 +228,7 @@ class Template {
   final String file, source;
 }
 
-enum ExportKind { loop, free, oneShot, wavetable }
+enum ExportKind { loop, free, oneShot, wavetable, midi }
 
 class RenderRequest {
   const RenderRequest({
