@@ -11,7 +11,7 @@ updated: 2026-11-01
 - Added a "Search all folders" scope chip when a query is active; matching modules show their folder path so results remain navigable and unambiguous.
 - Added module rename and confirmed delete actions. Deletion uses the existing AppState operation, which removes track references and dependent clips/effects consistently; the confirmation explicitly warns that this action is not undoable.
 - Added a widget test covering cross-folder search, path display, rename and confirmed deletion.
-- Initial exact-head CI caught one off-screen test tap and incorrect handoff frontmatter ordering; both are corrected for the next exact-head run.
+- Initial exact-head CI caught one off-screen test tap and incorrect handoff frontmatter ordering. The test now exercises the Files search controls at 360 dp and explicitly scrolls to interactive controls.
 
 # Task 1 UI implementation handoff
 

@@ -447,6 +447,10 @@ void main() {
 
 
   testWidgets('Files can search across folders and rename or delete a module safely', (tester) async {
+    tester.view.physicalSize = const Size(360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final module = ModuleDoc(id: 'nested-module', name: 'Old bass', source: 'sine(110)',
       folderPath: 'Synths/Bass', tags: ['low']);
     state.project = ProjectDoc(id: 'files-search', name: 'Files search',
@@ -459,12 +463,16 @@ void main() {
     await tester.enterText(find.byType(TextField).first, 'bass');
     await tester.pump();
     expect(find.text('No modules match this search.'), findsOneWidget);
+    await tester.ensureVisible(find.text('Search all folders'));
     await tester.tap(find.text('Search all folders'));
     await tester.pump();
+    await tester.ensureVisible(find.text('Old bass'));
     expect(find.text('Old bass'), findsOneWidget);
     expect(find.text('Synths/Bass'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Module actions'));
+    final moduleActions = find.byTooltip('Module actions');
+    await tester.ensureVisible(moduleActions);
+    await tester.tap(moduleActions);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Rename module'));
     await tester.pumpAndSettle();
@@ -473,7 +481,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(module.name, 'Sub bass');
 
-    await tester.tap(find.byTooltip('Module actions'));
+    await tester.ensureVisible(moduleActions);
+    await tester.tap(moduleActions);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete module'));
     await tester.pumpAndSettle();
