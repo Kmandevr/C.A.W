@@ -127,6 +127,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 
 ## UI update isolation
 - Mixer master gain now uses a dedicated native command (`caw_engine_set_master`) with a 5 ms audio-thread ramp. Dragging the master slider no longer serializes and recompiles the entire project; the UI updates through the scoped `values` notifier. This removes project-compilation work from the master-gain gesture, but device-level latency and CPU savings have not yet been benchmarked.
+- MIDI file generation runs in a worker isolate before the system save picker opens; the UI remains available during native MIDI serialization.
 
 
 - The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
