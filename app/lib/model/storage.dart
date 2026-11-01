@@ -69,23 +69,7 @@ class ProjectStorage {
   }
 
   String _validatedProjectId(String id) {
-    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}
-    final f = _file(id);
-    if (await f.exists()) await f.delete();
-  }
-
-  Future<String?> lastOpened() async {
-    try {
-      final j = jsonDecode(await _settings.readAsString()) as Map<String, dynamic>;
-      return j['last'] as String?;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> setLastOpened(String id) => _settings.writeAsString(jsonEncode({'last': id}));
-}
-).hasMatch(id)) {
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id)) {
       throw ArgumentError.value(id, 'projectId', 'Invalid project identifier.');
     }
     return id;
@@ -143,23 +127,7 @@ class ProjectStorage {
   }
 
   Future<ProjectDoc?> loadRestorePoint(String projectId, String restorePointId) async {
-    if (!RegExp(r'^rp_[0-9]{1,20}_[0-9]{1,8}
-    final f = _file(id);
-    if (await f.exists()) await f.delete();
-  }
-
-  Future<String?> lastOpened() async {
-    try {
-      final j = jsonDecode(await _settings.readAsString()) as Map<String, dynamic>;
-      return j['last'] as String?;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> setLastOpened(String id) => _settings.writeAsString(jsonEncode({'last': id}));
-}
-).hasMatch(restorePointId)) return null;
+    if (!RegExp(r'^rp_[0-9]{1,20}_[0-9]{1,8}$').hasMatch(restorePointId)) return null;
     try {
       final file = File(
         '${_restoreDirectory(projectId).path}${Platform.pathSeparator}$restorePointId.json',
@@ -177,20 +145,7 @@ class ProjectStorage {
   Future<void> delete(String id) async {
     final f = _file(id);
     if (await f.exists()) await f.delete();
-    if (RegExp(r'^[A-Za-z0-9_-]{1,128}
-
-  Future<String?> lastOpened() async {
-    try {
-      final j = jsonDecode(await _settings.readAsString()) as Map<String, dynamic>;
-      return j['last'] as String?;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> setLastOpened(String id) => _settings.writeAsString(jsonEncode({'last': id}));
-}
-).hasMatch(id)) {
+    if (RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id)) {
       final history = _restoreDirectory(id);
       if (await history.exists()) await history.delete(recursive: true);
     }
