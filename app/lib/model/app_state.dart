@@ -406,8 +406,9 @@ class AppState extends ChangeNotifier {
   }
 
   String _normalizeLibraryPath(String path) {
+    if (path.length > 512) throw ArgumentError.value(path, 'path', 'Folder path is too long.');
     final parts = path.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).toList();
-    if (parts.any((part) => part == '.' || part == '..' || part.contains(String.fromCharCode(92)))) {
+    if (parts.length > 32 || parts.any((part) => part == '.' || part == '..' || part.length > 64 || part.contains(String.fromCharCode(92)))) {
       throw ArgumentError.value(path, 'path', 'Folder paths cannot contain traversal segments.');
     }
     return parts.join('/');
@@ -508,7 +509,7 @@ class AppState extends ChangeNotifier {
     final seen = <String>{};
     module.tags = [
       for (final raw in tags)
-        if (raw.trim().isNotEmpty && seen.add(raw.trim().toLowerCase())) raw.trim(),
+        if (raw.trim().isNotEmpty && raw.trim().length <= 48 && seen.add(raw.trim().toLowerCase())) raw.trim(),
     ].take(16).toList();
     _changed(engine: false);
   }
