@@ -1,6 +1,6 @@
 ---
 title: App
-summary: The built Flutter app: its three areas, how it talks to the engine, where projects are saved, and how CI builds and signs it.
+summary: The built Flutter app: Builder, Arranger, Mixer, Engine Lab, Automation and Exporter, engine integration, project storage and CI.
 covers: [app/]
 updated: 2026-10-31
 ---
@@ -54,11 +54,25 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - empty-lane drags make time selections; selected clips can be split, snapped, moved, resized or source-offset shifted with Alt-drag
   - Shift-tap selects companion clips; their notes appear as references in the existing piano roll. Explicit multi-edit mode mirrors note edits to selected independent sources while preserving local note IDs; clips sharing a pattern source stay linked
   - a banner appears when the engine muted layers to keep audio clean, with Unmute
+- **Mixer / Editor** (`lib/ui/mixer_screen.dart`):
+  - a dedicated channel-strip workspace with shared track volume, pan, mute and solo controls
+  - master output level, live per-channel peak bars and an inspector for the selected compiled module's real engine parameters
+  - parameter edits use the same module parameter map and engine calls as Builder; the Mixer does not own a separate state model
+  - the current engine does not yet expose sends, arbitrary buses, stereo width, correlation, loudness, phase or master effect chains through this screen
+- **Engine Lab** (`lib/ui/engine_lab_screen.dart`):
+  - live CPU, left/right peak, playback and overload telemetry
+  - track signal-chain inspection from the project's generator/effect assignments, with direct navigation to the selected module in Builder
+  - compiler summaries, errors, warnings, imports and exports from the engine's module information
+  - it is an inspector for existing engine capabilities, not yet an editable universal processing graph or sample/buffer debugger
+- **Automation** (`lib/ui/automation_screen.dart`):
+  - edits the existing track volume and pan lanes stored on each `LayerDoc`
+  - adds/removes lanes and edits point positions and values, with a curve preview
+  - the same serialized points are consumed by the Arranger and native engine; plugin parameter, modulation-link and processing-behavior automation remain engine/API dependencies
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - the four exports from [engine](engine.md#exports), at 44.1 or 48 kHz, 24-bit or 32-bit float
   - progress and cancel while it renders
   - then the system file picker saves the file
-- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail, and the Builder shows code and params side by side. Ctrl+1/2/3 switch areas.
+- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a bottom navigation bar that shows only the selected label. Builder, Arranger, Mixer, Engine Lab, Automation and Exporter share the same AppState. Ctrl+1/2/3 remain the current registered view shortcuts.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
 - **Library and pattern modules** make no sound of their own: layers, the Exporter and Solo preview don't use them as generators.
 
