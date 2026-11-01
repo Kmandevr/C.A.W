@@ -12,8 +12,14 @@ const _c = Area.code;
 const Map<Area, List<String>> standardToolbars = {
   Area.pattern: [
     'roll.tool.draw', 'roll.tool.select', 'roll.tool.curve', 'roll.tool.erase', //
-    'edit.undo', 'edit.redo', 'roll.grid.menu', 'roll.grid.snap',
+    'edit.undo', 'edit.redo', 'roll.grid.menu', 'roll.grid.snap', //
+    'roll.grid.triplets', 'roll.grid.adaptive', 'roll.view.switch',
   ],
+  // Phone quick-action strips use the same editable, persistent toolbar data as the roll.
+  Area.builder: ['transport.playstop', 'project.save', 'view.actions'],
+  Area.code: ['transport.playstop', 'project.save', 'view.actions'],
+  Area.arranger: ['transport.playstop', 'project.save', 'view.actions'],
+  Area.exporter: ['transport.playstop', 'project.save', 'view.actions'],
 };
 
 /// Every action. Keys marked † in docs/actions.md are the owner's; where they collide with a proposed key in the same
@@ -26,9 +32,9 @@ const List<ActionDef> standardActions = [
   ActionDef('edit.redo', 'Redo', _g, defaultKeys: ['Ctrl+Shift+Z', 'Ctrl+Y']),
   ActionDef('project.save', 'Save now', _g, description: 'Projects also autosave', defaultKeys: ['Ctrl+S']),
   ActionDef('view.actions', 'Action list', _g, description: 'Search every action and its keys', defaultKeys: ['?']),
-  ActionDef('view.builder', 'Go to Builder', _g, defaultKeys: ['Ctrl+1']),
-  ActionDef('view.arranger', 'Go to Arranger', _g, defaultKeys: ['Ctrl+2']),
-  ActionDef('view.exporter', 'Go to Exporter', _g, defaultKeys: ['Ctrl+3']),
+  ActionDef('view.builder', 'Go to Sounds', _g, defaultKeys: ['Ctrl+1']),
+  ActionDef('view.arranger', 'Go to Tracks', _g, defaultKeys: ['Ctrl+2']),
+  ActionDef('view.exporter', 'Go to Export', _g, defaultKeys: ['Ctrl+3']),
   ActionDef('view.mixer', 'Go to Mixer', _g, defaultKeys: ['Ctrl+4']),
   ActionDef('view.engineLab', 'Go to Engine Lab', _g, defaultKeys: ['Ctrl+5']),
   ActionDef('view.automation', 'Go to Automation', _g, defaultKeys: ['Ctrl+6']),
