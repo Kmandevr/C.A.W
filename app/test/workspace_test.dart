@@ -281,6 +281,29 @@ void main() {
     expect(find.text('Export MIDI'), findsOneWidget);
   });
 
+  testWidgets('Exporter applies saved profiles and reuses recent export settings', (tester) async {
+    state.settings.exportProfiles = [
+      const ExportProfile(name: 'Pattern MIDI', kind: 'midi', sampleRate: 44100),
+    ];
+    state.settings.exportHistory = [
+      ExportHistoryEntry(fileName: 'Earlier.mid', kind: 'midi',
+        createdAtMs: DateTime(2026, 10, 31).millisecondsSinceEpoch, sampleRate: 44100),
+    ];
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ExporterScreen(state: state)),
+    ));
+
+    expect(find.text('RECENT EXPORTS'), findsOneWidget);
+    expect(find.text('Earlier.mid'), findsOneWidget);
+    await tester.tap(find.text('Choose a saved profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pattern MIDI').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Export MIDI'), findsOneWidget);
+    expect(find.text('Advanced'), findsWidgets);
+  });
+
   testWidgets('Plugin Builder exposes the native module workflow and honest target boundary', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: PluginBuilderScreen(state: state, onOpenBuilder: () {})),
