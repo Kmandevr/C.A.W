@@ -1,10 +1,18 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-10-28
+updated: 2026-11-01
 ---
 
 # Decisions
+
+## 2026-11-01: No in-app AI integration in current scope
+
+- Do not add AI generation, AI editing, source separation, model inference, cloud audio processing or AI-dependent sound features to C.A.W. for now.
+- AI coding assistants may still be used externally as development tools; that does not authorize AI functionality in the shipped app or engine.
+- Keep GitHub library synchronization/source picking separate and deferred; it is not implemented as an app workflow.
+
+## 2026-10-31: Arrangement-first composition replaces the session grid
 
 ## 2026-10-31: Arrangement-first composition replaces the session grid
 
