@@ -166,6 +166,12 @@ class LayerDoc {
       );
 }
 
+String _boundedProjectText(Object? raw, int maxLength) {
+  if (raw is! String) return '';
+  final value = raw.trim();
+  return value.length > maxLength ? value.substring(0, maxLength) : value;
+}
+
 class ProjectDoc {
   ProjectDoc({
     required this.id,
@@ -336,10 +342,8 @@ class ProjectDoc {
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().toList(),
       savedLibrarySearches: {
         for (final entry in ((j['saved_library_searches'] as Map?) ?? const {}).entries.take(32))
-          if (entry.key is String && entry.value is String &&
-              (entry.key as String).trim().isNotEmpty && (entry.value as String).trim().isNotEmpty)
-            (entry.key as String).trim().substring(0, min(64, (entry.key as String).trim().length)):
-              (entry.value as String).trim().substring(0, min(256, (entry.value as String).trim().length)),
+          if (_boundedProjectText(entry.key, 64).isNotEmpty && _boundedProjectText(entry.value, 256).isNotEmpty)
+            _boundedProjectText(entry.key, 64): _boundedProjectText(entry.value, 256),
       },
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
