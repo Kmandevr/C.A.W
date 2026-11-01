@@ -70,7 +70,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   }
 
   Future<void> _export() async {
-    if (_job != null || _midiBusy || _saving) return;
+    if (_job != null || _midiBusy) return;
     if (_kind == ExportKind.midi) {
       await _exportMidi();
       return;
@@ -79,6 +79,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final target = switch (_kind) {
       ExportKind.oneShot => _layerId ?? '',
       ExportKind.wavetable => _moduleId ?? '',
+      ExportKind.midi => _patternId ?? '',
       _ => '',
     };
     if ((_kind == ExportKind.oneShot || _kind == ExportKind.wavetable) && target.isEmpty) {
@@ -111,10 +112,14 @@ class _ExporterScreenState extends State<ExporterScreen> {
         job.cancel();
         return;
       }
-      setState(() { _job = job; _message = null; });
+      setState(() {
+        _job = job;
+        _message = null;
+      });
       _poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
         if (mounted) setState(() {});
       });
+
       final error = await job.result;
       _poll?.cancel();
       _poll = null;
@@ -123,12 +128,10 @@ class _ExporterScreenState extends State<ExporterScreen> {
         setState(() {
           _message = error == 'cancelled' ? 'Export cancelled.' : 'Export failed: $error';
           _messageIsError = error != 'cancelled';
-          _job = null;
         });
         return;
       }
 
-      setState(() { _job = null; _saving = true; });
       final bytes = await file.readAsBytes();
       final saved = await FilePicker.saveFile(
         fileName: name,
@@ -153,10 +156,10 @@ class _ExporterScreenState extends State<ExporterScreen> {
         try {
           if (await file.exists()) await file.delete();
         } catch (_) {
-          // A failed temporary-file cleanup is non-fatal to the completed export.
+          // Temporary-file cleanup must not hide the original export result.
         }
       }
-      if (mounted) setState(() { _job = null; _saving = false; });
+      if (mounted) setState(() => _job = null);
     }
   }
 
