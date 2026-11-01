@@ -467,8 +467,14 @@ Future<void> _exportProject(BuildContext context, AppState state) async {
         content: Text(saved == null ? 'Project export cancelled.' : 'Exported project file.')));
     }
   } catch (e) {
-    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Project export failed: $e')));
+    if (context.mounted) {
+
+      ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Project export failed: $e'))
+
+      );
+
+    }
   }
 }
 
@@ -502,11 +508,23 @@ Future<void> _importProject(BuildContext context, AppState state) async {
     );
     if (proceed != true) return;
     await state.importProject(project);
-    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Imported "${state.project.name}".')));
+    if (context.mounted) {
+
+      ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Imported "${state.project.name}".'))
+
+      );
+
+    }
   } catch (e) {
-    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Project import failed: $e')));
+    if (context.mounted) {
+
+      ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Project import failed: $e'))
+
+      );
+
+    }
   }
 }
 
@@ -519,11 +537,23 @@ Future<void> _importModule(BuildContext context, AppState state, String folderPa
     if (file == null) return;
     final source = await file.xFile.readAsString();
     final id = state.importModuleSource(source, fileName: file.name, folderPath: folderPath);
-    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Imported module "${state.project.module(id)?.name ?? file.name}".')));
+    if (context.mounted) {
+
+      ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Imported module "${state.project.module(id)?.name ?? file.name}".'))
+
+      );
+
+    }
   } catch (e) {
-    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Module import failed: $e')));
+    if (context.mounted) {
+
+      ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Module import failed: $e'))
+
+      );
+
+    }
   }
 }
 
@@ -537,10 +567,22 @@ Future<void> _exportModule(BuildContext context, ModuleDoc module) async {
       type: FileType.custom,
       allowedExtensions: const ['caw'],
     );
-    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(saved == null ? 'Module export cancelled.' : 'Exported "${module.name}.caw".')));
+    if (context.mounted) {
+
+      ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(saved == null ? 'Module export cancelled.' : 'Exported "${module.name}.caw".'))
+
+      );
+
+    }
   } catch (e) {
-    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Module export failed: $e')));
+    if (context.mounted) {
+
+      ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Module export failed: $e'))
+
+      );
+
+    }
   }
 }

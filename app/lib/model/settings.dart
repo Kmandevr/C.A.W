@@ -62,7 +62,9 @@ class ExportProfile {
     final name = (raw['name'] as String).trim();
     final kind = raw['kind'] as String;
     if (name.isEmpty || name.length > 64 ||
-        !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) return null;
+        !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) {
+      return null;
+    }
     final rate = _settingInt(raw['sample_rate'], 48000);
     final frames = _settingInt(raw['frames'], 64);
     return ExportProfile(
@@ -102,11 +104,15 @@ class ExportHistoryEntry {
 
   static ExportHistoryEntry? fromJson(Object? raw) {
     if (raw is! Map || raw['file_name'] is! String || raw['kind'] is! String ||
-        raw['created_at_ms'] is! num) return null;
+        raw['created_at_ms'] is! num) {
+      return null;
+    }
     final fileName = (raw['file_name'] as String).trim();
     final kind = raw['kind'] as String;
     if (fileName.isEmpty || fileName.length > 160 ||
-        !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) return null;
+        !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) {
+      return null;
+    }
     final rate = _settingInt(raw['sample_rate'], 48000);
     final frames = _settingInt(raw['frames'], 64);
     return ExportHistoryEntry(

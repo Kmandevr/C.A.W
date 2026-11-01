@@ -115,6 +115,11 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Analyzer style cleanup at head f91797bd
+
+- The analyzer then reported only style and deprecation infos. Converted the flagged single-statement conditionals in settings, Exporter and Files to explicit blocks. Replaced deprecated Semantics.focusable with the current focused property tied to the splitter FocusNode, and updated the accessibility test to verify the node can request focus.
+- The next exact-head run must confirm a clean analyzer and proceed into widget tests; no test pass is claimed yet.
+
 ## Additional analyzer cleanup at head 7d46a1dd
 
 - The second exact-head analyzer run confirmed the undefined identifiers, missing keyboard imports and theme token were fixed. It then found one remaining warning: an unused legacy key-event import in the workspace test. Removed it so analysis can proceed to the test step. Remaining analyzer findings are informational style/deprecation notices; recheck the new run.

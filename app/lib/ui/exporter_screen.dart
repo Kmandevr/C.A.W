@@ -122,11 +122,17 @@ class _ExporterScreenState extends State<ExporterScreen> {
       _seconds = entry.seconds;
       _frames = entry.frames;
       if (entry.kind == ExportKind.oneShot.name &&
-          s.project.layers.any((layer) => layer.id == entry.target)) _layerId = entry.target;
+          s.project.layers.any((layer) => layer.id == entry.target)) {
+        _layerId = entry.target;
+      }
       if (entry.kind == ExportKind.wavetable.name &&
-          s.project.modules.any((module) => module.id == entry.target)) _moduleId = entry.target;
+          s.project.modules.any((module) => module.id == entry.target)) {
+        _moduleId = entry.target;
+      }
       if (entry.kind == ExportKind.midi.name &&
-          s.project.module(entry.target) != null && s.isPattern(entry.target)) _patternId = entry.target;
+          s.project.module(entry.target) != null && s.isPattern(entry.target)) {
+        _patternId = entry.target;
+      }
       _param = entry.param.isEmpty ? null : entry.param;
     });
   }
@@ -152,18 +158,22 @@ class _ExporterScreenState extends State<ExporterScreen> {
       sampleRate: _rate, float32: _float, seconds: _seconds, frames: _frames);
     try {
       final saved = await s.settings.saveExportProfile(profile);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _profileName = saved ? profile.name : null;
         if (!saved) {
           _message = 'Profile limit reached (32) or the name is invalid.';
           _messageIsError = true;
         }
-      });
+        });
+      }
     } catch (e) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _message = 'Profile could not be saved: $e';
         _messageIsError = true;
-      });
+        });
+      }
     }
   }
 
@@ -174,10 +184,12 @@ class _ExporterScreenState extends State<ExporterScreen> {
       await s.settings.deleteExportProfile(name);
       if (mounted) setState(() => _profileName = null);
     } catch (e) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _message = 'Profile could not be deleted: $e';
         _messageIsError = true;
-      });
+        });
+      }
     }
   }
 
@@ -258,14 +270,16 @@ class _ExporterScreenState extends State<ExporterScreen> {
         }
         setState(() => _job = job);
         _poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
-          if (mounted) setState(() {});
+          if (mounted) {
+            setState(() {});
         });
         final error = await job.result;
         if (error != null) {
           if (mounted) setState(() {
             _message = error == 'cancelled' ? 'Queued export cancelled.' : 'Queued export failed: $error';
             _messageIsError = error != 'cancelled';
-          });
+            });
+          }
           return false;
         }
       }
@@ -282,7 +296,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
         allowedExtensions: midi ? const ['mid'] : null,
       );
       if (saved == null) {
-        if (mounted) setState(() { _message = 'Queue paused: destination picker closed.'; _messageIsError = false; });
+        if (mounted) {
+          setState(() { _message = 'Queue paused: destination picker closed.'; _messageIsError = false; });
         return false;
       }
       String? warning;
@@ -338,7 +353,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
         if (mounted) setState(() {
           _message = 'Queue ${completed + 1} of $total · ${item.fileName}';
           _messageIsError = false;
-        });
+          });
+        }
         final saved = await _runQueuedItem(item);
         if (!saved) break;
         if (mounted) setState(() => _queue.removeAt(0));
@@ -424,7 +440,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
         _message = null;
       });
       _poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
-        if (mounted) setState(() {});
+        if (mounted) {
+          setState(() {});
       });
 
       final error = await startedJob.result;
@@ -435,7 +452,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
         setState(() {
           _message = error == 'cancelled' ? 'Export cancelled.' : 'Export failed: $error';
           _messageIsError = error != 'cancelled';
-        });
+          });
+        }
         return;
       }
 
@@ -453,10 +471,12 @@ class _ExporterScreenState extends State<ExporterScreen> {
         _messageIsError = historyWarning != null;
       });
     } catch (e) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _message = 'Export failed: $e';
         _messageIsError = true;
-      });
+        });
+      }
     } finally {
       _poll?.cancel();
       _poll = null;

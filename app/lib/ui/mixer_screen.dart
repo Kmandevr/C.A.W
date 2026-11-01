@@ -107,6 +107,7 @@ class _MixerScreenState extends State<MixerScreen> {
             SizedBox(width: channelWidth, child: _channelPanel(columns)),
             Focus(
               focusNode: _dividerFocusNode,
+              onFocusChange: (_) => setState(() {}),
               onKeyEvent: (node, event) {
                 if (event is! KeyDownEvent) return KeyEventResult.ignored;
                 if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
@@ -121,7 +122,7 @@ class _MixerScreenState extends State<MixerScreen> {
               },
               child: Semantics(
                 container: true,
-                focusable: true,
+                focused: _dividerFocusNode.hasFocus,
                 label: 'Mixer inspector width',
                 value: '${(_inspectorFraction * 100).round()} percent',
                 increasedValue: '${((_inspectorFraction + 0.02).clamp(0.24, 0.52) * 100).round()} percent',

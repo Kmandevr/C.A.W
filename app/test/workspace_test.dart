@@ -122,9 +122,13 @@ void main() {
       home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
     ));
 
+    final dividerFinder = find.byWidgetPredicate((widget) =>
+      widget is Semantics && widget.properties.label == 'Mixer inspector width');
+    final focusFinder = find.ancestor(of: dividerFinder, matching: find.byType(Focus)).first;
+    final focus = tester.widget<Focus>(focusFinder);
+    expect(focus.focusNode!.canRequestFocus, isTrue);
     final divider = tester.widgetList<Semantics>(find.byType(Semantics))
       .firstWhere((node) => node.properties.label == 'Mixer inspector width');
-    expect(divider.properties.focusable, isTrue);
     expect(divider.properties.onIncrease, isNotNull);
     expect(divider.properties.onDecrease, isNotNull);
     expect(divider.properties.value, '34 percent');
