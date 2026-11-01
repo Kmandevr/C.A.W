@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../lib/engine/engine.dart';
-import '../lib/model/app_state.dart';
-import '../lib/model/project.dart';
-import '../lib/model/settings.dart';
-import '../lib/ui/automation_screen.dart';
-import '../lib/ui/engine_lab_screen.dart';
-import '../lib/ui/mixer_screen.dart';
+import 'package:caw/engine/engine.dart';
+import 'package:caw/model/app_state.dart';
+import 'package:caw/model/project.dart';
+import 'package:caw/model/settings.dart';
+import 'package:caw/ui/automation_screen.dart';
+import 'package:caw/ui/engine_lab_screen.dart';
+import 'package:caw/ui/mixer_screen.dart';
 
 void main() {
   late AppState state;
