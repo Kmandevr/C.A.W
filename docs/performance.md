@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
 covers: [engine/bench/, app/lib/model/poller.dart, app/test/rebuild_test.dart]
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # Performance
@@ -124,6 +124,23 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - nothing at all while the app is in the background
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
 3. **The audio device closes after 30 s stopped and idle.** Play reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
+
+## UI performance profiles (Task 1)
+
+The Settings page now offers four explicit profiles:
+
+| Profile | Presentation | Audio/UI behavior |
+| --- | --- | --- |
+| Full Experience | Full-strength theme glow and available visual feedback | Full voice budget; meter polling remains 30 Hz |
+| Balanced | Decorative glow scaled down to 55% | Full voice budget; meter polling remains 30 Hz |
+| Lightweight | Decorative glow disabled | Existing reduced voice budget (4 per pattern layer); meter polling remains 30 Hz |
+| Minimal | Decorative glow disabled; scope panels hidden | Reduced voice budget; meter polling remains 30 Hz |
+
+The legacy `light_mode` setting is still read for migration: true maps to Lightweight and false maps to Balanced. New settings persist `performance_mode` by name and also write the legacy boolean for older builds.
+
+**Important correction:** performance profiles do not lower meter polling to 15 Hz. Meter cadence stays at 30 Hz in every profile; visual simplification is preferred over slower feedback. Balanced only scales decorative glow, while Lightweight/Minimal apply the existing smaller voice budget. Minimal hides the Engine Lab master scope, whose data is a mono sum; independent left/right peak meters remain visible.
+
+No phone frame-time, battery or thermal measurements have been made for these profiles yet. Verify them on physical Android hardware before claiming a quantified performance improvement.
 
 ## Remaining bottlenecks and next steps
 
