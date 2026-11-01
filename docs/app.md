@@ -66,7 +66,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - the current engine does not yet expose sends, arbitrary buses, stereo width, correlation, loudness, phase or master effect chains through this screen
 - **Engine Lab** (`lib/ui/engine_lab_screen.dart`):
   - live CPU, left/right peak, playback and overload telemetry
-  - track signal-chain inspection from the project's generator/effect assignments, with direct navigation to the selected module in Builder
+  - track signal-chain inspection from the project's generator/effect assignments, with live signal pulses driven by the existing meter tick and direct navigation to the selected module in Builder
   - a read-only 512-sample native master scope (mono sum) and a 512-point Hann-window FFT spectrum spanning 0–24 kHz; left/right peak readouts remain independent
   - compiler summaries, errors, warnings, imports and exports from the engine's module information
   - it is an inspector for existing engine capabilities, not yet an editable universal processing graph or sample/buffer debugger
