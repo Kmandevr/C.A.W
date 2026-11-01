@@ -252,6 +252,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('EXPORT QUEUE · 1'), findsOneWidget);
     expect(find.textContaining('bars.wav'), findsOneWidget);
+    expect(find.text('loop · 48 kHz'), findsOneWidget);
     await tester.tap(find.byTooltip('Remove queued export'));
     await tester.pumpAndSettle();
     expect(find.textContaining('EXPORT QUEUE'), findsNothing);
@@ -315,20 +316,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Export MIDI'), findsOneWidget);
     expect(find.text('Advanced'), findsWidgets);
-  });
-
-  testWidgets('Exporter queue snapshots settings and supports removing queued jobs', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: ExporterScreen(state: state)),
-    ));
-
-    await tester.tap(find.text('Queue'));
-    await tester.pump();
-    expect(find.text('EXPORT QUEUE · 1'), findsOneWidget);
-    expect(find.text('loop · 48 kHz'), findsOneWidget);
-    await tester.tap(find.byTooltip('Remove queued export'));
-    await tester.pump();
-    expect(find.text('EXPORT QUEUE · 1'), findsNothing);
   });
 
   testWidgets('Plugin Builder exposes the native module workflow and honest target boundary', (tester) async {
