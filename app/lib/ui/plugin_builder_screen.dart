@@ -59,6 +59,10 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
   Future<void> _validate() async {
     final id = _moduleId;
     if (id == null) return;
+    if (s.engine == null) {
+      setState(() { _error = true; _message = 'Engine unavailable; this module cannot be validated right now.'; });
+      return;
+    }
     setState(() { _busy = true; _message = null; });
     try {
       final info = await s.run(id);
@@ -66,7 +70,7 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
       setState(() {
         _busy = false;
         _error = info == null || !info.ok;
-        _message = info == null ? 'Module was not found.' :
+        _message = info == null ? 'Engine returned no validation report.' :
           info.ok ? 'Compiled successfully · ${info.params.length} generated parameters.' : info.error;
       });
     } catch (e) {
