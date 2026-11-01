@@ -105,3 +105,11 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Added a named, focusable semantics node with current/increased/decreased width values and increase/decrease actions. Screen-reader users can adjust the inspector width in 2 percentage-point increments; mouse dragging remains available and uses the same bounded state update.
 - Added a widget regression test that verifies the semantic control, both adjustment actions and the resulting width values. The test uses a wide test viewport to exercise the desktop layout.
 - Verification is pending the exact-head App workflow for this commit.
+
+
+## Additional audit finding at head ae043d13
+
+- The Automation point editor placed two sliders, numeric readouts and a remove action in one fixed horizontal row. At common phone widths this could overflow and make point editing unusable.
+- Reworked point rows responsively: narrow layouts stack time and value controls with clear labels, while wider layouts retain the compact horizontal editor.
+- Added semantic slider value descriptions and a 360 px widget regression test covering layout, value edits and overflow detection.
+- Verification is pending the exact-head App workflow for this commit.

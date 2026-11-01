@@ -210,6 +210,37 @@ void main() {
     expect(lane.points, hasLength(2));
   });
 
+  testWidgets('Automation point editors fit narrow mobile layouts', (tester) async {
+    tester.view.physicalSize = const Size(360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final lane = AutomationLaneDoc(target: 'volume', points: [
+      AutomationPointDoc(step: 0, value: 0.2),
+      AutomationPointDoc(step: 64, value: 0.8),
+    ]);
+    final layer = LayerDoc(id: 'mobile-track', name: 'Mobile lead', color: 0, automation: [lane]);
+    state.project = ProjectDoc(id: 'mobile-project', name: 'Mobile automation', layers: [layer]);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ListenableBuilder(listenable: state, builder: (context, _) => AutomationScreen(state: state)),
+      ),
+    ));
+
+    expect(find.text('POINT 1'), findsOneWidget);
+    expect(find.text('TIME'), findsNWidgets(2));
+    expect(find.text('LEVEL'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+
+    final valueSlider = tester.widgetList<Slider>(find.byType(Slider)).last;
+    valueSlider.onChanged!(0.45);
+    await tester.pump();
+    expect(lane.points.last.value, closeTo(0.45, 0.0001));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Engine Lab reports compiled modules and track signal paths', (tester) async {
     final module = ModuleDoc(id: 'gen-1', name: 'Noise core', source: '');
     final pattern = ModuleDoc(id: 'pat-1', name: 'Beat pattern', source: '---\\nkind: pattern\\n---\\n0 C3 1');

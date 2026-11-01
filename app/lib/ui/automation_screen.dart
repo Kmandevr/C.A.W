@@ -96,21 +96,61 @@ class _PointEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final point = lane.points[index];
-    return Row(children: [
-      SizedBox(width: 28, child: Text('P${index + 1}', style: Neon.code(size: 10, color: color))),
-      Expanded(child: Slider(value: point.step.clamp(0.0, maxStep).toDouble(), min: 0, max: maxStep, activeColor: color,
-        onChanged: (v) => state.updateAutomationPoint(layer, lane, index, v, point.value))),
-      SizedBox(width: 38, child: Text(point.step.toStringAsFixed(0), textAlign: TextAlign.end,
-        style: Neon.code(size: 10, color: Neon.dim))),
-      Expanded(child: Slider(value: point.value.clamp(volume ? 0.0 : -1.0, 1.0).toDouble(),
-        min: volume ? 0 : -1, max: 1, activeColor: color,
-        onChanged: (v) => state.updateAutomationPoint(layer, lane, index, point.step, v))),
-      SizedBox(width: 42, child: Text(point.value.toStringAsFixed(2), textAlign: TextAlign.end,
-        style: Neon.code(size: 10, color: color))),
-      IconButton(tooltip: 'Remove automation point',
-        onPressed: () => state.removeAutomationPoint(layer, lane, index),
-        icon: const Icon(Icons.close, size: 16)),
-    ]);
+    final stepSlider = Slider(
+      value: point.step.clamp(0.0, maxStep).toDouble(),
+      min: 0,
+      max: maxStep,
+      activeColor: color,
+      semanticFormatterCallback: (value) => 'Step ${value.round()}',
+      onChanged: (value) => state.updateAutomationPoint(layer, lane, index, value, point.value),
+    );
+    final valueSlider = Slider(
+      value: point.value.clamp(volume ? 0.0 : -1.0, 1.0).toDouble(),
+      min: volume ? 0 : -1,
+      max: 1,
+      activeColor: color,
+      semanticFormatterCallback: (value) => volume
+        ? 'Volume ${(value * 100).round()} percent'
+        : 'Pan ${(value * 100).round()} percent',
+      onChanged: (value) => state.updateAutomationPoint(layer, lane, index, point.step, value),
+    );
+    final removeButton = IconButton(
+      tooltip: 'Remove automation point',
+      onPressed: () => state.removeAutomationPoint(layer, lane, index),
+      icon: const Icon(Icons.close, size: 16),
+    );
+
+    return LayoutBuilder(builder: (context, constraints) {
+      if (constraints.maxWidth < 560) {
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Expanded(child: Text('POINT ${index + 1}', style: Neon.code(size: 10, color: color))),
+            Text('Step ${point.step.toStringAsFixed(0)} · ${point.value.toStringAsFixed(2)}',
+              style: Neon.code(size: 10, color: Neon.dim)),
+            removeButton,
+          ]),
+          Row(children: [
+            const SizedBox(width: 42, child: Text('TIME', style: TextStyle(color: Neon.dim, fontSize: 9))),
+            Expanded(child: stepSlider),
+          ]),
+          Row(children: [
+            SizedBox(width: 42, child: Text(volume ? 'LEVEL' : 'PAN',
+              style: const TextStyle(color: Neon.dim, fontSize: 9))),
+            Expanded(child: valueSlider),
+          ]),
+        ]);
+      }
+      return Row(children: [
+        SizedBox(width: 28, child: Text('P${index + 1}', style: Neon.code(size: 10, color: color))),
+        Expanded(child: stepSlider),
+        SizedBox(width: 38, child: Text(point.step.toStringAsFixed(0), textAlign: TextAlign.end,
+          style: Neon.code(size: 10, color: Neon.dim))),
+        Expanded(child: valueSlider),
+        SizedBox(width: 42, child: Text(point.value.toStringAsFixed(2), textAlign: TextAlign.end,
+          style: Neon.code(size: 10, color: color))),
+        removeButton,
+      ]);
+    });
   }
 }
 
