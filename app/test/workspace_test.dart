@@ -194,6 +194,8 @@ void main() {
     expect(find.text('Import .caw module'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('Bass search'), findsOneWidget);
+    expect(find.byTooltip('Undo library operation'), findsOneWidget);
+    expect(find.byTooltip('Redo library operation'), findsOneWidget);
     await tester.tap(find.text('Bass search'));
     await tester.pump();
     expect(tester.widget<TextField>(find.byType(TextField)).controller?.text, 'bass');
@@ -303,6 +305,12 @@ void main() {
     expect(state.moveModulesToFolder([id, secondId], 'Synths'), isTrue);
     expect(state.project.module(id)?.folderPath, 'Synths');
     expect(state.project.module(secondId)?.folderPath, 'Synths');
+    expect(state.canUndoLibrary, isTrue);
+    expect(state.undoLibraryOperation(), isTrue);
+    expect(state.project.module(id)?.folderPath, 'Drums/Kicks');
+    expect(state.canRedoLibrary, isTrue);
+    expect(state.redoLibraryOperation(), isTrue);
+    expect(state.project.module(id)?.folderPath, 'Synths');
     expect(state.renameLibraryFolder('Synths', 'Sounds/Synths'), isTrue);
     expect(state.project.libraryFolders, containsAll(['Sounds', 'Sounds/Synths']));
     expect(state.project.module(id)?.folderPath, 'Sounds/Synths');
