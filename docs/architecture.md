@@ -16,7 +16,7 @@ Labels used below:
 
 ## Product focus and capability
 
-C.A.W.'s primary focus is sound design and music-content creation: making, shaping, auditioning, organising and exporting sounds, instruments, patterns and reusable musical content. That focus is not a prohibition on DAW capabilities. The app should include useful recording, arranging, editing, mixing and export functionality where it helps users make complete music, and it should be capable of serving as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment. “Not primarily a DAW” describes the product's centre of gravity, not a reason to reject practical music-production features.
+C.A.W.'s primary focus is sound design and music-content creation: making, shaping, auditioning, organising and exporting sounds, instruments, patterns and reusable musical content. That focus is not a prohibition on DAW capabilities. The app should include useful arranging, editing, mixing and export functionality where it helps users make complete music, and it should be capable of serving as a useful lightweight DAW in a pinch. Audio recording is not implemented and remains deferred in the current workflow plan; reconsider it only if the owner reprioritizes it. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment. “Not primarily a DAW” describes the product's centre of gravity, not a reason to reject practical music-production features.
 
 ## 0. Current state
 
