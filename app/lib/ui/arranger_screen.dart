@@ -82,39 +82,41 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       ),
       Expanded(child: p.layers.isEmpty
         ? const Center(child: Text('Add a track, choose a generator, then add a MIDI clip.'))
-        : ValueListenableBuilder<int>(
-            valueListenable: s.tick,
-            builder: (context, _, _) {
-              final playheadStep = s.meters.playing && s.meters.loopLength > 0
-                  ? endPosition(s, p, s.meters.loopLength) : -1.0;
-              return SingleChildScrollView(child: Column(children: [
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  SizedBox(width: headW, child: Column(children: [
-                    const SizedBox(height: 30, child: Padding(
-                      padding: EdgeInsets.only(left: 10, top: 8),
-                      child: Align(alignment: Alignment.centerLeft,
-                        child: Text('TRACKS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
+        : SingleChildScrollView(child: Column(children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(width: headW, child: Column(children: [
+                const SizedBox(height: 30, child: Padding(
+                  padding: EdgeInsets.only(left: 10, top: 8),
+                  child: Align(alignment: Alignment.centerLeft,
+                    child: Text('TRACKS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
+                for (final layer in visible)
+                  _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
+                    depth: s.folderDepth(layer), patterns: patterns, trackHeight: trackHeight),
+              ])),
+              Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
+                child: SizedBox(width: width, child: Stack(children: [
+                  Column(children: [
+                    SizedBox(height: 30, child: Row(children: [
+                      for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
+                        SizedBox(width: p.stepsPerBar * stepW,
+                          child: Align(alignment: Alignment.centerLeft,
+                            child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim)))),
+                    ])),
                     for (final layer in visible)
-                      _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
-                        depth: s.folderDepth(layer), patterns: patterns, trackHeight: trackHeight),
-                  ])),
-                  Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
-                    child: SizedBox(width: width, child: Column(children: [
-                      SizedBox(height: 30, child: Row(children: [
-                        for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
-                          SizedBox(width: p.stepsPerBar * stepW,
-                            child: Align(alignment: Alignment.centerLeft,
-                              child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim)))),
-                      ])),
-                      for (final layer in visible)
-                        _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
-                          trackHeight: trackHeight, playheadStep: playheadStep,
-                          selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
-                    ])))),
-                ]),
-              ]));
-            },
-          )),
+                      _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
+                        trackHeight: trackHeight, selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
+                  ]),
+                  Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
+                    valueListenable: s.tick,
+                    builder: (context, _, _) {
+                      final playheadStep = s.meters.playing && s.meters.loopLength > 0
+                          ? endPosition(s, p, s.meters.loopLength) : -1.0;
+                      return CustomPaint(painter: _PlayheadPainter(stepW, playheadStep));
+                    },
+                  ))),
+                ])))),
+            ]),
+          ]))),
       if (mixer) _ArrangementMixer(state: s),
     ]);
   }
@@ -209,10 +211,10 @@ class _TimelineHeader extends StatelessWidget {
 
 class _TimelineLane extends StatelessWidget {
   const _TimelineLane({required this.state, required this.layer, required this.width,
-    required this.stepW, required this.trackHeight, required this.playheadStep, required this.selectedIds, this.onOpen});
+    required this.stepW, required this.trackHeight, required this.selectedIds, this.onOpen});
   final AppState state;
   final LayerDoc layer;
-  final double width, stepW, trackHeight, playheadStep;
+  final double width, stepW, trackHeight;
   final Set<String> selectedIds;
   final VoidCallback? onOpen;
 
@@ -221,7 +223,7 @@ class _TimelineLane extends StatelessWidget {
     final height = trackHeight + layer.automation.length * 34.0;
     return SizedBox(width: width, height: height,
     child: Stack(children: [
-      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar, playheadStep)),
+      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar)),
       Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
         // A plain horizontal drag belongs to the enclosing scroll view. Long-press
         // drag creates a time selection without stealing normal timeline navigation.
@@ -252,8 +254,8 @@ class _TimelineLane extends StatelessWidget {
 }
 
 class _ArrangementGrid extends CustomPainter {
-  _ArrangementGrid(this.stepW, this.barSteps, this.playheadStep);
-  final double stepW, playheadStep;
+  _ArrangementGrid(this.stepW, this.barSteps);
+  final double stepW;
   final int barSteps;
   @override
   void paint(Canvas canvas, Size size) {
@@ -263,13 +265,25 @@ class _ArrangementGrid extends CustomPainter {
       final n = (x / stepW).round();
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
     }
-    if (playheadStep >= 0) {
-      final x = playheadStep * stepW;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), Paint()..color = Neon.blue..strokeWidth = 1.6);
-    }
   }
   @override
-  bool shouldRepaint(covariant _ArrangementGrid old) => old.stepW != stepW || old.barSteps != barSteps || old.playheadStep != playheadStep;
+  bool shouldRepaint(covariant _ArrangementGrid old) => old.stepW != stepW || old.barSteps != barSteps;
+}
+
+class _PlayheadPainter extends CustomPainter {
+  const _PlayheadPainter(this.stepW, this.step);
+  final double stepW, step;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (step < 0) return;
+    final x = step * stepW;
+    canvas.drawLine(Offset(x, 0), Offset(x, size.height),
+      Paint()..color = Neon.blue..strokeWidth = 1.6);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PlayheadPainter old) => old.step != step || old.stepW != stepW;
 }
 
 class _TimelineClip extends StatefulWidget {
