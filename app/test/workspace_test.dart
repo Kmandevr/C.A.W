@@ -75,8 +75,10 @@ void main() {
 
   testWidgets('Engine Lab reports compiled modules and track signal paths', (tester) async {
     final module = ModuleDoc(id: 'gen-1', name: 'Noise core', source: '');
-    final layer = LayerDoc(id: 'layer-1', name: 'Noise', color: 0, generatorId: module.id);
-    state.project = ProjectDoc(id: 'project-1', name: 'Engine Lab test', modules: [module], layers: [layer]);
+    final pattern = ModuleDoc(id: 'pat-1', name: 'Beat pattern', source: '---\\nkind: pattern\\n---\\n0 C3 1');
+    final layer = LayerDoc(id: 'layer-1', name: 'Noise', color: 0,
+      generatorId: module.id, patternId: pattern.id);
+    state.project = ProjectDoc(id: 'project-1', name: 'Engine Lab test', modules: [module, pattern], layers: [layer]);
     state.info[module.id] = const ModuleInfo(ok: true, kind: 'generator', summary: 'Noise generator');
 
     await tester.pumpWidget(MaterialApp(
@@ -88,6 +90,10 @@ void main() {
     expect(find.text('COMPILED MODULES'), findsOneWidget);
     expect(find.text('Noise core'), findsNWidgets(2));
     expect(find.text('Noise generator'), findsOneWidget);
+    expect(find.text('MIDI'), findsOneWidget);
+    expect(find.text('Beat pattern'), findsNWidgets(2));
+    await tester.tap(find.text('Beat pattern').first);
+    expect(state.selectedModuleId, pattern.id);
   });
 
   testWidgets('Arranger playhead updates from meter ticks without rebuilding the grid', (tester) async {
