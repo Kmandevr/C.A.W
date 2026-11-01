@@ -24,11 +24,11 @@ class MixerScreen extends StatelessWidget {
         builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Expanded(child: Text('MASTER OUTPUT', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800))),
-            Text((state.project.master * 100).round().toString() + '%', style: Neon.code(color: Neon.pink)),
+            Text('${(state.project.master * 100).round()}%', style: Neon.code(color: Neon.pink)),
           ]),
           Slider(value: state.project.master.clamp(0.0, 1.0).toDouble(), min: 0, max: 1, activeColor: Neon.pink,
             onChanged: (v) => state.editProject((p) => p.master = v)),
-          Text('Peak L ' + state.meters.peakL.toStringAsFixed(3) + '   Peak R ' + state.meters.peakR.toStringAsFixed(3),
+          Text('Peak L ${state.meters.peakL.toStringAsFixed(3)}   Peak R ${state.meters.peakR.toStringAsFixed(3)}',
             style: Neon.code(size: 12, color: Neon.dim)),
         ]),
       )),
