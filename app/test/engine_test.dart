@@ -83,7 +83,11 @@ void main() {
     e.dispose();
     final dir = await Directory.systemTemp.createTemp('caw');
     final midiOut = '${dir.path}/acid.mid';
-    final midiError = await Isolate.run(() => Engine.exportPattern(line.source, midiOut, bpm: 140, beatsPerBar: 4));
+    final midiSource = line.source;
+    final midiPath = midiOut;
+    const midiBpm = 140.0;
+    const midiBeatsPerBar = 4;
+    final midiError = await Isolate.run(() => Engine.exportPattern(midiSource, midiPath, bpm: midiBpm, beatsPerBar: midiBeatsPerBar));
     expect(midiError, isNull);
     final midiBytes = await File(midiOut).readAsBytes();
     expect(String.fromCharCodes(midiBytes.sublist(0, 4)), 'MThd');
