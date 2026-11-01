@@ -3,7 +3,7 @@ paths:
   - "app/**"
 ---
 
-# App (Flutter, every platform)
+# App (Flutter; Android/Windows CI artifacts, other targets unverified)
 
 - The UI never touches audio data. It sends control messages (play, stop, swap program, set parameter) and reads meters through the engine's C API over `dart:ffi`; no per-sample or per-block calls cross it.
 - Compile and render off the UI isolate. Long renders show progress and can be cancelled.
