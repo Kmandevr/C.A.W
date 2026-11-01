@@ -68,18 +68,17 @@ class _MixerScreenState extends State<MixerScreen> {
           ]),
         ),
         const SizedBox(height: 4),
+        Row(children: [
+          const SizedBox(width: 20, child: Text('L', style: TextStyle(color: Neon.blue, fontSize: 10))),
+          Expanded(child: PeakMeter(state: s, read: () => s.meters.peakL, color: Neon.blue)),
+          const SizedBox(width: 48, child: Text('R', style: TextStyle(color: Neon.green, fontSize: 10))),
+          Expanded(child: PeakMeter(state: s, read: () => s.meters.peakR, color: Neon.green)),
+        ]),
         ValueListenableBuilder<int>(
           valueListenable: s.tick,
-          builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              const SizedBox(width: 20, child: Text('L', style: TextStyle(color: Neon.blue, fontSize: 10))),
-              Expanded(child: PeakMeter(state: s, read: () => s.meters.peakL, color: Neon.blue)),
-              const SizedBox(width: 48, child: Text('R', style: TextStyle(color: Neon.green, fontSize: 10))),
-              Expanded(child: PeakMeter(state: s, read: () => s.meters.peakR, color: Neon.green)),
-            ]),
-            Text('Peak L ${s.meters.peakL.toStringAsFixed(3)}   Peak R ${s.meters.peakR.toStringAsFixed(3)}',
-              style: Neon.code(size: 11, color: Neon.dim)),
-          ]),
+          builder: (context, _, _) => Text(
+            'Peak L ${s.meters.peakL.toStringAsFixed(3)}   Peak R ${s.meters.peakR.toStringAsFixed(3)}',
+            style: Neon.code(size: 11, color: Neon.dim)),
         ),
       ])),
       const SizedBox(height: 14),
