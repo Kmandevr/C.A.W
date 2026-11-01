@@ -67,6 +67,7 @@ CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const cha
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
                                       int32_t solo);
+CAW_API void caw_engine_set_master(CawEngine* e, double volume);
 CAW_API void caw_engine_play(CawEngine* e);
 CAW_API void caw_engine_stop(CawEngine* e);
 CAW_API void caw_engine_clear_overload(CawEngine* e);
