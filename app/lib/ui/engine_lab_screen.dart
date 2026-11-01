@@ -56,23 +56,45 @@ class _SignalPath extends StatelessWidget {
   final VoidCallback onOpenBuilder;
 
   @override
-  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 8),
-    child: NeonPanel(color: Neon.green, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Widget build(BuildContext context) {
+    final midiIds = <String>{
+      if (layer.patternId != null) layer.patternId!,
+      ...layer.clips.map((clip) => clip.patternId),
+    };
+    final parent = state.project.layers.where((item) => item.id == layer.parentId && item.isFolder).firstOrNull;
+    return Padding(padding: const EdgeInsets.only(bottom: 8),
+      child: NeonPanel(color: Neon.green, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Expanded(child: Text(layer.name, style: const TextStyle(fontWeight: FontWeight.w700))),
         Text(layer.mute ? 'MUTED' : layer.solo ? 'SOLO' : 'ACTIVE',
           style: Neon.code(size: 10, color: layer.mute ? Neon.pink : Neon.green)),
       ]),
+      if (midiIds.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 6, children: [
+          const Text('MIDI', style: TextStyle(color: Neon.yellow, fontSize: 10, fontWeight: FontWeight.w800)),
+          for (final id in midiIds)
+            ActionChip(
+              avatar: const Icon(Icons.piano, size: 13, color: Neon.yellow),
+              label: Text(state.project.module(id)?.name ?? 'Missing pattern', style: const TextStyle(fontSize: 11)),
+              onPressed: () { state.selectModule(id); onOpenBuilder(); },
+              side: const BorderSide(color: Neon.line), backgroundColor: Neon.panelHi),
+        ]),
+      ],
       const SizedBox(height: 8),
       Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 6, children: [
+        const Text('AUDIO', style: TextStyle(color: Neon.green, fontSize: 10, fontWeight: FontWeight.w800)),
         for (var i = 0; i < layer.chain.length; i++) ...[
           if (i > 0) const Icon(Icons.arrow_forward, size: 14, color: Neon.dim),
           ActionChip(
             label: Text(state.project.module(layer.chain[i])?.name ?? 'Missing module', style: const TextStyle(fontSize: 11)),
-            onPressed: () { state.selectModule(layer.chain[i]); onOpenBuilder(); },
+            onPressed: () { state.selectLayer(layer); state.selectModule(layer.chain[i]); onOpenBuilder(); },
             side: const BorderSide(color: Neon.line), backgroundColor: Neon.panelHi),
         ],
         if (layer.chain.isEmpty) const Text('No generator or effects assigned', style: TextStyle(color: Neon.dim, fontSize: 12)),
+        const Icon(Icons.arrow_forward, size: 14, color: Neon.dim),
+        Text(parent?.busEnabled == true ? 'BUS · ${parent!.name}' : 'MASTER OUTPUT',
+          style: Neon.code(size: 10, color: Neon.blue)),
       ]),
       const SizedBox(height: 8),
       ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
@@ -84,7 +106,7 @@ class _SignalPath extends StatelessWidget {
         ]);
       }),
     ])));
-
+  }
 }
 
 class _ModuleReport extends StatelessWidget {
@@ -109,6 +131,9 @@ class _ModuleReport extends StatelessWidget {
           }, icon: const Icon(Icons.open_in_new, size: 18)),
         ]),
         if (info?.summary.isNotEmpty == true) Text(info!.summary, style: const TextStyle(color: Neon.dim, fontSize: 12)),
+        if (info?.params.isNotEmpty == true)
+          Text('Parameters: ${info!.params.map((p) => p.name).join(', ')}',
+            style: Neon.code(size: 11, color: Neon.green)),
         if (info?.error.isNotEmpty == true) Text(info!.error, style: const TextStyle(color: Neon.pink, fontSize: 12)),
         if (info?.imports.isNotEmpty == true) Text('Imports: ${info!.imports.join(', ')}', style: Neon.code(size: 11, color: Neon.dim)),
         if (info?.exports.isNotEmpty == true) Text('Exports: ${info!.exports.map((e) => e.name).join(', ')}', style: Neon.code(size: 11, color: Neon.dim)),
