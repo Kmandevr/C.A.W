@@ -46,6 +46,22 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
     await _validate();
   }
 
+  Future<void> _cloneExisting(ModuleDoc module) async {
+    final id = s.importModuleSource(
+      module.source,
+      fileName: '${module.name}.caw',
+      folderPath: module.folderPath,
+    );
+    if (!mounted) return;
+    setState(() {
+      _moduleId = id;
+      _guided = false;
+      _message = 'Created an independent copy of ${module.name}.';
+      _error = false;
+    });
+    await _validate();
+  }
+
   void _createBlank(String kind) {
     final id = s.addBlankModule(kind);
     setState(() {
@@ -169,6 +185,8 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
                 icon: const Icon(Icons.code), label: const Text('Edit source in Builder')),
               OutlinedButton.icon(onPressed: _busy ? null : _validate,
                 icon: const Icon(Icons.fact_check_outlined), label: const Text('Validate / Run')),
+              OutlinedButton.icon(onPressed: _busy ? null : () => _cloneExisting(module),
+                icon: const Icon(Icons.copy_outlined), label: const Text('Clone as new module')),
               FilledButton.icon(onPressed: _busy ? null : () => _export(module),
                 icon: const Icon(Icons.inventory_2_outlined), label: const Text('Package .caw')),
             ]),
