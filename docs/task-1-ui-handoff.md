@@ -115,6 +115,12 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Final App test refinements at head 93865908
+
+- The remaining test run passed 122 tests and isolated three stale assertions/interactions. Automation's point index is now correct; Files scrolls the actual IconButton into view rather than attempting to tap its Tooltip proxy; Exporter profile application is correctly asserted to switch the toggle label to Quick Export.
+- Added a 360 dp Mixer focused-editor regression test with a five-module effect chain to validate the taller mobile channel-strip viewport.
+- Exact-head CI must confirm the remaining tests, mobile Mixer test, and platform builds.
+
 ## Final widget-test corrections and accuracy fixes at head 8d375872
 
 - The last three test failures were narrowed to an Automation slider index (the new point is the third point, after the two existing points), an off-screen Files action, and a second Exporter test still tapping the hint text. Corrected those selectors and ensured the Files action is scrolled into view.

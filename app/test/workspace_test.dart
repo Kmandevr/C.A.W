@@ -210,6 +210,39 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
   });
 
+  testWidgets('Mixer focused editor remains usable on phone widths with long effect chains', (tester) async {
+    tester.view.physicalSize = const Size(360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final modules = [
+      ModuleDoc(id: 'gen', name: 'Generator', source: ''),
+      for (var i = 1; i <= 4; i++)
+        ModuleDoc(id: 'fx$i', name: 'Effect $i', source: ''),
+    ];
+    state.project = ProjectDoc(id: 'mobile-mixer', name: 'Mobile mixer',
+      modules: modules,
+      layers: [LayerDoc(id: 'mobile-layer', name: 'Mobile layer', color: 0,
+        generatorId: 'gen', effectIds: ['fx1', 'fx2', 'fx3', 'fx4'])]);
+    state.selectedLayerId = 'mobile-layer';
+    state.selectedModuleId = 'gen';
+    state.info = {
+      'gen': const ModuleInfo(ok: true, kind: 'generator'),
+      for (var i = 1; i <= 4; i++) 'fx$i': const ModuleInfo(ok: true, kind: 'effect'),
+    };
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
+    ));
+    await tester.tap(find.text('Focused editor'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Effect 4'), findsOneWidget);
+    expect(find.text('MODULE INSPECTOR'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Automation point edits update the same serialized lane model', (tester) async {
     final lane = AutomationLaneDoc(target: 'volume', points: [
       AutomationPointDoc(step: 0, value: 0.2),
@@ -381,9 +414,11 @@ void main() {
     expect(find.byTooltip('Import .caw module into this folder'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('Bass search'), findsOneWidget);
-    final soloPreview = find.byTooltip('Solo preview in Builder');
-    expect(soloPreview, findsOneWidget);
-    await tester.ensureVisible(soloPreview);
+    final soloPreview = find.ancestor(
+      of: find.byTooltip('Solo preview in Builder'),
+      matching: find.byType(IconButton),
+    ).first;
+    await tester.scrollUntilVisible(soloPreview, 240, scrollable: find.byType(Scrollable).first);
     await tester.tap(soloPreview);
     expect(state.previewOnly, isTrue);
     state.setPreviewOnly(false);
@@ -442,7 +477,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Master WAV').last);
     await tester.pumpAndSettle();
-    expect(find.text('Advanced'), findsOneWidget);
+    expect(find.text('Quick Export'), findsOneWidget);
     expect(find.text('44.1 kHz'), findsOneWidget);
     expect(find.text('32-bit float'), findsOneWidget);
   });
@@ -530,7 +565,7 @@ void main() {
     await tester.tap(find.text('Pattern MIDI').last);
     await tester.pumpAndSettle();
     expect(find.text('Export MIDI'), findsOneWidget);
-    expect(find.text('Advanced'), findsWidgets);
+    expect(find.text('Quick Export'), findsWidgets);
   });
 
   testWidgets('Plugin Builder exposes the native module workflow and honest target boundary', (tester) async {
