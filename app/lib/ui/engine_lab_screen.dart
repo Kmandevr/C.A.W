@@ -102,7 +102,7 @@ class _SignalPath extends StatelessWidget {
       ]),
       const SizedBox(height: 8),
       Row(children: [
-        Expanded(child: PeakMeter(state: state,
+        Expanded(child: PeakMeter(key: ValueKey(layer.id), state: state,
           read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
           color: Neon.green)),
         const SizedBox(width: 8),
