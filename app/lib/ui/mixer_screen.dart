@@ -140,7 +140,6 @@ class _ChannelStrip extends StatelessWidget {
                 Switch.adaptive(
                   value: layer.busEnabled,
                   onChanged: (v) => state.setFolderBus(layer, v),
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ])
             else ...[
