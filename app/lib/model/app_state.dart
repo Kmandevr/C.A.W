@@ -15,6 +15,19 @@ import 'storage.dart';
 ({ProjectSummary? last, List<ProjectSummary> projects}) startupChoices(String? lastId, List<ProjectSummary> projects) =>
     (last: projects.where((p) => p.id == lastId).firstOrNull, projects: projects);
 
+class _LibrarySnapshot {
+  _LibrarySnapshot(ProjectDoc project)
+      : folders = List.of(project.libraryFolders),
+        searches = Map.of(project.savedLibrarySearches),
+        moduleFolders = {for (final module in project.modules) module.id: module.folderPath},
+        moduleTags = {for (final module in project.modules) module.id: List.of(module.tags)};
+
+  final List<String> folders;
+  final Map<String, String> searches;
+  final Map<String, String> moduleFolders;
+  final Map<String, List<String>> moduleTags;
+}
+
 class AppState extends ChangeNotifier {
   AppState({Settings? settings}) : settings = settings ?? Settings() {
     _light = this.settings.lightMode;
@@ -58,6 +71,44 @@ class AppState extends ChangeNotifier {
   ProjectDoc project = ProjectDoc(id: newId('p'), name: 'Untitled');
   Map<String, ModuleInfo> info = {};
   String? selectedModuleId;
+  final List<_LibrarySnapshot> _libraryUndo = [];
+  final List<_LibrarySnapshot> _libraryRedo = [];
+
+  bool get canUndoLibrary => _libraryUndo.isNotEmpty;
+  bool get canRedoLibrary => _libraryRedo.isNotEmpty;
+
+  void _recordLibraryUndo() {
+    _libraryUndo.add(_LibrarySnapshot(project));
+    if (_libraryUndo.length > 50) _libraryUndo.removeAt(0);
+    _libraryRedo.clear();
+  }
+
+  void _restoreLibrarySnapshot(_LibrarySnapshot snapshot) {
+    project.libraryFolders = List.of(snapshot.folders);
+    project.savedLibrarySearches = Map.of(snapshot.searches);
+    for (final module in project.modules) {
+      final folder = snapshot.moduleFolders[module.id];
+      if (folder != null) module.folderPath = folder;
+      final tags = snapshot.moduleTags[module.id];
+      if (tags != null) module.tags = List.of(tags);
+    }
+  }
+
+  bool undoLibraryOperation() {
+    if (_libraryUndo.isEmpty) return false;
+    _libraryRedo.add(_LibrarySnapshot(project));
+    _restoreLibrarySnapshot(_libraryUndo.removeLast());
+    _changed(engine: false);
+    return true;
+  }
+
+  bool redoLibraryOperation() {
+    if (_libraryRedo.isEmpty) return false;
+    _libraryUndo.add(_LibrarySnapshot(project));
+    _restoreLibrarySnapshot(_libraryRedo.removeLast());
+    _changed(engine: false);
+    return true;
+  }
   String? selectedLayerId;
   String? selectedClipId;
   final Set<String> selectedClipIds = {};
@@ -418,8 +469,12 @@ class AppState extends ChangeNotifier {
   bool createLibraryFolder(String path) {
     final normalized = _normalizeLibraryPath(path);
     if (normalized.isEmpty) return false;
-    var changed = false;
     final parts = normalized.split('/');
+    if (parts.asMap().entries.every((entry) => project.libraryFolders.contains(parts.take(entry.key + 1).join('/')))) {
+      return false;
+    }
+    _recordLibraryUndo();
+    var changed = false;
     for (var i = 1; i <= parts.length; i++) {
       final parent = parts.take(i).join('/');
       if (!project.libraryFolders.contains(parent)) {
@@ -441,6 +496,7 @@ class AppState extends ChangeNotifier {
     if (oldValue.isEmpty || newValue.isEmpty || !project.libraryFolders.contains(oldValue)) return false;
     if (oldValue == newValue) return true;
     if (newValue.startsWith('$oldValue/') || project.libraryFolders.contains(newValue)) return false;
+    _recordLibraryUndo();
     project.libraryFolders = project.libraryFolders.map((path) =>
       path == oldValue ? newValue : path.startsWith('$oldValue/') ? '$newValue${path.substring(oldValue.length)}' : path
     ).toSet().toList();
@@ -466,6 +522,7 @@ class AppState extends ChangeNotifier {
     final normalized = _normalizeLibraryPath(path);
     if (normalized.isEmpty || !project.libraryFolders.contains(normalized)) return false;
     final parent = normalized.contains('/') ? normalized.substring(0, normalized.lastIndexOf('/')) : '';
+    _recordLibraryUndo();
     project.libraryFolders.removeWhere((folder) => folder == normalized || folder.startsWith('$normalized/'));
     for (final module in project.modules) {
       if (module.folderPath == normalized || module.folderPath.startsWith('$normalized/')) {
@@ -483,6 +540,7 @@ class AppState extends ChangeNotifier {
     final normalized = _normalizeLibraryPath(folderPath);
     if (normalized.isNotEmpty && !project.libraryFolders.contains(normalized)) return false;
     if (module.folderPath == normalized) return true;
+    _recordLibraryUndo();
     module.folderPath = normalized;
     _changed(engine: false);
     return true;
@@ -492,6 +550,9 @@ class AppState extends ChangeNotifier {
     final normalized = _normalizeLibraryPath(folderPath);
     if (normalized.isNotEmpty && !project.libraryFolders.contains(normalized)) return false;
     final ids = moduleIds.toSet();
+    final targets = project.modules.where((module) => ids.contains(module.id) && module.folderPath != normalized).toList();
+    if (targets.isEmpty) return false;
+    _recordLibraryUndo();
     var changed = false;
     for (final module in project.modules) {
       if (ids.contains(module.id) && module.folderPath != normalized) {
@@ -507,10 +568,13 @@ class AppState extends ChangeNotifier {
     final module = project.module(moduleId);
     if (module == null) return;
     final seen = <String>{};
-    module.tags = [
+    final nextTags = [
       for (final raw in tags)
         if (raw.trim().isNotEmpty && raw.trim().length <= 48 && seen.add(raw.trim().toLowerCase())) raw.trim(),
     ].take(16).toList();
+    if (listEquals(module.tags, nextTags)) return;
+    _recordLibraryUndo();
+    module.tags = nextTags;
     _changed(engine: false);
   }
 
@@ -519,13 +583,18 @@ class AppState extends ChangeNotifier {
     final value = query.trim();
     if (key.isEmpty || value.isEmpty || key.length > 64 || value.length > 256) return false;
     if (!project.savedLibrarySearches.containsKey(key) && project.savedLibrarySearches.length >= 32) return false;
+    if (project.savedLibrarySearches[key] == value) return true;
+    _recordLibraryUndo();
     project.savedLibrarySearches[key] = value;
     _changed(engine: false);
     return true;
   }
 
   void deleteLibrarySearch(String name) {
-    if (project.savedLibrarySearches.remove(name) != null) _changed(engine: false);
+    if (!project.savedLibrarySearches.containsKey(name)) return;
+    _recordLibraryUndo();
+    project.savedLibrarySearches.remove(name);
+    _changed(engine: false);
   }
 
   /// Imports an ordinary .caw module as a new project item; existing modules are never overwritten.
