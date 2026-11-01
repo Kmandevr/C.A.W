@@ -289,7 +289,7 @@ This is a priority order for the creative-systems work only. Complete or explici
 | 1 | Math modulation, bit-pattern/compact cellular primitives, waveshaping and waveform morphing | Highest creative value for lowest runtime cost | Unit/golden tests; templates; callback benchmark |
 | 2 | Seeded variation explorer | Builds on existing parameters, deterministic render and worker pool | 8–16 repeatable candidates; cancel/keep/discard; bounded memory |
 | 3 | Lineage metadata and bounded history/checkpoints | Makes exploration safe and reusable | Save/load, undo/redo and history tests |
-| 4 | Waveform/transient inspection and basic spectrum | Helps users understand and edit results | On-demand analysis, bounded cache, phone UI validation |
+| 4 | Waveform/transient inspection and expanded spectrum/asset analysis | Helps users understand and edit results | On-demand analysis, bounded cache, phone UI validation |
 | 5 | Small resonator/waveguide library | Distinctive instruments after state/voice budget patterns are proven | Several useful models, fixed state/voice caps, benchmark |
 | 6 | Granular/stutter prototype | Higher processing cost; only proceed if demand and headroom justify it | Measured worst-case profile and safe quality limit |
 
