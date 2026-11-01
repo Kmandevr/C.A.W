@@ -16,6 +16,7 @@ import 'package:caw/ui/file_manager_screen.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/key_router.dart';
 import 'package:caw/ui/plugin_builder_screen.dart';
+import 'package:caw/ui/widgets.dart';
 
 void main() {
   late AppState state;
@@ -60,6 +61,29 @@ void main() {
 
     routerKey.currentState!.vim.run(const ActionRef.action('view.mixer'));
     expect(selectedView, 2);
+  });
+
+  testWidgets('peak meters hold briefly and then decay on meter ticks', (tester) async {
+    var peak = 0.0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: PeakMeter(state: state, read: () => peak, color: Colors.green)),
+    ));
+
+    peak = 0.8;
+    state.tick.value++;
+    await tester.pump();
+    expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.8, 0.0001));
+
+    peak = 0;
+    for (var i = 0; i < 12; i++) {
+      state.tick.value++;
+      await tester.pump();
+    }
+    expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.8, 0.0001));
+
+    state.tick.value++;
+    await tester.pump();
+    expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.736, 0.0001));
   });
 
   test('master gain updates shared state without a full app notification', () {
