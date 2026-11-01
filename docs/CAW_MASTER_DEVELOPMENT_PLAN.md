@@ -1,3 +1,9 @@
+---
+title: C.A.W. master development plan
+summary: Approved coordinated scope for the complete UI and workflow overhaul and the audio engine integration and optimization.
+updated: 2026-10-31
+---
+
 # C.A.W. — Master Development Plan
 
 **Status:** Approved plan; implementation not yet authorized.  
