@@ -2,6 +2,7 @@
 title: Task 1 UI implementation handoff
 summary: Current UI implementation pointer and verified outstanding workflow gaps; no stale branch or CI snapshot.
 updated: 2026-11-01
+covers: [app/]
 ---
 
 # Task 1 UI implementation handoff
