@@ -233,7 +233,7 @@ class _MasterScopeState extends State<_MasterScope> {
       final first = 1 + bar * 2;
       final a = math.sqrt(_real[first] * _real[first] + _imaginary[first] * _imaginary[first]);
       final b = math.sqrt(_real[first + 1] * _real[first + 1] + _imaginary[first + 1] * _imaginary[first + 1]);
-      _spectrum[bar] = math.max(a, b) * (4 / _fftSize);
+      _spectrum[bar] = (math.max(a, b) * (4 / _fftSize)).toDouble();
     }
   }
 
@@ -290,7 +290,7 @@ class _SpectrumPainter extends CustomPainter {
       final db = (20 * math.log(magnitude) / math.ln10).clamp(-72.0, 0.0).toDouble();
       final height = ((db + 72) / 72 * size.height).toDouble();
       canvas.drawRect(Rect.fromLTWH(i * slot + slot * 0.15, size.height - height,
-        math.max(1.0, slot * 0.7), height), barPaint);
+        math.max(1.0, slot * 0.7).toDouble(), height), barPaint);
     }
   }
 
