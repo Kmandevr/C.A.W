@@ -380,6 +380,10 @@ class AppState extends ChangeNotifier {
     return m.id;
   }
 
+  /// Imports an ordinary .caw module as a new project item; existing modules are never overwritten.
+  String importModuleSource(String source, {String fileName = 'Imported.caw'}) =>
+      addModule(Template(fileName, source));
+
   /// A new, truly empty module. Until it has a header it compiles as a byte-mode generator, so the picked [kind]
   /// (generator, effect, pattern or library) is remembered only for the editor's hint and badge.
   String addBlankModule(String kind) {
@@ -850,6 +854,12 @@ class AppState extends ChangeNotifier {
   Future<void> openProject(String id) async {
     final p = await _storage?.load(id);
     if (p != null) await _switchTo(p);
+  }
+
+  /// Imports a portable project as a new project ID so it cannot overwrite an existing saved project.
+  Future<void> importProject(ProjectDoc imported) {
+    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = newId('p'));
+    return _switchTo(copy);
   }
 
   Future<void> duplicateProject() async {
