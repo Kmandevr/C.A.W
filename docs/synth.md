@@ -26,7 +26,7 @@ A synth patch is a code-editable module. In the current app, it is handled throu
 | Other sources | Sub oscillator and noise |
 | Filters | Two filters; low-pass, high-pass, band-pass and notch; serial or parallel routing |
 | Envelopes | Three ADSR envelopes |
-| LFOs | Four tempo-synced LFOs: sine, triangle, saw, square and stepped random |
+| LFOs | Four tempo-synced LFOs: sine, triangle, saw, square, stepped random or a four-point curve |
 | Macros | Four named macro controls |
 | Modulation | Sources: envelopes 2/3, LFOs 1–4, macros 1–4 and velocity. Destinations: oscillator position/level/pitch, filter cutoff/resonance and master volume |
 | Effects | Drive, bit-crush, delay, reverb and compressor; project effect modules can also be referenced in the patch effect chain |
@@ -42,7 +42,7 @@ The following are **not implemented**:
 - Drawing custom wavetable tables in the app.
 - Rendering arbitrary generator modules into custom synth tables as a patch authoring workflow.
 - Importing Serum/Vital WAV tables into a synth patch.
-- Drawn multi-point LFO curves.
+- A graphical multi-point LFO curve editor; the patch syntax supports a four-point curve via p0..p3, but drawing/editing arbitrary curves in the UI is not implemented.
 - Additional oscillator warp modes such as hard sync, FM and fold.
 - Built-in synth chorus and EQ effects. A project effect module can be used where the patch supports a named module effect.
 
