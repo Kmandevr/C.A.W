@@ -76,7 +76,7 @@ A new instrument, effect, editor, asset type, device backend or algorithm should
 
 Existing unrelated workspaces and subsystems should not need edits. If a feature requires broad changes, document the actual dependency and consider whether the boundary is wrong.
 
-### 3.4 Capability-based architecture
+### 3.3 Capability-based architecture
 
 **[Proposal]** Use explicit capability descriptions and negotiation as the common way to decide what a device, host, module, algorithm or UI workspace can do. Do not scatter platform-name checks or infer support from a version string alone.
 
@@ -97,7 +97,7 @@ Negotiation should produce a concrete, immutable execution/configuration choice 
 
 Avoid turning this into a central runtime service that every subsystem polls. Capability providers publish snapshots; consumers request a scoped negotiation when configuration changes. Cache the result with a clear invalidation trigger. Unknown is not equivalent to supported, and fallback is allowed only when it preserves documented semantics.
 
-### 3.5 Module and extension contract
+### 3.4 Module and extension contract
 
 The existing native SDK is a useful starting contract, not a completed plugin ecosystem. Keep one shared module identity, typed-port, parameter, state and processing model across built-in modules, bytecode modules and future native add-ons.
 
@@ -122,7 +122,7 @@ Keep the boundaries distinct:
 
 Do not claim dynamic loading, binary compatibility, sandboxing, signing or third-party plugin hosting until each is implemented and tested. Reuse [native module SDK](native-module-sdk.md) and [engine integration](engine-integration.md); update those owning notes when the SDK itself changes.
 
-### 3.3 Compatibility and evolution
+### 3.5 Compatibility and evolution
 
 - Version public/native interfaces where external modules or plugins depend on them.
 - Provide explicit project schema migrations and reject unsupported future versions safely.
