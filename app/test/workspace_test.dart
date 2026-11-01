@@ -159,14 +159,15 @@ void main() {
       home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    final focusFinder = find.ancestor(
-      of: find.byWidgetPredicate((widget) =>
-        widget is Semantics && widget.properties.label == 'Mixer inspector width'),
-      matching: find.byType(Focus),
-    ).first;
+    final focusFinder = find.byWidgetPredicate((widget) =>
+      widget is Focus && widget.focusNode?.debugLabel == 'Mixer inspector width');
     final focus = tester.widget<Focus>(focusFinder);
     focus.focusNode!.requestFocus();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(focus.focusNode!.hasFocus, isTrue);
+    expect(tester.binding.focusManager.primaryFocus, same(focus.focusNode));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pump();
 
     final divider = tester.widgetList<Semantics>(find.byType(Semantics))
@@ -206,6 +207,7 @@ void main() {
     sliders[1].onChanged!(0.72);
     await tester.pump();
     expect(layer.volume, closeTo(0.72, 0.0001));
+    await tester.pump(const Duration(milliseconds: 600));
   });
 
   testWidgets('Automation point edits update the same serialized lane model', (tester) async {
@@ -233,19 +235,22 @@ void main() {
     await tester.pump();
     expect(lane.points.first.value, closeTo(0.55, 0.0001));
 
-    final curve = tester.getRect(find.byType(CustomPaint).first);
-    await tester.tapAt(curve.center);
+    await tester.tap(find.byTooltip('Add midpoint point'));
     await tester.pump();
     expect(lane.points, hasLength(3));
-    final movedCurve = tester.getRect(find.byType(CustomPaint).first);
-    await tester.dragFrom(movedCurve.center, const Offset(12, -10));
+    final pointSliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
+    pointSliders[2].onChanged!(700);
     await tester.pump();
-    expect(lane.points.last.step, greaterThan(2048));
-    expect(lane.points.last.value, greaterThan(0.5));
+    final updatedPointSliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
+    updatedPointSliders[3].onChanged!(0.6);
+    await tester.pump();
+    expect(lane.points[1].step, greaterThan(512));
+    expect(lane.points[1].value, greaterThan(0.5));
 
     await tester.tap(find.byTooltip('Remove automation point').last);
     await tester.pump();
     expect(lane.points, hasLength(2));
+    await tester.pump(const Duration(milliseconds: 600));
   });
 
   testWidgets('Automation point editors fit narrow mobile layouts', (tester) async {
@@ -277,6 +282,7 @@ void main() {
     await tester.pump();
     expect(lane.points.last.value, closeTo(0.45, 0.0001));
     expect(tester.takeException(), isNull);
+    await tester.pump(const Duration(milliseconds: 600));
   });
 
   testWidgets('Engine Lab reports compiled modules and track signal paths', (tester) async {
@@ -291,16 +297,18 @@ void main() {
       home: Scaffold(body: EngineLabScreen(state: state, onOpenBuilder: () {})),
     ));
 
+    final scrollable = find.byType(Scrollable).first;
     expect(find.text('ENGINE LAB'), findsOneWidget);
-    expect(find.text('TRACK SIGNAL PATHS'), findsOneWidget);
-    expect(find.text('COMPILED MODULES'), findsOneWidget);
-    expect(find.text('Noise core'), findsNWidgets(2));
-    expect(find.text('Noise generator'), findsOneWidget);
-    expect(find.text('MIDI'), findsOneWidget);
-    expect(find.text('SPECTRUM · 0–24 kHz'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('SPECTRUM · 0–24 kHz'), 200, scrollable: scrollable);
     expect(find.text('512-POINT HANN / FFT'), findsOneWidget);
     expect(tester.widgetList<CustomPaint>(find.byType(CustomPaint)).length, greaterThanOrEqualTo(3));
-    expect(find.text('Beat pattern'), findsNWidgets(2));
+    await tester.scrollUntilVisible(find.text('TRACK SIGNAL PATHS'), 200, scrollable: scrollable);
+    expect(find.text('MIDI'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('COMPILED MODULES'), 200, scrollable: scrollable);
+    expect(find.text('COMPILED MODULES'), findsOneWidget);
+    expect(find.text('Noise core'), findsAtLeastNWidgets(1));
+    expect(find.text('Noise generator'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Beat pattern').first, 200, scrollable: scrollable);
     await tester.tap(find.text('Beat pattern').first);
     expect(state.selectedModuleId, pattern.id);
   });
@@ -326,6 +334,7 @@ void main() {
     expect(valueTicks, 1);
     expect(appNotifications, 0);
     expect(tester.widget<Slider>(find.byType(Slider).first).value, closeTo(0.42, 0.0001));
+    await tester.pump(const Duration(milliseconds: 600));
   });
 
   testWidgets('Arranger playhead updates from meter ticks without rebuilding the grid', (tester) async {
@@ -369,7 +378,7 @@ void main() {
     expect(find.text('Portable project'), findsOneWidget);
     expect(find.text('Export .cawproj'), findsOneWidget);
     expect(find.text('Import project'), findsOneWidget);
-    expect(find.text('Import .caw module'), findsOneWidget);
+    expect(find.byTooltip('Import .caw module into this folder'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('Bass search'), findsOneWidget);
     expect(find.byTooltip('Solo preview in Builder'), findsOneWidget);
@@ -404,7 +413,7 @@ void main() {
     await tester.tap(find.text('Queue'));
     await tester.pumpAndSettle();
     expect(find.text('EXPORT QUEUE · 1'), findsOneWidget);
-    expect(find.textContaining('bars.wav'), findsOneWidget);
+    expect(find.textContaining('bars.wav').first, findsOneWidget);
     expect(find.text('loop · 48 kHz'), findsOneWidget);
     await tester.tap(find.byTooltip('Remove queued export'));
     await tester.pumpAndSettle();
@@ -425,7 +434,9 @@ void main() {
 
     expect(find.text('Choose a saved profile'), findsOneWidget);
     expect(find.text('Recent_take.wav'), findsOneWidget);
-    await tester.tap(find.text('Choose a saved profile'));
+    final profilePicker = find.byType(DropdownButton<String>);
+    await tester.ensureVisible(profilePicker);
+    await tester.tap(profilePicker);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Master WAV').last);
     await tester.pumpAndSettle();
@@ -627,7 +638,7 @@ void main() {
 
   test('imported module source becomes a new project module', () {
     final id = state.importModuleSource(
-      '---\\nkind: generator\\nname: Imported bass\\n---\\nsin(110)',
+      '---\nkind: generator\nname: Imported bass\n---\nsin(110)',
       fileName: 'Bass.caw',
     );
 

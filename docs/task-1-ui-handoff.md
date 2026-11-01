@@ -115,6 +115,13 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Widget-test repair pass at head 6a128270
+
+- The scoped value notifier and compact Arranger track header removed the global rebuild benchmark failure and the 3 px track-header overflow. The suite improved from 112 passing / 13 failing to 115 passing / 10 failing.
+- The remaining failures were mostly stale test interactions: focus selection did not target the splitter FocusNode, debounce timers were not advanced, Automation tried to add a point by tapping an ambiguous CustomPaint, Engine Lab assertions targeted lazy ListView children before scrolling, Files asserted visible text where the action is tooltip-only, and Exporter tapped a hint Text rather than its DropdownButton. Updated those tests to exercise the real controls and wait for debounced work.
+- The imported-module test supplied literal backslash-n text rather than actual header newlines; corrected the fixture so the intended header name is parsed.
+- Exact-head CI must confirm all fixes. No test pass is claimed yet.
+
 ## Performance and phone-layout fixes at head 3e47ed8a
 
 - Replaced broad UI subscriptions to the shared value tick with scoped per-module and per-track ticks plus a master-output tick. Parameter drags now rebuild only the selected module's parameter controls; level/pan drags rebuild only that track's controls in Builder, Mixer and Arranger. The aggregate tick remains for compatibility but is no longer subscribed to by the workspaces.
