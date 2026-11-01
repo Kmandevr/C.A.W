@@ -82,7 +82,8 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
 - **Files** (`lib/ui/file_manager_screen.dart`):
   - import/export portable `.cawproj` projects and `.caw` module source to user-chosen operating-system locations
   - project-local virtual folders support nested create, rename, safe delete, module moves and tags; deleting a folder moves modules to its parent rather than deleting source
-  - search by module name/type/tags, sort by name/type and flag identical module source
+  - search by module name/type/tags, saved searches, sort by name/type and flag identical module source
+  - bulk-select modules and move them together between user-defined folders
   - imported projects receive a new ID so they cannot overwrite an existing saved project; imported modules are added as new items
   - validates the project format version and reports malformed or future-version files instead of opening them
   - WAV, MIDI and wavetable exports remain in Exporter
