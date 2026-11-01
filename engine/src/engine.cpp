@@ -99,7 +99,7 @@ struct Engine::Chain {
 };
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     int orderList[kSlots] = {};
     int orderCount = 0;
@@ -942,6 +942,14 @@ void Engine::setLayerMix(const std::string& layerId, double volume, double pan, 
     writeMix(ls.slot, ls.volume, ls.pan, mute, solo);
 }
 
+void Engine::setMaster(double volume) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    Cmd c;
+    c.type = Cmd::SetMaster;
+    c.master = std::isfinite(volume) ? std::clamp(volume, 0.0, 1.0) : 0.0;
+    send(c);
+}
+
 void Engine::play() {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
@@ -1203,7 +1211,9 @@ void Engine::applyCommands() noexcept {
                 beatsPerBar_ = c.beatsPerBar;
                 loopSteps_ = c.loopSteps;
                 seed_ = c.seed;
-                master_ = c.master;
+                master_ = masterTarget_ = c.master;
+                masterStep_ = 0.0;
+                masterRamp_ = 0;
                 seamXf_ = c.seamXf;
                 keyRoot_ = c.keyRoot;
                 keyScale_ = c.keyScale;
@@ -1212,6 +1222,11 @@ void Engine::applyCommands() noexcept {
                 updateTiming();
                 if (g_ >= loopLen_) g_ = 0;
                 loopLenFlag_.store(loopLen_, std::memory_order_relaxed);
+                break;
+            case Cmd::SetMaster:
+                masterTarget_ = std::isfinite(c.master) ? std::clamp(c.master, 0.0, 1.0) : 0.0;
+                masterRamp_ = std::max(1, static_cast<int>(sr_ * kGainSeconds));
+                masterStep_ = (masterTarget_ - master_) / masterRamp_;
                 break;
             case Cmd::Play:
                 playing_ = true;
@@ -1753,6 +1768,10 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
     const bool bypass = bypass_.load(std::memory_order_relaxed);
     int sp = masterScopePos_.load(std::memory_order_relaxed);
     for (int i = 0; i < m; ++i) {
+        if (masterRamp_ > 0) {
+            master_ += masterStep_;
+            if (--masterRamp_ == 0) master_ = masterTarget_;
+        }
         const double xl = finiteOr0(mixL_[i]) * master_;
         const double xr = finiteOr0(mixR_[i]) * master_;
         double yl = xl - dcL_[0] + R * dcL_[1];
