@@ -34,7 +34,7 @@ A feature belongs in this plan only when it:
 Scores are planning estimates, not measured benchmarks.
 
 - **Creative impact:** 1 (minor convenience) to 5 (could meaningfully distinguish C.A.W.).
-- **Priority:** P0 (foundation/next), P1 (high-value follow-on), P2 (optional later), P3 (do not schedule now).
+- **Priority:** P0 (first within this creative-systems track, after the currently approved v2 commitments), P1 (high-value follow-on), P2 (optional later), P3 (do not schedule now). These labels do not supersede the current app-usable v2 order recorded in [engine implementation status](engine-build-status.md) or owner-approved work in the [music workflow plan](music-workflow-feature-gap-plan.md).
 - **Engineering effort:** XS (small contained addition), S (small), M (moderate), L (large), XL (too broad for current scope).
 - **Runtime cost:** expected additional cost while the feature is actively used. "Idle: none" means no background polling or processing when closed/not selected. Actual CPU, memory, battery and callback measurements are required before release.
 
@@ -281,7 +281,7 @@ If a future concrete use case changes this decision, reopen it as a new proposal
 
 ## 5. Recommended build sequence
 
-This is a priority order for the creative-systems work only. It does not silently replace the existing app-usable v2 commitments or the music workflow gap sequence.
+This is a priority order for the creative-systems work only. Complete or explicitly reprioritize the current app-usable v2 commitments first (module/global automation, SFZ and stems export, as recorded in [engine implementation status](engine-build-status.md)). This sequence does not silently replace that work or the music workflow gap sequence.
 
 | Phase | Work | Why this order | Exit condition |
 |---|---|---|---|
