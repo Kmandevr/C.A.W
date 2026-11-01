@@ -217,6 +217,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Expanded(child: Text('LIBRARY FOLDERS', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800))),
+            IconButton(tooltip: 'Undo library operation', onPressed: state.canUndoLibrary ? state.undoLibraryOperation : null,
+              icon: const Icon(Icons.undo)),
+            IconButton(tooltip: 'Redo library operation', onPressed: state.canRedoLibrary ? state.redoLibraryOperation : null,
+              icon: const Icon(Icons.redo)),
             IconButton(tooltip: 'Create folder', onPressed: _createFolder, icon: const Icon(Icons.create_new_folder_outlined)),
           ]),
           ListTile(
