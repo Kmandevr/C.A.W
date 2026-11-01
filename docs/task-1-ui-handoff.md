@@ -10,9 +10,9 @@ updated: 2026-11-01
 
 - Repository: `Kmandevr/C.A.W`
 - Implementation branch: `feature/task-1-ui-workflow`
-- Latest implementation-code head at the time of this handoff: `5895143d46f7f50e6e152f05535aa760d8e40702`.
+- Latest implementation-code head before this checkpoint update: `bc021ea92164e0b3998488527d71693e3121656c`.
 - PR: [#56 — Task 1 UI workspaces](https://github.com/Kmandevr/C.A.W/pull/56), open and draft.
-- PR base: `ccr-395682a8-dthizd`; the branch is 253 commits ahead and 2 behind at the last comparison. GitHub reported it mergeable. Do not rebase or change its base silently.
+- PR base: `ccr-395682a8-dthizd`; the branch is 276 commits ahead and 2 behind at the latest comparison (status: diverged). GitHub reported it mergeable. Do not rebase or change its base silently.
 - PR remains unmerged. Do not merge without explicit authorization.
 - The repository's `main` branch was previously found to be substantially divergent and does not contain the authoritative master plan or current arrangement-first UI. Re-check branch relationships before changing the PR base.
 
@@ -51,13 +51,25 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 
 - Earlier Engine CI passed Linux x64, Linux Arm64, Windows x64 and Linux sanitizers before the latest master-gain API change.
 - Earlier Docs/hygiene CI passed after the master-plan metadata/index issue was fixed.
-- An App CI run exposed three real problems: an invalid Engine Lab scope callback variable, unsupported `Wrap.mainAxisSize`, and missing `ActionRef` import in workspace tests. All three were fixed.
+- An App CI run exposed three real problems: an invalid Engine Lab scope callback variable, unsupported `Wrap.mainAxisSize`, and missing `ActionRef` import in workspace tests. All three were fixed. Exporter failure/save handling, MIDI busy-state handling, temporary-file cleanup and render-option locking were also tightened. Plugin Builder now clones existing native modules as independent copies. Files library operations have bounded in-session undo/redo, safe import-filter reset and validated saved-search limits. Global Ctrl+1 through Ctrl+8 shortcuts navigate all eight workspaces.
 - Regression/widget tests cover master-gain update isolation, native smooth master gain, peak hold/release timing, 48 dp toggle targets, mobile focused Mixer navigation, shared Mixer state, Arranger playhead/track sizing, Engine Lab signal/spectrum, Exporter queue/profile/history/navigation, Plugin Builder cloning, library folder/tag/search operations, bulk move/tag undo/redo, project import identity and malformed library metadata bounds.
 - Audio export catches render/save failures and cleans temporary files; MIDI export has independent busy/error handling and worker-isolate generation.
 - CI workflow files cancel superseded runs per branch/PR to avoid spending runner time on stale commits.
-- **The latest App, Engine and Docs/hygiene workflows for head `5895143d` are queued/pending and have not yet produced final results.** Do not claim the latest head passes until those exact runs complete.
-- The GitHub Actions queue had a large backlog of older runs when checked. Re-check current head statuses and inspect failure logs before considering the branch verified.
+- **The latest App, Engine and Docs/hygiene workflows for head `bc021ea9` (run IDs `41320549040`, `41320549038` and `41320549049`) were queued when checked; all their individual jobs were still queued. These runs do not verify the subsequent handoff-document commit. Re-check the newest exact-head runs before claiming success.** Do not claim the latest head passes until those exact runs complete.
+- The GitHub Actions queue had a large backlog of older runs when checked, and rapid commits caused superseded runs to be cancelled. Allow the newest runs to execute, then inspect any failed job logs before considering the branch verified.
 - No local Flutter SDK execution, physical Android/desktop interaction audit, accessibility audit, screenshot comparison or current-device performance benchmark has been completed in this GitHub-only session.
+
+
+## Checkpoint additions after the earlier handoff
+
+- Added Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder actions and routing; updated action/keymap tests and shortcut documentation.
+- Added an in-session library metadata undo/redo stack (maximum 50 snapshots) covering folder creation/rename/delete, module moves, tags and saved searches. This is not general project undo and does not persist across restarts.
+- Added the undo/redo controls to the Files workspace and tests for restoring module folder placement.
+- Hardened project import by clearing stale search/folder/selection UI state; imported saved-search metadata is length-bounded using safe string handling.
+- Hardened WAV/MIDI export error handling, busy states, temporary-file cleanup and render-option locking while a job is active.
+- Added an advanced Plugin Builder action to clone an existing module into an independent module; added a widget test.
+- Engine Lab now renders a 512-point Hann-window FFT spectrum from the existing 512-sample native master scope. FFT scratch/window/output buffers are retained; the scope remains a mono-sum inspection and does not replace separate L/R peak meters.
+- Latest exact-head CI observed before this documentation update: App run 41320549040, Engine run 41320549038, Docs/hygiene run 41320549049; all jobs queued, no final results yet. A new documentation commit will trigger newer runs, which must be checked separately.
 
 ## Remaining Task 1 work
 
