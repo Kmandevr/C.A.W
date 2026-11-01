@@ -153,7 +153,7 @@ Build only after Phase 0 commitments and without blocking Phases 1–6 when a wo
 4. **Small seeded sound-variation explorer** — M; impact 5/5; creative P0; 8 candidates initially, hard cap 16, explicit user action, background/offline rendering.
 5. **Sound lineage/family metadata** — S; impact 3/5; creative P1.
 6. **Non-destructive processing history/checkpoints** — M; impact 4/5; creative P1; store recipes/metadata rather than duplicate audio buffers.
-7. **Waveform and transient inspection** — S–M; impact 4/5; creative P1; on-demand background analysis.
+7. **Asset/selection waveform and transient analysis** — S–M; impact 4/5; creative P1; the Engine Lab already has a live master scope, so any new work should extend it to assets/selections with on-demand background analysis.
 8. **Extend spectrum inspection to asset/selection analysis** — M; impact 3/5; creative P1; the Engine Lab already has a bounded 512-point master FFT view, so any expansion must reuse it rather than claim the first spectrum display is missing.
 9. **Small resonator/physical-model library** — M; impact 4/5; creative P1; fixed voices/state and simple comb, modal or digital-waveguide models.
 
@@ -161,7 +161,7 @@ Each item gets its own implementation issue, code audit, acceptance criteria and
 
 ### Phase 8 — Conditional advanced tools
 
-- **Granular/stutter processing:** M–L; impact 4/5; creative P2. Begin with bounded stutter/repeat and short fixed-window grains; hard caps on grain count, duration, overlap and buffer size.
+- **Expanded granular processing:** M–L; impact 4/5; creative P2. The existing engine already has a bounded glitch.stutter effect; any later granular work must add a distinct useful capability using short fixed-window grains and hard caps on grain count, duration, overlap and buffer size.
 - **Simple reusable audio transformation stack:** M–L; impact 4/5; reuse existing chains and module/effect composition. No new universal compositing framework.
 - **Parent selection/crossover for variation exploration:** only if the first seeded explorer proves useful; keep it user-directed and bounded.
 - **Optional oversampling:** only when measured aliasing warrants it; optional quality mode, never an unconditional weak-device cost.
@@ -210,7 +210,7 @@ This inventory preserves the features and directions discussed. The current base
 | Sound lineage/family metadata | Planned; parent, seed, changed parameters and source identity | 3 | S | Creative P1 |
 | Non-destructive processing history/checkpoints | Planned; operation recipes, bounded metadata and A/B | 4 | M | Creative P1 |
 | Lightweight resonator/modal/digital-waveguide instruments | Planned; fixed voice/state limits | 4 | M | Creative P1 |
-| Granular/stutter/repeat/freeze processor | Conditional; bounded grain and buffer counts | 4 | M–L | Creative P2 |
+| Expanded granular processor / advanced stutter variants | Conditional; existing glitch.stutter is implemented; any extension must keep bounded grain and buffer counts | 4 | M–L | Creative P2 |
 | Reusable audio transformation chains | Existing effect-chain foundation; keep composition simple | 4 | M–L | Conditional P2 |
 
 ### B. Pattern, piano roll and musical editing
