@@ -1067,6 +1067,8 @@ class AppState extends ChangeNotifier {
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
     if (saveCurrent) await flush();
     engine?.stop();
+    _libraryUndo.clear();
+    _libraryRedo.clear();
     project = p;
     info = {};
     blankKinds.clear();
