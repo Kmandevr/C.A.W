@@ -77,7 +77,7 @@ class FileManagerScreen extends StatelessWidget {
 }
 
 String _safeFileName(String value) =>
-    value.trim().replaceAll(RegExp(r'[^A-Za-z0-9 _-]+'), '').replaceAll(RegExp(r'\\s+'), '_');
+    value.trim().replaceAll(RegExp(r'[^A-Za-z0-9 _-]+'), '').replaceAll(RegExp(r'\s+'), '_');
 
 Future<void> _exportProject(BuildContext context, AppState state) async {
   try {
