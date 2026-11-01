@@ -360,6 +360,7 @@ void main() {
     await tester.pump();
     expect(state.project.modules, hasLength(1));
     expect(state.kindOf(state.project.modules.single.id), 'effect');
+    state.project.modules.single.params['drive'] = 0.35;
     await tester.tap(find.text('Advanced'));
     await tester.pumpAndSettle();
     expect(find.text('Clone as new module'), findsOneWidget);
@@ -367,6 +368,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.project.modules, hasLength(2));
     expect(state.kindOf(state.project.modules.last.id), 'effect');
+    expect(state.project.modules.last.params['drive'], closeTo(0.35, 0.0001));
   });
 
   test('imported projects receive a new identity and preserve project content', () async {
