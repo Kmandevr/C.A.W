@@ -411,7 +411,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
           ],
         ),
       ]);
-      final scope = s.settings.lightMode
+      final scope = !Neon.showScopes
           ? const SizedBox.shrink()
           : NeonPanel(
         color: color,
