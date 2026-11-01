@@ -1,214 +1,46 @@
 ---
 title: Task 1 UI implementation handoff
-summary: Current implementation state, branch and CI evidence for the C.A.W. Master Task 1 UI overhaul.
+summary: Current UI implementation pointer and verified outstanding workflow gaps; no stale branch or CI snapshot.
 updated: 2026-11-01
 ---
 
-## Durable project restore points (implemented at 0081a61b)
-
-- Added explicit, persistent project restore points to app-private storage. Snapshots use atomic temporary-file writes, are scoped to a validated project ID, and retain the newest 20 versions per project.
-- Added restore-point listing and safe loading that skips malformed snapshots and rejects snapshots belonging to another project. Deleting a project also deletes its restore-point history.
-- Added Files workspace actions to create a restore point and inspect/restore prior versions. Restoring first snapshots the current project, then reloads the selected version through the existing AppState project-switch path so the engine is resynchronized.
-- Added storage-level regression tests in `app/test/storage_test.dart` for snapshot round-trip, ordering, cross-project rejection, retention and history cleanup.
-- Exact-head verification is tracked in the CI section below. Restore-point storage and UI are implemented; do not claim them verified until the latest App workflow passes.
-
-
-## Files autosave-timer regression fix at head 7d6f337e
-
-- The controller lifecycle issue is resolved. The next test run exposed the expected 500 ms AppState autosave debounce after module deletion; the test now advances the fake clock past that debounce so it verifies the save path without leaving a pending timer at teardown.
-- Exact-head CI must confirm the updated Files workflow, Builder routing, and full app/platform/engine matrix.
-
-
-## Files dialog lifecycle fix at head 8601beb3
-
-- The new rename regression exposed a real Flutter lifecycle bug: locally owned TextEditingControllers were disposed immediately after a dialog popped, while the dialog's exit transition could still rebuild its TextField. The resulting disposed-controller exception then contaminated following widget tests.
-- Replaced dialog-local controllers in folder creation/rename, module tags, bulk tags, saved searches and module rename with TextFormField initial values and internal lifecycle management. This removes the premature-disposal race across the Files workspace, not only the newly added rename action.
-- The next exact-head App workflow must confirm all widget tests and analyzer output.
-
-
-
-## Files workspace workflow completion at head aa0a0cb0
-
-- The audit found that the library supported folder-scoped search, organization and import/export, but lacked a way to rename or remove an individual module from the Files workspace. It also could not search nested folders without navigating into each one.
-- Added a "Search all folders" scope chip when a query is active; matching modules show their folder path so results remain navigable and unambiguous.
-- Added module rename and confirmed delete actions. Deletion uses the existing AppState operation, which removes track references and dependent clips/effects consistently; the confirmation explicitly warns that this action is not undoable.
-- Added a widget test covering cross-folder search, path display, rename and confirmed deletion.
-- Initial exact-head CI caught one off-screen test tap and incorrect handoff frontmatter ordering. The test now exercises the Files search controls at 360 dp and explicitly scrolls to interactive controls.
-
 # Task 1 UI implementation handoff
 
-## Current GitHub state
+This file is a concise handoff, not a live Git branch/CI tracker. Previous commit-specific handoff entries and PR states are historical and have been removed because they no longer describe the current repository state.
 
-- Repository: `Kmandevr/C.A.W`
-- Implementation branch: `feature/task-1-ui-workflow`
-- Latest branch head at this handoff edit: `0081a61bb6b4d52b831b18a459b2706bf5492433`; CI cleanup and final verification are in progress.
-- PR: [#56 — Task 1 UI workspaces](https://github.com/Kmandevr/C.A.W/pull/56), open and draft.
-- PR base branch: `ccr-395682a8-dthizd` (base SHA at the last inspection: `b919994b6a583e4531438630eee08d4c642ef7db`). The branch is diverged from base; do not rebase or change its base silently.
-- PR remains unmerged. Do not merge without explicit authorization.
-- The repository's `main` branch was previously found to be substantially divergent and does not contain the authoritative master plan or current arrangement-first UI. Re-check branch relationships before changing the PR base.
+## Current implementation
 
-## Implemented workspaces and workflows
+The Flutter app currently exposes eight workspaces: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder. They share one AppState and the same native engine/project model.
 
-- **Builder:** fast creation workspace with existing code-first generator/effect/pattern authoring, parameter editing, audition and common track controls.
-- **Arranger:** horizontal arrangement-first timeline, stacked tracks, reusable MIDI clips, selection/editing/splitting/duplication, snapping, zoom, track-height presets, folder hierarchy and a playhead overlay that updates independently of the clip grid.
-- **Mixer / Editor:** dedicated channel strips, track volume/pan/mute/solo, generator/effect chain selection, existing folder-bus routing, master output, independent left/right master peaks and compiled-module parameter inspector. Desktop has a draggable channel/inspector split. Mobile has a focused channel list and separate focused editor instead of compressing the desktop grid.
-- **Master gain boundary:** a dedicated `caw_engine_set_master` native command updates gain on the audio thread with a 5 ms ramp. The Mixer no longer serializes/recompiles the whole project for every master-slider movement.
-- **Meters:** peak bars attack immediately, hold for approximately 400 ms at the 30 Hz meter cadence, then release smoothly. Presentation smoothing does not modify engine measurements.
-- **Engine Lab:** CPU/peak/playback/overload telemetry, existing track MIDI/audio paths and outputs, compiler diagnostics, live signal pulses driven by the meter tick, a read-only mono master scope and a 512-point Hann-window FFT spectrum (0–24 kHz). This is an inspector, not an editable universal processing graph or sample/buffer debugger.
-- **Automation:** edits the existing serialized track volume/pan lanes and points shared with Arranger and the engine. Curve taps add points, direct drags move them, and point rows expose delete plus precise sliders. Parameter/modulation/processing-behavior automation remains dependent on Task 2 graph APIs.
-- **Exporter:** Quick and Advanced modes; existing WAV loop/free/one-shot/wavetable render paths plus native MIDI pattern export. Render progress, cancellation, busy-state locking, actionable errors and temporary-file cleanup are implemented. MIDI generation runs in a worker isolate.
-  - Up to 50 export jobs can be queued in-session; each snapshots the project and options at queue time. Jobs run sequentially, can be removed/cancelled, and pause on render/save failure. The queue is not persisted across restarts.
-  - Up to 32 named export profiles and the last 20 successful exports persist in settings. History records kind, sample rate, bit depth, length/frame settings, target and parameter so settings can be reapplied when the target still exists.
-- **Plugin Builder:** guided blank/template creation and advanced selection/cloning of existing native modules; validates with the existing engine, exposes generated parameters and packages native `.caw` source. CLAP/VST3 binary builds, sandboxing and host I/O testing require a native plugin SDK/host backend not present in the repository.
-- **Files:** portable `.cawproj` project and `.caw` module import/export; project-local nested folders, tags, saved searches, name/type sorting, duplicate-source indicators, bulk move and bulk tag operations, and bounded in-session undo/redo (50 metadata snapshots). Imports get a new project identity and malformed/future project versions are rejected. Explicit atomic project restore points and version history are available from Files (newest 20 retained per project); restore snapshots the current version before switching. Non-library modules can be sent to the existing Builder Solo preview path.
-- **Navigation and touch:** eight workspaces are available on desktop and mobile; mobile uses focused More navigation. Global shortcuts cover all eight workspaces. Custom toggle targets are at least 48 dp.
-- **Performance profiles:** Full Experience, Balanced, Lightweight and Minimal. Visual effects are reduced before feedback cadence; meter polling remains at 30 Hz in every profile. Arranger playhead and scope/FFT work use retained buffers and scoped update paths.
+The app reference [App](app.md) is the authoritative inventory of implemented screens and behavior. The [UI design](ui.md) describes the design direction and current editor state. The [core development plan](core-and-feature-plan.md) gives the ordered work sequence.
 
-## Shared architecture and explicit engine boundaries
+Implemented UI/workflow foundations include:
+- Builder for code-defined generators, effects, libraries, patterns and synth patches, with generated controls and code editing.
+- Piano roll and drum grid, including note-expression editing, lane curves, pattern generators, multi-selection and MIDI pattern file import/export.
+- Arrangement timeline with reusable MIDI clips, clip editing, nested folders and stereo folder buses.
+- Mixer controls for tracks and master output, plus a read-only Engine Lab scope/spectrum and diagnostics.
+- Track/folder volume-pan automation.
+- Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue.
+- Files workspace for project/module import/export, project-local organization, tags, saved searches and project restore points.
+- Plugin Builder for validating and packaging native .caw source modules.
 
-All UI work uses the existing `AppState`, `ProjectDoc`, `LayerDoc`, `ModuleDoc`, native engine C API and existing automation representation. No second project, mixer, DSP, processing or automation system has been introduced.
+## Verified UI/workflow gaps
 
-The current engine still does not expose:
-- Universal typed editable graph connections across audio, MIDI, parameters and data.
-- Low-level sample/buffer mutation or programmable `.cawengine` modules.
-- Parameter/modulation graph automation and processing-behavior automation.
-- Flexible sends, arbitrary buses beyond the existing folder-bus model, stereo width, correlation/phase and loudness analysis.
-- Master effect-chain editing, limiter/compressor configuration or alternate output routing.
-- CLAP/VST3 hosting and binary plugin building.
+- Module/global parameter automation.
+- Sends, full sidechain routing, parallel mixer paths and master effect chains.
+- Audio import, audio clips and non-destructive audio editing.
+- Sample editing, mapping, multisample authoring and SFZ export.
+- USB/Bluetooth MIDI device discovery/connection, controller mapping and live Engine voice routing.
+- Stems export, persistent export queue and richer batch delivery.
+- External CLAP/VST3 binary build/hosting and native module dynamic loading.
+- Additional polish only where tests or real-device use demonstrate a gap.
 
-The UI documents these boundaries rather than simulating them. These capabilities belong to Task 2 and should be integrated through stable interfaces when available.
+The existing piano-roll curve tools and pattern generators are implemented; do not list them as missing.
 
-## Verification status
+## Verification rule
 
-- Earlier Engine CI passed Linux x64, Linux Arm64, Windows x64 and Linux sanitizers before the latest master-gain API change.
-- Earlier Docs/hygiene CI passed after the master-plan metadata/index issue was fixed.
-- An App CI run exposed three real problems: an invalid Engine Lab scope callback variable, unsupported `Wrap.mainAxisSize`, and missing `ActionRef` import in workspace tests. All three were fixed. Exporter failure/save handling, MIDI busy-state handling, temporary-file cleanup and render-option locking were also tightened. Plugin Builder now clones existing native modules as independent copies. Files library operations have bounded in-session undo/redo, safe import-filter reset and validated saved-search limits. Global Ctrl+1 through Ctrl+8 shortcuts navigate all eight workspaces.
-- Regression/widget tests cover master-gain update isolation, native smooth master gain, peak hold/release timing, 48 dp toggle targets, mobile focused Mixer navigation, shared Mixer state, Arranger playhead/track sizing, Engine Lab signal/spectrum, Exporter queue/profile/history/navigation, Plugin Builder cloning, library folder/tag/search operations, bulk move/tag undo/redo, project import identity and malformed library metadata bounds.
-- Audio export catches render/save failures and cleans temporary files; MIDI export has independent busy/error handling and worker-isolate generation.
-- CI workflow files cancel superseded runs per branch/PR to avoid spending runner time on stale commits.
-- **Verified exact-head checkpoint `aa0a0cb012725bae68fabd1a1af3768aace50757`: App CI passed Dart analysis and 126 widget tests; Windows desktop and Android APK builds passed; Engine CI passed Windows x64, Linux x64, Linux Arm64 and Linux sanitizers; Docs/hygiene passed.** These results apply to that exact head, not to subsequent commits.
-- The GitHub Actions queue had a large backlog of older runs when checked, and rapid commits caused superseded runs to be cancelled. Allow the newest runs to execute, then inspect any failed job logs before considering the branch verified.
-- No local Flutter SDK execution, physical Android/desktop interaction audit, full accessibility audit, screenshot comparison or current-device performance benchmark has been completed in this GitHub-only session.
+Do not infer current CI status from old commit hashes or historical handoff notes. Fetch workflow runs for the exact current PR head. The connector-only workflow cannot run Flutter/CMake commands locally; use CI logs as execution evidence and state that local reproduction was unavailable when applicable.
 
+## Next steps
 
-## Checkpoint additions after the earlier handoff
-
-- Added Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder actions and routing; updated action/keymap tests and shortcut documentation.
-- Added an in-session library metadata undo/redo stack (maximum 50 snapshots) covering folder creation/rename/delete, module moves, tags and saved searches. This is not general project undo and does not persist across restarts.
-- Added the undo/redo controls to the Files workspace and tests for restoring module folder placement.
-- Hardened project import by clearing stale search/folder/selection UI state; imported saved-search metadata is length-bounded using safe string handling.
-- Hardened WAV/MIDI export error handling, busy states, temporary-file cleanup and render-option locking while a job is active.
-- Added an advanced Plugin Builder action to clone an existing module into an independent module; added a widget test.
-- Engine Lab now renders a 512-point Hann-window FFT spectrum from the existing 512-sample native master scope. FFT scratch/window/output buffers are retained; the scope remains a mono-sum inspection and does not replace separate L/R peak meters.
-- Latest exact-head CI observed before this documentation update: App run 41320549040, Engine run 41320549038, Docs/hygiene run 41320549049; all jobs queued, no final results yet. A new documentation commit will trigger newer runs, which must be checked separately.
-
-## Additional audit finding at head b95a4221
-
-- The Arranger's project-settings master slider still used the general project-edit path, which schedules a full engine sync on every drag update. This bypassed the dedicated native master-gain API already used by Mixer.
-- Corrected the Arranger slider to use `AppState.setMaster` and listen to the shared value notifier, preserving immediate UI feedback without full app notifications or project recompilation during the drag.
-- Added a widget regression test asserting the Arranger control updates the shared project value, emits one value tick, emits no app-wide notification, and redraws the slider from the updated value.
-- Verification for this correction is pending the new exact-head App workflow; no passing claim is made until that run completes.
-
-## Not implemented / deferred Task 1 work
-
-- Finish Mixer capabilities only where the native engine API supports them; missing routing, stereo analysis and master-FX features above remain Task 2 dependencies.
-- Integrate universal editable Engine Lab graphs, low-level data inspection and programmable engine modules after Task 2 provides stable APIs.
-- Extend automation to parameters, modulation connections and processing behavior on the shared engine graph.
-- Extend Exporter with durable queue persistence if needed, stems/batch rendering, additional formats/bit depths/channel layouts, normalization/dither and dependency portability only when backend support exists.
-- Complete CLAP plugin build/validation/packaging after native host/SDK integration and license review.
-- Complete Files audio/MIDI previews and preview caching, dependency collection/relinking, project consolidation and OS-level folder browsing. Current Solo preview is a handoff to Builder, not a background preview player.
-- Complete desktop docking/panel persistence and full responsive/touch/keyboard/accessibility review.
-- Verify all workspaces on physical mobile and desktop hardware; capture frame-time, CPU, memory, thermal and audio-dropout measurements before making performance claims.
-- Run the latest queued CI for the current PR head, fix remaining failures, then update this handoff and PR description with exact results.
-
-## Continuation rules
-
-1. Read `docs/CAW_MASTER_DEVELOPMENT_PLAN.md` before changing scope.
-2. Inspect the current branch head and PR state before every significant change; preserve work already on the branch.
-3. Continue Task 1 only. Task 2 is architectural context and dependency work, not permission to replace the engine with a parallel implementation.
-4. Keep the PR draft and do not merge without authorization.
-5. Update this handoff with exact commits, tests and blockers whenever the context is nearing its limit.
-
-
-## Additional audit finding at head c27ae853
-
-- The desktop Mixer inspector splitter was mouse-draggable but did not expose an accessible adjustable semantic control.
-- Added a named, focusable semantics node with current/increased/decreased width values and increase/decrease actions. Screen-reader users can adjust the inspector width in 2 percentage-point increments; mouse dragging remains available and uses the same bounded state update.
-- Added a widget regression test that verifies the semantic control, both adjustment actions and the resulting width values. The test uses a wide test viewport to exercise the desktop layout.
-- Verification is pending the exact-head App workflow for this commit.
-
-
-## Additional audit finding at head ae043d13
-
-- The Automation point editor placed two sliders, numeric readouts and a remove action in one fixed horizontal row. At common phone widths this could overflow and make point editing unusable.
-- Reworked point rows responsively: narrow layouts stack time and value controls with clear labels, while wider layouts retain the compact horizontal editor.
-- Added semantic slider value descriptions and a 360 px widget regression test covering layout, value edits and overflow detection.
-- Verification is pending the exact-head App workflow for this commit.
-
-
-## Mobile Mixer and final test adjustments at head 42ad7afa
-
-- The long-effect-chain phone test found a 30 px vertical overflow in the focused Mixer channel strip. Its viewport now grows with effect-chain length rather than relying on one fixed height.
-- The Files test now provides a compiled generator and a realistic taller desktop viewport, so the Solo Preview action is enabled and visible. Export profile tests scroll to the selected sample-rate control instead of asserting offscreen toggle labels.
-- Exact-head CI must confirm the responsive Mixer and all workspace tests.
-
-## Final App test refinements at head 93865908
-
-- The remaining test run passed 122 tests and isolated three stale assertions/interactions. Automation's point index is now correct; Files scrolls the actual IconButton into view rather than attempting to tap its Tooltip proxy; Exporter profile application is correctly asserted to switch the toggle label to Quick Export.
-- Added a 360 dp Mixer focused-editor regression test with a five-module effect chain to validate the taller mobile channel-strip viewport.
-- Exact-head CI must confirm the remaining tests, mobile Mixer test, and platform builds.
-
-## Final widget-test corrections and accuracy fixes at head 8d375872
-
-- The last three test failures were narrowed to an Automation slider index (the new point is the third point, after the two existing points), an off-screen Files action, and a second Exporter test still tapping the hint text. Corrected those selectors and ensured the Files action is scrolled into view.
-- Extended the narrow Exporter test to actually select Wavetable and verify both Sweep and Frames controls render without overflow.
-- Increased the mobile Mixer focused editor's channel-strip viewport height to accommodate longer effect chains; add a dedicated phone-width regression test in the next pass.
-- Corrected master-value notification ordering on project switches so the new project's master value is published after the new project is installed.
-- Removed the unsupported bit-exact/cross-device guarantee from the Exporter explanation; the UI now describes the native offline renderer and the factors that can affect exact reproducibility.
-- Exact-head App and platform builds are pending. No final pass is claimed yet.
-
-## Widget-test repair pass at head 6a128270
-
-- The scoped value notifier and compact Arranger track header removed the global rebuild benchmark failure and the 3 px track-header overflow. The suite improved from 112 passing / 13 failing to 115 passing / 10 failing.
-- The remaining failures were mostly stale test interactions: focus selection did not target the splitter FocusNode, debounce timers were not advanced, Automation tried to add a point by tapping an ambiguous CustomPaint, Engine Lab assertions targeted lazy ListView children before scrolling, Files asserted visible text where the action is tooltip-only, and Exporter tapped a hint Text rather than its DropdownButton. Updated those tests to exercise the real controls and wait for debounced work.
-- The imported-module test supplied literal backslash-n text rather than actual header newlines; corrected the fixture so the intended header name is parsed.
-- Exact-head CI must confirm all fixes. No test pass is claimed yet.
-
-## Performance and phone-layout fixes at head 3e47ed8a
-
-- Replaced broad UI subscriptions to the shared value tick with scoped per-module and per-track ticks plus a master-output tick. Parameter drags now rebuild only the selected module's parameter controls; level/pan drags rebuild only that track's controls in Builder, Mixer and Arranger. The aggregate tick remains for compatibility but is no longer subscribed to by the workspaces.
-- Moved MIDI clip creation into the existing track context menu and compacted the generator selector in the narrow track header. This removes the 3 px DropdownButton overflow found by the widget suite without removing the ability to assign generators or add clips.
-- Added notifier disposal and project-switch cleanup. Exact-head widget tests and rebuild benchmark must verify the new scopes; not yet claimed passing.
-
-## Analyzer style cleanup correction at head 785b1331
-
-- The first automated brace pass was too broad and malformed nested Exporter callbacks. Restored the two affected UI files from the previous known-good commit and reapplied each lint fix with explicit block boundaries. The new exact-head App workflow must validate syntax and analyzer output before proceeding.
-
-## Analyzer style cleanup at head f91797bd
-
-- The analyzer then reported only style and deprecation infos. Converted the flagged single-statement conditionals in settings, Exporter and Files to explicit blocks. Replaced deprecated Semantics.focusable with the current focused property tied to the splitter FocusNode, and updated the accessibility test to verify the node can request focus.
-- The next exact-head run must confirm a clean analyzer and proceed into widget tests; no test pass is claimed yet.
-
-## Additional analyzer cleanup at head 7d46a1dd
-
-- The second exact-head analyzer run confirmed the undefined identifiers, missing keyboard imports and theme token were fixed. It then found one remaining warning: an unused legacy key-event import in the workspace test. Removed it so analysis can proceed to the test step. Remaining analyzer findings are informational style/deprecation notices; recheck the new run.
-
-## Additional CI audit and repair at head fa6c141e
-
-- Exact-head Dart analysis failed before tests ran. The export-history deserializer referenced undefined rawTarget and rawParam; it now reads the serialized target_id and param fields directly with bounded string validation. Existing settings round-trip coverage checks both fields.
-- Engine Lab referenced a nonexistent Neon.violet theme token. Added a dedicated violet theme slot across Calm neon, Night and Amber terminal palettes, and exposed it through Neon.violet; the theme round-trip test iterates every slot.
-- Mixer keyboard resizing and its widget test used Flutter keyboard event types without importing flutter/services.dart. Added the required imports.
-- Re-run App analysis and widget tests on the new head; the failed run did not reach the test step. Engine Linux x64, Linux Arm64, Windows x64 and Linux sanitizers passed on the preceding head; Docs/hygiene also passed there.
-
-## Additional audit finding at head a8d9ef5d
-
-- A narrow-screen audit found the Arranger toolbar kept its complete control set in a single horizontal row, which could overflow phone widths. It now wraps the controls beneath the section label below 760 px while retaining the desktop row.
-- The Exporter's wavetable sweep and frame selectors also shared one fixed horizontal row. They now stack into full-width labelled selectors on narrow layouts and retain the compact desktop row.
-- Added a 360 px Arranger regression test for toolbar layout and overflow. The existing Exporter phone-width test exercises format selection; the wavetable selector's narrow layout is covered by the new responsive implementation and will receive a dedicated interaction assertion in the next pass.
-- Exact-head CI is pending for these changes; no pass is claimed yet.
-
-## Additional audit finding at head 3a6593b6
-
-- Extended the Mixer splitter beyond screen-reader actions: it now participates in keyboard focus traversal and responds to Left/Right arrow keys, with a regression test for focus-driven resizing.
-- Replaced the Exporter's five-way horizontal format selector with a compact dropdown on narrow layouts while retaining the segmented desktop selector. One-shot, MIDI and wavetable target dropdowns expand to the available width.
-- Added phone-width Exporter selection coverage and keyboard resizing coverage. Exact-head CI is pending.
+Follow [Core development plan and complete feature list](core-and-feature-plan.md) and [Engine implementation status](engine-build-status.md). Do not resume the paused graph-to-Engine/VM integration or introduce AI product integration without explicit owner authorization.
