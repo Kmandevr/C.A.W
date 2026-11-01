@@ -251,8 +251,6 @@ class _ExporterScreenState extends State<ExporterScreen> {
           target: item.target,
           param: item.param,
           frames: item.frames,
-          target: item.target,
-          param: item.param,
         ));
         if (!mounted) {
           job.cancel();
