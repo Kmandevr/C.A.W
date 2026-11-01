@@ -110,7 +110,7 @@ void main() {
     expect(find.text('PLUGIN BUILDER'), findsOneWidget);
     expect(find.text('Guided'), findsOneWidget);
     expect(find.text('Advanced'), findsOneWidget);
-    expect(find.textContaining('CLAP/VST3 binary builds'), findsOneWidget);
+    expect(find.textContaining('native plugin SDK/host backend'), findsOneWidget);
   });
 
   test('imported projects receive a new identity and preserve project content', () async {
