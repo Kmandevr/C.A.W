@@ -12,6 +12,29 @@ import '../model/settings.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
+class _QueuedExport {
+  const _QueuedExport({
+    required this.fileName,
+    required this.projectJson,
+    required this.kind,
+    required this.sampleRate,
+    required this.float32,
+    required this.seconds,
+    required this.target,
+    required this.param,
+    required this.frames,
+    required this.patternSource,
+    required this.bpm,
+    required this.beatsPerBar,
+  });
+
+  final String fileName, projectJson, target, param, patternSource;
+  final ExportKind kind;
+  final int sampleRate, frames, beatsPerBar;
+  final bool float32;
+  final double seconds, bpm;
+}
+
 class ExporterScreen extends StatefulWidget {
   const ExporterScreen({super.key, required this.state});
   final AppState state;
@@ -32,6 +55,9 @@ class _ExporterScreenState extends State<ExporterScreen> {
   String? _param;
   int _frames = 64;
   String? _profileName;
+  final List<_QueuedExport> _queue = [];
+  bool _queueRunning = false;
+  bool _cancelQueueRequested = false;
   RenderJob? _job;
   bool _midiBusy = false;
   bool _saving = false;
@@ -138,6 +164,171 @@ class _ExporterScreenState extends State<ExporterScreen> {
     if (name == null) return;
     await s.settings.deleteExportProfile(name);
     if (mounted) setState(() => _profileName = null);
+  }
+
+  void _addToQueue() {
+    if (_queue.length >= 50) {
+      setState(() { _message = 'Export queue limit reached (50 items).'; _messageIsError = true; });
+      return;
+    }
+    final pattern = s.project.module(_patternId);
+    final target = switch (_kind) {
+      ExportKind.oneShot => _layerId ?? '',
+      ExportKind.wavetable => _moduleId ?? '',
+      ExportKind.midi => pattern?.id ?? '',
+      _ => '',
+    };
+    if ((_kind == ExportKind.oneShot && target.isEmpty) ||
+        (_kind == ExportKind.wavetable && target.isEmpty) ||
+        (_kind == ExportKind.midi && (pattern == null || !s.isPattern(pattern.id)))) {
+      setState(() { _message = 'Choose a valid export target before queueing.'; _messageIsError = true; });
+      return;
+    }
+    final item = _QueuedExport(
+      fileName: _fileName(),
+      projectJson: s.project.toEngineJson(),
+      kind: _kind,
+      sampleRate: _rate,
+      float32: _float,
+      seconds: _seconds,
+      target: target,
+      param: _param ?? '',
+      frames: _frames,
+      patternSource: pattern?.source ?? '',
+      bpm: s.project.bpm,
+      beatsPerBar: s.project.beatsPerBar,
+    );
+    setState(() {
+      _queue.add(item);
+      _message = 'Added ${item.fileName} to the export queue.';
+      _messageIsError = false;
+    });
+  }
+
+  void _cancelQueue() {
+    _cancelQueueRequested = true;
+    _job?.cancel();
+  }
+
+  Future<bool> _runQueuedItem(_QueuedExport item) async {
+    File? file;
+    try {
+      final tmp = await getTemporaryDirectory();
+      final path = '${tmp.path}${Platform.pathSeparator}${item.fileName}';
+      final outputFile = File(path);
+      file = outputFile;
+      if (item.kind == ExportKind.midi) {
+        final error = Engine.exportPattern(item.patternSource, path,
+          bpm: item.bpm, beatsPerBar: item.beatsPerBar);
+        if (error != null) throw StateError(error);
+      } else {
+        final job = RenderJob.start(RenderRequest(
+          projectJson: item.projectJson,
+          kind: item.kind,
+          outPath: path,
+          sampleRate: item.sampleRate,
+          float32: item.float32,
+          seconds: item.seconds,
+          target: item.target,
+          param: item.param,
+          frames: item.frames,
+        ));
+        if (!mounted) {
+          job.cancel();
+          return false;
+        }
+        setState(() => _job = job);
+        _poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
+          if (mounted) setState(() {});
+        });
+        final error = await job.result;
+        if (error != null) {
+          if (mounted) setState(() {
+            _message = error == 'cancelled' ? 'Queued export cancelled.' : 'Queued export failed: $error';
+            _messageIsError = error != 'cancelled';
+          });
+          return false;
+        }
+      }
+
+      if (!mounted) return false;
+      setState(() => _saving = true);
+      final bytes = await outputFile.readAsBytes();
+      final midi = item.kind == ExportKind.midi;
+      final saved = await FilePicker.saveFile(
+        fileName: item.fileName,
+        bytes: bytes,
+        mimeType: midi ? 'audio/midi' : 'audio/wav',
+        type: midi ? FileType.custom : FileType.audio,
+        allowedExtensions: midi ? const ['mid'] : null,
+      );
+      if (saved == null) {
+        if (mounted) setState(() { _message = 'Queue paused: destination picker closed.'; _messageIsError = false; });
+        return false;
+      }
+      String? warning;
+      try {
+        await s.settings.recordExport(ExportHistoryEntry(
+          fileName: item.fileName,
+          kind: item.kind.name,
+          createdAtMs: DateTime.now().millisecondsSinceEpoch,
+          sampleRate: item.sampleRate,
+          float32: item.float32,
+          seconds: item.seconds,
+          frames: item.frames,
+        ));
+      } catch (e) {
+        warning = 'Export saved, but history could not be updated: $e';
+      }
+      if (mounted) setState(() {
+        _message = warning ?? 'Saved ${item.fileName}';
+        _messageIsError = warning != null;
+      });
+      return true;
+    } catch (e) {
+      if (mounted) setState(() { _message = 'Queued export failed: $e'; _messageIsError = true; });
+      return false;
+    } finally {
+      _poll?.cancel();
+      _poll = null;
+      if (file != null) {
+        try {
+          if (await file.exists()) await file.delete();
+        } catch (_) {
+          // Temporary-file cleanup must not hide the export result.
+        }
+      }
+      if (mounted) setState(() {
+        _job = null;
+        _saving = false;
+      });
+    }
+  }
+
+  Future<void> _runQueue() async {
+    if (_queueRunning || _queue.isEmpty) return;
+    _cancelQueueRequested = false;
+    setState(() { _queueRunning = true; _message = null; });
+    final total = _queue.length;
+    var completed = 0;
+    try {
+      while (_queue.isNotEmpty && mounted && !_cancelQueueRequested) {
+        final item = _queue.first;
+        if (mounted) setState(() {
+          _message = 'Queue ${completed + 1} of $total · ${item.fileName}';
+          _messageIsError = false;
+        });
+        final saved = await _runQueuedItem(item);
+        if (!saved) break;
+        if (mounted) setState(() => _queue.removeAt(0));
+        completed++;
+      }
+      if (mounted && _cancelQueueRequested) {
+        setState(() { _message = 'Queue cancelled. Remaining items were kept.'; _messageIsError = false; });
+      }
+    } finally {
+      if (mounted) setState(() => _queueRunning = false);
+    }
   }
 
   Future<String?> _recordExport(String fileName) async {
