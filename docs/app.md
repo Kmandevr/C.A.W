@@ -83,7 +83,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - Quick Export renders the current project loop; Advanced offers loop, free-length, one-shot, wavetable and MIDI pattern exports
   - audio renders use the native offline render job, with progress and cancellation, at 44.1 or 48 kHz and 24-bit or 32-bit float
-  - MIDI patterns use the native MIDI writer in a worker isolate and preserve the project tempo and time signature
+  - MIDI pattern import/export uses the native C API synchronously from the UI isolate and preserves the project tempo and time signature. These conversions are not currently routed through the native worker pool; measure large-file responsiveness before claiming they are off-thread.
   - named export profiles persist in settings; the last 20 successful exports are recorded with reproducible settings that can be reapplied
   - a sequential in-memory queue holds up to 50 snapshot jobs, supports removal/clear, runs one render at a time and can cancel the current job while preserving remaining items
   - each queued item uses the native offline renderer or MIDI writer and asks for its own destination; the queue itself is not persisted across restarts. Batch/stem rendering and multi-destination automation remain incomplete
@@ -109,7 +109,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 ## How it works
 
 - **Engine access:** `lib/engine/bindings.dart` binds the C API by hand. `lib/engine/engine.dart` wraps it:
-  - Project compilation, asynchronous source checks and offline WAV rendering run through the native bounded C++ worker pool. MIDI file serialization uses a worker isolate. Project jobs are ordered by the AppState update path; native job status/progress/cancellation are exposed through owned handles. None of this work runs on the audio callback.
+  - Project compilation, asynchronous source checks and offline WAV rendering run through the native bounded C++ worker pool. MIDI pattern import/export currently calls the native conversion API synchronously from the UI isolate; it is not routed through the pool. Project jobs are ordered by the AppState update path; native job status/progress/cancellation are exposed through owned handles. None of the worker-pool work runs on the audio callback.
   - Meters and scopes are read about 30 times a second, but only while playing and for 1 s after stopping, and never in the background (`lib/model/poller.dart`). Stopped and settled, the app does no periodic work, and after 30 s it closes the audio device; Play reopens it.
   - Slider drags and typing update only the widgets that show them, not the whole app ([performance](performance.md#app-audit-2026-10-28)).
   - Volume, pan, mute, solo and param changes go straight to the engine. Everything else re-sends the project, and the engine applies only what changed.
