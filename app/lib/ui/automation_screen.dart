@@ -74,8 +74,7 @@ class _AutomationLane extends StatelessWidget {
               state.addAutomationPoint(layer, lane, (maxStep / 2).roundToDouble(), volume ? layer.volume : layer.pan),
             icon: const Icon(Icons.add_circle_outline, size: 18)),
         ]),
-        SizedBox(height: 72, width: double.infinity,
-          child: CustomPaint(painter: _CurvePainter(lane.points, maxStep, color, volume))),
+        _CurveEditor(state: state, layer: layer, lane: lane, maxStep: maxStep, color: color, volume: volume),
         for (var i = 0; i < lane.points.length; i++)
           _PointEditor(state: state, layer: layer, lane: lane, index: i, maxStep: maxStep, color: color, volume: volume),
       ],
@@ -108,8 +107,95 @@ class _PointEditor extends StatelessWidget {
         onChanged: (v) => state.updateAutomationPoint(layer, lane, index, point.step, v))),
       SizedBox(width: 42, child: Text(point.value.toStringAsFixed(2), textAlign: TextAlign.end,
         style: Neon.code(size: 10, color: color))),
+      IconButton(tooltip: 'Remove automation point',
+        onPressed: () => state.removeAutomationPoint(layer, lane, index),
+        icon: const Icon(Icons.close, size: 16)),
     ]);
   }
+}
+
+class _CurveEditor extends StatefulWidget {
+  const _CurveEditor({required this.state, required this.layer, required this.lane,
+    required this.maxStep, required this.color, required this.volume});
+  final AppState state;
+  final LayerDoc layer;
+  final AutomationLaneDoc lane;
+  final double maxStep;
+  final Color color;
+  final bool volume;
+
+  @override
+  State<_CurveEditor> createState() => _CurveEditorState();
+}
+
+class _CurveEditorState extends State<_CurveEditor> {
+  int? _dragIndex;
+
+  Offset _position(AutomationPointDoc point, Size size) {
+    final minimum = widget.volume ? 0.0 : -1.0;
+    final fraction = (point.value - minimum) / (widget.volume ? 1.0 : 2.0);
+    return Offset(
+      (point.step / widget.maxStep * size.width).clamp(0.0, size.width).toDouble(),
+      size.height - (fraction * size.height).clamp(0.0, size.height).toDouble(),
+    );
+  }
+
+  double _stepAt(Offset position, Size size) =>
+      (position.dx / size.width * widget.maxStep).clamp(0.0, widget.maxStep).toDouble();
+
+  double _valueAt(Offset position, Size size) {
+    final fraction = (1 - position.dy / size.height).clamp(0.0, 1.0).toDouble();
+    return widget.volume ? fraction : fraction * 2 - 1;
+  }
+
+  int? _nearestPoint(Offset position, Size size) {
+    var nearestIndex = -1;
+    var nearestDistance = 20.0;
+    for (var i = 0; i < widget.lane.points.length; i++) {
+      final distance = (_position(widget.lane.points[i], size) - position).distance;
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = i;
+      }
+    }
+    return nearestIndex < 0 ? null : nearestIndex;
+  }
+
+  void _addAt(TapUpDetails details, Size size) {
+    if (size.width <= 0 || size.height <= 0 || widget.lane.points.length >= 128) return;
+    widget.state.addAutomationPoint(widget.layer, widget.lane,
+      _stepAt(details.localPosition, size), _valueAt(details.localPosition, size));
+  }
+
+  void _startDrag(DragStartDetails details, Size size) {
+    if (size.width <= 0 || size.height <= 0) return;
+    _dragIndex = _nearestPoint(details.localPosition, size);
+  }
+
+  void _drag(DragUpdateDetails details, Size size) {
+    final index = _dragIndex;
+    if (index == null || size.width <= 0 || size.height <= 0) return;
+    widget.state.updateAutomationPoint(widget.layer, widget.lane, index,
+      _stepAt(details.localPosition, size), _valueAt(details.localPosition, size));
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 72,
+    width: double.infinity,
+    child: LayoutBuilder(builder: (context, constraints) {
+      final size = Size(constraints.maxWidth, constraints.maxHeight);
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (details) => _addAt(details, size),
+        onPanStart: (details) => _startDrag(details, size),
+        onPanUpdate: (details) => _drag(details, size),
+        onPanEnd: (_) => _dragIndex = null,
+        onPanCancel: () => _dragIndex = null,
+        child: CustomPaint(painter: _CurvePainter(widget.lane.points, widget.maxStep, widget.color, widget.volume)),
+      );
+    }),
+  );
 }
 
 class _CurvePainter extends CustomPainter {
