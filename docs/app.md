@@ -1,6 +1,6 @@
 ---
 title: App
-summary: The built Flutter app: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter and Files, engine integration, project storage and CI.
+summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/]
 updated: 2026-10-31
 ---
@@ -69,10 +69,20 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - adds/removes lanes and edits point positions and values, with a curve preview
   - the same serialized points are consumed by the Arranger and native engine; plugin parameter, modulation-link and processing-behavior automation remain engine/API dependencies
 - **Exporter** (`lib/ui/exporter_screen.dart`):
-  - the four exports from [engine](engine.md#exports), at 44.1 or 48 kHz, 24-bit or 32-bit float
-  - progress and cancel while it renders
-  - then the system file picker saves the file
-- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a bottom navigation bar that shows only the selected label. Builder, Arranger, Mixer, Engine Lab, Automation and Exporter share the same AppState. Ctrl+1/2/3 remain the current registered view shortcuts.
+  - Quick Export renders the current project loop; Advanced offers loop, free-length, one-shot, wavetable and MIDI pattern exports
+  - audio renders use the native offline render job, with progress and cancellation, at 44.1 or 48 kHz and 24-bit or 32-bit float
+  - MIDI patterns use the native MIDI writer and preserve the project tempo and time signature
+  - the system file picker saves each completed output; unsupported formats are not offered
+- **Files** (`lib/ui/file_manager_screen.dart`):
+  - import/export portable `.cawproj` projects and `.caw` module source to user-chosen locations
+  - imported projects receive a new ID so they cannot overwrite an existing saved project; imported modules are added as new items
+  - validates the project format version and reports malformed or future-version files instead of opening them
+  - WAV, MIDI and wavetable exports remain in Exporter; this workspace does not force a folder hierarchy
+- **Plugin Builder** (`lib/ui/plugin_builder_screen.dart`):
+  - guided creation from existing generator/effect templates and an advanced workflow for project modules
+  - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source
+  - CLAP/VST3 binary targets, host sandboxing and per-plugin CPU/memory tests are not available until a native plugin SDK/host backend is integrated
+- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a four-item bottom bar (Builder, Arranger, Mixer, More); More opens Engine Lab, Automation, Exporter, Files and Plugin Builder. Desktop uses a navigation rail for all eight destinations. All workspaces share the same AppState. Ctrl+1/2/3 remain the current registered view shortcuts.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
 - **Library and pattern modules** make no sound of their own: layers, the Exporter and Solo preview don't use them as generators.
 
