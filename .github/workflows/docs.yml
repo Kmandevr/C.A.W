@@ -3,11 +3,13 @@ name: Docs and hygiene
 on:
   push:
   pull_request:
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
-  cancel-in-progress: true
 permissions:
   contents: read
+
+# Cancel obsolete runs for this workflow/PR when a newer commit arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
