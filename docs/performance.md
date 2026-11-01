@@ -130,7 +130,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 
 
 - The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
-- Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; the UI does not allocate a new sample buffer each frame.
+- Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; its Hann window, FFT scratch buffers and 128-bin spectrum buffer are retained between ticks. A 512-point radix-2 FFT is performed at the existing 30 Hz meter cadence; the UI does not allocate new sample buffers each frame.
 - Mixer meters and Builder controls listen to the existing state notifiers rather than introducing a second audio-state polling loop.
 - These are architectural reductions in unnecessary rebuild/allocation work; no frame-time, CPU or battery benchmark has yet been captured on physical hardware.
 
