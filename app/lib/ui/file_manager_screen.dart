@@ -419,6 +419,15 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                 : Icon(Icons.description_outlined,
                     color: state.isEffect(module.id) ? Neon.pink : state.isPattern(module.id) ? Neon.yellow : Neon.green),
               trailing: _selectionMode ? null : Wrap(spacing: 0, runSpacing: 0, children: [
+                IconButton(
+                  tooltip: 'Solo preview in Builder',
+                  onPressed: state.isLibrary(module.id) ? null : () {
+                    state.selectModule(module.id);
+                    state.setPreviewOnly(true);
+                    widget.onOpenBuilder();
+                  },
+                  icon: const Icon(Icons.play_arrow, color: Neon.green),
+                ),
                 IconButton(tooltip: 'Open in Builder', onPressed: () {
                   state.selectModule(module.id);
                   widget.onOpenBuilder();
