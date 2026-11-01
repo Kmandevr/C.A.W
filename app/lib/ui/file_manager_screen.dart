@@ -138,8 +138,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         final q = _query.trim().toLowerCase();
         return module.name.toLowerCase().contains(q) ||
           state.kindOf(module.id).toLowerCase().contains(q) ||
-          module.tags.any((tag) => tag.toLowerCase().contains(q)) ||
-          module.source.toLowerCase().contains(q);
+          module.tags.any((tag) => tag.toLowerCase().contains(q));
       }).toList();
       modules.sort((a, b) => _sort == 'kind'
         ? state.kindOf(a.id).compareTo(state.kindOf(b.id))
@@ -217,7 +216,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           ]),
           Row(children: [
             Expanded(child: TextField(
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search name, source or tags'),
+              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search name, type or tags'),
               onChanged: (value) => setState(() => _query = value),
             )),
             const SizedBox(width: 8),
@@ -263,6 +262,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   onSelected: (action) {
                     if (action == 'tags') _editTags(module);
                     if (action == 'export') _exportModule(context, module);
+                    if (action == 'root') state.moveModuleToFolder(module.id, '');
+                    if (action.startsWith('folder:')) {
+                      state.moveModuleToFolder(module.id, action.substring('folder:'.length));
+                    }
                   },
                   itemBuilder: (_) => [
                     const PopupMenuItem(value: 'tags', child: Text('Edit tags')),
