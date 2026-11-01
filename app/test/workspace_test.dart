@@ -181,6 +181,31 @@ void main() {
     expect(state.project.bpm, 128);
   });
 
+
+  test('library folder operations preserve modules through rename and delete', () {
+    final id = state.importModuleSource(
+      '---\\nkind: generator\\nname: Folder test\\n---\\nsin(220)',
+      fileName: 'Folder.caw',
+      folderPath: 'Drums/Kicks',
+    );
+    expect(state.project.libraryFolders, containsAll(['Drums', 'Drums/Kicks']));
+    expect(state.project.module(id)?.folderPath, 'Drums/Kicks');
+
+    state.setModuleTags(id, ['bass', 'Analog', 'bass']);
+    expect(state.project.module(id)?.tags, ['bass', 'Analog']);
+
+    state.createLibraryFolder('Synths');
+    expect(state.moveModuleToFolder(id, 'Synths'), isTrue);
+    expect(state.renameLibraryFolder('Synths', 'Sounds/Synths'), isTrue);
+    expect(state.project.libraryFolders, containsAll(['Sounds', 'Sounds/Synths']));
+    expect(state.project.module(id)?.folderPath, 'Sounds/Synths');
+
+    expect(state.deleteLibraryFolder('Sounds'), isTrue);
+    expect(state.project.module(id)?.folderPath, '');
+    expect(state.project.libraryFolders, isNot(contains('Sounds/Synths')));
+    expect(state.project.module(id)?.source, contains('sin(220)'));
+  });
+
   test('imported module source becomes a new project module', () {
     final id = state.importModuleSource(
       '---\\nkind: generator\\nname: Imported bass\\n---\\nsin(110)',
