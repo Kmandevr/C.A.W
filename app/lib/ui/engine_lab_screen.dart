@@ -62,6 +62,9 @@ class _SignalPath extends StatelessWidget {
       ...layer.clips.map((clip) => clip.patternId),
     };
     final parent = state.project.layers.where((item) => item.id == layer.parentId && item.isFolder).firstOrNull;
+    final outputLabel = layer.isFolder && !layer.busEnabled
+        ? 'GROUP ONLY'
+        : parent?.busEnabled == true ? 'BUS · ${parent!.name}' : 'MASTER OUTPUT';
     return Padding(padding: const EdgeInsets.only(bottom: 8),
       child: NeonPanel(color: Neon.green, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
@@ -93,7 +96,7 @@ class _SignalPath extends StatelessWidget {
         ],
         if (layer.chain.isEmpty) const Text('No generator or effects assigned', style: TextStyle(color: Neon.dim, fontSize: 12)),
         const Icon(Icons.arrow_forward, size: 14, color: Neon.dim),
-        Text(parent?.busEnabled == true ? 'BUS · ${parent!.name}' : 'MASTER OUTPUT',
+        Text(outputLabel,
           style: Neon.code(size: 10, color: Neon.blue)),
       ]),
       const SizedBox(height: 8),
@@ -155,7 +158,7 @@ class _Readout extends StatelessWidget {
 }
 
 
-/// Reads the engine's existing 1024-sample mono master scope only when the meter poller ticks.
+/// Reads 512 samples from the native mono master scope only when the meter poller ticks.
 class _MasterScope extends StatefulWidget {
   const _MasterScope({required this.state});
   final AppState state;
