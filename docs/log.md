@@ -6,6 +6,8 @@ updated: 2026-11-01
 
 # Log
 
+- 2026-11-01: Repository-wide documentation accuracy pass: reconciled current app/engine facts, corrected piano-roll curves and generator status, separated shipped/partial/deferred capabilities, updated synth and worker-pool references, and removed stale claims of AI, MIDI-device, audio-recording, plugin-host and platform support.
+
 - 2026-11-01: Consolidated the owner-discussed work into a two-part master plan: core build order and complete feature inventory. Linked it from the docs index and roadmap; retained the workflow-gap and creative-systems plans as detailed supporting specifications.
 
 - 2026-10-31: Corrected low-memory scheduling inputs: removed the 16 MiB budget floor, preserved exhausted finite cgroup memory limits as a constrained signal, and added boundary tests for the budget conversion (#46).
