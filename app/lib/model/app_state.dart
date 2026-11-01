@@ -339,6 +339,7 @@ class AppState extends ChangeNotifier {
     selectedClipId = null;
     selectedClipIds.clear();
     selectedModuleId = layer.generatorId ?? layer.effectIds.firstOrNull;
+    if (previewOnly && selectedModuleId != null) _sync();
     notifyListeners();
   }
 
