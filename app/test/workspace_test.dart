@@ -243,6 +243,20 @@ void main() {
 
 
 
+  testWidgets('Exporter queues and removes a reproducible quick-export snapshot', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ExporterScreen(state: state)),
+    ));
+
+    await tester.tap(find.text('Queue'));
+    await tester.pumpAndSettle();
+    expect(find.text('EXPORT QUEUE · 1'), findsOneWidget);
+    expect(find.textContaining('bars.wav'), findsOneWidget);
+    await tester.tap(find.byTooltip('Remove queued export'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('EXPORT QUEUE'), findsNothing);
+  });
+
   testWidgets('Exporter applies saved profiles and exposes recent history', (tester) async {
     state.settings.exportProfiles = [
       const ExportProfile(name: 'Master WAV', kind: 'loop', sampleRate: 44100, float32: true),
