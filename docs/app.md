@@ -92,7 +92,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - guided creation from blank generators/effects or existing generator/effect templates and an advanced workflow for project modules
   - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source
   - CLAP/VST3 binary targets, host sandboxing and per-plugin CPU/memory tests are not available until a native plugin SDK/host backend is integrated
-- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a four-item bottom bar (Builder, Arranger, Mixer, More); More opens Engine Lab, Automation, Exporter, Files and Plugin Builder. Desktop uses a navigation rail for all eight destinations. All workspaces share the same AppState. Ctrl+1/2/3 remain the current registered view shortcuts.
+- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a four-item bottom bar (Builder, Arranger, Mixer, More); More opens Engine Lab, Automation, Exporter, Files and Plugin Builder. Desktop uses a navigation rail for all eight destinations. All workspaces share the same AppState. Global shortcuts navigate all workspaces: Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
 - **Library and pattern modules** make no sound of their own: layers, the Exporter and Solo preview don't use them as generators.
 
