@@ -7,6 +7,7 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
+import 'package:caw/ui/exporter_screen.dart';
 import 'package:caw/ui/file_manager_screen.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/plugin_builder_screen.dart';
@@ -101,6 +102,21 @@ void main() {
     expect(find.text('Bass'), findsOneWidget);
   });
 
+
+
+  testWidgets('Exporter switches between quick loop and advanced MIDI options', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ExporterScreen(state: state)),
+    ));
+
+    expect(find.text('Quick Export'), findsWidgets);
+    await tester.tap(find.text('Advanced'));
+    await tester.pumpAndSettle();
+    expect(find.text('MIDI'), findsOneWidget);
+    await tester.tap(find.text('MIDI'));
+    await tester.pumpAndSettle();
+    expect(find.text('Export MIDI'), findsOneWidget);
+  });
 
   testWidgets('Plugin Builder exposes the native module workflow and honest target boundary', (tester) async {
     await tester.pumpWidget(MaterialApp(
