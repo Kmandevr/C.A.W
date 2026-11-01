@@ -215,30 +215,33 @@ class _MobileFocusedEditor extends StatelessWidget {
   final VoidCallback onOpenBuilder;
 
   @override
-  Widget build(BuildContext context) {
-    final layers = state.project.layers;
-    final selected = layers.where((layer) => layer.id == state.selectedLayerId).firstOrNull ?? layers.firstOrNull;
-    if (selected == null) {
-      return const NeonPanel(child: Text('Add a track in Arranger to open its focused editor.'));
-    }
-    final index = layers.indexOf(selected);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      NeonPanel(color: Neon.blue, child: DropdownButton<String>(
-        value: selected.id,
-        isExpanded: true,
-        underline: const SizedBox.shrink(),
-        items: [for (final layer in layers) DropdownMenuItem(value: layer.id, child: Text(layer.name))],
-        onChanged: (id) {
-          final layer = layers.where((item) => item.id == id).firstOrNull;
-          if (layer != null) state.selectLayer(layer);
-        },
-      )),
-      const SizedBox(height: 10),
-      SizedBox(height: 280, child: _ChannelStrip(state: state, layer: selected, index: index)),
-      const SizedBox(height: 12),
-      _ModuleInspector(state: state, onOpenBuilder: onOpenBuilder),
-    ]);
-  }
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: state,
+    builder: (context, _) {
+      final layers = state.project.layers;
+      final selected = layers.where((layer) => layer.id == state.selectedLayerId).firstOrNull ?? layers.firstOrNull;
+      if (selected == null) {
+        return const NeonPanel(child: Text('Add a track in Arranger to open its focused editor.'));
+      }
+      final index = layers.indexOf(selected);
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        NeonPanel(color: Neon.blue, child: DropdownButton<String>(
+          value: selected.id,
+          isExpanded: true,
+          underline: const SizedBox.shrink(),
+          items: [for (final layer in layers) DropdownMenuItem(value: layer.id, child: Text(layer.name))],
+          onChanged: (id) {
+            final layer = layers.where((item) => item.id == id).firstOrNull;
+            if (layer != null) state.selectLayer(layer);
+          },
+        )),
+        const SizedBox(height: 10),
+        SizedBox(height: 280, child: _ChannelStrip(state: state, layer: selected, index: index)),
+        const SizedBox(height: 12),
+        _ModuleInspector(state: state, onOpenBuilder: onOpenBuilder),
+      ]);
+    },
+  );
 }
 
 class _ChannelStrip extends StatelessWidget {
