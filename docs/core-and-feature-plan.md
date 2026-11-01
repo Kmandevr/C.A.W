@@ -27,6 +27,26 @@ The core plan controls sequencing. The feature list preserves scope so lower-pri
 - Every feature needs relevant model/serialization, engine, UI and performance tests. Keep CI green; never weaken or skip tests to make it pass.
 - Preserve current approved v2 commitments and their status. Any change in priority requires the owner's direction.
 
+## Current implementation snapshot (checked 2026-11-01)
+
+This is the repository baseline before future work. The linked app/engine references contain the detailed evidence.
+
+| Area | What exists now | What is not yet complete |
+|---|---|---|
+| App and platforms | Eight Flutter workspaces; Android and Windows app CI artifacts | iOS/macOS release builds; Linux app is not a shipped CI artifact |
+| Engine | Portable C++20 engine, constrained module VM, native stereo playback/mixer, offline renderer, bounded worker pool and adaptive workload policy | Not every modular graph/native-module foundation is integrated into the active VM/mixer path |
+| Pattern editing | Piano roll, drum grid, note expressions, lane curves, pattern generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze, advanced groove/quantize extensions |
+| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation | Audio clips, clip automation, markers/sections and consolidation |
+| Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths and master effect chains |
+| Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
+| MIDI | MIDI pattern file import/export and MIDI 2.0 UMP decoder/input-queue primitive | USB/Bluetooth device I/O, controller learn, clock and live Engine voice routing |
+| Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | SFZ multisample export, stems, persistent queue and broader batch delivery |
+| Audio assets | Generated audio and module/effect processing | Audio-file import, audio clip editing, sample editor, multisample mapping |
+| Plugins | Plugin Builder validates/packages native .caw source; native SDK/graph foundations exist | Dynamic native loading, process isolation, CLAP/VST3 binary build/hosting |
+| AI | External coding assistants may be used as development tools | No in-app AI, model inference or cloud-audio integration is in current scope |
+
+**Status rule:** a row in Part II is an inventory of product scope, not proof of implementation. If a capability is not listed as existing above or verified in [App](app.md)/[Engine implementation status](engine-build-status.md), treat it as planned, partial or conditional—not shipped.
+
 ## Part I — Core development plan
 
 ### Core order at a glance
@@ -127,9 +147,9 @@ These remain ahead of the new creative-systems track unless the owner explicitly
 
 Build only after Phase 0 commitments and without blocking Phases 1–6 when a workflow dependency is more important. Priority labels below are relative to this creative-systems phase.
 
-1. **Deterministic mathematical modulation** — XS–S; impact 4/5; creative P0.
+1. **Extend deterministic mathematical modulation** — XS–S; impact 4/5; creative P0; build on existing deterministic math, seeded noise, LFOs and parameter/global modulation.
 2. **Compact cellular/bit-pattern generators** — S–M; impact 4/5; creative P0.
-3. **Waveshaping and waveform morphing** — S–M; impact 5/5; creative P0.
+3. **Extend waveshaping and waveform morphing** — S–M; impact 5/5; creative P0; build on existing drive/fold/tanh and wavetable frame morph/phase warp.
 4. **Small seeded sound-variation explorer** — M; impact 5/5; creative P0; 8 candidates initially, hard cap 16, explicit user action, background/offline rendering.
 5. **Sound lineage/family metadata** — S; impact 3/5; creative P1.
 6. **Non-destructive processing history/checkpoints** — M; impact 4/5; creative P1; store recipes/metadata rather than duplicate audio buffers.
@@ -173,7 +193,7 @@ Each item gets its own implementation issue, code audit, acceptance criteria and
 
 ## Part II — Complete feature list
 
-This inventory preserves the features and directions discussed. Status terms are planning labels, not claims that code exists: **Existing foundation** means some relevant implementation is present; **Complete** must be confirmed against code; **Planned** means not yet complete; **Conditional** means prototype/owner approval required; **Excluded** means not in current scope.
+This inventory preserves the features and directions discussed. The current baseline is in the snapshot above. Status terms are planning labels, not claims that code exists: **Existing foundation** means some relevant implementation is present; **Complete** must be confirmed against code; **Planned** means not yet complete; **Conditional** means prototype/owner approval required; **Excluded** means not in current scope.
 
 ### A. Core creation and sound design
 
