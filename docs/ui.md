@@ -65,13 +65,13 @@ The Arranger is the main composition view. It is a horizontal song timeline with
 
 ## Layout
 
-The application shell currently exposes six destinations: Builder, Arranger, Mixer, Engine Lab, Automation and Exporter. The Arranger remains the composition workspace; the old session grid is retired. Mixer, Engine Lab and Automation are separate destinations that read and edit the shared project state.
+The application shell currently exposes seven destinations: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter and Files. The Arranger remains the composition workspace; the old session grid is retired. Mixer, Engine Lab and Automation are separate destinations that read and edit the shared project state.
 
-**Phone (portrait):** transport at the top, then the track headers beside a horizontally scrolling song timeline. The Arranger's compact mixer panel remains available below the timeline, while the dedicated Mixer, Engine Lab and Automation workspaces are reached through bottom navigation.
+**Phone (portrait):** transport at the top, then the track headers beside a horizontally scrolling song timeline. The Arranger's compact mixer panel remains available below the timeline. Builder, Arranger and Mixer are primary bottom destinations; More opens Engine Lab, Automation, Exporter and Files.
 
 **Phone (landscape):** the timeline gets the available width. Track headers stay aligned with their lanes while the song timeline scrolls horizontally. The mixer remains a separate panel.
 
-**Desktop / wide:** navigation rail, persistent transport, and a full-width arrangement timeline. Track headers remain fixed beside the horizontally scrolling timeline; the Arranger's mixer panel can be opened without replacing the arrangement, and the dedicated Mixer remains a separate detailed workspace.
+**Desktop / wide:** navigation rail, persistent transport, and a full-width arrangement timeline. Track headers remain fixed beside the horizontally scrolling timeline; the Arranger's mixer panel can be opened without replacing the arrangement, and the dedicated Mixer remains a separate detailed workspace; Files exposes portable project/module import and export.
 
 The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 
@@ -175,3 +175,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 ## Not yet
 
 Recording audio or MIDI, audio clips, clip-following automation and automation of globals or module parameters remain out of scope for this slice ([roadmap](roadmap.md)).
+
+## Performance profiles
+
+Settings provides Full Experience, Balanced, Lightweight and Minimal. Profiles reduce decorative effects before useful responsiveness: meter polling stays at 30 Hz in every mode. Lightweight/Minimal use the existing reduced voice budget; Minimal hides scope panels. See [Performance](performance.md#ui-performance-profiles) for the exact behavior and remaining device measurements.
