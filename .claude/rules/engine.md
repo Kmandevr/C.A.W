@@ -7,7 +7,7 @@ paths:
 
 The design is in `docs/architecture.md` ("Audio and code execution"); this is the checklist for touching it.
 
-- **Portable core.** No OS, audio-API or UI headers outside `engine/platform/`. The same core builds for Android, iOS, Windows, macOS and Linux, the desktop CLI used by CI and AI agents, and later WASM. Audio output goes through miniaudio in `engine/platform/`.
+- **Portable core.** No OS, audio-API or UI headers outside `engine/platform/`. The core is currently CI-verified on Linux x64, Linux Arm64 and Windows x64, and is built into the Android app. iOS/macOS engine builds and WASM are portability targets, not currently verified CI targets. The desktop CLI is used by CI and external coding tools. Audio output goes through miniaudio in `engine/platform/`.
 - **Audio thread.** In the callback and everything it calls: no allocation, no locks, no logging, no I/O, no calls into the app, no exceptions, no unbounded loops. Programs arrive through a lock-free swap and are freed off the audio thread.
 - **`.caw` language boundary.** The user module language has no filesystem, network or system-call access and is subject to explicit source/program/state/execution limits. This does not sandbox native SDK modules: they execute as trusted in-process code. Do not claim third-party native modules are isolated or safe to load until process isolation and host validation exist.
 - **C API.** The app calls the engine only through a small, versioned C API (plain structs and functions, no C++ types across it), so `dart:ffi` and any future host can bind it.
