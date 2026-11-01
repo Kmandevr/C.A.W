@@ -24,8 +24,15 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   String _sort = 'name';
   bool _selectionMode = false;
   final Set<String> _selectedModuleIds = {};
+  final TextEditingController _searchController = TextEditingController();
 
   AppState get state => widget.state;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   Future<void> _createFolder() async {
     final controller = TextEditingController();
@@ -246,6 +253,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           ]),
           Row(children: [
             Expanded(child: TextField(
+              controller: _searchController,
               decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search name, type or tags'),
               onChanged: (value) => setState(() => _query = value),
             )),
@@ -269,7 +277,10 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   InputChip(
                     label: Text(entry.key),
                     tooltip: 'Search: ${entry.value}',
-                    onPressed: () => setState(() => _query = entry.value),
+                    onPressed: () {
+                      _searchController.text = entry.value;
+                      setState(() => _query = entry.value);
+                    },
                     onDeleted: () => state.deleteLibrarySearch(entry.key),
                   ),
               ])),
