@@ -23,6 +23,7 @@ class CawTheme {
     'pink': 'Effects, errors, keywords',
     'yellow': 'Patterns, numbers, edits',
     'blue': 'Libraries, focus, variables',
+    'violet': 'Modulation, automation and spectrum',
     'layer1': 'Layer colour 1',
     'layer2': 'Layer colour 2',
     'layer3': 'Layer colour 3',
@@ -100,7 +101,7 @@ final calmNeon = CawTheme(
   name: 'Calm neon',
   colors: _palette(const [
     0xFF07070B, 0xFF101018, 0xFF181824, 0xFF2A2A3C, 0xFFE9E9F2, 0xFF8C8CA3, //
-    0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, //
+    0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, //
     0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF,
   ]),
 );
@@ -113,7 +114,7 @@ final starterThemes = [
     glow: false,
     colors: _palette(const [
       0xFF040406, 0xFF0B0B10, 0xFF12121A, 0xFF20202C, 0xFFC4C4D0, 0xFF6C6C80, //
-      0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, //
+      0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, //
       0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6,
     ]),
   ),
@@ -121,7 +122,7 @@ final starterThemes = [
     name: 'Amber terminal',
     colors: _palette(const [
       0xFF0B0804, 0xFF15100A, 0xFF1E170E, 0xFF3A2C18, 0xFFFFD9A0, 0xFFA08060, //
-      0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFFFC861, //
+      0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFFFC861, 0xFFB68AE0, //
       0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFD9A066,
     ]),
   ),
@@ -149,8 +150,10 @@ class Neon {
   /// The theme every Neon colour reads from. Settings sets it; widgets built earlier repaint when the app remounts.
   static CawTheme active = calmNeon;
 
-  /// Light mode (for slow devices) turns glow off whatever the theme says.
+  /// Performance profile: 0 full, 1 balanced, 2 lightweight, 3 minimal.
+  static int performanceMode = 1;
   static bool light = false;
+  static bool showScopes = true;
 
   static const Color bg = _ThemeColor('bg');
   static const Color panel = _ThemeColor('panel');
@@ -163,6 +166,7 @@ class Neon {
   static const Color pink = _ThemeColor('pink');
   static const Color yellow = _ThemeColor('yellow');
   static const Color blue = _ThemeColor('blue');
+  static const Color violet = _ThemeColor('violet');
 
   /// Layer colours, in order.
   static const List<Color> layers = [
@@ -181,9 +185,12 @@ class Neon {
       TextStyle(fontFamily: mono, fontFamilyFallback: monoFallback, fontSize: size, color: color, height: 1.45);
 
   /// The glow around active things; nothing when the theme turns glow off.
-  static List<BoxShadow> glow(Color c, {double strength = 0.55}) => active.glow && !light
-      ? [BoxShadow(color: c.withValues(alpha: strength), blurRadius: 12, spreadRadius: -2)]
-      : const [];
+  static List<BoxShadow> glow(Color c, {double strength = 0.55}) {
+    final scale = performanceMode == 0 ? 1.0 : performanceMode == 1 ? 0.55 : 0.0;
+    return active.glow && !light && scale > 0
+        ? [BoxShadow(color: c.withValues(alpha: strength * scale), blurRadius: 12, spreadRadius: -2)]
+        : const [];
+  }
 
   /// True when the compact density is on.
   static bool compact(BuildContext context) => Theme.of(context).visualDensity == VisualDensity.compact;

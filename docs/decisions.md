@@ -6,6 +6,15 @@ updated: 2026-10-28
 
 # Decisions
 
+## 2026-10-31: Arrangement-first composition replaces the session grid
+
+- **The old session grid is retired completely.** The Arranger is a horizontal song timeline with track lanes and reusable MIDI clip instances; no clip-launcher/session-grid alternate mode is retained.
+- **Track ownership:** generators, effects and mix controls belong to tracks. Clips reference reusable pattern sources and own their start, length, source offset and loop behavior.
+- **Folder routing:** nested folders can be organizational or stereo group buses. A bus sums child audio once and applies group volume/pan before routing to its parent or master.
+- **Automation:** track volume and pan lanes follow song time and are interpolated in the native callback. Global and module-parameter automation remain future work.
+- **Piano-roll multi-clip behavior:** selected companion clips are visible as read-only references; linked clips that share a source edit together. Editing multiple independent sources as one operation remains a follow-up.
+
+
 Newest first. A later entry wins over an earlier one on the same topic.
 
 ## 2026-10-28: Light mode, and this branch becomes main (owner)

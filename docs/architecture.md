@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical plan for every target platform: stack, audio engine and code execution, module format, GitHub sync, AI workflow, risks.
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # Architecture
@@ -84,6 +84,9 @@ The central decision: **user code is compiled into bytecode for our own small VM
 - **The sandbox comes from what the language can't do.** It has no I/O, no filesystem, no network and no system calls. Memory is fixed-size and allocated before playback. Loops are bounded and the call depth is capped. Downloaded modules are therefore no more dangerous than local ones.
 - **Audio-thread rules:** no allocation, no locks, no calls into the UI layer and no logging inside the callback. Programs are handed over through a single-slot atomic swap, and old programs are freed off the audio thread.
 - **Block processing:** the VM runs each opcode over a block of samples (for example 64) rather than one sample at a time. This cuts interpreter overhead a lot.
+- **Arrangement scheduling:** clips are immutable instances that reference reusable pattern sources. On the control thread, CAW compiles their note events into one sorted absolute-time stream per track. The audio callback uses the existing block-boundary engine; it never parses patterns, allocates clip data or relies on UI timers. This keeps note timing independent of Flutter frame rate and avoids a separate scheduler thread.
+- **Folder buses:** the control thread resolves a validated folder tree into slot routing indices and a child-before-parent render order. The callback sums child stereo buffers into each bus, applies bus gain and stereo balance, then routes the result upward exactly once. Organization-only folders have no audio slot. No routing graph is allocated or walked in the callback.
+- **Track automation:** volume and pan points are copied into fixed-size slot arrays through the command queue. The callback interpolates against the current song step for each sample. The supported lane targets are deliberately limited to volume and pan in this implementation slice; global and plugin-parameter automation remain future work.
 - **Cost guard:** the engine measures time spent per callback. If it overruns repeatedly, it fades out and reports "too expensive" instead of stuttering.
 - **Ear and speaker safety:** NaN/Inf values are replaced with 0, DC is blocked, and a hard safety limiter runs last. Default output gain is low. Glitch audio can go to full-scale noise instantly.
 - **Defined arithmetic:** every operation has one defined result on every device (see [Bits and determinism](#bits-and-determinism)). Output has two modes: *byte* (`v & 255` mapped to −1…1, classic bytebeat) and *float* (clamped to −1…1).
@@ -171,7 +174,7 @@ export let env = ad(trig, 0.001, 0.3)                  a signal other modules re
 - the note variables, and voices (8 per layer, oldest stolen)
 - a Pattern picker per layer, and Solo preview through a layer's pattern
 
-The audio thread asks a pattern for the notes in a stretch of time, so procedural patterns can answer the same question later. Patterns reach the audio thread apart from the sound's code, so editing one doesn't restart the sound, and scenes can swap them. Notes keep room for a kit row and curves, and `bend` is reserved. Not built yet: kit patterns, procedural code, custom values and curves, swing, the editor, scenes and automation.
+The audio thread consumes pattern events separately from the sound's code, so a pattern edit can update without rebuilding the instrument/effect chain. The arrangement compiles reusable pattern sources into absolute-time clip events on the control thread; the audio callback schedules them at sample positions. Notes keep room for a kit row and curves, and `bend` is reserved. Not built yet: kit patterns, procedural code, custom values and curves, swing, clip-following automation, and plugin/global parameter automation. The session-grid scene launcher is retired; the linear Arranger is the composition view.
 - **Two shapes:**
   - A **single-sound pattern** drives one layer.
   - A **kit pattern** has named rows (kick, snare, hats …), and each row is routed to a layer, so one pattern can drive a whole kit.

@@ -86,6 +86,15 @@ void main() {
     // Area keys win over global ones: Ctrl+S saves elsewhere but moves the cursor in the roll.
     expect(defaults.lookup(Area.arranger, k('Ctrl+S')), const ActionRef.action('arranger.layer.moveDown'));
     expect(defaults.lookup(Area.exporter, k('Ctrl+S')), const ActionRef.action('project.save'));
+    for (final entry in const {
+      'Ctrl+4': 'view.mixer',
+      'Ctrl+5': 'view.engineLab',
+      'Ctrl+6': 'view.automation',
+      'Ctrl+7': 'view.files',
+      'Ctrl+8': 'view.pluginBuilder',
+    }.entries) {
+      expect(defaults.lookup(Area.global, k(entry.key)), ActionRef.action(entry.value));
+    }
     expect(defaults.toolbars[Area.pattern]!.first, const ActionRef.action('roll.tool.draw'));
   });
 

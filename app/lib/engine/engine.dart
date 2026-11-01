@@ -228,7 +228,7 @@ class Template {
   final String file, source;
 }
 
-enum ExportKind { loop, free, oneShot, wavetable }
+enum ExportKind { loop, free, oneShot, wavetable, midi }
 
 class RenderRequest {
   const RenderRequest({
@@ -311,6 +311,8 @@ class Engine {
     _b.setLayerMix(_handle, id, volume, pan, mute ? 1 : 0, solo ? 1 : 0);
     calloc.free(id);
   }
+
+  void setMaster(double volume) => _b.setMaster(_handle, volume);
 
   void play() => _b.play(_handle);
   void stop() => _b.stop(_handle);

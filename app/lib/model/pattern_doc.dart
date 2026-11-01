@@ -1004,6 +1004,56 @@ class PatternDoc {
   PatternDoc setRatchet(Set<int> sel, int ratchet) => _map(sel, (n) => n.copyWith(ratchet: ratchet.clamp(1, 8)));
   PatternDoc setSlide(Set<int> sel, bool slide) => _map(sel, (n) => n.copyWith(slide: slide));
 
+  PatternDoc _insertEquivalent(PatternNote note) {
+    final inserted = insert(note.at, note.pitch, note.len, vel: note.vel);
+    if (inserted.id == null) return inserted.doc;
+    var next = inserted.doc;
+    final id = inserted.id!;
+    if (note.prob != 1) next = next.setProb({id}, note.prob);
+    if (note.ratchet != 1) next = next.setRatchet({id}, note.ratchet);
+    if (note.slide) next = next.setSlide({id}, true);
+    return next;
+  }
+
+  /// Mirrors a note-level edit delta from [before] → [after] onto this independent source.
+  /// Matching notes use their original time, pitch and nearest original length; ids stay local to each source.
+  PatternDoc mirrorChanges(PatternDoc before, PatternDoc after) {
+    var result = this;
+    final afterById = {for (final note in after.notes) note.id: note};
+    final beforeIds = before.notes.map((note) => note.id).toSet();
+    for (final oldNote in before.notes) {
+      final changed = afterById[oldNote.id];
+      final matches = result.notes.where((note) =>
+        note.at == oldNote.at && note.pitch == oldNote.pitch).toList()
+        ..sort((x, y) => (x.len - oldNote.len).toDouble().abs().compareTo((y.len - oldNote.len).toDouble().abs()));
+      if (matches.isEmpty) {
+        if (changed != null && !oldNote.sameAs(changed)) result = result._insertEquivalent(changed);
+        continue;
+      }
+      final targetNote = matches.first;
+      if (changed == null) {
+        result = result.delete({targetNote.id});
+        continue;
+      }
+      final id = targetNote.id;
+      if (changed.at != oldNote.at || changed.pitch != oldNote.pitch) {
+        result = result.move({id}, changed.at - oldNote.at, changed.pitch - oldNote.pitch);
+      }
+      if (changed.len != oldNote.len) result = result.resize({id}, changed.len - oldNote.len);
+      if (changed.vel != oldNote.vel) result = result.setVelocity({id}, changed.vel);
+      if (changed.prob != oldNote.prob) result = result.setProb({id}, changed.prob);
+      if (changed.ratchet != oldNote.ratchet) result = result.setRatchet({id}, changed.ratchet);
+      if (changed.slide != oldNote.slide) result = result.setSlide({id}, changed.slide);
+    }
+    for (final note in after.notes) {
+      if (beforeIds.contains(note.id)) continue;
+      if (result.notes.any((existing) => existing.sameAs(note))) continue;
+      result = result._insertEquivalent(note);
+    }
+    return result;
+  }
+
+
   // Queries.
 
   /// Notes that sound during [t0, t1) (or at t0 when t0 == t1) with pitch in [p0, p1]; bounds may come in any order.

@@ -51,6 +51,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.beatsPerBar = clampi(root.number("beats_per_bar", 4), 1, 16);
     out.voices = clampi(root.number("voices", 8), 1, 8);
     out.loopBars = clampi(root.number("loop_bars", 4), 1, 64);
+    const int maxArrangementSteps = 64 * out.beatsPerBar * 4;
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
     out.master = clampd(root.number("master", 0.7), 0, 1);
     out.seamCrossfade = root.boolean("seam_crossfade", true);
@@ -88,13 +89,64 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.name = l.string("name");
             if (spec.id.empty()) continue;
             spec.chain = idList(l.get("chain"));
-            spec.lengthSteps = clampi(l.number("length_steps", 0), 0, 64 * 16 * 16);
+            spec.lengthSteps = clampi(l.number("length_steps", 0), 0, maxArrangementSteps);
             spec.pattern = l.string("pattern");
+            spec.parentId = l.string("parent");
+            spec.folder = l.boolean("folder", false);
+            spec.busEnabled = l.boolean("bus", true);
+            if (const Json* clips = l.get("clips"); clips && clips->type == Json::Type::Array) {
+                for (const Json& c : clips->arr) {
+                    if (c.type != Json::Type::Object || spec.clips.size() >= 512) continue;
+                    ClipSpec clip;
+                    clip.id = c.string("id");
+                    clip.pattern = c.string("pattern");
+                    clip.startSteps = clampi(c.number("start_steps", 0), 0, maxArrangementSteps - 1);
+                    clip.lengthSteps = clampi(c.number("length_steps", 64), 1, maxArrangementSteps - clip.startSteps);
+                    clip.sourceOffsetSteps = clampi(c.number("source_offset_steps", 0), 0, maxArrangementSteps);
+                    clip.loop = c.boolean("loop", true);
+                    if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));
+                }
+            }
+            if (const Json* lanes = l.get("automation"); lanes && lanes->type == Json::Type::Array) {
+                for (const Json& laneJson : lanes->arr) {
+                    if (laneJson.type != Json::Type::Object) continue;
+                    AutomationLaneSpec lane; lane.target = laneJson.string("target");
+                    if (lane.target != "volume" && lane.target != "pan") continue;
+                    if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
+                        for (const Json& point : points->arr) {
+                            if (point.type != Json::Type::Object || lane.points.size() >= 128) continue;
+                            lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
+                                clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1, 1)});
+                        }
+                    }
+                    std::stable_sort(lane.points.begin(), lane.points.end(), [](const auto& a, const auto& b) { return a.step < b.step; });
+                    if (!lane.points.empty()) spec.automation.push_back(std::move(lane));
+                }
+            }
             spec.volume = clampd(l.number("volume", 0.8), 0, 1);
             spec.pan = clampd(l.number("pan", 0), -1, 1);
             spec.mute = l.boolean("mute", false);
             spec.solo = l.boolean("solo", false);
             out.layers.push_back(std::move(spec));
+        }
+    }
+    // Reject malformed parent references and cycles before the audio thread sees routing indices.
+    for (const LayerSpec& layer : out.layers) {
+        std::string parent = layer.parentId;
+        std::vector<std::string> seen{layer.id};
+        for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+            if (std::find(seen.begin(), seen.end(), parent) != seen.end()) {
+                error = "folder hierarchy contains a cycle";
+                return false;
+            }
+            seen.push_back(parent);
+            const auto found = std::find_if(out.layers.begin(), out.layers.end(),
+                [&](const LayerSpec& candidate) { return candidate.id == parent; });
+            if (found == out.layers.end() || !found->folder) {
+                error = "a layer parent must reference an existing folder";
+                return false;
+            }
+            parent = found->parentId;
         }
     }
     if (const Json* g = root.get("globals"); g && g->type == Json::Type::Object)

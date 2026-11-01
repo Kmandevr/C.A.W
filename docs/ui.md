@@ -1,7 +1,7 @@
 ---
 title: UI design
-summary: How the app should look and feel as a light "halfway DAW" on phone and desktop: layout, one gesture vocabulary, the session grid, editors, inspector, and the performance budget.
-updated: 2026-10-28
+summary: Retro-neon, arrangement-first creative UI across eight shared-state workspaces on desktop and mobile.
+updated: 2026-10-31
 ---
 
 # UI design
@@ -11,7 +11,7 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
 ## Owner's choices (2026-10-28)
 
 - **Phone orientation:** portrait and landscape matter equally, so every screen gets a proper layout for both.
-- **Mix view:** the session grid (layers × scenes).
+- **Composition view:** a horizontal arrangement timeline with tracks and reusable MIDI clips. The old session grid is retired, not retained as an alternate view.
 - **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
 - **New files and startup** (owner, 2026-10-28):
   - **New modules:** a new sound, effect, pattern or library starts as an empty file. A faint hint (not part of the file) shows an example header and first line until you start typing. Templates stay one choice away in the same New menu.
@@ -51,54 +51,29 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
   - Bitwig draws micro-pitch on the note itself. Its curves are edited by adding points, moving them and bending the segments between them ([Bitwig user guide](https://www.bitwig.com/userguide/latest/inspecting_note_clips), [Admiral Bumblebee](https://www.admiralbumblebee.com/music/2017/06/16/bitwig-feature-review-note-expression)).
   - Bitwig Studio 6 edits gain and the other expressions on the notes too ([Plugin Boutique](https://www.pluginboutique.com/products/16950-Bitwig-Studio-6)). This is the model for curved notes here.
 
+## Arrangement workspace
+
+The Arranger is the main composition view. It is a horizontal song timeline with one row per track, a bar ruler, reusable MIDI clips, and a separate mixer panel. It is not a session grid or clip launcher.
+
+- A track owns its generator, effects, volume, pan, mute/solo and eventual routing. Clips reference pattern sources; they do not own instruments.
+- A clip instance has a timeline start, visible length, source offset and loop setting. Moving a clip does not rewrite its source. Independent duplication clones the pattern source; linked duplication shares it.
+- Drag the clip body to move it, Alt-drag to shift its source offset, drag its right edge to resize it, tap to select, Shift-tap to add clips to the selection, and double-tap to open the existing piano roll. Companion sources appear as faint references by default. Explicit multi-edit mode mirrors note additions, deletions, moves, resizes and expression changes to selected independent pattern sources while keeping each source's note IDs local; linked clips still share one source.
+- The track header keeps mute/solo and generator selection close to the timeline. The mixer panel edits the same track values, not a second copy of them.
+- Folders nest, can collapse, and can be organization-only or enabled as stereo group buses. Children route through the nearest enabled ancestor bus; folder volume and pan act on the summed group.
+- Volume and pan automation lanes are editable under a track. Points follow song time and are interpolated by the native engine. Clip automation and plugin/global parameter automation are not implemented yet.
+- Tapping empty timeline space sets the edit cursor; long-press-drag creates a time selection without blocking horizontal scrolling. Selected clips can be split at the selection end. Snap resolution is adjustable and Shift bypasses snapping. Audio clips remain deferred, but the clip model is kept type-extensible.
+
 ## Layout
 
-The same pieces fit both screens. On a phone they stack and slide in; on a wide screen they sit side by side.
+The application shell currently exposes eight destinations: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder. Builder includes shared active-track quick controls; Arranger exposes adjustable track heights and a playhead overlay that repaints independently of clip layout. Mixer uses a draggable desktop split between channel strips and the module inspector; the mobile view stacks them. The Files workspace imports/exports portable `.cawproj` and `.caw` files. Plugin Builder validates and packages native `.caw` modules; external CLAP/VST3 binaries remain blocked on a native plugin host/SDK. The Arranger remains the composition workspace; the old session grid is retired. Mixer, Engine Lab and Automation are separate destinations that read and edit the shared project state.
 
-**Phone (portrait):**
+**Phone (portrait):** transport at the top, then the track headers beside a horizontally scrolling song timeline. The Arranger's compact mixer panel remains available below the timeline. Builder, Arranger and Mixer are primary bottom destinations; More opens Engine Lab, Automation, Exporter, Files and Plugin Builder.
 
-```
-┌──────────────────────────────┐
-│ ▶  140 BPM  Scene B ▾   ↶ ↷  │  transport + undo/redo, always visible
-├──────────────────────────────┤
-│                              │
-│   main view (one at a time)  │  session grid · pattern editor · sound editor
-│                              │
-├──────────────────────────────┤
-│ ▔▔ inspector sheet (drag ↑) ▔│  controls for what's selected; peek / half / full
-├──────────────────────────────┤
-│  Mix   Patterns   Sounds  Export │  bottom tabs, in the thumb's reach
-└──────────────────────────────┘
-```
+**Phone (landscape):** the timeline gets the available width. Track headers stay aligned with their lanes while the song timeline scrolls horizontally. The mixer remains a separate panel.
 
-**Phone (landscape):** two-handed, like a groovebox. The tabs move to a narrow side rail. The main view gets the full width, which suits the grid and the piano roll. The inspector opens as a side panel instead of a bottom sheet.
+**Desktop / wide:** navigation rail, persistent transport, and a full-width arrangement timeline. Track headers remain fixed beside the horizontally scrolling timeline; the Arranger's mixer panel can be opened without replacing the arrangement, and the dedicated Mixer remains a separate detailed workspace; Files exposes portable project/module import and export.
 
-**Desktop / wide (≥ 900 px):**
-
-```
-┌────────┬───────────────────────────────┬─────────────┐
-│Library │  session grid (layers × scenes)│  Inspector  │
-│sounds  │                               │  (params,   │
-│patterns│                               │   globals)  │
-│        ├───────────────────────────────┤             │
-│ drag → │  editor drawer: pattern / code │             │
-└────────┴───────────────────────────────┴─────────────┘
-```
-
-- **Mix** is the session grid. Rows are layers and columns are scenes. Each cell holds the pattern that layer plays in that scene.
-  - Tapping a cell's big area plays it. A scene is launched from the narrow strip on its left edge only (the Griid lesson).
-  - Launches are queued to the next loop boundary, so they're always in time.
-  - "Commit" copies the current scene into a new one to try a variation (the EP-133 lesson).
-- **Library:** sounds and patterns are cards you drag onto a layer or a grid cell. They're organised in folders, matching the library repo's layout, with tags and a search box across all folders and favourites pinned at the top.
-  - On a phone the library is a tray that slides up from the bottom. Long-press a card to pick it up.
-  - On desktop the library is a side column, and `.mid` or `.caw` files can be dropped onto the window.
-- **Inspector:** the Unity-style panel for whatever is selected: a module's params, a layer's mix or a note's extras.
-  - Headers fold. Tooltips show on long-press on a phone and on hover on desktop.
-  - On a phone it's a bottom sheet: peek shows 3–4 controls, half shows a section, full shows everything.
-- **Progressive disclosure:**
-  - At most two levels deep.
-  - Advanced settings sit in a folded "More" section.
-  - Defaults should already sound good, as v1's templates do.
+The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 
 ## One gesture vocabulary
 
@@ -123,7 +98,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 - **Owner's answers (2026-10-28), not built yet; the owner has more input before building starts:**
   - The piano roll comes next, inside today's app (before the session-grid redesign), together with the drum grid.
-  - The piano roll and the drum grid edit the same pattern files, which stay readable text.
+  - The piano roll and the drum grid edit the same pattern files, which stay readable text. Selected arrangement clips can be shown as faint reference notes; notes in the active source retain ownership and remain the only directly editable notes unless the selected clips share a linked source.
   - **Scale:** rows in the project's key are highlighted. Notes can go anywhere, with no lock to the key.
   - **Velocity:** a lane under the roll.
   - **New notes:** a tap makes a note as long as the last one you sized; dragging while drawing sets the length directly.
@@ -163,6 +138,7 @@ The same meaning everywhere, so nothing has to be learned twice:
   - Enter opens or plays. The Menu key or Shift+F10 opens the same options as a long-press.
   - Every control can be adjusted from the keyboard: arrows for steps, Shift+arrows for fine steps, typing a number to set it.
 - **Shortcuts like Reaper's where they overlap:** Space for play/stop, Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
+- **Workspace shortcuts:** Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
 - **Shortcut overlay:** `?` shows every shortcut for the current screen.
 - **Customisable, like Reaper** (owner, 2026-10-28): every command is an action with keys you can change per area, plus macros and your own toolbars. The draft is in [actions](actions.md).
 - **Vim-style** (owner, 2026-10-28): with a keyboard, the whole app works modally: modes, counts, `:` commands, `.` and recorded macros. The code editor has optional Vim editing. See [actions](actions.md#vim-style-control).
@@ -174,7 +150,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 - **[Assumption]** For testing, a "potato" means:
   - an Android 8 phone (the app's minimum, `minSdk` 26) with 2 GB of RAM and an old 4-core ARM CPU
   - an old dual-core Windows laptop
-- **[Fact]** **Light mode** (owner OK and built, 2026-10-28): a setting that turns itself on at the first overload. It turns glow and scopes off, runs meters at 15 fps, plays 4 voices per pattern layer instead of 8, and pauses auto-update while playing, so swaps happen on Run only ([app](app.md)).
+- **[Fact]** Performance profiles are Full Experience, Balanced, Lightweight and Minimal. All retain 30 Hz meter cadence; Lightweight/Minimal use the reduced voice budget, and Minimal hides scope panels. Overload auto-response selects Lightweight once when enabled ([app](app.md)).
 - **Editors:**
   - The piano roll and grid repaint only when something changes, plus the playhead's small region while playing.
   - The pattern model stays the source of truth while editing. It's turned into text only when saving or sending to the engine, not on every touch.
@@ -183,7 +159,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 - **The audio never depends on the UI.** The C++ engine runs on its own thread ([engine](engine.md)), so a slow frame can't cause a dropout.
 - **Repaint only what moves:**
-  - Meters, the playhead and scopes each sit in a small repaint region of their own, driven by one 30 fps ticker. The ticker runs only while playing and visible, and stops when the app is in the background.
+  - Meters, the playhead and scopes each sit in a small repaint region of their own, driven by the existing 30 Hz meter ticker. Engine Lab's mono master scope and spectrum are read from the native scope buffer. The ticker runs only while playing and visible, and stops when the app is in the background.
   - **[Fact]** Fixed 2026-10-28: the meters are read only while playing, and the app does nothing periodic when stopped ([performance](performance.md)).
   - Community advice warns that a repaint boundary around something that changes every frame only adds cost, so measure ([blog](https://omr.it.com/blog/flutter-engine-raster-cache-tuning/)).
 - **Draw grids, not widgets:** the session grid, drum grid and piano roll are each one painter that draws only the visible area, not one widget per cell. Lists are built lazily.
@@ -199,4 +175,8 @@ The same meaning everywhere, so nothing has to be learned twice:
 
 ## Not yet
 
-Recording audio or MIDI, audio clips and a timeline arranger stay out until the owner says otherwise ([roadmap](roadmap.md)).
+Recording audio or MIDI, audio clips, clip-following automation and automation of globals or module parameters remain out of scope for this slice ([roadmap](roadmap.md)).
+
+## Performance profiles
+
+Settings provides Full Experience, Balanced, Lightweight and Minimal. Profiles reduce decorative effects before useful responsiveness: meter polling stays at 30 Hz in every mode. Lightweight/Minimal use the existing reduced voice budget; Minimal hides scope panels. See [Performance](performance.md#ui-performance-profiles) for the exact behavior and remaining device measurements.

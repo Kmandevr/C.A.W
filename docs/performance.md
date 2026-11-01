@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
 covers: [engine/bench/, app/lib/model/poller.dart, app/test/rebuild_test.dart]
-updated: 2026-10-28
+updated: 2026-11-01
 ---
 
 # Performance
@@ -124,6 +124,34 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - nothing at all while the app is in the background
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
 3. **The audio device closes after 30 s stopped and idle.** Play reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
+
+## UI update isolation
+- Mixer master gain now uses a dedicated native command (`caw_engine_set_master`) with a 5 ms audio-thread ramp. Dragging the master slider no longer serializes and recompiles the entire project; the UI updates through the scoped `values` notifier. This removes project-compilation work from the master-gain gesture, but device-level latency and CPU savings have not yet been benchmarked.
+- MIDI file generation runs in a worker isolate before the system save picker opens; the UI remains available during native MIDI serialization.
+
+
+- The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
+- Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; its Hann window, FFT scratch buffers and 128-bin spectrum buffer are retained between ticks. A 512-point radix-2 FFT is performed at the existing 30 Hz meter cadence; the UI does not allocate new sample buffers each frame.
+- Mixer meters and Builder controls listen to the existing state notifiers rather than introducing a second audio-state polling loop.
+- Peak meters attack immediately, hold the recent peak for 12 meter ticks (about 400 ms), then decay smoothly. The hold/release is presentation-only and never changes the engine's peak samples.
+- These are architectural reductions in unnecessary rebuild/allocation work; no frame-time, CPU or battery benchmark has yet been captured on physical hardware.
+
+## UI performance profiles (Task 1)
+
+The Settings page now offers four explicit profiles:
+
+| Profile | Presentation | Audio/UI behavior |
+| --- | --- | --- |
+| Full Experience | Full-strength theme glow and available visual feedback | Full voice budget; meter polling remains 30 Hz |
+| Balanced | Decorative glow scaled down to 55% | Full voice budget; meter polling remains 30 Hz |
+| Lightweight | Decorative glow disabled | Existing reduced voice budget (4 per pattern layer); meter polling remains 30 Hz |
+| Minimal | Decorative glow disabled; scope panels hidden | Reduced voice budget; meter polling remains 30 Hz |
+
+The legacy `light_mode` setting is still read for migration: true maps to Lightweight and false maps to Balanced. New settings persist `performance_mode` by name and also write the legacy boolean for older builds.
+
+**Important correction:** performance profiles do not lower meter polling to 15 Hz. Meter cadence stays at 30 Hz in every profile; visual simplification is preferred over slower feedback. Balanced only scales decorative glow, while Lightweight/Minimal apply the existing smaller voice budget. Minimal hides the Engine Lab master scope, whose data is a mono sum; independent left/right peak meters remain visible.
+
+No phone frame-time, battery or thermal measurements have been made for these profiles yet. Verify them on physical Android hardware before claiming a quantified performance improvement.
 
 ## Remaining bottlenecks and next steps
 

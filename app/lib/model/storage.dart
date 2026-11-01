@@ -12,10 +12,18 @@ class ProjectSummary {
   final DateTime modified;
 }
 
+class RestorePointSummary {
+  const RestorePointSummary(this.id, this.name, this.createdAt);
+  final String id;
+  final String name;
+  final DateTime createdAt;
+}
+
 class ProjectStorage {
   ProjectStorage(this._root);
 
   final Directory _root;
+  static int _restorePointSequence = 0;
 
   static Future<ProjectStorage> open() async {
     final base = await getApplicationSupportDirectory();
@@ -60,9 +68,87 @@ class ProjectStorage {
     await tmp.rename(f.path);
   }
 
+  String _validatedProjectId(String id) {
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id)) {
+      throw ArgumentError.value(id, 'projectId', 'Invalid project identifier.');
+    }
+    return id;
+  }
+
+  Directory _restoreDirectory(String projectId) => Directory(
+    '${_root.path}${Platform.pathSeparator}restore-points${Platform.pathSeparator}${_validatedProjectId(projectId)}');
+
+  /// Creates an explicit restore point atomically and retains at most 20 per project.
+  Future<String> createRestorePoint(ProjectDoc project) async {
+    final directory = _restoreDirectory(project.id);
+    await directory.create(recursive: true);
+    final sequence = (_restorePointSequence++).toString().padLeft(4, '0');
+    final id = 'rp_${DateTime.now().microsecondsSinceEpoch}_$sequence';
+    final file = File('${directory.path}${Platform.pathSeparator}$id.json');
+    final temporary = File('${file.path}.tmp');
+    await temporary.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(project.toJson()),
+      flush: true,
+    );
+    await temporary.rename(file.path);
+
+    final snapshots = (await directory.list().where(
+      (entity) => entity is File && entity.path.endsWith('.json'),
+    ).cast<File>().toList())
+      ..sort((a, b) => b.path.compareTo(a.path));
+    for (final stale in snapshots.skip(20)) {
+      await stale.delete();
+    }
+    return id;
+  }
+
+  Future<List<RestorePointSummary>> listRestorePoints(String projectId) async {
+    final directory = _restoreDirectory(projectId);
+    if (!await directory.exists()) return const [];
+    final points = <RestorePointSummary>[];
+    await for (final entity in directory.list()) {
+      if (entity is! File || !entity.path.endsWith('.json')) continue;
+      try {
+        final decoded = jsonDecode(await entity.readAsString());
+        if (decoded is! Map<String, dynamic> || decoded['id'] != projectId) continue;
+        final fileName = entity.uri.pathSegments.last;
+        final id = fileName.substring(0, fileName.length - 5);
+        points.add(RestorePointSummary(
+          id,
+          (decoded['name'] as String?) ?? 'Untitled',
+          await entity.lastModified(),
+        ));
+      } catch (_) {
+        // A corrupt restore point is skipped without hiding valid history.
+      }
+    }
+    points.sort((a, b) => b.id.compareTo(a.id));
+    return points;
+  }
+
+  Future<ProjectDoc?> loadRestorePoint(String projectId, String restorePointId) async {
+    if (!RegExp(r'^rp_[0-9]{1,20}_[0-9]{1,8}$').hasMatch(restorePointId)) return null;
+    try {
+      final file = File(
+        '${_restoreDirectory(projectId).path}${Platform.pathSeparator}$restorePointId.json',
+      );
+      if (!await file.exists()) return null;
+      final decoded = jsonDecode(await file.readAsString());
+      if (decoded is! Map<String, dynamic>) return null;
+      final project = ProjectDoc.fromJson(decoded);
+      return project.id == projectId ? project : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> delete(String id) async {
     final f = _file(id);
     if (await f.exists()) await f.delete();
+    if (RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id)) {
+      final history = _restoreDirectory(id);
+      if (await history.exists()) await history.delete(recursive: true);
+    }
   }
 
   Future<String?> lastOpened() async {

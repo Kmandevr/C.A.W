@@ -49,6 +49,9 @@ class _PatternEditorState extends State<PatternEditor> {
   int _res = 16; // grid resolution: 1/16 of a whole note = one step
   bool _snap = true, _fixed = false, _triplet = false;
   bool _velLane = true, _extrasLane = false; // Alt+V, Alt+X
+  bool _multiEditEnabled = false;
+  final Map<String, PatternDoc> _multiDocs = {};
+  List<String> _multiSourceIds = [];
   double _pxPerStep = 28, _scrollX = 0, _scrollY = 0;
   final double _rowH = 16;
   Steps _cursorAt = Steps.zero;
@@ -94,7 +97,12 @@ class _PatternEditorState extends State<PatternEditor> {
   @override
   void didUpdateWidget(PatternEditor old) {
     super.didUpdateWidget(old);
-    if (old.module.id != widget.module.id || widget.module.source != _lastText) _load();
+    if (old.module.id != widget.module.id || widget.module.source != _lastText) {
+      _load();
+      _multiEditEnabled = false;
+      _multiDocs.clear();
+      _multiSourceIds = [];
+    }
   }
 
   @override
@@ -123,6 +131,25 @@ class _PatternEditorState extends State<PatternEditor> {
     }
   }
 
+  void _loadMultiDocs(AppState state) {
+    final ids = state.selectedPatternModuleIds.where((id) => id != widget.module.id).toList()..sort();
+    _multiDocs.clear();
+    for (final id in ids) {
+      final module = state.project.module(id);
+      if (module == null) continue;
+      final parsed = PatternDoc.parse(module.source);
+      if (parsed.ok && parsed.doc != null) _multiDocs[id] = parsed.doc!;
+    }
+    _multiSourceIds = ids;
+  }
+
+  void _mirrorSelectedSources(PatternDoc before, PatternDoc after) {
+    if (!_multiEditEnabled) return;
+    for (final id in _multiDocs.keys.toList()) {
+      _multiDocs[id] = _multiDocs[id]!.mirrorChanges(before, after);
+    }
+  }
+
   // ---------- edits ----------
 
   Steps get _resSteps => _triplet ? Steps(32, _res * 3) : Steps(16, _res);
@@ -145,6 +172,7 @@ class _PatternEditorState extends State<PatternEditor> {
   void _apply(PatternDoc next, {Set<int>? select}) {
     final d = _doc;
     if (d == null || identical(next, d)) return;
+    _mirrorSelectedSources(d, next);
     _undo.add(d);
     if (_undo.length > 200) _undo.removeAt(0);
     _redo.clear();
@@ -172,13 +200,24 @@ class _PatternEditorState extends State<PatternEditor> {
     _lastText = text;
     s.editSource(widget.module.id, text);
     s.run(widget.module.id);
+    if (_multiEditEnabled) {
+      for (final entry in _multiDocs.entries) {
+        final source = entry.value.serialize();
+        if (s.project.module(entry.key)?.source == source) continue;
+        s.editSource(entry.key, source);
+        s.run(entry.key);
+      }
+    }
   }
 
   void _undoRedo(bool undo) {
     final from = undo ? _undo : _redo, to = undo ? _redo : _undo;
     if (from.isEmpty || _doc == null) return;
-    to.add(_doc!);
-    setState(() => _doc = from.removeLast());
+    final before = _doc!;
+    final next = from.removeLast();
+    _mirrorSelectedSources(before, next);
+    to.add(before);
+    setState(() => _doc = next);
     _scheduleSend();
   }
 
@@ -734,7 +773,9 @@ class _PatternEditorState extends State<PatternEditor> {
 
   Color get _noteColor {
     for (final l in s.project.layers) {
-      if (l.patternId == widget.module.id) return Neon.layer(l.color);
+      if (l.patternId == widget.module.id || l.clips.any((clip) => clip.patternId == widget.module.id)) {
+        return Neon.layer(l.color);
+      }
     }
     return Neon.yellow;
   }
@@ -749,6 +790,9 @@ class _PatternEditorState extends State<PatternEditor> {
       );
     }
     final length = d.lengthSteps(s.project.beatsPerBar);
+    final selectedSourceIds = s.selectedPatternModuleIds.where((id) => id != widget.module.id).toList()..sort();
+    if (_multiEditEnabled && selectedSourceIds.join('|') != _multiSourceIds.join('|')) _loadMultiDocs(s);
+    final references = _multiEditEnabled ? _multiDocs.values.toList() : s.selectedPatternReferences;
     final toolbar = _Toolbar(
       tool: _tool,
       onTool: (t) => setState(() => _tool = t),
@@ -800,6 +844,25 @@ class _PatternEditorState extends State<PatternEditor> {
       focusNode: _focus,
       onKeyEvent: _onKey,
       child: Column(children: [
+        if (s.selectedClipIds.length > 1)
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            child: Row(children: [
+              Text('${s.selectedClipIds.length} CLIPS SELECTED',
+                style: const TextStyle(color: Neon.dim, fontSize: 9, letterSpacing: 1)),
+              const Spacer(),
+              if (s.canMultiEditSelectedClips)
+                const Text('SHARED SOURCE · edits affect every selected linked clip',
+                  style: TextStyle(color: Neon.blue, fontSize: 9))
+              else if (references.isNotEmpty)
+                Text(_multiEditEnabled ? 'MULTI-EDIT · mirroring to ${references.length} source(s)' : '${references.length} read-only reference source(s)',
+                  style: const TextStyle(color: Neon.blue, fontSize: 9)),
+              if (references.isNotEmpty && !s.canMultiEditSelectedClips)
+                TextButton(onPressed: () => setState(() {
+                  _multiEditEnabled = !_multiEditEnabled;
+                  if (_multiEditEnabled) { _loadMultiDocs(s); } else { _multiDocs.clear(); _multiSourceIds = []; }
+                }), child: Text(_multiEditEnabled ? 'MULTI-EDIT ON' : 'EDIT ALL SELECTED')),
+
+            ])),
         toolbar,
         Expanded(
           child: LayoutBuilder(builder: (context, box) {
@@ -847,6 +910,7 @@ class _PatternEditorState extends State<PatternEditor> {
                     size: Size.infinite,
                     painter: _RollPainter(
                       doc: d,
+                      references: references,
                       sel: _sel,
                       length: length,
                       beatsPerBar: s.project.beatsPerBar,
@@ -966,6 +1030,7 @@ class _Toolbar extends StatelessWidget {
 class _RollPainter extends CustomPainter {
   _RollPainter({
     required this.doc,
+    required this.references,
     required this.sel,
     required this.length,
     required this.beatsPerBar,
@@ -986,6 +1051,7 @@ class _RollPainter extends CustomPainter {
   });
   final double velH, xH;
   final PatternDoc doc;
+  final List<PatternDoc> references;
   final Set<int> sel;
   final int length, beatsPerBar;
   final double pxPerStep, rowH, scrollX, scrollY, cursorPitch;
@@ -1029,6 +1095,19 @@ class _RollPainter extends CustomPainter {
     // Past the pattern's end is shaded.
     final endX = length * pxPerStep - scrollX;
     if (endX < w) canvas.drawRect(Rect.fromLTWH(endX, 0, w - endX, h), Paint()..color = const Color(0x88000000));
+    // Other selected clips are faint references; the active source remains the only editable owner.
+    for (final reference in references) {
+      for (final n in reference.notes) {
+        final x = n.at.toDouble() * pxPerStep - scrollX, nw = math.max(3.0, n.len.toDouble() * pxPerStep - 1);
+        if (x > w || x + nw < 0) continue;
+        final y = (127 - n.pitch.round()) * rowH - scrollY;
+        if (y > h || y + rowH < 0) continue;
+        final r = RRect.fromRectAndRadius(Rect.fromLTWH(x, y + 1, nw, rowH - 2), const Radius.circular(3));
+        canvas.drawRRect(r, Paint()..color = Neon.blue.withValues(alpha: 0.13));
+        canvas.drawRRect(r, Paint()..color = Neon.blue.withValues(alpha: 0.35)
+          ..style = PaintingStyle.stroke..strokeWidth = 0.8);
+      }
+    }
     // Notes: layer colour, brighter when louder; white outline when selected; a dot when it has extras.
     for (final n in doc.notes) {
       final x = n.at.toDouble() * pxPerStep - scrollX, nw = math.max(3.0, n.len.toDouble() * pxPerStep - 1);
@@ -1106,6 +1185,7 @@ class _RollPainter extends CustomPainter {
   @override
   bool shouldRepaint(_RollPainter o) =>
       !identical(o.doc, doc) ||
+      o.references != references ||
       o.sel != sel ||
       o.pxPerStep != pxPerStep ||
       o.scrollX != scrollX ||

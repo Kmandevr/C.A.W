@@ -1,5 +1,6 @@
 // Engine integration over dart:ffi: needs CAW_LIB pointing at a desktop build of the engine library (CI sets it).
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/project.dart';
@@ -81,6 +82,15 @@ void main() {
     expect(result['s']!.warnings, isEmpty);
     e.dispose();
     final dir = await Directory.systemTemp.createTemp('caw');
+    final midiOut = '${dir.path}/acid.mid';
+    final midiSource = line.source;
+    final midiPath = midiOut;
+    const midiBpm = 140.0;
+    const midiBeatsPerBar = 4;
+    final midiError = await Isolate.run(() => Engine.exportPattern(midiSource, midiPath, bpm: midiBpm, beatsPerBar: midiBeatsPerBar));
+    expect(midiError, isNull);
+    final midiBytes = await File(midiOut).readAsBytes();
+    expect(String.fromCharCodes(midiBytes.sublist(0, 4)), 'MThd');
     final out = '${dir.path}/acid.wav';
     final job = RenderJob.start(RenderRequest(projectJson: p.toEngineJson(), kind: ExportKind.loop, outPath: out));
     expect(await job.result, isNull);

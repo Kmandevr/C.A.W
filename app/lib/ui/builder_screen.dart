@@ -343,9 +343,11 @@ class _BuilderScreenState extends State<BuilderScreen> {
     return LayoutBuilder(builder: (context, box) {
       final wide = box.maxWidth >= 900;
       final picker = _ModulePicker(state: s, onNew: _newModule);
+      final trackControls = _BuilderTrackControls(state: s);
       if (m == null) {
         return Column(children: [
           picker,
+          trackControls,
           const Expanded(child: Center(child: Text('No modules yet: tap New to start one'))),
         ]);
       }
@@ -409,7 +411,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
           ],
         ),
       ]);
-      final scope = s.settings.lightMode
+      final scope = !Neon.showScopes
           ? const SizedBox.shrink()
           : NeonPanel(
         color: color,
@@ -450,6 +452,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
       if (wide) {
         return Column(children: [
           picker,
+          trackControls,
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -475,6 +478,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
       }
       return Column(children: [
         picker,
+        trackControls,
         Expanded(
           child: ListView(padding: const EdgeInsets.symmetric(horizontal: 12), children: [
             header,
@@ -492,6 +496,88 @@ class _BuilderScreenState extends State<BuilderScreen> {
         Padding(padding: const EdgeInsets.fromLTRB(12, 6, 12, 10), child: Column(children: [completion, runBar])),
       ]);
     });
+  }
+}
+
+class _BuilderTrackControls extends StatelessWidget {
+  const _BuilderTrackControls({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final layers = state.project.layers.where((layer) => !layer.isFolder).toList();
+    final layer = layers.where((item) => item.id == state.selectedLayerId).firstOrNull ?? layers.firstOrNull;
+    if (layer == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Text('Track controls appear here after you add a track in Arranger.',
+          style: TextStyle(color: Neon.dim, fontSize: 11)),
+      );
+    }
+    final folders = state.project.layers.where((item) => item.isFolder && item.id != layer.id).toList();
+    final routeId = folders.any((folder) => folder.id == layer.parentId) ? layer.parentId : null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: NeonPanel(color: Neon.blue, padding: const EdgeInsets.all(8), child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Text('TRACK', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800, fontSize: 10)),
+            const SizedBox(width: 8),
+            Expanded(child: DropdownButton<String>(
+              value: layer.id,
+              isExpanded: true,
+              underline: const SizedBox.shrink(),
+              items: [for (final item in layers) DropdownMenuItem(value: item.id, child: Text(item.name,
+                maxLines: 1, overflow: TextOverflow.ellipsis))],
+              onChanged: (id) {
+                final next = layers.where((item) => item.id == id).firstOrNull;
+                if (next != null) state.selectLayer(next);
+              },
+            )),
+            IconButton(
+              tooltip: layer.mute ? 'Unmute track' : 'Mute track',
+              onPressed: () => state.mixLayer(layer, mute: !layer.mute),
+              icon: Icon(Icons.volume_off, color: layer.mute ? Neon.pink : Neon.dim),
+            ),
+            IconButton(
+              tooltip: layer.solo ? 'Unsolo track' : 'Solo track',
+              onPressed: () => state.mixLayer(layer, solo: !layer.solo),
+              icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim),
+            ),
+          ]),
+          ValueListenableBuilder<int>(valueListenable: state.layerValueTick(layer.id), builder: (context, _, _) => Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('LEVEL · ${(layer.volume * 100).round()}%', style: Neon.code(size: 10, color: Neon.green)),
+              Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
+                activeColor: Neon.green, onChanged: (v) => state.mixLayer(layer, volume: v)),
+            ])),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('PAN · ${layer.pan.abs() < .01 ? 'CENTER' : layer.pan < 0 ? 'LEFT' : 'RIGHT'}',
+                style: Neon.code(size: 10, color: Neon.blue)),
+              Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
+                activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v)),
+            ])),
+          ])),
+          Row(children: [
+            const SizedBox(width: 48, child: Text('ROUTE', style: TextStyle(color: Neon.dim, fontSize: 10))),
+            Expanded(child: DropdownButton<String?>(
+              value: routeId,
+              isExpanded: true,
+              underline: const SizedBox.shrink(),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('Master')),
+                for (final folder in folders)
+                  DropdownMenuItem<String?>(value: folder.id, child: Text(folder.name,
+                    maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: (id) => state.moveLayerIntoFolder(layer, id),
+            )),
+          ]),
+        ],
+      )),
+    );
   }
 }
 
@@ -570,10 +656,11 @@ class _Params extends StatelessWidget {
   final ModuleInfo? info;
 
   String _patternUse(ModuleInfo i) {
-    final users = [for (final l in state.project.layers) if (l.patternId == module.id) l.name];
+    final users = [for (final l in state.project.layers)
+      if (l.patternId == module.id || l.clips.any((clip) => clip.patternId == module.id)) l.name];
     final notes = '${i.noteCount} note${i.noteCount == 1 ? '' : 's'}';
     return users.isEmpty
-        ? 'A pattern of $notes. To hear it, pick it as a layer\'s pattern in the Arranger, or use Solo preview.'
+        ? 'A pattern of $notes. To hear it, add it as a MIDI clip on a track in the Arranger, or use Solo preview.'
         : 'A pattern of $notes, played by ${users.join(', ')}.';
   }
 
@@ -595,7 +682,7 @@ class _Params extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Heading('Controls'),
       ValueListenableBuilder<int>(
-        valueListenable: state.values,
+        valueListenable: state.moduleValueTick(module.id),
         builder: (context, _, _) => ParamGroups(
           params: params,
           color: color,

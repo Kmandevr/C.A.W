@@ -1,11 +1,13 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
 import '../engine/engine.dart';
 import 'poller.dart';
 import 'project.dart';
+import 'pattern_doc.dart';
 import 'settings.dart';
 import 'storage.dart';
 
@@ -13,20 +15,48 @@ import 'storage.dart';
 ({ProjectSummary? last, List<ProjectSummary> projects}) startupChoices(String? lastId, List<ProjectSummary> projects) =>
     (last: projects.where((p) => p.id == lastId).firstOrNull, projects: projects);
 
+class _LibrarySnapshot {
+  _LibrarySnapshot(ProjectDoc project)
+      : folders = List.of(project.libraryFolders),
+        searches = Map.of(project.savedLibrarySearches),
+        moduleFolders = {for (final module in project.modules) module.id: module.folderPath},
+        moduleTags = {for (final module in project.modules) module.id: List.of(module.tags)};
+
+  final List<String> folders;
+  final Map<String, String> searches;
+  final Map<String, String> moduleFolders;
+  final Map<String, List<String>> moduleTags;
+}
+
 class AppState extends ChangeNotifier {
   AppState({Settings? settings}) : settings = settings ?? Settings() {
     _light = this.settings.lightMode;
+    _performanceMode = this.settings.performanceMode;
+    _density = this.settings.density;
+    _lookRevision = this.settings.lookRevision;
     this.settings.addListener(_settingsChanged);
   }
 
   late bool _light;
+  late PerformanceMode _performanceMode;
+  late Density _density;
+  late int _lookRevision;
 
-  // Light mode changes the engine's voice count and the meter rate.
+  // Lightweight/Minimal change the engine's voice budget; UI meter cadence stays fixed.
   void _settingsChanged() {
-    if (settings.lightMode == _light) return;
+    final nextMode = settings.performanceMode;
+    final nextDensity = settings.density;
+    final nextLook = settings.lookRevision;
+    final modeChanged = nextMode != _performanceMode;
+    if (!modeChanged && nextDensity == _density && nextLook == _lookRevision) return;
+    final voiceBudgetChanged = settings.lightMode != _light;
+    _performanceMode = nextMode;
+    _density = nextDensity;
+    _lookRevision = nextLook;
     _light = settings.lightMode;
-    _poller.interval = Duration(milliseconds: _light ? 66 : 33);
-    _sync();
+    // Visual profiles never lower meter cadence; editing and meter feedback stay at 30 Hz.
+    if (voiceBudgetChanged) _sync();
+    notifyListeners();
   }
 
   /// App-wide settings (theme, density, live coding).
@@ -41,6 +71,49 @@ class AppState extends ChangeNotifier {
   ProjectDoc project = ProjectDoc(id: newId('p'), name: 'Untitled');
   Map<String, ModuleInfo> info = {};
   String? selectedModuleId;
+  final List<_LibrarySnapshot> _libraryUndo = [];
+  final List<_LibrarySnapshot> _libraryRedo = [];
+
+  bool get canUndoLibrary => _libraryUndo.isNotEmpty;
+  bool get canRedoLibrary => _libraryRedo.isNotEmpty;
+
+  void _recordLibraryUndo() {
+    _libraryUndo.add(_LibrarySnapshot(project));
+    if (_libraryUndo.length > 50) _libraryUndo.removeAt(0);
+    _libraryRedo.clear();
+  }
+
+  void _restoreLibrarySnapshot(_LibrarySnapshot snapshot) {
+    project.libraryFolders = List.of(snapshot.folders);
+    project.savedLibrarySearches = Map.of(snapshot.searches);
+    for (final module in project.modules) {
+      final folder = snapshot.moduleFolders[module.id];
+      if (folder != null) module.folderPath = folder;
+      final tags = snapshot.moduleTags[module.id];
+      if (tags != null) module.tags = List.of(tags);
+    }
+  }
+
+  bool undoLibraryOperation() {
+    if (_libraryUndo.isEmpty) return false;
+    _libraryRedo.add(_LibrarySnapshot(project));
+    _restoreLibrarySnapshot(_libraryUndo.removeLast());
+    _changed(engine: false);
+    return true;
+  }
+
+  bool redoLibraryOperation() {
+    if (_libraryRedo.isEmpty) return false;
+    _libraryUndo.add(_LibrarySnapshot(project));
+    _restoreLibrarySnapshot(_libraryRedo.removeLast());
+    _changed(engine: false);
+    return true;
+  }
+  String? selectedLayerId;
+  String? selectedClipId;
+  final Set<String> selectedClipIds = {};
+  int? timeSelectionStart, timeSelectionEnd, timeSelectionAnchor;
+  int arrangementSnapSteps = 1;
   bool previewOnly = false;
   bool ready = false;
 
@@ -55,9 +128,14 @@ class AppState extends ChangeNotifier {
   /// Bumped on every meter poll (about 30 times a second) so meters can repaint without rebuilding screens.
   final ValueNotifier<int> tick = ValueNotifier(0);
 
-  /// Bumped when a param, global, volume or pan changes. Only the controls showing those values listen, so a slider
-  /// drag doesn't rebuild the whole app (it rebuilt about 3,500 widgets per step before).
+  /// Aggregate value tick retained for diagnostics and external listeners. Workspaces use the scoped ticks below
+  /// so parameter, track and master drags don't rebuild unrelated controls.
   final ValueNotifier<int> values = ValueNotifier(0);
+  final ValueNotifier<int> masterValueTick = ValueNotifier(0);
+  final Map<String, ValueNotifier<int>> _moduleValueTicks = {};
+  final Map<String, ValueNotifier<int>> _layerValueTicks = {};
+  ValueNotifier<int> moduleValueTick(String id) => _moduleValueTicks.putIfAbsent(id, () => ValueNotifier(0));
+  ValueNotifier<int> layerValueTick(String id) => _layerValueTicks.putIfAbsent(id, () => ValueNotifier(0));
   EngineMeters meters = const EngineMeters();
 
   /// Set when an overload switched light mode on, so the app can say so once.
@@ -71,7 +149,7 @@ class AppState extends ChangeNotifier {
   // device after a while (Play reopens it).
   late final Poller _poller = Poller(
       poll: _poll,
-      interval: Duration(milliseconds: settings.lightMode ? 66 : 33),
+      interval: const Duration(milliseconds: 33),
       onIdle: () {
     if (!meters.playing) engine?.stopAudio();
   });
@@ -118,6 +196,11 @@ class AppState extends ChangeNotifier {
     _liveTimer?.cancel();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
+    masterValueTick.dispose();
+    values.dispose();
+    tick.dispose();
+    for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
+    for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
     engine?.dispose();
     super.dispose();
   }
@@ -131,7 +214,7 @@ class AppState extends ChangeNotifier {
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
-      // The device can't keep up: light mode turns on by itself, once (the setting can turn it back off).
+      // The device can't keep up: Lightweight turns on by itself once (the user can choose another profile).
       lightTurnedOnBySelf = true;
       settings.update((s) {
         s.lightMode = true;
@@ -179,13 +262,17 @@ class AppState extends ChangeNotifier {
     void layer(String name, ModuleDoc? gen, int steps, double vol,
         [List<ModuleDoc?> fx = const [], ModuleDoc? pattern, bool mute = false]) {
       if (gen == null) return;
+      final patternDoc = pattern == null ? null : PatternDoc.parse(pattern.runSource).doc;
+      final clipLength = patternDoc?.lengthSteps(p.beatsPerBar) ?? (steps > 0 ? steps : p.stepsPerBar);
       p.layers.add(LayerDoc(
           id: newId('l'),
           name: name,
           color: c++ % 4,
           generatorId: gen.id,
           effectIds: [for (final f in fx) if (f != null) f.id],
-          patternId: pattern?.id,
+          clips: pattern == null ? [] : [
+            ClipDoc(id: newId('c'), patternId: pattern.id, lengthSteps: clipLength),
+          ],
           lengthSteps: steps,
           volume: vol,
           mute: mute));
@@ -209,17 +296,17 @@ class AppState extends ChangeNotifier {
     if (m == null || isLibrary(m.id)) return null;
     String? firstGenerator() => project.modules.where((x) => isGenerator(x.id)).map((x) => x.id).firstOrNull;
     if (isPattern(m.id)) {
-      final layer = project.layers.where((l) => l.patternId == m.id && l.generatorId != null).firstOrNull;
+      final layer = project.layers.where((l) => l.clips.any((clip) => clip.patternId == m.id) && l.generatorId != null).firstOrNull;
       final gen = layer?.generatorId ?? firstGenerator();
       return gen == null ? null : (chain: layer?.chain ?? [gen], pattern: m.id);
     }
     if (!isEffect(m.id)) {
       final layer = project.layers.where((l) => l.generatorId == m.id).firstOrNull;
-      return (chain: [m.id], pattern: layer?.patternId);
+      return (chain: [m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
     }
     final layer = project.layers.where((l) => l.effectIds.contains(m.id) && l.generatorId != null).lastOrNull;
     final gen = layer?.generatorId ?? firstGenerator();
-    return (chain: [?gen, m.id], pattern: layer?.patternId);
+    return (chain: [?gen, m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
   }
 
   Future<void> _syncNow() async {
@@ -256,6 +343,28 @@ class AppState extends ChangeNotifier {
     if (starting) return; // the placeholder shown behind the startup screen is never saved
     await _storage?.save(project);
   }
+
+  Future<bool> createRestorePoint() async {
+    final storage = _storage;
+    if (storage == null || starting) return false;
+    await flush();
+    await storage.createRestorePoint(project);
+    return true;
+  }
+
+  Future<List<RestorePointSummary>> listRestorePoints() async =>
+      await _storage?.listRestorePoints(project.id) ?? const [];
+
+  Future<bool> restoreProjectVersion(String restorePointId) async {
+    final storage = _storage;
+    if (storage == null || starting) return false;
+    final snapshot = await storage.loadRestorePoint(project.id, restorePointId);
+    if (snapshot == null) return false;
+    await storage.createRestorePoint(project);
+    await _switchTo(snapshot);
+    return true;
+  }
+
 
   void _changed({bool engine = true}) {
     if (engine) _sync();
@@ -304,6 +413,16 @@ class AppState extends ChangeNotifier {
   void selectModule(String id) {
     selectedModuleId = id;
     if (previewOnly) _sync();
+    notifyListeners();
+  }
+
+  /// Selects a channel for shared workspace inspectors without changing its processing state.
+  void selectLayer(LayerDoc layer) {
+    selectedLayerId = layer.id;
+    selectedClipId = null;
+    selectedClipIds.clear();
+    selectedModuleId = layer.generatorId ?? layer.effectIds.firstOrNull;
+    if (previewOnly && selectedModuleId != null) _sync();
     notifyListeners();
   }
 
@@ -369,6 +488,168 @@ class AppState extends ChangeNotifier {
     return m.id;
   }
 
+  String _normalizeLibraryPath(String path) {
+    if (path.length > 512) throw ArgumentError.value(path, 'path', 'Folder path is too long.');
+    final parts = path.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).toList();
+    if (parts.length > 32 || parts.any((part) => part == '.' || part == '..' || part.length > 64 || part.contains(String.fromCharCode(92)))) {
+      throw ArgumentError.value(path, 'path', 'Folder paths cannot contain traversal segments.');
+    }
+    return parts.join('/');
+  }
+
+  /// Creates a user-named virtual library folder and any missing parents.
+  bool createLibraryFolder(String path) {
+    final normalized = _normalizeLibraryPath(path);
+    if (normalized.isEmpty) return false;
+    final parts = normalized.split('/');
+    if (parts.asMap().entries.every((entry) => project.libraryFolders.contains(parts.take(entry.key + 1).join('/')))) {
+      return false;
+    }
+    _recordLibraryUndo();
+    var changed = false;
+    for (var i = 1; i <= parts.length; i++) {
+      final parent = parts.take(i).join('/');
+      if (!project.libraryFolders.contains(parent)) {
+        project.libraryFolders.add(parent);
+        changed = true;
+      }
+    }
+    if (changed) {
+      project.libraryFolders.sort();
+      _changed(engine: false);
+    }
+    return changed;
+  }
+
+  /// Renames a folder and all descendants without moving or deleting their modules.
+  bool renameLibraryFolder(String oldPath, String newPath) {
+    final oldValue = _normalizeLibraryPath(oldPath);
+    final newValue = _normalizeLibraryPath(newPath);
+    if (oldValue.isEmpty || newValue.isEmpty || !project.libraryFolders.contains(oldValue)) return false;
+    if (oldValue == newValue) return true;
+    if (newValue.startsWith('$oldValue/') || project.libraryFolders.contains(newValue)) return false;
+    _recordLibraryUndo();
+    project.libraryFolders = project.libraryFolders.map((path) =>
+      path == oldValue ? newValue : path.startsWith('$oldValue/') ? '$newValue${path.substring(oldValue.length)}' : path
+    ).toSet().toList();
+    final newParts = newValue.split('/');
+    for (var i = 1; i < newParts.length; i++) {
+      final parentPath = newParts.take(i).join('/');
+      if (!project.libraryFolders.contains(parentPath)) project.libraryFolders.add(parentPath);
+    }
+    project.libraryFolders.sort();
+    for (final module in project.modules) {
+      if (module.folderPath == oldValue) {
+        module.folderPath = newValue;
+      } else if (module.folderPath.startsWith('$oldValue/')) {
+        module.folderPath = '$newValue${module.folderPath.substring(oldValue.length)}';
+      }
+    }
+    _changed(engine: false);
+    return true;
+  }
+
+  /// Deletes a folder node and returns its modules/children to its parent folder.
+  bool deleteLibraryFolder(String path) {
+    final normalized = _normalizeLibraryPath(path);
+    if (normalized.isEmpty || !project.libraryFolders.contains(normalized)) return false;
+    final parent = normalized.contains('/') ? normalized.substring(0, normalized.lastIndexOf('/')) : '';
+    _recordLibraryUndo();
+    project.libraryFolders.removeWhere((folder) => folder == normalized || folder.startsWith('$normalized/'));
+    for (final module in project.modules) {
+      if (module.folderPath == normalized || module.folderPath.startsWith('$normalized/')) {
+        module.folderPath = parent;
+      }
+    }
+    _changed(engine: false);
+    return true;
+  }
+
+  /// Moves a module into a user-owned library folder; an empty path means the project root.
+  bool moveModuleToFolder(String moduleId, String folderPath) {
+    final module = project.module(moduleId);
+    if (module == null) return false;
+    final normalized = _normalizeLibraryPath(folderPath);
+    if (normalized.isNotEmpty && !project.libraryFolders.contains(normalized)) return false;
+    if (module.folderPath == normalized) return true;
+    _recordLibraryUndo();
+    module.folderPath = normalized;
+    _changed(engine: false);
+    return true;
+  }
+
+  bool moveModulesToFolder(Iterable<String> moduleIds, String folderPath) {
+    final normalized = _normalizeLibraryPath(folderPath);
+    if (normalized.isNotEmpty && !project.libraryFolders.contains(normalized)) return false;
+    final ids = moduleIds.toSet();
+    final targets = project.modules.where((module) => ids.contains(module.id) && module.folderPath != normalized).toList();
+    if (targets.isEmpty) return false;
+    _recordLibraryUndo();
+    var changed = false;
+    for (final module in project.modules) {
+      if (ids.contains(module.id) && module.folderPath != normalized) {
+        module.folderPath = normalized;
+        changed = true;
+      }
+    }
+    if (changed) _changed(engine: false);
+    return changed;
+  }
+
+  void setModuleTags(String moduleId, List<String> tags) => setModulesTags([moduleId], tags);
+
+  /// Applies one tag set to multiple modules as a single undoable library operation.
+  bool setModulesTags(Iterable<String> moduleIds, List<String> tags) {
+    final ids = moduleIds.toSet();
+    final seen = <String>{};
+    final nextTags = [
+      for (final raw in tags)
+        if (raw.trim().isNotEmpty && raw.trim().length <= 48 && seen.add(raw.trim().toLowerCase()))
+          raw.trim(),
+    ].take(16).toList();
+    final targets = project.modules.where((module) => ids.contains(module.id) &&
+        !listEquals(module.tags, nextTags)).toList();
+    if (targets.isEmpty) return false;
+    _recordLibraryUndo();
+    for (final module in targets) {
+      module.tags = List.of(nextTags);
+    }
+    _changed(engine: false);
+    return true;
+  }
+
+  bool saveLibrarySearch(String name, String query) {
+    final key = name.trim();
+    final value = query.trim();
+    if (key.isEmpty || value.isEmpty || key.length > 64 || value.length > 256) return false;
+    if (!project.savedLibrarySearches.containsKey(key) && project.savedLibrarySearches.length >= 32) return false;
+    if (project.savedLibrarySearches[key] == value) return true;
+    _recordLibraryUndo();
+    project.savedLibrarySearches[key] = value;
+    _changed(engine: false);
+    return true;
+  }
+
+  void deleteLibrarySearch(String name) {
+    if (!project.savedLibrarySearches.containsKey(name)) return;
+    _recordLibraryUndo();
+    project.savedLibrarySearches.remove(name);
+    _changed(engine: false);
+  }
+
+  /// Imports an ordinary .caw module as a new project item; existing modules are never overwritten.
+  String importModuleSource(String source, {String fileName = 'Imported.caw', String folderPath = ''}) {
+    final folder = _normalizeLibraryPath(folderPath);
+    if (folder.isNotEmpty && !project.libraryFolders.contains(folder)) createLibraryFolder(folder);
+    final module = moduleFromTemplate(Template(fileName, source));
+    module.name = _freeModuleName(module.name);
+    module.folderPath = folder;
+    project.modules.add(module);
+    selectedModuleId = module.id;
+    _changed();
+    return module.id;
+  }
+
   /// A new, truly empty module. Until it has a header it compiles as a byte-mode generator, so the picked [kind]
   /// (generator, effect, pattern or library) is remembered only for the editor's hint and badge.
   String addBlankModule(String kind) {
@@ -400,9 +681,11 @@ class AppState extends ChangeNotifier {
     for (final l in project.layers) {
       if (l.generatorId == id) l.generatorId = null;
       if (l.patternId == id) l.patternId = null;
+      l.clips.removeWhere((clip) => clip.patternId == id);
       l.effectIds.remove(id);
     }
     if (selectedModuleId == id) selectedModuleId = project.modules.isEmpty ? null : project.modules.first.id;
+    _pruneClipSelection();
     _changed();
   }
 
@@ -412,6 +695,7 @@ class AppState extends ChangeNotifier {
     m.params[name] = value;
     engine?.setParam(moduleId, name, value);
     _save();
+    moduleValueTick(moduleId).value++;
     values.value++;
   }
 
@@ -433,6 +717,11 @@ class AppState extends ChangeNotifier {
     project.globals[name] = value;
     engine?.setGlobal(name, value);
     _save();
+    for (final module in project.modules) {
+      if ((info[module.id]?.params ?? const <ParamInfo>[]).any((param) => param.global && param.name == name)) {
+        moduleValueTick(module.id).value++;
+      }
+    }
     values.value++;
   }
 
@@ -445,7 +734,8 @@ class AppState extends ChangeNotifier {
   String kindOf(String moduleId) {
     final m = project.module(moduleId);
     if (m == null) return 'generator';
-    return info[moduleId]?.kind ?? headerValue(m.runSource, 'kind') ?? 'generator';
+    final emptyHint = m.source.isEmpty ? blankKinds[moduleId] : null;
+    return info[moduleId]?.kind ?? headerValue(m.runSource, 'kind') ?? emptyHint ?? 'generator';
   }
 
   bool isEffect(String moduleId) => kindOf(moduleId) == 'effect';
@@ -454,6 +744,162 @@ class AppState extends ChangeNotifier {
   bool isGenerator(String moduleId) => kindOf(moduleId) == 'generator';
 
   // ---------- layers (Arranger) ----------
+
+  List<LayerDoc> get visibleLayers => project.layers.where((layer) {
+    var parent = layer.parentId;
+    for (var depth = 0; parent != null && depth < project.layers.length; depth++) {
+      final folder = project.layers.where((x) => x.id == parent).firstOrNull;
+      if (folder == null) break;
+      if (folder.collapsed) return false;
+      parent = folder.parentId;
+    }
+    return true;
+  }).toList();
+
+  int folderDepth(LayerDoc layer) {
+    var depth = 0, parent = layer.parentId;
+    final seen = <String>{layer.id};
+    while (parent != null && seen.add(parent)) {
+      final folder = project.layers.where((x) => x.id == parent).firstOrNull;
+      if (folder == null) break;
+      depth++;
+      parent = folder.parentId;
+    }
+    return depth;
+  }
+
+  bool moveLayerIntoFolder(LayerDoc layer, String? folderId) {
+    if (folderId == layer.id) return false;
+    if (folderId != null) {
+      final folder = project.layers.where((x) => x.id == folderId).firstOrNull;
+      if (folder == null || !folder.isFolder) return false;
+      var parent = folder.parentId;
+      for (var depth = 0; parent != null && depth < project.layers.length; depth++) {
+        if (parent == layer.id) return false;
+        parent = project.layers.where((x) => x.id == parent).firstOrNull?.parentId;
+      }
+    }
+    bool inSubtree(LayerDoc candidate, String root) {
+      var parent = candidate.parentId;
+      for (var depth = 0; parent != null && depth < project.layers.length; depth++) {
+        if (parent == root) return true;
+        parent = project.layers.where((x) => x.id == parent).firstOrNull?.parentId;
+      }
+      return false;
+    }
+    final subtree = project.layers.where((candidate) =>
+      candidate.id == layer.id || inSubtree(candidate, layer.id)).toList();
+    project.layers.removeWhere((candidate) => subtree.contains(candidate));
+    layer.parentId = folderId;
+    if (folderId == null) {
+      project.layers.addAll(subtree);
+    } else {
+      var insertAt = project.layers.indexWhere((x) => x.id == folderId) + 1;
+      while (insertAt < project.layers.length && inSubtree(project.layers[insertAt], folderId)) {
+        insertAt++;
+      }
+      project.layers.insertAll(insertAt, subtree);
+    }
+    _changed();
+    return true;
+  }
+
+  void setFolderBus(LayerDoc folder, bool enabled) {
+    if (!folder.isFolder) return;
+    editLayer(folder, (l) => l.busEnabled = enabled);
+  }
+
+  void setFolderCollapsed(LayerDoc folder, bool collapsed) {
+    if (!folder.isFolder) return;
+    editLayer(folder, (l) => l.collapsed = collapsed);
+  }
+
+  void addAutomationLane(LayerDoc layer, String target) {
+    if (target != 'volume' && target != 'pan') return;
+    if (layer.automation.any((a) => a.target == target)) return;
+    final end = project.layers.fold<int>(project.loopSteps, (v, item) =>
+      item.clips.fold<int>(v, (e, clip) => e > clip.startSteps + clip.lengthSteps ? e : clip.startSteps + clip.lengthSteps))
+        .clamp(1, project.maxArrangementSteps).toInt();
+    editLayer(layer, (l) => l.automation.add(AutomationLaneDoc(target: target,
+      points: [AutomationPointDoc(step: 0, value: target == 'volume' ? l.volume : l.pan),
+        AutomationPointDoc(step: end.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
+  }
+
+  void removeAutomationLane(LayerDoc layer, AutomationLaneDoc lane) {
+    editLayer(layer, (l) => l.automation.remove(lane));
+  }
+
+  void removeAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index) {
+    if (index < 0 || index >= lane.points.length) return;
+    editLayer(layer, (l) {
+      l.automation.firstWhere((a) => a.target == lane.target).points.removeAt(index);
+    });
+  }
+
+  void updateAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index, double step, double value) {
+    if (index < 0 || index >= lane.points.length) return;
+    editLayer(layer, (l) {
+      final p = lane.points[index];
+      final sorted = [...lane.points]..sort((a, b) => a.step.compareTo(b.step));
+      final position = sorted.indexOf(p);
+      final lower = position > 0 ? sorted[position - 1].step + 0.01 : 0.0;
+      final upper = position >= 0 && position < sorted.length - 1 ? sorted[position + 1].step - 0.01 : 4096.0;
+      p.step = step.clamp(lower, math.min(upper, project.maxArrangementSteps.toDouble())).toDouble();
+      p.value = value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
+      // Clamp to neighboring points instead of reordering during a drag; the dragged handle stays stable.
+    });
+  }
+
+  void addAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, double step, double value) {
+    if (lane.points.length >= 128) return;
+    final at = step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
+    if (lane.points.any((p) => (p.step - at).abs() < 0.01)) return;
+    editLayer(layer, (l) {
+      l.automation.firstWhere((a) => a.target == lane.target).points.add(
+        AutomationPointDoc(step: at,
+          value: value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble()));
+      l.automation.firstWhere((a) => a.target == lane.target).points.sort((a, b) => a.step.compareTo(b.step));
+    });
+  }
+
+  void beginTimeSelection(int step) {
+    timeSelectionAnchor = step.clamp(0, project.maxArrangementSteps).toInt();
+    setTimeSelection(step, step);
+  }
+
+  void updateTimeSelection(int step) {
+    final anchor = timeSelectionAnchor ?? timeSelectionStart ?? step;
+    setTimeSelection(anchor, step);
+  }
+
+  void endTimeSelection() {
+    timeSelectionAnchor = null;
+  }
+
+  void setTimeSelection(int start, int end) {
+    timeSelectionStart = start.clamp(0, project.maxArrangementSteps).toInt();
+    timeSelectionEnd = end.clamp(0, project.maxArrangementSteps).toInt();
+    notifyListeners();
+  }
+
+  void clearTimeSelection() {
+    timeSelectionStart = timeSelectionEnd = timeSelectionAnchor = null;
+    notifyListeners();
+  }
+
+  void splitClipAt(LayerDoc layer, ClipDoc clip, int atStep) {
+    final offset = atStep - clip.startSteps;
+    if (offset <= 0 || offset >= clip.lengthSteps) return;
+    final right = ClipDoc(id: newId('c'), patternId: clip.patternId,
+      startSteps: atStep, lengthSteps: clip.lengthSteps - offset,
+      sourceOffsetSteps: clip.sourceOffsetSteps + offset, loop: clip.loop, linked: true);
+    editLayer(layer, (l) {
+      clip.lengthSteps = offset;
+      l.clips.add(right);
+    });
+    selectClip(layer, right);
+  }
+
 
   void addLayer() {
     final gen = project.modules.where((m) => isGenerator(m.id)).firstOrNull;
@@ -468,7 +914,11 @@ class AppState extends ChangeNotifier {
   }
 
   void removeLayer(LayerDoc l) {
+    for (final child in project.layers.where((x) => x.parentId == l.id)) {
+      child.parentId = l.parentId;
+    }
     project.layers.remove(l);
+    _pruneClipSelection();
     _changed();
   }
 
@@ -486,6 +936,15 @@ class AppState extends ChangeNotifier {
   }
 
   /// Volume, pan, mute and solo go straight to the audio thread.
+  /// Master gain shares the same project/engine state but updates only value listeners during a drag.
+  void setMaster(double value) {
+    project.master = value.clamp(0.0, 1.0).toDouble();
+    engine?.setMaster(project.master);
+    _save();
+    masterValueTick.value++;
+    values.value++;
+  }
+
   void mixLayer(LayerDoc l, {double? volume, double? pan, bool? mute, bool? solo}) {
     if (volume != null) l.volume = volume;
     if (pan != null) l.pan = pan;
@@ -495,10 +954,160 @@ class AppState extends ChangeNotifier {
     // Volume and pan drags only redraw their sliders; mute and solo change how the whole layer list looks.
     if (mute == null && solo == null) {
       _save();
+      layerValueTick(l.id).value++;
       values.value++;
     } else {
       _changed(engine: false);
     }
+  }
+
+  void _pruneClipSelection() {
+    final valid = {for (final layer in project.layers) for (final clip in layer.clips) clip.id};
+    selectedClipIds.removeWhere((id) => !valid.contains(id));
+    if (selectedClipId == null || !selectedClipIds.contains(selectedClipId)) {
+      if (selectedClipIds.isEmpty) {
+        selectedClipId = null;
+        selectedLayerId = null;
+        if (selectedModuleId != null && !project.modules.any((m) => m.id == selectedModuleId)) {
+          selectedModuleId = project.modules.firstOrNull?.id;
+        }
+      } else {
+        for (final layer in project.layers) {
+          final clip = layer.clips.where((c) => selectedClipIds.contains(c.id)).firstOrNull;
+          if (clip == null) continue;
+          selectedLayerId = layer.id;
+          selectedClipId = clip.id;
+          selectedModuleId = clip.patternId;
+          break;
+        }
+      }
+    }
+  }
+
+  bool get canMultiEditSelectedClips {
+    if (selectedClipIds.length < 2) return false;
+    final ids = <String>{};
+    for (final layer in project.layers) {
+      for (final clip in layer.clips) {
+        if (selectedClipIds.contains(clip.id)) ids.add(clip.patternId);
+      }
+    }
+    return ids.length == 1;
+  }
+
+  Set<String> get selectedPatternModuleIds => {
+    for (final layer in project.layers)
+      for (final clip in layer.clips)
+        if (selectedClipIds.contains(clip.id)) clip.patternId,
+  };
+
+  List<PatternDoc> get selectedPatternReferences {
+    final active = selectedModuleId;
+    final refs = <PatternDoc>[];
+    final seen = <String>{};
+    for (final layer in project.layers) {
+      for (final clip in layer.clips) {
+        if (!selectedClipIds.contains(clip.id) || clip.patternId == active || !seen.add(clip.patternId)) continue;
+        final module = project.module(clip.patternId);
+        if (module == null) continue;
+        final parsed = PatternDoc.parse(module.runSource);
+        if (parsed.ok && parsed.doc != null) refs.add(parsed.doc!);
+      }
+    }
+    return refs;
+  }
+
+  void activateClip(LayerDoc layer, ClipDoc clip) {
+    selectedLayerId = layer.id;
+    selectedClipId = clip.id;
+    selectedModuleId = clip.patternId;
+    selectedClipIds.add(clip.id);
+    notifyListeners();
+  }
+
+  void selectClip(LayerDoc layer, ClipDoc clip, {bool additive = false}) {
+    if (!additive) selectedClipIds.clear();
+    if (additive && selectedClipIds.contains(clip.id)) {
+      selectedClipIds.remove(clip.id);
+      if (selectedClipIds.isEmpty) {
+        selectedClipId = null;
+        selectedLayerId = null;
+        selectedModuleId = null;
+      } else {
+        final next = project.layers.expand((l) => l.clips.map((c) => (l, c)))
+            .where((entry) => selectedClipIds.contains(entry.$2.id)).first;
+        selectedLayerId = next.$1.id;
+        selectedClipId = next.$2.id;
+        selectedModuleId = next.$2.patternId;
+      }
+    } else {
+      selectedClipIds.add(clip.id);
+      selectedLayerId = layer.id;
+      selectedClipId = clip.id;
+      selectedModuleId = clip.patternId;
+    }
+    notifyListeners();
+  }
+
+  void addClip(LayerDoc layer, String patternId, {int? startSteps}) {
+    final module = project.module(patternId);
+    if (module == null || !isPattern(patternId)) return;
+    final doc = PatternDoc.parse(module.runSource).doc;
+    final length = doc?.lengthSteps(project.beatsPerBar) ?? project.stepsPerBar;
+    final end = layer.clips.fold<int>(0, (v, c) => v > c.startSteps + c.lengthSteps ? v : c.startSteps + c.lengthSteps);
+    final requestedStart = startSteps ?? end;
+    if (requestedStart >= project.maxArrangementSteps) return;
+    final at = requestedStart.clamp(0, project.maxArrangementSteps - 1).toInt();
+    final clip = ClipDoc(id: newId('c'), patternId: patternId,
+        startSteps: at, lengthSteps: length.clamp(1, project.maxArrangementSteps - at).toInt());
+    editLayer(layer, (l) => l.clips.add(clip));
+    selectClip(layer, clip);
+  }
+
+  void duplicateClip(LayerDoc layer, ClipDoc clip, {bool linked = false}) {
+    final start = clip.startSteps + clip.lengthSteps;
+    if (start >= project.maxArrangementSteps) return;
+    var patternId = clip.patternId;
+    if (!linked) {
+      final original = project.module(patternId);
+      if (original == null) return;
+      final copy = ModuleDoc(id: newId('m'), name: '${original.name} copy',
+          source: original.source, runSource: original.runSource, params: Map.of(original.params));
+      project.modules.add(copy);
+      patternId = copy.id;
+    }
+    final next = ClipDoc(id: newId('c'), patternId: patternId,
+        startSteps: start, lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
+        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop, linked: linked);
+    editLayer(layer, (l) => l.clips.add(next));
+    selectClip(layer, next);
+  }
+
+  void moveClip(LayerDoc layer, ClipDoc clip, int startSteps) {
+    editLayer(layer, (l) => clip.startSteps = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt());
+  }
+
+  void resizeClip(LayerDoc layer, ClipDoc clip, int lengthSteps) {
+    editLayer(layer, (l) => clip.lengthSteps = lengthSteps.clamp(1, project.maxArrangementSteps - clip.startSteps).toInt());
+  }
+
+  void shiftClipSource(LayerDoc layer, ClipDoc clip, int deltaSteps) {
+    editLayer(layer, (l) => clip.sourceOffsetSteps = (clip.sourceOffsetSteps + deltaSteps).clamp(0, project.maxArrangementSteps).toInt());
+  }
+
+  void removeClip(LayerDoc layer, ClipDoc clip) {
+    editLayer(layer, (l) => l.clips.remove(clip));
+    selectedClipIds.remove(clip.id);
+    _pruneClipSelection();
+    notifyListeners();
+  }
+
+  void addFolder({String? parentId}) {
+    final folder = LayerDoc(id: newId('l'), name: 'Group', color: project.layers.length % 4,
+        parentId: parentId, isFolder: true, busEnabled: true);
+    project.layers.add(folder);
+    selectedLayerId = folder.id;
+    _changed();
   }
 
   // ---------- project settings and files ----------
@@ -513,10 +1122,21 @@ class AppState extends ChangeNotifier {
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
     if (saveCurrent) await flush();
     engine?.stop();
+    _libraryUndo.clear();
+    _libraryRedo.clear();
+    for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
+    for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
+    _moduleValueTicks.clear();
+    _layerValueTicks.clear();
     project = p;
+    masterValueTick.value++;
     info = {};
     blankKinds.clear();
     selectedModuleId = p.modules.isEmpty ? null : p.modules.first.id;
+    selectedLayerId = null;
+    selectedClipId = null;
+    selectedClipIds.clear();
+    clearTimeSelection();
     previewOnly = false;
     await _storage?.setLastOpened(p.id);
     await flush();
@@ -531,6 +1151,12 @@ class AppState extends ChangeNotifier {
   Future<void> openProject(String id) async {
     final p = await _storage?.load(id);
     if (p != null) await _switchTo(p);
+  }
+
+  /// Imports a portable project as a new project ID so it cannot overwrite an existing saved project.
+  Future<void> importProject(ProjectDoc imported) {
+    final copy = ProjectDoc.fromJson(imported.toJson()..['id'] = newId('p'));
+    return _switchTo(copy);
   }
 
   Future<void> duplicateProject() async {

@@ -1,8 +1,8 @@
 ---
 title: App
-summary: The built Flutter app: its three areas, how it talks to the engine, where projects are saved, and how CI builds and signs it.
+summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/]
-updated: 2026-10-28
+updated: 2026-11-01
 ---
 
 # App
@@ -18,6 +18,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - Play/Stop (the space bar on desktop)
 - **Builder** (`lib/ui/builder_screen.dart`):
   - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)
+  - a compact active-track panel shared with the Mixer for track selection, volume, pan, mute and solo
   - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth and the Acid line and Chords patterns)
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
@@ -44,15 +45,58 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
     - the curve tool and the `roll.gen.*` generators (euclid, random, arpeggiate, humanize, chord stamp, reverse) are not built yet
 - **Arranger** (`lib/ui/arranger_screen.dart`):
-  - project settings: BPM with −/+ and tap, time signature 2/4 to 7/4, loop length of 1–16 bars, key, hex seed, master volume and the seam crossfade switch
-  - **Project controls:** one control per `global` declared by any module. Its value is saved with the project and sent to the engine without recompiling.
-  - the loop stack, where each layer has a colour, name, generator, **pattern** (or none), length (from 1 beat to 16 bars, or following the project; a pattern sets it instead), an effect chain, volume, pan, M/S, a progress bar and a peak meter
-  - a banner when the engine muted layers to keep audio clean, with Unmute
+  - the main workspace is a horizontal timeline with a bar ruler and one lane per track; the former layer-card list has been replaced
+  - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
+  - track height can be set to 54, 76, 96 or 120 px from the timeline toolbar
+  - clips are instances of reusable pattern sources; they can be selected, moved, resized, duplicated independently or as linked copies, deleted, and opened in the existing Builder piano roll
+  - the separate Mixer panel edits the same track volume and pan values as the engine; it does not maintain duplicate mix state
+  - project settings and global controls are available from the settings button rather than permanently occupying the timeline
+  - folders can be nested, collapsed and moved; bus folders sum child stereo audio and apply group volume/pan, while organization-only folders simply group tracks
+  - volume and pan automation lanes are serialized and played by the native engine; the callback interpolates their points at song position
+  - empty-lane drags make time selections; selected clips can be split, snapped, moved, resized or source-offset shifted with Alt-drag
+  - Shift-tap selects companion clips; their notes appear as references in the existing piano roll. Explicit multi-edit mode mirrors note edits to selected independent sources while preserving local note IDs; clips sharing a pattern source stay linked
+  - the playhead overlay reads the 30 Hz meter tick independently, so the moving line repaints without rebuilding the clip grid or track layout
+  - a banner appears when the engine muted layers to keep audio clean, with Unmute
+- **Mixer / Editor** (`lib/ui/mixer_screen.dart`):
+  - a dedicated channel-strip workspace with shared track volume, pan, mute and solo controls
+  - channel strips expose existing generator/effect chains, folder-bus enablement and track-to-folder routing
+  - master output level with independent live left/right peak meters and an inspector for the selected compiled module's real engine parameters
+  - desktop widths above 1200 px show channels and the module inspector side-by-side; drag the divider to resize. Mobile starts with a compact channel list and switches to a focused editor for the selected channel and module inspector
+  - parameter edits use the same module parameter map and engine calls as Builder; the Mixer does not own a separate state model
+  - the current engine does not yet expose sends, arbitrary buses, stereo width, correlation, loudness, phase or master effect chains through this screen
+- **Engine Lab** (`lib/ui/engine_lab_screen.dart`):
+  - live CPU, left/right peak, playback and overload telemetry
+  - track signal-chain inspection from the project's generator/effect assignments, with live signal pulses driven by the existing meter tick and direct navigation to the selected module in Builder
+  - a read-only 512-sample native master scope (mono sum) and a 512-point Hann-window FFT spectrum spanning 0–24 kHz; left/right peak readouts remain independent
+  - compiler summaries, errors, warnings, imports and exports from the engine's module information
+  - it is an inspector for existing engine capabilities, not yet an editable universal processing graph or sample/buffer debugger
+- **Automation** (`lib/ui/automation_screen.dart`):
+  - edits the existing track volume and pan lanes stored on each `LayerDoc`
+  - adds/removes lanes; tap the curve to add points, drag existing points directly, remove individual points or use precise step/value sliders
+  - the same serialized points are consumed by the Arranger and native engine; plugin parameter, modulation-link and processing-behavior automation remain engine/API dependencies
 - **Exporter** (`lib/ui/exporter_screen.dart`):
-  - the four exports from [engine](engine.md#exports), at 44.1 or 48 kHz, 24-bit or 32-bit float
-  - progress and cancel while it renders
-  - then the system file picker saves the file
-- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail, and the Builder shows code and params side by side. Ctrl+1/2/3 switch areas.
+  - Quick Export renders the current project loop; Advanced offers loop, free-length, one-shot, wavetable and MIDI pattern exports
+  - audio renders use the native offline render job, with progress and cancellation, at 44.1 or 48 kHz and 24-bit or 32-bit float
+  - MIDI patterns use the native MIDI writer in a worker isolate and preserve the project tempo and time signature
+  - named export profiles persist in settings; the last 20 successful exports are recorded with reproducible settings that can be reapplied
+  - a sequential in-memory queue holds up to 50 snapshot jobs, supports removal/clear, runs one render at a time and can cancel the current job while preserving remaining items
+  - each queued item uses the native offline renderer or MIDI writer and asks for its own destination; the queue itself is not persisted across restarts. Batch/stem rendering and multi-destination automation remain incomplete
+  - the system file picker saves each completed output; unsupported formats are not offered
+- **Files** (`lib/ui/file_manager_screen.dart`):
+  - import/export portable `.cawproj` projects and `.caw` module source to user-chosen operating-system locations
+  - project-local virtual folders support nested create, rename, safe delete, module moves and tags; deleting a folder moves modules to its parent rather than deleting source
+  - search by module name/type/tags, saved searches, sort by name/type and flag identical module source
+  - bulk-select modules and move them together between user-defined folders
+  - imported projects receive a new ID so they cannot overwrite an existing saved project; imported modules are added as new items
+  - validates the project format version and reports malformed or future-version files instead of opening them
+  - WAV, MIDI and wavetable exports remain in Exporter
+  - non-library modules can be sent directly to the existing Builder Solo preview path; audio/MIDI file preview caching remains incomplete
+  - virtual folders, tags and saved searches are stored in the project; bulk move/tag and folder/tag/search operations have bounded in-session undo/redo (50 snapshots). Audio/MIDI preview caching, durable version history, dependency relinking and OS-level folder browsing remain incomplete
+- **Plugin Builder** (`lib/ui/plugin_builder_screen.dart`):
+  - guided creation from blank generators/effects or existing generator/effect templates; advanced workflow can select, clone, validate and package project modules
+  - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source; cloning preserves the original and creates an independent project module
+  - CLAP/VST3 binary targets, host sandboxing and per-plugin CPU/memory tests are not available until a native plugin SDK/host backend is integrated
+- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a four-item bottom bar (Builder, Arranger, Mixer, More); More opens Engine Lab, Automation, Exporter, Files and Plugin Builder. Desktop uses a navigation rail for all eight destinations. All workspaces share the same AppState. Global shortcuts navigate all workspaces: Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
 - **Library and pattern modules** make no sound of their own: layers, the Exporter and Solo preview don't use them as generators.
 
@@ -65,7 +109,7 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - Volume, pan, mute, solo and param changes go straight to the engine. Everything else re-sends the project, and the engine applies only what changed.
 - **Model:** `lib/model/project.dart` holds the project.
   - Each module keeps its editor text (`source`) and the code last run (`run_source`). The engine only ever gets the code last run, so other edits never compile half-typed code.
-  - The app's file format adds colours, the key and per-layer generator and effect fields to the engine's project JSON.
+  - The app's file format adds colours, the key, per-layer generator/effect fields, nested folder metadata, automation lanes and arrangement clip instances. The engine receives clip source references and song-time automation points.
 - **Storage:** projects are JSON files in the app's private support folder, under `projects/`. They're written 0.5 s after each change, and right away when the app goes to the background or quits. The app reopens the last project.
 - **Audio:** the device opens at start-up (48 kHz stereo, low-latency profile). When the app goes to the background while stopped, it closes the device, and it reopens it on return. Playing on in the background (an Android foreground service) is not in v1.
 - **Startup screen** (`lib/ui/startup_screen.dart`): continue the last project, start a new blank project, start from the "First loop" template, or open another saved project.
@@ -76,12 +120,10 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
     - The built-in themes are Calm neon (the default), Night (dimmer, no glow) and Amber terminal.
     - Custom themes are `kind: theme` text files in `themes/`.
   - **Density:** comfortable or compact.
-  - **Light mode** for slow devices (owner OK, 2026-10-28). It:
-    - turns glow and the Builder's scope off
-    - reads meters 15 times a second instead of 30
-    - plays 4 voices per pattern layer instead of 8 (the project's `voices`)
-    - stops auto-update while playing
-    - Unless that switch is off, it turns itself on the first time the engine reports an overload, and the Arranger's overload banner says so.
+  - **Performance profiles:** Full Experience (full glow), Balanced (55% glow), Lightweight (no glow, 4 voices per pattern layer) and Minimal (Lightweight plus hidden scope panels). All profiles keep meter polling at 30 Hz; Minimal does not slow down editing or meters.
+    - Existing `light_mode` settings migrate to Lightweight/ Balanced; the legacy key is still written for older builds.
+    - Automatic overload response selects Lightweight once, unless disabled.
+    - Lightweight/Minimal retain the existing behavior of pausing auto-update while playback is running.
   - **Live coding:** auto-update (on by default) runs code that compiles the set pause (100–2000 ms) after the last edit. Code with an error waits for the next edit. Swaps land at the swap timing: now, the next beat or the next bar.
   - **Vim keys in the code editor:** off by default.
 - **Keys** (`lib/ui/key_router.dart`): with a keyboard, every key goes through the action system in [actions](actions.md): per-area keymaps, Vim modes, counts, `:` commands, `.` and macros.

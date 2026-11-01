@@ -49,6 +49,7 @@ public:
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
+    void setMaster(double volume);
     void play();
     void stop();
     void clearOverload();
@@ -100,6 +101,8 @@ private:
     int loopSteps_ = 64;
     uint32_t seed_ = 0;
     double master_ = 0.7;
+    double masterTarget_ = 0.7, masterStep_ = 0.0;
+    int masterRamp_ = 0;
     bool seamXf_ = true;
     int keyRoot_ = 9, keyScale_ = 1;
     int swapMode_ = 0;  // 0 at once, 1 next beat, 2 next bar
@@ -150,8 +153,11 @@ private:
         int steps = -1;
         bool voiced = false;                     // plays a pattern through a pool of voices
         std::shared_ptr<const Pattern> pattern;  // what the audio thread was last sent
+        std::string arrangementSig;              // source + clip signature; keeps compiled timelines stable
         double volume = -1, pan = 0;
-        bool mute = false, solo = false;
+        bool mute = false, solo = false, bus = false;
+        int parentSlot = -1;
+        std::string automationSig;
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;

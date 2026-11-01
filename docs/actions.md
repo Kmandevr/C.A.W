@@ -2,7 +2,7 @@
 title: Actions, keys and macros
 summary: Every command as an action, customisable keys per area, macros and toolbars, and the full action catalogue with default keys.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart]
-updated: 2026-10-28
+updated: 2026-10-31
 ---
 
 # Actions, keys and macros
@@ -12,7 +12,7 @@ updated: 2026-10-28
 ## How it works
 
 - **Everything is an action.** Each command the app can do has an id (`roll.notes.up`), a name and a description. Buttons, menus, keys and macros all run actions, so anything you can tap, you can bind. Reaper works the same way ([Sound on Sound](https://www.soundonsound.com/techniques/automate-anything-reapers-custom-actions)).
-- **Areas, like Reaper's sections:** Global, Builder, Pattern editor (roll and grid), Arranger and Exporter. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
+- **Areas, like Reaper's sections:** Global, Builder, Pattern editor (roll and grid), Arranger and Exporter. The new Mixer, Engine Lab, Automation, Files and Plugin Builder screens use global actions for workspace navigation. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
 - **The action list** (`?`, or Help → Actions):
   - search every action by name, with its keys
   - add or remove keys, with a warning when a key is already taken in that area
@@ -83,13 +83,15 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
 | Go to Builder / Arranger / Exporter | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built) |
+| Go to Mixer / Engine Lab / Automation | Ctrl+4 / Ctrl+5 / Ctrl+6 |
+| Go to Files / Plugin Builder | Ctrl+7 / Ctrl+8 |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |
 | Tap tempo | T |
 | Tempo up / down 1 BPM (Shift: 0.1) | Ctrl+= / Ctrl+- |
 | Master volume up / down | — |
 | Unmute layers the engine muted (overload) | — |
 | Full screen for the current editor | F11 |
-| Focus next / previous panel | Tab / Shift+Tab (already planned in the UI design) |
+| Focus next / previous panel | Tab / Shift+Tab (focus traversal) |
 | Open the long-press menu | Menu key or Shift+F10 |
 
 ### Builder (code)

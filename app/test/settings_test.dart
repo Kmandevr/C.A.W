@@ -14,6 +14,9 @@ void main() {
   tearDown(() {
     dir.deleteSync(recursive: true);
     Neon.active = calmNeon;
+    Neon.performanceMode = PerformanceMode.balanced.index;
+    Neon.light = false;
+    Neon.showScopes = true;
   });
 
   test('defaults: Calm neon, comfortable, auto-update on at 400 ms, swap now', () async {
@@ -23,6 +26,7 @@ void main() {
     expect(s.liveUpdate, isTrue);
     expect(s.liveDelayMs, 400);
     expect(s.swapTiming, SwapTiming.now);
+    expect(s.performanceMode, PerformanceMode.balanced);
   });
 
   test('settings and a custom theme are saved and loaded back', () async {
@@ -45,6 +49,72 @@ void main() {
     expect(back.themeName, 'Mine');
     expect(back.theme['bg'].toARGB32(), 0xFF123456);
     expect(File('${dir.path}/themes/Mine.theme').readAsStringSync(), contains('kind: theme'));
+  });
+
+
+  test('performance profiles persist and legacy light mode migrates', () async {
+    final s = await Settings.open(base: dir);
+    await s.update((x) => x.performanceMode = PerformanceMode.minimal);
+    expect(Neon.performanceMode, PerformanceMode.minimal.index);
+    expect(Neon.showScopes, isFalse);
+
+    final back = await Settings.open(base: dir);
+    expect(back.performanceMode, PerformanceMode.minimal);
+    expect(back.lightMode, isTrue);
+    expect(Neon.showScopes, isFalse);
+
+    await back.update((x) => x.performanceMode = PerformanceMode.lightweight);
+    expect(Neon.showScopes, isTrue);
+    expect(Neon.light, isTrue);
+    expect(Neon.glow(Neon.green), isEmpty);
+
+    final legacy = Settings();
+    legacy.fromJson({'light_mode': true});
+    expect(legacy.performanceMode, PerformanceMode.lightweight);
+    legacy.fromJson({'light_mode': false});
+    expect(legacy.performanceMode, PerformanceMode.balanced);
+  });
+
+  test('export profiles and recent history persist with bounded metadata', () async {
+    final settings = await Settings.open(base: dir);
+    await settings.saveExportProfile(const ExportProfile(
+      name: 'Master WAV', kind: 'loop', sampleRate: 44100, float32: true, seconds: 12, frames: 32,
+    ));
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await settings.recordExport(ExportHistoryEntry(
+      fileName: 'Song_120bpm_4bars.wav', kind: 'loop', createdAtMs: now,
+      sampleRate: 44100, float32: true, seconds: 12, frames: 32,
+      target: 'pattern-1', param: 'cutoff',
+    ));
+
+    final back = await Settings.open(base: dir);
+    expect(back.exportProfiles, hasLength(1));
+    expect(back.exportProfiles.single.name, 'Master WAV');
+    expect(back.exportProfiles.single.sampleRate, 44100);
+    expect(back.exportProfiles.single.float32, isTrue);
+    expect(back.exportHistory, hasLength(1));
+    expect(back.exportHistory.single.fileName, 'Song_120bpm_4bars.wav');
+    expect(back.exportHistory.single.createdAtMs, now);
+    expect(back.exportHistory.single.target, 'pattern-1');
+    expect(back.exportHistory.single.param, 'cutoff');
+
+    final malformed = Settings();
+    malformed.fromJson({
+      'export_profiles': [
+        {'name': '  ', 'kind': 'loop'},
+        {'name': 'Unsupported', 'kind': 'flac'},
+        {'name': 'Valid', 'kind': 'midi', 'sample_rate': 'bad', 'seconds': 'bad'},
+      ],
+      'export_history': [
+        {'file_name': 'missing timestamp', 'kind': 'loop'},
+        {'file_name': 'Valid.mid', 'kind': 'midi', 'created_at_ms': now, 'sample_rate': 96000},
+      ],
+    });
+    expect(malformed.exportProfiles, hasLength(1));
+    expect(malformed.exportProfiles.single.sampleRate, 48000);
+    expect(malformed.exportProfiles.single.seconds, 8);
+    expect(malformed.exportHistory, hasLength(1));
+    expect(malformed.exportHistory.single.sampleRate, 48000);
   });
 
   test('a starter theme is never overwritten: saving it makes a copy', () async {

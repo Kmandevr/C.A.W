@@ -1,4 +1,4 @@
-// App shell: the crow logo, transport bar (play, BPM, CPU), project menu and navigation between the three areas.
+// App shell: transport, project menu and eight workspaces. Mobile groups advanced destinations under More.
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
@@ -8,6 +8,11 @@ import '../model/app_state.dart';
 import 'arranger_screen.dart';
 import 'builder_screen.dart';
 import 'exporter_screen.dart';
+import 'mixer_screen.dart';
+import 'automation_screen.dart';
+import 'engine_lab_screen.dart';
+import 'file_manager_screen.dart';
+import 'plugin_builder_screen.dart';
 import 'key_router.dart';
 import 'startup_screen.dart';
 import 'theme.dart';
@@ -58,8 +63,13 @@ class _ShellState extends State<Shell> {
 
   static const _dest = [
     (Icons.code, 'Builder'),
-    (Icons.layers, 'Arranger'),
+    (Icons.view_timeline, 'Arranger'),
+    (Icons.tune, 'Mixer'),
+    (Icons.account_tree, 'Engine Lab'),
+    (Icons.show_chart, 'Automation'),
     (Icons.ios_share, 'Exporter'),
+    (Icons.folder_open, 'Files'),
+    (Icons.extension, 'Plugin Builder'),
   ];
 
   @override
@@ -70,8 +80,13 @@ class _ShellState extends State<Shell> {
           if (s.starting) return StartupScreen(state: s);
           final screens = [
             BuilderScreen(state: s),
-            ArrangerScreen(state: s),
+            ArrangerScreen(state: s, onOpenPattern: () => setState(() => _tab = 0)),
+            MixerScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
+            EngineLabScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
+            AutomationScreen(state: s),
             ExporterScreen(state: s),
+            FileManagerScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
+            PluginBuilderScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
           ];
           return LayoutBuilder(builder: (context, box) {
             final wide = box.maxWidth >= 900;
@@ -88,7 +103,7 @@ class _ShellState extends State<Shell> {
             ]);
             return KeyRouter(
               state: s,
-              screenArea: const [Area.builder, Area.arranger, Area.exporter][_tab],
+              screenArea: const [Area.builder, Area.arranger, Area.global, Area.global, Area.global, Area.exporter, Area.global, Area.global][_tab],
               onView: (i) => setState(() => _tab = i),
               child: Scaffold(
                 body: SafeArea(
@@ -110,10 +125,46 @@ class _ShellState extends State<Shell> {
                 bottomNavigationBar: wide
                     ? null
                     : NavigationBar(
-                        height: Neon.compact(context) ? 52 : 64,
-                        selectedIndex: _tab,
-                        onDestinationSelected: (i) => setState(() => _tab = i),
-                        destinations: [for (final d in _dest) NavigationDestination(icon: Icon(d.$1), label: d.$2)],
+                        height: 64,
+                        selectedIndex: _tab < 3 ? _tab : 3,
+                        onDestinationSelected: (i) {
+                          if (i < 3) {
+                            setState(() => _tab = i);
+                          } else {
+                            showModalBottomSheet<void>(
+                              context: context,
+                              backgroundColor: Neon.panel,
+                              builder: (sheetContext) => SafeArea(child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  for (final entry in const [
+                                    (3, Icons.account_tree, 'Engine Lab'),
+                                    (4, Icons.show_chart, 'Automation'),
+                                    (5, Icons.ios_share, 'Exporter'),
+                                    (6, Icons.folder_open, 'Files'),
+                                    (7, Icons.extension, 'Plugin Builder'),
+                                  ])
+                                    ListTile(
+                                      leading: Icon(entry.$2, color: _tab == entry.$1 ? Neon.green : Neon.dim),
+                                      title: Text(entry.$3),
+                                      selected: _tab == entry.$1,
+                                      onTap: () {
+                                        Navigator.pop(sheetContext);
+                                        setState(() => _tab = entry.$1);
+                                      },
+                                    ),
+                                ],
+                              )),
+                            );
+                          }
+                        },
+                        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+                        destinations: const [
+                          NavigationDestination(icon: Icon(Icons.code), label: 'Builder'),
+                          NavigationDestination(icon: Icon(Icons.view_timeline), label: 'Arranger'),
+                          NavigationDestination(icon: Icon(Icons.tune), label: 'Mixer'),
+                          NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+                        ],
                       ),
               ),
             );
