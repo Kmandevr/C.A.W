@@ -10,25 +10,27 @@ updated: 2026-11-01
 
 - Repository: `Kmandevr/C.A.W`
 - Implementation branch: `feature/task-1-ui-workflow`
-- Current recorded head: `b390c45e8520798613fcb10c508825f26e587364`
+- Current recorded head: `27581b99e21539a5541e905801bb36ec697c7b4b`
 - PR: [#56 — Task 1 UI workspaces](https://github.com/Kmandevr/C.A.W/pull/56), open and draft.
-- PR base: `ccr-395682a8-dthizd` (the repository default branch used when this workstream began).
+- PR base: `ccr-395682a8-dthizd`; the branch is 253 commits ahead and 2 behind at the last comparison. GitHub reported it mergeable. Do not rebase or change its base silently.
 - PR remains unmerged. Do not merge without explicit authorization.
-- The repository's `main` branch was previously found to be substantially divergent and does not contain the authoritative master plan or current arrangement-first UI. Re-check branch relationships before changing the PR base; do not silently rebase or switch.
+- The repository's `main` branch was previously found to be substantially divergent and does not contain the authoritative master plan or current arrangement-first UI. Re-check branch relationships before changing the PR base.
 
 ## Implemented workspaces and workflows
 
-- **Builder:** existing code-first generator/effect/pattern authoring, parameter editing, audition and common track controls; remains the fast creation workspace.
-- **Arranger:** horizontal arrangement-first timeline, stacked tracks, reusable MIDI clips, clip selection/editing/splitting/duplication, snapping, zoom, track-height presets, folder hierarchy and a playhead overlay that updates independently of the clip grid.
+- **Builder:** fast creation workspace with existing code-first generator/effect/pattern authoring, parameter editing, audition and common track controls.
+- **Arranger:** horizontal arrangement-first timeline, stacked tracks, reusable MIDI clips, selection/editing/splitting/duplication, snapping, zoom, track-height presets, folder hierarchy and a playhead overlay that updates independently of the clip grid.
 - **Mixer / Editor:** dedicated channel strips, track volume/pan/mute/solo, generator/effect chain selection, existing folder-bus routing, master output, independent left/right master peaks and compiled-module parameter inspector. Desktop has a draggable channel/inspector split. Mobile has a focused channel list and separate focused editor instead of compressing the desktop grid.
 - **Master gain boundary:** a dedicated `caw_engine_set_master` native command updates gain on the audio thread with a 5 ms ramp. The Mixer no longer serializes/recompiles the whole project for every master-slider movement.
 - **Meters:** peak bars attack immediately, hold for approximately 400 ms at the 30 Hz meter cadence, then release smoothly. Presentation smoothing does not modify engine measurements.
 - **Engine Lab:** CPU/peak/playback/overload telemetry, existing track MIDI/audio paths and outputs, compiler diagnostics, a read-only mono master scope and a 512-point Hann-window FFT spectrum (0–24 kHz). This is an inspector, not an editable universal processing graph or sample/buffer debugger.
 - **Automation:** edits the existing serialized track volume/pan lanes and points shared with Arranger and the engine. Parameter/modulation/processing-behavior automation remains dependent on Task 2 graph APIs.
-- **Exporter:** Quick and Advanced modes; existing WAV loop/free/one-shot/wavetable render paths plus native MIDI pattern export. Render progress, cancellation, busy-state locking, actionable errors and temporary-file cleanup are implemented. It does not advertise unsupported formats.
+- **Exporter:** Quick and Advanced modes; existing WAV loop/free/one-shot/wavetable render paths plus native MIDI pattern export. Render progress, cancellation, busy-state locking, actionable errors and temporary-file cleanup are implemented. MIDI generation runs in a worker isolate.
+  - Up to 50 export jobs can be queued in-session; each snapshots the project and options at queue time. Jobs run sequentially, can be removed/cancelled, and pause on render/save failure. The queue is not persisted across restarts.
+  - Up to 32 named export profiles and the last 20 successful exports persist in settings. History records kind, sample rate, bit depth, length/frame settings, target and parameter so settings can be reapplied when the target still exists.
 - **Plugin Builder:** guided blank/template creation and advanced selection/cloning of existing native modules; validates with the existing engine, exposes generated parameters and packages native `.caw` source. CLAP/VST3 binary builds, sandboxing and host I/O testing require a native plugin SDK/host backend not present in the repository.
-- **Files:** portable `.cawproj` project and `.caw` module import/export; project-local nested folders, tags, saved searches, name/type sorting, duplicate-source indicators, bulk move and bulk tag operations, and bounded in-session undo/redo (50 metadata snapshots). Imports get a new project identity and malformed/future project versions are rejected.
-- **Navigation:** eight workspaces are available on desktop and mobile; mobile uses focused More navigation. Global shortcuts cover Builder, Arranger, Exporter, Mixer, Engine Lab, Automation, Files and Plugin Builder.
+- **Files:** portable `.cawproj` project and `.caw` module import/export; project-local nested folders, tags, saved searches, name/type sorting, duplicate-source indicators, bulk move and bulk tag operations, and bounded in-session undo/redo (50 metadata snapshots). Imports get a new project identity and malformed/future project versions are rejected. Non-library modules can be sent to the existing Builder Solo preview path.
+- **Navigation and touch:** eight workspaces are available on desktop and mobile; mobile uses focused More navigation. Global shortcuts cover all eight workspaces. Custom toggle targets are at least 48 dp.
 - **Performance profiles:** Full Experience, Balanced, Lightweight and Minimal. Visual effects are reduced before feedback cadence; meter polling remains at 30 Hz in every profile. Arranger playhead and scope/FFT work use retained buffers and scoped update paths.
 
 ## Shared architecture and explicit engine boundaries
@@ -43,31 +45,31 @@ The current engine still does not expose:
 - Master effect-chain editing, limiter/compressor configuration or alternate output routing.
 - CLAP/VST3 hosting and binary plugin building.
 
-The UI documents these boundaries rather than simulating functionality. These capabilities belong to Task 2 and should be integrated through stable interfaces when available.
+The UI documents these boundaries rather than simulating them. These capabilities belong to Task 2 and should be integrated through stable interfaces when available.
 
 ## Verification status
 
 - Earlier Engine CI passed Linux x64, Linux Arm64, Windows x64 and Linux sanitizers before the latest master-gain API change.
 - Earlier Docs/hygiene CI passed after the master-plan metadata/index issue was fixed.
-- An App CI run exposed three real compile/analyzer problems: an invalid Engine Lab scope callback variable, unsupported `Wrap.mainAxisSize`, and missing `ActionRef` import in workspace tests. All three were fixed.
-- Additional tests now cover master-gain update isolation, native smooth master gain, peak hold/release timing, mobile focused Mixer navigation, shared Mixer state, Arranger playhead/track sizing, Engine Lab signal/spectrum, Exporter navigation, Plugin Builder cloning, library folder/tag/search operations, bulk move/tag undo/redo, project import identity and malformed library metadata bounds.
-- Audio export now catches render/save failures and cleans temporary files; MIDI export has independent busy/error handling.
-- CI workflow files now cancel superseded runs per branch/PR to avoid wasting runner time on stale commits.
-- **Latest App, Engine and Docs/hygiene workflows have been queued but have not yet produced final results.** Do not claim the latest head passes until those exact runs complete.
-- The GitHub Actions queue contained a large backlog of earlier runs when checked. Re-check current head statuses and inspect failure logs before considering the branch verified.
+- An App CI run exposed three real problems: an invalid Engine Lab scope callback variable, unsupported `Wrap.mainAxisSize`, and missing `ActionRef` import in workspace tests. All three were fixed.
+- Regression/widget tests cover master-gain update isolation, native smooth master gain, peak hold/release timing, 48 dp toggle targets, mobile focused Mixer navigation, shared Mixer state, Arranger playhead/track sizing, Engine Lab signal/spectrum, Exporter queue/profile/history/navigation, Plugin Builder cloning, library folder/tag/search operations, bulk move/tag undo/redo, project import identity and malformed library metadata bounds.
+- Audio export catches render/save failures and cleans temporary files; MIDI export has independent busy/error handling and worker-isolate generation.
+- CI workflow files cancel superseded runs per branch/PR to avoid spending runner time on stale commits.
+- **The latest App, Engine and Docs/hygiene workflows for head `27581b99` are queued/pending and have not yet produced final results.** Do not claim the latest head passes until those exact runs complete.
+- The GitHub Actions queue had a large backlog of older runs when checked. Re-check current head statuses and inspect failure logs before considering the branch verified.
 - No local Flutter SDK execution, physical Android/desktop interaction audit, accessibility audit, screenshot comparison or current-device performance benchmark has been completed in this GitHub-only session.
 
 ## Remaining Task 1 work
 
-- Finish Mixer capabilities only where the native engine API supports them; the missing routing, stereo analysis and master-FX features above remain Task 2 dependencies.
+- Finish Mixer capabilities only where the native engine API supports them; missing routing, stereo analysis and master-FX features above remain Task 2 dependencies.
 - Integrate universal editable Engine Lab graphs, low-level data inspection and programmable engine modules after Task 2 provides stable APIs.
 - Extend automation to parameters, modulation connections and processing behavior on the shared engine graph.
-- Extend Exporter with queues/history/profiles, stems, additional formats/bit depths/channel layouts, normalization/dither and dependency portability only when backend support exists.
+- Extend Exporter with persistent queues, stems/batch rendering, additional formats/bit depths/channel layouts, normalization/dither and dependency portability only when backend support exists.
 - Complete CLAP plugin build/validation/packaging after native host/SDK integration and license review.
-- Complete Files audio/MIDI previews and preview caching, durable version history/restore points, dependency collection/relinking, project consolidation and OS-level folder browsing.
+- Complete Files audio/MIDI previews and preview caching, durable version history/restore points, dependency collection/relinking, project consolidation and OS-level folder browsing. Current Solo preview is a handoff to Builder, not a background preview player.
 - Complete desktop docking/panel persistence and full responsive/touch/keyboard/accessibility review.
 - Verify all workspaces on physical mobile and desktop hardware; capture frame-time, CPU, memory, thermal and audio-dropout measurements before making performance claims.
-- Run the latest queued CI for the current PR head, fix any remaining failures, then update this handoff and PR description with exact results.
+- Run the latest queued CI for the current PR head, fix remaining failures, then update this handoff and PR description with exact results.
 
 ## Continuation rules
 
