@@ -26,7 +26,7 @@ class MixerScreen extends StatelessWidget {
             const Expanded(child: Text('MASTER OUTPUT', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800))),
             Text((state.project.master * 100).round().toString() + '%', style: Neon.code(color: Neon.pink)),
           ]),
-          Slider(value: state.project.master.clamp(0.0, 1.0), min: 0, max: 1, activeColor: Neon.pink,
+          Slider(value: state.project.master.clamp(0.0, 1.0).toDouble(), min: 0, max: 1, activeColor: Neon.pink,
             onChanged: (v) => state.editProject((p) => p.master = v)),
           Text('Peak L ' + state.meters.peakL.toStringAsFixed(3) + '   Peak R ' + state.meters.peakR.toStringAsFixed(3),
             style: Neon.code(size: 12, color: Neon.dim)),
@@ -81,14 +81,14 @@ class _ChannelStrip extends StatelessWidget {
         const Spacer(),
         Row(children: [
           const SizedBox(width: 48, child: Text('LEVEL', style: TextStyle(color: Neon.dim, fontSize: 10))),
-          Expanded(child: Slider(value: layer.volume.clamp(0.0, 1.0), min: 0, max: 1, activeColor: Neon.green,
+          Expanded(child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1, activeColor: Neon.green,
             onChanged: (v) => state.mixLayer(layer, volume: v))),
           SizedBox(width: 38, child: Text((layer.volume * 100).round().toString(),
             textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.green))),
         ]),
         Row(children: [
           const SizedBox(width: 48, child: Text('PAN', style: TextStyle(color: Neon.dim, fontSize: 10))),
-          Expanded(child: Slider(value: layer.pan.clamp(-1.0, 1.0), min: -1, max: 1, activeColor: Neon.blue,
+          Expanded(child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1, activeColor: Neon.blue,
             onChanged: (v) => state.mixLayer(layer, pan: v))),
           SizedBox(width: 38, child: Text(layer.pan.abs() < .01 ? 'C' :
             (layer.pan.abs() * 100).round().toString() + (layer.pan < 0 ? 'L' : 'R'),
