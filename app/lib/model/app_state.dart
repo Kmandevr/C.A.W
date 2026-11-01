@@ -442,7 +442,13 @@ class AppState extends ChangeNotifier {
     if (newValue.startsWith('$oldValue/') || project.libraryFolders.contains(newValue)) return false;
     project.libraryFolders = project.libraryFolders.map((path) =>
       path == oldValue ? newValue : path.startsWith('$oldValue/') ? '$newValue${path.substring(oldValue.length)}' : path
-    ).toSet().toList()..sort();
+    ).toSet().toList();
+    final newParts = newValue.split('/');
+    for (var i = 1; i < newParts.length; i++) {
+      final parentPath = newParts.take(i).join('/');
+      if (!project.libraryFolders.contains(parentPath)) project.libraryFolders.add(parentPath);
+    }
+    project.libraryFolders.sort();
     for (final module in project.modules) {
       if (module.folderPath == oldValue) {
         module.folderPath = newValue;
