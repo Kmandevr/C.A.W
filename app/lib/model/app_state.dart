@@ -487,6 +487,21 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
+  bool moveModulesToFolder(Iterable<String> moduleIds, String folderPath) {
+    final normalized = _normalizeLibraryPath(folderPath);
+    if (normalized.isNotEmpty && !project.libraryFolders.contains(normalized)) return false;
+    final ids = moduleIds.toSet();
+    var changed = false;
+    for (final module in project.modules) {
+      if (ids.contains(module.id) && module.folderPath != normalized) {
+        module.folderPath = normalized;
+        changed = true;
+      }
+    }
+    if (changed) _changed(engine: false);
+    return changed;
+  }
+
   void setModuleTags(String moduleId, List<String> tags) {
     final module = project.module(moduleId);
     if (module == null) return;
