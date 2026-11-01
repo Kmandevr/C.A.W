@@ -255,7 +255,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
                   max: 120,
                   divisions: 119,
                   activeColor: Neon.yellow,
-                  onChanged: (v) => setState(() => _seconds = v),
+                  onChanged: busy ? null : (v) => setState(() => _seconds = v),
                 ),
               ),
               Text(_seconds.toStringAsFixed(0), style: Neon.code(color: Neon.yellow)),
@@ -265,7 +265,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
               value: _layerId,
               hint: const Text('No layers with a generator'),
               items: [for (final l in layers) DropdownMenuItem(value: l.id, child: Text(l.name))],
-              onChanged: (v) => setState(() => _layerId = v),
+              onChanged: busy ? null : (v) => setState(() => _layerId = v),
             ),
           if (_kind == ExportKind.midi)
             DropdownButton<String>(
@@ -279,7 +279,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
               value: _moduleId,
               hint: const Text('No compiled modules'),
               items: [for (final m in modules) DropdownMenuItem(value: m.id, child: Text(m.name))],
-              onChanged: (v) => setState(() => _moduleId = v),
+              onChanged: busy ? null : (v) => setState(() => _moduleId = v),
             ),
             Row(children: [
               const Text('Sweep '),
@@ -289,14 +289,14 @@ class _ExporterScreenState extends State<ExporterScreen> {
                   const DropdownMenuItem<String?>(value: null, child: Text('nothing')),
                   for (final x in params) DropdownMenuItem<String?>(value: x.name, child: Text(x.name)),
                 ],
-                onChanged: (v) => setState(() => _param = v),
+                onChanged: busy ? null : (v) => setState(() => _param = v),
               ),
               const SizedBox(width: 16),
               const Text('Frames '),
               DropdownButton<int>(
                 value: _frames,
                 items: [for (final f in [1, 8, 16, 32, 64, 128, 256]) DropdownMenuItem(value: f, child: Text('$f'))],
-                onChanged: (v) => setState(() => _frames = v!),
+                onChanged: busy ? null : (v) => setState(() => _frames = v!),
               ),
             ]),
           ],
