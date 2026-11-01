@@ -47,11 +47,13 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
   }
 
   Future<void> _cloneExisting(ModuleDoc module) async {
-    final id = s.importModuleSource(
-      module.source,
-      fileName: '${module.name}.caw',
-      folderPath: module.folderPath,
-    );
+    final id = module.source.isEmpty
+      ? s.addBlankModule(s.kindOf(module.id))
+      : s.importModuleSource(
+          module.source,
+          fileName: '${module.name}.caw',
+          folderPath: module.folderPath,
+        );
     if (!mounted) return;
     setState(() {
       _moduleId = id;
