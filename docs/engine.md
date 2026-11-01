@@ -301,7 +301,7 @@ The app, the CLI and exports share one format:
   - for a pattern: kind `pattern`, name, summary, `notes` (how many), `length_steps`, `length_bars` and `last_end`
 - **Engine:** `caw_engine_create(sample_rate)` creates one.
   - `caw_engine_set_project(json)` returns the same description per module, plus `ref` (its name for exports) and `warnings`.
-  - Live controls: `caw_engine_set_param`, `caw_engine_set_global`, `caw_engine_set_layer_mix`, `caw_engine_play`, `caw_engine_stop`, `caw_engine_clear_overload`.
+  - Live controls: `caw_engine_set_param`, `caw_engine_set_global`, `caw_engine_set_layer_mix`, `caw_engine_set_master` (a 5 ms audio-thread gain ramp), `caw_engine_play`, `caw_engine_stop`, `caw_engine_clear_overload`.
 - **Meters:** `caw_engine_meters`, `caw_engine_layer_meter` and `caw_engine_scope` (1024 samples per layer, for the audition at index 64, or for the master at −1).
 - **Hosts and devices:** `caw_engine_process(left, right, frames)` lets hosts such as a plugin drive the audio. `caw_audio_start` and `caw_audio_stop` open the device through miniaudio: AAudio or OpenSL ES on Android, WASAPI on Windows, Core Audio, and ALSA or PulseAudio.
 - **Exports:** `caw_render(project_json, options, path, progress, cancel, …)` writes a WAV. Progress counts 0–1000, and a non-zero cancel stops it.
