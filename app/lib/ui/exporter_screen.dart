@@ -349,7 +349,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   }
 
   Future<void> _export() async {
-    if (_job != null || _midiBusy) return;
+    if (_job != null || _midiBusy || _saving || _queueRunning) return;
     if (_kind == ExportKind.midi) {
       await _exportMidi();
       return;
@@ -495,7 +495,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
     }
     final params = s.info[_moduleId]?.params ?? const <ParamInfo>[];
     if (_param != null && !params.any((x) => x.name == _param)) _param = null;
-    final busy = _job != null || _midiBusy || _saving;
+    final busy = _job != null || _midiBusy || _saving || _queueRunning;
     return ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 96), children: [
       const Heading('Export mode'),
       SegmentedButton<bool>(
@@ -666,21 +666,55 @@ class _ExporterScreenState extends State<ExporterScreen> {
       if (_job != null) ...[
         Bar(value: _job!.progress, color: Neon.yellow, height: 6),
         const SizedBox(height: 10),
-        OutlinedButton(onPressed: _job!.cancel, child: const Text('Cancel')),
-      ] else if (_midiBusy || _saving) ...[
+        OutlinedButton(onPressed: _queueRunning ? _cancelQueue : _job!.cancel,
+          child: Text(_queueRunning ? 'Cancel queue' : 'Cancel export')),
+      ] else if (_midiBusy || _saving || _queueRunning) ...[
         const LinearProgressIndicator(minHeight: 4),
         const SizedBox(height: 10),
-        Text(_midiBusy ? 'Preparing MIDI file…' : 'Preparing export destination…',
+        Text(_queueRunning ? 'Export queue running…' : _midiBusy ? 'Preparing MIDI file…' : 'Preparing export destination…',
           style: const TextStyle(color: Neon.dim, fontSize: 12)),
+        if (_queueRunning)
+          OutlinedButton(onPressed: _cancelQueue, child: const Text('Cancel queue')),
       ] else
-        FilledButton.icon(
-          style: FilledButton.styleFrom(
+        Row(children: [
+          Expanded(child: FilledButton.icon(
+            style: FilledButton.styleFrom(
               backgroundColor: Neon.yellow, foregroundColor: Neon.bg, minimumSize: const Size.fromHeight(52)),
-          onPressed: _export,
-          icon: const Icon(Icons.download),
-          label: Text(!_advanced ? 'Quick Export' : _kind == ExportKind.midi ? 'Export MIDI' : 'Export WAV',
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-        ),
+            onPressed: _export,
+            icon: const Icon(Icons.download),
+            label: Text(!_advanced ? 'Quick Export' : _kind == ExportKind.midi ? 'Export MIDI' : 'Export WAV',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          )),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: busy ? null : _addToQueue,
+            icon: const Icon(Icons.playlist_add),
+            label: const Text('Queue'),
+          ),
+        ]),
+      if (_queue.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: Text('EXPORT QUEUE · ${_queue.length}', style: const TextStyle(color: Neon.blue, fontWeight: FontWeight.w800))),
+            TextButton(onPressed: busy ? null : () => setState(() => _queue.clear()), child: const Text('Clear')),
+            FilledButton.tonal(onPressed: busy ? null : _runQueue, child: const Text('Run queue')),
+          ]),
+          for (final item in _queue)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: Text(item.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text('${item.kind.name} · ${item.sampleRate ~/ 1000} kHz',
+                style: const TextStyle(color: Neon.dim, fontSize: 10)),
+              trailing: IconButton(
+                tooltip: 'Remove queued export',
+                onPressed: busy ? null : () => setState(() => _queue.remove(item)),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+        ])),
+      ],
       if (_message != null)
         Padding(
           padding: const EdgeInsets.only(top: 12),
