@@ -498,6 +498,18 @@ class AppState extends ChangeNotifier {
     _changed(engine: false);
   }
 
+  void saveLibrarySearch(String name, String query) {
+    final key = name.trim();
+    final value = query.trim();
+    if (key.isEmpty || value.isEmpty) return;
+    project.savedLibrarySearches[key] = value;
+    _changed(engine: false);
+  }
+
+  void deleteLibrarySearch(String name) {
+    if (project.savedLibrarySearches.remove(name) != null) _changed(engine: false);
+  }
+
   /// Imports an ordinary .caw module as a new project item; existing modules are never overwritten.
   String importModuleSource(String source, {String fileName = 'Imported.caw', String folderPath = ''}) {
     final folder = _normalizeLibraryPath(folderPath);
