@@ -1,6 +1,6 @@
 ---
 title: UI design
-summary: Retro-neon, arrangement-first creative UI across Builder, Arranger, Mixer, Engine Lab, Automation and Exporter on desktop and mobile.
+summary: Retro-neon, arrangement-first creative UI across eight shared-state workspaces on desktop and mobile.
 updated: 2026-10-31
 ---
 
@@ -65,9 +65,9 @@ The Arranger is the main composition view. It is a horizontal song timeline with
 
 ## Layout
 
-The application shell currently exposes seven destinations: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter and Files. The Arranger remains the composition workspace; the old session grid is retired. Mixer, Engine Lab and Automation are separate destinations that read and edit the shared project state.
+The application shell currently exposes eight destinations: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder. The Arranger remains the composition workspace; the old session grid is retired. Mixer, Engine Lab and Automation are separate destinations that read and edit the shared project state.
 
-**Phone (portrait):** transport at the top, then the track headers beside a horizontally scrolling song timeline. The Arranger's compact mixer panel remains available below the timeline. Builder, Arranger and Mixer are primary bottom destinations; More opens Engine Lab, Automation, Exporter and Files.
+**Phone (portrait):** transport at the top, then the track headers beside a horizontally scrolling song timeline. The Arranger's compact mixer panel remains available below the timeline. Builder, Arranger and Mixer are primary bottom destinations; More opens Engine Lab, Automation, Exporter, Files and Plugin Builder.
 
 **Phone (landscape):** the timeline gets the available width. Track headers stay aligned with their lanes while the song timeline scrolls horizontally. The mixer remains a separate panel.
 
