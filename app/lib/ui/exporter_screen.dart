@@ -96,8 +96,9 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final tmp = await getTemporaryDirectory();
       final name = _fileName();
       final path = '${tmp.path}${Platform.pathSeparator}$name';
-      file = File(path);
-      job = RenderJob.start(RenderRequest(
+      final outputFile = File(path);
+      file = outputFile;
+      final startedJob = RenderJob.start(RenderRequest(
         projectJson: p.toEngineJson(),
         kind: _kind,
         outPath: path,
@@ -108,19 +109,20 @@ class _ExporterScreenState extends State<ExporterScreen> {
         param: _param ?? '',
         frames: _frames,
       ));
+      job = startedJob;
       if (!mounted) {
-        job.cancel();
+        startedJob.cancel();
         return;
       }
       setState(() {
-        _job = job;
+        _job = startedJob;
         _message = null;
       });
       _poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
         if (mounted) setState(() {});
       });
 
-      final error = await job.result;
+      final error = await startedJob.result;
       _poll?.cancel();
       _poll = null;
       if (!mounted) return;
@@ -132,7 +134,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
         return;
       }
 
-      final bytes = await file.readAsBytes();
+      final bytes = await outputFile.readAsBytes();
       final saved = await FilePicker.saveFile(
         fileName: name,
         bytes: bytes,
