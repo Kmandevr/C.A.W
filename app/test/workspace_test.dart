@@ -143,6 +143,8 @@ void main() {
     expect(find.text('Noise core'), findsNWidgets(2));
     expect(find.text('Noise generator'), findsOneWidget);
     expect(find.text('MIDI'), findsOneWidget);
+    expect(find.text('SPECTRUM · 0–24 kHz'), findsOneWidget);
+    expect(find.text('512-POINT HANN / FFT'), findsOneWidget);
     expect(find.text('Beat pattern'), findsNWidgets(2));
     await tester.tap(find.text('Beat pattern').first);
     expect(state.selectedModuleId, pattern.id);
