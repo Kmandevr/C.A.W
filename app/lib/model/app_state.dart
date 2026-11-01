@@ -19,18 +19,27 @@ class AppState extends ChangeNotifier {
   AppState({Settings? settings}) : settings = settings ?? Settings() {
     _light = this.settings.lightMode;
     _performanceMode = this.settings.performanceMode;
+    _density = this.settings.density;
+    _lookRevision = this.settings.lookRevision;
     this.settings.addListener(_settingsChanged);
   }
 
   late bool _light;
   late PerformanceMode _performanceMode;
+  late Density _density;
+  late int _lookRevision;
 
   // Lightweight/Minimal change the engine's voice budget; UI meter cadence stays fixed.
   void _settingsChanged() {
     final nextMode = settings.performanceMode;
-    if (nextMode == _performanceMode) return;
+    final nextDensity = settings.density;
+    final nextLook = settings.lookRevision;
+    final modeChanged = nextMode != _performanceMode;
+    if (!modeChanged && nextDensity == _density && nextLook == _lookRevision) return;
     final voiceBudgetChanged = settings.lightMode != _light;
     _performanceMode = nextMode;
+    _density = nextDensity;
+    _lookRevision = nextLook;
     _light = settings.lightMode;
     // Visual profiles never lower meter cadence; editing and meter feedback stay at 30 Hz.
     if (voiceBudgetChanged) _sync();
