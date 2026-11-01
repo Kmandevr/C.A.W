@@ -149,7 +149,7 @@ class _TimelineHeader extends StatelessWidget {
       child: Column(children: [
         Row(children: [
           if (layer.isFolder)
-            IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints.tightFor(width: 22, height: 24),
+            IconButton(padding: const EdgeInsets.all(8), constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
               onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed))
           else Container(width: 6, height: 20, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
