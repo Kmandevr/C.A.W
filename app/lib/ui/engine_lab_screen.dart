@@ -1,5 +1,6 @@
 // Engine Lab: live diagnostics and inspectable relationships from the compiled project.
 // Only capabilities returned by the current engine API are presented; unsupported graph operations are not simulated.
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -168,32 +169,133 @@ class _MasterScope extends StatefulWidget {
 }
 
 class _MasterScopeState extends State<_MasterScope> {
-  final Float32List _samples = Float32List(512);
+  static const _fftSize = 512;
+  final Float32List _samples = Float32List(_fftSize);
+  final Float32List _real = Float32List(_fftSize);
+  final Float32List _imaginary = Float32List(_fftSize);
+  final Float32List _spectrum = Float32List(_fftSize ~/ 4);
+  late final Float32List _window = Float32List.fromList([
+    for (var i = 0; i < _fftSize; i++)
+      0.5 - 0.5 * math.cos(2 * math.pi * i / (_fftSize - 1)),
+  ]);
+
+  void _updateSpectrum() {
+    for (var i = 0; i < _fftSize; i++) {
+      _real[i] = _samples[i] * _window[i];
+      _imaginary[i] = 0;
+    }
+
+    // In-place radix-2 FFT. Scratch buffers and the window are retained across meter ticks.
+    var j = 0;
+    for (var i = 1; i < _fftSize; i++) {
+      var bit = _fftSize >> 1;
+      while ((j & bit) != 0) {
+        j ^= bit;
+        bit >>= 1;
+      }
+      j ^= bit;
+      if (i < j) {
+        final real = _real[i];
+        _real[i] = _real[j];
+        _real[j] = real;
+        final imaginary = _imaginary[i];
+        _imaginary[i] = _imaginary[j];
+        _imaginary[j] = imaginary;
+      }
+    }
+
+    for (var length = 2; length <= _fftSize; length <<= 1) {
+      final angle = -2 * math.pi / length;
+      final stepReal = math.cos(angle);
+      final stepImaginary = math.sin(angle);
+      final half = length >> 1;
+      for (var start = 0; start < _fftSize; start += length) {
+        var weightReal = 1.0;
+        var weightImaginary = 0.0;
+        for (var offset = 0; offset < half; offset++) {
+          final even = start + offset;
+          final odd = even + half;
+          final oddReal = _real[odd] * weightReal - _imaginary[odd] * weightImaginary;
+          final oddImaginary = _real[odd] * weightImaginary + _imaginary[odd] * weightReal;
+          _real[odd] = _real[even] - oddReal;
+          _imaginary[odd] = _imaginary[even] - oddImaginary;
+          _real[even] += oddReal;
+          _imaginary[even] += oddImaginary;
+          final nextReal = weightReal * stepReal - weightImaginary * stepImaginary;
+          weightImaginary = weightReal * stepImaginary + weightImaginary * stepReal;
+          weightReal = nextReal;
+        }
+      }
+    }
+
+    // 128 bars cover bins 1..256 (0..24 kHz at the engine's 48 kHz rate).
+    for (var bar = 0; bar < _spectrum.length; bar++) {
+      final first = 1 + bar * 2;
+      final a = math.sqrt(_real[first] * _real[first] + _imaginary[first] * _imaginary[first]);
+      final b = math.sqrt(_real[first + 1] * _real[first + 1] + _imaginary[first + 1] * _imaginary[first + 1]);
+      _spectrum[bar] = math.max(a, b) * (4 / _fftSize);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     if (!Neon.showScopes) return const SizedBox.shrink();
     return NeonPanel(color: Neon.blue, child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Text('MASTER SCOPE · MONO SUM', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
-      const SizedBox(height: 8),
-      ValueListenableBuilder<int>(
-        valueListenable: widget.state.tick,
-        builder: (context, tick, _) {
-          widget.state.engine?.scope(Engine.masterIndex, _samples);
-          return SizedBox(
-            height: 92,
-            width: double.infinity,
-            child: CustomPaint(painter: _ScopePainter(_samples, tick)),
-          );
-        },
-      ),
-      const Text('Read-only view of the engine scope buffer. Left/right peak meters remain independent.',
-        style: TextStyle(color: Neon.dim, fontSize: 11)),
-    ],
-  ));
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('MASTER SCOPE · MONO SUM', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        ValueListenableBuilder<int>(
+          valueListenable: widget.state.tick,
+          builder: (context, tick, _) {
+            widget.state.engine?.scope(Engine.masterIndex, _samples);
+            _updateSpectrum();
+            return Column(children: [
+              SizedBox(height: 92, width: double.infinity,
+                child: CustomPaint(painter: _ScopePainter(_samples, tick))),
+              const SizedBox(height: 10),
+              SizedBox(height: 72, width: double.infinity,
+                child: CustomPaint(painter: _SpectrumPainter(_spectrum, tick))),
+            ]);
+          },
+        ),
+        const Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text('SPECTRUM · 0–24 kHz', style: TextStyle(color: Neon.violet, fontWeight: FontWeight.w800, fontSize: 10)),
+          Text('512-POINT HANN / FFT', style: TextStyle(color: Neon.dim, fontSize: 9)),
+        ]),
+        const Text('Read-only mono-sum scope and spectrum from the native master buffer. Left/right peak meters remain independent.',
+          style: TextStyle(color: Neon.dim, fontSize: 11)),
+      ],
+    ));
   }
+}
+
+class _SpectrumPainter extends CustomPainter {
+  const _SpectrumPainter(this.bins, this.revision);
+  final Float32List bins;
+  final int revision;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final grid = Paint()..color = Neon.line..strokeWidth = 1;
+    for (var i = 1; i < 4; i++) {
+      final y = size.height * i / 4;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+    }
+    if (bins.isEmpty) return;
+    final slot = size.width / bins.length;
+    final barPaint = Paint()..color = Neon.violet;
+    for (var i = 0; i < bins.length; i++) {
+      final magnitude = math.max(bins[i], 1e-6);
+      final db = (20 * math.log(magnitude) / math.ln10).clamp(-72.0, 0.0);
+      final height = ((db + 72) / 72) * size.height;
+      canvas.drawRect(Rect.fromLTWH(i * slot + slot * 0.15, size.height - height,
+        math.max(1.0, slot * 0.7), height), barPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpectrumPainter old) => old.revision != revision;
 }
 
 class _ScopePainter extends CustomPainter {
