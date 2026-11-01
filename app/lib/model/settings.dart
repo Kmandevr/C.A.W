@@ -147,6 +147,10 @@ class Settings extends ChangeNotifier {
   bool vimCode = false;
 
   /// Themes the user made or imported, saved one file each in themes/.
+  /// User-saved export presets and the most recent successful exports.
+  List<ExportProfile> exportProfiles = [];
+  List<ExportHistoryEntry> exportHistory = [];
+
   List<CawTheme> customThemes = [];
 
   /// A theme being edited, shown live instead of the chosen one until it is saved or dropped.
@@ -191,7 +195,9 @@ class Settings extends ChangeNotifier {
         'performance_mode': performanceMode.name,
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
-        'vim_code': vimCode,\n        'export_profiles': [for (final profile in exportProfiles) profile.toJson()],\n        'export_history': [for (final entry in exportHistory) entry.toJson()],
+        'vim_code': vimCode,
+        'export_profiles': [for (final profile in exportProfiles) profile.toJson()],
+        'export_history': [for (final entry in exportHistory) entry.toJson()],
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -209,7 +215,11 @@ class Settings extends ChangeNotifier {
       performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
-    vimCode = (j['vim_code'] as bool?) ?? vimCode;\n    exportProfiles = ((j['export_profiles'] as List?) ?? const [])\n        .map(ExportProfile.fromJson).whereType<ExportProfile>().take(32).toList();\n    exportHistory = ((j['export_history'] as List?) ?? const [])\n        .map(ExportHistoryEntry.fromJson).whereType<ExportHistoryEntry>().take(20).toList();
+    vimCode = (j['vim_code'] as bool?) ?? vimCode;
+    exportProfiles = ((j['export_profiles'] as List?) ?? const [])
+        .map(ExportProfile.fromJson).whereType<ExportProfile>().take(32).toList();
+    exportHistory = ((j['export_history'] as List?) ?? const [])
+        .map(ExportHistoryEntry.fromJson).whereType<ExportHistoryEntry>().take(20).toList();
   }
 
   Future<void> _load() async {
