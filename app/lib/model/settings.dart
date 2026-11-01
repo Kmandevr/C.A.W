@@ -109,8 +109,6 @@ class ExportHistoryEntry {
         !const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(kind)) return null;
     final rate = _settingInt(raw['sample_rate'], 48000);
     final frames = _settingInt(raw['frames'], 64);
-    final rawTarget = raw['target_id'] is String ? (raw['target_id'] as String).trim() : '';
-    final rawParam = raw['param'] is String ? (raw['param'] as String).trim() : '';
     return ExportHistoryEntry(
       fileName: fileName,
       kind: kind,
