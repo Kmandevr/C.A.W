@@ -80,10 +80,13 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - MIDI patterns use the native MIDI writer and preserve the project tempo and time signature
   - the system file picker saves each completed output; unsupported formats are not offered
 - **Files** (`lib/ui/file_manager_screen.dart`):
-  - import/export portable `.cawproj` projects and `.caw` module source to user-chosen locations
+  - import/export portable `.cawproj` projects and `.caw` module source to user-chosen operating-system locations
+  - project-local virtual folders support nested create, rename, safe delete, module moves and tags; deleting a folder moves modules to its parent rather than deleting source
+  - search by module name/type/tags, sort by name/type and flag identical module source
   - imported projects receive a new ID so they cannot overwrite an existing saved project; imported modules are added as new items
   - validates the project format version and reports malformed or future-version files instead of opening them
-  - WAV, MIDI and wavetable exports remain in Exporter; this workspace does not force a folder hierarchy
+  - WAV, MIDI and wavetable exports remain in Exporter
+  - virtual library folders are stored in the project; saved searches, bulk operations, audio/MIDI preview caching, file-operation undo/version history, dependency relinking and OS-level folder browsing remain incomplete
 - **Plugin Builder** (`lib/ui/plugin_builder_screen.dart`):
   - guided creation from blank generators/effects or existing generator/effect templates and an advanced workflow for project modules
   - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source
