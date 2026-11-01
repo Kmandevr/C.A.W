@@ -109,6 +109,39 @@ void main() {
     expect(appNotifications, 0);
   });
 
+  testWidgets('Mixer inspector divider exposes accessible width adjustments', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    state.project = ProjectDoc(id: 'project-1', name: 'Accessible mixer', layers: [
+      LayerDoc(id: 'layer-1', name: 'Lead', color: 0),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
+    ));
+
+    final divider = tester.widgetList<Semantics>(find.byType(Semantics))
+      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
+    expect(divider.properties.focusable, isTrue);
+    expect(divider.properties.onIncrease, isNotNull);
+    expect(divider.properties.onDecrease, isNotNull);
+    expect(divider.properties.value, '34 percent');
+
+    divider.properties.onIncrease!();
+    await tester.pump();
+    final adjusted = tester.widgetList<Semantics>(find.byType(Semantics))
+      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
+    expect(adjusted.properties.value, '36 percent');
+
+    adjusted.properties.onDecrease!();
+    await tester.pump();
+    final restored = tester.widgetList<Semantics>(find.byType(Semantics))
+      .firstWhere((node) => node.properties.label == 'Mixer inspector width');
+    expect(restored.properties.value, '34 percent');
+  });
+
   testWidgets('Mixer channel controls update the shared project model', (tester) async {
     final module = ModuleDoc(id: 'gen-1', name: 'Bass synth', source: '');
     final layer = LayerDoc(id: 'layer-1', name: 'Bass', color: 0, generatorId: module.id, volume: 0.5);

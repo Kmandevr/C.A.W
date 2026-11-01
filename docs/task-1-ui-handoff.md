@@ -97,3 +97,11 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 3. Continue Task 1 only. Task 2 is architectural context and dependency work, not permission to replace the engine with a parallel implementation.
 4. Keep the PR draft and do not merge without authorization.
 5. Update this handoff with exact commits, tests and blockers whenever the context is nearing its limit.
+
+
+## Additional audit finding at head c27ae853
+
+- The desktop Mixer inspector splitter was mouse-draggable but did not expose an accessible adjustable semantic control.
+- Added a named, focusable semantics node with current/increased/decreased width values and increase/decrease actions. Screen-reader users can adjust the inspector width in 2 percentage-point increments; mouse dragging remains available and uses the same bounded state update.
+- Added a widget regression test that verifies the semantic control, both adjustment actions and the resulting width values. The test uses a wide test viewport to exercise the desktop layout.
+- Verification is pending the exact-head App workflow for this commit.

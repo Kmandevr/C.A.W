@@ -20,6 +20,12 @@ class _MixerScreenState extends State<MixerScreen> {
   double _inspectorFraction = 0.34;
   int _mobilePage = 0;
 
+  void _adjustInspector(double delta) {
+    setState(() {
+      _inspectorFraction = (_inspectorFraction + delta).clamp(0.24, 0.52).toDouble();
+    });
+  }
+
   Widget _channelPanel(int columns) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -91,17 +97,24 @@ class _MixerScreenState extends State<MixerScreen> {
           final channelWidth = available - inspectorWidth;
           return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             SizedBox(width: channelWidth, child: _channelPanel(columns)),
-            MouseRegion(
-              cursor: SystemMouseCursors.resizeColumn,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onHorizontalDragUpdate: (details) => setState(() {
-                  _inspectorFraction = (_inspectorFraction - details.delta.dx / available)
-                    .clamp(0.24, 0.52).toDouble();
-                }),
-                child: SizedBox(width: dividerWidth, height: 520,
-                  child: Center(child: Container(width: 2, height: 72,
-                    decoration: BoxDecoration(color: Neon.blue, borderRadius: BorderRadius.circular(2)))),
+            Semantics(
+              container: true,
+              focusable: true,
+              label: 'Mixer inspector width',
+              value: '${(_inspectorFraction * 100).round()} percent',
+              increasedValue: '${((_inspectorFraction + 0.02).clamp(0.24, 0.52) * 100).round()} percent',
+              decreasedValue: '${((_inspectorFraction - 0.02).clamp(0.24, 0.52) * 100).round()} percent',
+              onIncrease: () => _adjustInspector(0.02),
+              onDecrease: () => _adjustInspector(-0.02),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragUpdate: (details) => _adjustInspector(-details.delta.dx / available),
+                  child: SizedBox(width: dividerWidth, height: 520,
+                    child: Center(child: Container(width: 2, height: 72,
+                      decoration: BoxDecoration(color: Neon.blue, borderRadius: BorderRadius.circular(2)))),
+                  ),
                 ),
               ),
             ),
