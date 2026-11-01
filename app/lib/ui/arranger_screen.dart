@@ -35,8 +35,6 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final p = s.project;
     final stepW = zoom * (Neon.compact(context) ? 0.85 : 1.0);
     final trackHeight = compactTracks ? 54.0 : 76.0;
-    final playheadStep = s.meters.playing && s.meters.loopLength > 0
-        ? endPosition(s, p, s.meters.loopLength) : -1.0;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
     final end = p.layers.fold<int>(p.loopSteps, (v, l) =>
       l.clips.fold<int>(v, (e, c) => math.max(e, c.startSteps + c.lengthSteps)));
@@ -84,32 +82,39 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       ),
       Expanded(child: p.layers.isEmpty
         ? const Center(child: Text('Add a track, choose a generator, then add a MIDI clip.'))
-        : SingleChildScrollView(child: Column(children: [
-            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              SizedBox(width: headW, child: Column(children: [
-                const SizedBox(height: 30, child: Padding(
-                  padding: EdgeInsets.only(left: 10, top: 8),
-                  child: Align(alignment: Alignment.centerLeft,
-                    child: Text('TRACKS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
-                for (final layer in visible)
-                  _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
-                    depth: s.folderDepth(layer), patterns: patterns, trackHeight: trackHeight),
-              ])),
-              Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
-                child: SizedBox(width: width, child: Column(children: [
-                  SizedBox(height: 30, child: Row(children: [
-                    for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
-                      SizedBox(width: p.stepsPerBar * stepW,
-                        child: Align(alignment: Alignment.centerLeft,
-                          child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim)))),
+        : ValueListenableBuilder<int>(
+            valueListenable: s.tick,
+            builder: (context, _, _) {
+              final playheadStep = s.meters.playing && s.meters.loopLength > 0
+                  ? endPosition(s, p, s.meters.loopLength) : -1.0;
+              return SingleChildScrollView(child: Column(children: [
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  SizedBox(width: headW, child: Column(children: [
+                    const SizedBox(height: 30, child: Padding(
+                      padding: EdgeInsets.only(left: 10, top: 8),
+                      child: Align(alignment: Alignment.centerLeft,
+                        child: Text('TRACKS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
+                    for (final layer in visible)
+                      _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
+                        depth: s.folderDepth(layer), patterns: patterns, trackHeight: trackHeight),
                   ])),
-                  for (final layer in visible)
-                    _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
-                      trackHeight: trackHeight, playheadStep: playheadStep,
-                      selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
-                ])))),
-            ]),
-          ]))),
+                  Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
+                    child: SizedBox(width: width, child: Column(children: [
+                      SizedBox(height: 30, child: Row(children: [
+                        for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
+                          SizedBox(width: p.stepsPerBar * stepW,
+                            child: Align(alignment: Alignment.centerLeft,
+                              child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim)))),
+                      ])),
+                      for (final layer in visible)
+                        _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
+                          trackHeight: trackHeight, playheadStep: playheadStep,
+                          selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
+                    ])))),
+                ]),
+              ]));
+            },
+          )),
       if (mixer) _ArrangementMixer(state: s),
     ]);
   }
