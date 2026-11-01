@@ -306,7 +306,7 @@ The app, the CLI and exports share one format:
 
 ## Hardware profile and execution policy
 
-The native hardware probe is a one-time, non-real-time snapshot. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU and memory limits where readable. Available memory is conservatively budgeted after accounting for a finite cgroup limit and current usage. A zero CPU or memory field means the signal is unknown; the scheduler falls back conservatively to one worker. Thermal and battery pressure are host-supplied and are not fabricated or continuously polled.
+The native hardware probe is a one-time, non-real-time snapshot. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU and memory limits where readable. Windows uses available physical memory; Linux/Android combine system-available memory with a finite cgroup limit minus current usage. A finite cgroup limit that is exhausted is represented by the smallest 1 MiB scheduler budget, while a zero field means the signal is unavailable. Positive measurements are budgeted at one quarter, capped at 8192 MiB, without the former 16 MiB floor. macOS/iOS currently use half of reported physical memory as a conservative fallback, not a live available-memory or pressure measurement. The scheduler falls back to one worker for unknown or very low memory. Thermal and battery pressure are host-supplied and are not fabricated or continuously polled.
 
 ## C API (`engine/include/caw.h`)
 

@@ -100,7 +100,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 ### Hardware limits used by the scheduler
 
 - **[Fact]** The native profile is a startup snapshot, not a polling loop. It uses active/online logical CPUs, process affinity where exposed, and Linux/Android cgroup CPU quota where readable. The effective core count is the tightest available limit.
-- **[Fact]** Linux/Android memory availability is bounded by both system-available memory and a finite cgroup memory limit minus current usage. A missing or unlimited cgroup value is ignored. A zero profile field means unknown; the policy uses a one-worker fallback instead of inventing a capacity.
+- **[Fact]** Windows budgets from available physical memory. Linux/Android take the tighter of system-available memory and a finite cgroup limit minus current usage; an exhausted finite cgroup limit produces the minimum 1 MiB budget instead of being mistaken for an unavailable signal. Positive measurements are quartered, capped at 8192 MiB, and no longer rounded up to a 16 MiB floor. macOS/iOS still use half of total physical memory as a fallback, not a live available-memory reading. A zero profile field means unknown; the policy uses a one-worker fallback.
 - **Verification boundary:** policy unit tests cover unknown profiles and explicit CPU/memory caps. The actual host probe remains platform-dependent and must be validated on representative Android and desktop devices.
 
 ## App audit (2026-10-28)
