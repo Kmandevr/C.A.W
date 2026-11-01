@@ -32,6 +32,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   int _frames = 64;
   RenderJob? _job;
   bool _midiBusy = false;
+  bool _saving = false;
   Timer? _poll;
   String? _message;
   bool _messageIsError = false;
@@ -69,7 +70,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   }
 
   Future<void> _export() async {
-    if (_job != null || _midiBusy) return;
+    if (_job != null || _midiBusy || _saving) return;
     if (_kind == ExportKind.midi) {
       await _exportMidi();
       return;
@@ -78,7 +79,6 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final target = switch (_kind) {
       ExportKind.oneShot => _layerId ?? '',
       ExportKind.wavetable => _moduleId ?? '',
-      ExportKind.midi => _patternId ?? '',
       _ => '',
     };
     if ((_kind == ExportKind.oneShot || _kind == ExportKind.wavetable) && target.isEmpty) {
@@ -88,55 +88,76 @@ class _ExporterScreenState extends State<ExporterScreen> {
       });
       return;
     }
-    final tmp = await getTemporaryDirectory();
-    final name = _fileName();
-    final path = '${tmp.path}${Platform.pathSeparator}$name';
-    final job = RenderJob.start(RenderRequest(
-      projectJson: p.toEngineJson(),
-      kind: _kind,
-      outPath: path,
-      sampleRate: _rate,
-      float32: _float,
-      seconds: _seconds,
-      target: target,
-      param: _param ?? '',
-      frames: _frames,
-    ));
-    setState(() {
-      _job = job;
-      _message = null;
-    });
-    _poll = Timer.periodic(const Duration(milliseconds: 100), (_) => setState(() {}));
-    final err = await job.result;
-    _poll?.cancel();
-    if (!mounted) return;
-    setState(() => _job = null);
-    if (err != null) {
-      setState(() {
-        _message = err == 'cancelled' ? 'Export cancelled.' : 'Export failed: $err';
-        _messageIsError = err != 'cancelled';
-      });
-      return;
-    }
-    final file = File(path);
-    final bytes = await file.readAsBytes();
-    Uri? saved;
+
+    File? file;
+    RenderJob? job;
     try {
-      saved = await FilePicker.saveFile(fileName: name, bytes: bytes, mimeType: 'audio/wav', type: FileType.audio);
-    } catch (e) {
+      final tmp = await getTemporaryDirectory();
+      final name = _fileName();
+      final path = '${tmp.path}${Platform.pathSeparator}$name';
+      file = File(path);
+      job = RenderJob.start(RenderRequest(
+        projectJson: p.toEngineJson(),
+        kind: _kind,
+        outPath: path,
+        sampleRate: _rate,
+        float32: _float,
+        seconds: _seconds,
+        target: target,
+        param: _param ?? '',
+        frames: _frames,
+      ));
+      if (!mounted) {
+        job.cancel();
+        return;
+      }
+      setState(() { _job = job; _message = null; });
+      _poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
+        if (mounted) setState(() {});
+      });
+      final error = await job.result;
+      _poll?.cancel();
+      _poll = null;
+      if (!mounted) return;
+      if (error != null) {
+        setState(() {
+          _message = error == 'cancelled' ? 'Export cancelled.' : 'Export failed: $error';
+          _messageIsError = error != 'cancelled';
+          _job = null;
+        });
+        return;
+      }
+
+      setState(() { _job = null; _saving = true; });
+      final bytes = await file.readAsBytes();
+      final saved = await FilePicker.saveFile(
+        fileName: name,
+        bytes: bytes,
+        mimeType: 'audio/wav',
+        type: FileType.audio,
+      );
+      if (!mounted) return;
       setState(() {
-        _message = 'Could not save: $e';
+        _message = saved == null ? 'Not saved (picker closed).' : 'Saved $name';
+        _messageIsError = false;
+      });
+    } catch (e) {
+      if (mounted) setState(() {
+        _message = 'Export failed: $e';
         _messageIsError = true;
       });
-      return;
     } finally {
-      if (await file.exists()) await file.delete();
+      _poll?.cancel();
+      _poll = null;
+      if (file != null) {
+        try {
+          if (await file.exists()) await file.delete();
+        } catch (_) {
+          // A failed temporary-file cleanup is non-fatal to the completed export.
+        }
+      }
+      if (mounted) setState(() { _job = null; _saving = false; });
     }
-    if (!mounted) return;
-    setState(() {
-      _message = saved == null ? 'Not saved (picker closed).' : 'Saved $name';
-      _messageIsError = false;
-    });
   }
 
   Future<void> _exportMidi() async {
@@ -145,7 +166,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
       setState(() { _message = 'Choose a valid MIDI pattern first.'; _messageIsError = true; });
       return;
     }
-    if (_job != null || _midiBusy) return;
+    if (_job != null || _midiBusy || _saving) return;
     setState(() { _midiBusy = true; _message = null; });
     File? file;
     try {
@@ -163,7 +184,13 @@ class _ExporterScreenState extends State<ExporterScreen> {
     } catch (e) {
       if (mounted) setState(() { _message = 'MIDI export failed: $e'; _messageIsError = true; });
     } finally {
-      if (file != null && await file.exists()) await file.delete();
+      if (file != null) {
+        try {
+          if (await file.exists()) await file.delete();
+        } catch (_) {
+          // A failed temporary-file cleanup is non-fatal to the export result.
+        }
+      }
       if (mounted) setState(() => _midiBusy = false);
     }
   }
@@ -181,7 +208,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
     }
     final params = s.info[_moduleId]?.params ?? const <ParamInfo>[];
     if (_param != null && !params.any((x) => x.name == _param)) _param = null;
-    final busy = _job != null || _midiBusy;
+    final busy = _job != null || _midiBusy || _saving;
     return ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 96), children: [
       const Heading('Export mode'),
       SegmentedButton<bool>(
@@ -297,10 +324,15 @@ class _ExporterScreenState extends State<ExporterScreen> {
         ]),
       ),
       const SizedBox(height: 16),
-      if (busy) ...[
+      if (_job != null) ...[
         Bar(value: _job!.progress, color: Neon.yellow, height: 6),
         const SizedBox(height: 10),
         OutlinedButton(onPressed: _job!.cancel, child: const Text('Cancel')),
+      ] else if (_midiBusy || _saving) ...[
+        const LinearProgressIndicator(minHeight: 4),
+        const SizedBox(height: 10),
+        Text(_midiBusy ? 'Preparing MIDI file…' : 'Preparing export destination…',
+          style: const TextStyle(color: Neon.dim, fontSize: 12)),
       ] else
         FilledButton.icon(
           style: FilledButton.styleFrom(
