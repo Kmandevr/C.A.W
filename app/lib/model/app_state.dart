@@ -67,7 +67,6 @@ class AppState extends ChangeNotifier {
   Engine? engine;
   EngineHardwareProfile? hardwareProfile;
   EngineExecutionPlan? auditionPlan;
-  bool _disposed = false;
   StreamSubscription<EnginePressure>? _resourcePressureSubscription;
   String? engineError;
   String? audioError;
