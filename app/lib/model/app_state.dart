@@ -405,9 +405,105 @@ class AppState extends ChangeNotifier {
     return m.id;
   }
 
+  String _normalizeLibraryPath(String path) {
+    final parts = path.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).toList();
+    if (parts.any((part) => part == '.' || part == '..' || part.contains(r'\\'))) {
+      throw ArgumentError.value(path, 'path', 'Folder paths cannot contain traversal segments.');
+    }
+    return parts.join('/');
+  }
+
+  /// Creates a user-named virtual library folder and any missing parents.
+  bool createLibraryFolder(String path) {
+    final normalized = _normalizeLibraryPath(path);
+    if (normalized.isEmpty) return false;
+    var changed = false;
+    final parts = normalized.split('/');
+    for (var i = 1; i <= parts.length; i++) {
+      final parent = parts.take(i).join('/');
+      if (!project.libraryFolders.contains(parent)) {
+        project.libraryFolders.add(parent);
+        changed = true;
+      }
+    }
+    if (changed) {
+      project.libraryFolders.sort();
+      _changed(engine: false);
+    }
+    return changed;
+  }
+
+  /// Renames a folder and all descendants without moving or deleting their modules.
+  bool renameLibraryFolder(String oldPath, String newPath) {
+    final oldValue = _normalizeLibraryPath(oldPath);
+    final newValue = _normalizeLibraryPath(newPath);
+    if (oldValue.isEmpty || newValue.isEmpty || !project.libraryFolders.contains(oldValue)) return false;
+    if (oldValue == newValue) return true;
+    if (newValue.startsWith('$oldValue/') || project.libraryFolders.contains(newValue)) return false;
+    project.libraryFolders = project.libraryFolders.map((path) =>
+      path == oldValue ? newValue : path.startsWith('$oldValue/') ? '$newValue${path.substring(oldValue.length)}' : path
+    ).toSet().toList()..sort();
+    for (final module in project.modules) {
+      if (module.folderPath == oldValue) {
+        module.folderPath = newValue;
+      } else if (module.folderPath.startsWith('$oldValue/')) {
+        module.folderPath = '$newValue${module.folderPath.substring(oldValue.length)}';
+      }
+    }
+    _changed(engine: false);
+    return true;
+  }
+
+  /// Deletes a folder node and returns its modules/children to its parent folder.
+  bool deleteLibraryFolder(String path) {
+    final normalized = _normalizeLibraryPath(path);
+    if (normalized.isEmpty || !project.libraryFolders.contains(normalized)) return false;
+    final parent = normalized.contains('/') ? normalized.substring(0, normalized.lastIndexOf('/')) : '';
+    project.libraryFolders.removeWhere((folder) => folder == normalized || folder.startsWith('$normalized/'));
+    for (final module in project.modules) {
+      if (module.folderPath == normalized || module.folderPath.startsWith('$normalized/')) {
+        module.folderPath = parent;
+      }
+    }
+    _changed(engine: false);
+    return true;
+  }
+
+  /// Moves a module into a user-owned library folder; an empty path means the project root.
+  bool moveModuleToFolder(String moduleId, String folderPath) {
+    final module = project.module(moduleId);
+    if (module == null) return false;
+    final normalized = _normalizeLibraryPath(folderPath);
+    if (normalized.isNotEmpty && !project.libraryFolders.contains(normalized)) return false;
+    if (module.folderPath == normalized) return true;
+    module.folderPath = normalized;
+    _changed(engine: false);
+    return true;
+  }
+
+  void setModuleTags(String moduleId, List<String> tags) {
+    final module = project.module(moduleId);
+    if (module == null) return;
+    final seen = <String>{};
+    module.tags = [
+      for (final raw in tags)
+        if (raw.trim().isNotEmpty && seen.add(raw.trim().toLowerCase())) raw.trim(),
+    ].take(16).toList();
+    _changed(engine: false);
+  }
+
   /// Imports an ordinary .caw module as a new project item; existing modules are never overwritten.
-  String importModuleSource(String source, {String fileName = 'Imported.caw'}) =>
-      addModule(Template(fileName, source));
+  String importModuleSource(String source, {String fileName = 'Imported.caw', String folderPath = ''}) {
+    final folder = _normalizeLibraryPath(folderPath);
+    if (folder.isNotEmpty && !project.libraryFolders.contains(folder)) createLibraryFolder(folder);
+    final module = moduleFromTemplate(Template(fileName, source));
+    module.name = _freeModuleName(module.name);
+    module.folderPath = folder;
+    project.modules.add(module);
+    selectedModuleId = module.id;
+    _changed();
+    return module.id;
+  }
 
   /// A new, truly empty module. Until it has a header it compiles as a byte-mode generator, so the picked [kind]
   /// (generator, effect, pattern or library) is remembered only for the editor's hint and badge.
