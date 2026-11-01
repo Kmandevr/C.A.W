@@ -9,6 +9,7 @@ import '../model/project.dart';
 import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
+import 'track_cards_screen.dart';
 
 
 double endPosition(AppState state, ProjectDoc project, int loopLength) {
@@ -18,21 +19,31 @@ double endPosition(AppState state, ProjectDoc project, int loopLength) {
 }
 
 class ArrangerScreen extends StatefulWidget {
-  const ArrangerScreen({super.key, required this.state, this.onOpenPattern});
+  const ArrangerScreen({super.key, required this.state, this.onOpenPattern, this.onOpenModule});
   final AppState state;
   final VoidCallback? onOpenPattern;
+  final ValueChanged<String>? onOpenModule;
   @override
   State<ArrangerScreen> createState() => _ArrangerScreenState();
 }
 
 class _ArrangerScreenState extends State<ArrangerScreen> {
-  bool mixer = false, settings = false;
+  bool mixer = false, settings = false, cardsView = false;
   double zoom = 18.0, _trackHeight = 76.0;
 
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
     final p = s.project;
+    if (cardsView) {
+      return Column(children: [
+        Padding(padding: const EdgeInsets.fromLTRB(8, 4, 8, 2), child: Row(children: [
+          IconButton(onPressed: () => setState(() => cardsView = false), icon: const Icon(Icons.view_timeline), tooltip: 'Timeline view'),
+          const Text('TRACK CARDS', style: TextStyle(color: Neon.dim, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800)),
+        ])),
+        Expanded(child: TrackCardsScreen(state: s, onOpenModule: widget.onOpenModule ?? s.selectModule)),
+      ]);
+    }
     final stepW = zoom * (Neon.compact(context) ? 0.85 : 1.0);
     final trackHeight = _trackHeight;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
@@ -80,6 +91,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
               color: mixer ? Neon.blue : Neon.dim, icon: const Icon(Icons.tune), tooltip: 'Mixer'),
             IconButton(onPressed: () => setState(() => settings = !settings),
               color: settings ? Neon.blue : Neon.dim, icon: const Icon(Icons.settings_outlined), tooltip: 'Settings'),
+            IconButton(onPressed: () => setState(() => cardsView = true),
+              icon: const Icon(Icons.view_agenda_outlined), tooltip: 'Track cards'),
           ];
           if (constraints.maxWidth < 760) {
             return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
