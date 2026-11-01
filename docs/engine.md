@@ -2,7 +2,7 @@
 title: Engine and language reference
 summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI and the tests.
 covers: [engine/, examples/]
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Engine and language reference
