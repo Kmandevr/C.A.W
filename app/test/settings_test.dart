@@ -14,6 +14,9 @@ void main() {
   tearDown(() {
     dir.deleteSync(recursive: true);
     Neon.active = calmNeon;
+    Neon.performanceMode = PerformanceMode.balanced.index;
+    Neon.light = false;
+    Neon.showScopes = true;
   });
 
   test('defaults: Calm neon, comfortable, auto-update on at 400 ms, swap now', () async {
@@ -23,6 +26,7 @@ void main() {
     expect(s.liveUpdate, isTrue);
     expect(s.liveDelayMs, 400);
     expect(s.swapTiming, SwapTiming.now);
+    expect(s.performanceMode, PerformanceMode.balanced);
   });
 
   test('settings and a custom theme are saved and loaded back', () async {
@@ -45,6 +49,25 @@ void main() {
     expect(back.themeName, 'Mine');
     expect(back.theme['bg'].toARGB32(), 0xFF123456);
     expect(File('${dir.path}/themes/Mine.theme').readAsStringSync(), contains('kind: theme'));
+  });
+
+
+  test('performance profiles persist and legacy light mode migrates', () async {
+    final s = await Settings.open(base: dir);
+    await s.update((x) => x.performanceMode = PerformanceMode.minimal);
+    expect(Neon.performanceMode, PerformanceMode.minimal.index);
+    expect(Neon.showScopes, isFalse);
+
+    final back = await Settings.open(base: dir);
+    expect(back.performanceMode, PerformanceMode.minimal);
+    expect(back.lightMode, isTrue);
+    expect(Neon.showScopes, isFalse);
+
+    final legacy = Settings();
+    legacy.fromJson({'light_mode': true});
+    expect(legacy.performanceMode, PerformanceMode.lightweight);
+    legacy.fromJson({'light_mode': false});
+    expect(legacy.performanceMode, PerformanceMode.balanced);
   });
 
   test('a starter theme is never overwritten: saving it makes a copy', () async {
