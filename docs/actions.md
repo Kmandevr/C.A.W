@@ -91,7 +91,7 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Master volume up / down | — |
 | Unmute layers the engine muted (overload) | — |
 | Full screen for the current editor | F11 |
-| Focus next / previous panel | Tab / Shift+Tab (already planned in the UI design) |
+| Focus next / previous panel | Tab / Shift+Tab (focus traversal) |
 | Open the long-press menu | Menu key or Shift+F10 |
 
 ### Builder (code)
