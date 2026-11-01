@@ -8,7 +8,6 @@ import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
-import 'package:caw/model/settings.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
