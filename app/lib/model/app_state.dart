@@ -817,7 +817,7 @@ class AppState extends ChangeNotifier {
   /// Master gain shares the same project/engine state but updates only value listeners during a drag.
   void setMaster(double value) {
     project.master = value.clamp(0.0, 1.0).toDouble();
-    _sync();
+    engine?.setMaster(project.master);
     _save();
     values.value++;
   }
