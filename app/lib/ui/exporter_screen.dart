@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import '../model/settings.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -30,6 +31,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   String? _patternId;
   String? _param;
   int _frames = 64;
+  String? _profileName;
   RenderJob? _job;
   bool _midiBusy = false;
   bool _saving = false;
@@ -66,6 +68,88 @@ class _ExporterScreenState extends State<ExporterScreen> {
       case ExportKind.midi:
         final m = p.module(_patternId);
         return '${base}_${_safe(m?.name ?? 'pattern')}.mid';
+    }
+  }
+
+  void _applyProfile(ExportProfile profile) {
+    setState(() {
+      _profileName = profile.name;
+      _kind = ExportKind.values.firstWhere((kind) => kind.name == profile.kind,
+        orElse: () => ExportKind.loop);
+      _advanced = true;
+      _rate = profile.sampleRate;
+      _float = profile.float32;
+      _seconds = profile.seconds;
+      _frames = profile.frames;
+    });
+  }
+
+  void _applyHistory(ExportHistoryEntry entry) {
+    setState(() {
+      _profileName = null;
+      _kind = ExportKind.values.firstWhere((kind) => kind.name == entry.kind,
+        orElse: () => ExportKind.loop);
+      _advanced = true;
+      _rate = entry.sampleRate;
+      _float = entry.float32;
+      _seconds = entry.seconds;
+      _frames = entry.frames;
+    });
+  }
+
+  Future<void> _saveProfile() async {
+    final controller = TextEditingController(text: _profileName ?? 'My export');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save export profile'),
+        content: TextField(controller: controller, autofocus: true,
+          maxLength: 64, decoration: const InputDecoration(labelText: 'Profile name')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Save profile')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || name.trim().isEmpty) return;
+    final profile = ExportProfile(name: name.trim(), kind: _kind.name,
+      sampleRate: _rate, float32: _float, seconds: _seconds, frames: _frames);
+    try {
+      await s.settings.saveExportProfile(profile);
+      if (mounted) setState(() => _profileName = profile.name);
+    } catch (e) {
+      if (mounted) setState(() {
+        _message = 'Profile could not be saved: $e';
+        _messageIsError = true;
+      });
+    }
+  }
+
+  Future<void> _deleteProfile() async {
+    final name = _profileName;
+    if (name == null) return;
+    await s.settings.deleteExportProfile(name);
+    if (mounted) setState(() => _profileName = null);
+  }
+
+  Future<void> _recordExport(String fileName) async {
+    try {
+      await s.settings.recordExport(ExportHistoryEntry(
+        fileName: fileName,
+        kind: _kind.name,
+        createdAtMs: DateTime.now().millisecondsSinceEpoch,
+        sampleRate: _rate,
+        float32: _float,
+        seconds: _seconds,
+        frames: _frames,
+      ));
+    } catch (e) {
+      if (mounted) setState(() {
+        _message = 'Export saved, but history could not be updated: $e';
+        _messageIsError = true;
+      });
     }
   }
 
@@ -139,6 +223,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
         mimeType: 'audio/wav',
         type: FileType.audio,
       );
+      if (saved != null) await _recordExport(name);
       if (!mounted) return;
       setState(() {
         _message = saved == null ? 'Not saved (picker closed).' : 'Saved $name';
@@ -182,6 +267,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final bytes = await file.readAsBytes();
       final saved = await FilePicker.saveFile(fileName: name, bytes: bytes,
         mimeType: 'audio/midi', type: FileType.custom, allowedExtensions: const ['mid']);
+      if (saved != null) await _recordExport(name);
       if (!mounted) return;
       setState(() { _message = saved == null ? 'Not saved (picker closed).' : 'Saved $name'; _messageIsError = false; });
     } catch (e) {
@@ -225,6 +311,58 @@ class _ExporterScreenState extends State<ExporterScreen> {
           _advanced = v.first;
           if (!_advanced) _kind = ExportKind.loop;
         }),
+      ),
+      const SizedBox(height: 12),
+      ListenableBuilder(
+        listenable: s.settings,
+        builder: (context, _) {
+          final profiles = s.settings.exportProfiles;
+          final history = s.settings.exportHistory.take(5).toList();
+          final selectedProfile = profiles.any((profile) => profile.name == _profileName)
+            ? _profileName : null;
+          return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('EXPORT PROFILES', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
+              Row(children: [
+                Expanded(child: DropdownButton<String>(
+                  value: selectedProfile,
+                  isExpanded: true,
+                  hint: const Text('Choose a saved profile'),
+                  underline: const SizedBox.shrink(),
+                  items: [for (final profile in profiles)
+                    DropdownMenuItem(value: profile.name, child: Text(profile.name))],
+                  onChanged: busy ? null : (name) {
+                    final profile = profiles.where((item) => item.name == name).firstOrNull;
+                    if (profile != null) _applyProfile(profile);
+                  },
+                )),
+                IconButton(tooltip: 'Save current export profile',
+                  onPressed: busy ? null : _saveProfile, icon: const Icon(Icons.bookmark_add_outlined)),
+                IconButton(tooltip: 'Delete selected export profile',
+                  onPressed: busy || selectedProfile == null ? null : _deleteProfile,
+                  icon: const Icon(Icons.delete_outline)),
+              ]),
+            ])),
+            if (history.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              NeonPanel(color: Neon.yellow, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('RECENT EXPORTS', style: TextStyle(color: Neon.yellow, fontWeight: FontWeight.w800)),
+                for (final entry in history)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(entry.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text('${entry.kind} · ${entry.sampleRate ~/ 1000} kHz · ${DateTime.fromMillisecondsSinceEpoch(entry.createdAtMs).toLocal()}',
+                      style: const TextStyle(color: Neon.dim, fontSize: 10)),
+                    trailing: TextButton(
+                      onPressed: busy ? null : () => _applyHistory(entry),
+                      child: const Text('Use settings'),
+                    ),
+                  ),
+              ])),
+            ],
+          ]);
+        },
       ),
       if (_advanced) ...[
         const SizedBox(height: 12),
