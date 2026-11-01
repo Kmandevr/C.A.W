@@ -1,6 +1,6 @@
 ---
 title: Vision and principles
-summary: Owner-approved product direction, current supported platforms, scope boundaries and unresolved owner decisions.
+summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
 updated: 2026-11-01
 ---
 
