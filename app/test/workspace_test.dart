@@ -9,6 +9,7 @@ import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
 import 'package:caw/ui/file_manager_screen.dart';
 import 'package:caw/ui/mixer_screen.dart';
+import 'package:caw/ui/plugin_builder_screen.dart';
 
 void main() {
   late AppState state;
@@ -98,6 +99,18 @@ void main() {
     expect(find.text('Import project'), findsOneWidget);
     expect(find.text('Import .caw module'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
+  });
+
+
+  testWidgets('Plugin Builder exposes the native module workflow and honest target boundary', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: PluginBuilderScreen(state: state, onOpenBuilder: () {})),
+    ));
+
+    expect(find.text('PLUGIN BUILDER'), findsOneWidget);
+    expect(find.text('Guided'), findsOneWidget);
+    expect(find.text('Advanced'), findsOneWidget);
+    expect(find.textContaining('CLAP/VST3 binary builds'), findsOneWidget);
   });
 
   test('imported projects receive a new identity and preserve project content', () async {
