@@ -578,6 +578,26 @@ class AppState extends ChangeNotifier {
     _changed(engine: false);
   }
 
+  /// Applies one tag set to multiple modules as a single undoable library operation.
+  bool setModulesTags(Iterable<String> moduleIds, List<String> tags) {
+    final ids = moduleIds.toSet();
+    final seen = <String>{};
+    final nextTags = [
+      for (final raw in tags)
+        if (raw.trim().isNotEmpty && raw.trim().length <= 48 && seen.add(raw.trim().toLowerCase()))
+          raw.trim(),
+    ].take(16).toList();
+    final targets = project.modules.where((module) => ids.contains(module.id) &&
+        !listEquals(module.tags, nextTags)).toList();
+    if (targets.isEmpty) return false;
+    _recordLibraryUndo();
+    for (final module in targets) {
+      module.tags = List.of(nextTags);
+    }
+    _changed(engine: false);
+    return true;
+  }
+
   bool saveLibrarySearch(String name, String query) {
     final key = name.trim();
     final value = query.trim();
