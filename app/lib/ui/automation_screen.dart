@@ -101,11 +101,11 @@ class _PointEditor extends StatelessWidget {
     final point = lane.points[index];
     return Row(children: [
       SizedBox(width: 28, child: Text('P' + (index + 1).toString(), style: Neon.code(size: 10, color: color))),
-      Expanded(child: Slider(value: point.step.clamp(0.0, maxStep), min: 0, max: maxStep, activeColor: color,
+      Expanded(child: Slider(value: point.step.clamp(0.0, maxStep).toDouble(), min: 0, max: maxStep, activeColor: color,
         onChanged: (v) => state.updateAutomationPoint(layer, lane, index, v, point.value))),
       SizedBox(width: 38, child: Text(point.step.toStringAsFixed(0), textAlign: TextAlign.end,
         style: Neon.code(size: 10, color: Neon.dim))),
-      Expanded(child: Slider(value: point.value.clamp(volume ? 0.0 : -1.0, 1.0),
+      Expanded(child: Slider(value: point.value.clamp(volume ? 0.0 : -1.0, 1.0).toDouble(),
         min: volume ? 0 : -1, max: 1, activeColor: color,
         onChanged: (v) => state.updateAutomationPoint(layer, lane, index, point.step, v))),
       SizedBox(width: 42, child: Text(point.value.toStringAsFixed(2), textAlign: TextAlign.end,
@@ -131,8 +131,8 @@ class _CurvePainter extends CustomPainter {
     if (points.isEmpty) return;
     final sorted = [...points]..sort((a, b) => a.step.compareTo(b.step));
     Offset map(AutomationPointDoc p) => Offset(
-      (p.step / maxStep * size.width).clamp(0.0, size.width),
-      size.height - ((p.value - (volume ? 0 : -1)) / (volume ? 1 : 2) * size.height).clamp(0.0, size.height));
+      (p.step / maxStep * size.width).clamp(0.0, size.width).toDouble(),
+      size.height - ((p.value - (volume ? 0 : -1)) / (volume ? 1 : 2) * size.height).clamp(0.0, size.height).toDouble());
     final path = Path()..moveTo(map(sorted.first).dx, map(sorted.first).dy);
     for (final p in sorted.skip(1)) { final at = map(p); path.lineTo(at.dx, at.dy); }
     canvas.drawPath(path, Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 2);
