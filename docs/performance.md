@@ -125,6 +125,13 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
 3. **The audio device closes after 30 s stopped and idle.** Play reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
 
+## UI update isolation
+
+- The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
+- Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; the UI does not allocate a new sample buffer each frame.
+- Mixer meters and Builder controls listen to the existing state notifiers rather than introducing a second audio-state polling loop.
+- These are architectural reductions in unnecessary rebuild/allocation work; no frame-time, CPU or battery benchmark has yet been captured on physical hardware.
+
 ## UI performance profiles (Task 1)
 
 The Settings page now offers four explicit profiles:
