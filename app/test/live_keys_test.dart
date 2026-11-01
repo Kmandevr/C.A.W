@@ -119,31 +119,36 @@ void main() {
     final s = app();
     s.settings.liveDelayMs = 50;
     final kick = s.project.modules.first;
-    s.editSource(kick.id, '${kick.source}\n// edited');
-    // Engine compilation runs on the native worker pool; wait for the observable state transition
-    // instead of assuming a fixed duration that can be too short on a busy CI runner.
-    final deadline = DateTime.now().add(const Duration(seconds: 5));
-    while (kick.edited && DateTime.now().isBefore(deadline)) {
+    final goodSource = '${kick.source}\n// edited';
+    s.editSource(kick.id, goodSource);
+
+    // run() assigns runSource before native compilation starts, so edited == false
+    // alone is not proof that the first automatic compile has completed. Wait for
+    // the successful per-module result as well as the source transition before
+    // replacing it; otherwise this edit can race the first compile on busy CI.
+    final successDeadline = DateTime.now().add(const Duration(seconds: 10));
+    while ((kick.runSource != goodSource ||
+            kick.edited ||
+            s.info[kick.id]?.ok != true) &&
+        DateTime.now().isBefore(successDeadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
+    expect(kick.runSource, goodSource, reason: 'automatic update did not run the edited source');
     expect(kick.edited, isFalse);
+    expect(s.info[kick.id]?.ok, isTrue, reason: 'first automatic compilation did not complete successfully');
+
     final lastGoodSource = kick.runSource;
     final invalidSource = '${kick.source}\n((('; // doesn't compile: the last good sound must remain
     s.editSource(kick.id, invalidSource);
 
-    // Wait for the live update to attempt the new source, then for its failed
-    // compile result and rollback to the last-good source.
-    final attemptDeadline = DateTime.now().add(const Duration(seconds: 5));
-    while (kick.runSource != invalidSource && DateTime.now().isBefore(attemptDeadline)) {
-      await Future<void>.delayed(const Duration(milliseconds: 25));
-    }
-    expect(kick.runSource, invalidSource, reason: 'live update never attempted the invalid source');
-
-    final rollbackDeadline = DateTime.now().add(const Duration(seconds: 5));
+    // A failed result is the observable proof that the invalid source was
+    // actually compiled. Wait for that result and the last-good rollback;
+    // runSource changes to invalid before the worker has attempted compilation.
+    final failureDeadline = DateTime.now().add(const Duration(seconds: 10));
     while ((kick.runSource != lastGoodSource ||
             s.info[kick.id]?.ok != false ||
             s.engineError != null) &&
-        DateTime.now().isBefore(rollbackDeadline)) {
+        DateTime.now().isBefore(failureDeadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 25));
     }
     expect(kick.runSource, lastGoodSource, reason: 'failed compile did not restore the last good source');

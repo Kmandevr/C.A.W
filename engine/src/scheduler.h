@@ -3,11 +3,11 @@
 
 #include <array>
 #include "execution.h"
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <thread>
-#include <vector>
 
 namespace caw {
 
@@ -19,7 +19,7 @@ public:
     static constexpr uint32_t kQueueCapacity = 256;
     static constexpr uint32_t kMaxWorkers = 16;
 
-    explicit WorkerPool(uint32_t workers);
+    explicit WorkerPool(uint32_t workers, std::chrono::milliseconds idleTimeout = std::chrono::seconds(30));
     ~WorkerPool();
     WorkerPool(const WorkerPool&) = delete;
     WorkerPool& operator=(const WorkerPool&) = delete;
@@ -52,11 +52,14 @@ private:
     std::array<Job, kQueueCapacity> queue_{};
     uint32_t queueCount_ = 0;
     uint32_t activeCount_ = 0;
+    uint32_t liveWorkerCount_ = 0;
     uint32_t capacity_ = 1;
+    std::chrono::milliseconds idleTimeout_;
+    std::array<bool, kMaxWorkers> exited_{};
     uint32_t workerLimit_ = 0;
     uint64_t nextSequence_ = 0;
     bool stopping_ = false;
-    std::vector<std::thread> workers_;
+    std::array<std::thread, kMaxWorkers> workers_;
 };
 
  // Applies deterministic hardware/pressure policy to a bounded worker pool.

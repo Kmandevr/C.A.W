@@ -18,21 +18,23 @@ enum class DevicePressure : uint8_t {
     BatterySaver,
     ThermalWarm,
     ThermalHot,
-    ThermalCritical
+    ThermalCritical,
+    Unknown
 };
 
 // Supplied by the platform host from supported OS APIs and measured probes.
 // This type deliberately performs no OS queries and is safe to use in tests.
 struct HardwareProfile {
-    uint16_t logicalCores = 1;
-    uint32_t memoryBudgetMiB = 256;
+    // Zero means the platform could not provide this signal; policy treats it conservatively.
+    uint16_t logicalCores = 0;
+    uint32_t memoryBudgetMiB = 0;
     bool supportsSimd = false;
     bool supportsGpuCompute = false;
 };
 
 struct ExecutionRequest {
     WorkloadClass workload = WorkloadClass::InteractivePreview;
-    DevicePressure pressure = DevicePressure::Normal;
+    DevicePressure pressure = DevicePressure::Unknown;
     bool foregroundBusy = false;
     bool allowGpu = true;
 };

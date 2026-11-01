@@ -21,6 +21,7 @@ TEST(execution_background_leaves_capacity_for_foreground) {
     HardwareProfile hw{8, 8192, true, false};
     ExecutionRequest req;
     req.workload = WorkloadClass::BackgroundGeneration;
+    req.pressure = DevicePressure::Normal;
     const ExecutionPlan normal = makeExecutionPlan(hw, req);
     CHECK_EQ(normal.workerThreads, 7);
     req.foregroundBusy = true;
@@ -33,6 +34,7 @@ TEST(execution_offline_uses_available_hardware) {
     HardwareProfile hw{12, 16384, true, true};
     ExecutionRequest req;
     req.workload = WorkloadClass::OfflineRender;
+    req.pressure = DevicePressure::Normal;
     const ExecutionPlan p = makeExecutionPlan(hw, req);
     CHECK_EQ(p.workerThreads, 12);
     CHECK_EQ(p.preferredBatchFrames, 4096u);
@@ -64,6 +66,24 @@ TEST(execution_thermal_and_battery_pressure_reduce_background_work) {
     CHECK_EQ(hot.workerThreads, 1);
     CHECK(!hot.allowGpu);
     CHECK(hot.yieldToForeground);
+}
+
+TEST(execution_unknown_pressure_reserves_one_host_core_for_offline_work) {
+    HardwareProfile hw{8, 8192, true, true};
+    ExecutionRequest req;
+    req.workload = WorkloadClass::OfflineRender;
+    req.pressure = DevicePressure::Unknown;
+    req.allowGpu = true;
+    const ExecutionPlan p = makeExecutionPlan(hw, req);
+    CHECK_EQ(p.workerThreads, 7);
+    CHECK(p.yieldToForeground);
+    CHECK(!p.allowGpu);
+
+    req.workload = WorkloadClass::InteractivePreview;
+    req.foregroundBusy = true;
+    const ExecutionPlan preview = makeExecutionPlan(hw, req);
+    CHECK_EQ(preview.workerThreads, 1);
+    CHECK(preview.yieldToForeground);
 }
 
 TEST(execution_idle_releases_worker_budget) {
