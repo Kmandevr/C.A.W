@@ -1,6 +1,6 @@
 ---
 title: UI design
-summary: Arrangement-first composition and editing on phone and desktop: timeline, tracks, MIDI clips, mixer, editors, inspector, and performance budget.
+summary: Retro-neon, arrangement-first creative UI across Builder, Arranger, Mixer, Engine Lab, Automation and Exporter on desktop and mobile.
 updated: 2026-10-31
 ---
 
@@ -65,13 +65,13 @@ The Arranger is the main composition view. It is a horizontal song timeline with
 
 ## Layout
 
-The app keeps its three areas—Builder, Arranger and Exporter. The Arranger is the composition workspace; the old session grid is retired.
+The application shell currently exposes six destinations: Builder, Arranger, Mixer, Engine Lab, Automation and Exporter. The Arranger remains the composition workspace; the old session grid is retired. Mixer, Engine Lab and Automation are separate destinations that read and edit the shared project state.
 
-**Phone (portrait):** transport at the top, then the track headers beside a horizontally scrolling song timeline. The mixer opens as a panel below the timeline. Builder and Exporter remain separate bottom-navigation destinations.
+**Phone (portrait):** transport at the top, then the track headers beside a horizontally scrolling song timeline. The Arranger's compact mixer panel remains available below the timeline, while the dedicated Mixer, Engine Lab and Automation workspaces are reached through bottom navigation.
 
 **Phone (landscape):** the timeline gets the available width. Track headers stay aligned with their lanes while the song timeline scrolls horizontally. The mixer remains a separate panel.
 
-**Desktop / wide:** navigation rail, persistent transport, and a full-width arrangement timeline. Track headers remain fixed beside the horizontally scrolling timeline; the Mixer panel can be opened without replacing the arrangement.
+**Desktop / wide:** navigation rail, persistent transport, and a full-width arrangement timeline. Track headers remain fixed beside the horizontally scrolling timeline; the Arranger's mixer panel can be opened without replacing the arrangement, and the dedicated Mixer remains a separate detailed workspace.
 
 The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 
