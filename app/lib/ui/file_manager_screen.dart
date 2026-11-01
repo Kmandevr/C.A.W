@@ -134,6 +134,31 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     state.setModuleTags(module.id, value.split(','));
   }
 
+  Future<void> _editSelectedTags() async {
+    final count = _selectedModuleIds.length;
+    if (count == 0) return;
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Tags · $count modules'),
+        content: TextField(controller: controller, autofocus: true,
+          decoration: const InputDecoration(labelText: 'Replace tags on selected modules',
+            hintText: 'bass, analog, lead')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Apply tags')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null) return;
+    if (state.setModulesTags(_selectedModuleIds, value.split(','))) {
+      _notice('Updated tags on $count modules.');
+    }
+    setState(() => _selectedModuleIds.clear());
+  }
+
   Future<void> _saveSearch() async {
     if (_query.trim().isEmpty) return;
     final controller = TextEditingController();
@@ -311,6 +336,11 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   }
                 }),
                 child: const Text('Select all / none'),
+              ),
+              TextButton.icon(
+                onPressed: _selectedModuleIds.isEmpty ? null : _editSelectedTags,
+                icon: const Icon(Icons.sell_outlined, size: 16),
+                label: const Text('Tag selected'),
               ),
               PopupMenuButton<String>(
                 tooltip: 'Move selected modules',
