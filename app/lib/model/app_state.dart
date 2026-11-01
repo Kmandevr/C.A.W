@@ -18,17 +18,23 @@ import 'storage.dart';
 class AppState extends ChangeNotifier {
   AppState({Settings? settings}) : settings = settings ?? Settings() {
     _light = this.settings.lightMode;
+    _performanceMode = this.settings.performanceMode;
     this.settings.addListener(_settingsChanged);
   }
 
   late bool _light;
+  late PerformanceMode _performanceMode;
 
   // Light mode changes the engine's voice count and the meter rate.
   void _settingsChanged() {
-    if (settings.lightMode == _light) return;
+    final nextMode = settings.performanceMode;
+    if (nextMode == _performanceMode) return;
+    final voiceBudgetChanged = settings.lightMode != _light;
+    _performanceMode = nextMode;
     _light = settings.lightMode;
-    _poller.interval = Duration(milliseconds: _light ? 66 : 33);
-    _sync();
+    // Visual profiles never lower meter cadence; editing and meter feedback stay at 30 Hz.
+    if (voiceBudgetChanged) _sync();
+    notifyListeners();
   }
 
   /// App-wide settings (theme, density, live coding).
@@ -78,7 +84,7 @@ class AppState extends ChangeNotifier {
   // device after a while (Play reopens it).
   late final Poller _poller = Poller(
       poll: _poll,
-      interval: Duration(milliseconds: settings.lightMode ? 66 : 33),
+      interval: const Duration(milliseconds: 33),
       onIdle: () {
     if (!meters.playing) engine?.stopAudio();
   });
