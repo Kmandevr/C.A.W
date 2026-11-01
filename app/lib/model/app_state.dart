@@ -407,7 +407,7 @@ class AppState extends ChangeNotifier {
 
   String _normalizeLibraryPath(String path) {
     final parts = path.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).toList();
-    if (parts.any((part) => part == '.' || part == '..' || part.contains(r'\\'))) {
+    if (parts.any((part) => part == '.' || part == '..' || part.contains(String.fromCharCode(92)))) {
       throw ArgumentError.value(path, 'path', 'Folder paths cannot contain traversal segments.');
     }
     return parts.join('/');
