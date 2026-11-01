@@ -54,6 +54,9 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
           fileName: '${module.name}.caw',
           folderPath: module.folderPath,
         );
+    for (final entry in module.params.entries) {
+      s.setParam(id, entry.key, entry.value);
+    }
     if (!mounted) return;
     setState(() {
       _moduleId = id;
