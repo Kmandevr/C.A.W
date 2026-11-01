@@ -105,7 +105,7 @@ class ExportHistoryEntry {
     return ExportHistoryEntry(
       fileName: fileName,
       kind: kind,
-      createdAtMs: (raw['created_at_ms'] as num).toInt().clamp(0, 4102444800000),
+      createdAtMs: (raw['created_at_ms'] as num).toInt().clamp(0, 4102444800000).toInt(),
       sampleRate: rate == 44100 ? 44100 : 48000,
       float32: raw['float32'] == true,
       seconds: _settingDouble(raw['seconds'], 8).clamp(1.0, 120.0).toDouble(),
@@ -216,9 +216,9 @@ class Settings extends ChangeNotifier {
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
-    exportProfiles = ((j['export_profiles'] as List?) ?? const [])
+    exportProfiles = ((j['export_profiles'] is List ? j['export_profiles'] as List : const []))
         .map(ExportProfile.fromJson).whereType<ExportProfile>().take(32).toList();
-    exportHistory = ((j['export_history'] as List?) ?? const [])
+    exportHistory = ((j['export_history'] is List ? j['export_history'] as List : const []))
         .map(ExportHistoryEntry.fromJson).whereType<ExportHistoryEntry>().take(20).toList();
   }
 
