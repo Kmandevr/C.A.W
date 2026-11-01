@@ -117,8 +117,14 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final profile = ExportProfile(name: name.trim(), kind: _kind.name,
       sampleRate: _rate, float32: _float, seconds: _seconds, frames: _frames);
     try {
-      await s.settings.saveExportProfile(profile);
-      if (mounted) setState(() => _profileName = profile.name);
+      final saved = await s.settings.saveExportProfile(profile);
+      if (mounted) setState(() {
+        _profileName = saved ? profile.name : null;
+        if (!saved) {
+          _message = 'Profile limit reached (32) or the name is invalid.';
+          _messageIsError = true;
+        }
+      });
     } catch (e) {
       if (mounted) setState(() {
         _message = 'Profile could not be saved: $e';
