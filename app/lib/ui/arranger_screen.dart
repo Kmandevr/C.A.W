@@ -491,7 +491,7 @@ class _OverloadBanner extends StatelessWidget {
             Expanded(
               child: Text(
                   'Out of headroom: the newest layer${state.meters.overloaded > 1 ? 's were' : ' was'} muted to keep audio clean.'
-                  '${state.lightTurnedOnBySelf ? ' Light mode is now on (Settings).' : ''}'),
+                  '${state.lightTurnedOnBySelf ? ' Lightweight profile is now active (Settings).' : ''}'),
             ),
             TextButton(onPressed: state.clearOverload, child: const Text('Unmute')),
           ]),
