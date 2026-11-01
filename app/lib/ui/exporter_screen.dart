@@ -232,6 +232,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
         final error = await Isolate.run(() => Engine.exportPattern(source, path,
           bpm: bpm, beatsPerBar: beatsPerBar));
         if (error != null) throw StateError(error);
+        if (_cancelQueueRequested) return false;
       } else {
         final job = RenderJob.start(RenderRequest(
           projectJson: item.projectJson,
