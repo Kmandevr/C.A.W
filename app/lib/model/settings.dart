@@ -32,6 +32,10 @@ extension PerformanceModeDetails on PerformanceMode {
 
 int _settingInt(Object? value, int fallback) => value is num ? value.toInt() : fallback;
 double _settingDouble(Object? value, double fallback) => value is num ? value.toDouble() : fallback;
+String _settingText(Object? value, int maxLength) {
+  if (value is! String) return '';
+  return value.substring(0, value.length > maxLength ? maxLength : value.length);
+}
 
 class ExportProfile {
   const ExportProfile({
@@ -113,8 +117,8 @@ class ExportHistoryEntry {
       float32: raw['float32'] == true,
       seconds: _settingDouble(raw['seconds'], 8).clamp(1.0, 120.0).toDouble(),
       frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
-      target: raw['target'] is String ? (raw['target'] as String).substring(0, (raw['target'] as String).length.clamp(0, 128)) : '',
-      param: raw['param'] is String ? (raw['param'] as String).substring(0, (raw['param'] as String).length.clamp(0, 128)) : '',
+      target: _settingText(raw['target'], 128),
+      param: _settingText(raw['param'], 128),
     );
   }
 }
