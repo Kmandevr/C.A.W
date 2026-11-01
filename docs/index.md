@@ -16,6 +16,7 @@ Project memory for C.A.W. Open this `docs/` folder as a vault in Obsidian, or re
 
 - [Task 1 UI implementation handoff](task-1-ui-handoff.md): current branch, implementation, CI evidence and next steps.
 - [Master development plan](CAW_MASTER_DEVELOPMENT_PLAN.md): approved Task 1 and Task 2 scope.
+- [Platform, modularity, resilience and optimization](platform-modularity-resilience.md): application-wide module boundaries, platform audio backends, failure isolation, interchangeable DSP algorithms and measured whole-app optimization.
 - [Vision](vision.md): the owner's brief, condensed, and the open-questions register; read before planning a feature
 - [Architecture](architecture.md): current technical architecture and execution model
 - [Modular adaptive engine](engine-next.md): owner direction for the next native engine, modular creation, UI extensions, adaptive hardware use and implementation order
