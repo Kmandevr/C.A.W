@@ -81,9 +81,11 @@ class ExportHistoryEntry {
     this.float32 = false,
     this.seconds = 8,
     this.frames = 64,
+    this.target = '',
+    this.param = '',
   });
 
-  final String fileName, kind;
+  final String fileName, kind, target, param;
   final int createdAtMs, sampleRate, frames;
   final bool float32;
   final double seconds;
@@ -91,6 +93,7 @@ class ExportHistoryEntry {
   Map<String, dynamic> toJson() => {
     'file_name': fileName, 'kind': kind, 'created_at_ms': createdAtMs,
     'sample_rate': sampleRate, 'float32': float32, 'seconds': seconds, 'frames': frames,
+    'target': target, 'param': param,
   };
 
   static ExportHistoryEntry? fromJson(Object? raw) {
@@ -110,6 +113,8 @@ class ExportHistoryEntry {
       float32: raw['float32'] == true,
       seconds: _settingDouble(raw['seconds'], 8).clamp(1.0, 120.0).toDouble(),
       frames: const [1, 8, 16, 32, 64, 128, 256].contains(frames) ? frames : 64,
+      target: raw['target'] is String ? (raw['target'] as String).substring(0, (raw['target'] as String).length.clamp(0, 128)) : '',
+      param: raw['param'] is String ? (raw['param'] as String).substring(0, (raw['param'] as String).length.clamp(0, 128)) : '',
     );
   }
 }
