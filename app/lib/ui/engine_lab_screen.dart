@@ -143,7 +143,9 @@ class _MasterScopeState extends State<_MasterScope> {
   final Float32List _samples = Float32List(512);
 
   @override
-  Widget build(BuildContext context) => NeonPanel(color: Neon.blue, child: Column(
+  Widget build(BuildContext context) {
+    if (!Neon.showScopes) return const SizedBox.shrink();
+    return NeonPanel(color: Neon.blue, child: Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       const Text('MASTER SCOPE · MONO SUM', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
@@ -163,6 +165,7 @@ class _MasterScopeState extends State<_MasterScope> {
         style: TextStyle(color: Neon.dim, fontSize: 11)),
     ],
   ));
+  }
 }
 
 class _ScopePainter extends CustomPainter {
