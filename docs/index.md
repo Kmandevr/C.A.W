@@ -32,6 +32,7 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [Synth](synth.md): the house synth (kind: synth): owner's choices, the patch file, how the engine plays it, open questions and build stages
 - [UI design](ui.md): v2 layout and interactions for phone and desktop, gestures, editors, and the CPU and RAM budget
 - [Roadmap](roadmap.md): v1 (build, arrange, export) and later stages, with v1's acceptance test and build order
-- [Music workflow feature-gap plan](music-workflow-feature-gap-plan.md): verified implemented/partial/missing status and recommended build order for piano roll, mixer, audio editing, sampling, MIDI hardware, arrangement and export\n- [Lightweight creative audio systems plan](lightweight-creative-audio-systems.md): impact-ranked, performance-filtered plan for non-AI mathematical sound, cellular patterns, waveform transformation, variation, inspection and lightweight physical models
+- [Music workflow feature-gap plan](music-workflow-feature-gap-plan.md): verified implemented/partial/missing status and recommended build order for piano roll, mixer, audio editing, sampling, MIDI hardware, arrangement and export
+- [Lightweight creative audio systems plan](lightweight-creative-audio-systems.md): impact-ranked, performance-filtered plan for non-AI mathematical sound, cellular patterns, waveform transformation, variation, inspection and lightweight physical models
 - [Decisions](decisions.md): what was chosen and why
 - [Log](log.md): dated history of changes
