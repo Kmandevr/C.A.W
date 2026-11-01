@@ -633,10 +633,13 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
         Row(children: [
           const SizedBox(width: 56, child: Text('Master', style: TextStyle(color: Neon.dim))),
           Expanded(
-            child: Slider(
-              value: p.master,
-              activeColor: Neon.blue,
-              onChanged: (v) => s.editProject((p) => p.master = v),
+            child: ValueListenableBuilder<int>(
+              valueListenable: s.values,
+              builder: (context, _, _) => Slider(
+                value: s.project.master.clamp(0.0, 1.0).toDouble(),
+                activeColor: Neon.blue,
+                onChanged: s.setMaster,
+              ),
             ),
           ),
           SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.meters.peakL > s.meters.peakR ? s.meters.peakL : s.meters.peakR, color: Neon.blue)),

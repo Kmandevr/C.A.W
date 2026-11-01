@@ -203,6 +203,29 @@ void main() {
     expect(state.selectedModuleId, pattern.id);
   });
 
+  testWidgets('Arranger master gain uses the native value-only update path', (tester) async {
+    state.project = ProjectDoc(id: 'project-1', name: 'Master gain test', master: 0.7);
+    var appNotifications = 0;
+    var valueTicks = 0;
+    state.addListener(() => appNotifications++);
+    state.values.addListener(() => valueTicks++);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ArrangerScreen(state: state)),
+    ));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    final slider = tester.widget<Slider>(find.byType(Slider).first);
+    slider.onChanged!(0.42);
+    await tester.pump();
+
+    expect(state.project.master, closeTo(0.42, 0.0001));
+    expect(valueTicks, 1);
+    expect(appNotifications, 0);
+    expect(tester.widget<Slider>(find.byType(Slider).first).value, closeTo(0.42, 0.0001));
+  });
+
   testWidgets('Arranger playhead updates from meter ticks without rebuilding the grid', (tester) async {
     final layer = LayerDoc(id: 'layer-1', name: 'Lead', color: 0);
     state.project = ProjectDoc(id: 'project-1', name: 'Timeline test', layers: [layer]);

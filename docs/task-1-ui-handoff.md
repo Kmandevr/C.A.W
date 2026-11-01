@@ -71,6 +71,13 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Engine Lab now renders a 512-point Hann-window FFT spectrum from the existing 512-sample native master scope. FFT scratch/window/output buffers are retained; the scope remains a mono-sum inspection and does not replace separate L/R peak meters.
 - Latest exact-head CI observed before this documentation update: App run 41320549040, Engine run 41320549038, Docs/hygiene run 41320549049; all jobs queued, no final results yet. A new documentation commit will trigger newer runs, which must be checked separately.
 
+## Additional audit finding at head b95a4221
+
+- The Arranger's project-settings master slider still used the general project-edit path, which schedules a full engine sync on every drag update. This bypassed the dedicated native master-gain API already used by Mixer.
+- Corrected the Arranger slider to use `AppState.setMaster` and listen to the shared value notifier, preserving immediate UI feedback without full app notifications or project recompilation during the drag.
+- Added a widget regression test asserting the Arranger control updates the shared project value, emits one value tick, emits no app-wide notification, and redraws the slider from the updated value.
+- Verification for this correction is pending the new exact-head App workflow; no passing claim is made until that run completes.
+
 ## Remaining Task 1 work
 
 - Finish Mixer capabilities only where the native engine API supports them; missing routing, stereo analysis and master-FX features above remain Task 2 dependencies.
