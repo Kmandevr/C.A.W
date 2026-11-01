@@ -63,6 +63,15 @@ void main() {
     expect(selectedView, 2);
   });
 
+  testWidgets('custom toggle controls provide a 48 dp touch target', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ToggleChip(
+        label: 'M', on: false, color: Colors.green, onTap: () {},
+      )),
+    ));
+    expect(tester.getSize(find.byType(InkWell)), const Size(48, 48));
+  });
+
   testWidgets('peak meters hold briefly and then decay on meter ticks', (tester) async {
     var peak = 0.0;
     await tester.pumpWidget(MaterialApp(
