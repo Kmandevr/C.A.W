@@ -46,6 +46,16 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
     await _validate();
   }
 
+  void _createBlank(String kind) {
+    final id = s.addBlankModule(kind);
+    setState(() {
+      _moduleId = id;
+      _guided = false;
+      _message = 'Created a blank $kind module. Open it in Builder to author its source.';
+      _error = false;
+    });
+  }
+
   Future<void> _validate() async {
     final id = _moduleId;
     if (id == null) return;
@@ -107,8 +117,15 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('START FROM A GENERATOR OR EFFECT', style: TextStyle(color: Neon.green, fontWeight: FontWeight.w800)),
-            const Text('Choose an existing engine template. The source and generated parameters remain editable in Builder.',
+            const Text('Start from a blank module or an existing engine template. Source and generated parameters remain editable in Builder.',
               style: TextStyle(color: Neon.dim, fontSize: 12)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              OutlinedButton.icon(onPressed: _busy ? null : () => _createBlank('generator'),
+                icon: const Icon(Icons.graphic_eq), label: const Text('Blank generator')),
+              OutlinedButton.icon(onPressed: _busy ? null : () => _createBlank('effect'),
+                icon: const Icon(Icons.auto_fix_high), label: const Text('Blank effect')),
+            ]),
             const SizedBox(height: 8),
             InputDecorator(
               decoration: const InputDecoration(labelText: 'Starter module'),
