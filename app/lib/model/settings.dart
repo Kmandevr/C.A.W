@@ -12,11 +12,29 @@ enum Density { comfortable, compact }
 /// When a code change swaps into the playing sound.
 enum SwapTiming { now, beat, bar }
 
+enum PerformanceMode { fullExperience, balanced, lightweight, minimal }
+
+extension PerformanceModeDetails on PerformanceMode {
+  String get label => switch (this) {
+    PerformanceMode.fullExperience => 'Full Experience',
+    PerformanceMode.balanced => 'Balanced',
+    PerformanceMode.lightweight => 'Lightweight',
+    PerformanceMode.minimal => 'Minimal',
+  };
+
+  String get description => switch (this) {
+    PerformanceMode.fullExperience => 'All visual features and full-strength active glow.',
+    PerformanceMode.balanced => 'Reduced decorative glow with full editing and meter responsiveness.',
+    PerformanceMode.lightweight => 'No decorative glow and a smaller voice budget; editing and meters stay responsive.',
+    PerformanceMode.minimal => 'Minimal visual effects and no scope panels; audio and editing responsiveness are preserved.',
+  };
+}
+
 class Settings extends ChangeNotifier {
   /// Settings kept in [dir] (settings.json and themes/); with no folder they live in memory only.
   Settings({this.dir}) {
     Neon.active = activeTheme;
-    Neon.light = lightMode;
+    _applyPerformanceMode();
   }
 
   final Directory? dir;
@@ -31,8 +49,16 @@ class Settings extends ChangeNotifier {
 
   /// Light mode for slow devices: no glow or scopes, meters at 15 fps, 4 voices per pattern layer, and auto-update
   /// waits while playing. [lightAuto] turns it on by itself the first time the engine reports an overload.
-  bool lightMode = false;
+  PerformanceMode performanceMode = PerformanceMode.balanced;
+  bool get lightMode => performanceMode == PerformanceMode.lightweight || performanceMode == PerformanceMode.minimal;
+  set lightMode(bool value) => performanceMode = value ? PerformanceMode.lightweight : PerformanceMode.balanced;
   bool lightAuto = true;
+
+  void _applyPerformanceMode() {
+    Neon.performanceMode = performanceMode.index;
+    Neon.light = lightMode;
+    Neon.showScopes = performanceMode != PerformanceMode.minimal;
+  }
 
   /// Vim editing in the code editor (WASD moves; I types). Off by default.
   bool vimCode = false;
@@ -79,7 +105,8 @@ class Settings extends ChangeNotifier {
         'live_update': liveUpdate,
         'live_delay_ms': liveDelayMs,
         'swap_timing': swapTiming.name,
-        'light_mode': lightMode,
+        'performance_mode': performanceMode.name,
+        'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
         'vim_code': vimCode,
       };
@@ -92,7 +119,12 @@ class Settings extends ChangeNotifier {
     liveUpdate = (j['live_update'] as bool?) ?? liveUpdate;
     liveDelayMs = ((j['live_delay_ms'] as num?)?.toInt() ?? liveDelayMs).clamp(0, 10000);
     swapTiming = pick(SwapTiming.values, j['swap_timing'], swapTiming);
-    lightMode = (j['light_mode'] as bool?) ?? lightMode;
+    final savedMode = j['performance_mode'];
+    if (savedMode is String) {
+      performanceMode = PerformanceMode.values.where((m) => m.name == savedMode).firstOrNull ?? performanceMode;
+    } else if (j['light_mode'] is bool) {
+      performanceMode = j['light_mode'] == true ? PerformanceMode.lightweight : PerformanceMode.balanced;
+    }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
   }
@@ -120,7 +152,7 @@ class Settings extends ChangeNotifier {
       // Damaged settings fall back to the defaults.
     }
     Neon.active = activeTheme;
-    Neon.light = lightMode;
+    _applyPerformanceMode();
     _shownLook = activeTheme.toFile();
   }
 
@@ -138,7 +170,7 @@ class Settings extends ChangeNotifier {
   Future<void> update(void Function(Settings) change) async {
     change(this);
     Neon.active = activeTheme;
-    Neon.light = lightMode;
+    _applyPerformanceMode();
     notifyListeners();
     await save();
   }
