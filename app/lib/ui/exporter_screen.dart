@@ -69,6 +69,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   }
 
   Future<void> _export() async {
+    if (_job != null || _midiBusy) return;
     if (_kind == ExportKind.midi) {
       await _exportMidi();
       return;
