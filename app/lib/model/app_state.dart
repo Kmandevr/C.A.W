@@ -791,6 +791,13 @@ class AppState extends ChangeNotifier {
     editLayer(layer, (l) => l.automation.remove(lane));
   }
 
+  void removeAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index) {
+    if (index < 0 || index >= lane.points.length) return;
+    editLayer(layer, (l) {
+      l.automation.firstWhere((a) => a.target == lane.target).points.removeAt(index);
+    });
+  }
+
   void updateAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index, double step, double value) {
     if (index < 0 || index >= lane.points.length) return;
     editLayer(layer, (l) {
