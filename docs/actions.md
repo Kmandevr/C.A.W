@@ -1,7 +1,7 @@
 ---
 title: Actions, keys and macros
 summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
-covers: [app/lib/actions/, app/lib/ui/key_router.dart]
+covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
 updated: 2026-11-01
 ---
 
@@ -23,7 +23,7 @@ updated: 2026-11-01
   - on-screen toolbars you fill with your own actions and macros, so the phone gets one-tap macros without a keyboard
   - long-press menu entries are supported by the keymap data format, but a user-facing menu editor/integration is not currently complete
   - later, MIDI controller notes and CCs, once device support is built ([architecture](architecture.md#variables-and-patterns-proposal))
-- **Macros (custom actions):** a named list of actions run in order. Any step can repeat N times (owner: chains plus repeat, no scripting for now). A macro is itself an action, so it can have keys, toolbar buttons and menu entries. You build one in a list on the phone: add a step, pick an action, set the repeat count, reorder.
+- **Macros (custom actions):** a named list of actions run in order. Any step can repeat N times. Macros can be recorded from keyboard actions with Alt+Q and then replayed, bound or added to toolbars. The model/parser supports named step lists and repeat counts. There is no in-app step-list macro editor yet; edit the app-private keys.txt file manually for custom macro definitions.
 - **Saving** (owner: both):
   - the app keymap, toolbars and macros persist in the app-private keys.txt file and are loaded over the shipped defaults
   - the file format can be edited manually; user-facing keymap import/export and project-carried macros are not implemented
