@@ -199,6 +199,9 @@ void main() {
     expect(state.renameLibraryFolder('Synths', 'Sounds/Synths'), isTrue);
     expect(state.project.libraryFolders, containsAll(['Sounds', 'Sounds/Synths']));
     expect(state.project.module(id)?.folderPath, 'Sounds/Synths');
+    final restored = ProjectDoc.fromJson(state.project.toJson());
+    expect(restored.libraryFolders, containsAll(['Sounds', 'Sounds/Synths']));
+    expect(restored.module(id)?.tags, ['bass', 'Analog']);
 
     expect(state.deleteLibraryFolder('Sounds'), isTrue);
     expect(state.project.module(id)?.folderPath, '');
