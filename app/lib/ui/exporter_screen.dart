@@ -151,7 +151,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
       if (error != null) throw StateError(error);
       final bytes = await file.readAsBytes();
       final saved = await FilePicker.saveFile(fileName: name, bytes: bytes,
-        mimeType: 'audio/midi', type: FileType.audio);
+        mimeType: 'audio/midi', type: FileType.custom, allowedExtensions: const ['mid']);
       if (!mounted) return;
       setState(() { _message = saved == null ? 'Not saved (picker closed).' : 'Saved $name'; _messageIsError = false; });
     } catch (e) {
