@@ -31,6 +31,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   String? _param;
   int _frames = 64;
   RenderJob? _job;
+  bool _midiBusy = false;
   Timer? _poll;
   String? _message;
   bool _messageIsError = false;
@@ -143,8 +144,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
       setState(() { _message = 'Choose a valid MIDI pattern first.'; _messageIsError = true; });
       return;
     }
-    if (_busy) return;
-    setState(() { _busy = true; _message = null; });
+    if (_job != null || _midiBusy) return;
+    setState(() { _midiBusy = true; _message = null; });
     File? file;
     try {
       final tmp = await getTemporaryDirectory();
@@ -162,7 +163,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
       if (mounted) setState(() { _message = 'MIDI export failed: $e'; _messageIsError = true; });
     } finally {
       if (file != null && await file.exists()) await file.delete();
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _midiBusy = false);
     }
   }
 
@@ -179,7 +180,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
     }
     final params = s.info[_moduleId]?.params ?? const <ParamInfo>[];
     if (_param != null && !params.any((x) => x.name == _param)) _param = null;
-    final busy = _job != null;
+    final busy = _job != null || _midiBusy;
     return ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 96), children: [
       const Heading('Export mode'),
       SegmentedButton<bool>(
