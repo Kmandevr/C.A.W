@@ -334,7 +334,13 @@ class ProjectDoc {
       modules: ((j['modules'] as List?) ?? const [])
           .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().toList(),
-      savedLibrarySearches: ((j['saved_library_searches'] as Map?) ?? const {}).map((k, v) => MapEntry(k.toString(), v.toString())),
+      savedLibrarySearches: {
+        for (final entry in ((j['saved_library_searches'] as Map?) ?? const {}).entries.take(32))
+          if (entry.key is String && entry.value is String &&
+              (entry.key as String).trim().isNotEmpty && (entry.value as String).trim().isNotEmpty)
+            (entry.key as String).trim().substring(0, min(64, (entry.key as String).trim().length)):
+              (entry.value as String).trim().substring(0, min(256, (entry.value as String).trim().length)),
+      },
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
