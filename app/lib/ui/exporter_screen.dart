@@ -147,7 +147,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final name = _fileName();
     final file = File('${tmp.path}${Platform.pathSeparator}$name');
     try {
-      final error = Engine.exportPattern(module.runSource, file.path,
+      final error = Engine.exportPattern(module.source, file.path,
         bpm: s.project.bpm, beatsPerBar: s.project.beatsPerBar);
       if (error != null) throw StateError(error);
       final bytes = await file.readAsBytes();
