@@ -92,17 +92,17 @@ Owner-approved scope originating 2026-10-28 ([decisions](decisions.md)); the cur
 
 For exact implementation boundaries, use [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
 
-## Stage 3 — GitHub integration
+## Stage 3 — GitHub integration (proposal; not implemented)
 
-GitHub App with device-flow sign-in, a library repo template, tree-diff sync, atomic commits, conflict branches, and a branch/PR source picker.
+A possible future GitHub App workflow: device-flow sign-in, a library repo template, tree-diff sync, atomic commits, conflict branches and a branch/PR source picker. The current app has no GitHub library-sync/source-picker workflow; local/offline project creation and file import/export remain the supported path.
 
 ## Stage 4 — GitHub/AI-assisted editing (deferred)
 
 The earlier proposal for GitHub library synchronization, source picking and AI-assisted editing is **not implemented** and is **not in the current product scope**. The owner has explicitly directed no in-app AI integration for now. Do not add AI generation, editing, source separation, model inference or cloud audio processing. AI coding assistants remain external development tools, not a C.A.W. feature.
 
-## Stage 4b — More platforms and plugins
+## Stage 4b — More platforms and plugins (proposal; not implemented)
 
-macOS and Linux desktop apps, then iOS once its distribution question is settled. A CLAP plugin of the engine, wrapped into VST3 and AU by clap-wrapper.
+Potential future targets are macOS and Linux desktop apps, then iOS once its distribution question is settled. CLAP/VST3/AU builds or hosting require a real native host/SDK, platform packaging, licensing review and tests; none is currently shipped.
 
 ## Stage 5 — Advanced instrument and complete workflow
 
