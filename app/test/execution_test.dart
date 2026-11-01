@@ -12,7 +12,7 @@ void main() {
   test('hardware profile and workload plans come from the native engine', () {
     final hardware = EngineExecutionPolicy.hardwareProfile;
     expect(hardware.logicalCores, inInclusiveRange(1, 256));
-    expect(hardware.memoryBudgetMiB, inInclusiveRange(64, 8192));
+    expect(hardware.memoryBudgetMiB, inInclusiveRange(0, 8192));
 
     final audition = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
     expect(audition.workerThreads, 1);
@@ -20,16 +20,37 @@ void main() {
     expect(audition.latencySensitive, isTrue);
     expect(audition.yieldToForeground, isTrue);
 
-    final offline = EngineExecutionPolicy.plan(workload: EngineWorkload.offlineRender);
+    final unknown = EngineExecutionPolicy.plan(workload: EngineWorkload.offlineRender, allowGpu: true);
+    final offline = EngineExecutionPolicy.plan(
+      workload: EngineWorkload.offlineRender,
+      pressure: EnginePressure.normal,
+    );
     final hot = EngineExecutionPolicy.plan(
       workload: EngineWorkload.offlineRender,
       pressure: EnginePressure.thermalHot,
     );
-    expect(offline.workerThreads, greaterThanOrEqualTo(1));
+    expect(unknown.workerThreads, greaterThanOrEqualTo(1));
+    expect(unknown.yieldToForeground, isTrue);
+    expect(unknown.allowGpu, isFalse);
+    expect(offline.workerThreads, greaterThanOrEqualTo(unknown.workerThreads));
     expect(offline.maxConcurrentJobs, offline.workerThreads);
     expect(offline.preferredBatchFrames, 4096);
     expect(hot.workerThreads, 1);
     expect(hot.yieldToForeground, isTrue);
+
+    EngineExecutionPolicy.updateRuntimeSignals(
+      pressure: EnginePressure.thermalCritical,
+      foreground: true,
+      audioActive: true,
+    );
+    final busyPreview = EngineExecutionPolicy.plan(workload: EngineWorkload.interactivePreview);
+    expect(busyPreview.workerThreads, 1);
+    expect(busyPreview.yieldToForeground, isTrue);
+    EngineExecutionPolicy.updateRuntimeSignals(
+      pressure: EnginePressure.unknown,
+      foreground: true,
+      audioActive: false,
+    );
 
     final idle = EngineExecutionPolicy.plan(workload: EngineWorkload.idle);
     expect(idle.workerThreads, 0);

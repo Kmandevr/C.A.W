@@ -219,7 +219,7 @@ void caw_worker_pool_destroy(CawWorkerPool* pool) {
 int32_t caw_worker_pool_apply(CawWorkerPool* pool, const CawExecutionRequest* request, CawExecutionPlan* out) try {
     if (!pool || !request || !out) return 1;
     if (request->workload < CAW_WORK_INTERACTIVE_AUDITION || request->workload > CAW_WORK_IDLE ||
-        request->pressure < CAW_PRESSURE_NORMAL || request->pressure > CAW_PRESSURE_THERMAL_CRITICAL) return 2;
+        request->pressure < CAW_PRESSURE_NORMAL || request->pressure > CAW_PRESSURE_UNKNOWN) return 2;
     std::lock_guard<std::mutex> lock(pool->apiMutex);
     if (pool->closing) return 4;
     if (request->workload == CAW_WORK_IDLE && pool->adaptive.queued() != 0) return 3;

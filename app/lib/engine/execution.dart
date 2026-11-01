@@ -22,6 +22,7 @@ enum EnginePressure {
   thermalWarm,
   thermalHot,
   thermalCritical,
+  unknown,
 }
 
 class EngineHardwareProfile {
@@ -63,6 +64,19 @@ class EngineExecutionPolicy {
   EngineExecutionPolicy._();
 
   static EngineHardwareProfile? _hardwareProfile;
+  static EnginePressure _runtimePressure = EnginePressure.unknown;
+  static bool _foreground = true;
+  static bool _audioActive = false;
+
+  static EnginePressure get runtimePressure => _runtimePressure;
+  static bool get foregroundBusy => !_foreground || _audioActive;
+
+  static void updateRuntimeSignals({EnginePressure? pressure, bool? foreground, bool? audioActive}) {
+    if (pressure != null) _runtimePressure = pressure;
+    if (foreground != null) _foreground = foreground;
+    if (audioActive != null) _audioActive = audioActive;
+    NativeEngineWorkPool._refreshRuntimePlan();
+  }
 
   static EngineHardwareProfile get hardwareProfile {
     final cached = _hardwareProfile;
@@ -88,8 +102,8 @@ class EngineExecutionPolicy {
 
   static EngineExecutionPlan plan({
     required EngineWorkload workload,
-    EnginePressure pressure = EnginePressure.normal,
-    bool foregroundBusy = false,
+    EnginePressure? pressure,
+    bool? foregroundBusy,
     bool allowGpu = false,
   }) {
     final b = Bindings.instance;
@@ -105,8 +119,8 @@ class EngineExecutionPolicy {
         ..supportsGpuCompute = hardware.supportsGpuCompute ? 1 : 0;
       request.ref
         ..workload = workload.index
-        ..pressure = pressure.index
-        ..foregroundBusy = foregroundBusy ? 1 : 0
+        ..pressure = (pressure ?? runtimePressure).index
+        ..foregroundBusy = (foregroundBusy ?? EngineExecutionPolicy.foregroundBusy) ? 1 : 0
         ..allowGpu = allowGpu ? 1 : 0;
 
       final result = b.executionPlan(hw, request, out);
@@ -136,11 +150,16 @@ enum NativeJobPriority { background, offline, foreground }
 class NativeEngineWorkPool {
   NativeEngineWorkPool._(this._bindings, this._handle);
 
-  static final NativeEngineWorkPool shared = NativeEngineWorkPool._create();
+  static NativeEngineWorkPool? _shared;
+  static NativeEngineWorkPool get shared => _shared ??= NativeEngineWorkPool._create();
+
+  static void _refreshRuntimePlan() => _shared?._applyCurrentWorkload();
 
   final Bindings _bindings;
   final Pointer<Void> _handle;
   bool _disposed = false;
+  int _previewJobs = 0;
+  int _renderJobs = 0;
 
   factory NativeEngineWorkPool._create() {
     final bindings = Bindings.instance;
@@ -162,8 +181,8 @@ class NativeEngineWorkPool {
 
   EngineExecutionPlan apply({
     required EngineWorkload workload,
-    EnginePressure pressure = EnginePressure.normal,
-    bool foregroundBusy = false,
+    EnginePressure? pressure,
+    bool? foregroundBusy,
     bool allowGpu = false,
   }) {
     if (_disposed) throw StateError('native worker pool is disposed');
@@ -172,8 +191,8 @@ class NativeEngineWorkPool {
     try {
       request.ref
         ..workload = workload.index
-        ..pressure = pressure.index
-        ..foregroundBusy = foregroundBusy ? 1 : 0
+        ..pressure = (pressure ?? EngineExecutionPolicy.runtimePressure).index
+        ..foregroundBusy = (foregroundBusy ?? EngineExecutionPolicy.foregroundBusy) ? 1 : 0
         ..allowGpu = allowGpu ? 1 : 0;
       final result = _bindings.workerPoolApply(_handle, request, out);
       if (result != 0) throw StateError('native worker pool rejected the execution plan ($result)');
@@ -195,10 +214,21 @@ class NativeEngineWorkPool {
 
   NativeEngineJob submitCheck(String source) {
     final text = source.toNativeUtf8();
+    const workload = EngineWorkload.interactivePreview;
+    var began = false;
+    var tracked = false;
     try {
-      final job = _bindings.workerPoolSubmitCheck(_handle, text, NativeJobPriority.foreground.index);
-      if (job == nullptr) throw StateError('native check queue is full or has no available capacity');
-      return NativeEngineJob._(_bindings, job, includeResult: true);
+      _beginWorkload(workload);
+      began = true;
+      final handle = _bindings.workerPoolSubmitCheck(_handle, text, NativeJobPriority.foreground.index);
+      if (handle == nullptr) throw StateError('native check queue is full or has no available capacity');
+      final job = NativeEngineJob._(_bindings, handle, includeResult: true);
+      _trackJob(job, workload);
+      tracked = true;
+      return job;
+    } catch (_) {
+      if (began && !tracked) _finishWorkload(workload);
+      rethrow;
     } finally {
       calloc.free(text);
     }
@@ -206,12 +236,23 @@ class NativeEngineWorkPool {
 
   NativeEngineJob submitProject(Pointer<Void> engine, String projectJson) {
     final json = projectJson.toNativeUtf8();
+    const workload = EngineWorkload.interactivePreview;
+    var began = false;
+    var tracked = false;
     try {
-      final job = _bindings.workerPoolSubmitProject(
+      _beginWorkload(workload);
+      began = true;
+      final handle = _bindings.workerPoolSubmitProject(
         _handle, engine, json, NativeJobPriority.foreground.index,
       );
-      if (job == nullptr) throw StateError('native project queue is full or has no available capacity');
-      return NativeEngineJob._(_bindings, job, includeResult: true);
+      if (handle == nullptr) throw StateError('native project queue is full or has no available capacity');
+      final job = NativeEngineJob._(_bindings, handle, includeResult: true);
+      _trackJob(job, workload);
+      tracked = true;
+      return job;
+    } catch (_) {
+      if (began && !tracked) _finishWorkload(workload);
+      rethrow;
     } finally {
       calloc.free(json);
     }
@@ -242,11 +283,24 @@ class NativeEngineWorkPool {
         ..seconds = seconds
         ..target = targetText
         ..param = param.isEmpty ? nullptr : paramText;
-      final job = _bindings.workerPoolSubmitRender(
-        _handle, json, options, path, NativeJobPriority.offline.index,
-      );
-      if (job == nullptr) throw StateError('native render queue is full or has no available capacity');
-      return NativeEngineJob._(_bindings, job, includeResult: false);
+      const workload = EngineWorkload.offlineRender;
+      var began = false;
+      var tracked = false;
+      try {
+        _beginWorkload(workload);
+        began = true;
+        final handle = _bindings.workerPoolSubmitRender(
+          _handle, json, options, path, NativeJobPriority.offline.index,
+        );
+        if (handle == nullptr) throw StateError('native render queue is full or has no available capacity');
+        final job = NativeEngineJob._(_bindings, handle, includeResult: false);
+        _trackJob(job, workload);
+        tracked = true;
+        return job;
+      } catch (_) {
+        if (began && !tracked) _finishWorkload(workload);
+        rethrow;
+      }
     } finally {
       calloc
         ..free(options)
@@ -255,6 +309,46 @@ class NativeEngineWorkPool {
         ..free(targetText)
         ..free(paramText);
     }
+  }
+
+  void _beginWorkload(EngineWorkload workload) {
+    if (workload == EngineWorkload.offlineRender) {
+      _renderJobs++;
+    } else {
+      _previewJobs++;
+    }
+    try {
+      _applyCurrentWorkload();
+    } catch (_) {
+      _decrementWorkload(workload);
+      rethrow;
+    }
+  }
+
+  void _trackJob(NativeEngineJob job, EngineWorkload workload) {
+    job.result.then<void>(
+      (_) => _finishWorkload(workload),
+      onError: (Object _, StackTrace _) => _finishWorkload(workload),
+    );
+  }
+
+  void _decrementWorkload(EngineWorkload workload) {
+    if (workload == EngineWorkload.offlineRender) {
+      if (_renderJobs > 0) _renderJobs--;
+    } else {
+      if (_previewJobs > 0) _previewJobs--;
+    }
+  }
+
+  void _finishWorkload(EngineWorkload workload) {
+    _decrementWorkload(workload);
+    if (!_disposed) _applyCurrentWorkload();
+  }
+
+  void _applyCurrentWorkload() {
+    if (_disposed) return;
+    apply(workload: _previewJobs > 0 ? EngineWorkload.interactivePreview :
+        (_renderJobs > 0 ? EngineWorkload.offlineRender : EngineWorkload.interactivePreview));
   }
 
   void waitIdle() {
