@@ -109,7 +109,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 ## How it works
 
 - **Engine access:** `lib/engine/bindings.dart` binds the C API by hand. `lib/engine/engine.dart` wraps it:
-  - Project updates and exports run on worker isolates, so compiling never blocks the UI. Updates run one at a time, in order.
+  - Project compilation, asynchronous source checks and offline WAV rendering run through the native bounded C++ worker pool. MIDI file serialization uses a worker isolate. Project jobs are ordered by the AppState update path; native job status/progress/cancellation are exposed through owned handles. None of this work runs on the audio callback.
   - Meters and scopes are read about 30 times a second, but only while playing and for 1 s after stopping, and never in the background (`lib/model/poller.dart`). Stopped and settled, the app does no periodic work, and after 30 s it closes the audio device; Play reopens it.
   - Slider drags and typing update only the widgets that show them, not the whole app ([performance](performance.md#app-audit-2026-10-28)).
   - Volume, pan, mute, solo and param changes go straight to the engine. Everything else re-sends the project, and the engine applies only what changed.
