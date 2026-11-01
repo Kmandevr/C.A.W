@@ -208,6 +208,11 @@ void main() {
       fileName: 'Folder.caw',
       folderPath: 'Drums/Kicks',
     );
+    final secondId = state.importModuleSource(
+      '---\\nkind: effect\\nname: Folder effect\\n---\\nidentity',
+      fileName: 'Effect.caw',
+      folderPath: 'Drums/Kicks',
+    );
     expect(state.project.libraryFolders, containsAll(['Drums', 'Drums/Kicks']));
     expect(state.project.module(id)?.folderPath, 'Drums/Kicks');
 
@@ -217,10 +222,13 @@ void main() {
     expect(state.project.savedLibrarySearches['Bass modules'], 'bass');
 
     state.createLibraryFolder('Synths');
-    expect(state.moveModuleToFolder(id, 'Synths'), isTrue);
+    expect(state.moveModulesToFolder([id, secondId], 'Synths'), isTrue);
+    expect(state.project.module(id)?.folderPath, 'Synths');
+    expect(state.project.module(secondId)?.folderPath, 'Synths');
     expect(state.renameLibraryFolder('Synths', 'Sounds/Synths'), isTrue);
     expect(state.project.libraryFolders, containsAll(['Sounds', 'Sounds/Synths']));
     expect(state.project.module(id)?.folderPath, 'Sounds/Synths');
+    expect(state.project.module(secondId)?.folderPath, 'Sounds/Synths');
     final restored = ProjectDoc.fromJson(state.project.toJson());
     expect(restored.libraryFolders, containsAll(['Sounds', 'Sounds/Synths']));
     expect(restored.module(id)?.tags, ['bass', 'Analog']);
@@ -230,6 +238,7 @@ void main() {
     expect(state.project.module(id)?.folderPath, '');
     expect(state.project.libraryFolders, isNot(contains('Sounds/Synths')));
     expect(state.project.module(id)?.source, contains('sin(220)'));
+    expect(state.project.module(secondId)?.source, contains('identity'));
   });
 
   test('imported module source becomes a new project module', () {
