@@ -123,7 +123,7 @@ void main() {
     final modules = raw['modules'] as List;
     final module = modules.first as Map<String, dynamic>;
     module['folder_path'] = '../../outside';
-    module['tags'] = ['  clean  ', 'x' * 100, ...List.generate(40, (i) => 'tag$i')];
+    module['tags'] = ['  clean  ', List.filled(100, 'x').join(), ...List.generate(40, (i) => 'tag$i')];
     raw['library_folders'] = ['Synths/Kicks', '../outside', 'x' * 600];
     final imported = ProjectDoc.fromJson(raw);
 
