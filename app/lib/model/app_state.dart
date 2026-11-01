@@ -324,6 +324,15 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Selects a channel for shared workspace inspectors without changing its processing state.
+  void selectLayer(LayerDoc layer) {
+    selectedLayerId = layer.id;
+    selectedClipId = null;
+    selectedClipIds.clear();
+    selectedModuleId = layer.generatorId ?? layer.effectIds.firstOrNull;
+    notifyListeners();
+  }
+
   void editSource(String id, String source) {
     final m = project.module(id);
     if (m == null || m.source == source) return;
