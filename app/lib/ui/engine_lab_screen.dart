@@ -100,7 +100,7 @@ class _SignalPath extends StatelessWidget {
           style: Neon.code(size: 10, color: Neon.blue)),
       ]),
       const SizedBox(height: 8),
-      ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
+      ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, tick, child) {
         final peak = index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0;
         return Row(children: [
           Expanded(child: Bar(value: peak, color: Neon.green, height: 5)),
@@ -185,7 +185,7 @@ class _MasterScopeState extends State<_MasterScope> {
           return SizedBox(
             height: 92,
             width: double.infinity,
-            child: CustomPaint(painter: _ScopePainter(_samples, _)),
+            child: CustomPaint(painter: _ScopePainter(_samples, tick)),
           );
         },
       ),
