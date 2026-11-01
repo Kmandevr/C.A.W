@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:caw/actions/actions.dart';
+import 'package:caw/actions/key_event.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
@@ -11,6 +13,7 @@ import 'package:caw/ui/engine_lab_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
 import 'package:caw/ui/file_manager_screen.dart';
 import 'package:caw/ui/mixer_screen.dart';
+import 'package:caw/ui/key_router.dart';
 import 'package:caw/ui/plugin_builder_screen.dart';
 
 void main() {
@@ -22,6 +25,37 @@ void main() {
 
   tearDown(() {
     state.dispose();
+  });
+
+
+  testWidgets('workspace shortcuts and focus traversal work through the action router', (tester) async {
+    final routerKey = GlobalKey<KeyRouterState>();
+    final first = FocusNode();
+    final second = FocusNode();
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    var selectedView = -1;
+
+    await tester.pumpWidget(MaterialApp(
+      home: KeyRouter(
+        key: routerKey,
+        state: state,
+        screenArea: Area.global,
+        onView: (index) => selectedView = index,
+        child: Column(children: [
+          TextButton(focusNode: first, onPressed: () {}, child: const Text('First')),
+          TextButton(focusNode: second, onPressed: () {}, child: const Text('Second')),
+        ]),
+      ),
+    ));
+
+    first.requestFocus();
+    routerKey.currentState!.vim.run(const ActionRef.action('focus.next'));
+    await tester.pump();
+    expect(second.hasFocus, isTrue);
+
+    routerKey.currentState!.vim.run(const ActionRef.action('view.mixer'));
+    expect(selectedView, 2);
   });
 
   testWidgets('Mixer channel controls update the shared project model', (tester) async {
