@@ -78,7 +78,8 @@ The Flutter app in `app/`. The engine it drives is described in [engine](engine.
   - Quick Export renders the current project loop; Advanced offers loop, free-length, one-shot, wavetable and MIDI pattern exports
   - audio renders use the native offline render job, with progress and cancellation, at 44.1 or 48 kHz and 24-bit or 32-bit float
   - MIDI patterns use the native MIDI writer and preserve the project tempo and time signature
-  - the system file picker saves each completed output; unsupported formats are not offered
+  - named export profiles persist in settings; the last 20 successful exports are recorded with reproducible settings that can be reapplied
+  - the system file picker saves each completed output; unsupported formats are not offered. A multi-job export queue and batch/stem rendering remain incomplete
 - **Files** (`lib/ui/file_manager_screen.dart`):
   - import/export portable `.cawproj` projects and `.caw` module source to user-chosen operating-system locations
   - project-local virtual folders support nested create, rename, safe delete, module moves and tags; deleting a folder moves modules to its parent rather than deleting source
