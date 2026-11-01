@@ -514,6 +514,8 @@ class _BuilderTrackControls extends StatelessWidget {
           style: TextStyle(color: Neon.dim, fontSize: 11)),
       );
     }
+    final folders = state.project.layers.where((item) => item.isFolder && item.id != layer.id).toList();
+    final routeId = folders.any((folder) => folder.id == layer.parentId) ? layer.parentId : null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       child: NeonPanel(color: Neon.blue, padding: const EdgeInsets.all(8), child: Column(
@@ -558,6 +560,21 @@ class _BuilderTrackControls extends StatelessWidget {
                 activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v)),
             ])),
           ])),
+          Row(children: [
+            const SizedBox(width: 48, child: Text('ROUTE', style: TextStyle(color: Neon.dim, fontSize: 10))),
+            Expanded(child: DropdownButton<String?>(
+              value: routeId,
+              isExpanded: true,
+              underline: const SizedBox.shrink(),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('Master')),
+                for (final folder in folders)
+                  DropdownMenuItem<String?>(value: folder.id, child: Text(folder.name,
+                    maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: (id) => state.moveLayerIntoFolder(layer, id),
+            )),
+          ]),
         ],
       )),
     );

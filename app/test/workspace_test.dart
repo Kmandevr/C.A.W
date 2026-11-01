@@ -9,6 +9,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/automation_screen.dart';
+import 'package:caw/ui/builder_screen.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
@@ -208,6 +209,30 @@ void main() {
     await tester.pump();
     expect(layer.volume, closeTo(0.72, 0.0001));
     await tester.pump(const Duration(milliseconds: 600));
+  });
+
+  testWidgets('Builder exposes the existing folder-bus route control', (tester) async {
+    final folder = LayerDoc(id: 'bus', name: 'Drum bus', color: 0, isFolder: true, busEnabled: true);
+    final track = LayerDoc(id: 'kick', name: 'Kick', color: 1);
+    state.project = ProjectDoc(id: 'builder-route', name: 'Builder routing', layers: [folder, track]);
+    state.selectedLayerId = track.id;
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: BuilderScreen(state: state)),
+    ));
+
+    expect(find.text('ROUTE'), findsOneWidget);
+    final routePicker = find.ancestor(
+      of: find.text('Master'),
+      matching: find.byType(DropdownButton<String?>),
+    ).first;
+    await tester.tap(routePicker);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Drum bus').last);
+    await tester.pumpAndSettle();
+
+    expect(track.parentId, folder.id);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Mixer focused editor remains usable on phone widths with long effect chains', (tester) async {
@@ -468,7 +493,7 @@ void main() {
     await tester.pump();
     await tester.ensureVisible(find.text('Old bass'));
     expect(find.text('Old bass'), findsOneWidget);
-    expect(find.text('Synths/Bass'), findsOneWidget);
+    expect(find.text('Synths/Bass'), findsWidgets);
 
     final moduleActions = find.byTooltip('Module actions');
     await tester.ensureVisible(moduleActions);
