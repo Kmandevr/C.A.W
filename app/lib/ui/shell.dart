@@ -1,4 +1,4 @@
-// App shell: the crow logo, transport bar (play, BPM, CPU), project menu and navigation between the three areas.
+// App shell: transport, project menu and six workspaces. Mobile groups advanced destinations under More.
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
@@ -119,11 +119,44 @@ class _ShellState extends State<Shell> {
                 bottomNavigationBar: wide
                     ? null
                     : NavigationBar(
-                        height: Neon.compact(context) ? 52 : 64,
-                        selectedIndex: _tab,
-                        onDestinationSelected: (i) => setState(() => _tab = i),
+                        height: 64,
+                        selectedIndex: _tab < 3 ? _tab : 3,
+                        onDestinationSelected: (i) {
+                          if (i < 3) {
+                            setState(() => _tab = i);
+                          } else {
+                            showModalBottomSheet<void>(
+                              context: context,
+                              backgroundColor: Neon.panel,
+                              builder: (sheetContext) => SafeArea(child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  for (final entry in const [
+                                    (3, Icons.account_tree, 'Engine Lab'),
+                                    (4, Icons.show_chart, 'Automation'),
+                                    (5, Icons.ios_share, 'Exporter'),
+                                  ])
+                                    ListTile(
+                                      leading: Icon(entry.$2, color: _tab == entry.$1 ? Neon.green : Neon.dim),
+                                      title: Text(entry.$3),
+                                      selected: _tab == entry.$1,
+                                      onTap: () {
+                                        Navigator.pop(sheetContext);
+                                        setState(() => _tab = entry.$1);
+                                      },
+                                    ),
+                                ],
+                              )),
+                            );
+                          }
+                        },
                         labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-                        destinations: [for (final d in _dest) NavigationDestination(icon: Icon(d.$1), label: d.$2)],
+                        destinations: const [
+                          NavigationDestination(icon: Icon(Icons.code), label: 'Builder'),
+                          NavigationDestination(icon: Icon(Icons.view_timeline), label: 'Arranger'),
+                          NavigationDestination(icon: Icon(Icons.tune), label: 'Mixer'),
+                          NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+                        ],
                       ),
               ),
             );
