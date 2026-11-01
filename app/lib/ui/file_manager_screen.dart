@@ -201,13 +201,15 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               icon: const Icon(Icons.file_upload_outlined), label: const Text('Export .cawproj')),
             OutlinedButton.icon(onPressed: () async {
               await _importProject(context, state);
-              if (mounted) setState(() {
+              if (mounted) {
+                setState(() {
                 _folderPath = '';
                 _query = '';
                 _searchController.clear();
                 _selectedModuleIds.clear();
                 _selectionMode = false;
-              });
+                });
+              }
             }, icon: const Icon(Icons.file_open_outlined), label: const Text('Import project')),
           ]),
         ])),
@@ -355,7 +357,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                   )
                 : Icon(Icons.description_outlined,
                     color: state.isEffect(module.id) ? Neon.pink : state.isPattern(module.id) ? Neon.yellow : Neon.green),
-              trailing: _selectionMode ? null : Wrap(mainAxisSize: MainAxisSize.min, children: [
+              trailing: _selectionMode ? null : Wrap(spacing: 0, runSpacing: 0, children: [
                 IconButton(tooltip: 'Open in Builder', onPressed: () {
                   state.selectModule(module.id);
                   widget.onOpenBuilder();
