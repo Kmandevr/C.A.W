@@ -115,6 +115,13 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Additional CI audit and repair at head fa6c141e
+
+- Exact-head Dart analysis failed before tests ran. The export-history deserializer referenced undefined rawTarget and rawParam; it now reads the serialized target_id and param fields directly with bounded string validation. Existing settings round-trip coverage checks both fields.
+- Engine Lab referenced a nonexistent Neon.violet theme token. Added a dedicated violet theme slot across Calm neon, Night and Amber terminal palettes, and exposed it through Neon.violet; the theme round-trip test iterates every slot.
+- Mixer keyboard resizing and its widget test used Flutter keyboard event types without importing flutter/services.dart. Added the required imports.
+- Re-run App analysis and widget tests on the new head; the failed run did not reach the test step. Engine Linux x64, Linux Arm64, Windows x64 and Linux sanitizers passed on the preceding head; Docs/hygiene also passed there.
+
 ## Additional audit finding at head a8d9ef5d
 
 - A narrow-screen audit found the Arranger toolbar kept its complete control set in a single horizontal row, which could overflow phone widths. It now wraps the controls beneath the section label below 760 px while retaining the desktop row.

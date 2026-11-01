@@ -23,6 +23,7 @@ class CawTheme {
     'pink': 'Effects, errors, keywords',
     'yellow': 'Patterns, numbers, edits',
     'blue': 'Libraries, focus, variables',
+    'violet': 'Modulation, automation and spectrum',
     'layer1': 'Layer colour 1',
     'layer2': 'Layer colour 2',
     'layer3': 'Layer colour 3',
@@ -100,7 +101,7 @@ final calmNeon = CawTheme(
   name: 'Calm neon',
   colors: _palette(const [
     0xFF07070B, 0xFF101018, 0xFF181824, 0xFF2A2A3C, 0xFFE9E9F2, 0xFF8C8CA3, //
-    0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, //
+    0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, //
     0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF,
   ]),
 );
@@ -113,7 +114,7 @@ final starterThemes = [
     glow: false,
     colors: _palette(const [
       0xFF040406, 0xFF0B0B10, 0xFF12121A, 0xFF20202C, 0xFFC4C4D0, 0xFF6C6C80, //
-      0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, //
+      0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, //
       0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6,
     ]),
   ),
@@ -121,7 +122,7 @@ final starterThemes = [
     name: 'Amber terminal',
     colors: _palette(const [
       0xFF0B0804, 0xFF15100A, 0xFF1E170E, 0xFF3A2C18, 0xFFFFD9A0, 0xFFA08060, //
-      0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFFFC861, //
+      0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFFFC861, 0xFFB68AE0, //
       0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFD9A066,
     ]),
   ),
@@ -165,6 +166,7 @@ class Neon {
   static const Color pink = _ThemeColor('pink');
   static const Color yellow = _ThemeColor('yellow');
   static const Color blue = _ThemeColor('blue');
+  static const Color violet = _ThemeColor('violet');
 
   /// Layer colours, in order.
   static const List<Color> layers = [

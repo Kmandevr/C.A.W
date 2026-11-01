@@ -1,6 +1,7 @@
 // Mixer / Editor: detailed channel controls and the shared module inspector.
 // All edits flow through AppState; this screen does not own a second mix or processing model.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../model/app_state.dart';
 import '../model/project.dart';
 import 'param_control.dart';
