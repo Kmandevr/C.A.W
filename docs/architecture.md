@@ -26,15 +26,15 @@ The current app and native implementation are documented in [App](app.md), [Engi
 
 ## 1. Technology stack
 
-**Targets (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, with the web as a later extra. Android comes first, because the owner's phone (a Galaxy S22+) is the test device.
+**Product targets (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, with Android first. Web is not a current release target. The Galaxy S22+ is the primary Android test device. Product targets are not evidence that a platform build is currently shipped or CI-verified.
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| Sound engine | **Custom C++20 core** (owner, 2026-10-28), no platform dependencies | Real-time safe and sandboxed by design. The same code runs on every target, in a Linux CLI for CI and AI agents, and later as WASM for the web |
-| Audio I/O | **miniaudio**, behind a small `engine/platform/` interface | One C library for every target: AAudio on Android, Core Audio on iOS and macOS, WASAPI on Windows, ALSA/PulseAudio on Linux. Public domain or MIT-0 |
-| UI | **Flutter** (owner, 2026-10-28) | One UI codebase for all five targets. One bridge to the engine everywhere (`dart:ffi`). Dart never touches audio samples, so its garbage collector can't cause dropouts |
+| Sound engine | **Custom C++20 core** (owner, 2026-10-28), platform separation under engine/platform/ | Portable core; currently CI-verified on Linux x64, Linux Arm64 and Windows x64, and built into the Android app. iOS/macOS/WASM builds are not currently CI-verified |
+| Audio I/O | **miniaudio**, behind `engine/platform/` | Current host backends are selected in the platform layer; upstream miniaudio supports AAudio/OpenSL ES, Core Audio, WASAPI and ALSA/PulseAudio. Do not infer every backend is currently built or tested by this repository |
+| UI | **Flutter** (owner, 2026-10-28) | One UI codebase; current CI builds Android and Windows app artifacts. Linux analysis/tests run, but Linux is not a shipped artifact; iOS/macOS app builds are not configured |
 | Bridge | Thin C API over the engine, called through `dart:ffi` | Only control messages cross it (play, stop, swap program, set parameter, read meters). No audio data, no per-sample calls |
-| Build | CMake for the engine, Flutter for the app, **all built in GitHub Actions** | The owner works from a phone, so CI builds every installable and the owner downloads it |
+| Build | CMake for the engine, Flutter for the app, GitHub Actions CI | CI currently produces Android and Windows app artifacts and verifies Linux/Windows engine targets; it does not produce every target's installable |
 
 - **[Fact]** miniaudio is public domain or MIT-0 (your choice). Its backends are AAudio (Android 8.0+) and OpenSL ES on Android, Core Audio on macOS and iOS, WASAPI on Windows, and ALSA on Linux. ([github.com/mackron/miniaudio](https://github.com/mackron/miniaudio), 2026-10-28)
 - **[Fact]** Flutter 3.47 supports Android API 24–37, iOS 15+, Windows 10/11, macOS 12+, Debian 10+ and Ubuntu 20.04+ on x64 and Arm64, plus the web. ([docs.flutter.dev](https://docs.flutter.dev/reference/supported-platforms), 2026-10-28)
