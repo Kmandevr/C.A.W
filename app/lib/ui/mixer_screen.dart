@@ -18,6 +18,7 @@ class MixerScreen extends StatefulWidget {
 
 class _MixerScreenState extends State<MixerScreen> {
   double _inspectorFraction = 0.34;
+  int _mobilePage = 0;
 
   Widget _channelPanel(int columns) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -109,12 +110,135 @@ class _MixerScreenState extends State<MixerScreen> {
           ]);
         })
       else ...[
-        _channelPanel(columns),
-        const SizedBox(height: 16),
-        _ModuleInspector(state: s, onOpenBuilder: widget.onOpenBuilder),
+        SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(value: 0, label: Text('Channels'), icon: Icon(Icons.tune)),
+            ButtonSegment(value: 1, label: Text('Focused editor'), icon: Icon(Icons.edit_note)),
+          ],
+          selected: {_mobilePage},
+          showSelectedIcon: false,
+          onSelectionChanged: (value) => setState(() => _mobilePage = value.first),
+        ),
+        const SizedBox(height: 12),
+        if (_mobilePage == 0)
+          if (s.project.layers.isEmpty)
+            const NeonPanel(child: Text('No channels yet. Add a track in Arranger.'))
+          else
+            for (var i = 0; i < s.project.layers.length; i++)
+              _MobileChannelRow(
+                state: s,
+                layer: s.project.layers[i],
+                index: i,
+                selected: s.selectedLayerId == s.project.layers[i].id,
+                onSelect: () => setState(() {
+                  s.selectLayer(s.project.layers[i]);
+                  _mobilePage = 1;
+                }),
+              )
+        else
+          _MobileFocusedEditor(state: s, onOpenBuilder: widget.onOpenBuilder),
       ],
     ]);
   });
+}
+
+class _MobileChannelRow extends StatelessWidget {
+  const _MobileChannelRow({
+    required this.state,
+    required this.layer,
+    required this.index,
+    required this.selected,
+    required this.onSelect,
+  });
+  final AppState state;
+  final LayerDoc layer;
+  final int index;
+  final bool selected;
+  final VoidCallback onSelect;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: NeonPanel(
+      color: selected ? Neon.blue : Neon.layer(layer.color),
+      padding: const EdgeInsets.all(10),
+      child: ValueListenableBuilder<int>(
+        valueListenable: state.values,
+        builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(child: InkWell(
+              onTap: onSelect,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800)),
+              ),
+            )),
+            IconButton(tooltip: layer.mute ? 'Unmute' : 'Mute',
+              onPressed: () => state.mixLayer(layer, mute: !layer.mute),
+              icon: Icon(Icons.volume_off, color: layer.mute ? Neon.pink : Neon.dim)),
+            IconButton(tooltip: layer.solo ? 'Unsolo' : 'Solo',
+              onPressed: () => state.mixLayer(layer, solo: !layer.solo),
+              icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim)),
+            IconButton(tooltip: 'Open focused channel editor', onPressed: onSelect,
+              icon: const Icon(Icons.chevron_right, color: Neon.blue)),
+          ]),
+          Row(children: [
+            const SizedBox(width: 48, child: Text('LEVEL', style: TextStyle(color: Neon.dim, fontSize: 10))),
+            Expanded(child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
+              activeColor: Neon.green, onChanged: (v) => state.mixLayer(layer, volume: v))),
+            SizedBox(width: 38, child: Text('${(layer.volume * 100).round()}%',
+              textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.green))),
+          ]),
+          Row(children: [
+            const SizedBox(width: 48, child: Text('PAN', style: TextStyle(color: Neon.dim, fontSize: 10))),
+            Expanded(child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
+              activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v))),
+            SizedBox(width: 38, child: Text(layer.pan.abs() < .01 ? 'C' :
+              '${(layer.pan.abs() * 100).round()}${layer.pan < 0 ? 'L' : 'R'}',
+              textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.blue))),
+          ]),
+          ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
+            final meter = index < state.layerMeters.length ? state.layerMeters[index] : null;
+            return Bar(value: meter?.peak ?? 0,
+              color: meter?.overloaded == true ? Neon.pink : Neon.green, height: 5);
+          }),
+        ]),
+      ),
+    ),
+  );
+}
+
+class _MobileFocusedEditor extends StatelessWidget {
+  const _MobileFocusedEditor({required this.state, required this.onOpenBuilder});
+  final AppState state;
+  final VoidCallback onOpenBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    final layers = state.project.layers;
+    final selected = layers.where((layer) => layer.id == state.selectedLayerId).firstOrNull ?? layers.firstOrNull;
+    if (selected == null) {
+      return const NeonPanel(child: Text('Add a track in Arranger to open its focused editor.'));
+    }
+    final index = layers.indexOf(selected);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      NeonPanel(color: Neon.blue, child: DropdownButton<String>(
+        value: selected.id,
+        isExpanded: true,
+        underline: const SizedBox.shrink(),
+        items: [for (final layer in layers) DropdownMenuItem(value: layer.id, child: Text(layer.name))],
+        onChanged: (id) {
+          final layer = layers.where((item) => item.id == id).firstOrNull;
+          if (layer != null) state.selectLayer(layer);
+        },
+      )),
+      const SizedBox(height: 10),
+      _ChannelStrip(state: state, layer: selected, index: index),
+      const SizedBox(height: 12),
+      _ModuleInspector(state: state, onOpenBuilder: onOpenBuilder),
+    ]);
+  }
 }
 
 class _ChannelStrip extends StatelessWidget {
