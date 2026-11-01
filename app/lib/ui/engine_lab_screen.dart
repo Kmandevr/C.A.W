@@ -101,16 +101,16 @@ class _SignalPath extends StatelessWidget {
           style: Neon.code(size: 10, color: Neon.blue)),
       ]),
       const SizedBox(height: 8),
-      ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
-        final peak = index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0;
-        return Row(children: [
-          Expanded(child: PeakMeter(state: state,
-            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
-            color: Neon.green)),
-          const SizedBox(width: 8),
-          Text(peak.toStringAsFixed(3), style: Neon.code(size: 10, color: Neon.green)),
-        ]);
-      }),
+      Row(children: [
+        Expanded(child: PeakMeter(state: state,
+          read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
+          color: Neon.green)),
+        const SizedBox(width: 8),
+        ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
+          final peak = index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0;
+          return Text(peak.toStringAsFixed(3), style: Neon.code(size: 10, color: Neon.green));
+        }),
+      ]),
     ])));
   }
 }
