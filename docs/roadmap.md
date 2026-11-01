@@ -84,11 +84,11 @@ CI runs the engine tests and golden renders, and checks the acceptance test's ti
 
 Owner-approved scope originating 2026-10-28 ([decisions](decisions.md)); the current implementation ledger is [engine-build-status](engine-build-status.md). This section separates what shipped from what remains.
 
-**[Fact] Implemented:** module params/globals/exports/functions; code-defined pattern playback; piano roll and drum grid; note expressions and lane curves; pattern generator actions; house synth patch format and playback; MIDI pattern import/export; arrangement clips; nested folders and stereo folder buses; track/folder volume-pan automation; on-screen keyboard input; documented function library and in-app help.
+**[Fact] Implemented:** module params/globals/exports/functions; code-defined pattern playback; piano roll and drum grid; note expressions and lane curves; pattern generator actions; house synth patch format and playback; MIDI pattern import/export; arrangement clips; nested folders and stereo folder buses; track/folder volume-pan automation; documented function library and in-app help.
 
 **[Fact] Partial:** MIDI 2.0 UMP decoder and bounded input queue exist, but no USB/Bluetooth device connection or live Engine voice routing. Export includes WAV loop/free-length/one-shot/wavetable and MIDI; SFZ multisample authoring and stems export are not implemented. Module/global parameter automation is not implemented. Export queue is in-memory, not persistent.
 
-**[Deferred or not implemented]:** kit-row pattern routing, procedural code patterns/Freeze, scenes/session launcher (retired), full modulation-link/routing workflow, USB/Bluetooth MIDI device I/O, SFZ multisample workflow and stems export. The current app-usable v2 priority is module/global automation, then SFZ and stems export, unless the owner changes it.
+**[Not implemented]:** kit-row pattern routing and procedural code patterns/Freeze. Scenes/session launcher are retired. **[Partial]:** module/global modulation tools and export-signal sidechain ducking exist, but a general routing/modulation connection workflow is incomplete. **[Not implemented]:** USB/Bluetooth MIDI device I/O, SFZ multisample workflow and stems export. The current app-usable v2 priority is module/global automation, then SFZ and stems export, unless the owner changes it.
 
 For exact implementation boundaries, use [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
 
