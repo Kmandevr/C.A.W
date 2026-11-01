@@ -3,6 +3,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import '../engine/engine.dart';
 import '../model/app_state.dart';
 import '../model/project.dart';
 import 'theme.dart';
@@ -154,7 +155,7 @@ class _MasterScopeState extends State<_MasterScope> {
           return SizedBox(
             height: 92,
             width: double.infinity,
-            child: CustomPaint(painter: _ScopePainter(_samples)),
+            child: CustomPaint(painter: _ScopePainter(_samples, _)),
           );
         },
       ),
@@ -165,8 +166,9 @@ class _MasterScopeState extends State<_MasterScope> {
 }
 
 class _ScopePainter extends CustomPainter {
-  const _ScopePainter(this.samples);
+  const _ScopePainter(this.samples, this.revision);
   final Float32List samples;
+  final int revision;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -196,5 +198,5 @@ class _ScopePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ScopePainter old) => !identical(old.samples, samples);
+  bool shouldRepaint(covariant _ScopePainter old) => old.revision != revision;
 }
