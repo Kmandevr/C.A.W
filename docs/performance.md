@@ -86,8 +86,8 @@ Timed release run after the fixes (same server, a single run, so noisy):
 ### Checked and fine
 
 - **Stopped:** the callback just writes silence; costs about 0 µs.
-- **Exports:** run on their own `Engine` instance in a worker isolate, so they never touch live playback state. They compete for CPU only, and the audio thread has the higher priority on Android.
-  - **[Assumption]** That priority holds for AAudio's callback thread. Check it on the device under a long export.
+- **Offline WAV exports:** run on their own `Engine` instance through the native bounded worker pool, so they never touch live playback state. They compete for CPU only; Android callback-thread priority still requires physical-device verification.
+- **MIDI pattern import/export:** the native conversion API is currently called synchronously from the UI isolate. It is not routed through the native worker pool. Large-file responsiveness has not been benchmarked; move it off the UI isolate if measurements show a stall.
 - **Live code edits:**
   - A swap compiles on the control thread, about 0.4–0.5 ms for 16 layers.
   - For 20 ms the audio thread runs both the old and the new code to crossfade.
@@ -143,7 +143,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 
 ## UI update isolation
 - Mixer master gain now uses a dedicated native command (`caw_engine_set_master`) with a 5 ms audio-thread ramp. Dragging the master slider no longer serializes and recompiles the entire project; the UI updates through the scoped `values` notifier. This removes project-compilation work from the master-gain gesture, but device-level latency and CPU savings have not yet been benchmarked.
-- MIDI file generation runs in a worker isolate before the system save picker opens; the UI remains available during native MIDI serialization.
+- MIDI pattern import/export is still synchronous on the UI isolate before/after the system file picker. This is a known potential UI stall for larger files; it has not been benchmarked or moved to the native worker pool.
 
 
 - The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
