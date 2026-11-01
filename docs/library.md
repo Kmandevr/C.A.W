@@ -2,7 +2,6 @@
 title: Function library
 summary: Every built-in function, constant and library function the module language offers, generated from the engine.
 updated: 2026-10-31
-covers: [engine/src/builtins.cpp, engine/lib/]
 ---
 
 # Function library
