@@ -287,8 +287,8 @@ class _SpectrumPainter extends CustomPainter {
     final barPaint = Paint()..color = Neon.violet;
     for (var i = 0; i < bins.length; i++) {
       final magnitude = math.max(bins[i], 1e-6);
-      final db = (20 * math.log(magnitude) / math.ln10).clamp(-72.0, 0.0);
-      final height = ((db + 72) / 72) * size.height;
+      final db = (20 * math.log(magnitude) / math.ln10).clamp(-72.0, 0.0).toDouble();
+      final height = ((db + 72) / 72 * size.height).toDouble();
       canvas.drawRect(Rect.fromLTWH(i * slot + slot * 0.15, size.height - height,
         math.max(1.0, slot * 0.7), height), barPaint);
     }
