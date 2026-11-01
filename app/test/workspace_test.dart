@@ -8,6 +8,7 @@ import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/model/settings.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
@@ -242,6 +243,29 @@ void main() {
   });
 
 
+
+  testWidgets('Exporter applies saved profiles and exposes recent history', (tester) async {
+    state.settings.exportProfiles = [
+      const ExportProfile(name: 'Master WAV', kind: 'loop', sampleRate: 44100, float32: true),
+    ];
+    state.settings.exportHistory = [
+      ExportHistoryEntry(fileName: 'Recent_take.wav', kind: 'loop',
+        createdAtMs: DateTime(2026, 11, 1).millisecondsSinceEpoch),
+    ];
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ExporterScreen(state: state)),
+    ));
+
+    expect(find.text('Master WAV'), findsOneWidget);
+    expect(find.text('Recent_take.wav'), findsOneWidget);
+    await tester.tap(find.text('Choose a saved profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Master WAV').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Advanced'), findsOneWidget);
+    expect(find.text('44.1 kHz'), findsOneWidget);
+    expect(find.text('32-bit float'), findsOneWidget);
+  });
 
   testWidgets('Exporter switches between quick loop and advanced MIDI options', (tester) async {
     await tester.pumpWidget(MaterialApp(
