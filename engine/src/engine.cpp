@@ -685,7 +685,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 pl.pattern = compileArrangement(w.clips, sources, p.beatsPerBar, p.loopSteps());
             }
             pl.w.steps = 0;  // arrangement follows the project transport, not an individual clip loop
-            layerState += static_cast<int64_t>(kVoices - 1) * modules_.at(pl.ids.front()).program->stateSize;
+            const Program& gen = *modules_.at(pl.ids.front()).program;
+            layerState += static_cast<int64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) * gen.stateSize;
         } else if (!w.pattern.empty() && !pl.ids.empty()) {
             auto it = modules_.find(w.pattern);
             if (it != modules_.end() && it->second.pattern) {
