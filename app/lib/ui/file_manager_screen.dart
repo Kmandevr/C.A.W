@@ -125,6 +125,26 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     state.setModuleTags(module.id, value.split(','));
   }
 
+  Future<void> _saveSearch() async {
+    if (_query.trim().isEmpty) return;
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save library search'),
+        content: TextField(controller: controller, autofocus: true,
+          decoration: const InputDecoration(labelText: 'Search name')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Save')),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name != null && name.trim().isNotEmpty) state.saveLibrarySearch(name, _query);
+  }
+
   void _notice(String message, {bool error = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(message),
@@ -224,7 +244,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search name, type or tags'),
               onChanged: (value) => setState(() => _query = value),
             )),
-            const SizedBox(width: 8),
+            IconButton(tooltip: 'Save current search', onPressed: _query.trim().isEmpty ? null : _saveSearch,
+              icon: const Icon(Icons.bookmark_add_outlined)),
+            const SizedBox(width: 4),
             DropdownButton<String>(
               value: _sort,
               underline: const SizedBox.shrink(),
@@ -235,6 +257,17 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
               onChanged: (value) { if (value != null) setState(() => _sort = value); },
             ),
           ]),
+          if (state.project.savedLibrarySearches.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 6),
+              child: Wrap(spacing: 6, runSpacing: 4, children: [
+                for (final entry in state.project.savedLibrarySearches.entries)
+                  InputChip(
+                    label: Text(entry.key),
+                    tooltip: 'Search: ${entry.value}',
+                    onPressed: () => setState(() => _query = entry.value),
+                    onDeleted: () => state.deleteLibrarySearch(entry.key),
+                  ),
+              ])),
           if (modules.isEmpty)
             Padding(padding: const EdgeInsets.only(top: 12),
               child: Text(_query.isEmpty ? 'This folder is empty.' : 'No modules match this search.',
