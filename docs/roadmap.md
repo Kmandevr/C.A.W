@@ -1,7 +1,7 @@
 ---
 title: Roadmap
 summary: Staged plan from the bare-bones v1 (build sounds, stack them into loops, export) to commercial release, with v1's scope, acceptance test and build order.
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Roadmap
@@ -132,6 +132,8 @@ GitHub App with device-flow sign-in, a library repo template, tree-diff sync, at
 macOS and Linux desktop apps, then iOS once its distribution question is settled. A CLAP plugin of the engine, wrapped into VST3 and AU by clap-wrapper.
 
 ## Stage 5 — Advanced instrument
+
+The detailed, code-checked status and recommended sequence for music-production workflows lives in the [music workflow feature-gap plan](music-workflow-feature-gap-plan.md). It distinguishes what the app already implements from partial foundations and future work. Follow that plan before duplicating existing systems. In brief: finish piano-roll expression/generator tools; complete mixer routing; add basic non-destructive audio clips; build sample editing and multisample mapping; complete USB/Bluetooth MIDI connectivity; then improve arrangement, stems and batch export. Recording and comping remain deferred unless the owner changes scope.
 
 - timeline arranger foundation is now in v2; remaining work includes more editing polish, clip-following automation and plugin/global parameter automation
 - the sequencing mini-language
