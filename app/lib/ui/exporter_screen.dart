@@ -160,18 +160,18 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final saved = await s.settings.saveExportProfile(profile);
       if (mounted) {
         setState(() {
-        _profileName = saved ? profile.name : null;
-        if (!saved) {
-          _message = 'Profile limit reached (32) or the name is invalid.';
-          _messageIsError = true;
-        }
+          _profileName = saved ? profile.name : null;
+          if (!saved) {
+            _message = 'Profile limit reached (32) or the name is invalid.';
+            _messageIsError = true;
+          }
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-        _message = 'Profile could not be saved: $e';
-        _messageIsError = true;
+          _message = 'Profile could not be saved: $e';
+          _messageIsError = true;
         });
       }
     }
@@ -186,8 +186,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-        _message = 'Profile could not be deleted: $e';
-        _messageIsError = true;
+          _message = 'Profile could not be deleted: $e';
+          _messageIsError = true;
         });
       }
     }
@@ -270,14 +270,14 @@ class _ExporterScreenState extends State<ExporterScreen> {
         }
         setState(() => _job = job);
         _poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
-          if (mounted) {
-            setState(() {});
+          if (mounted) setState(() {});
         });
         final error = await job.result;
         if (error != null) {
-          if (mounted) setState(() {
-            _message = error == 'cancelled' ? 'Queued export cancelled.' : 'Queued export failed: $error';
-            _messageIsError = error != 'cancelled';
+          if (mounted) {
+            setState(() {
+              _message = error == 'cancelled' ? 'Queued export cancelled.' : 'Queued export failed: $error';
+              _messageIsError = error != 'cancelled';
             });
           }
           return false;
@@ -298,6 +298,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
       if (saved == null) {
         if (mounted) {
           setState(() { _message = 'Queue paused: destination picker closed.'; _messageIsError = false; });
+        }
         return false;
       }
       String? warning;
@@ -316,10 +317,12 @@ class _ExporterScreenState extends State<ExporterScreen> {
       } catch (e) {
         warning = 'Export saved, but history could not be updated: $e';
       }
-      if (mounted) setState(() {
-        _message = warning ?? 'Saved ${item.fileName}';
-        _messageIsError = warning != null;
-      });
+      if (mounted) {
+        setState(() {
+          _message = warning ?? 'Saved ${item.fileName}';
+          _messageIsError = warning != null;
+        });
+      }
       return true;
     } catch (e) {
       if (mounted) setState(() { _message = 'Queued export failed: $e'; _messageIsError = true; });
@@ -334,10 +337,12 @@ class _ExporterScreenState extends State<ExporterScreen> {
           // Temporary-file cleanup must not hide the export result.
         }
       }
-      if (mounted) setState(() {
-        _job = null;
-        _saving = false;
-      });
+      if (mounted) {
+        setState(() {
+          _job = null;
+          _saving = false;
+        });
+      }
     }
   }
 
@@ -350,9 +355,10 @@ class _ExporterScreenState extends State<ExporterScreen> {
     try {
       while (_queue.isNotEmpty && mounted && !_cancelQueueRequested) {
         final item = _queue.first;
-        if (mounted) setState(() {
-          _message = 'Queue ${completed + 1} of $total · ${item.fileName}';
-          _messageIsError = false;
+        if (mounted) {
+          setState(() {
+            _message = 'Queue ${completed + 1} of $total · ${item.fileName}';
+            _messageIsError = false;
           });
         }
         final saved = await _runQueuedItem(item);
@@ -440,8 +446,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
         _message = null;
       });
       _poll = Timer.periodic(const Duration(milliseconds: 100), (_) {
-        if (mounted) {
-          setState(() {});
+        if (mounted) setState(() {});
       });
 
       final error = await startedJob.result;
@@ -452,8 +457,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
         setState(() {
           _message = error == 'cancelled' ? 'Export cancelled.' : 'Export failed: $error';
           _messageIsError = error != 'cancelled';
-          });
-        }
+        });
         return;
       }
 
@@ -473,8 +477,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-        _message = 'Export failed: $e';
-        _messageIsError = true;
+          _message = 'Export failed: $e';
+          _messageIsError = true;
         });
       }
     } finally {

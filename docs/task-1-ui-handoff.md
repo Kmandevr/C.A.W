@@ -115,6 +115,10 @@ The UI documents these boundaries rather than simulating them. These capabilitie
 - Verification is pending the exact-head App workflow for this commit.
 
 
+## Analyzer style cleanup correction at head 785b1331
+
+- The first automated brace pass was too broad and malformed nested Exporter callbacks. Restored the two affected UI files from the previous known-good commit and reapplied each lint fix with explicit block boundaries. The new exact-head App workflow must validate syntax and analyzer output before proceeding.
+
 ## Analyzer style cleanup at head f91797bd
 
 - The analyzer then reported only style and deprecation infos. Converted the flagged single-statement conditionals in settings, Exporter and Files to explicit blocks. Replaced deprecated Semantics.focusable with the current focused property tied to the splitter FocusNode, and updated the accessibility test to verify the node can request focus.
