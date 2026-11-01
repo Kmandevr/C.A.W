@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:caw/actions/actions.dart';
 import 'package:caw/actions/key_event.dart';
+import 'package:caw/actions/macro.dart';
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
