@@ -7,46 +7,99 @@ import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-class MixerScreen extends StatelessWidget {
+class MixerScreen extends StatefulWidget {
   const MixerScreen({super.key, required this.state, required this.onOpenBuilder});
   final AppState state;
   final VoidCallback onOpenBuilder;
 
   @override
+  State<MixerScreen> createState() => _MixerScreenState();
+}
+
+class _MixerScreenState extends State<MixerScreen> {
+  double _inspectorFraction = 0.34;
+
+  Widget _channelPanel(int columns) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('CHANNELS', style: TextStyle(color: Neon.green, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      if (widget.state.project.layers.isEmpty)
+        const NeonPanel(child: Text('No channels yet. Add a track in Arranger.'))
+      else
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: widget.state.project.layers.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            mainAxisExtent: 224,
+          ),
+          itemBuilder: (context, index) => _ChannelStrip(
+            state: widget.state,
+            layer: widget.state.project.layers[index],
+            index: index,
+          ),
+        ),
+    ],
+  );
+
+  @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, constraints) {
-    final columns = constraints.maxWidth >= 1100 ? 4 : constraints.maxWidth >= 680 ? 2 : 1;
+    final wide = constraints.maxWidth >= 1200;
+    final columns = constraints.maxWidth >= 1100 ? 3 : constraints.maxWidth >= 680 ? 2 : 1;
+    final s = widget.state;
     return ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 96), children: [
       const Text('MIXER / EDITOR', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
       const Text('Shared project channels · live engine controls', style: TextStyle(color: Neon.dim, fontSize: 11)),
       const SizedBox(height: 12),
       NeonPanel(color: Neon.pink, child: ValueListenableBuilder<int>(
-        valueListenable: state.values,
+        valueListenable: s.values,
         builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Expanded(child: Text('MASTER OUTPUT', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800))),
-            Text('${(state.project.master * 100).round()}%', style: Neon.code(color: Neon.pink)),
+            Text('${(s.project.master * 100).round()}%', style: Neon.code(color: Neon.pink)),
           ]),
-          Slider(value: state.project.master.clamp(0.0, 1.0).toDouble(), min: 0, max: 1, activeColor: Neon.pink,
-            onChanged: (v) => state.editProject((p) => p.master = v)),
-          Text('Peak L ${state.meters.peakL.toStringAsFixed(3)}   Peak R ${state.meters.peakR.toStringAsFixed(3)}',
+          Slider(value: s.project.master.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
+            activeColor: Neon.pink, onChanged: (v) => s.editProject((p) => p.master = v)),
+          Text('Peak L ${s.meters.peakL.toStringAsFixed(3)}   Peak R ${s.meters.peakR.toStringAsFixed(3)}',
             style: Neon.code(size: 12, color: Neon.dim)),
         ]),
       )),
       const SizedBox(height: 14),
-      const Text('CHANNELS', style: TextStyle(color: Neon.green, fontWeight: FontWeight.w800)),
-      const SizedBox(height: 8),
-      if (state.project.layers.isEmpty)
-        const NeonPanel(child: Text('No channels yet. Add a track in Arranger.'))
-      else
-        GridView.builder(
-          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-          itemCount: state.project.layers.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns, crossAxisSpacing: 10, mainAxisSpacing: 10, mainAxisExtent: 224),
-          itemBuilder: (context, index) => _ChannelStrip(state: state, layer: state.project.layers[index], index: index),
-        ),
-      const SizedBox(height: 16),
-      _ModuleInspector(state: state, onOpenBuilder: onOpenBuilder),
+      if (wide)
+        LayoutBuilder(builder: (context, inner) {
+          final dividerWidth = 12.0;
+          final available = inner.maxWidth - dividerWidth;
+          final inspectorWidth = available * _inspectorFraction;
+          final channelWidth = available - inspectorWidth;
+          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(width: channelWidth, child: _channelPanel(columns)),
+            MouseRegion(
+              cursor: SystemMouseCursors.resizeColumn,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: (details) => setState(() {
+                  _inspectorFraction = (_inspectorFraction - details.delta.dx / available)
+                    .clamp(0.24, 0.52).toDouble();
+                }),
+                child: SizedBox(width: dividerWidth, height: 520,
+                  child: Center(child: Container(width: 2, height: 72,
+                    decoration: BoxDecoration(color: Neon.blue, borderRadius: BorderRadius.circular(2)))),
+                ),
+              ),
+            ),
+            SizedBox(width: inspectorWidth,
+              child: _ModuleInspector(state: s, onOpenBuilder: widget.onOpenBuilder)),
+          ]);
+        })
+      else ...[
+        _channelPanel(columns),
+        const SizedBox(height: 16),
+        _ModuleInspector(state: s, onOpenBuilder: widget.onOpenBuilder),
+      ],
     ]);
   });
 }
