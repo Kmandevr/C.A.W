@@ -516,7 +516,8 @@ class AppState extends ChangeNotifier {
   void saveLibrarySearch(String name, String query) {
     final key = name.trim();
     final value = query.trim();
-    if (key.isEmpty || value.isEmpty) return;
+    if (key.isEmpty || value.isEmpty || key.length > 64 || value.length > 256) return;
+    if (!project.savedLibrarySearches.containsKey(key) && project.savedLibrarySearches.length >= 32) return;
     project.savedLibrarySearches[key] = value;
     _changed(engine: false);
   }
