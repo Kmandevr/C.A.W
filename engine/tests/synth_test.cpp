@@ -417,5 +417,17 @@ TEST(synth_patch_can_expose_more_than_64_parameters) {
     for (int i = 0; i < 30; ++i) many += "fx delay\n";
     const SynthResult translated = translateSynth(many);
     CHECK(translated.ok);
-    if (translated.ok) CHECK(translated.program->params.size() > 64);
+    if (translated.ok) {
+        auto countParams = [](const std::string& code) {
+            size_t count = 0, pos = 0;
+            while ((pos = code.find("param ", pos)) != std::string::npos) {
+                ++count;
+                pos += 6;
+            }
+            return count;
+        };
+        size_t count = countParams(translated.generator);
+        for (const SynthFx& fx : translated.fx) count += countParams(fx.source);
+        CHECK(count > 64);
+    }
 }
