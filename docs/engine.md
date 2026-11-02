@@ -217,8 +217,8 @@ The language has no I/O, loops or recursion, so a program's cost is fixed when i
 - 64 KB of source
 - nesting 128 deep
 - 1024 values (registers)
-- 32 params and globals
-- 16 exports and 32 imports
+- dynamically sized params and globals (subject to source/register representation limits)
+- 16 exports
 - functions nested 32 calls deep, and 4096 function calls expanded in all (each call is copied in place, so nested calls multiply)
 - 1,048,576 numbers (8 MB) of state for oscillators, envelopes, filters, delays and reverbs
 - across the whole project, 64 MB of such state (each module also keeps a copy for seams). A layer that would pass it stays silent, with a warning
