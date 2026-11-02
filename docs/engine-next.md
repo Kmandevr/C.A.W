@@ -1,13 +1,13 @@
 ---
 title: Modular adaptive engine blueprint
-summary: Deferred native-engine blueprint with implementation boundaries; current code status is tracked separately.
+summary: Complete native-engine architecture and implementation requirements; actual progress and recovery are tracked separately.
 updated: 2026-11-02
 covers: [engine/, app/]
 ---
 
 # Modular adaptive engine blueprint
 
-**Status: owner direction and implementation blueprint.** This combines earlier CAW decisions with the clarified 2026-10-30 direction. It describes planned work, not features already built. Current implementation remains documented in [engine](engine.md), [app](app.md) and [performance](performance.md).
+**Status: owner direction and implementation blueprint.** This combines earlier CAW decisions with the clarified 2026-10-30 direction. It describes planned work, not features already built. Actual implementation status is documented in [engine implementation status](engine-build-status.md), [milestone progress](engine-progress.md), [recovery instructions](engine-recovery.md), [engine](engine.md), [app](app.md) and [performance](performance.md).
 
 ## 1. Product boundary
 
