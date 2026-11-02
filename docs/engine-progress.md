@@ -10,7 +10,7 @@ updated: 2026-11-02
 ## Current state
 
 - **Branch:** `feature/native-engine-refactor-integration`
-- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison before this ledger refresh: 140 commits ahead.
+- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison before this ledger refresh: 147 commits ahead.
 - **Starting point:** `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`, which was 15 commits ahead and 0 behind Main when selected.
 - **Latest code/test checkpoint:** `8f43d76036cadcc3998eed6747a94d9e0c3f0480`; latest docs/log checkpoint: `78bc7d2e4c8265337861511a09feae897fc0d223`.
 - **Previous fully verified native code checkpoint:** `07c796f8e745cd44e7be37992747b8263ac27e9a` (Engine, App and Docs CI all passed at `1269019`). The compiler-budget follow-up and all subsequent project-content changes still require fresh CI verification; the last known green Engine/App/Docs runs predate them.
@@ -102,7 +102,7 @@ updated: 2026-11-02
 
 - Removed the 4096-step pattern/MIDI import cap. Pattern length, note positions and MIDI import are now bounded by the signed 32-bit step representation and explicit file/event safety limits, not a fixed 4096-step product ceiling.
 - Replaced fixed 16-point bend/pressure/timbre arrays with dynamic curve vectors. Pattern parsing/evaluation uses vector points; Engine computes the maximum curve capacity for each prepared pattern and reserves each voice's curve storage before playback.
-- Chain rebuilds reserve at least the prior chain's expression capacity, so hot-swapping voices copies existing expressions without allocating on the audio callback. A larger new pattern forces preparation of a larger capacity before activation.
+- Chain rebuilds reserve at least the prior chain's expression capacity, so hot-swapping voices copies existing expressions without allocating on the audio callback. A larger new pattern forces preparation of a larger capacity before activation. Pattern publication is ordered after successful chain installation so a failed install cannot expose larger curves to an undersized old chain.
 - Added tests for 5000-step patterns, 20-point note curves, and Engine playback of a 20-point expression.
 - **Verification:** fresh CI for these changes is not yet inspectable.
 
