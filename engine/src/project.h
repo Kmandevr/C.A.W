@@ -33,6 +33,13 @@ struct ClipSpec {
 struct AutomationPointSpec { double step = 0, value = 0; };
 struct AutomationLaneSpec { std::string target; std::vector<AutomationPointSpec> points; };
 
+struct ProjectAutomationLaneSpec {
+    std::string targetType;  // param or global
+    std::string moduleId;    // required for param
+    std::string target;      // parameter/global name
+    std::vector<AutomationPointSpec> points;
+};
+
 struct LayerSpec {
     std::string id, name;
     std::vector<std::string> chain;  // module ids: generator first, then effects
@@ -62,6 +69,7 @@ struct ProjectSpec {
     std::vector<DependencyRef> dependencies;
     std::vector<ModuleSpec> modules;
     std::vector<LayerSpec> layers;
+    std::vector<ProjectAutomationLaneSpec> automation;
     std::vector<std::string> auditionChain;  // the Builder's preview, if any
     int auditionSteps = 0;
     std::string auditionPattern;
