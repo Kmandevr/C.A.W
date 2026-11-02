@@ -170,7 +170,9 @@ class _ProjectCurvePainter extends CustomPainter {
       path.lineTo(at.dx, at.dy);
     }
     canvas.drawPath(path, Paint()..color = Neon.blue..style = PaintingStyle.stroke..strokeWidth = 2);
-    for (final point in sorted) canvas.drawCircle(map(point), 4, Paint()..color = Neon.blue);
+    for (final point in sorted) {
+      canvas.drawCircle(map(point), 4, Paint()..color = Neon.blue);
+    }
   }
 
   @override
