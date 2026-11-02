@@ -44,6 +44,14 @@ updated: 2026-11-02
 - The app C API/FFI remains API v1. The app submits project compilation, source checks and offline WAV renders to the native worker pool; it does not submit graph execution or native module work.
 - Existing synth modulation, sidechain ducking effects, per-note expression and project automation are partial foundations, not the unified parameter/routing system requested.
 
+## Latest implementation slice — dynamic effect-chain length
+
+- Removed the fixed nine-module/eight-effect limit from ProjectSpec, project JSON chain parsing, Engine chain preparation and synth patch parsing.
+- The project parser now preserves every string module ID in a chain; Engine no longer warns and truncates the chain after its ninth entry; synth patch translation no longer rejects the ninth effect.
+- Added regression tests for a 12-entry project chain and a nine-effect synth patch. Updated engine, synth, decisions and log documentation.
+- This is a targeted removal only. Fixed layer slots, export buffers, voice arrays and automation arrays remain separate work.
+- **Verification:** no fresh Engine/App/Docs workflow result has yet been observed for commits 20081ae through 6734c29. The previously green runs at 1269019 predate this slice and do not verify it.
+
 ## Fixed limits and correctness risks
 
 Graph compile/prepare now require an explicit working-memory budget and preflight internal storage estimates; allocator overhead is implementation-dependent, so actual allocation failure is still handled. The budget is not yet derived from hardware or passed by the active Engine. The following limits and loss paths remain in the current source and must be converted to explicit, configurable resource budgets or dynamic storage:
@@ -74,7 +82,7 @@ Graph compile/prepare now require an explicit working-memory budget and prefligh
 - **Current branch tip at this status record:** 34 commits ahead, 0 behind Main; native test commit `e815b495a8055e58fd9f7079641173f24aa251d4` is the implementation checkpoint recorded here.
 - **Verified graph-budget implementation:** code commit `07c796f8` at branch checkpoint `1269019` passed Engine workflow `41403872524` on Linux x64, Linux Arm64, Windows x64 and Linux sanitizers; all four CTest shards passed. The follow-up compiler-budget test commit `e815b495` is awaiting fresh CI. The earlier docs-only checkpoint `1370a43` also eventually passed all four Engine jobs in run `41402930328`; Windows was delayed but did not fail.
 - **Docs/hygiene:** workflow `41403872717` passed at checkpoint `1269019`; the follow-up test/status commit will trigger a fresh Docs check.
-- **App:** workflow `41403872504` at checkpoint `1269019` — Dart analysis, Dart tests, Windows app and Android APK all **SUCCESS**. Earlier App run `41401179166` also passed at `eb465f4`. The follow-up change is native test/header-comment only; fresh App CI is still required.
+- **App:** workflow `41403872504` at checkpoint `1269019` — Dart analysis, Dart tests, Windows app and Android APK all **SUCCESS**. Earlier App run `41401179166` also passed at `eb465f4`. Fresh App CI is required for the subsequent chain-cap removal commits.
 - **Earlier Engine/Docs:** `41401179084` and `41401179017` at `eb465f4` both passed.
 - **Earlier Docs failure:** `41401014639` failed because progress/recovery docs were not linked from `docs/index.md`; fixed in `d1677c7`, later Docs workflows passed. Do not repeat this omission.
 - **Local build/tests:** unavailable in this connector-only workflow. GitHub Actions is the compiler/test runner; never claim local reproduction.
