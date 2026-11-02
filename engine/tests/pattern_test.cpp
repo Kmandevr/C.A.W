@@ -415,3 +415,13 @@ TEST(pattern_parser_accepts_more_than_4096_notes) {
     CHECK_EQ(parsed.pattern->notes.size(), size_t{4097});
     CHECK_EQ(parsed.pattern->events.size(), size_t{8194});
 }
+
+TEST(pattern_lengths_can_exceed_4096_steps) {
+    const PatternResult parsed = parsePattern(
+        "---\nkind: pattern\nlength: 5000\n---\n4500 C4 1\n");
+    CHECK(parsed.pattern != nullptr);
+    if (!parsed.pattern) return;
+    CHECK_EQ(parsed.pattern->steps(4), 5000);
+    CHECK_EQ(parsed.pattern->notes.size(), size_t{1});
+    CHECK_NEAR(parsed.pattern->notes[0].at, 4500.0, 1e-9);
+}
