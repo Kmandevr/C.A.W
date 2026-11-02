@@ -326,6 +326,7 @@ class ProjectDoc {
         'master': master,
         'seam_crossfade': seamCrossfade,
         'globals': globals,
+        'automation': [for (final lane in automation) lane.toJson()],
         'modules': [for (final m in modules) m.toJson()],
         'layers': [for (final l in layers) l.toJson()],
         'library_folders': libraryFolders,
