@@ -367,7 +367,7 @@ TEST(notes_carry_their_own_bend_vibrato_press_and_timbre) {
         CHECK_EQ(r.pattern->notes[0].extra, 0);
         CHECK_EQ(r.pattern->notes[1].extra, -1);
         const NoteExpression& ex = r.pattern->expressions[0];
-        CHECK_EQ(ex.bend.count, 3);
+        CHECK_EQ(ex.bend.points.size(), size_t{3});
         CHECK_NEAR(ex.bend.at(0.0), 0.0, 1e-9);
         CHECK_NEAR(ex.bend.at(0.5), 12.0, 1e-6);
         CHECK(ex.bend.at(0.25) < 6.0);  // bend 0.5 eases in
