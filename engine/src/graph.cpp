@@ -369,7 +369,7 @@ bool PreparedGraph::process(const float* inputLeft, const float* inputRight,
 
 bool GraphRuntime::publish(PreparedGraph* prepared) noexcept {
     if (!prepared || !prepared->ready()) return false;
-    GraphExecutor* expected = nullptr;
+    PreparedGraph* expected = nullptr;
     return pending_.compare_exchange_strong(expected, prepared, std::memory_order_release,
                                             std::memory_order_relaxed);
 }
@@ -398,7 +398,7 @@ PreparedGraph* GraphRuntime::collectRetired() noexcept {
 }
 
 PreparedGraph* GraphRuntime::takeActiveAfterStop() noexcept {
-    GraphExecutor* result = active_;
+    PreparedGraph* result = active_;
     active_ = nullptr;
     return result;
 }
