@@ -22,6 +22,11 @@ struct Engine::AutomationData {
     std::vector<AutomationPointSpec> pan;
 };
 
+struct Engine::ExportPool {
+    size_t capacityPerSlot = 0;
+    std::vector<std::array<double, kBlock>> buffers;
+};
+
 // Per-layer audio and meter state. Fields above `vol` belong to the audio thread.
 struct Engine::Slot {
     bool active = false;
@@ -53,7 +58,9 @@ struct Engine::Slot {
     std::atomic<float> scope[kScopeSize];
     std::atomic<int> scopePos{0};
 
-    double exportBuf[kMaxExports][kBlock] = {};  // this layer's exported values for the current chunk
+    std::array<double, kBlock>* exportBuf = nullptr;  // stable slice in Engine::ExportPool
+    size_t exportCapacity = 0;
+    size_t exportCount = 0;  // grows to the largest active chain export count; audio-thread owned
     int64_t visited = -1;                         // chunk id when last processed
 };
 
@@ -120,7 +127,8 @@ struct Engine::Chain {
         std::vector<std::array<uint32_t, 3>> ranges;  // (from offset, to offset, count)
     };
     std::vector<Migration> migrate;
-    std::vector<std::vector<std::pair<uint16_t, int>>> exportMap;  // per module: (register, export buffer)
+    std::vector<std::vector<std::pair<uint16_t, size_t>>> exportMap;  // per module: (register, export buffer)
+    size_t exportCount = 0;
     std::vector<std::vector<const double*>> importPtrs;            // per module: one pointer per import
     uint32_t used = 0;
     double layerLen = 1;  // samples in this layer's loop, for pos and phase
@@ -410,7 +418,7 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
                                    size_t expressionCapacity) {
     auto* c = new Chain();
     c->voiced = voiced;
-    int buf = 0;
+    size_t buf = 0;
     size_t w = 0;
     for (size_t i = 0; i < ids.size(); ++i) {
         const ModuleState& m = modules_.at(ids[i]);
@@ -419,9 +427,8 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
         c->moduleIds.push_back(ids[i]);
         c->used |= m.program->usedVars;
         // Export buffers are numbered in chain order; setProject uses the same numbering.
-        std::vector<std::pair<uint16_t, int>> exports;
-        for (const ExportDef& e : m.program->exports)
-            if (buf < kMaxExports) exports.emplace_back(e.reg, buf++);
+        std::vector<std::pair<uint16_t, size_t>> exports;
+        for (const ExportDef& e : m.program->exports) exports.emplace_back(e.reg, buf++);
         c->exportMap.push_back(std::move(exports));
         std::vector<const double*> imports;
         for (size_t k = 0; k < m.program->imports.size(); ++k) imports.push_back(w < wiring.size() ? wiring[w++] : nullptr);
@@ -441,6 +448,7 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
         c->voices[1].inst = c->shadow[0].get();
         for (int v = 2; v < c->voiceCount; ++v) c->voices[v].inst = c->extraVoices[static_cast<size_t>(v - 2)].get();
     }
+    c->exportCount = buf;
     c->expressionCapacity = std::max(expressionCapacity, prev ? prev->expressionCapacity : size_t{0});
     for (Voice& voice : c->voices) {
         voice.ex.bend.points.reserve(c->expressionCapacity);
@@ -891,8 +899,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         for (const std::string& id : pl.ids) {
             const ModuleState& m = modules_.at(id);
             for (const ExportDef& e : m.program->exports) {
-                if (buf >= kMaxExports) break;
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, slots_[pl.ls.slot].exportBuf[buf]});
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, slots_[pl.ls.slot].exportBuf[buf].data()});
                 ++buf;
             }
         }
@@ -1659,7 +1666,7 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
         ctx.vars[static_cast<int>(Var::In)] = input;
         input = inst->process(ctx);
         if (exportTo)
-            for (const auto& [reg, buf] : c.exportMap[idx]) std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf] + offset);
+            for (const auto& [reg, buf] : c.exportMap[idx]) std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf].data() + offset);
     }
     std::copy_n(input, len, out);
 }
@@ -1796,7 +1803,7 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         for (int v = 0; v < c.voiceCount; ++v)
             if (c.voices[v].active && (newest < 0 || c.voices[v].started > c.voices[newest].started)) newest = v;
         if (exportTo)
-            for (const auto& [reg, buf] : c.exportMap[0]) std::fill_n(exportTo->exportBuf[buf] + offset + o, n, 0.0);
+            for (const auto& [reg, buf] : c.exportMap[0]) std::fill_n(exportTo->exportBuf[buf].data() + offset + o, n, 0.0);
         BlockCtx ctx = base;
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
@@ -1883,7 +1890,7 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
                 if (!v.gate) v.quiet = std::fabs(s) < kQuietLevel ? v.quiet + 1 : 0;
             }
             if (exportTo && vi == newest)
-                for (const auto& [reg, buf] : c.exportMap[0]) std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf] + offset + o);
+                for (const auto& [reg, buf] : c.exportMap[0]) std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf].data() + offset + o);
             if (!v.gate && (v.quiet >= quietMax || v.rel >= relMax || (engineFade && v.rel >= fadeLen))) {
                 c.declick += v.lastY;  // ending a voice that is still sounding: smooth over the jump
                 v.active = false;
@@ -2077,7 +2084,8 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                 if (!s.cur) continue;
                 if (target == 0.0 && s.gain == 0.0) {
                     s.contiguous = false;
-                    for (auto& b : s.exportBuf) std::fill_n(b, m, 0.0);
+                    for (size_t b = 0; b < s.exportCount; ++b)
+                        std::fill_n(s.exportBuf[b].data(), m, 0.0);
                     if (s.pending) { swapIn(s, s.pending); s.pending = nullptr; }
                     if (s.removing) {
                         retire(s.cur, -1, s.pattern);
