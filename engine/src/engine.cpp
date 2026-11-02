@@ -391,6 +391,9 @@ void Engine::drainRetired() {
 }
 
 bool Engine::send(const Cmd& c) {
+    // Reclaim completed objects before publishing more work. This also makes room
+    // for the audio thread to transfer any pending retirements into the SPSC queue.
+    drainRetired();
     // The audio thread empties the queue every callback; wait briefly if it is full.
     for (int tries = 0; !cmds_->push(c); ++tries) {
         drainRetired();
