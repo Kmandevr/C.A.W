@@ -904,15 +904,13 @@ std::string Engine::setProject(const ProjectSpec& p) {
             ls.parentSlot = pl.ls.parentSlot;
             if (ls.automationSig != pl.automationSig) {
                 Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot; automation.flag = newBus;
+                auto* data = new AutomationData();
                 for (const AutomationLaneSpec& lane : w.automation) {
-                    int* count = lane.target == "volume" ? &automation.volumeAutomationCount : &automation.panAutomationCount;
-                    double* steps = lane.target == "volume" ? automation.volumeAutomationStep : automation.panAutomationStep;
-                    double* values = lane.target == "volume" ? automation.volumeAutomationValue : automation.panAutomationValue;
-                    for (const AutomationPointSpec& point : lane.points) {
-                        if (*count >= 128) break;
-                        steps[*count] = point.step; values[*count] = point.value; ++*count;
-                    }
+                    auto& points = lane.target == "volume" ? data->volume : data->pan;
+                    points.insert(points.end(), lane.points.begin(), lane.points.end());
                 }
+                if (data->volume.empty() && data->pan.empty()) delete data;
+                else automation.automation = data;
                 send(automation);
                 ls.automationSig = pl.automationSig;
             }
@@ -929,15 +927,13 @@ std::string Engine::setProject(const ProjectSpec& p) {
         if (ls.bus) ls.automationSig = "\\x01new-slot";
         if (ls.automationSig != pl.automationSig) {
             Cmd automation; automation.type = Cmd::SetAutomation; automation.slot = ls.slot;
+            auto* data = new AutomationData();
             for (const AutomationLaneSpec& lane : w.automation) {
-                int* count = lane.target == "volume" ? &automation.volumeAutomationCount : &automation.panAutomationCount;
-                double* steps = lane.target == "volume" ? automation.volumeAutomationStep : automation.panAutomationStep;
-                double* values = lane.target == "volume" ? automation.volumeAutomationValue : automation.panAutomationValue;
-                for (const AutomationPointSpec& point : lane.points) {
-                    if (*count >= 128) break;
-                    steps[*count] = point.step; values[*count] = point.value; ++*count;
-                }
+                auto& points = lane.target == "volume" ? data->volume : data->pan;
+                points.insert(points.end(), lane.points.begin(), lane.points.end());
             }
+            if (data->volume.empty() && data->pan.empty()) delete data;
+            else automation.automation = data;
             send(automation);
             ls.automationSig = pl.automationSig;
         }
