@@ -19,21 +19,7 @@ updated: 2026-11-02
 - Working tree/remote state is represented by GitHub branch commits; no local build/test environment is available through the current connector workflow.
 - PR: none. Do not open a PR until the complete assignment is reviewable; do not merge, approve or delete branches.
 
-## Immediate continuation — fix red CI before extending the engine
-
-Latest Engine CI run `41455843126` on `8ddbb1bfabba5ca4eec6d3238e7a617d4dac0286` failed on Windows x64, Linux Arm64, Linux x64 and sanitizers. App and Docs passed. Failures:
-
-1. `engine_routes_more_than_16_module_exports`: final output is `0.707106769` instead of `14.1421356`; `value19` is not reaching the consumer. Trace export writes, namespace/reference resolution, import binding, slot processing and consumer order. Do not weaken the assertion.
-2. `engine_automates_parameters_beyond_32`: actual `0.707106769` instead of `1.06066015`. Trace BlockCtx parameter pointer table, sample buffers, parameter indexing and mix/gain expectations.
-3. `project_parser_preserves_large_project_automation`: parser still returns 128 points (last step 127) instead of 129 (last step 128). Find remaining truncation in parser/validation.
-4. `project_automation_rejects_excessive_lane_count`: old test expects >256 lanes rejected. Since the goal is removing arbitrary product caps, replace it with a real resource-budget/hostile-input bound test; retain explicit byte/count budgets and actionable errors.
-5. `midi_import_rejects_malformed_files_without_crashing`: malformed input now returns an empty error string instead of the expected `wanted 4096 steps`. Preserve malformed-file rejection while allowing legitimate patterns above 4096.
-6. `a_patch_can_grow_its_effect_chain_without_truncation`: synth patch translation fails for 9 effects. Inspect remaining parser/compiler/translator constraints and surface the actual error.
-7. `projects_have_a_memory_budget`: actual response lacks both `project-state budget` and `"ok":false`. Inspect exact setProject response and ensure budget is enforced at the correct boundary; do not weaken the test without proving enforcement.
-
-The latest run had 9 failing assertions across shards (some paired assertions share a root cause). Read the workflow logs, fix one root cause at a time, rerun Engine CI after each coherent group, and preserve passing App/Docs. Do not begin a new architecture rewrite.
-
-## What has actually been implemented
+## Immediate continuation — current CI repair follow-up\n\nThe original seven failure groups (nine assertions) have been addressed. The confirmed green checkpoint `fa438f874571550515bccdeb193e1dde72747286` passed all four Engine jobs, all App jobs and Docs. The follow-up at `1c88f05e` clears `ProjectSpec` and the error string at the start of `parseProject`, ensuring an oversized JSON rejection cannot leave stale previously parsed project state. A regression test seeds stale state and checks it is cleared. Its Engine run `41503176374` and App run `41503176276` were pending; Docs `41503176230` passed. Check those runs before proceeding with further engine changes.\n\n## What has actually been implemented
 
 1. **Graph foundation:** removed arbitrary 1,024-node/8,192-connection compile caps and the 8,192-frame executor cap; added large graph/block tests and explicit graph working-set estimation/rejection.
 2. **Project/chain content:** removed the nine-module chain cap, 256-project-module cap, 512-clips-per-layer cap, 256 project parameter-automation binding cap, 256 project automation lane cap, 128 project automation point skip, 4,096 arrangement-note truncation and 4,096 pattern-note cap.
