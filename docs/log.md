@@ -6,6 +6,8 @@ updated: 2026-11-02
 
 # Log
 
+- 2026-11-02: Started the native engine integration work on feature/native-engine-refactor-integration, based on the verified 49ba277 checkpoint from refactor/native-engine-foundation (Main ancestor 20fd3da). Added the durable milestone ledger and recovery guide. Initial audit confirms substantial existing foundations (worker pool, typed graph compiler/executor, module registry, UMP decoder, partial app job integration) but also confirms the prepared graph executor is not wired into the existing Engine/VM mixer. No engine code or CI result is claimed yet; see engine-progress.md for the exact continuation point.
+
 - 2026-11-02: Added adaptive concurrency and batching as foundational engine requirements, including dependency-aware scheduling, bounded worker pools, SIMD/accelerator selection, deterministic behavior, deadline-safe fallbacks and measurement of total overhead.
 
 
@@ -17,7 +19,7 @@ updated: 2026-11-02
 
 - 2026-11-02: Established docs/roadmap.md as the permanent canonical C.A.W. roadmap. Consolidated the long-term production direction into ordered stages, including audio/MIDI recording, monitoring and latency compensation, loop recording, take lanes/comping, plugin hosting, tempo maps, control surfaces, mastering tools, optional collaboration and surround/immersive audio. Explicitly excluded video synchronization for now. Converted the former two-part core plan into a compatibility pointer and the music workflow plan into a factual gap reference; aligned vision and UI scope notes.
 
-- 2026-11-01: Repository-wide documentation accuracy pass: reconciled current app/engine facts, corrected piano-roll curves and generator status, separated shipped/partial/deferred capabilities, updated synth and worker-pool references, and removed stale claims of AI, MIDI-device, audio-recording, plugin-host and platform support.
+- 2026-11-01: Repository-wide documentation accuracy pass: reconciled current app/engine facts, corrected piano-roll curves and generator status, separated shipped/partial/missing capabilities, updated synth and worker-pool references, and removed stale claims of AI, MIDI-device, audio-recording, plugin-host and platform support.
 
 - 2026-11-01: Consolidated the owner-discussed work into a two-part master plan: core build order and complete feature inventory. This interim planning structure was superseded on 2026-11-02 by the permanent single roadmap.
 
