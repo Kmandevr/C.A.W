@@ -90,9 +90,9 @@ std::vector<double> pitches(const Word& w, int line) {
     return out;
 }
 
-// A curve's points: `t:v` or `t:v~k`, as many as follow (2..16), times rising from 0 to 1.
+// A curve's points: `t:v` or `t:v~k`, as many as fit the source/resource budget, times rising from 0 to 1.
 size_t curvePoints(const std::vector<Word>& w, size_t k, int line, const Word& key, double lo, double hi, NoteCurve& c) {
-    c.count = 0;
+    c.points.clear();
     double last = -1;
     while (k < w.size()) {
         const std::string& s = w[k].text;
@@ -111,16 +111,11 @@ size_t curvePoints(const std::vector<Word>& w, size_t k, int line, const Word& k
             throw PatternError(line, w[k].col, msg);
         }
         if (b < -1 || b > 1) throw PatternError(line, w[k].col, "a bend (after ~) must be -1 to 1");
-        if (c.count >= kMaxCurvePoints) throw PatternError(line, w[k].col, "a curve has at most 16 points");
-        c.t[c.count] = static_cast<float>(t);
-        c.v[c.count] = static_cast<float>(v);
-        c.k[c.count] = static_cast<float>(b);
-        c.e[c.count] = detPow(4.0, c.k[c.count]);
-        ++c.count;
+        c.points.push_back({static_cast<float>(t), static_cast<float>(v), static_cast<float>(b), detPow(4.0, b)});
         last = t;
         ++k;
     }
-    if (c.count == 0) throw PatternError(line, key.col, "'" + key.text + "' needs points such as 0:0 0.5:2 1:0");
+    if (c.points.empty()) throw PatternError(line, key.col, "'" + key.text + "' needs points such as 0:0 0.5:2 1:0");
     return k;
 }
 
@@ -134,17 +129,19 @@ uint64_t mix64(uint64_t x) {
 }  // namespace
 
 double NoteCurve::at(double u) const {
-    if (count == 0) return 0;
-    if (u <= t[0]) return v[0];
-    for (int i = 0; i + 1 < count; ++i) {
-        if (u <= t[i + 1]) {
-            const double span = static_cast<double>(t[i + 1]) - t[i];
-            double x = span > 0 ? (u - t[i]) / span : 1.0;
-            if (k[i] != 0) x = detPow(x, e[i]);
-            return v[i] + (static_cast<double>(v[i + 1]) - v[i]) * x;
+    if (points.empty()) return 0;
+    if (u <= points.front().t) return points.front().v;
+    for (size_t i = 0; i + 1 < points.size(); ++i) {
+        const CurvePoint& a = points[i];
+        const CurvePoint& b = points[i + 1];
+        if (u <= b.t) {
+            const double span = static_cast<double>(b.t) - a.t;
+            double x = span > 0 ? (u - a.t) / span : 1.0;
+            if (a.k != 0) x = detPow(x, a.exponent);
+            return a.v + (static_cast<double>(b.v) - a.v) * x;
         }
     }
-    return v[count - 1];
+    return points.back().v;
 }
 
 int Pattern::steps(int beatsPerBar) const {
@@ -269,7 +266,7 @@ PatternResult parsePattern(std::string_view src) {
             }
             if (expressive) {
                 double most = 0;
-                for (int q = 0; q < ex.bend.count; ++q) most = std::max(most, std::fabs(static_cast<double>(ex.bend.v[q])));
+                for (const CurvePoint& point : ex.bend.points) most = std::max(most, std::fabs(static_cast<double>(point.v)));
                 if (most + ex.vibDepth > kMaxBend)
                     throw PatternError(lineNo, w[0].col, "a note's bend plus its vibrato depth can be at most 48 semitones");
                 n.extra = static_cast<int>(p->expressions.size());
