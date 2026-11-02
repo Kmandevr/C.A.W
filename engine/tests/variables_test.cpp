@@ -286,17 +286,19 @@ TEST(project_parameter_and_global_automation_parse_with_legacy_compatibility) {
     }
 }
 
-TEST(project_automation_rejects_excessive_lane_count) {
-    std::string json = R"({"caw_project":1,"modules":[],"layers":[],"automation":[)";
-    for (int i = 0; i < 257; ++i) {
-        if (i) json += ",";
-        json += R"({"target_type":"global","target":"g","points":[{"step":0,"value":0}]})";
+TEST(project_parser_rejects_automation_payload_over_memory_budget) {
+    std::string json = R"({"caw_project":1,"modules":[],"layers":[],"automation":[{"target_type":"global","target":"g","points":[)";
+    bool first = true;
+    while (json.size() <= (8u << 20)) {
+        if (!first) json += ",";
+        json += R"({"step":0,"value":0})";
+        first = false;
     }
-    json += "]}";
+    json += "]}]}";
     ProjectSpec project;
     std::string error;
     CHECK(!parseProject(json, project, error));
-    CHECK(has(error, "256"));
+    CHECK(has(error, "8 MiB parser memory budget"));
 }
 
 
