@@ -954,7 +954,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     std::map<std::string, Source> sources;
     for (const Planned& pl : plan) {
         if (pl.w.id[0] == '\x01') continue;
-        int buf = 0;
+        size_t buf = 0;
         for (const std::string& id : pl.ids) {
             const ModuleState& m = modules_.at(id);
             for (const ExportDef& e : m.program->exports) {
@@ -1727,7 +1727,7 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
         input = inst->process(ctx);
         if (exportTo && exportTo->exportBuf)
             for (const auto& [reg, buf] : c.exportMap[idx])
-                if (buf < exportTo->exportCapacity)
+                if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
                     std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf]->data() + offset);
     }
     std::copy_n(input, len, out);
@@ -1866,7 +1866,7 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
             if (c.voices[v].active && (newest < 0 || c.voices[v].started > c.voices[newest].started)) newest = v;
         if (exportTo && exportTo->exportBuf)
             for (const auto& [reg, buf] : c.exportMap[0])
-                if (buf < exportTo->exportCapacity)
+                if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
                     std::fill_n(exportTo->exportBuf[buf]->data() + offset + o, n, 0.0);
         BlockCtx ctx = base;
         ctx.n = n;
