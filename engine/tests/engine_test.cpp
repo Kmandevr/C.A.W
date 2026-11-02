@@ -644,7 +644,9 @@ TEST(master_gain_updates_without_recompiling_and_ramps_smoothly) {
     p.master = 1.0;
     Engine e(48000);
     e.setMasterBypass(true);
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    const std::string projectResult = e.setProject(p);
+    CHECK(projectResult.find("\"ok\":true") != std::string::npos);
+    CHECK(projectResult.find("nothing exports") == std::string::npos);
     e.play();
     run(e, 256);
 
@@ -869,8 +871,8 @@ TEST(engine_routes_more_than_16_module_exports) {
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"source", source, {}, "source"});
-    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsource.value19", {}});
+    p.modules.push_back({"source", source, {}, "src"});
+    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsrc.value19", {}});
     LayerSpec sourceLayer;
     sourceLayer.id = "source_track";
     sourceLayer.chain = {"source"};
