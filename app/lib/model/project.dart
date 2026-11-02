@@ -265,8 +265,11 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
-    final arrangementEnd = layers.fold<int>(loopSteps, (end, l) =>
-        max(end, l.clips.fold<int>(0, (e, clip) => max(e, clip.startSteps + clip.lengthSteps))));
+    final layerArrangementEnd = layers.fold<int>(loopSteps, (end, layer) =>
+        max(end, layer.clips.fold<int>(0, (value, clip) => max(value, clip.startSteps + clip.lengthSteps))));
+    final automationEnd = automation.fold<int>(0, (end, lane) =>
+        lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
+    final arrangementEnd = max(layerArrangementEnd, automationEnd);
     final engineLoopBars = min(64, max(loopBars, (arrangementEnd / stepsPerBar).ceil()));
     final result = jsonEncode({
         'caw_project': 1,
