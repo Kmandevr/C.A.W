@@ -30,6 +30,15 @@ class _LibrarySnapshot {
   final Map<String, List<String>> moduleTags;
 }
 
+class _AutomationSnapshot {
+  _AutomationSnapshot(ProjectDoc project)
+      : projectLanes = project.automation,
+        trackLanes = {for (final layer in project.layers) layer.id: layer.automation};
+
+  final List<ProjectAutomationLaneDoc> projectLanes;
+  final Map<String, List<AutomationLaneDoc>> trackLanes;
+}
+
 class AppState extends ChangeNotifier {
   AppState({Settings? settings}) : settings = settings ?? Settings() {
     _light = this.settings.lightMode;
@@ -80,6 +89,8 @@ class AppState extends ChangeNotifier {
   String? selectedModuleId;
   final List<_LibrarySnapshot> _libraryUndo = [];
   final List<_LibrarySnapshot> _libraryRedo = [];
+  final List<_AutomationSnapshot> _automationUndo = [];
+  final List<_AutomationSnapshot> _automationRedo = [];
 
   bool get canUndoLibrary => _libraryUndo.isNotEmpty;
 
