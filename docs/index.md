@@ -1,7 +1,7 @@
 ---
 title: C.A.W vault
 summary: Vault home: links to every note.
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # C.A.W vault
@@ -15,8 +15,7 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 ## Notes
 
 - [Task 1 UI implementation handoff](task-1-ui-handoff.md): concise current UI implementation pointer and verified workflow gaps; no stale branch/CI snapshot.
-- [Master development plan](CAW_MASTER_DEVELOPMENT_PLAN.md): approved UI/engine design specification; not a report of shipped functionality.
-- [Core development plan and complete feature list](core-and-feature-plan.md): the two-part master plan; ordered core build sequence followed by the complete owner-discussed feature inventory.
+- [Roadmap](roadmap.md): the permanent, canonical product roadmap, including ordered stages, current implementation snapshot, future production capabilities, performance gates and scope boundaries.
 - [Vision](vision.md): owner-approved product direction, actual platform support, current scope boundaries and open decisions.
 - [Architecture](architecture.md): verified technical architecture plus explicitly labelled future design proposals
 - [Modular adaptive engine](engine-next.md): owner direction for the next native engine, modular creation, UI extensions, adaptive hardware use and implementation order
@@ -32,8 +31,8 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [Actions, keys and macros](actions.md): draft for review: every command as an action, customisable keys per area, macros, toolbars and the default keymap
 - [Synth](synth.md): implemented synth patch compiler, supported features, app behavior and verified gaps
 - [UI design](ui.md): current editor implementation, phone/desktop interaction design and performance constraints
-- [Roadmap](roadmap.md): historical v1 acceptance scope, current v2 implementation status and deferred future stages
-- [Music workflow feature-gap plan](music-workflow-feature-gap-plan.md): verified implemented/partial/missing status and detailed build order for pattern editing, mixer, audio editing, sampling, MIDI hardware, arrangement and export
-- [Lightweight creative audio systems plan](lightweight-creative-audio-systems.md): detailed impact-ranked, performance-filtered designs for non-AI mathematical sound, cellular patterns, waveform transformation, variation, inspection and lightweight physical models
+- [Core development plan](core-and-feature-plan.md): compatibility pointer to the permanent roadmap; not a separate plan
+- [Music workflow implementation gaps](music-workflow-feature-gap-plan.md): factual implemented/partial/missing status, without a competing feature sequence
+- [Lightweight creative audio systems](lightweight-creative-audio-systems.md): supporting technical designs for non-AI sound systems in the roadmap
 - [Decisions](decisions.md): what was chosen and why
 - [Log](log.md): dated history of changes
