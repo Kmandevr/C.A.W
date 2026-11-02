@@ -14,8 +14,6 @@ constexpr size_t kMaxSourceBytes = 64 * 1024;
 constexpr int kMaxDepth = 128;
 constexpr int kMaxRegisters = 1024;
 constexpr int kMaxStateDoubles = 1 << 20;  // 8 MB: room for a few delay lines and reverbs
-// All playing modules together (each also has a seam copy, so twice this in memory). Layers past it stay silent.
-constexpr int64_t kMaxProjectStateDoubles = int64_t{1} << 23;  // 64 MB
 constexpr int kMaxCallArgs = 6;
 
 // Built-in variables a module can read.
