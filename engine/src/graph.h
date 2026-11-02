@@ -2,6 +2,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -9,9 +10,6 @@
 #include "module.h"
 
 namespace caw {
-
-constexpr uint32_t kMaxGraphNodes = 1024;
-constexpr uint32_t kMaxGraphConnections = 8192;
 
 struct GraphNode {
     std::string_view id;
@@ -28,7 +26,6 @@ struct GraphConnection {
 enum class GraphError : uint8_t {
     Ok,
     TooManyNodes,
-    TooManyConnections,
     MissingModule,
     InvalidModule,
     EmptyNodeId,
@@ -53,7 +50,7 @@ enum class GraphError : uint8_t {
 
 struct CompiledGraph {
     GraphError error = GraphError::Ok;
-    uint32_t errorConnection = UINT32_MAX;
+    std::size_t errorConnection = static_cast<std::size_t>(-1);
     std::vector<uint32_t> executionOrder;
     explicit operator bool() const noexcept { return error == GraphError::Ok; }
 };
@@ -82,7 +79,7 @@ private:
     std::vector<ModuleProcessor*> processors_;
     std::vector<std::vector<float>> left_, right_;
     std::vector<float> zero_;
-    std::vector<int32_t> inputSource_;
+    std::vector<uint32_t> inputSource_;
     std::vector<uint8_t> hasInput_, hasOutput_;
     std::vector<uint32_t> order_;
     uint32_t outputNode_ = UINT32_MAX;
