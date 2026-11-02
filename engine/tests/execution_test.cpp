@@ -2,6 +2,7 @@
 #include "test.h"
 
 #include "execution.h"
+#include "spsc.h"
 
 using namespace caw;
 
@@ -95,4 +96,24 @@ TEST(execution_idle_releases_worker_budget) {
     CHECK_EQ(p.maxConcurrentJobs, 0);
     CHECK_EQ(p.preferredBatchFrames, 0u);
     CHECK(!p.useSimd);
+}
+
+TEST(spsc_peek_and_capacity_queries_do_not_consume_items) {
+    Spsc<int, 4> queue;
+    CHECK_EQ(queue.writable(), 4u);
+    CHECK(queue.push(11));
+    CHECK(queue.push(22));
+    CHECK_EQ(queue.writable(), 2u);
+
+    int value = 0;
+    CHECK(queue.peek(value));
+    CHECK_EQ(value, 11);
+    CHECK_EQ(queue.writable(), 2u);
+    CHECK(queue.pop(value));
+    CHECK_EQ(value, 11);
+    CHECK_EQ(queue.writable(), 3u);
+    CHECK(queue.pop(value));
+    CHECK_EQ(value, 22);
+    CHECK(!queue.peek(value));
+    CHECK_EQ(queue.writable(), 4u);
 }
