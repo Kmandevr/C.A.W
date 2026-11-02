@@ -217,3 +217,61 @@ This blueprint describes direction and proposed architecture, not a claim that e
 This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, plain-text files external coding tools can edit, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities while keeping sound design and content creation primary and adding useful lightweight DAW capabilities where they help, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, existing starter modules under examples/, local/offline project assets, no in-app AI integration, and future plugin work only after a real native host/SDK and release checks, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
 
 See [vision](vision.md), [architecture](architecture.md), [synth](synth.md), [performance](performance.md), [decisions](decisions.md) and [roadmap](roadmap.md). Where those notes conflict with this clarified product focus and capability boundary or adaptive-engine direction, reconcile them as implementation proceeds.
+
+
+## 15. Unified parameters, modulation, automation and mathematical modules
+
+**Owner clarification:** standard audio parameter control must be a native engine capability, whether it is visible to the user or used internally. The same parameter and modulation machinery must support ordinary manual controls, conventional automation and hidden/internal modulation. Internal complexity must not force a complicated UI; expose simple controls by default and make advanced routing available when wanted.
+
+### One parameter model
+
+Use one typed, addressable parameter model across built-in instruments, effects, native modules, the .caw VM, tracks, buses and project-level controls. Each parameter defines a stable identity, value type, range, default, units, scaling/curve, smoothing behavior, automation eligibility and serialization/version rules.
+
+A parameter must be controllable through any supported source without requiring a separate implementation for each module type. UI controls, MIDI/controller input, project automation, modulation links and mathematical expressions all resolve to the same parameter contract. Keep control and UI presentation separate: a parameter can be internally controllable without being displayed, while user-facing parameters can be exposed as knobs, sliders, text/numeric entry, curves or custom controls.
+
+### Manual and conventional control
+
+Support familiar hands-on workflows, including:
+- Direct editing and live manipulation of exposed parameters.
+- MIDI CC and supported controller mappings, macros and external control surfaces.
+- Track, bus, instrument, effect and project-level parameter control.
+- Automation lanes with editable points and curves, tempo/time positioning, interpolation, snapping and undo/redo.
+- Envelopes, LFOs, note velocity, key tracking and per-note expression as reusable modulation sources.
+- Modulation assignment/depth/polarity/scaling and multiple destinations.
+- Sidechain/audio-following control where the routing graph supplies the required signal.
+
+Do not require every parameter to have a visible automation lane. Users can reveal or create lanes when needed. Internal modulation may run without adding UI clutter.
+
+### Modulation and automation execution
+
+Treat automation and modulation as related inputs to a shared parameter-resolution stage, not as unrelated features bolted onto individual effects. Define deterministic combination and precedence rules. Support common operations such as replace, add, multiply, min/max and scaled/bipolar modulation, with explicit clamping, units and parameter-specific smoothing. Conflicting sources must have documented, testable behavior; no implicit ordering based on UI or graph traversal.
+
+Use sample-accurate evaluation where audible timing or modulation rate requires it. Use block/control-rate evaluation for slower controls when it is measurably cheaper and does not change the intended behavior. Compile and prepare the control/modulation plan off the audio thread; preallocate its state and buffers. Do not allocate, lock, resolve strings, traverse arbitrary graphs or rebuild automation data in the callback. Reuse constant values and unchanged control signals rather than recalculating them every sample. Preserve the existing per-sample automation path where required for correctness and migrate incrementally.
+
+### Mathematical expressions as first-class generators and effects
+
+Mathematical expressions are not limited to bytebeat or hidden modulation. They must be usable as:
+- Audio generators and oscillators.
+- Waveform and wavetable definitions.
+- Control/modulation sources and parameter curves.
+- Complete effects/processors that transform incoming audio.
+- Mathematical utility modules that combine signals, events and parameter values where the type system allows.
+
+Keep the existing .caw language and VM as a first-class route for this work. Provide reusable, typed interfaces so a mathematical generator/effect can be used like any other instrument or processor in a track, bus or module chain. Do not force users to write code for ordinary controls or force code-defined modules into a visual graph.
+
+Expression execution must be bounded and sandboxed: validate types and limits before playback, define operation/instruction budgets, prevent unbounded loops and unsafe access, and prepare reusable state outside the callback. Prefer direct formulas for cheap operations; use precomputed tables or compiled/specialized paths only when profiling demonstrates a benefit. Preserve deterministic seeded behavior and defined numerical semantics.
+
+### Resource-aware implementation
+
+The unified parameter system must avoid unnecessary work:
+- Constant parameters should remain constants; do not create per-sample streams for values that never change.
+- Block-rate controls should not be evaluated per sample unless required.
+- Share a modulation source's computed output across destinations where semantics permit.
+- Reuse curves, envelopes and expression results when their inputs and timing are unchanged.
+- Smooth only parameters that need smoothing; do not add generic smoothing overhead to every value.
+- Bound modulation fan-out and expression cost, and include them in graph preparation and workload estimates.
+- If a prepared optimization or cache is unavailable, fall back to the ordinary correct calculation path.
+
+### Required verification
+
+Test parameter identity and serialization, manual edits during playback, MIDI/controller mapping, automation interpolation and tempo behavior, multiple-source combination/precedence, modulation fan-out, sample-accurate events, block-rate equivalence, smoothing, expression safety/budgets, deterministic output, project save/reopen and live/offline render parity. Include CPU and memory benchmarks for common cases (static parameters, one LFO, many lanes, high modulation fan-out and mathematical effects). Internal modulation must not add visible UI or recurring idle work when unused.
