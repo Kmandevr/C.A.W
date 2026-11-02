@@ -374,7 +374,7 @@ void Engine::drainRetired() {
     }
 }
 
-void Engine::send(const Cmd& c) {
+bool Engine::send(const Cmd& c) {
     // The audio thread empties the queue every callback; wait briefly if it is full.
     for (int tries = 0; !cmds_->push(c); ++tries) {
         drainRetired();
@@ -382,10 +382,11 @@ void Engine::send(const Cmd& c) {
             if (c.type == Cmd::Install) delete c.chain;  // audio stalled; drop rather than hang the app
             delete c.pattern;
             delete c.automation;
-            return;
+            return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    return true;
 }
 
 int Engine::freeSlot() {
@@ -911,8 +912,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 }
                 if (data->volume.empty() && data->pan.empty()) delete data;
                 else automation.automation = data;
-                send(automation);
-                ls.automationSig = pl.automationSig;
+                if (send(automation)) ls.automationSig = pl.automationSig;
             }
             ls.chain = nullptr;
             ls.sig.clear();
@@ -934,8 +934,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             }
             if (data->volume.empty() && data->pan.empty()) delete data;
             else automation.automation = data;
-            send(automation);
-            ls.automationSig = pl.automationSig;
+            if (send(automation)) ls.automationSig = pl.automationSig;
         }
         {
             Cmd routing;
@@ -1362,7 +1361,10 @@ void Engine::applyCommands() noexcept {
                 break;
             }
             case Cmd::Remove:
-                slots_[c.slot].removing = true;
+                Slot& s = slots_[c.slot];
+                s.removing = true;
+                retire(nullptr, -1, nullptr, s.automation);
+                s.automation = nullptr;
                 break;
             case Cmd::Transport:
                 // A tempo change moves every note in time: let held notes go so none is left hanging.
