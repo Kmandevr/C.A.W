@@ -1,10 +1,17 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Decisions
+
+## 2026-11-02: Reopen and complete native engine integration
+
+- The owner explicitly authorizes the full native engine refactor and integration, superseding the earlier note that graph-to-Engine integration was paused.
+- Start from the verified native-engine-foundation branch history, but integrate into the existing Engine/VM/mixer. Do not create a second engine or stop at interfaces and documentation.
+- Keep the permanent engine blueprint, milestone ledger and recovery guide current; one coherent review PR is the delivery target.
+- The graph compiler must not impose arbitrary node/connection/block caps. Resource limits must reflect actual memory, hardware and host safety budgets, with explicit errors and no silent content loss.
 
 
 ## 2026-11-02: Adaptive concurrency and batching
