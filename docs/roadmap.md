@@ -130,7 +130,7 @@ Extend the existing folder-bus and engine processing models. Do not create a sec
 - Clip-following automation and complete parameter/modulation automation.
 - Consolidation/bounce and rendering of selected tracks, folders and groups.
 - Complete stems export, batch export, persistent/recoverable export queues and reusable delivery presets.
-- Useful quantization and audio/MIDI alignment tools across the arrangement.
+- Useful MIDI quantization and audio quantization/alignment tools across the arrangement, including transient-aware placement where appropriate.
 - Robust export progress, cancellation, errors, cleanup and output-location handling.
 
 **Exit gate:** tempo/meter changes, automation and arrangement edits survive save/reopen; stems and batch renders have correct routing, alignment, naming and duration; cancellation and failure cleanup are tested.
@@ -152,7 +152,7 @@ Recording is part of the long-term product direction. It is not implemented toda
 
 ### Stage 8 — Audio transformation and advanced production tools
 
-- Time-stretching/warping and pitch-shifting, including beat-aware workflows.
+- Time-stretching/warping and pitch-shifting, including beat-aware workflows and non-destructive audio quantization.
 - Transient detection/slicing and advanced sample-to-pattern tools.
 - Expanded waveform, spectrum and on-demand asset/selection analysis.
 - Spectrogram inspection and practical spectral selection where device cost permits.
