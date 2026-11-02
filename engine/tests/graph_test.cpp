@@ -4,8 +4,17 @@
 #include "graph.h"
 
 #include <string>
+#include <limits>
 
 using namespace caw;
+
+namespace {
+constexpr GraphResourceBudget kTestBudget{
+    std::numeric_limits<std::size_t>::max(),
+    std::numeric_limits<std::size_t>::max(),
+    64u * 1024u * 1024u,
+};
+}
 
 namespace {
 const PortDescriptor sourcePorts[] = {
@@ -31,12 +40,25 @@ const ModuleDescriptor monoRuntime{"test.mono.runtime", 1, monoRuntimePorts, 2, 
 TEST(graph_compiles_stereo_chain_in_dependency_order) {
     const std::vector<GraphNode> nodes{{"sink", &sink}, {"effect", &effect}, {"source", &source}};
     const std::vector<GraphConnection> edges{{2, 0, 1, 0}, {1, 1, 0, 0}};
-    const CompiledGraph graph = compileGraph(nodes, edges);
+    const CompiledGraph graph = compileGraph(nodes, edges, kTestBudget);
     CHECK(graph);
     CHECK_EQ(graph.executionOrder.size(), 3u);
     CHECK_EQ(graph.executionOrder[0], 2u);
     CHECK_EQ(graph.executionOrder[1], 1u);
     CHECK_EQ(graph.executionOrder[2], 0u);
+}
+
+TEST(graph_compiler_requires_explicit_working_memory_budget) {
+    const std::vector<GraphNode> nodes{{"source", &source}};
+    CHECK(compileGraph(nodes, {}, GraphResourceBudget{}).error == GraphError::InvalidResourceBudget);
+}
+
+TEST(graph_compiler_enforces_optional_count_budgets) {
+    const std::vector<GraphNode> nodes{{"source", &source}, {"sink", &sink}};
+    const GraphResourceBudget nodeBudget{1, std::numeric_limits<std::size_t>::max(), 1024u * 1024u};
+    CHECK(compileGraph(nodes, {}, nodeBudget).error == GraphError::ResourceBudgetExceeded);
+    const GraphResourceBudget connectionBudget{2, 0, 1024u * 1024u};
+    CHECK(compileGraph(nodes, {{0, 0, 1, 0}}, connectionBudget).error == GraphError::ResourceBudgetExceeded);
 }
 
 TEST(graph_compiler_has_no_arbitrary_node_or_connection_cap) {
@@ -51,7 +73,7 @@ TEST(graph_compiler_has_no_arbitrary_node_or_connection_cap) {
     for (uint32_t i = 0; i < nodeCount; ++i) nodes.push_back({ids[i], &effect});
     for (uint32_t i = 0; i + 1 < nodeCount; ++i) edges.push_back({i, 1, i + 1, 0});
 
-    const CompiledGraph graph = compileGraph(nodes, edges);
+    const CompiledGraph graph = compileGraph(nodes, edges, kTestBudget);
     CHECK(graph);
     CHECK_EQ(graph.executionOrder.size(), static_cast<std::size_t>(nodeCount));
     CHECK_EQ(graph.executionOrder.front(), 0u);
@@ -62,7 +84,7 @@ TEST(graph_rejects_mono_stereo_mismatch) {
     const PortDescriptor monoOut[] = {{"out", PortType::Audio, ChannelLayout::Mono, false}};
     const ModuleDescriptor mono{"test.mono", 1, monoOut, 1, nullptr, 0};
     const std::vector<GraphNode> nodes{{"mono", &mono}, {"stereo", &sink}};
-    const CompiledGraph graph = compileGraph(nodes, {{0, 0, 1, 0}});
+    const CompiledGraph graph = compileGraph(nodes, {{0, 0, 1, 0}}, kTestBudget);
     CHECK(graph.error == GraphError::ChannelLayoutMismatch);
     CHECK_EQ(graph.errorConnection, 0u);
 }
@@ -71,22 +93,22 @@ TEST(graph_rejects_control_audio_connection) {
     const PortDescriptor controlOut[] = {{"out", PortType::Control, ChannelLayout::None, false}};
     const ModuleDescriptor control{"test.control", 1, controlOut, 1, nullptr, 0};
     const std::vector<GraphNode> nodes{{"control", &control}, {"audio", &sink}};
-    CHECK(compileGraph(nodes, {{0, 0, 1, 0}}).error == GraphError::PortTypeMismatch);
+    CHECK(compileGraph(nodes, {{0, 0, 1, 0}}, kTestBudget).error == GraphError::PortTypeMismatch);
 }
 
 TEST(graph_rejects_duplicate_drivers) {
     const std::vector<GraphNode> nodes{{"a", &source}, {"b", &source}, {"sink", &sink}};
-    CHECK(compileGraph(nodes, {{0, 0, 2, 0}, {1, 0, 2, 0}}).error == GraphError::InputAlreadyConnected);
+    CHECK(compileGraph(nodes, {{0, 0, 2, 0}, {1, 0, 2, 0}}, kTestBudget).error == GraphError::InputAlreadyConnected);
 }
 
 TEST(graph_rejects_cycles) {
     const std::vector<GraphNode> nodes{{"a", &effect}, {"b", &effect}};
-    CHECK(compileGraph(nodes, {{0, 1, 1, 0}, {1, 1, 0, 0}}).error == GraphError::Cycle);
+    CHECK(compileGraph(nodes, {{0, 1, 1, 0}, {1, 1, 0, 0}}, kTestBudget).error == GraphError::Cycle);
 }
 
 TEST(graph_rejects_duplicate_node_ids) {
     const std::vector<GraphNode> nodes{{"same", &source}, {"same", &sink}};
-    CHECK(compileGraph(nodes, {}).error == GraphError::DuplicateNodeId);
+    CHECK(compileGraph(nodes, {}, kTestBudget).error == GraphError::DuplicateNodeId);
 }
 
 namespace {
@@ -119,7 +141,7 @@ TEST(graph_executor_processes_prepared_stereo_chain_without_changing_block_size)
     GainProcessor gain;
     const std::vector<ModuleProcessor*> processors{&pass, &gain};
     GraphExecutor executor;
-    CHECK(executor.prepare(nodes, edges, processors, 1, 64, 48000) == GraphError::Ok);
+    CHECK(executor.prepare(nodes, edges, processors, 1, 64, 48000, kTestBudget) == GraphError::Ok);
     CHECK(executor.ready());
     const float inL[] = {1, 2, 3, 4};
     const float inR[] = {-1, -2, -3, -4};
@@ -132,6 +154,17 @@ TEST(graph_executor_processes_prepared_stereo_chain_without_changing_block_size)
     CHECK(!executor.process(inL, inR, outL, outR, 65));
 }
 
+TEST(graph_executor_rejects_prepared_buffers_over_working_memory_budget) {
+    const std::vector<GraphNode> nodes{{"processor", &effect}};
+    PassThrough pass;
+    const std::vector<ModuleProcessor*> processors{&pass};
+    const GraphResourceBudget tinyBudget{1, 0, 1024};
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, {}, processors, 0, 8193, 48000.0, tinyBudget) ==
+          GraphError::ResourceBudgetExceeded);
+    CHECK(!executor.ready());
+}
+
 TEST(graph_executor_accepts_block_sizes_above_legacy_fixed_cap) {
     const std::vector<GraphNode> nodes{{"processor", &effect}};
     PassThrough pass;
@@ -140,7 +173,7 @@ TEST(graph_executor_accepts_block_sizes_above_legacy_fixed_cap) {
     std::vector<float> input(frames, 0.375f);
     std::vector<float> outputLeft(frames, 0.0f), outputRight(frames, 0.0f);
     GraphExecutor executor;
-    CHECK(executor.prepare(nodes, {}, processors, 0, frames, 48000.0) == GraphError::Ok);
+    CHECK(executor.prepare(nodes, {}, processors, 0, frames, 48000.0, kTestBudget) == GraphError::Ok);
     CHECK(executor.process(input.data(), input.data(), outputLeft.data(), outputRight.data(), frames));
     CHECK_NEAR(outputLeft.front(), 0.375, 1e-7);
     CHECK_NEAR(outputRight.back(), 0.375, 1e-7);
@@ -155,7 +188,7 @@ TEST(graph_executor_rejects_mono_runtime_layout_until_adapter_exists) {
     const std::vector<GraphNode> nodes{{"mono", &monoRuntime}};
     const std::vector<ModuleProcessor*> processors{&processor};
     GraphExecutor executor;
-    CHECK(executor.prepare(nodes, {}, processors, 0, 64, 48000) == GraphError::RuntimeUnsupportedPortLayout);
+    CHECK(executor.prepare(nodes, {}, processors, 0, 64, 48000, kTestBudget) == GraphError::RuntimeUnsupportedPortLayout);
     CHECK(!executor.ready());
 }
 
@@ -167,7 +200,7 @@ TEST(graph_runtime_publishes_on_audio_thread_and_retires_off_thread) {
     GainProcessor gain;
     const std::vector<ModuleProcessor*> processors{&pass, &gain};
     auto* first = new GraphExecutor();
-    CHECK(first->prepare(nodes, edges, processors, 1, 64, 48000) == GraphError::Ok);
+    CHECK(first->prepare(nodes, edges, processors, 1, 64, 48000, kTestBudget) == GraphError::Ok);
     GraphRuntime runtime;
     CHECK(runtime.publish(first));
     CHECK(!runtime.publish(first));
@@ -178,7 +211,7 @@ TEST(graph_runtime_publishes_on_audio_thread_and_retires_off_thread) {
     CHECK(runtime.collectRetired() == nullptr);
 
     auto* second = new GraphExecutor();
-    CHECK(second->prepare(nodes, edges, processors, 1, 64, 48000) == GraphError::Ok);
+    CHECK(second->prepare(nodes, edges, processors, 1, 64, 48000, kTestBudget) == GraphError::Ok);
     CHECK(runtime.publish(second));
     CHECK(runtime.process(in, in, outL, outR, 2));
     GraphExecutor* retired = runtime.collectRetired();

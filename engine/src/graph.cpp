@@ -7,24 +7,76 @@
 #include <limits>
 #include <functional>
 #include <queue>
-#include <unordered_set>
 #include <stdexcept>
+#include <utility>
 
 namespace caw {
 
+namespace {
+bool addEstimatedBytes(std::size_t& total, std::size_t count, std::size_t elementBytes) noexcept {
+    const std::size_t maximum = std::numeric_limits<std::size_t>::max();
+    if (count != 0 && elementBytes > (maximum - total) / count) return false;
+    total += count * elementBytes;
+    return true;
+}
+
+bool estimateGraphWorkingBytes(std::size_t nodeCount, std::size_t connectionCount,
+                               std::size_t portCount, std::size_t& bytes) noexcept {
+    std::size_t total = 0;
+    // node IDs, indegree/outdegree, adjacency/port-vector headers, adjacency entries,
+    // connected-port flags, stable ready heap and the returned execution order.
+    if (!addEstimatedBytes(total, nodeCount, sizeof(std::string_view)) ||
+        !addEstimatedBytes(total, nodeCount, sizeof(std::size_t)) ||
+        !addEstimatedBytes(total, nodeCount, sizeof(std::size_t)) ||
+        !addEstimatedBytes(total, nodeCount, sizeof(std::vector<uint32_t>)) ||
+        !addEstimatedBytes(total, nodeCount, sizeof(std::vector<uint8_t>)) ||
+        !addEstimatedBytes(total, connectionCount, sizeof(uint32_t)) ||
+        !addEstimatedBytes(total, portCount, sizeof(uint8_t)) ||
+        !addEstimatedBytes(total, nodeCount, sizeof(uint32_t)) ||
+        !addEstimatedBytes(total, nodeCount, sizeof(uint32_t))) return false;
+    bytes = total;
+    return true;
+}
+
+bool estimateExecutorWorkingBytes(std::size_t nodeCount, uint32_t maxFrames,
+                                  std::size_t& bytes) noexcept {
+    std::size_t total = 0;
+    const std::size_t perNodeBuffer = static_cast<std::size_t>(maxFrames) * 2u * sizeof(float);
+    if (maxFrames != 0 && perNodeBuffer / maxFrames != 2u * sizeof(float)) return false;
+    // Per-node metadata: two vector headers, processor pointer, input source, port flags,
+    // and execution-order index. Buffer payloads and the shared zero-input block follow.
+    constexpr std::size_t perNodeMetadata =
+        sizeof(std::vector<float>) * 2u + sizeof(ModuleProcessor*) +
+        sizeof(uint32_t) + sizeof(uint8_t) * 2u + sizeof(uint32_t);
+    if (!addEstimatedBytes(total, nodeCount, perNodeMetadata) ||
+        !addEstimatedBytes(total, nodeCount, perNodeBuffer) ||
+        !addEstimatedBytes(total, maxFrames, sizeof(float))) return false;
+    bytes = total;
+    return true;
+}
+}  // namespace
+
 CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
-                           const std::vector<GraphConnection>& connections) {
+                           const std::vector<GraphConnection>& connections,
+                           const GraphResourceBudget& budget) {
     CompiledGraph out;
     try {
+        if (budget.maxWorkingBytes == 0) {
+            out.error = GraphError::InvalidResourceBudget;
+            return out;
+        }
+        if (nodes.size() > budget.maxNodes || connections.size() > budget.maxConnections) {
+            out.error = GraphError::ResourceBudgetExceeded;
+            return out;
+        }
         // Node references are uint32_t in the graph ABI. This is the representational
-        // limit, not a product cap; connection count is bounded by addressable memory.
+        // limit, not a product cap; connection count is bounded by the caller's budget.
         if (nodes.size() > std::numeric_limits<uint32_t>::max()) {
             out.error = GraphError::TooManyNodes;
             return out;
         }
 
-        std::unordered_set<std::string_view> nodeIds;
-        nodeIds.reserve(nodes.size());
+        std::size_t portCount = 0;
         for (const GraphNode& node : nodes) {
             if (node.id.empty()) { out.error = GraphError::EmptyNodeId; return out; }
             if (!node.module) { out.error = GraphError::MissingModule; return out; }
@@ -32,13 +84,35 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                 out.error = GraphError::InvalidModule;
                 return out;
             }
-            if (!nodeIds.insert(node.id).second) {
-                out.error = GraphError::DuplicateNodeId;
+            if (node.module->portCount > std::numeric_limits<std::size_t>::max() - portCount) {
+                out.error = GraphError::SizeOverflow;
                 return out;
             }
+            portCount += node.module->portCount;
         }
 
-        std::vector<uint32_t> indegree(nodes.size(), 0);
+        std::size_t estimatedBytes = 0;
+        if (!estimateGraphWorkingBytes(nodes.size(), connections.size(), portCount, estimatedBytes)) {
+            out.error = GraphError::SizeOverflow;
+            return out;
+        }
+        if (estimatedBytes > budget.maxWorkingBytes) {
+            out.error = GraphError::ResourceBudgetExceeded;
+            return out;
+        }
+
+        // Sorting gives deterministic duplicate detection without hash-table worst cases.
+        std::vector<std::string_view> nodeIds;
+        nodeIds.reserve(nodes.size());
+        for (const GraphNode& node : nodes) nodeIds.push_back(node.id);
+        std::sort(nodeIds.begin(), nodeIds.end());
+        if (std::adjacent_find(nodeIds.begin(), nodeIds.end()) != nodeIds.end()) {
+            out.error = GraphError::DuplicateNodeId;
+            return out;
+        }
+
+        std::vector<std::size_t> indegree(nodes.size(), 0);
+        std::vector<std::size_t> outdegree(nodes.size(), 0);
         std::vector<std::vector<uint32_t>> outgoing(nodes.size());
         std::vector<std::vector<uint8_t>> connected;
         connected.reserve(nodes.size());
@@ -70,12 +144,19 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                 return out;
             }
             connected[connection.destinationNode][connection.destinationPort] = 1;
-            outgoing[connection.sourceNode].push_back(connection.destinationNode);
             ++indegree[connection.destinationNode];
+            ++outdegree[connection.sourceNode];
         }
 
+        for (std::size_t i = 0; i < outgoing.size(); ++i) outgoing[i].reserve(outdegree[i]);
+        for (const GraphConnection& connection : connections)
+            outgoing[connection.sourceNode].push_back(connection.destinationNode);
+
         // Stable Kahn ordering with a min-heap preserves authored order among ready nodes.
-        std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
+        std::vector<uint32_t> readyStorage;
+        readyStorage.reserve(nodes.size());
+        std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>>
+            ready(std::greater<uint32_t>{}, std::move(readyStorage));
         for (std::size_t i = 0; i < nodes.size(); ++i)
             if (indegree[i] == 0) ready.push(static_cast<uint32_t>(i));
         out.executionOrder.reserve(nodes.size());
@@ -122,14 +203,23 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                                   const std::vector<ModuleProcessor*>& processors,
                                   uint32_t outputNode,
                                   uint32_t maxFrames,
-                                  double sampleRate) {
+                                  double sampleRate,
+                                  const GraphResourceBudget& budget) {
     reset();
+    if (budget.maxWorkingBytes == 0) return GraphError::InvalidResourceBudget;
+    if (nodes.size() > budget.maxNodes || connections.size() > budget.maxConnections)
+        return GraphError::ResourceBudgetExceeded;
     if (nodes.empty() || processors.size() != nodes.size()) return GraphError::ProcessorCountMismatch;
     if (outputNode >= nodes.size()) return GraphError::InvalidOutputNode;
     if (maxFrames == 0 || !std::isfinite(sampleRate) ||
         sampleRate < 8000.0 || sampleRate > 192000.0) return GraphError::InvalidBlockSize;
 
-    const CompiledGraph compiled = compileGraph(nodes, connections);
+    std::size_t executorBytes = 0;
+    if (!estimateExecutorWorkingBytes(nodes.size(), maxFrames, executorBytes))
+        return GraphError::SizeOverflow;
+    if (executorBytes > budget.maxWorkingBytes) return GraphError::ResourceBudgetExceeded;
+
+    CompiledGraph compiled = compileGraph(nodes, connections, budget);
     if (!compiled) return compiled.error;
 
     try {
@@ -189,7 +279,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
             if (!hasOutput_[edge.sourceNode] || !hasInput_[edge.destinationNode]) {
                 reset(); return GraphError::ProcessorDescriptorMismatch;
             }
-        order_ = compiled.executionOrder;
+        order_ = std::move(compiled.executionOrder);
         outputNode_ = outputNode;
         maxFrames_ = maxFrames;
         sampleRate_ = sampleRate;

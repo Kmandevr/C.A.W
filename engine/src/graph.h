@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 #include <vector>
 
@@ -23,9 +24,21 @@ struct GraphConnection {
     uint32_t destinationPort = 0;
 };
 
+struct GraphResourceBudget {
+    // Count ceilings are optional host policy. By default there is no arbitrary object-count cap.
+    std::size_t maxNodes = std::numeric_limits<std::size_t>::max();
+    std::size_t maxConnections = std::numeric_limits<std::size_t>::max();
+    // Required: maximum internal working memory for compile or prepared execution.
+    // Caller-owned GraphNode/GraphConnection storage and processor instances are excluded.
+    std::size_t maxWorkingBytes = 0;
+};
+
 enum class GraphError : uint8_t {
     Ok,
     TooManyNodes,
+    InvalidResourceBudget,
+    ResourceBudgetExceeded,
+    SizeOverflow,
     MissingModule,
     InvalidModule,
     EmptyNodeId,
@@ -57,7 +70,8 @@ struct CompiledGraph {
 
 // Produces a stable topological order. Call on a control/build thread, never from process().
 CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
-                           const std::vector<GraphConnection>& connections);
+                           const std::vector<GraphConnection>& connections,
+                           const GraphResourceBudget& budget);
 
 // Prepared native stereo executor. Processor instances and descriptors are borrowed and must outlive the executor.
 // reset() never destroys processors. prepare() allocates on a control thread; process() performs
@@ -69,7 +83,8 @@ public:
                        const std::vector<ModuleProcessor*>& processors,
                        uint32_t outputNode,
                        uint32_t maxFrames,
-                       double sampleRate);
+                       double sampleRate,
+                       const GraphResourceBudget& budget);
     void reset() noexcept;
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
