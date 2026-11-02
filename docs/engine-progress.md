@@ -44,7 +44,11 @@ updated: 2026-11-02
 - The app C API/FFI remains API v1. The app submits project compilation, source checks and offline WAV renders to the native worker pool; it does not submit graph execution or native module work.
 - Existing synth modulation, sidechain ducking effects, per-note expression and project automation are partial foundations, not the unified parameter/routing system requested.
 
-## Latest implementation slice — parser failure-state safety (unverified)\n\n- `parseProject` now clears its output object and error string before applying the 8 MiB JSON input budget. A rejected oversized document cannot leave a caller's previous project appearing valid. Regression test pre-populates project state and verifies it is cleared on rejection. Commit `5bd40eb` contains implementation; `1c88f05` adds the regression. CI runs `41503176374` / `41503176276` pending at documentation update.\n\n## Latest implementation slice — dynamic effect-chain length
+## Latest implementation slice — parser failure-state safety (unverified)
+
+- `parseProject` now clears its output object and error string before applying the 8 MiB JSON input budget. A rejected oversized document cannot leave a caller's previous project appearing valid. Regression test pre-populates project state and verifies it is cleared on rejection. Commit `5bd40eb` contains implementation; `1c88f05` adds the regression. CI runs `41503176374` / `41503176276` pending at documentation update.
+
+## Latest implementation slice — dynamic effect-chain length
 
 - Removed the fixed nine-module/eight-effect limit from ProjectSpec, project JSON chain parsing, Engine chain preparation and synth patch parsing.
 - The project parser now preserves every string module ID in a chain; Engine no longer warns and truncates the chain after its ninth entry; synth patch translation no longer rejects the ninth effect.
@@ -125,7 +129,14 @@ Graph compile/prepare now require an explicit working-memory budget and prefligh
 - **Confirmed silent/lossy behavior:** no free layer slot now returns an explicit project error; bounded command submission can still time out after about two seconds, but project updates propagate failures and keep failed installs retryable (standalone transport controls still ignore the result); retirement reclamation is capacity-guarded and defers transitions rather than dropping pointers; sustained queue saturation still requires stress verification; project-state overflow returns an explicit error and does not install the over-budget layer. The known chain/module/clip/arrangement-note/pattern-note/project-automation truncations have been removed. Layer volume/pan automation and VM parameter/import collections are dynamic.
 - Some limits are legitimate sandbox/parser safety budgets. They must remain explicit, configurable within host policy where practical, and fail clearly. Project content must never be silently truncated or a track silently omitted. Real-time event queues may be bounded, but overflow must be visible and recoverable.
 
-## Latest ownership-safety change — retirement backpressure (CI pending)\n\n- Added non-consuming SPSC `peek()` and producer-side `writable()` inspection.\n- `Engine::applyCommands` now reserves worst-case retirement capacity before popping a command (including the multi-slot `Play` case).\n- Callback-side crossfade completion, pending swaps and layer removal check capacity before changing ownership. When the retirement queue and fixed pending list are full, transitions are deferred; the callback does not allocate, wait, lock or delete.\n- Added SPSC capacity/peek regression coverage. Commits: `9540553`, `d5c3330`, `7577f0e`, `d00472f`, `ecc5482`, `c0dbeeb`. Engine/App/Docs CI for checkpoint `c0dbeeb` was pending when recorded.\n\n## Milestones
+## Latest ownership-safety change — retirement backpressure (CI pending)
+
+- Added non-consuming SPSC `peek()` and producer-side `writable()` inspection.
+- `Engine::applyCommands` now reserves worst-case retirement capacity before popping a command (including the multi-slot `Play` case).
+- Callback-side crossfade completion, pending swaps and layer removal check capacity before changing ownership. When the retirement queue and fixed pending list are full, transitions are deferred; the callback does not allocate, wait, lock or delete.
+- Added SPSC capacity/peek regression coverage. Commits: `9540553`, `d5c3330`, `7577f0e`, `d00472f`, `ecc5482`, `c0dbeeb`. Engine/App/Docs CI for checkpoint `c0dbeeb` was pending when recorded.
+
+## Milestones
 
 | ID | Objective | Status | Evidence / remaining work |
 |---|---|---|---|
