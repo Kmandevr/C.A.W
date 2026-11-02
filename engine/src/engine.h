@@ -172,7 +172,7 @@ private:
     int64_t ctlLoopLen_ = 0;
 
     Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced,
-                      const Chain* prev, const std::vector<ProjectAutomationLaneSpec>& automation);
+                      const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation);
     void swapIn(Slot& s, Chain* c) noexcept;  // hot swap with a crossfade, keeping what can keep playing
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
