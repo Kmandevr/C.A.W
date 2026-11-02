@@ -13,7 +13,7 @@ updated: 2026-11-02
 
 - Branch: `feature/native-engine-refactor-integration`
 - Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
-- Current branch tip at this status record: 58 ahead, 0 behind. Latest implementation/test commit: `8f310708617e742a53cb00896a9715d41883d5cd`.
+- Current branch tip at this status record: 64 ahead, 0 behind. Latest implementation/test commit: `d0de712c41be3a78c10dddbfd861dbfd23e205e9`.
 - Starting point: `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`.
 - Issue: #28, open and in progress. PR: none.
 - Milestones: M0 verified; M1 in progress.
@@ -41,7 +41,7 @@ The graph executor remains stereo-only with one audio input and output per node,
 
 Important remaining risks include fixed 64 layer slots, 32 voices, 9 chain modules, parameter/import/export caps, 64-bar arrangement clamp, silent parser truncation, project-state exhaustion that leaves layers silent, a project command queue timeout that can drop installs, retirement overflow that can leak, and slot exhaustion that can skip a layer. See `docs/engine-progress.md` for exact limits and source behavior.
 
-M0 audit is complete; do not repeat the repository-wide investigation without new evidence. The latest code slices remove fixed chain, project module/clip, project parameter-automation binding, arrangement note-output and pattern note-count ceilings. Regression coverage includes 12 chain modules, nine synth effects, 300 project modules, 520 clips, 520×9 arrangement notes and 4097 parsed pattern notes. These changes are not yet verified by an inspectable fresh CI result. Next, check CI as soon as a workflow is available, then continue with hardware-aware Engine budgets and transactional prepared-project publication, safe retirement, typed multi-domain graph execution and Engine/VM integration.
+M0 audit is complete; do not repeat the repository-wide investigation without new evidence. The latest code slices remove fixed chain, project module/clip, project parameter-automation binding, project-level automation lane/point, arrangement note-output and pattern note-count ceilings. Regression coverage includes 12 chain modules, nine synth effects, 300 project modules, 520 clips, 520×9 arrangement notes and 4097 parsed pattern notes. These changes are not yet verified by an inspectable fresh CI result. Next, check CI as soon as a workflow is available, then continue with hardware-aware Engine budgets and transactional prepared-project publication, safe retirement, typed multi-domain graph execution and Engine/VM integration.
 
 The owner explicitly reopened full graph/runtime integration despite the older pause comment on issue #28. The issue body and current owner comment reflect the current scope.
 
