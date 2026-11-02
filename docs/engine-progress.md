@@ -17,7 +17,7 @@ updated: 2026-11-02
 - **Issue:** #28, open and `status: in progress`.
 - **PR:** none. Open one coherent PR only when the complete refactor is genuinely reviewable. Do not merge or approve it.
 - **Current milestone:** M1 — core execution foundations (**IN PROGRESS**). M0 is **VERIFIED**.
-- **Last implementation step:** removed fixed VM parameter/import ceilings and the synth-generated parameter ceiling. BlockCtx now borrows a dynamically sized parameter pointer table with an explicit count and sample offset; Engine allocates parameter sample buffers per prepared chain. Tests cover 40 VM parameters with live automation, 40 imports and more than 64 synth parameters. This code is not yet CI-verified.
+- **Last implementation step:** removed the 4096-step pattern/MIDI cap and fixed 16-point note-expression curves. Engine reserves per-voice curve capacity off callback and preserves prior capacity during hot swaps. Tests cover 5000-step patterns and 20-point curve parsing/playback. This code is not yet CI-verified.
 - **Implementation commits:** graph scaling/budgets: `979d25abcd7794731c58fbce72c7522bc442612e`, `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a`, `eb465f4a1489d30beb34801e52bc1e7ddc2e7577`, `07c796f8e745cd44e7be37992747b8263ac27e9a`, `e815b495a8055e58fd9f7079641173f24aa251d4`; latest VM capacity code/test checkpoint: `8f43d76036cadcc3998eed6747a94d9e0c3f0480`. See docs/log.md for intermediate code commits.
 - **Current code changed:** graph, project parser, Engine, VM/compiler/program contracts, MIDI/pattern/synth parsing and associated tests. No graph/VM playback integration has been implemented yet.
 
@@ -65,7 +65,7 @@ updated: 2026-11-02
 
 - Removed the 256 project-level parameter/global automation-lane rejection and the 128-point silent skip. Both collections are already vector-backed; all valid lanes and points now survive parsing.
 - Added a parser regression with 257 lanes and 129 points per lane.
-- The separate layer volume/pan automation path still uses fixed 128-point arrays in Slot/Cmd and is not changed by this slice. Parameter automation binding count is dynamic, but the VM's parameter-value arrays remain fixed at 32.
+- Layer volume/pan automation is now dynamically stored in prepared AutomationData vectors; VM parameter automation tables are dynamically sized per chain. Both are prepared off callback and avoid callback allocation during note/parameter processing.
 - **Verification:** fresh CI results for the implementation commits remain uninspected. Earlier green runs predate these changes.
 
 ## Latest implementation slice — dynamic layer automation and command failure handling
