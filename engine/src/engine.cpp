@@ -182,7 +182,7 @@ std::shared_ptr<const Pattern> compileArrangement(
         double sourcePos = static_cast<double>(clip.sourceOffsetSteps);
         int consumed = 0;
         int timeline = clip.startSteps;
-        while (consumed < clip.lengthSteps && out->notes.size() < kMaxPatternNotes) {
+        while (consumed < clip.lengthSteps) {
             if (sourcePos >= sourceLength) {
                 if (!clip.loop) break;
                 sourcePos = std::fmod(sourcePos, static_cast<double>(sourceLength));
@@ -195,7 +195,7 @@ std::shared_ptr<const Pattern> compileArrangement(
             struct RatchetSpan { double start, end; uint16_t sub; };
             std::vector<std::vector<RatchetSpan>> eventSpans;
             std::vector<int> remap(src.notes.size(), -1);
-            for (size_t i = 0; i < src.notes.size() && out->notes.size() < kMaxPatternNotes; ++i) {
+            for (size_t i = 0; i < src.notes.size(); ++i) {
                 const PatternNote& original = src.notes[i];
                 const double originalEnd = original.at + original.len;
                 if (originalEnd <= sourcePos || original.at >= sourceEnd) continue;
