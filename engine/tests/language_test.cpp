@@ -243,3 +243,25 @@ TEST(module_imports_are_not_capped_at_32) {
     CHECK(compiled.program != nullptr);
     if (compiled.program) CHECK_EQ(compiled.program->imports.size(), size_t{40});
 }
+
+TEST(module_parameters_are_not_capped_at_32) {
+    std::string source;
+    std::string expression;
+    for (int i = 0; i < 40; ++i) {
+        source += "param p" + std::to_string(i) + " = 0.5 in 0..2\n";
+        if (i) expression += " + ";
+        expression += "p" + std::to_string(i);
+    }
+    const CompileResult compiled = compileModule(source + expression);
+    CHECK(compiled.program != nullptr);
+    if (!compiled.program) return;
+    CHECK_EQ(compiled.program->params.size(), size_t{40});
+    Instance instance(compiled.program);
+    BlockCtx context;
+    context.n = kBlock;
+    instance.process(context);
+    CHECK_NEAR(instance.rawOutput()[0], 20.0, 1e-9);
+    instance.setParam(39, 1.5);
+    instance.process(context);
+    CHECK_NEAR(instance.rawOutput()[0], 21.0, 1e-9);
+}
