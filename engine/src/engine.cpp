@@ -1358,13 +1358,20 @@ void Engine::updateTiming() noexcept {
     if (loopLen_ < 1) loopLen_ = 1;
 }
 
+bool Engine::canRetire(size_t count) const noexcept {
+    // A non-empty pending list means the retirement queue is already full. Stop
+    // consuming commands until the control thread has reclaimed enough entries.
+    return pendingCount_ == 0 && retired_->writable() >= count;
+}
+
 void Engine::retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern,
                     AutomationData* automation) noexcept {
     if (!c && freedSlot < 0 && !pattern && !automation) return;
     Retired r{c, freedSlot, pattern, automation};
     if (pendingCount_ == 0 && retired_->push(r)) return;
     if (pendingCount_ < kPendingMax) pending_[pendingCount_++] = r;
-    // If even the pending list is full, reclamation is deferred by the existing overflow policy.
+    // All callers reserve queue capacity before changing ownership. This is a
+    // defensive fallback; command processing is paused while pending is non-empty.
 }
 
 void Engine::swapIn(Slot& s, Chain* c) noexcept {
@@ -1425,8 +1432,20 @@ void Engine::applyCommands() noexcept {
         for (int i = 1; i < pendingCount_; ++i) pending_[i - 1] = pending_[i];
         --pendingCount_;
     }
+    if (pendingCount_ != 0) return;
     Cmd c;
-    while (cmds_->pop(c)) {
+    while (cmds_->peek(c)) {
+        size_t retirementNeed = 0;
+        switch (c.type) {
+            case Cmd::Install: retirementNeed = 2; break;
+            case Cmd::SetAutomation:
+            case Cmd::SetPattern:
+            case Cmd::Remove: retirementNeed = 1; break;
+            case Cmd::ConfigureBus: retirementNeed = c.flag ? 4 : 3; break;
+            case Cmd::Play: retirementNeed = static_cast<size_t>(2 * kSlots); break;
+            default: break;
+        }
+        if (!canRetire(retirementNeed) || !cmds_->pop(c)) break;
         switch (c.type) {
             case Cmd::Install: {
                 Slot& s = slots_[c.slot];
