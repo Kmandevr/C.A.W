@@ -84,6 +84,14 @@ updated: 2026-11-02
 - Tests cover 40 parameters with runtime setParam, 40 imports through actual VM processing, Engine automation of parameter 40, and a synth patch exposing more than 64 generated parameters.
 - **Verification:** fresh CI is not inspectable through the current commit workflow reader. Earlier green runs predate these changes.
 
+## Latest implementation slice — hardware-derived Engine memory budget
+
+- Added EngineResourceBudget with total, project-state, graph-working, compile-working and retirement shares. The platform's conservative memoryBudgetMiB is the source; the shares are 1/2, 1/4, 1/8 and 1/8. Unknown memory uses a documented 128 MiB total fallback, preserving the previous 64 MiB project-state allowance.
+- Engine's default constructor probes hardware on the control thread; hosts/tests can inject an explicit EngineResourceBudget. Project state is now checked in bytes against the per-Engine project-state share instead of the removed fixed 64 MiB constant.
+- Added tests for budget partitioning, unknown-memory fallback and project rejection when delay state exceeds a 2 MiB hardware budget.
+- Graph/compile/retirement shares are defined but are not yet enforced by those subsystems. The active GraphExecutor is still not integrated into Engine.
+- **Verification:** fresh CI for these changes is not yet inspectable.
+
 ## Fixed limits and correctness risks
 
 Graph compile/prepare now require an explicit working-memory budget and preflight internal storage estimates; allocator overhead is implementation-dependent, so actual allocation failure is still handled. The budget is not yet derived from hardware or passed by the active Engine. The following limits and loss paths remain in the current source and must be converted to explicit, configurable resource budgets or dynamic storage:
@@ -91,8 +99,8 @@ Graph compile/prepare now require an explicit working-memory budget and prefligh
 - **Project structure:** 64 layers/slots; module chains, project module lists, arrangement clip lists and project-level parameter/global automation lanes/points are now dynamically stored; layer volume/pan automation is now vector-backed and dynamically sized, with control-thread preparation and off-callback retirement; dependency records above 4,096 are rejected; arrangement length/loop is clamped to 64 bars.
 - **VM/module:** parameters and imports are dynamically sized; 16 exports remain; 6 call arguments; 1,024 VM registers; 64 KiB source; 8 MiB state per module; 32 voices; compiler depth/call budgets.
 - **Pattern/MIDI:** pattern note arrays are dynamic; pattern length remains limited to 4,096 steps; note curves have 16 points; MIDI file size is limited to 16 MiB and MIDI event count to 65,536; MIDI import note allowance is caller-configurable; MIDI 2.0 input queue capacity is 1,024 (drop-newest with a counter).
-- **Runtime queues/state:** 1,024-entry command queue; 1,024-entry retirement queue; 256 pending retirements; 2 MiB state-takeover threshold; 64 MiB project-state budget. Worker pool has a maximum of 16 workers and a 256-job queue.
-- **Confirmed silent/lossy behavior:** export collection stops at 16; no free layer slot now returns an explicit project error; bounded command submission can still time out after about two seconds, but project updates propagate failures and keep failed installs retryable (standalone transport controls still ignore the result); retirement overflow can leak after the pending list fills; project-state overflow returns an explicit error while the over-budget layer remains silent. The known chain/module/clip/arrangement-note/pattern-note/project-automation truncations have been removed. Layer volume/pan automation and VM parameter/import collections are dynamic.
+- **Runtime queues/state:** 1,024-entry command queue; 1,024-entry retirement queue; 256 pending retirements; 2 MiB state-takeover threshold; hardware-derived project-state budget (64 MiB fallback when memory is unknown). Worker pool has a maximum of 16 workers and a 256-job queue.
+- **Confirmed silent/lossy behavior:** export collection stops at 16; no free layer slot now returns an explicit project error; bounded command submission can still time out after about two seconds, but project updates propagate failures and keep failed installs retryable (standalone transport controls still ignore the result); retirement overflow can leak after the pending list fills; project-state overflow returns an explicit error and does not install the over-budget layer. The known chain/module/clip/arrangement-note/pattern-note/project-automation truncations have been removed. Layer volume/pan automation and VM parameter/import collections are dynamic.
 - Some limits are legitimate sandbox/parser safety budgets. They must remain explicit, configurable within host policy where practical, and fail clearly. Project content must never be silently truncated or a track silently omitted. Real-time event queues may be bounded, but overflow must be visible and recoverable.
 
 ## Milestones
