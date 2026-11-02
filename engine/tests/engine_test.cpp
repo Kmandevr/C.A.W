@@ -890,3 +890,22 @@ TEST(engine_routes_more_than_16_module_exports) {
     const auto out = run(e, 128);
     CHECK_NEAR(out[0], 20.0 * std::cos(kPi / 4.0), 1e-4);
 }
+
+TEST(engine_rejects_export_layout_above_memory_budget) {
+    std::string source = "---\nmode: float\n---\n";
+    for (int i = 0; i < 20; ++i)
+        source += "export let value" + std::to_string(i) + " = " + std::to_string(i + 1) + "\n";
+    source += "1";
+    ProjectSpec p;
+    p.modules.push_back({"source", source, {}, "source"});
+    LayerSpec layer;
+    layer.id = "source_track";
+    layer.chain = {"source"};
+    p.layers.push_back(layer);
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 1;
+    Engine e(8000, makeEngineResourceBudget(hardware));
+    const std::string result = e.setProject(p);
+    CHECK(result.find("\"ok\":false") != std::string::npos);
+    CHECK(result.find("hardware-derived graph working-memory budget") != std::string::npos);
+}
