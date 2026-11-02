@@ -297,3 +297,65 @@ TEST(project_automation_rejects_excessive_lane_count) {
     CHECK(!parseProject(json, project, error));
     CHECK(has(error, "256"));
 }
+
+
+TEST(module_parameter_automation_matches_offline_render) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "param level = 0 in 0..1\\nlevel", {}});
+    LayerSpec layer;
+    layer.id = "tone-track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "param";
+    lane.moduleId = "tone";
+    lane.target = "level";
+    lane.points = {{0, 0}, {4, 1}};
+    p.automation.push_back(lane);
+
+    Engine engine(48000);
+    engine.setMasterBypass(true);
+    const std::string setup = engine.setProject(p);
+    CHECK(!has(setup, "\\\"ok\\\":false"));
+    engine.play();
+    const std::vector<float> live = run(engine, 14000);
+
+    RenderResult rendered;
+    ExportOptions options;
+    options.kind = ExportKind::Free;
+    options.seconds = 0.3;
+    CHECK(renderExport(p, options, rendered));
+    CHECK_NEAR(live[12000], 0.5 * std::cos(kPi / 4.0), 1e-6);
+    CHECK_NEAR(live[12000], rendered.samples[static_cast<size_t>(12000) * 2], 1e-6);
+}
+
+TEST(project_global_automation_reaches_global_parameters) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "global level = 0 in 0..1\\nlevel", {}});
+    LayerSpec layer;
+    layer.id = "tone-track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "global";
+    lane.target = "level";
+    lane.points = {{0, 0}, {4, 1}};
+    p.automation.push_back(lane);
+
+    Engine engine(48000);
+    engine.setMasterBypass(true);
+    engine.setProject(p);
+    engine.play();
+    const std::vector<float> live = run(engine, 14000);
+    CHECK_NEAR(live[12000], 0.5 * std::cos(kPi / 4.0), 1e-6);
+}
