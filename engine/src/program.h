@@ -46,7 +46,6 @@ struct Op {
 enum class ModuleKind : uint8_t { Generator, Effect, Library, Pattern, Synth };
 enum class OutputMode : uint8_t { Byte, Float };
 
-constexpr int kMaxExports = 16;  // per layer, across its chain
 
 enum class ParamKind : uint8_t { Number, Toggle, Choice };
 
