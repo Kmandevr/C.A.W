@@ -1,5 +1,6 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+#include "hardware.h"
 
 #include <algorithm>
 #include <array>
@@ -316,7 +317,11 @@ void storeMax(std::atomic<float>& a, float v) {
 }  // namespace
 
 Engine::Engine(double sampleRate)
+    : Engine(sampleRate, makeEngineResourceBudget(detectHardwareProfile())) {}
+
+Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     : sr_(sampleRate),
+      resourceBudget_(resourceBudget),
       slots_(new Slot[kSlots]),
       pending_(new Retired[kPendingMax]),
       cmds_(new Spsc<Cmd, 1024>()),
