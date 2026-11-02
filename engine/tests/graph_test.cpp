@@ -226,3 +226,12 @@ TEST(graph_runtime_publishes_on_audio_thread_and_retires_off_thread) {
     delete runtime.takeActiveAfterStop();
     CHECK(runtime.takePendingAfterStop() == nullptr);
 }
+
+TEST(graph_budget_uses_engine_hardware_share) {
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 16;
+    const EngineResourceBudget engine = makeEngineResourceBudget(hardware);
+    const GraphResourceBudget graph = makeGraphResourceBudget(engine);
+    CHECK_EQ(graph.maxWorkingBytes, engine.graphWorkingBytes);
+    CHECK_EQ(graph.maxWorkingBytes, 4ull * 1024ull * 1024ull);
+}
