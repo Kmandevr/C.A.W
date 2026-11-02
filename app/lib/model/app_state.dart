@@ -1294,6 +1294,8 @@ class AppState extends ChangeNotifier {
     _lastGoodRunSources.clear();
     _libraryUndo.clear();
     _libraryRedo.clear();
+    _automationUndo.clear();
+    _automationRedo.clear();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
     _moduleValueTicks.clear();
