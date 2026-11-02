@@ -755,15 +755,28 @@ TEST(project_parser_preserves_large_project_automation) {
     CHECK_NEAR(parsed.automation.back().points.back().step, 128.0, 1e-9);
 }
 
-TEST(project_parser_rejects_oversized_layer_automation_without_truncation) {
-    std::string json = R"({"caw_project":1,"layers":[{"id":"track","automation":[{"target":"volume","points":[)";
+TEST(project_and_engine_preserve_layer_automation_beyond_128_points) {
+    std::string json = R"({"caw_project":1,"bpm":400,"loop_bars":64,"master":1,
+      "modules":[{"id":"tone","source":"---\nmode: float\n---\n1"}],
+      "layers":[{"id":"track","chain":["tone"],"volume":1,"automation":[
+        {"target":"volume","points":[)";
     for (int point = 0; point < 129; ++point) {
         if (point) json += ",";
-        json += R"({"step":)" + std::to_string(point) + R"(,"value":0.5})";
+        const double value = point == 128 ? 0.1 : 1.0;
+        json += R"({"step":)" + std::to_string(point) + R"(,"value":)" + std::to_string(value) + "}";
     }
     json += R"(]}]}]})";
     ProjectSpec parsed;
     std::string error;
-    CHECK(!parseProject(json, parsed, error));
-    CHECK(error.find("128 points") != std::string::npos);
+    CHECK(parseProject(json, parsed, error));
+    CHECK_EQ(parsed.layers[0].automation[0].points.size(), size_t{129});
+
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(parsed).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 38500);
+    const float unity = static_cast<float>(std::cos(kPi / 4.0));
+    CHECK_NEAR(out[30000], unity, 1e-4); // automation point 100
+    CHECK_NEAR(out[38400], 0.1 * unity, 1e-4); // point 128 must not be truncated
 }
