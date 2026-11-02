@@ -1359,9 +1359,12 @@ void Engine::updateTiming() noexcept {
 }
 
 bool Engine::canRetire(size_t count) const noexcept {
-    // A non-empty pending list means the retirement queue is already full. Stop
-    // consuming commands until the control thread has reclaimed enough entries.
-    return pendingCount_ == 0 && retired_->writable() >= count;
+    // The callback may use the queue plus its preallocated overflow list. When
+    // overflow is already in use, retire() appends there until the control thread
+    // drains the queue and a later callback can move the pending entries across.
+    const size_t pendingFree = static_cast<size_t>(kPendingMax - pendingCount_);
+    if (pendingCount_ != 0) return count <= pendingFree;
+    return count <= retired_->writable() + pendingFree;
 }
 
 void Engine::retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern,
