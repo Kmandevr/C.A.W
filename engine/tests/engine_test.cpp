@@ -859,3 +859,34 @@ TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
     const auto out = run(e, 2000);
     CHECK(std::any_of(out.begin(), out.end(), [](float sample) { return std::abs(sample) > 1e-5f; }));
 }
+
+TEST(engine_routes_more_than_16_module_exports) {
+    std::string source = "---\nmode: float\n---\n";
+    for (int i = 0; i < 20; ++i)
+        source += "export let value" + std::to_string(i) + " = " + std::to_string(i + 1) + "\n";
+    source += "1";
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"source", source, {}});
+    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsrc.value19", {}});
+    LayerSpec sourceLayer;
+    sourceLayer.id = "source_track";
+    sourceLayer.chain = {"source"};
+    sourceLayer.volume = 0.0;
+    LayerSpec consumerLayer;
+    consumerLayer.id = "consumer_track";
+    consumerLayer.chain = {"consumer"};
+    consumerLayer.volume = 1.0;
+    p.layers = {sourceLayer, consumerLayer};
+
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 16;
+    Engine e(8000, makeEngineResourceBudget(hardware));
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 128);
+    CHECK_NEAR(out[0], 20.0 * std::cos(kPi / 4.0), 1e-4);
+}
