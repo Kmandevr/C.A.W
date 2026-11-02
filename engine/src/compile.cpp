@@ -614,7 +614,6 @@ private:
             }
         }
         if (d.def < d.min || d.def > d.max) fail(at, "param default is outside its range");
-        if (p_.params.size() >= static_cast<size_t>(kMaxParams)) fail(at, "too many params");
         Op op{};
         op.code = OpCode::Param;
         op.index = static_cast<uint32_t>(p_.params.size());
@@ -1298,11 +1297,6 @@ CompileResult compileModule(std::string_view source, const std::vector<LibrarySo
                     return r;
                 }
                 for (ParamDef d : fx.program->params) {
-                    if (out->params.size() >= static_cast<size_t>(kMaxSynthParams)) {
-                        r.line = r.col = 1;
-                        r.error = "line 1, col 1: this patch has more than 64 values to set; remove an effect or a part";
-                        return r;
-                    }
                     d.header = "Effects";
                     out->params.push_back(std::move(d));
                 }
