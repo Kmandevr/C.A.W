@@ -907,7 +907,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             static_cast<size_t>(resourceBudget_.graphWorkingBytes / bytesPerAllSlots);
         if (!exportPool_) {
             if (budgetCapacity < maxExportsPerSlot)
-                return "{\\\"ok\\\":false,\\\"error\\\":\\\"project exports exceed the hardware-derived graph working-memory budget\\\"}";
+                return R"({"ok":false,"error":"project exports exceed the hardware-derived graph working-memory budget"})";
             try {
                 auto pool = std::make_unique<ExportPool>();
                 pool->capacityPerSlot = budgetCapacity;
@@ -918,10 +918,10 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 }
                 exportPool_ = std::move(pool);
             } catch (const std::bad_alloc&) {
-                return "{\\\"ok\\\":false,\\\"error\\\":\\\"unable to allocate export buffers within the hardware-derived memory budget\\\"}";
+                return R"({"ok":false,"error":"unable to allocate export buffers within the hardware-derived memory budget"})";
             }
         } else if (maxExportsPerSlot > exportPool_->capacityPerSlot) {
-            return "{\\\"ok\\\":false,\\\"error\\\":\\\"project requires more exports per layer than the existing stable export pool supports\\\"}";
+            return R"({"ok":false,"error":"project requires more exports per layer than the existing stable export pool supports"})";
         }
     }
 
