@@ -339,11 +339,13 @@ TEST(setting_a_synth_param_reaches_its_voice_and_its_effects) {
     CHECK(rms(before) > 0.0);
 }
 
-TEST(a_patch_cannot_grow_the_chain_or_params_past_the_limits) {
-    // At most 8 fx lines: more is an error at its line, so a patch can't make the engine build thousands of modules.
-    std::string many = kPatch + "osc a\n";
-    for (int i = 0; i < 9; ++i) many += (i % 2 ? "fx drive\n" : "fx zz\n");
-    CHECK(translateSynth(many).error.find("line 15, col 1: a patch can have at most 8 fx lines") == 0);
+TEST(a_patch_can_grow_its_effect_chain_without_truncation) {
+    // Effect-chain length is dynamic; resource limits belong to the host's explicit budget, not a product cap.
+    std::string many = kPatch + "osc a\\n";
+    for (int i = 0; i < 9; ++i) many += "fx delay\\n";
+    const SynthResult translated = translateSynth(many);
+    CHECK(translated.ok);
+    CHECK_EQ(translated.fx.size(), size_t{9});
     // A full patch with 8 effects stays under the 64-value limit and compiles.
     std::string full = kPatch + "osc a\nosc b\nosc c\nsub\nnoise\nfilter 1 lowpass\nfilter 2 highpass\n";
     for (int i = 0; i < 8; ++i) full += "fx delay\n";
