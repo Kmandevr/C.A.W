@@ -2113,9 +2113,11 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
         std::fill_n(slots_[i].outL, m, 0.0);
         std::fill_n(slots_[i].outR, m, 0.0);
         Slot& slot = slots_[i];
-        if (slot.exportBuf) {
+        if (slot.exportBuf && slot.exportCount > 0 &&
+            (!slot.active || !slot.cur || (slotTarget(slot) == 0.0 && slot.gain == 0.0))) {
             for (size_t b = 0; b < slot.exportCount; ++b)
                 if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), m, 0.0);
+            if (!slot.active || (!slot.cur && !slot.pending)) slot.exportCount = 0;
         }
     }
     ++chunkId_;
