@@ -948,7 +948,9 @@ class AppState extends ChangeNotifier {
     if (targetType != 'global' && targetType != 'param') return;
     if (targetType == 'param' && (moduleId == null || moduleId.isEmpty)) return;
     if (project.automation.any((lane) => lane.targetType == targetType &&
-        lane.target == target && lane.moduleId == moduleId)) return;
+        lane.target == target && lane.moduleId == moduleId)) {
+      return;
+    }
     _pushAutomationUndo();
     final end = project.loopSteps.toDouble();
     final definition = targetType == 'global'
