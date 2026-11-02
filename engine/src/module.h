@@ -55,6 +55,7 @@ enum class ModuleValidation : uint8_t {
     MissingParameterArray,
     EmptyPortId,
     DuplicatePortId,
+    InvalidPortType,
     InvalidPortLayout,
     EmptyParameterId,
     DuplicateParameterId,
