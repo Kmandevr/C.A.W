@@ -340,3 +340,49 @@ Version extension APIs, graph data and serialized module state. Preserve existin
 ### Required verification
 
 Test complex mixed-domain routing; audio/MIDI/control sidechains; multichannel mapping; nested buses, sends and returns; feedback with and without valid delay boundaries; graph compilation and cycle diagnostics; large projects without arbitrary truncation; resource-budget exhaustion and recovery; extension/API version mismatch; malicious or runaway VM programs; processor failure and bypass; state migration; deterministic output; and live/offline parity. Benchmark graph compilation, routing, extension dispatch and callback costs across small and large projects. Confirm that standard paths remain lightweight while advanced projects remain possible within actual hardware and safety constraints.
+
+
+## 17. Adaptive concurrency, batching and minimum-overhead execution
+
+Concurrency is a foundational engine capability. The engine should automatically exploit useful parallelism and batching across the complete workload while minimizing scheduling, synchronization, memory movement, latency and power overhead. The goal is not maximum thread count; it is maximum useful work completed within the audio deadline and available resource budget.
+
+### Dependency-aware execution
+
+- Compile the typed signal/event graph into a dependency-aware execution plan. Run independent branches concurrently; preserve required ordering, sample accuracy and explicit feedback/delay boundaries.
+- Schedule work at useful task sizes. Avoid creating tiny tasks whose dispatch and synchronization cost exceeds their processing cost.
+- Support parallel work across independent tracks, buses, voices, instruments, effects, channels, generators, analysis tasks and offline render ranges where dependencies permit.
+- Support nested or internally parallel modules through declared execution capabilities. Prevent uncontrolled nested thread pools and oversubscription.
+- Use serial execution for small workloads or latency-critical paths when it is faster or more predictable.
+- Use bounded worker pools and real-time-safe coordination. The audio callback must never wait on an unbounded queue, worker startup, blocking barrier or non-real-time task.
+- Ensure tasks required for the next audio deadline are scheduled with appropriate priority; background analysis, waveform generation, indexing, asset preparation and UI work must not starve audio.
+
+### Batching and vectorized processing
+
+Batch wherever it reduces overhead without changing required timing or semantics:
+- Process multiple voices, events, parameter updates, channels or compatible module instances together.
+- Group similar operations and reuse prepared kernels, coefficient sets, lookup data and shared modulation results.
+- Use SIMD/vector instructions and cache-friendly layouts when supported, with portable scalar fallbacks.
+- Batch control/event dispatch while preserving timestamps, ordering, note-off safety and sample-accurate events.
+- Batch graph preparation, project loading, asset work and offline rendering outside the real-time callback.
+- Do not force batching where it adds latency, increases memory pressure, breaks dependencies or makes the workload less efficient.
+
+### Adaptive hardware use
+
+Detect available CPU cores, instruction sets, memory capacity and supported accelerators. Select CPU parallelism, SIMD, GPU/DSP or other hardware paths only when profiling and workload characteristics show a net benefit. Account for transfer, setup, synchronization, power and thermal costs. Keep a correct portable CPU fallback and avoid requiring any specific accelerator.
+
+Choose worker count, task granularity, batch size, buffering and quality settings based on workload size, device capacity, current load and audio deadline. Adapt without audible discontinuities. Avoid excessive thread creation, context switching, busy waiting, cache contention, false sharing and unnecessary buffer copies.
+
+### Determinism, stability and deadline safety
+
+- Define deterministic ordering and reduction behavior wherever output depends on the order of operations. Parallel floating-point reductions must have documented reproducibility semantics.
+- Never parallelize across a dependency that changes results or violates sample-accurate timing.
+- Keep callback work bounded. If a worker or accelerator misses a deadline, use a defined safe fallback, previous valid state, bypass or controlled degradation rather than blocking the callback.
+- Avoid races in shared module state; declare whether modules are serial, internally parallel or safely reentrant, and enforce those declarations in the execution plan.
+- Make project save/load, graph changes, module replacement and resource reclamation safe across audio-thread boundaries.
+- Prefer stable predictable execution over a small benchmark gain that increases glitches, jitter or failure risk.
+
+### Measurement and validation
+
+Profile real workloads on low-end phones, ordinary mobile devices, desktop CPUs and accelerator-equipped systems. Measure end-to-end audio deadline margin, worst-case and tail processing time, glitch/dropout rate, CPU utilization, memory use, power where measurable, scheduling overhead, synchronization cost, cache behavior and scaling efficiency.
+
+Test serial versus parallel parity, deterministic modes, high voice counts, large routing graphs, mixed audio/MIDI/control workloads, simultaneous background tasks, CPU saturation, worker failure, thermal/resource pressure and live/offline rendering. Require evidence that each batching or parallel path improves total cost for its target workload; otherwise retain the simpler path.
