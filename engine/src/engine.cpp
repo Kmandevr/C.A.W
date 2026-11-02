@@ -439,7 +439,6 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
                 if (matches) { selected = &lane; break; }
             }
             if (!selected || selected->points.empty()) continue;
-            if (c->paramAutomation.size() >= 256) break;
             Chain::ParamAutomation binding;
             binding.moduleIndex = static_cast<int>(moduleIndex);
             binding.paramIndex = static_cast<int>(paramIndex);
