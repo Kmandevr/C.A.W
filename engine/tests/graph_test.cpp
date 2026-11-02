@@ -191,9 +191,9 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     PassThrough pass;
     GainProcessor gain;
     const std::vector<ModuleProcessor*> processors{&pass, &gain};
-    // Compile storage and prepared buffers each fit 1500 bytes separately, but their
-    // simultaneous peak does not. Preparation must reject before allocating runtime state.
-    const GraphResourceBudget budget{2, 1, 1500};
+    // The executor needs 1412 bytes and the retained execution order needs another 8.
+    // Each phase fits 1419 bytes independently, but the simultaneous live set does not.
+    const GraphResourceBudget budget{2, 1, 1419};
     GraphExecutor executor;
     CHECK(executor.prepare(nodes, edges, processors, 1, 64, 48000, budget) ==
           GraphError::ResourceBudgetExceeded);

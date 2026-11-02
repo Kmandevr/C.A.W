@@ -229,18 +229,13 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
     CompiledGraph compiled = compileGraph(nodes, connections, budget);
     if (!compiled) return compiled.error;
 
-    // The compiled plan remains alive while prepared buffers are allocated. Enforce the
-    // peak working-set budget across both phases, not merely each phase independently.
-    std::size_t portCount = 0;
-    for (const GraphNode& node : nodes) {
-        if (node.module->portCount > std::numeric_limits<std::size_t>::max() - portCount)
-            return GraphError::SizeOverflow;
-        portCount += node.module->portCount;
-    }
-    std::size_t compileBytes = 0;
-    if (!estimateGraphWorkingBytes(nodes.size(), connections.size(), portCount, compileBytes))
+    // Graph compilation has already checked its own peak. Its temporary adjacency and
+    // scheduling storage is gone now; only the returned execution order remains live while
+    // prepared buffers are allocated. Account for that retained plan plus executor storage.
+    std::size_t retainedPlanBytes = 0;
+    if (!addEstimatedBytes(retainedPlanBytes, compiled.executionOrder.capacity(), sizeof(uint32_t)))
         return GraphError::SizeOverflow;
-    if (compileBytes > budget.maxWorkingBytes - executorBytes)
+    if (retainedPlanBytes > budget.maxWorkingBytes - executorBytes)
         return GraphError::ResourceBudgetExceeded;
 
     try {
