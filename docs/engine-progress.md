@@ -9,72 +9,94 @@ updated: 2026-11-02
 
 ## Current state
 
-- **Branch:** feature/native-engine-refactor-integration
-- **Base:** Main at 20fd3da9a37f8936f1c3ff6069878978d064ae37. Planning branch refactor/native-engine-foundation was 15 commits ahead and 0 behind Main when selected.
-- **Code checkpoint:** eb465f4a1489d30beb34801e52bc1e7ddc2e7577 (22 commits ahead, 0 behind Main before this documentation update).
-- **PR:** none. Keep one coherent PR for the completed refactor; do not merge or approve it.
-- **Current milestone:** M0 — repository recovery and architecture audit (**IN PROGRESS**).
-- **Last implementation step:** removed fixed 1024-node/8192-connection graph compiler caps; duplicate-ID validation is now hash-based; allocation/length failures return OutOfMemory; removed the executor's fixed 8192-frame cap; corrected node-source sentinel width; added large-graph/large-block tests.
-- **Files changed:** engine/src/graph.h, engine/src/graph.cpp, engine/tests/graph_test.cpp, and continuity/status docs.
-- **Implementation commits:** 979d25abcd7794731c58fbce72c7522bc442612e (graph caps); 37d75466cf1b58944aa5e4be8a0d91ecd9834c2a (scalable validation/OOM); eb465f4a1489d30beb34801e52bc1e7ddc2e7577 (tests).
-- **Continuity commits:** 0a6d551a935d7df618740d88e113342195b9f105 (progress); e01e06a68c1f6e246d8a5676bff7dbbee8e76d6e (recovery); d1677c7b3e2d06fd90d3d4ff31d51af0ba6b23a5 (index); cfcd78826b1489ac6ba361333eeba13e5369c21b (log).
-- **Inherited planning history:** 15 commits from refactor/native-engine-foundation, including the approved Sections 15–17 blueprint and permanent roadmap changes.
+- **Branch:** `feature/native-engine-refactor-integration`
+- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch is 29 commits ahead and 0 behind.
+- **Starting point:** `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`, which was 15 commits ahead and 0 behind Main when selected.
+- **Current head:** `72502e87cc67506479216edb6ff8128520b15031`.
+- **Last native code checkpoint:** `eb465f4a1489d30beb34801e52bc1e7ddc2e7577`; later commits through current head are documentation/continuity updates only.
+- **Issue:** #28, open and `status: in progress`.
+- **PR:** none. Open one coherent PR only when the complete refactor is genuinely reviewable. Do not merge or approve it.
+- **Current milestone:** M1 — core execution foundations (**IN PROGRESS**). M0 is **VERIFIED**.
+- **Last implementation step:** removed the graph compiler's former fixed 1,024-node/8,192-connection caps; changed duplicate-ID validation to hash-based lookup; report allocation/length failures as `OutOfMemory`; removed the executor's fixed 8,192-frame cap; corrected the node-source sentinel width; added large-graph and large-block regression tests.
+- **Implementation commits:** `979d25abcd7794731c58fbce72c7522bc442612e` (graph caps); `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a` (scalable validation/OOM); `eb465f4a1489d30beb34801e52bc1e7ddc2e7577` (large graph/block tests).
+- **Current code changed:** `engine/src/graph.h`, `engine/src/graph.cpp`, `engine/tests/graph_test.cpp`. No graph/VM playback integration has been implemented yet.
 
-## Verified architecture
+## M0 — repository recovery and architecture audit
 
-- PR #68 (project parameter/global automation) is merged into Main at 20fd3da9a37f8936f1c3ff6069878978d064ae37.
-- GraphExecutor/GraphRuntime exist only in graph.h/graph.cpp and their tests/docs. They have no production references from Engine, VM, C API or Flutter. ModuleRegistry likewise has no production Engine integration.
-- The active Engine still processes VM instances through Engine::runChain, runVoices and processChunk, with separate chain sequencing, import/export pointer wiring, voice handling, per-sample automation and folder-bus parentSlot routing. This must migrate into one prepared execution model, not a parallel engine.
-- GraphExecutor is currently stereo-audio-only, one input/output per node, one driver per input port, and 8–192 kHz. Multichannel, multiple ports/sources/outputs, control/modulation/event/MIDI processing, sidechains and feedback runtime are not implemented.
-- ModuleRegistry is static/in-process only. The native SDK header has no production host/loader or process isolation. Trusted native code is not sandboxed; the .caw VM remains the constrained untrusted-code path.
-- The owner explicitly reopened the full refactor on 2026-11-02, superseding the older paused-integration note. Preserve product boundaries: no in-app AI; recording remains deferred; practical DAW usefulness remains in scope.
+<badge color="success">VERIFIED</badge>
 
-## Remaining fixed limits and silent-loss audit
+- Read AGENTS/CLAUDE, applicable .claude rules and skills, engine blueprint, decisions/log/roadmap/architecture/status docs, relevant source, tests and workflows.
+- Confirmed PR #68 is merged into Main at `20fd3da`; project parameter/global automation is part of the baseline.
+- Confirmed there were no open PRs at the start of this task. The foundation branch was the correct base; the implementation branch preserves it and is still 0 commits behind Main.
+- Inspected the native VM/compiler, synth, project parser, layer/chain mixer, voice engine, pattern parser, automation, graph compiler/executor/runtime, module descriptors/registry, worker scheduler, hardware policy, MIDI decoder/queue, C API and Flutter bridge.
+- Inspected native tests for engine routing/automation/hot swap, graph, module/registry, MIDI 2.0, patterns/voices, scheduler/execution, dependencies, plus app project/pattern/engine tests.
+- Inspected Engine, App and Docs workflows and the current branch's successful CI results.
 
-The graph caps and executor 8192-frame cap are removed. Remaining limits to replace with explicit budgets, dynamic storage or surfaced errors include:
-- Project/runtime: 64 layers/slots; 9 modules per chain; 32 voices; 16 exports; 128 volume/pan automation points; 16 note splits per block; 2 MiB state-takeover threshold; 256 pending retirements and 1024-entry command/retirement queues.
-- VM/data: 4096 pattern notes/steps; 16 curve points; 32 parameters/imports; 64 synth parameters; 8 MiB per-module state and 64 MiB project state; 64 KiB source; 1024 registers; compiler depth/call limits.
-- MIDI/JSON/jobs: 16 MiB JSON/MIDI file limits; 65536 MIDI events; MIDI 2.0 input queue capacity 1024 (drops newest with a counter); worker pool maximum 16 and queue capacity 256.
-- Confirmed silent/lossy paths: arrangement compilation stops adding notes at 4096; export collection stops at 16; automation arrays stop at 128; when no layer slot is free, a planned layer is skipped; command submission retries then drops an install/pattern; retirement overflow can leak after the pending list fills. Project parser note/layer limits return errors, chain overflow warns before truncation, and project-state overflow warns while leaving layers silent.
-- Some limits are necessary for untrusted VM safety or fixed-width formats, but must be explicit, configurable within host safety policy where possible, and must not silently discard project content.
+## Verified architecture and integration gaps
+
+- Existing foundations include the .caw compiler/VM, synth patch translation, layer/chain mixer, folder buses, module import/export wiring, project parameter/global automation, MIDI file import/export, MIDI 2.0 UMP decoding/queue, typed module descriptors, static module registry, graph compiler/executor/publication helper, dependency resolver, hardware policy and bounded background worker pool.
+- **Critical integration gap:** `Engine::setProject` compiles programs and creates legacy `Chain` instances. `Engine::process` calls `processChunk`, which manually schedules layers/buses; `processSlot`/`runChain` execute the VM. `GraphExecutor`, `GraphRuntime` and `ModuleRegistry` have no production references from Engine, VM, C API or Flutter.
+- The graph compiler now has no arbitrary fixed node/connection count cap. Node references remain `uint32_t` (a representation boundary); allocation failure is surfaced. The executor's former 8,192-frame cap is removed.
+- **Graph runtime is still limited:** stereo audio only, one input and one output per node, one driver per input port, 8–192 kHz. No multi-input mixing, multiple outputs, custom/multichannel channel mapping, control/modulation/event/MIDI runtime buffers, timestamped event scheduling, cross-domain conversion or delayed feedback edges. There is no explicit prepared-buffer byte budget yet.
+- `ModuleProcessor` is still a borrowed stereo-block contract. Port descriptors identify audio/control/modulation/event types, but typed descriptors do not provide runtime buffers for those domains.
+- `ModuleRegistry` is static/in-process only. No dynamic loader, production host adapter, capability negotiation or native crash isolation exists. Trusted native code is not sandboxed; the .caw VM remains the constrained untrusted-code path.
+- MIDI 2.0 decoding/queue are primitives only. `Midi2Event` has no sample timestamp, there is no live USB/Bluetooth device adapter, and events are not routed into Engine voices. Queue overflow is counted but not surfaced through the app.
+- The app C API/FFI remains API v1. The app submits project compilation, source checks and offline WAV renders to the native worker pool; it does not submit graph execution or native module work.
+- Existing synth modulation, sidechain ducking effects, per-note expression and project automation are partial foundations, not the unified parameter/routing system requested.
+
+## Fixed limits and correctness risks
+
+The graph node/connection caps and executor 8,192-frame cap are removed. The following limits and loss paths remain in the current source and must be converted to explicit, configurable resource budgets or dynamic storage:
+
+- **Project structure:** 64 layers/slots; 9 modules per layer chain; project module parsing stops at 256; clips stop at 512 per layer; project automation lanes stop at 256; automation points stop at 128; dependency records above 4,096 are rejected; arrangement length/loop is clamped to 64 bars.
+- **VM/module:** 32 parameters; 64 synth parameters; 16 exports; 32 imports; 6 call arguments; 1,024 VM registers; 64 KiB source; 8 MiB state per module; 32 voices; compiler depth/call budgets.
+- **Pattern/MIDI:** 4,096 pattern notes/steps; 16 points per note curve; 16 MiB JSON/MIDI file limits; 65,536 MIDI events; 4,096 MIDI notes/steps; MIDI 2.0 input queue capacity 1,024 (drop-newest with a counter).
+- **Runtime queues/state:** 1,024-entry command queue; 1,024-entry retirement queue; 256 pending retirements; 2 MiB state-takeover threshold; 64 MiB project-state budget. Worker pool has a maximum of 16 workers and a 256-job queue.
+- **Confirmed silent/lossy behavior:** arrangement compilation stops adding notes at 4,096; export collection stops at 16; automation arrays stop at 128; no free layer slot causes a planned layer to be skipped; command submission retries for about two seconds then can drop an install/pattern without propagating failure; retirement overflow can leak after the pending list fills; project-state overflow warns while leaving a layer silent. Parser module/clip/automation/chain excess may be truncated or skipped; other limits return errors.
+- Some limits are legitimate sandbox/parser safety budgets. They must remain explicit, configurable within host policy where practical, and fail clearly. Project content must never be silently truncated or a track silently omitted. Real-time event queues may be bounded, but overflow must be visible and recoverable.
 
 ## Milestones
 
-| ID | Objective | Status | Remaining work |
+| ID | Objective | Status | Evidence / remaining work |
 |---|---|---|---|
-| M0 | Repository recovery and architecture audit | **IN PROGRESS** | Instructions and primary design/status docs read; branch/PR/CI and graph/Engine paths inspected. Finish parameter, MIDI, persistence, worker and cap/error audits. |
-| M1 | Core execution foundations and lifecycle | **IN PROGRESS (PARTIAL)** | Typed graph, descriptors, borrowed stereo buffers, executor and publication helper exist but are not integrated into Engine/VM. Establish one prepared execution model, ownership, activation, state lifetime and retirement. |
-| M2 | Universal typed routing | **NOT STARTED (FOUNDATION PARTIAL)** | Current runtime is stereo, audio-only, one-in/one-out. Add multichannel, multi-port, multi-source, buses/sends/returns, sidechains, control/modulation/events/MIDI and feedback. |
-| M3 | Unified parameters/modulation/automation | **IN PROGRESS (PARTIAL)** | Synth modulation and project parameter/global automation exist; unify across VM/native modules/tracks/buses/routes. |
-| M4 | Extensibility and mathematical processing | **IN PROGRESS (PARTIAL)** | .caw VM and static descriptors/registry exist; production integration, stable API/state, failure/bypass and native trust isolation remain. |
-| M5 | MIDI/events | **IN PROGRESS (PARTIAL)** | UMP decoder/queue, MIDI files and note expression exist; device I/O, graph/voice routing, output scheduling and overflow diagnostics remain. |
-| M6 | Adaptive concurrency/batching | **IN PROGRESS (PARTIAL)** | Adaptive non-RT pool exists; integrate graph/voice/offline scheduling, remove arbitrary worker ceiling and benchmark end-to-end cost. |
-| M7 | Application integration | **IN PROGRESS (PARTIAL)** | App submits selected native jobs and edits automation; graph/module runtime and project routing/state migration remain unconnected. |
-| M8 | Optimization and validation | **NOT STARTED** | Full stress, compatibility, parity, sanitizer, deadline, weak-device and real-device validation. |
+| M0 | Repository recovery and architecture audit | **VERIFIED** | Instructions, design/status docs, source, tests, workflows, branch/PR/issue state and app bridge inspected. Confirmed PR #68 merged, no open PRs, current branch ancestry and CI. |
+| M1 | Core execution foundations, lifecycle, buffers, ownership and graph publication | **IN PROGRESS (PARTIAL)** | Graph compiler scaling and large-size tests are implemented. Add explicit resource budgets, prepared processor ownership/lifecycle, project snapshot publication, safe retirement and integrate execution with Engine/VM. |
+| M2 | Universal typed routing | **NOT STARTED (FOUNDATION PARTIAL)** | Descriptors exist, but runtime remains stereo audio one-in/one-out. Add multichannel, fan-in/fan-out, buses/sends/returns, sidechains, control/modulation/events/MIDI and delayed feedback. |
+| M3 | Unified parameters/modulation/automation | **IN PROGRESS (PARTIAL)** | Synth modulation and project parameter/global automation exist. Unify manual controls, automation, modulation, MIDI/controller mappings, note expression and sidechain-derived control across VM/native modules/tracks/buses. |
+| M4 | Extensibility and mathematical processing | **IN PROGRESS (PARTIAL)** | .caw VM and static registry exist. Add capability declarations, stable API/state versioning, ownership, failure/bypass and advanced extension paths. Native in-process code remains trusted, not sandboxed. |
+| M5 | MIDI and event integration | **IN PROGRESS (PARTIAL)** | UMP decoder, bounded queue, note expression and MIDI files exist. Add timestamped events, live device I/O, voice routing and MIDI 1.0/2.0 scheduling. |
+| M6 | Adaptive concurrency and batching | **IN PROGRESS (PARTIAL)** | Adaptive non-real-time pool and hardware policy exist. Remove arbitrary worker ceiling; integrate dependency-aware graph/voice/offline scheduling, batching and measured SIMD paths. |
+| M7 | Application/project integration | **IN PROGRESS (PARTIAL)** | Flutter uses C API v1 and native worker jobs. Graph/project serialization, richer routing/parameter controls, module lifecycle and migrations remain. |
+| M8 | Optimization and validation | **NOT STARTED** | Profile the integrated runtime; stress-test resource pressure, compatibility, parity, sanitizers, deadlines and weak/strong hardware; remove obsolete paths only after verified migration. |
 
 ## Verification record
 
-- **Engine:** workflow 41401179084 at eb465f4 — Linux x64, Linux sanitizers, Windows x64 and Linux Arm64 all **SUCCESS**. Linux x64/Arm64 CTest each report 4/4 shards passed.
-- **Docs/hygiene:** workflow 41401179017 at eb465f4 — **SUCCESS**.
-- **App:** workflow 41401179166 — Dart analysis, Dart tests and Windows app **SUCCESS**; Android APK was still **IN PROGRESS** at checkpoint. Verify the run triggered by this documentation update before claiming the branch fully green.
-- **Earlier docs failure:** workflow 41401014639 failed because progress/recovery docs were not linked in docs/index.md. Fixed by commit d1677c7; later docs workflow 41401179017 passed.
-- **Local build/tests:** unavailable in connector-only workflow; GitHub Actions is the compiler/test runner. No physical-device performance/audio-latency test has run.
+- **Current branch head:** `72502e87cc67506479216edb6ff8128520b15031`; 29 commits ahead, 0 behind Main.
+- **Engine:** workflow `41401950333` at current head — Linux x64, Linux Arm64, Windows x64 and Linux sanitizers all **SUCCESS**. The Linux CTest suite reports all four shards passed.
+- **Docs/hygiene:** workflow `41401950277` at current head — **SUCCESS**.
+- **App:** workflow `41401179166` at code checkpoint `eb465f4` — Dart analysis, Dart tests, Windows app and Android APK all **SUCCESS**. No app source changed after that run.
+- **Earlier Engine/Docs:** `41401179084` and `41401179017` at `eb465f4` both passed.
+- **Earlier Docs failure:** `41401014639` failed because progress/recovery docs were not linked from `docs/index.md`; fixed in `d1677c7`, later Docs workflows passed. Do not repeat this omission.
+- **Local build/tests:** unavailable in this connector-only workflow. GitHub Actions is the compiler/test runner; never claim local reproduction.
+- **Hardware validation:** no physical-device performance/audio-latency test has run. CI does not prove phone latency, thermal behavior, battery use or dropout resistance.
 
 ## Exact next actions
 
-1. Finish M0: inspect parameter/automation, MIDI device/event, state persistence/migration, scheduler, project serialization, C API and app bridge. Map every fixed capacity and truncation/drop/fallback to its caller and tests.
-2. Begin M1 without adding a second engine: design the prepared execution representation around existing VM Instance/BlockCtx, Engine::runChain/runVoices/processChunk, import/export signals, pattern voices, automation, folder routing and state migration. GraphExecutor's stereo one-in/one-out contract is insufficient; generalize it before audio-callback integration.
-3. Implement a vertical migration slice with tests for old project behavior, deterministic output, callback safety and graph activation/retirement. Add app/C ABI exposure only after the native contract is stable.
-4. Replace fixed project/voice/event/automation caps with resource-budgeted storage and explicit errors; first fix confirmed silent truncation/drop/leak paths.
-5. Re-run affected CI after each coherent code change; inspect logs on failure. Update this ledger and decisions/log at each checkpoint. Open one PR only when the full refactor is reviewable and Main remains an ancestor.
+1. Add an explicit, host-configurable graph resource budget. Check node/edge and prepared-buffer memory requirements before allocation; distinguish budget exhaustion from allocator failure and test overflow/boundary cases.
+2. Establish a prepared project/runtime snapshot as the publication unit. Build modules, graph, routing, schedules, buffers and migration plan off the callback; publish atomically at a block boundary; reclaim old snapshots off the callback. Replace per-layer partial project command submission with a transactional update. Fix command timeout/drop, retirement overflow/leak and slot-exhaustion loss.
+3. Generalize the module process contract and graph executor: multichannel/custom layouts, multiple inputs/outputs, fan-in/fan-out, channel mapping, audio/control/modulation/event/MIDI buffers, timestamp ordering and explicit delayed feedback boundaries.
+4. Integrate the prepared graph with existing VM instances, voices, patterns, imports/exports, automation, folder buses, offline rendering and state migration. Do not create a second engine.
+5. Replace fixed project/VM/voice/automation/event caps with resource-derived storage and actionable errors; remove silent truncation, 64-bar clamp and 64 MiB layer-silencing behavior. Update app model/parser tests that currently encode these caps.
+6. Continue unified parameter resolution, native module lifecycle/extensibility, MIDI device/event routing, adaptive scheduling/batching and Flutter/project integration.
+7. At each coherent milestone, add tests, update this ledger/status/log, push and wait for affected CI before the next code change. Open one coherent PR only when acceptance criteria are met.
 
 ## Non-negotiable decisions
 
 - One portable C++20 engine; no competing second engine or duplicate module model.
 - Existing .caw VM remains first-class and sandboxed; no filesystem/network/system calls. Trusted native code is not sandboxed without process isolation.
-- Audio callback remains allocation-free, lock-free, I/O-free, logging-free, bounded and independent of UI/Dart. Never wait for workers from callback.
-- Graphs/scheduling/buffers are prepared before activation; graph traversal/compilation stays off callback.
+- Audio callback remains allocation-free, lock-free, I/O-free, logging-free, bounded and independent of UI/Dart. Never wait for workers in callback.
+- Prepare topology, schedules, buffers, parameter resolution, state migration plans and resource requirements before activation. Reclaim retired state off callback.
 - Preserve deterministic semantics, golden audio, project/module compatibility and live/offline parity.
-- Adaptive concurrency uses bounded resource-aware scheduling with serial fast paths; no thread-per-task, oversubscription or speculative GPU path.
+- Adaptive concurrency uses bounded resource-aware scheduling and serial fast paths; no thread-per-task, oversubscription or speculative GPU path.
 - No arbitrary product caps. Use explicit budgets, actionable errors and no silent project-content truncation. Bounded real-time queues require visible overflow diagnostics and safe recovery.
 - No GPL dependency without owner approval. No in-app AI or cloud-audio integration. Recording remains deferred.
