@@ -270,8 +270,6 @@ PatternResult parsePattern(std::string_view src) {
                 p->expressions.push_back(ex);
             }
             for (double pitch : chord) {
-                if (static_cast<int>(p->notes.size()) >= kMaxPatternNotes)
-                    throw PatternError(lineNo, w[0].col, "a pattern holds at most 4096 notes");
                 n.pitch = pitch;
                 p->notes.push_back(n);
             }
