@@ -277,44 +277,66 @@ The unified parameter system must avoid unnecessary work:
 Test parameter identity and serialization, manual edits during playback, MIDI/controller mapping, automation interpolation and tempo behavior, multiple-source combination/precedence, modulation fan-out, sample-accurate events, block-rate equivalence, smoothing, expression safety/budgets, deterministic output, project save/reopen and live/offline render parity. Include CPU and memory benchmarks for common cases (static parameters, one LFO, many lanes, high modulation fan-out and mathematical effects). Internal modulation must not add visible UI or recurring idle work when unused.
 
 
-## 16. Safe extensibility and deliberate departures from standard engine behavior
+## 16. Universal creative capability, safe extensibility and unrestricted composition
 
-The engine must make unusual creative ideas practical without requiring developers to fork or destabilize the core. Standard workflows are the default fast path, not a restriction on what can be built.
+The engine's goal is to make any technically realizable audio or music idea straightforward to express, connect, run, save and share. It must not be limited to the feature set or workflows its original designers anticipated. Standard workflows are convenient defaults and optimized fast paths, never creative boundaries.
+
+A developer should be able to build a new instrument, effect, generator, processor, routing topology, control system, synthesis method, event behavior or complete custom signal-processing environment by composing documented capabilities or implementing an extension. The architecture should make common work easy and unusual work possible without requiring a fork or invasive core rewrite.
+
+### Universal signal, event and routing model
+
+Use a typed, multi-domain graph with explicit ports and connections. It must support, combine and route at minimum:
+- Mono, stereo, multichannel and custom channel layouts, with explicit channel mapping, splitting, merging, encoding and conversion.
+- Audio streams, sidechain/key inputs, control-rate signals, sample-accurate control signals, modulation, envelopes and parameter streams.
+- MIDI 1.0, MIDI 2.0/UMP, note events, per-note expression, controller data, clock, transport, tempo and arbitrary timestamped events.
+- Internal and external inputs/outputs, tracks, buses, groups, sends, returns, parallel paths, nested processing, instrument outputs and effect sidechains.
+- Cross-domain routing where meaningful: audio to envelope/follower/control, MIDI or events to parameters and generators, control to audio processing, and custom extension-defined data types.
+- Feedback and cyclic networks when explicitly declared and made schedulable through appropriate delay/state boundaries. Detect and explain instantaneous cycles that cannot be scheduled safely.
+
+Sidechain must be a first-class connection type, not a special case tied to one mixer layout. Any compatible source may feed a processor's declared sidechain input, including audio channels, buses, tracks, external inputs, MIDI/event streams, envelopes or control signals. Support multiple sidechain inputs and destinations, independent channel mapping, filtering and gain, and sidechain routing between buses and processors. Sidechain and ordinary routing must work through the same graph and project model.
+
+Provide a discoverable routing UI and APIs that make connections easy to create, inspect, edit, save, validate and automate. The engine graph must not assume a fixed track/bus/master hierarchy.
 
 ### Extension surfaces
 
 Provide documented, versioned extension points for:
-- Custom generators, instruments, effects, processors and analysis modules.
-- Custom signal and event routing, including non-standard graph topologies where valid.
+- Custom generators, instruments, effects, processors, analyzers and complete module subgraphs.
+- Custom signal, sidechain, control and event routing.
 - Custom parameter types, modulation sources, mappings and resolution behaviors.
-- Alternative synthesis and processing algorithms, including hybrid, physical, granular, spectral, feedback-based and other experimental approaches.
+- Alternative synthesis and processing algorithms, including hybrid, physical, granular, spectral, physical-modeling, feedback-based and future approaches not yet anticipated.
 - Custom control surfaces, UI presentations and module-specific workflows without coupling UI code to the audio callback.
-- New processing domains or execution strategies where the module declares its requirements and capabilities.
+- New processing domains, execution strategies, state models and specialized hardware paths.
 
-Prefer composing existing primitives and registering modules over modifying core engine code. Where a genuinely new capability requires a core extension, make the extension explicit, documented and testable rather than relying on hidden assumptions.
+Prefer composing existing primitives and registering modules over modifying core engine code. Do not force every technique into one generic processor abstraction when that would constrain the idea or add needless overhead. Offer simple common interfaces and advanced escape hatches with explicit contracts.
 
-### Safety contracts
+### No arbitrary architectural limits
 
-Every extension declares its input/output types and channel layouts, supported sample rates and block sizes, latency, tail behavior, state requirements, parameter/event interfaces, resource needs and real-time safety properties. Validate compatibility when compiling/preparing the graph, not by discovering errors during audio processing.
+Do not impose arbitrary fixed caps on tracks, buses, channels, routing connections, graph depth, module count, parameters, modulation links, automation lanes, events, voices, or project size merely for implementation convenience. Do not silently truncate or drop user content at an arbitrary threshold.
 
-Keep hard real-time processing protected:
-- No unbounded work, allocation, blocking locks, file/network I/O, logging or UI calls on the audio thread.
-- Bound memory, CPU/instruction budgets, recursion, event counts, graph depth and fan-out.
-- Detect invalid or incompatible graph connections and report them before activation.
-- Define behavior for non-finite values, runaway feedback, unstable or excessive gain, denormals, overruns and processor failure.
-- Provide safe bypass/mute/isolation and recovery policies that do not cause callback stalls.
-- For untrusted or third-party code, use the strongest practical isolation boundary; do not treat in-process native code as sandboxed. Clearly distinguish trusted native extensions from sandboxed .caw VM modules.
+The real limits are available memory, CPU/GPU/DSP capacity, platform/API constraints, declared module requirements and the user's chosen resource budget. Discover and use available capacity; allocate and schedule according to actual needs; expose meaningful resource diagnostics; degrade gracefully where possible. Any unavoidable platform or format limit must be documented, surfaced before destructive action, and handled with a clear alternative. Avoid unlimited allocation or unbounded real-time work: scalable does not mean unchecked.
 
-### Experimental behavior without core fragility
+Resource budgets for untrusted or potentially runaway work must be configurable and enforceable, not hidden arbitrary product caps. Support sensible defaults, user/developer overrides within host safety policy, per-module budgets, global budgets, monitoring, graceful throttling/bypass and clear explanations when a requested graph exceeds the resources actually available. Never claim a configuration is safe if it cannot be bounded.
 
-Allow modules to request specialized execution paths, custom state, feedback or delayed connections, oversampling, internal subgraphs, unusual channel layouts and custom event processing when supported. Such requests must be declared and prepared ahead of time. The graph compiler/scheduler should either construct a valid execution plan or reject the unsupported configuration with an actionable diagnostic.
+### Safety and real-time contracts
 
-Do not force every creative technique into a single generic processor abstraction if doing so adds overhead or removes essential control. Provide a small set of composable interfaces plus explicit advanced interfaces for cases that need more control. Keep ordinary modules simple and cheap.
+Every extension declares input/output types and channel layouts, sample-rate and block-size requirements, latency, tail behavior, state needs, parameter/event interfaces, resource estimates and real-time properties. Validate and prepare the graph before activation.
+
+- Keep allocation, blocking locks, file/network I/O, logging, UI calls and unbounded work off the hard real-time audio thread.
+- Preallocate or reserve resources during preparation; use bounded callback work and lock-free or otherwise real-time-safe communication where needed.
+- Define handling for non-finite values, excessive gain, unstable feedback, denormals, deadline misses, resource exhaustion and processor failure.
+- Provide safe bypass, mute, isolation, recovery and diagnostics without stalling the audio callback.
+- Make feedback stability tools available (delay boundaries, gain/energy monitoring, optional limiting and cycle diagnostics) without forbidding intentional feedback designs.
+- Use the strongest practical isolation for untrusted third-party code. In-process native extensions are trusted code, not sandboxed. Keep sandboxed .caw VM execution bounded and explicit.
+- Where a hard safety boundary prevents a requested operation, explain the exact constraint and offer a safe supported route rather than silently changing behavior.
+
+### Efficient execution without creative restrictions
+
+Compile/prepare graph topology, routing, parameter resolution and scheduling away from the audio callback. Choose efficient execution paths based on measured benefit and available hardware. Support parallel independent branches, specialized processors, vectorization and accelerators where useful, while retaining portable CPU fallbacks. Do not impose advanced-path overhead on ordinary modules that do not use those features.
 
 ### Compatibility and evolution
 
-Version extension APIs and serialized module state. Preserve old projects through migrations and defaults. Define capability negotiation so an older host can identify unsupported modules and provide a safe fallback rather than silently changing project behavior. Keep experimental APIs clearly marked and isolate them so they can evolve without destabilizing stable interfaces.
+Version extension APIs, graph data and serialized module state. Preserve existing projects through migrations and defaults. Capability negotiation must identify unavailable modules or features and provide a clear fallback or actionable error rather than silently changing project behavior. Experimental interfaces may evolve, but isolate them from stable contracts and provide migration paths.
 
 ### Required verification
 
-Test invalid connections, channel mismatches, unsupported sample rates/block sizes, resource-limit exhaustion, malicious or runaway VM programs, processor failure, feedback stability, bypass/recovery, state migration, API version mismatch, deterministic output and live/offline parity. Benchmark extension dispatch overhead and ensure ordinary built-in modules do not pay meaningful costs for advanced extension features they do not use.
+Test complex mixed-domain routing; audio/MIDI/control sidechains; multichannel mapping; nested buses, sends and returns; feedback with and without valid delay boundaries; graph compilation and cycle diagnostics; large projects without arbitrary truncation; resource-budget exhaustion and recovery; extension/API version mismatch; malicious or runaway VM programs; processor failure and bypass; state migration; deterministic output; and live/offline parity. Benchmark graph compilation, routing, extension dispatch and callback costs across small and large projects. Confirm that standard paths remain lightweight while advanced projects remain possible within actual hardware and safety constraints.
