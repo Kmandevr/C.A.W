@@ -813,3 +813,23 @@ TEST(engine_automates_parameters_beyond_32) {
     CHECK_NEAR(out[0], 0.5 * pan, 1e-4);
     CHECK_NEAR(out[1000], 1.5 * pan, 1e-4);
 }
+
+TEST(engine_rejects_project_state_above_hardware_budget) {
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 2;
+    Engine e(8000, makeEngineResourceBudget(hardware));
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"tone", std::string(kFloat) + "1", {}});
+    const std::string delay = "---\nkind: effect\nmode: float\n---\nfx.delay(in, 0.5, 0.3, 0.5)";
+    p.modules.push_back({"delay_a", delay, {}});
+    p.modules.push_back({"delay_b", delay, {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone", "delay_a", "delay_b"};
+    p.layers.push_back(layer);
+    const std::string result = e.setProject(p);
+    CHECK(result.find("\"ok\":false") != std::string::npos);
+    CHECK(result.find("project-state budget") != std::string::npos);
+}
