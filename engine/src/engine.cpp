@@ -700,6 +700,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         size_t expressionCapacity = 0;
     };
     std::vector<Planned> plan;
+    std::map<std::string, LayerState> nextLayers;
     std::map<std::string, std::vector<std::string>> warnings;
     for (const auto& [id, msg] : synthWarnings) warnings[id].push_back(msg);
     for (const auto& [id, st] : modules_) {
@@ -965,7 +966,6 @@ std::string Engine::setProject(const ProjectSpec& p) {
     }
 
     // Pass 3: wire imports, install changed chains, and order layers so exporters run before their readers.
-    std::map<std::string, LayerState> nextLayers;
     std::vector<int> projectOrder;
     for (Planned& pl : plan) {
         std::vector<const double*> wiring;
@@ -1525,12 +1525,13 @@ void Engine::applyCommands() noexcept {
                 s.pattern = c.pattern;
                 break;
             }
-            case Cmd::Remove:
+            case Cmd::Remove: {
                 Slot& s = slots_[c.slot];
                 s.removing = true;
                 retire(nullptr, -1, nullptr, s.automation);
                 s.automation = nullptr;
                 break;
+            }
             case Cmd::Transport:
                 // A tempo change moves every note in time: let held notes go so none is left hanging.
                 if (c.bpm != bpm_)
