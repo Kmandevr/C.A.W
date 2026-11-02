@@ -275,3 +275,46 @@ The unified parameter system must avoid unnecessary work:
 ### Required verification
 
 Test parameter identity and serialization, manual edits during playback, MIDI/controller mapping, automation interpolation and tempo behavior, multiple-source combination/precedence, modulation fan-out, sample-accurate events, block-rate equivalence, smoothing, expression safety/budgets, deterministic output, project save/reopen and live/offline render parity. Include CPU and memory benchmarks for common cases (static parameters, one LFO, many lanes, high modulation fan-out and mathematical effects). Internal modulation must not add visible UI or recurring idle work when unused.
+
+
+## 16. Safe extensibility and deliberate departures from standard engine behavior
+
+The engine must make unusual creative ideas practical without requiring developers to fork or destabilize the core. Standard workflows are the default fast path, not a restriction on what can be built.
+
+### Extension surfaces
+
+Provide documented, versioned extension points for:
+- Custom generators, instruments, effects, processors and analysis modules.
+- Custom signal and event routing, including non-standard graph topologies where valid.
+- Custom parameter types, modulation sources, mappings and resolution behaviors.
+- Alternative synthesis and processing algorithms, including hybrid, physical, granular, spectral, feedback-based and other experimental approaches.
+- Custom control surfaces, UI presentations and module-specific workflows without coupling UI code to the audio callback.
+- New processing domains or execution strategies where the module declares its requirements and capabilities.
+
+Prefer composing existing primitives and registering modules over modifying core engine code. Where a genuinely new capability requires a core extension, make the extension explicit, documented and testable rather than relying on hidden assumptions.
+
+### Safety contracts
+
+Every extension declares its input/output types and channel layouts, supported sample rates and block sizes, latency, tail behavior, state requirements, parameter/event interfaces, resource needs and real-time safety properties. Validate compatibility when compiling/preparing the graph, not by discovering errors during audio processing.
+
+Keep hard real-time processing protected:
+- No unbounded work, allocation, blocking locks, file/network I/O, logging or UI calls on the audio thread.
+- Bound memory, CPU/instruction budgets, recursion, event counts, graph depth and fan-out.
+- Detect invalid or incompatible graph connections and report them before activation.
+- Define behavior for non-finite values, runaway feedback, unstable or excessive gain, denormals, overruns and processor failure.
+- Provide safe bypass/mute/isolation and recovery policies that do not cause callback stalls.
+- For untrusted or third-party code, use the strongest practical isolation boundary; do not treat in-process native code as sandboxed. Clearly distinguish trusted native extensions from sandboxed .caw VM modules.
+
+### Experimental behavior without core fragility
+
+Allow modules to request specialized execution paths, custom state, feedback or delayed connections, oversampling, internal subgraphs, unusual channel layouts and custom event processing when supported. Such requests must be declared and prepared ahead of time. The graph compiler/scheduler should either construct a valid execution plan or reject the unsupported configuration with an actionable diagnostic.
+
+Do not force every creative technique into a single generic processor abstraction if doing so adds overhead or removes essential control. Provide a small set of composable interfaces plus explicit advanced interfaces for cases that need more control. Keep ordinary modules simple and cheap.
+
+### Compatibility and evolution
+
+Version extension APIs and serialized module state. Preserve old projects through migrations and defaults. Define capability negotiation so an older host can identify unsupported modules and provide a safe fallback rather than silently changing project behavior. Keep experimental APIs clearly marked and isolate them so they can evolve without destabilizing stable interfaces.
+
+### Required verification
+
+Test invalid connections, channel mismatches, unsupported sample rates/block sizes, resource-limit exhaustion, malicious or runaway VM programs, processor failure, feedback stability, bypass/recovery, state migration, API version mismatch, deterministic output and live/offline parity. Benchmark extension dispatch overhead and ensure ordinary built-in modules do not pay meaningful costs for advanced extension features they do not use.
