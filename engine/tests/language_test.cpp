@@ -232,3 +232,14 @@ TEST(stateful_builtins_make_sound) {
     CHECK(same);
     CHECK(varied);
 }
+
+TEST(module_imports_are_not_capped_at_32) {
+    std::string expression;
+    for (int i = 0; i < 40; ++i) {
+        if (i) expression += " + ";
+        expression += "module_" + std::to_string(i) + ".value";
+    }
+    const CompileResult compiled = compileModule("---\nkind: effect\n---\n" + expression);
+    CHECK(compiled.program != nullptr);
+    if (compiled.program) CHECK_EQ(compiled.program->imports.size(), size_t{40});
+}
