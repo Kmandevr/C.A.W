@@ -864,7 +864,7 @@ TEST(engine_routes_more_than_16_module_exports) {
     std::string source = "---\nmode: float\n---\n";
     for (int i = 0; i < 20; ++i)
         source += "export let value" + std::to_string(i) + " = " + std::to_string(i + 1) + "\n";
-    source += "1";
+    source += "0";
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
@@ -874,7 +874,7 @@ TEST(engine_routes_more_than_16_module_exports) {
     LayerSpec sourceLayer;
     sourceLayer.id = "source_track";
     sourceLayer.chain = {"source"};
-    sourceLayer.volume = 0.0;
+    sourceLayer.volume = 1.0;
     LayerSpec consumerLayer;
     consumerLayer.id = "consumer_track";
     consumerLayer.chain = {"consumer"};
