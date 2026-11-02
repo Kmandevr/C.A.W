@@ -994,7 +994,6 @@ private:
     Val importVal(const Token& tok) {
         auto it = importRegs_.find(tok.text);
         if (it == importRegs_.end()) {
-            if (p_.imports.size() >= static_cast<size_t>(kMaxImports)) fail(tok, "too many shared values read");
             Op op{};
             op.code = OpCode::Import;
             op.index = static_cast<uint32_t>(p_.imports.size());
