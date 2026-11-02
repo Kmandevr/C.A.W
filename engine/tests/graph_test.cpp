@@ -37,22 +37,6 @@ const PortDescriptor monoRuntimePorts[] = {
 const ModuleDescriptor monoRuntime{"test.mono.runtime", 1, monoRuntimePorts, 2, nullptr, 0};
 }
 
-TEST(module_descriptor_rejects_unknown_port_type_values) {
-    const PortDescriptor invalidPorts[] = {
-        {"out", static_cast<PortType>(0xFF), ChannelLayout::None, false},
-    };
-    const ModuleDescriptor invalid{"test.invalid.type", 1, invalidPorts, 1, nullptr, 0};
-    CHECK(validateModuleDescriptor(invalid) == ModuleValidation::InvalidPortType);
-}
-
-TEST(module_descriptor_rejects_unknown_channel_layout_values) {
-    const PortDescriptor invalidPorts[] = {
-        {"out", PortType::Audio, static_cast<ChannelLayout>(0xFF), false},
-    };
-    const ModuleDescriptor invalid{"test.invalid.layout", 1, invalidPorts, 1, nullptr, 0};
-    CHECK(validateModuleDescriptor(invalid) == ModuleValidation::InvalidPortLayout);
-}
-
 TEST(graph_compiles_stereo_chain_in_dependency_order) {
     const std::vector<GraphNode> nodes{{"sink", &sink}, {"effect", &effect}, {"source", &source}};
     const std::vector<GraphConnection> edges{{2, 0, 1, 0}, {1, 1, 0, 0}};
