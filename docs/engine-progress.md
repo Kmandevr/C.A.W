@@ -10,14 +10,14 @@ updated: 2026-11-02
 ## Current state
 
 - **Branch:** `feature/native-engine-refactor-integration`
-- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison before this ledger refresh: 180 commits ahead.
+- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison at code checkpoint `8ddbb1bf`: 191 commits ahead, 0 behind Main.
 - **Starting point:** `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`, which was 15 commits ahead and 0 behind Main when selected.
-- **Latest code/test checkpoint:** `8f43d76036cadcc3998eed6747a94d9e0c3f0480`; latest docs/log checkpoint: `78bc7d2e4c8265337861511a09feae897fc0d223`.
-- **Previous fully verified native code checkpoint:** `07c796f8e745cd44e7be37992747b8263ac27e9a` (Engine, App and Docs CI all passed at `1269019`). The compiler-budget follow-up and all subsequent project-content changes still require fresh CI verification; the last known green Engine/App/Docs runs predate them.
+- **Latest code checkpoint:** `8ddbb1bfabba5ca4eec6d3238e7a617d4dac0286` (Engine CI red); see `docs/engine-recovery.md` for exact failure inventory.
+- **Previous fully verified native code checkpoint:** `07c796f8e745cd44e7be37992747b8263ac27e9a`. Latest Engine run `41455843126` failed all four jobs; App `41455843138` and Docs `41455843017` passed.
 - **Issue:** #28, open and `status: in progress`.
 - **PR:** none. Open one coherent PR only when the complete refactor is genuinely reviewable. Do not merge or approve it.
 - **Current milestone:** M1 — core execution foundations (**IN PROGRESS**). M0 is **VERIFIED**.
-- **Last implementation step:** removed the fixed 16-export ceiling and added stable per-slot export pointer tables with lazily allocated, heap-stable buffers bounded by the hardware-derived graph-working share. Tests cover 20 exports end-to-end and explicit low-memory rejection. This code is not yet CI-verified.
+- **Last implementation step:** removed the fixed 16-export ceiling and added stable per-slot export pointer tables. Its end-to-end route test currently fails; dynamic automation, parser and budget regression tests also remain red. Fix these before extending the engine.
 - **Implementation commits:** graph scaling/budgets: `979d25abcd7794731c58fbce72c7522bc442612e`, `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a`, `eb465f4a1489d30beb34801e52bc1e7ddc2e7577`, `07c796f8e745cd44e7be37992747b8263ac27e9a`, `e815b495a8055e58fd9f7079641173f24aa251d4`; latest VM capacity code/test checkpoint: `8f43d76036cadcc3998eed6747a94d9e0c3f0480`. See docs/log.md for intermediate code commits.
 - **Current code changed:** graph, project parser, Engine, VM/compiler/program contracts, MIDI/pattern/synth parsing and associated tests. No graph/VM playback integration has been implemented yet.
 
