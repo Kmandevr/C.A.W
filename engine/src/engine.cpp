@@ -106,7 +106,8 @@ struct Engine::Chain {
         double minimum = 0.0, maximum = 1.0, step = 0.0;
         const ProjectAutomationLaneSpec* lane = nullptr;
     };
-    double paramSamples[kMaxParams][kBlock] = {};
+    std::vector<std::array<double, kBlock>> paramSamples;
+    std::vector<const double*> paramValuePtrs;
     std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> automation;
     std::vector<ParamAutomation> paramAutomation;
     std::vector<std::string> moduleIds;
@@ -433,6 +434,10 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
         c->voices[1].inst = c->shadow[0].get();
         for (int v = 2; v < c->voiceCount; ++v) c->voices[v].inst = c->extraVoices[static_cast<size_t>(v - 2)].get();
     }
+    size_t maxParams = 0;
+    for (const auto& instance : c->main) maxParams = std::max(maxParams, instance->program().params.size());
+    c->paramSamples.resize(maxParams);
+    c->paramValuePtrs.resize(maxParams, nullptr);
     writeParams(*c);
     c->automation = automation;
     // Resolve automation targets and allocate their sample buffers on the control thread.
@@ -1586,7 +1591,9 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
     ctx.importOffset = offset;
     for (size_t idx = 0; idx < insts.size(); ++idx) {
         auto& inst = insts[idx];
-        for (int param = 0; param < kMaxParams; ++param) ctx.paramValues[param] = nullptr;
+        std::fill(c.paramValuePtrs.begin(), c.paramValuePtrs.end(), nullptr);
+        ctx.paramValues = c.paramValuePtrs.data();
+        ctx.paramValueCount = static_cast<uint32_t>(c.paramValuePtrs.size());
         for (Chain::ParamAutomation& binding : c.paramAutomation) {
             if (binding.moduleIndex != static_cast<int>(idx)) continue;
             for (int sample = 0; sample < len; ++sample) {
@@ -1596,9 +1603,9 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
                 if (binding.step > 0.0)
                     value = std::clamp(binding.minimum + std::round((value - binding.minimum) / binding.step) * binding.step,
                         binding.minimum, binding.maximum);
-                c.paramSamples[binding.paramIndex][sample] = value;
+                c.paramSamples[static_cast<size_t>(binding.paramIndex)][static_cast<size_t>(sample)] = value;
             }
-            ctx.paramValues[binding.paramIndex] = c.paramSamples[binding.paramIndex];
+            c.paramValuePtrs[static_cast<size_t>(binding.paramIndex)] = c.paramSamples[static_cast<size_t>(binding.paramIndex)].data();
         }
         if (idx == 0 && c.voiced) {
             runVoices(c, pat, repeat, n0, len, c.gen, exportTo, offset, ctx);
@@ -1762,8 +1769,8 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
             if (ctx.vars[k]) ctx.vars[k] += o;
-        for (int k = 0; k < kMaxParams; ++k)
-            if (ctx.paramValues[k]) ctx.paramValues[k] += o;
+        for (uint32_t k = 0; ctx.paramValues && k < ctx.paramValueCount; ++k)
+            if (ctx.paramValues[k]) const_cast<const double*&>(ctx.paramValues[k]) += o;
         ctx.vars[static_cast<int>(Var::T)] = c.vtb;
         ctx.vars[static_cast<int>(Var::Time)] = c.vtime;
         ctx.vars[static_cast<int>(Var::Phase)] = c.vphase;
