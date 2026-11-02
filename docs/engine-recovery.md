@@ -13,11 +13,25 @@ updated: 2026-11-02
 
 - Branch: `feature/native-engine-refactor-integration`
 - Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
-- Last live comparison before this recovery refresh: **180 ahead, 0 behind Main**.
-- Latest code/test checkpoint: `80e2664a5f9af2c3f6628ba94a0529ead4a42165`.
-- Latest progress/log checkpoint: `2c45cfcff9c3681e6a5a216f97d001db28c96885` / `431b83fca657c4dc38f058d6bbf3bdbdc9ff8aaf`.
+- Code checkpoint: `8ddbb1bfabba5ca4eec6d3238e7a617d4dac0286` (191 ahead, 0 behind Main at the time checked). Recompare before any PR.
+- Latest code checkpoint: `8ddbb1bfabba5ca4eec6d3238e7a617d4dac0286` (not CI-green).
+- Engine CI run `41455843126` failed on all four jobs; App `41455843138` passed; Docs `41455843017` passed. Previous green checkpoint: `07c796f8e745cd44e7be37992747b8263ac27e9a`.
 - Working tree/remote state is represented by GitHub branch commits; no local build/test environment is available through the current connector workflow.
 - PR: none. Do not open a PR until the complete assignment is reviewable; do not merge, approve or delete branches.
+
+## Immediate continuation — fix red CI before extending the engine
+
+Latest Engine CI run `41455843126` on `8ddbb1bfabba5ca4eec6d3238e7a617d4dac0286` failed on Windows x64, Linux Arm64, Linux x64 and sanitizers. App and Docs passed. Failures:
+
+1. `engine_routes_more_than_16_module_exports`: final output is `0.707106769` instead of `14.1421356`; `value19` is not reaching the consumer. Trace export writes, namespace/reference resolution, import binding, slot processing and consumer order. Do not weaken the assertion.
+2. `engine_automates_parameters_beyond_32`: actual `0.707106769` instead of `1.06066015`. Trace BlockCtx parameter pointer table, sample buffers, parameter indexing and mix/gain expectations.
+3. `project_parser_preserves_large_project_automation`: parser still returns 128 points (last step 127) instead of 129 (last step 128). Find remaining truncation in parser/validation.
+4. `project_automation_rejects_excessive_lane_count`: old test expects >256 lanes rejected. Since the goal is removing arbitrary product caps, replace it with a real resource-budget/hostile-input bound test; retain explicit byte/count budgets and actionable errors.
+5. `midi_import_rejects_malformed_files_without_crashing`: malformed input now returns an empty error string instead of the expected `wanted 4096 steps`. Preserve malformed-file rejection while allowing legitimate patterns above 4096.
+6. `a_patch_can_grow_its_effect_chain_without_truncation`: synth patch translation fails for 9 effects. Inspect remaining parser/compiler/translator constraints and surface the actual error.
+7. `projects_have_a_memory_budget`: actual response lacks both `project-state budget` and `"ok":false`. Inspect exact setProject response and ensure budget is enforced at the correct boundary; do not weaken the test without proving enforcement.
+
+The latest run had 9 failing assertions across shards (some paired assertions share a root cause). Read the workflow logs, fix one root cause at a time, rerun Engine CI after each coherent group, and preserve passing App/Docs. Do not begin a new architecture rewrite.
 
 ## What has actually been implemented
 
