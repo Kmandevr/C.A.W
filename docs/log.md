@@ -6,6 +6,8 @@ updated: 2026-11-02
 
 # Log
 
+- 2026-11-02: Expanded the engine foundation requirements to target universal creative capability, typed audio/MIDI/control routing, first-class cross-domain sidechains, feedback networks, and resource-based rather than arbitrary architectural limits.
+
 - 2026-11-02: Added safe extensibility requirements so developers can implement unconventional creative behavior through declared, bounded extension points without compromising core stability, real-time safety or project compatibility.
 
 - 2026-11-02: Extended the native engine refactor plan with one unified parameter model for visible manual controls, conventional automation and hidden modulation; specified deterministic source combination, sample/block-rate evaluation, mathematical generators/effects, bounded expression execution and resource-aware fallbacks.
