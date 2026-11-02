@@ -56,6 +56,13 @@ bool estimateExecutorWorkingBytes(std::size_t nodeCount, uint32_t maxFrames,
 }
 }  // namespace
 
+GraphResourceBudget makeGraphResourceBudget(const EngineResourceBudget& engineBudget) noexcept {
+    GraphResourceBudget budget;
+    const uint64_t maximum = static_cast<uint64_t>(std::numeric_limits<std::size_t>::max());
+    budget.maxWorkingBytes = static_cast<std::size_t>(std::min(engineBudget.graphWorkingBytes, maximum));
+    return budget;
+}
+
 CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                            const std::vector<GraphConnection>& connections,
                            const GraphResourceBudget& budget) {
