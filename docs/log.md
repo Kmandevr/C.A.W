@@ -1,4 +1,4 @@
-- 2026-11-02: Repaired the current red native CI inventory on `feature/native-engine-refactor-integration`. Project JSON automation no longer truncates at 128 points; parser input has an 8 MiB memory budget; the obsolete automation-lane count test now checks a byte-budget rejection; MIDI tests allow legitimate patterns above 4,096 steps; the nine-effect synth test now emits real newlines; routing/automation tests respect the VM's normalized output contract; and project memory-budget coverage injects a deterministic one-byte state budget. Engine run `41495601022` passed Windows x64, Linux x64, Linux ARM64 and sanitizers; App `41495601172` and Docs `41495601067` passed at `fa438f87`. Follow-up commit `5bd40eb` clears stale ProjectSpec/error state before rejecting oversized input; regression added in `1c88f05`, with Engine `41503176374` / App `41503176276` pending and Docs `41503176230` passed at update time.\n---
+---
 title: Log
 summary: Dated history of changes, newest first.
 updated: 2026-11-02
@@ -6,24 +6,11 @@ updated: 2026-11-02
 
 # Log
 
-- 2026-11-02: M0 repository recovery and architecture audit is verified. Confirmed PR #68 is merged, no open PR exists, and feature/native-engine-refactor-integration is 29 commits ahead/0 behind Main. Completed inspection of parameter/automation, MIDI, persistence/state migration, scheduler, project serialization, C API, Flutter bridge, relevant tests and CI. The active graph executor remains unintegrated; see engine-progress.md for the complete audit.
-- 2026-11-02: M1 first code slice removes the graph compiler's former 1,024-node/8,192-connection caps and the executor's 8,192-frame cap, adds allocation-failure reporting, fixes node-source sentinel width and tests 8,195 nodes/8,194 edges/8,193 frames. Code commit 07c796f adds mandatory graph working-memory budgets, optional caller-supplied count ceilings, preflight compile/executor estimates and boundary tests. It passed Engine, App and Docs CI at checkpoint 1269019. Follow-up commit e815b495 adds direct compiler working-set rejection coverage; its CI is pending.
-- 2026-11-02: Reliability audit found that Engine::send can drop install/pattern commands after a two-second queue timeout without returning failure; retirement can leak when its 1,024-entry queue and 256-item pending list fill; freeSlot exhaustion can skip a planned layer; and project-state exhaustion can leave a layer silent. These are tracked as M1 correctness work, not accepted limitations.
-
-- 2026-11-02: Started from the verified 49ba277 planning checkpoint, preserving its approved engine blueprint and permanent roadmap. The current implementation branch contains the first graph compiler scaling changes and a durable milestone/recovery record; the exact verified status is maintained above and in engine-progress.md.
-
-- 2026-11-02: Added adaptive concurrency and batching as foundational engine requirements, including dependency-aware scheduling, bounded worker pools, SIMD/accelerator selection, deterministic behavior, deadline-safe fallbacks and measurement of total overhead.
-
-
-- 2026-11-02: Expanded the engine foundation requirements to target universal creative capability, typed audio/MIDI/control routing, first-class cross-domain sidechains, feedback networks, and resource-based rather than arbitrary architectural limits.
-
-- 2026-11-02: Added safe extensibility requirements so developers can implement unconventional creative behavior through declared, bounded extension points without compromising core stability, real-time safety or project compatibility.
-
-- 2026-11-02: Extended the native engine refactor plan with one unified parameter model for visible manual controls, conventional automation and hidden modulation; specified deterministic source combination, sample/block-rate evaluation, mathematical generators/effects, bounded expression execution and resource-aware fallbacks.
+- 2026-11-02: Native-engine CI repair follow-up. Engine tests now cover clearing stale project state when the 8 MiB parser budget rejects input. Docs CI caught a malformed log frontmatter replacement; restore the canonical log history and preserve its frontmatter. Retirement overflow remains a known ownership defect requiring a callback-safe backpressure design.
 
 - 2026-11-02: Established docs/roadmap.md as the permanent canonical C.A.W. roadmap. Consolidated the long-term production direction into ordered stages, including audio/MIDI recording, monitoring and latency compensation, loop recording, take lanes/comping, plugin hosting, tempo maps, control surfaces, mastering tools, optional collaboration and surround/immersive audio. Explicitly excluded video synchronization for now. Converted the former two-part core plan into a compatibility pointer and the music workflow plan into a factual gap reference; aligned vision and UI scope notes.
 
-- 2026-11-01: Repository-wide documentation accuracy pass: reconciled current app/engine facts, corrected piano-roll curves and generator status, separated shipped/partial/missing capabilities, updated synth and worker-pool references, and removed stale claims of AI, MIDI-device, audio-recording, plugin-host and platform support.
+- 2026-11-01: Repository-wide documentation accuracy pass: reconciled current app/engine facts, corrected piano-roll curves and generator status, separated shipped/partial/deferred capabilities, updated synth and worker-pool references, and removed stale claims of AI, MIDI-device, audio-recording, plugin-host and platform support.
 
 - 2026-11-01: Consolidated the owner-discussed work into a two-part master plan: core build order and complete feature inventory. This interim planning structure was superseded on 2026-11-02 by the permanent single roadmap.
 
@@ -75,26 +62,3 @@ Newest first.
 - 2026-10-28: Owner set the adaptive grid: the chosen resolution (1 down to 1/128, or off) is its finest level and the snap, Shift-drag ignores it, and tapping keeps 48 dp cells ([UI design](ui.md#editors)). Still waiting for the go.
 
 - 2026-10-28: Owner answered the remaining key questions (WASD in the code editor's Vim mode, Alt+Q to record, Ctrl+1/2/3 for areas, the cursor keys, the phone toolbar); updated [actions](actions.md). Still waiting for the go.
-
-- 2026-11-02: The docs-only checkpoint 1370a43 triggered a delayed Windows build that remained in Build for over 15 minutes but eventually passed; all four Engine targets completed successfully in run 41402930328. The later full Engine matrix at 1269019 also passed.
-- 2026-11-02: Removed the fixed nine-module/eight-effect chain ceiling from project parsing, synth patch parsing and Engine chain preparation. Added regression coverage for a 12-module parsed project chain and a nine-effect synth patch. Updated engine/synth documentation. Native CI for this new code checkpoint has not yet been observed; do not treat the earlier graph-budget CI as verification of these changes.
-
-- 2026-11-02: Removed further content ceilings: project parsing now retains all modules and clips instead of stopping at 256/512; removed the 256 project-parameter automation binding cutoff; arrangement compilation no longer silently stops at 4096 notes; pattern parsing no longer has a 4096-note cap; MIDI import defaults to a caller-configurable note allowance. Added parser and late-arrangement-audio regression tests. Latest code/test checkpoint: 8f310708617e742a53cb00896a9715d41883d5cd. Fresh CI result is not yet inspectable through the current GitHub workflow-run reader.
-
-- 2026-11-02: Removed fixed project-level parameter/global automation lane and point cutoffs; added regression coverage for 257 lanes with 129 points each. Layer volume/pan automation still uses fixed callback arrays and remains separate work.
-
-- 2026-11-02: Layer volume/pan automation parsing now rejects lanes above the currently supported 128-point callback capacity rather than silently retaining only the first 128. Added a regression test for the explicit error. Dynamic callback storage/ownership remains future work; the parser no longer silently discards authored automation.
-
-- 2026-11-02: Replaced fixed layer volume/pan automation arrays with immutable vector-backed AutomationData prepared on the control thread, adopted by the audio thread without allocation and retired for off-callback destruction. Removed the 128-point parser cap and added a 129-point end-to-end audio test. Engine::send now reports queue acceptance; project updates propagate failures and retain retryable layer state rather than treating dropped installs as active. Slot exhaustion and project-state overflow now surface as project errors. Latest code checkpoint: 787e9fed0a56607b102c988a15089fc714c7538f. Fresh CI remains uninspected.
-
-- 2026-11-02: Removed the 32-parameter, 64-synth-parameter and 32-import ceilings. VM BlockCtx now borrows a dynamic parameter pointer table with an explicit count and per-voice sample offset; Engine prepares per-chain parameter buffers before playback. Import tables remain vector-backed and are no longer compiler-capped. Added tests for 40 parameters with runtime automation, 40 VM imports, and synth patches exposing more than 64 generated parameters. Latest code checkpoint: 8f43d76036cadcc3998eed6747a94d9e0c3f0480.
-
-- 2026-11-02: Added hardware-derived EngineResourceBudget. Detected conservative memory is split into project-state (1/2), graph working (1/4), compile working (1/8) and retirement (1/8) shares; unknown memory uses a 128 MiB total fallback to preserve the existing 64 MiB project-state allowance. Engine default construction probes on the control thread, supports injected budgets, and enforces project-state in bytes. Added budget partition/fallback and low-memory project rejection tests. Latest code checkpoint: bba9bc1a8b47534ab11e51a1657807183e6a16a2 plus tests ebf009d and 4b3db68. Fresh CI is not yet inspectable.
-
-- 2026-11-02: Added makeGraphResourceBudget(EngineResourceBudget) so graph compile/prepare policy can consume the hardware-derived graph-working share; added a conversion test. This does not mean GraphExecutor is integrated into Engine playback. Latest graph budget conversion test checkpoint: 3d99a652bddf3dfae3a1348b0471660eef912d08.
-
-- 2026-11-02: Removed the fixed 4096-step pattern and MIDI-import limit; signed 32-bit step representation and existing file/event safety budgets remain. Replaced fixed 16-point note-expression curve arrays with dynamic vectors and prepared per-voice curve capacity off callback; hot-swap capacity is at least the prior chain's capacity to avoid callback allocations while copying held voices. Added 5000-step, 20-point curve and Engine playback regressions. Latest code/test checkpoint: 3d9bdf1cf18fbc823cd3b905728c11759ac75199. Fresh CI is not yet inspectable.
-
-- 2026-11-02: Corrected pattern hot-swap command ordering: install the chain with its pre-reserved curve capacity before publishing a changed pattern. If the chain install is rejected, the old pattern remains active; this prevents an oversized new expression from reaching a chain whose voice vectors were prepared for fewer points. Latest code checkpoint: ff8b5a566e6ab2d8b3cb8282eeb520d857d2aa56.
-
-- 2026-11-02: Removed the 16-export compiler/runtime cap. Each Engine now lazily allocates stable per-slot export buffers from the hardware-derived graph-working share; a fixed pointer table and heap-stable buffers keep import addresses valid across project updates. Export counts are checked before installation, failures are explicit, and inactive/muted export sources are zeroed without double-clearing active producers. Added 20-export compiler and end-to-end import routing tests plus a low-memory budget rejection test. Latest code/test checkpoint: 80e2664a5f9af2c3f6628ba94a0529ead4a42165. Fresh CI is not yet inspectable.
