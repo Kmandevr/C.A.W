@@ -754,3 +754,16 @@ TEST(project_parser_preserves_large_project_automation) {
     CHECK_EQ(parsed.automation.back().points.size(), size_t{129});
     CHECK_NEAR(parsed.automation.back().points.back().step, 128.0, 1e-9);
 }
+
+TEST(project_parser_rejects_oversized_layer_automation_without_truncation) {
+    std::string json = R"({"caw_project":1,"layers":[{"id":"track","automation":[{"target":"volume","points":[)";
+    for (int point = 0; point < 129; ++point) {
+        if (point) json += ",";
+        json += R"({"step":)" + std::to_string(point) + R"(,"value":0.5})";
+    }
+    json += R"(]}]}]})";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(!parseProject(json, parsed, error));
+    CHECK(error.find("128 points") != std::string::npos);
+}
