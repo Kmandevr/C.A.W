@@ -678,7 +678,7 @@ TEST(project_parser_preserves_long_module_chains) {
         chain += "\\\"module_" + std::to_string(i) + "\\\"";
     }
     chain += "]";
-    const std::string json = "{\\\"caw_project\\\":1,\\\"layers\\\":[{\\\"id\\\":\\\"track\\\",\\\"chain\\\":" + chain + "}]}";
+    const std::string json = R"({"caw_project":1,"layers":[{"id":"track","chain":)" + chain + R"(}]})";
     ProjectSpec parsed;
     std::string error;
     CHECK(parseProject(json, parsed, error));
@@ -686,3 +686,4 @@ TEST(project_parser_preserves_long_module_chains) {
     CHECK_EQ(parsed.layers[0].chain.size(), size_t{12});
     CHECK_EQ(parsed.layers[0].chain.back(), std::string("module_11"));
 }
+
