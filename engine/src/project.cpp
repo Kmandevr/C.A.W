@@ -35,6 +35,11 @@ const ModuleSpec* ProjectSpec::module(const std::string& id) const {
 }
 
 bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
+    constexpr size_t kMaxProjectJsonBytes = 8u << 20;  // Bound hostile JSON parsing by input memory, not object counts.
+    if (text.size() > kMaxProjectJsonBytes) {
+        error = "project JSON exceeds the 8 MiB parser memory budget";
+        return false;
+    }
     Json root;
     if (!parseJson(text, root, error)) return false;
     if (root.type != Json::Type::Object) {
@@ -178,7 +183,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 (lane.targetType == "param" && lane.moduleId.empty())) continue;
             if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                 for (const Json& point : points->arr) {
-                    if (point.type != Json::Type::Object || lane.points.size() >= 128) continue;
+                    if (point.type != Json::Type::Object) continue;
                     lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
                                            clampd(point.number("value", 0), -1000000, 1000000)});
                 }
