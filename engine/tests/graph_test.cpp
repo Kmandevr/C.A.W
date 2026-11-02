@@ -3,6 +3,8 @@
 
 #include "graph.h"
 
+#include <string>
+
 using namespace caw;
 
 namespace {
@@ -35,6 +37,25 @@ TEST(graph_compiles_stereo_chain_in_dependency_order) {
     CHECK_EQ(graph.executionOrder[0], 2u);
     CHECK_EQ(graph.executionOrder[1], 1u);
     CHECK_EQ(graph.executionOrder[2], 0u);
+}
+
+TEST(graph_compiler_has_no_arbitrary_node_or_connection_cap) {
+    constexpr uint32_t nodeCount = 8195;
+    std::vector<std::string> ids;
+    std::vector<GraphNode> nodes;
+    std::vector<GraphConnection> edges;
+    ids.reserve(nodeCount);
+    nodes.reserve(nodeCount);
+    edges.reserve(nodeCount - 1);
+    for (uint32_t i = 0; i < nodeCount; ++i) ids.push_back("node-" + std::to_string(i));
+    for (uint32_t i = 0; i < nodeCount; ++i) nodes.push_back({ids[i], &effect});
+    for (uint32_t i = 0; i + 1 < nodeCount; ++i) edges.push_back({i, 1, i + 1, 0});
+
+    const CompiledGraph graph = compileGraph(nodes, edges);
+    CHECK(graph);
+    CHECK_EQ(graph.executionOrder.size(), static_cast<std::size_t>(nodeCount));
+    CHECK_EQ(graph.executionOrder.front(), 0u);
+    CHECK_EQ(graph.executionOrder.back(), nodeCount - 1);
 }
 
 TEST(graph_rejects_mono_stereo_mismatch) {
@@ -109,6 +130,20 @@ TEST(graph_executor_processes_prepared_stereo_chain_without_changing_block_size)
         CHECK_NEAR(outR[i], inR[i] * 0.25, 1e-7);
     }
     CHECK(!executor.process(inL, inR, outL, outR, 65));
+}
+
+TEST(graph_executor_accepts_block_sizes_above_legacy_fixed_cap) {
+    const std::vector<GraphNode> nodes{{"processor", &effect}};
+    PassThrough pass;
+    const std::vector<ModuleProcessor*> processors{&pass};
+    constexpr uint32_t frames = 8193;
+    std::vector<float> input(frames, 0.375f);
+    std::vector<float> outputLeft(frames, 0.0f), outputRight(frames, 0.0f);
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, {}, processors, 0, frames, 48000.0) == GraphError::Ok);
+    CHECK(executor.process(input.data(), input.data(), outputLeft.data(), outputRight.data(), frames));
+    CHECK_NEAR(outputLeft.front(), 0.375, 1e-7);
+    CHECK_NEAR(outputRight.back(), 0.375, 1e-7);
 }
 
 TEST(graph_executor_rejects_mono_runtime_layout_until_adapter_exists) {
