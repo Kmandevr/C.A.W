@@ -263,3 +263,37 @@ TEST(export_cycles_still_play) {
     // One side reads the other a block late, so after the first block both values are there.
     CHECK_NEAR(out[511], 0.3 * std::cos(kPi / 4.0), 1e-6);
 }
+
+
+TEST(project_parameter_and_global_automation_parse_with_legacy_compatibility) {
+    ProjectSpec legacy;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,"name":"legacy","modules":[],"layers":[]})", legacy, error));
+    CHECK(legacy.automation.empty());
+
+    ProjectSpec project;
+    const std::string json = R"({"caw_project":1,"bpm":120,"beats_per_bar":4,"loop_bars":4,"modules":[{"id":"synth","source":"param cutoff = 100\ncutoff"}],"layers":[],"automation":[{"target_type":"param","module":"synth","target":"cutoff","points":[{"step":16,"value":900},{"step":0,"value":100}]},{"target_type":"global","target":"swing","points":[{"step":0,"value":0},{"step":64,"value":0.5}]}]})";
+    CHECK(parseProject(json, project, error));
+    CHECK_EQ(project.automation.size(), size_t{2});
+    if (project.automation.size() == 2) {
+        CHECK_EQ(project.automation[0].targetType, std::string("param"));
+        CHECK_EQ(project.automation[0].moduleId, std::string("synth"));
+        CHECK_EQ(project.automation[0].target, std::string("cutoff"));
+        CHECK_EQ(project.automation[0].points.size(), size_t{2});
+        CHECK_EQ(project.automation[0].points[0].step, 0.0);
+        CHECK_EQ(project.automation[1].targetType, std::string("global"));
+    }
+}
+
+TEST(project_automation_rejects_excessive_lane_count) {
+    std::string json = R"({"caw_project":1,"modules":[],"layers":[],"automation":[)";
+    for (int i = 0; i < 257; ++i) {
+        if (i) json += ",";
+        json += R"({"target_type":"global","target":"g","points":[{"step":0,"value":0}]})";
+    }
+    json += "]}";
+    ProjectSpec project;
+    std::string error;
+    CHECK(!parseProject(json, project, error));
+    CHECK(has(error, "256"));
+}
