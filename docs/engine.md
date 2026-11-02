@@ -253,6 +253,12 @@ The app, the CLI and exports share one format:
 ```json
 { "caw_project": 1, "name": "Night Glitch", "bpm": 140, "beats_per_bar": 4, "loop_bars": 4,
   "seed": 7, "master": 0.7, "seam_crossfade": true, "voices": 8, "swap": "now", "key_root": 9, "key_scale": 1, "globals": { "swing": 0.1 },
+  "automation": [
+    { "target_type": "param", "module": "m1", "target": "cutoff",
+      "points": [ { "step": 0, "value": 900 }, { "step": 64, "value": 2400 } ] },
+    { "target_type": "global", "target": "swing",
+      "points": [ { "step": 0, "value": 0 }, { "step": 64, "value": 0.2 } ] }
+  ],
   "modules": [ { "id": "m1", "name": "Kick", "source": "...the .caw text...", "params": { "shift": 6 } } ],
   "layers": [
     { "id": "g1", "name": "Group", "folder": true, "bus": true,
@@ -266,6 +272,7 @@ The app, the CLI and exports share one format:
   "audition": { "chain": ["m1"], "pattern": "p1", "length_steps": 0 }, "audition_only": false }
 ```
 
+- Optional project-level `automation` lanes target module parameters or named project globals. A parameter lane uses `target_type: "param"`, its stable `module` ID and parameter `target`; a global lane uses `target_type: "global"` and the global `target` name. Each lane has song-time `points` with `step` and `value`. Points are linearly interpolated; the lane holds its first/last value outside its point range and repeats with the project transport loop. Parameter values are clamped to the declared parameter range. A global lane reaches every module declaring that global name. The field is optional, so older project files remain valid. Limits: 256 project lanes and 128 points per lane.
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
 - A legacy layer's \`pattern\` names one pattern module; its notes play the generator, and its length replaces \`length_steps\`.
