@@ -50,7 +50,16 @@ updated: 2026-11-02
 - The project parser now preserves every string module ID in a chain; Engine no longer warns and truncates the chain after its ninth entry; synth patch translation no longer rejects the ninth effect.
 - Added regression tests for a 12-entry project chain and a nine-effect synth patch. Updated engine, synth, decisions and log documentation.
 - This is a targeted removal only. Fixed layer slots, export buffers, voice arrays and automation arrays remain separate work.
-- **Verification:** no fresh Engine/App/Docs workflow result has yet been observed for commits 20081ae through 6734c29. The previously green runs at 1269019 predate this slice and do not verify it.
+- **Verification:** no fresh Engine/App/Docs workflow result has yet been observed for the dynamic chain and content-cap changes. The previously green runs at 1269019 predate these changes and do not verify them.
+
+## Latest implementation slice — remove silent content ceilings
+
+- Project JSON parsing now preserves more than 256 modules and more than 512 arrangement clips; the 256-binding cutoff for project parameter automation was removed.
+- Arrangement compilation no longer silently stops adding notes at 4096. Added an audio regression with 520 clips × 9 notes and checks that a late clip beyond the former cutoff is audible.
+- Pattern parsing no longer rejects the 4097th note. MIDI import's default note allowance is now caller-configurable instead of inheriting the former 4096-note constant. Added a 4097-note parser test.
+- Added project parser coverage for 300 modules and 520 clips. Dynamic signal-chain tests cover 12 project modules and nine synth effects.
+- These changes remove specific fixed ceilings; they do not yet establish a complete hardware-derived project memory budget. MIDI file byte/event safety bounds, pattern step length, layer slots, voices, exports, automation point arrays and other limits remain.
+- **Verification:** the current Engine/App/Docs push-triggered runs have not been readable through the available commit-workflow result view, which only returns pull-request-triggered runs. Do not claim these changes passed CI until the actual checks are inspected.
 
 ## Fixed limits and correctness risks
 
