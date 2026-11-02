@@ -97,6 +97,11 @@ struct Engine::Chain {
     double vvel[kBlock], vrel[kBlock], vout[kBlock], gen[kBlock];
     double vbend[kBlock], vpress[kBlock], vtimbre[kBlock];
     double dtrig[kBlock], ones[kBlock], dnote[kBlock], dfreq[kBlock];
+    struct ParamAutomation {
+        int moduleIndex = 0, paramIndex = 0, count = 0;
+        double steps[128] = {}, values[128] = {}, samples[kBlock] = {};
+    };
+    std::vector<ParamAutomation> paramAutomation;
     std::vector<std::string> moduleIds;
     // How each module takes over the running state of the chain it replaces, so unchanged calls play on.
     struct Migration {
