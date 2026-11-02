@@ -194,6 +194,14 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         }
     }
 
+    int automationEndStep = 0;
+    for (const auto& lane : out.automation)
+        for (const auto& point : lane.points)
+            automationEndStep = std::max(automationEndStep, static_cast<int>(std::ceil(point.step)));
+    const int stepsPerBar = out.beatsPerBar * 4;
+    if (automationEndStep > 0 && stepsPerBar > 0)
+        out.loopBars = std::min(64, std::max(out.loopBars, (automationEndStep + stepsPerBar - 1) / stepsPerBar));
+
     // Reject malformed parent references and cycles before the audio thread sees routing indices.
     for (const LayerSpec& layer : out.layers) {
         std::string parent = layer.parentId;
