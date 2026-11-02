@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <stdexcept>
 
@@ -147,11 +148,16 @@ double NoteCurve::at(double u) const {
 }
 
 int Pattern::steps(int beatsPerBar) const {
-    const int bar = std::max(1, beatsPerBar) * 4;
-    int s = lengthSteps;
-    if (lengthBars > 0) s = lengthBars * bar;
-    if (s <= 0) s = std::max(1, static_cast<int>(std::ceil(lastEnd / bar - 1e-9))) * bar;
-    return std::min(s, kMaxPatternSteps);
+    const int bar = std::clamp(beatsPerBar, 1, 16) * 4;
+    int64_t steps = lengthSteps;
+    if (lengthBars > 0) steps = static_cast<int64_t>(lengthBars) * bar;
+    if (steps <= 0) {
+        const double bars = std::ceil(lastEnd / static_cast<double>(bar) - 1e-9);
+        if (!std::isfinite(bars) || bars >= static_cast<double>(std::numeric_limits<int>::max()) / bar)
+            return std::numeric_limits<int>::max();
+        steps = static_cast<int64_t>(std::max(1.0, bars)) * bar;
+    }
+    return static_cast<int>(std::clamp<int64_t>(steps, 1, std::numeric_limits<int>::max()));
 }
 
 bool notePlays(const PatternNote& n, uint32_t index, int64_t repeat, uint32_t seed) {
@@ -201,7 +207,7 @@ PatternResult parsePattern(std::string_view src) {
                     const bool bars = w.size() == 2 && (w[1].text == "bars" || w[1].text == "bar");
                     if (w.empty() || w.size() > 2 || (w.size() == 2 && !bars))
                         throw PatternError(lineNo, col, "length is a number of steps (16) or bars (4 bars)");
-                    const double n = needNumber(w[0], lineNo, "length", 1, bars ? 256 : kMaxPatternSteps);
+                    const double n = needNumber(w[0], lineNo, "length", 1, bars ? std::numeric_limits<int>::max() / 64 : std::numeric_limits<int>::max());
                     if (n != std::floor(n)) throw PatternError(lineNo, col, "length must be a whole number");
                     (bars ? p->lengthBars : p->lengthSteps) = static_cast<int>(n);
                 }
@@ -223,9 +229,9 @@ PatternResult parsePattern(std::string_view src) {
             if (w.size() < 3) throw PatternError(lineNo, w[0].col, "a note line is: at  note  length  [velocity]  [extras]");
             PatternNote n;
             n.line = lineNo;
-            n.at = needNumber(w[0], lineNo, "the start (in steps)", 0, kMaxPatternSteps);
+            n.at = needNumber(w[0], lineNo, "the start (in steps)", 0, std::numeric_limits<int>::max());
             const std::vector<double> chord = pitches(w[1], lineNo);
-            n.len = needNumber(w[2], lineNo, "the length (in steps)", 1e-3, kMaxPatternSteps);
+            n.len = needNumber(w[2], lineNo, "the length (in steps)", 1e-3, std::numeric_limits<int>::max());
             size_t k = 3;
             double v = 0;
             if (k < w.size() && number(w[k].text, v)) n.vel = needNumber(w[k++], lineNo, "velocity", 0, 1);
