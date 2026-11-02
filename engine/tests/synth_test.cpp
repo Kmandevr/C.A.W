@@ -342,7 +342,7 @@ TEST(setting_a_synth_param_reaches_its_voice_and_its_effects) {
 TEST(a_patch_can_grow_its_effect_chain_without_truncation) {
     // Effect-chain length is dynamic; resource limits belong to the host's explicit budget, not a product cap.
     std::string many = kPatch + "osc a\n";
-    for (int i = 0; i < 9; ++i) many += "fx delay\\n";
+    for (int i = 0; i < 9; ++i) many += "fx delay\n";
     const SynthResult translated = translateSynth(many);
     if (!translated.ok) cawtest::fail(__FILE__, __LINE__, "nine-effect patch translation failed: " + translated.error);
     if (translated.ok) CHECK_EQ(translated.fx.size(), size_t{9});
