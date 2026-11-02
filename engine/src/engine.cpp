@@ -760,7 +760,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 pl.pattern = it->second.pattern;
                 pl.w.steps = pl.pattern->steps(p.beatsPerBar);
                 const Program& gen = *modules_.at(pl.ids.front()).program;
-                layerState += static_cast<int64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) * gen.stateSize;
+                layerStateDoubles += static_cast<uint64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) *
+                    static_cast<uint64_t>(std::max(0, gen.stateSize));
             } else {
                 warnings[pl.ids.front()].push_back("pattern '" + w.pattern + "' is missing or has an error, so it plays without one");
             }
