@@ -1,7 +1,7 @@
 ---
 title: App
 summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
-covers: [app/]
+covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
 updated: 2026-11-01
 ---
 
@@ -49,7 +49,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
     - triplets (Alt+0) make every grid size 2/3 as long
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
-    - the curve tool and the `roll.gen.*` generators (euclid, random, arpeggiate, humanize, chord stamp, reverse) are not built yet
+    - Curve mode edits velocity/chance lane curves and per-note expression curves (pitch bend, pressure/volume and timbre); point and segment-bend editing is implemented. Pattern actions include Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - the main workspace is a horizontal timeline with a bar ruler and one lane per track; the former layer-card list has been replaced
   - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
@@ -83,7 +83,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - Quick Export renders the current project loop; Advanced offers loop, free-length, one-shot, wavetable and MIDI pattern exports
   - audio renders use the native offline render job, with progress and cancellation, at 44.1 or 48 kHz and 24-bit or 32-bit float
-  - MIDI patterns use the native MIDI writer in a worker isolate and preserve the project tempo and time signature
+  - MIDI pattern import/export uses the native C API synchronously from the UI isolate and preserves the project tempo and time signature. These conversions are not currently routed through the native worker pool; measure large-file responsiveness before claiming they are off-thread.
   - named export profiles persist in settings; the last 20 successful exports are recorded with reproducible settings that can be reapplied
   - a sequential in-memory queue holds up to 50 snapshot jobs, supports removal/clear, runs one render at a time and can cancel the current job while preserving remaining items
   - each queued item uses the native offline renderer or MIDI writer and asks for its own destination; the queue itself is not persisted across restarts. Batch/stem rendering and multi-destination automation remain incomplete
@@ -109,7 +109,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 ## How it works
 
 - **Engine access:** `lib/engine/bindings.dart` binds the C API by hand. `lib/engine/engine.dart` wraps it:
-  - Project updates and exports run on worker isolates, so compiling never blocks the UI. Updates run one at a time, in order.
+  - Project compilation, asynchronous source checks and offline WAV rendering run through the native bounded C++ worker pool. MIDI pattern import/export currently calls the native conversion API synchronously from the UI isolate; it is not routed through the pool. Project jobs are ordered by the AppState update path; native job status/progress/cancellation are exposed through owned handles. None of the worker-pool work runs on the audio callback.
   - Meters and scopes are read about 30 times a second, but only while playing and for 1 s after stopping, and never in the background (`lib/model/poller.dart`). Stopped and settled, the app does no periodic work, and after 30 s it closes the audio device; Play reopens it.
   - Slider drags and typing update only the widgets that show them, not the whole app ([performance](performance.md#app-audit-2026-10-28)).
   - Volume, pan, mute, solo and param changes go straight to the engine. Everything else re-sends the project, and the engine applies only what changed.
@@ -138,7 +138,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - Recorded macros are saved in `keys.txt` next to `settings.json`; a user `keys.txt` is merged over the default keys.
   - Text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X.
   - The roll, the Builder and the code editor's Vim mode each run their area's actions; the Arranger's actions work on a keyboard-selected layer.
-  - **Not built yet:** editing keys in the action list, custom toolbars and the long-press menu entries from the keymap.
+  - **Not built yet:** editing key bindings directly in the action list and keymap-driven long-press menu entries. The piano-roll toolbar and phone Quick Actions strips are configurable.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
 ## Build
