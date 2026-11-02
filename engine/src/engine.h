@@ -79,7 +79,7 @@ private:
     void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
-    void runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, Slot* exportTo, int offset,
+    void runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, int len, double* out, Slot* exportTo, int offset,
                   const Pattern* pat, int64_t repeat) noexcept;
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
                    int offset, const BlockCtx& base) noexcept;
@@ -171,7 +171,7 @@ private:
     int64_t ctlLoopLen_ = 0;
 
     Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced,
-                      const Chain* prev);
+                      const Chain* prev, const std::vector<ProjectAutomationLaneSpec>& automation);
     void swapIn(Slot& s, Chain* c) noexcept;  // hot swap with a crossfade, keeping what can keep playing
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
