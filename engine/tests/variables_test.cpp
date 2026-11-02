@@ -305,7 +305,7 @@ TEST(module_parameter_automation_matches_offline_render) {
     p.loopBars = 1;
     p.master = 1.0;
     p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "param level = 0 in 0..1\nsine(100) * level", {}});
+    p.modules.push_back({"tone", std::string(kFloat) + "param level = 0 in 0..1\nsine(t * 100 / sr) * level", {}});
     LayerSpec layer;
     layer.id = "tone-track";
     layer.chain = {"tone"};
@@ -339,7 +339,7 @@ TEST(project_global_automation_reaches_global_parameters) {
     p.loopBars = 1;
     p.master = 1.0;
     p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "global level = 0 in 0..1\nsine(100) * level", {}});
+    p.modules.push_back({"tone", std::string(kFloat) + "global level = 0 in 0..1\nsine(t * 100 / sr) * level", {}});
     LayerSpec layer;
     layer.id = "tone-track";
     layer.chain = {"tone"};
