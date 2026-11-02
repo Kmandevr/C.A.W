@@ -15,6 +15,12 @@
 
 namespace caw {
 
+// Immutable automation prepared on the control thread and reclaimed off the audio callback.
+struct Engine::AutomationData {
+    std::vector<AutomationPointSpec> volume;
+    std::vector<AutomationPointSpec> pan;
+};
+
 // Per-layer audio and meter state. Fields above `vol` belong to the audio thread.
 struct Engine::Slot {
     bool active = false;
@@ -24,9 +30,7 @@ struct Engine::Slot {
     bool overloaded = false;
     bool bus = false;
     int parentSlot = -1;
-    int volumeAutomationCount = 0, panAutomationCount = 0;
-    double volumeAutomationStep[128] = {}, volumeAutomationValue[128] = {};
-    double panAutomationStep[128] = {}, panAutomationValue[128] = {};
+    AutomationData* automation = nullptr;
     double outL[kBlock] = {}, outR[kBlock] = {};
     Chain* cur = nullptr;
     Chain* old = nullptr;    // previous chain, fading out after a hot swap
@@ -129,9 +133,7 @@ struct Engine::Cmd {
     int slot = 0;
     Chain* chain = nullptr;
     int steps = 0, order = 0, parentSlot = -1;
-    int volumeAutomationCount = 0, panAutomationCount = 0;
-    double volumeAutomationStep[128] = {}, volumeAutomationValue[128] = {};
-    double panAutomationStep[128] = {}, panAutomationValue[128] = {};
+    AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
     int beatsPerBar = 4, loopSteps = 64, keyRoot = 9, keyScale = 1;
     uint32_t seed = 0;
@@ -144,6 +146,7 @@ struct Engine::Retired {
     Chain* chain = nullptr;
     int freedSlot = -1;
     std::shared_ptr<const Pattern>* pattern = nullptr;
+    AutomationData* automation = nullptr;
 };
 
 namespace {
