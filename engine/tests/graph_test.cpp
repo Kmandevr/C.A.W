@@ -191,9 +191,21 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     PassThrough pass;
     GainProcessor gain;
     const std::vector<ModuleProcessor*> processors{&pass, &gain};
-    // The executor needs 1412 bytes and the retained execution order needs another 8.
-    // Each phase fits 1419 bytes independently, but the simultaneous live set does not.
-    const GraphResourceBudget budget{2, 1, 1419};
+    constexpr std::size_t perNodeMetadata =
+        sizeof(std::vector<float>) * 2u + sizeof(ModuleProcessor*) +
+        sizeof(uint32_t) + sizeof(uint8_t) * 2u + sizeof(uint32_t);
+    constexpr std::size_t fixedHeaders =
+        sizeof(std::vector<ModuleProcessor*>) +
+        sizeof(std::vector<std::vector<float>>) * 2u +
+        sizeof(std::vector<float>) +
+        sizeof(std::vector<uint32_t>) * 2u +
+        sizeof(std::vector<uint8_t>) * 2u;
+    constexpr std::size_t executorBytes =
+        fixedHeaders + 2u * perNodeMetadata + 2u * 64u * 2u * sizeof(float) + 64u * sizeof(float);
+    constexpr std::size_t retainedPlanBytes = 2u * sizeof(uint32_t);
+    // Each phase fits independently, but the live execution order plus prepared
+    // executor storage exceeds the budget by one byte.
+    const GraphResourceBudget budget{2, 1, executorBytes + retainedPlanBytes - 1u};
     GraphExecutor executor;
     CHECK(executor.prepare(nodes, edges, processors, 1, 64, 48000, budget) ==
           GraphError::ResourceBudgetExceeded);

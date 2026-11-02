@@ -48,7 +48,14 @@ bool estimateExecutorWorkingBytes(std::size_t nodeCount, uint32_t maxFrames,
     constexpr std::size_t perNodeMetadata =
         sizeof(std::vector<float>) * 2u + sizeof(ModuleProcessor*) +
         sizeof(uint32_t) + sizeof(uint8_t) * 2u + sizeof(uint32_t);
-    if (!addEstimatedBytes(total, nodeCount, perNodeMetadata) ||
+    // Include the fixed headers for every executor-owned vector, in addition to
+    // the per-node inner buffer headers and payloads.
+    if (!addEstimatedBytes(total, 1, sizeof(std::vector<ModuleProcessor*>)) ||
+        !addEstimatedBytes(total, 2, sizeof(std::vector<std::vector<float>>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<float>)) ||
+        !addEstimatedBytes(total, 2, sizeof(std::vector<uint32_t>)) ||
+        !addEstimatedBytes(total, 2, sizeof(std::vector<uint8_t>)) ||
+        !addEstimatedBytes(total, nodeCount, perNodeMetadata) ||
         !addEstimatedBytes(total, nodeCount, perNodeBuffer) ||
         !addEstimatedBytes(total, maxFrames, sizeof(float))) return false;
     bytes = total;
