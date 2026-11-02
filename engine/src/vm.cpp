@@ -51,7 +51,7 @@ const double* Instance::process(const BlockCtx& ctx) noexcept {
                 break;
             }
             case OpCode::Param: {
-                const double* automated = ctx.paramValues && op.index < ctx.paramValueCount ? ctx.paramValues[op.index] : nullptr;
+                const double* automated = ctx.paramValues && op.index < ctx.paramValueCount ? ctx.paramValues[op.index] + ctx.paramValueOffset : nullptr;
                 if (automated) std::copy_n(automated, n, d);
                 else std::fill_n(d, n, param(static_cast<int>(op.index)));
                 break;
