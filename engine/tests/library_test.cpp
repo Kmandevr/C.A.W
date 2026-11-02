@@ -232,7 +232,7 @@ TEST(effect_buffers_start_silent_on_every_loop) {
 }
 
 TEST(projects_have_a_memory_budget) {
-    // Each module holds five delay lines (about 7.3 MB); nine such layers pass the 64 MB budget.
+    // An injected one-byte state budget deterministically rejects any prepared delay-line state.
     std::string body = "---\nmode: float\n---\nlet x = saw(110) * 0.1\n";
     for (int k = 0; k < 5; ++k) body += "let d" + std::to_string(k) + " = fx.delay(x, 0.1)\n";
     body += "(d0 + d1 + d2 + d3 + d4) * 0.1\n";
@@ -245,7 +245,9 @@ TEST(projects_have_a_memory_budget) {
         l.chain = {id};
         p.layers.push_back(l);
     }
-    Engine e(48000);
+    EngineResourceBudget budget;
+    budget.projectStateBytes = 1;
+    Engine e(48000, budget);
     const std::string res = e.setProject(p);
     CHECK(res.find("project-state budget") != std::string::npos);
     CHECK(res.find("\"ok\":false") != std::string::npos);
