@@ -1,4 +1,4 @@
----
+- 2026-11-02: Repaired the current red native CI inventory on `feature/native-engine-refactor-integration`. Project JSON automation no longer truncates at 128 points; parser input has an 8 MiB memory budget; the obsolete automation-lane count test now checks a byte-budget rejection; MIDI tests allow legitimate patterns above 4,096 steps; the nine-effect synth test now emits real newlines; routing/automation tests respect the VM's normalized output contract; and project memory-budget coverage injects a deterministic one-byte state budget. Engine run `41495601022` passed Windows x64, Linux x64, Linux ARM64 and sanitizers; App `41495601172` and Docs `41495601067` passed at `fa438f87`. Follow-up commit `5bd40eb` clears stale ProjectSpec/error state before rejecting oversized input; regression added in `1c88f05`, with Engine `41503176374` / App `41503176276` pending and Docs `41503176230` passed at update time.\n---
 title: Log
 summary: Dated history of changes, newest first.
 updated: 2026-11-02
