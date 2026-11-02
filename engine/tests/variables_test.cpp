@@ -272,9 +272,10 @@ TEST(project_parameter_and_global_automation_parse_with_legacy_compatibility) {
     CHECK(legacy.automation.empty());
 
     ProjectSpec project;
-    const std::string json = R"({"caw_project":1,"bpm":120,"beats_per_bar":4,"loop_bars":4,"modules":[{"id":"synth","source":"param cutoff = 100\ncutoff"}],"layers":[],"automation":[{"target_type":"param","module":"synth","target":"cutoff","points":[{"step":16,"value":900},{"step":0,"value":100}]},{"target_type":"global","target":"swing","points":[{"step":0,"value":0},{"step":64,"value":0.5}]}]})";
+    const std::string json = R"({"caw_project":1,"bpm":120,"beats_per_bar":4,"loop_bars":4,"modules":[{"id":"synth","source":"param cutoff = 100\ncutoff"}],"layers":[],"automation":[{"target_type":"param","module":"synth","target":"cutoff","points":[{"step":16,"value":900},{"step":0,"value":100}]},{"target_type":"global","target":"swing","points":[{"step":0,"value":0},{"step":128,"value":0.5}]}]})";
     CHECK(parseProject(json, project, error));
     CHECK_EQ(project.automation.size(), size_t{2});
+    CHECK_EQ(project.loopBars, 8);
     if (project.automation.size() == 2) {
         CHECK_EQ(project.automation[0].targetType, std::string("param"));
         CHECK_EQ(project.automation[0].moduleId, std::string("synth"));
