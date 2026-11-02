@@ -221,7 +221,7 @@ The language has no I/O, loops or recursion, so a program's cost is fixed when i
 - 16 exports
 - functions nested 32 calls deep, and 4096 function calls expanded in all (each call is copied in place, so nested calls multiply)
 - 1,048,576 numbers (8 MB) of state for oscillators, envelopes, filters, delays and reverbs
-- across the whole project, 64 MB of such state (each module also keeps a copy for seams). A layer that would pass it stays silent, with a warning
+- across the whole project, a project-state share of the EngineResourceBudget, derived from the platform's conservative available-memory probe. Unknown memory uses an explicit 64 MiB project-state fallback. Over-budget layers are not installed and the project update returns an error.
 
 Errors give a line and column, counting the header lines, for example `line 5, col 5: unknown name 'nope'`.
 
