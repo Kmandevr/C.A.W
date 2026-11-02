@@ -810,6 +810,6 @@ TEST(engine_automates_parameters_beyond_32) {
     e.play();
     const auto out = run(e, 1100);
     const float pan = static_cast<float>(std::cos(kPi / 4.0));
-    CHECK_NEAR(out[100], 0.5 * pan, 1e-4);
+    CHECK_NEAR(out[0], 0.5 * pan, 1e-4);
     CHECK_NEAR(out[1000], 1.5 * pan, 1e-4);
 }
