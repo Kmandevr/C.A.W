@@ -13,17 +13,45 @@ updated: 2026-11-02
 
 - Branch: `feature/native-engine-refactor-integration`
 - Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
-- Last live branch comparison before the latest ledger/recovery refresh: 87 ahead, 0 behind Main. Latest implementation/test commit: `53e350ce9bb9004ee88e265be3f46bb235879c5f`.
-- Starting point: `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`.
-- Issue: #28, open and in progress. PR: none.
-- Milestones: M0 verified; M1 in progress.
-- Graph-budget implementation commit `07c796f8` passed Engine `41403872524` on Linux x64, Linux Arm64, Windows x64 and sanitizers; Docs `41403872717` passed; App `41403872504` passed Dart analysis/tests, Windows app and Android APK. The graph compiler-budget follow-up and subsequent chain-cap removal changes require fresh CI; the last known green run predates those changes. The earlier delayed Windows job at `1370a43` eventually passed all four targets.
+- Last live comparison before this recovery refresh: **148 ahead, 0 behind Main**.
+- Latest code/test checkpoint: `ff8b5a566e6ab2d8b3cb8282eeb520d857d2aa56`.
+- Working tree/remote state is represented by GitHub branch commits; no local build/test environment is available through the current connector workflow.
+- PR: none. Do not open a PR until the complete assignment is reviewable; do not merge, approve or delete branches.
 
-## Latest implementation slices
+## What has actually been implemented
 
-Dynamic signal-chain length is now preserved through project parsing and Engine chain preparation; synth patch parsing also accepts more than eight effects. See the 2026-11-02 entry in docs/log.md and the decision in docs/decisions.md. Do not reintroduce the old chain cap. Fixed export-buffer, layer-slot, voice and automation limits remain.
+1. **Graph foundation:** removed arbitrary 1,024-node/8,192-connection compile caps and the 8,192-frame executor cap; added large graph/block tests and explicit graph working-set estimation/rejection.
+2. **Project/chain content:** removed the nine-module chain cap, 256-project-module cap, 512-clips-per-layer cap, 256 project parameter-automation binding cap, 256 project automation lane cap, 128 project automation point skip, 4,096 arrangement-note truncation and 4,096 pattern-note cap.
+3. **Layer automation:** replaced fixed Slot/Cmd 128-point volume/pan arrays with immutable vector-backed AutomationData. Control thread prepares it; audio thread adopts the pointer without allocating; old data is retired and freed off callback. An end-to-end test verifies that point 129 changes rendered audio.
+4. **Command failures:** Engine::send returns queue acceptance. Project updates propagate critical failures for bus configuration, automation, routing, pattern/chain installation, layer length/removal, ordering and audition mode. Failed installs remain retryable rather than being recorded as active. Slot exhaustion and project-state budget overflow return explicit errors. Standalone setMaster/play/stop/clearOverload methods still ignore the bool result.
+5. **VM capacity:** removed the 32-parameter, 64-synth-parameter and 32-import ceilings. BlockCtx borrows a dynamic parameter pointer table/count/sample offset; each prepared Chain allocates parameter sample buffers off callback. Tests cover 40 parameters with automation, 40 imports through VM processing and more than 64 synth-generated parameters.
+6. **Hardware budget:** added EngineResourceBudget, derived from HardwareProfile.memoryBudgetMiB. It partitions the conservative total into project-state (1/2), graph working (1/4), compile working (1/8) and retirement (1/8) shares. Unknown memory uses a 128 MiB total fallback, preserving the prior 64 MiB project-state allowance. Engine enforces project-state bytes and accepts an injected budget for hosts/tests. makeGraphResourceBudget maps the graph share into GraphResourceBudget; graph/compile/retirement shares are not yet enforced by the active runtime.
+7. **Pattern lengths/curves:** removed the 4,096-step pattern/MIDI cap; signed 32-bit step representation and existing MIDI file/event budgets remain. Replaced fixed 16-point bend/pressure/timbre arrays with dynamic vectors. Engine reserves each voice's curve capacity off callback, preserving at least the prior chain capacity during hot swap. Pattern publication is ordered after successful chain installation so a failed install cannot expose larger curves to an undersized old chain.
 
-The parser still has an explicit 4096-step pattern-length limit, MIDI file byte/event limits, and the current engine still has fixed layer slots, voices, export buffers and automation point arrays. Do not assume those were removed by the dynamic-storage changes.
+Regression coverage added across these slices includes 8,195 graph nodes/8,194 connections, 8,193-frame processing, 12 chain modules, nine synth effects, 300 project modules, 520 clips, 520×9 arrangement notes, 4,097 pattern notes, 257 project automation lanes ×129 points, 129-point layer automation playback, 40 VM parameters/imports, more than 64 synth parameters, hardware budget partition/fallback, low-memory project-state rejection, graph-budget conversion, 5,000-step patterns and 20-point curves/Engine playback.
+
+**Verification status:** the older graph-budget foundation passed Engine/App/Docs CI at its recorded checkpoint. The later content, automation, VM, hardware-budget and curve changes do not yet have an inspectable fresh CI result. The available workflow-run reader has not exposed the push-triggered runs; do not claim these changes pass CI until actual checks are inspected.
+
+## Architecture facts that must not be rediscovered or contradicted
+
+- The active Engine still uses `Engine::setProject`, `processChunk`, `processSlot`, `runChain` and `runVoices`.
+- `GraphExecutor` and `ModuleRegistry` still have no production playback integration with Engine/VM.
+- GraphExecutor remains stereo-only with one audio input and one audio output per node. It does not yet implement multiport/fan-in/fan-out, typed control/modulation/event/MIDI routing, sidechains, sends/returns, feedback boundaries or nested graphs.
+- Do not create a second engine. Integrate existing VM Instances, voices, imports/exports, automation, folder buses, offline rendering and project migration into one prepared execution model.
+- Audio callback must remain allocation-free, lock-free, I/O-free and logging-free. No worker waits on callback. Prepare data before activation and reclaim it off callback.
+- Existing `.caw` VM remains the constrained untrusted-code path; trusted native code is not sandboxed without process isolation.
+- Preserve deterministic semantics, project/module compatibility, live/offline parity and existing audio behavior.
+
+## Remaining fixed capacities and correctness risks
+
+- 64 layer slots; 32 voices; 16 exports; 6 VM call arguments; 1,024 VM registers; 64 KiB VM source; 8 MiB state per module; ratchets up to 8.
+- Arrangement/transport still clamps to 64 bars.
+- MIDI file size remains 16 MiB; MIDI event count remains 65,536; MIDI 2.0 input queue is 1,024 and drops newest with a counter.
+- Command queue is bounded at 1,024; sender times out after about two seconds. Project updates propagate key failures, but standalone transport/control methods still ignore the result.
+- Retirement queue is 1,024 and pending retirement list is 256; overflow can still leak.
+- Project-state budget is hardware-derived and enforced; graph working share has a conversion helper but is not yet connected to active Engine graph compilation. Compile and retirement shares are not yet consumed.
+- Export buffers remain fixed at 16; export references are coupled to per-slot buffers and need a prepared layout/snapshot solution before safely removing the cap.
+- Fixed layer slots/voice pools and other budgets need to become explicit hardware/resource budgets with actionable failure paths, not silent project-content loss.
 
 ## Read first
 
@@ -32,20 +60,6 @@ The parser still has an explicit 4096-step pattern-length limit, MIDI file byte/
 3. `docs/engine-build-status.md` — existing code versus missing integration.
 4. `docs/engine-next.md` — full owner requirements.
 5. `docs/decisions.md`, `docs/log.md`, `docs/roadmap.md`, `docs/how-it-works.md`.
-
-## Critical recovery facts
-
-The graph compiler no longer has the former 1,024-node/8,192-connection caps and has regression tests above those values. The executor no longer has the former 8,192-frame cap. The new `GraphResourceBudget` requires explicit working bytes and checks estimated compile/prepared-buffer memory before allocation; optional node/connection caps default to unlimited. Its compiler and executor budget tests passed CI at checkpoint `1269019`; a follow-up test now directly covers compiler working-set rejection and awaits CI.
-
-The graph executor remains stereo-only with one audio input and output per node, and is not integrated into active Engine/VM playback. The low-level byte budget is not yet derived from hardware or wired through Engine. The active path still uses `Engine::setProject`, `processChunk`, `processSlot` and `runChain`. Do not claim graph integration is complete.
-
-Last live branch comparison before this recovery refresh: 108 commits ahead and 0 behind Main. Latest code/test checkpoint: `8f43d76036cadcc3998eed6747a94d9e0c3f0480`; latest progress checkpoint: `2e1ecf712c62126181dc56bd2abee3efde3ca19a`.
-
-Important remaining risks include fixed 64 layer slots, 32 voices, 16 exports,  the 64-bar arrangement clamp, hardware-derived project-state budget exhaustion that rejects over-budget layers with an explicit project error, command-queue timeouts, retirement overflow that can leak, and bounded export collection. VM parameter/import counts and project/layer automation collections are now dynamically sized. EngineResourceBudget is derived from HardwareProfile.memoryBudgetMiB, split into project-state, graph, compile and retirement shares; unknown memory uses a 128 MiB total fallback. The Engine enforces its project-state share in bytes. GraphResourceBudget can now be derived from EngineResourceBudget.graphWorkingBytes. The graph share is not yet used by active Engine playback; compile and retirement shares are not yet consumed by those subsystems. Per-chain VM parameter sample buffers are prepared off callback; voice blocks use an explicit offset into those buffers. Slot exhaustion returns an explicit project error. Chain, project module/clip, arrangement note, pattern note and project automation lane/point truncations have been removed. See `docs/engine-progress.md` for exact limits and source behavior.
-
-M0 audit is complete; do not repeat the repository-wide investigation without new evidence. The latest code slices remove fixed chain, project module/clip, project parameter-automation binding, project-level automation lane/point, arrangement note-output, pattern note-count/step, note-curve point, layer volume/pan automation point, VM parameter, synth parameter and VM import ceilings. Regression coverage includes 12 chain modules, nine synth effects, 300 project modules, 520 clips, 520×9 arrangement notes, 4097 parsed pattern notes, 257 project automation lanes with 129 points, 129-point layer automation rendered into audio, 40 VM parameters with runtime automation, 40 VM imports processed by the VM, Engine automation of the 40th parameter, and more than 64 synth parameters. Layer automation and parameter sample buffers are prepared off callback; old automation is retired off callback. Engine project updates now propagate critical command-queue failures and retain retryable layer state. These changes are not yet verified by an inspectable fresh CI result. Next, check CI as soon as a workflow is available, then continue with hardware-aware Engine budgets and transactional prepared-project publication, safe retirement, typed multi-domain graph execution and Engine/VM integration.
-
-The owner explicitly reopened full graph/runtime integration despite the older pause comment on issue #28. The issue body and current owner comment reflect the current scope.
 
 ## Resume protocol
 
