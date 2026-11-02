@@ -98,9 +98,11 @@ struct Engine::Chain {
     double vbend[kBlock], vpress[kBlock], vtimbre[kBlock];
     double dtrig[kBlock], ones[kBlock], dnote[kBlock], dfreq[kBlock];
     struct ParamAutomation {
-        int moduleIndex = 0, paramIndex = 0, count = 0;
-        double steps[128] = {}, values[128] = {}, samples[kBlock] = {};
+        int moduleIndex = 0, paramIndex = 0;
+        const ProjectAutomationLaneSpec* lane = nullptr;
+        double samples[kBlock] = {};
     };
+    std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> automation;
     std::vector<ParamAutomation> paramAutomation;
     std::vector<std::string> moduleIds;
     // How each module takes over the running state of the chain it replaces, so unchanged calls play on.
@@ -284,6 +286,21 @@ double automationValue(int count, const double* steps, const double* values, dou
     return values[lo] + (values[hi] - values[lo]) * t;
 }
 
+double automationValue(const std::vector<AutomationPointSpec>& points, double at, double fallback) noexcept {
+    if (points.empty()) return fallback;
+    if (at <= points.front().step) return points.front().value;
+    size_t lo = 0, hi = points.size() - 1;
+    while (lo + 1 < hi) {
+        const size_t mid = (lo + hi) / 2;
+        if (points[mid].step <= at) lo = mid; else hi = mid;
+    }
+    if (at >= points.back().step) return points.back().value;
+    const double span = points[hi].step - points[lo].step;
+    if (span <= 0.0) return points[hi].value;
+    const double t = (at - points[lo].step) / span;
+    return points[lo].value + (points[hi].value - points[lo].value) * t;
+}
+
 
 void storeMax(std::atomic<float>& a, float v) {
     float cur = a.load(std::memory_order_relaxed);
@@ -371,7 +388,7 @@ int Engine::freeSlot() {
 }
 
 Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring,
-                                  bool voiced, const Chain* prev, const std::vector<ProjectAutomationLaneSpec>& automation) {
+                                  bool voiced, const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation) {
     auto* c = new Chain();
     c->voiced = voiced;
     int buf = 0;
@@ -406,6 +423,7 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
         for (int v = 2; v < c->voiceCount; ++v) c->voices[v].inst = c->extraVoices[static_cast<size_t>(v - 2)].get();
     }
     writeParams(*c);
+    c->automation = automation;
     // Resolve automation targets and allocate their sample buffers on the control thread.
     for (size_t moduleIndex = 0; moduleIndex < c->main.size(); ++moduleIndex) {
         const Program& program = c->main[moduleIndex]->program();
@@ -413,7 +431,7 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
         for (size_t paramIndex = 0; paramIndex < program.params.size(); ++paramIndex) {
             const ParamDef& def = program.params[paramIndex];
             const ProjectAutomationLaneSpec* selected = nullptr;
-            for (const ProjectAutomationLaneSpec& lane : automation) {
+            for (const ProjectAutomationLaneSpec& lane : *automation) {
                 const bool matches = lane.targetType == "global"
                     ? (def.global && lane.target == def.name)
                     : (lane.targetType == "param" && !def.global && lane.moduleId == moduleId && lane.target == def.name);
@@ -424,14 +442,7 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
             Chain::ParamAutomation binding;
             binding.moduleIndex = static_cast<int>(moduleIndex);
             binding.paramIndex = static_cast<int>(paramIndex);
-            binding.count = static_cast<int>(std::min<size_t>(128, selected->points.size()));
-            for (int point = 0; point < binding.count; ++point) {
-                binding.steps[point] = selected->points[static_cast<size_t>(point)].step;
-                double value = std::clamp(selected->points[static_cast<size_t>(point)].value, def.min, def.max);
-                if (def.step > 0.0)
-                    value = std::clamp(def.min + std::round((value - def.min) / def.step) * def.step, def.min, def.max);
-                binding.values[point] = value;
-            }
+            binding.lane = selected;
             c->paramAutomation.push_back(binding);
         }
     }
@@ -527,6 +538,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
 
     globals_ = p.globals;
+    const auto projectAutomation = std::make_shared<const std::vector<ProjectAutomationLaneSpec>>(p.automation);
 
     // Project libraries (kind: library) compile first; every other module can call their functions.
     std::vector<std::string_view> moduleSources;
@@ -940,7 +952,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             ls.pattern = pl.pattern;
         }
         if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced || parameterAutomationChanged) {
-            Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain, p.automation);
+            Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain, projectAutomation);
             Cmd cmd;
             cmd.type = Cmd::Install;
             cmd.slot = ls.slot;
@@ -1513,8 +1525,8 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
             if (binding.moduleIndex != static_cast<int>(idx)) continue;
             for (int sample = 0; sample < len; ++sample) {
                 const double at = static_cast<double>(globalStart + sample) / stepLen_;
-                binding.samples[sample] = automationValue(binding.count, binding.steps, binding.values, at,
-                    binding.values[0]);
+                binding.samples[sample] = automationValue(binding.lane->points, at,
+                    binding.lane->points.front().value);
             }
             ctx.paramValues[binding.paramIndex] = binding.samples;
         }
