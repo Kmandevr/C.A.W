@@ -1371,6 +1371,7 @@ void Engine::applyCommands() noexcept {
         switch (c.type) {
             case Cmd::Install: {
                 Slot& s = slots_[c.slot];
+                s.exportCount = std::max(s.exportCount, c.chain ? c.chain->exportCount : size_t{0});
                 s.steps = c.steps;
                 s.order = c.order;
                 if (!s.active || s.removing || !s.cur) {
@@ -2084,8 +2085,9 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                 if (!s.cur) continue;
                 if (target == 0.0 && s.gain == 0.0) {
                     s.contiguous = false;
-                    for (size_t b = 0; b < s.exportCount; ++b)
-                        std::fill_n(s.exportBuf[b].data(), m, 0.0);
+                    if (s.exportBuf)
+                        for (size_t b = 0; b < s.exportCount; ++b)
+                            std::fill_n(s.exportBuf[b].data(), m, 0.0);
                     if (s.pending) { swapIn(s, s.pending); s.pending = nullptr; }
                     if (s.removing) {
                         retire(s.cur, -1, s.pattern);
