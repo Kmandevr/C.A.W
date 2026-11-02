@@ -546,7 +546,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
     t.keyScale = p.keyScale;
     t.swapMode = p.swapMode;
     t.voices = p.voices;
-    send(t);
+    if (!send(t))
+        return "{\"ok\":false,\"error\":\"audio command queue is not accepting project updates\",\"modules\":{}}";
     const double stepLen = 60.0 * ctlSr_ / (p.bpm * 4.0);
     ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
 
@@ -900,7 +901,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
             const bool newBus = !ls.bus;
             bus.flag = newBus;
             if (newBus) ls.automationSig = "\\x01new-slot";
-            send(bus);
+            if (!send(bus)) {
+                allOk = false;
+                warnings[w.id].push_back("audio command queue rejected folder-bus configuration");
+                continue;
+            }
             ls.bus = true;
             ls.parentSlot = pl.ls.parentSlot;
             if (ls.automationSig != pl.automationSig) {
@@ -913,6 +918,16 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 if (data->volume.empty() && data->pan.empty()) delete data;
                 else automation.automation = data;
                 if (send(automation)) ls.automationSig = pl.automationSig;
+            else {
+                allOk = false;
+                warnings[w.id].push_back("audio command queue rejected layer automation update");
+                continue;
+            }
+                else {
+                    allOk = false;
+                    warnings[w.id].push_back("audio command queue rejected folder automation update");
+                    continue;
+                }
             }
             ls.chain = nullptr;
             ls.sig.clear();
@@ -941,7 +956,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
             routing.type = Cmd::SetRouting;
             routing.slot = ls.slot;
             routing.parentSlot = pl.ls.parentSlot;
-            send(routing);
+            if (!send(routing)) {
+                allOk = false;
+                warnings[w.id].push_back("audio command queue rejected track routing update");
+                continue;
+            }
             ls.bus = false;
             ls.parentSlot = pl.ls.parentSlot;
         }
@@ -950,7 +969,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
             cmd.type = Cmd::SetPattern;
             cmd.slot = ls.slot;
             cmd.pattern = pl.pattern ? new std::shared_ptr<const Pattern>(pl.pattern) : nullptr;
-            send(cmd);
+            if (!send(cmd)) {
+                allOk = false;
+                warnings[w.id].push_back("audio command queue rejected pattern update");
+                continue;
+            }
             ls.pattern = pl.pattern;
         }
         if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced || parameterAutomationChanged) {
@@ -961,7 +984,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
             cmd.chain = c;
             cmd.steps = w.steps;
             cmd.order = w.order;
-            send(cmd);
+            if (!send(cmd)) {
+                allOk = false;
+                warnings[w.id].push_back("audio command queue rejected the prepared module chain");
+                continue;
+            }
             ls.chain = c;
             ls.voiced = voiced;
             ls.sig = pl.sig;
@@ -974,7 +1001,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 cmd.type = Cmd::SetSteps;
                 cmd.slot = ls.slot;
                 cmd.steps = w.steps;
-                send(cmd);
+                if (!send(cmd)) {
+                    allOk = false;
+                    warnings[w.id].push_back("audio command queue rejected layer-length update");
+                    continue;
+                }
                 ls.steps = w.steps;
             }
         }
@@ -988,7 +1019,10 @@ std::string Engine::setProject(const ProjectSpec& p) {
         Cmd c;
         c.type = Cmd::Remove;
         c.slot = ls.slot;
-        send(c);
+        if (!send(c)) {
+            allOk = false;
+            warnings[id].push_back("audio command queue rejected layer removal");
+        }
     }
     layers_ = std::move(nextLayers);
 
