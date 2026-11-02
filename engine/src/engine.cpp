@@ -427,7 +427,10 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
             binding.count = static_cast<int>(std::min<size_t>(128, selected->points.size()));
             for (int point = 0; point < binding.count; ++point) {
                 binding.steps[point] = selected->points[static_cast<size_t>(point)].step;
-                binding.values[point] = std::clamp(selected->points[static_cast<size_t>(point)].value, def.min, def.max);
+                double value = std::clamp(selected->points[static_cast<size_t>(point)].value, def.min, def.max);
+                if (def.step > 0.0)
+                    value = std::clamp(def.min + std::round((value - def.min) / def.step) * def.step, def.min, def.max);
+                binding.values[point] = value;
             }
             c->paramAutomation.push_back(binding);
         }
