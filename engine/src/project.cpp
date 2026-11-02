@@ -22,7 +22,7 @@ std::vector<std::string> idList(const Json* arr) {
     std::vector<std::string> out;
     if (!arr || arr->type != Json::Type::Array) return out;
     for (const Json& j : arr->arr)
-        if (j.type == Json::Type::String && out.size() < static_cast<size_t>(kMaxChain)) out.push_back(j.str);
+        if (j.type == Json::Type::String) out.push_back(j.str);
     return out;
 }
 
