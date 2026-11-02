@@ -13,7 +13,7 @@ updated: 2026-11-02
 
 - Branch: `feature/native-engine-refactor-integration`
 - Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
-- Current branch tip at this status record: 66 ahead, 0 behind. Latest implementation/test commit: `53e350ce9bb9004ee88e265be3f46bb235879c5f`.
+- Last live branch comparison before the latest ledger/recovery refresh: 72 ahead, 0 behind Main. Latest implementation/test commit: `53e350ce9bb9004ee88e265be3f46bb235879c5f`.
 - Starting point: `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`.
 - Issue: #28, open and in progress. PR: none.
 - Milestones: M0 verified; M1 in progress.
