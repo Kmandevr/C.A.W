@@ -892,9 +892,12 @@ class AppState extends ChangeNotifier {
     if (project.automation.any((lane) => lane.targetType == targetType &&
         lane.target == target && lane.moduleId == moduleId)) return;
     final end = project.loopSteps.toDouble();
+    final definition = targetType == 'global'
+        ? info.values.expand((module) => module.params).where((param) => param.global && param.name == target).firstOrNull
+        : info[moduleId]?.params.where((param) => param.name == target).firstOrNull;
     final value = targetType == 'global'
-        ? (project.globals[target] ?? 0.0)
-        : (project.module(moduleId)?.params[target] ?? 0.0);
+        ? (project.globals[target] ?? definition?.defaultValue ?? 0.0)
+        : (project.module(moduleId)?.params[target] ?? definition?.defaultValue ?? 0.0);
     project.automation.add(ProjectAutomationLaneDoc(targetType: targetType, target: target,
       moduleId: moduleId, points: [AutomationPointDoc(step: 0, value: value),
         AutomationPointDoc(step: end, value: value)]));
