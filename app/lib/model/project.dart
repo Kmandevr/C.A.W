@@ -189,11 +189,13 @@ class ProjectDoc {
     Map<String, double>? globals,
     List<ModuleDoc>? modules,
     List<LayerDoc>? layers,
+    List<ProjectAutomationLaneDoc>? automation,
     List<String>? libraryFolders,
     Map<String, String>? savedLibrarySearches,
   })  : globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
+        automation = automation ?? [],
         libraryFolders = libraryFolders ?? [],
         savedLibrarySearches = savedLibrarySearches ?? {} {
     // Keep the in-memory model canonical: a track owns clip instances, not a legacy
@@ -232,6 +234,7 @@ class ProjectDoc {
   Map<String, double> globals; // project-wide control values by name
   List<ModuleDoc> modules;
   List<LayerDoc> layers;
+  List<ProjectAutomationLaneDoc> automation;
   List<String> libraryFolders;
   Map<String, String> savedLibrarySearches;
 
@@ -278,6 +281,7 @@ class ProjectDoc {
         'swap': swap,
         if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
         'globals': globals,
+        'automation': [for (final lane in automation) lane.toJson()],
         'modules': [
           for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
@@ -340,6 +344,7 @@ class ProjectDoc {
       master: (j['master'] as num?)?.toDouble() ?? 0.7,
       seamCrossfade: j['seam_crossfade'] != false,
       globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
+      automation: ((j['automation'] as List?) ?? const []).take(256).map((lane) => ProjectAutomationLaneDoc.fromJson(lane as Map<String, dynamic>)).toList(),
       modules: ((j['modules'] as List?) ?? const [])
           .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().take(512).toList(),
