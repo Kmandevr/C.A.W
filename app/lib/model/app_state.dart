@@ -901,6 +901,34 @@ class AppState extends ChangeNotifier {
     _changed();
   }
 
+  void updateProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index, double step, double value) {
+    if (index < 0 || index >= lane.points.length) return;
+    final point = lane.points[index];
+    final ordered = [...lane.points]..sort((a, b) => a.step.compareTo(b.step));
+    final position = ordered.indexOf(point);
+    final lower = position > 0 ? ordered[position - 1].step + 0.01 : 0.0;
+    final upper = position < ordered.length - 1
+        ? ordered[position + 1].step - 0.01 : project.maxArrangementSteps.toDouble();
+    point.step = step.clamp(lower, math.max(lower, upper)).toDouble();
+    point.value = value.clamp(-1000000.0, 1000000.0).toDouble();
+    _changed();
+  }
+
+  void addProjectAutomationPoint(ProjectAutomationLaneDoc lane, double step, double value) {
+    if (lane.points.length >= 128) return;
+    final at = step.clamp(0.0, project.maxArrangementSteps.toDouble()).toDouble();
+    if (lane.points.any((point) => (point.step - at).abs() < 0.01)) return;
+    lane.points.add(AutomationPointDoc(step: at, value: value));
+    lane.points.sort((a, b) => a.step.compareTo(b.step));
+    _changed();
+  }
+
+  void removeProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index) {
+    if (index < 0 || index >= lane.points.length) return;
+    lane.points.removeAt(index);
+    _changed();
+  }
+
   void removeProjectAutomationLane(ProjectAutomationLaneDoc lane) {
     project.automation.remove(lane);
     _changed();
