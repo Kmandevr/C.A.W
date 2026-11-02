@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,7 @@ constexpr int kMidiExportPpq = 960;              // ticks per quarter note in ex
 struct MidiImportOptions {
     int track = -1;            // Standard MIDI File track (0-based, in file order); -1 = all tracks merged
     int channel = -1;          // MIDI channel 0..15; -1 = all channels merged
-    int maxNotes = kMaxPatternNotes;
+    int maxNotes = std::numeric_limits<int>::max();
     std::string name;          // pattern name; empty = the file's track or clip name, else "Imported MIDI"
     bool pitchBend = true;     // a pitch bend sounding at a note's start becomes a microtonal pitch (+-2 semitones)
     bool legatoSlides = true;  // a note overlapping the start of the next one by at most 1/4 step becomes a slide
