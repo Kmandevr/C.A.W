@@ -35,6 +35,9 @@ const ModuleSpec* ProjectSpec::module(const std::string& id) const {
 }
 
 bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
+    // A failed parse must never leave a caller's previous project looking valid.
+    out = ProjectSpec{};
+    error.clear();
     constexpr size_t kMaxProjectJsonBytes = 8u << 20;  // Bound hostile JSON parsing by input memory, not object counts.
     if (text.size() > kMaxProjectJsonBytes) {
         error = "project JSON exceeds the 8 MiB parser memory budget";
