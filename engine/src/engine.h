@@ -74,6 +74,7 @@ private:
     struct Cmd;
     struct Retired;
     struct AutomationData;
+    struct ExportPool;
 
     void drainRetired();
     bool send(const Cmd& c);
@@ -96,6 +97,7 @@ private:
 
     const double sr_;
     const EngineResourceBudget resourceBudget_;
+    std::unique_ptr<ExportPool> exportPool_;
 
     // ---- audio-thread state ----
     std::unique_ptr<Slot[]> slots_;
