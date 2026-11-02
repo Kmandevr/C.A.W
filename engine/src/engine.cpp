@@ -2052,8 +2052,10 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
             int64_t at = static_cast<int64_t>(std::floor(kb * unit + 0.5));
             if (at < gg) at = static_cast<int64_t>(std::floor(++kb * unit + 0.5));
             if (at == gg || swapMode_ == 0) {
-                swapIn(s, s.pending);
-                s.pending = nullptr;
+                if (canRetire(1)) {
+                    swapIn(s, s.pending);
+                    s.pending = nullptr;
+                }
             } else {
                 len = static_cast<int>(std::min<int64_t>(len, at - gg));
             }
@@ -2074,7 +2076,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
             s.shadowN += sl;
             s.seamLeft -= sl;
         }
-        if (s.old) {
+        if (s.old && s.swapLeft > 0) {
             s.old->layerLen = layerLen;
             runChain(*s.old, false, n0, gg, len, tmp2_, nullptr, j, nullptr, k);
             const int sl = std::min(len, s.swapLeft);
@@ -2084,10 +2086,10 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
                 y[i] = tmp2_[i] * (1.0 - w) + y[i] * w;
             }
             s.swapLeft -= sl;
-            if (s.swapLeft <= 0) {
-                retire(s.old, -1);
-                s.old = nullptr;
-            }
+        }
+        if (s.old && s.swapLeft <= 0 && canRetire(1)) {
+            retire(s.old, -1);
+            s.old = nullptr;
         }
         int sp = s.scopePos.load(std::memory_order_relaxed);
         for (int i = 0; i < len; ++i) {
@@ -2177,8 +2179,8 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                 if (!s.cur) continue;
                 if (target == 0.0 && s.gain == 0.0) {
                     s.contiguous = false;
-                    if (s.pending) { swapIn(s, s.pending); s.pending = nullptr; }
-                    if (s.removing) {
+                    if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; }
+                    if (s.removing && canRetire(2)) {
                         retire(s.cur, -1, s.pattern);
                         s.pattern = nullptr;
                         retire(s.old, i);
