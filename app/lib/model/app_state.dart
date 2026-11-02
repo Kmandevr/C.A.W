@@ -900,7 +900,18 @@ class AppState extends ChangeNotifier {
         AutomationPointDoc(step: end.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
   }
 
+  bool _automationGestureOpen = false;
+
+  void beginAutomationGesture() {
+    if (_automationGestureOpen) return;
+    _pushAutomationUndo();
+    _automationGestureOpen = true;
+  }
+
+  void endAutomationGesture() => _automationGestureOpen = false;
+
   void _pushAutomationUndo() {
+    if (_automationGestureOpen) return;
     _automationUndo.add(_AutomationSnapshot(project));
     if (_automationUndo.length > 64) _automationUndo.removeAt(0);
     _automationRedo.clear();
