@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "execution.h"
 #include "pattern.h"
 #include "program.h"
 #include "project.h"
@@ -37,11 +38,13 @@ struct LayerMeter {
 class Engine {
 public:
     explicit Engine(double sampleRate);
+    Engine(double sampleRate, EngineResourceBudget resourceBudget);
     ~Engine();
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
     double sampleRate() const { return sr_; }
+    const EngineResourceBudget& resourceBudget() const noexcept { return resourceBudget_; }
 
     // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
     std::string setProject(const ProjectSpec& p);  // result JSON: per-module ok/error and params
@@ -92,6 +95,7 @@ private:
     void pickOverloadVictim() noexcept;
 
     const double sr_;
+    const EngineResourceBudget resourceBudget_;
 
     // ---- audio-thread state ----
     std::unique_ptr<Slot[]> slots_;
