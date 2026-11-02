@@ -150,6 +150,10 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     AutomationLaneSpec lane; lane.target = laneJson.string("target");
                     if (lane.target != "volume" && lane.target != "pan") continue;
                     if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
+                        if (points->arr.size() > 128) {
+                            error = "a layer volume/pan automation lane currently supports at most 128 points";
+                            return false;
+                        }
                         for (const Json& point : points->arr) {
                             if (point.type != Json::Type::Object) continue;
                             lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
