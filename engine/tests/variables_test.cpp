@@ -357,4 +357,10 @@ TEST(project_global_automation_reaches_global_parameters) {
     engine.play();
     const std::vector<float> live = run(engine, 14000);
     CHECK(live[12120] > 0.1f);
+    RenderResult rendered;
+    ExportOptions options;
+    options.kind = ExportKind::Free;
+    options.seconds = 0.3;
+    CHECK(renderExport(p, options, rendered));
+    CHECK_NEAR(live[12120], rendered.samples[static_cast<size_t>(12120) * 2], 1e-6);
 }
