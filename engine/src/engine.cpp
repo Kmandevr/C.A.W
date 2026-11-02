@@ -1435,7 +1435,8 @@ void Engine::applyCommands() noexcept {
         for (int i = 1; i < pendingCount_; ++i) pending_[i - 1] = pending_[i];
         --pendingCount_;
     }
-    if (pendingCount_ != 0) return;
+    // Non-retiring controls may still pass a full retirement backlog (for example Stop).
+    // Commands that replace or release owned objects remain blocked by canRetire().
     Cmd c;
     while (cmds_->peek(c)) {
         size_t retirementNeed = 0;
