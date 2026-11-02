@@ -280,3 +280,13 @@ TEST(module_parameters_are_not_capped_at_32) {
     instance.process(context);
     CHECK_NEAR(instance.rawOutput()[0], 21.0, 1e-9);
 }
+
+TEST(module_exports_are_not_capped_at_16) {
+    std::string source = "---\nmode: float\n---\n";
+    for (int i = 0; i < 20; ++i)
+        source += "export let value" + std::to_string(i) + " = " + std::to_string(i + 1) + "\n";
+    source += "1";
+    const CompileResult compiled = compileModule(source);
+    CHECK(compiled.program != nullptr);
+    if (compiled.program) CHECK_EQ(compiled.program->exports.size(), size_t{20});
+}
