@@ -240,28 +240,8 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         for (size_t n = 0; n < nodes.size(); ++n) {
             if (!processors[n]) { reset(); return GraphError::MissingProcessor; }
             const ModuleDescriptor& descriptor = processors[n]->descriptor();
-            if (validateModuleDescriptor(descriptor) != ModuleValidation::Ok ||
-                descriptor.id != nodes[n].module->id || descriptor.apiVersion != nodes[n].module->apiVersion ||
-                descriptor.portCount != nodes[n].module->portCount ||
-                descriptor.parameterCount != nodes[n].module->parameterCount) {
+            if (!moduleDescriptorsMatch(descriptor, *nodes[n].module)) {
                 reset(); return GraphError::ProcessorDescriptorMismatch;
-            }
-            for (uint32_t p = 0; p < descriptor.portCount; ++p) {
-                const PortDescriptor& actual = descriptor.ports[p];
-                const PortDescriptor& expected = nodes[n].module->ports[p];
-                if (actual.id != expected.id || actual.type != expected.type ||
-                    actual.layout != expected.layout || actual.input != expected.input) {
-                    reset(); return GraphError::ProcessorDescriptorMismatch;
-                }
-            }
-            for (uint32_t p = 0; p < descriptor.parameterCount; ++p) {
-                const ParameterDescriptor& actual = descriptor.parameters[p];
-                const ParameterDescriptor& expected = nodes[n].module->parameters[p];
-                if (actual.id != expected.id || actual.minimum != expected.minimum ||
-                    actual.maximum != expected.maximum || actual.defaultValue != expected.defaultValue ||
-                    actual.automatable != expected.automatable) {
-                    reset(); return GraphError::ProcessorDescriptorMismatch;
-                }
             }
             uint32_t audioInputs = 0, audioOutputs = 0;
             for (uint32_t p = 0; p < descriptor.portCount; ++p) {

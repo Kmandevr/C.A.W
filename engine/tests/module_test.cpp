@@ -87,3 +87,23 @@ TEST(module_descriptor_rejects_unknown_channel_layout_values) {
     const ModuleDescriptor d{"caw.test.invalid-layout", 1, ports, 1, nullptr, 0};
     CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidPortLayout);
 }
+
+TEST(module_descriptor_matching_covers_parameters_and_ui_metadata) {
+    const ParameterDescriptor parameters[] = {{"gain", 0.5, 0.0, 1.0, true}};
+    const UiControlDescriptor controls[] = {
+        {"gain-slider", "Gain", "gain", UiControlKind::Slider, 0.0, 1.0},
+    };
+    const ModuleDescriptor original{"caw.test.match", 1, nullptr, 0, parameters, 1,
+                                    controls, 1, "caw.ui.gain"};
+    const ParameterDescriptor changedParameters[] = {{"gain", 0.25, 0.0, 1.0, true}};
+    const ModuleDescriptor changedParameter{"caw.test.match", 1, nullptr, 0,
+                                            changedParameters, 1, controls, 1, "caw.ui.gain"};
+    const UiControlDescriptor changedControls[] = {
+        {"gain-slider", "Output gain", "gain", UiControlKind::Slider, 0.0, 1.0},
+    };
+    const ModuleDescriptor changedUi{"caw.test.match", 1, nullptr, 0, parameters, 1,
+                                     changedControls, 1, "caw.ui.gain"};
+    CHECK(moduleDescriptorsMatch(original, original));
+    CHECK(!moduleDescriptorsMatch(original, changedParameter));
+    CHECK(!moduleDescriptorsMatch(original, changedUi));
+}

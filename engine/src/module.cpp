@@ -70,4 +70,36 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
     return ModuleValidation::Ok;
 }
 
+bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept {
+    if (validateModuleDescriptor(a) != ModuleValidation::Ok ||
+        validateModuleDescriptor(b) != ModuleValidation::Ok)
+        return false;
+    if (a.id != b.id || a.apiVersion != b.apiVersion ||
+        a.portCount != b.portCount || a.parameterCount != b.parameterCount ||
+        a.uiControlCount != b.uiControlCount || a.customUiId != b.customUiId)
+        return false;
+
+    for (uint32_t i = 0; i < a.portCount; ++i) {
+        const PortDescriptor& x = a.ports[i];
+        const PortDescriptor& y = b.ports[i];
+        if (x.id != y.id || x.type != y.type || x.layout != y.layout || x.input != y.input)
+            return false;
+    }
+    for (uint32_t i = 0; i < a.parameterCount; ++i) {
+        const ParameterDescriptor& x = a.parameters[i];
+        const ParameterDescriptor& y = b.parameters[i];
+        if (x.id != y.id || x.defaultValue != y.defaultValue || x.minimum != y.minimum ||
+            x.maximum != y.maximum || x.automatable != y.automatable)
+            return false;
+    }
+    for (uint32_t i = 0; i < a.uiControlCount; ++i) {
+        const UiControlDescriptor& x = a.uiControls[i];
+        const UiControlDescriptor& y = b.uiControls[i];
+        if (x.id != y.id || x.label != y.label || x.parameterId != y.parameterId ||
+            x.kind != y.kind || x.minimum != y.minimum || x.maximum != y.maximum)
+            return false;
+    }
+    return true;
+}
+
 }  // namespace caw

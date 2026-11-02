@@ -23,9 +23,7 @@ std::unique_ptr<ModuleProcessor> ModuleRegistry::create(std::string_view id) con
         ModuleProcessor* processor = registration.factory();
         if (!processor) return {};
         const ModuleDescriptor& actual = processor->descriptor();
-        if (actual.id != registration.descriptor->id ||
-            actual.apiVersion != registration.descriptor->apiVersion ||
-            validateModuleDescriptor(actual) != ModuleValidation::Ok) {
+        if (!moduleDescriptorsMatch(actual, *registration.descriptor)) {
             delete processor;
             return {};
         }

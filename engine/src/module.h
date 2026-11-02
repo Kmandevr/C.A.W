@@ -70,6 +70,8 @@ enum class ModuleValidation : uint8_t {
 
 // Validation is control-thread work. It never allocates and never runs in audio processing.
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& descriptor) noexcept;
+// Exact contract match, including ports, parameters, and UI metadata.
+bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept;
 
 // A block is a borrowed view over host-owned buffers. Processing implementations must not
 // allocate, lock, perform I/O, or retain these pointers. Stereo is the native processing shape.

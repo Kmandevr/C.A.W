@@ -11,6 +11,11 @@ const PortDescriptor ports[] = {
     {"out", PortType::Audio, ChannelLayout::Stereo, false},
 };
 const ModuleDescriptor kDescriptor{"test.registry", 1, ports, 2, nullptr, 0};
+const PortDescriptor mismatchedPorts[] = {
+    {"in", PortType::Audio, ChannelLayout::Mono, true},
+    {"out", PortType::Audio, ChannelLayout::Mono, false},
+};
+const ModuleDescriptor kMismatchedDescriptor{"test.registry", 1, mismatchedPorts, 2, nullptr, 0};
 class TestProcessor final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDescriptor; }
@@ -22,6 +27,12 @@ public:
     }
 };
 ModuleProcessor* makeTest() noexcept { return new TestProcessor(); }
+class MismatchedProcessor final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kMismatchedDescriptor; }
+    void process(const StereoProcessBlock&) noexcept override {}
+};
+ModuleProcessor* makeMismatched() noexcept { return new MismatchedProcessor(); }
 }
 
 TEST(module_registry_registers_and_creates_valid_processors) {
@@ -32,6 +43,12 @@ TEST(module_registry_registers_and_creates_valid_processors) {
     auto instance = registry.create("test.registry");
     CHECK(instance != nullptr);
     CHECK(instance->descriptor().id == kDescriptor.id);
+}
+
+TEST(module_registry_rejects_factory_with_mismatched_port_contract) {
+    ModuleRegistry registry;
+    CHECK(registry.add(kDescriptor, &makeMismatched));
+    CHECK(registry.create("test.registry") == nullptr);
 }
 
 TEST(module_registry_rejects_duplicate_and_unknown_modules) {
