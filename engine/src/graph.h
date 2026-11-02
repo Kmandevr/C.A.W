@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <string_view>
 #include <vector>
 
@@ -107,23 +108,53 @@ private:
     bool ready_ = false;
 };
 
+// Owns every processor referenced by its prepared executor. Build and destroy on a
+// control thread; once published, process() is callback-safe and the owner must be
+// reclaimed only after GraphRuntime returns it from collectRetired()/take*AfterStop().
+class PreparedGraph {
+public:
+    PreparedGraph() = default;
+    ~PreparedGraph() = default;
+    PreparedGraph(const PreparedGraph&) = delete;
+    PreparedGraph& operator=(const PreparedGraph&) = delete;
+    PreparedGraph(PreparedGraph&&) = delete;
+    PreparedGraph& operator=(PreparedGraph&&) = delete;
+
+    GraphError prepare(const std::vector<GraphNode>& nodes,
+                       const std::vector<GraphConnection>& connections,
+                       std::vector<std::unique_ptr<ModuleProcessor>> processors,
+                       uint32_t outputNode,
+                       uint32_t maxFrames,
+                       double sampleRate,
+                       const GraphResourceBudget& budget);
+    void reset() noexcept;
+    bool process(const float* inputLeft, const float* inputRight,
+                 float* outputLeft, float* outputRight, uint32_t frames) noexcept;
+    bool ready() const noexcept { return executor_.ready(); }
+
+private:
+    // Declaration order is intentional: executor_ is destroyed before processors_.
+    std::vector<std::unique_ptr<ModuleProcessor>> processors_;
+    GraphExecutor executor_;
+};
+
 // Single-producer control-thread publication and single audio-thread adoption.
 // The control thread owns published executors until publish succeeds, then reclaims
 // replaced executors with collectRetired(). Never destroy an executor on the audio thread.
 class GraphRuntime {
 public:
-    bool publish(GraphExecutor* prepared) noexcept;
+    bool publish(PreparedGraph* prepared) noexcept;
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
-    GraphExecutor* collectRetired() noexcept;
+    PreparedGraph* collectRetired() noexcept;
     // Call only after the audio callback has stopped.
-    GraphExecutor* takeActiveAfterStop() noexcept;
-    GraphExecutor* takePendingAfterStop() noexcept;
+    PreparedGraph* takeActiveAfterStop() noexcept;
+    PreparedGraph* takePendingAfterStop() noexcept;
 
 private:
-    GraphExecutor* active_ = nullptr; // audio-thread only except after stop
-    std::atomic<GraphExecutor*> pending_{nullptr};
-    std::atomic<GraphExecutor*> retired_{nullptr};
+    PreparedGraph* active_ = nullptr; // audio-thread only except after stop
+    std::atomic<PreparedGraph*> pending_{nullptr};
+    std::atomic<PreparedGraph*> retired_{nullptr};
 };
 
 }  // namespace caw
