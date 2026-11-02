@@ -1,14 +1,14 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-02
+updated: 2026-11-01
 ---
 
 # C.A.W. roadmap
 
 This is the **permanent, canonical roadmap** for C.A.W. It records the product direction, the order of work and the capabilities intended for the long term. Keep it as a living document: update implementation status only after code, tests and CI establish that a feature works.
 
-The roadmap is the single source for feature sequencing. [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md) remain the factual sources for what is implemented today. The [music workflow feature-gap note](music-workflow-feature-gap-plan.md) is a factual gap reference, not a second roadmap. The [lightweight creative audio systems note](lightweight-creative-audio-systems.md) contains supporting technical designs for its roadmap stage.
+The roadmap is the single source for feature sequencing. [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md) remain the factual sources for what is implemented today. The [native engine refactor plan](engine-next.md) is the detailed technical plan for the current engine-foundation workstream. The [music workflow feature-gap note](music-workflow-feature-gap-plan.md) is a factual gap reference, not a second roadmap. The [lightweight creative audio systems note](lightweight-creative-audio-systems.md) contains supporting technical designs for its roadmap stage.
 
 ## Product direction
 
@@ -56,15 +56,16 @@ Checked against the repository on 2026-11-01; re-check before each implementatio
 
 The stages are ordered by dependency and product value. Work may be split into smaller issues and pull requests, but keep the stage dependencies and exit conditions. The owner can reprioritize explicitly.
 
-### Stage 0 — Complete already-approved v2 commitments
+### Stage 0 — Complete approved v2 commitments and the engine foundation
 
-These commitments remain first unless the owner changes their order.
+1. **[Implemented] Project parameter and global automation.** PR #68 is merged to `Main`; preserve its project format, app editing, native playback and live/offline parity.
+2. **[Active next] Native engine refactor and integration.** Follow the [native engine refactor plan](engine-next.md). Refactor the existing engine rather than rebuilding it; integrate its existing modular foundations, preserve project/module compatibility, establish efficient DSP/precomputation, hardware-aware execution and safe fallbacks. Do not start a parallel engine.
+3. **[Planned after the refactor gate] WAV/SFZ multisample workflow.**
+4. **[Planned after the refactor gate] Stems export and integration with the native export pipeline.**
 
-1. Complete automation for module parameters and project globals, including serialization and native engine integration.
-2. Complete the WAV/SFZ multisample workflow.
-3. Complete stems export and integrate it with the native export pipeline.
+The refactor is a foundational dependency for later routing, sample, device and plugin work. It does not mean every later feature is implemented in this stage; each substantial capability still receives its own issue, tests and PR.
 
-**Exit gate:** each feature is usable through the app, tested, documented and verified by CI. A partial engine API or design does not count as complete integration.
+**Exit gate:** automation remains fully functional; the refactored engine uses one coherent execution model; existing projects and modules remain compatible; the portable fallback works; callback safety, deterministic behavior, playback/export parity, performance budgets and CI are verified. Device performance claims require real-device evidence.
 
 ### Stage 1 — Finish the existing pattern and piano-roll workflow
 
