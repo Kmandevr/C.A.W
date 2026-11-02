@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # App
