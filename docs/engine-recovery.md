@@ -14,7 +14,7 @@ updated: 2026-11-02
 - Branch: `feature/native-engine-refactor-integration`
 - Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
 - Last live comparison before this recovery refresh: **148 ahead, 0 behind Main**.
-- Latest code/test checkpoint: `ff8b5a566e6ab2d8b3cb8282eeb520d857d2aa56`.
+- Latest code/test checkpoint: `80e2664a5f9af2c3f6628ba94a0529ead4a42165`.
 - Working tree/remote state is represented by GitHub branch commits; no local build/test environment is available through the current connector workflow.
 - PR: none. Do not open a PR until the complete assignment is reviewable; do not merge, approve or delete branches.
 
@@ -44,13 +44,13 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 
 ## Remaining fixed capacities and correctness risks
 
-- 64 layer slots; 32 voices; 16 exports; 6 VM call arguments; 1,024 VM registers; 64 KiB VM source; 8 MiB state per module; ratchets up to 8.
+- 64 layer slots; 32 voices; 6 VM call arguments; 1,024 VM registers; 64 KiB VM source; 8 MiB state per module; ratchets up to 8.
 - Arrangement/transport still clamps to 64 bars.
 - MIDI file size remains 16 MiB; MIDI event count remains 65,536; MIDI 2.0 input queue is 1,024 and drops newest with a counter.
 - Command queue is bounded at 1,024; sender times out after about two seconds. Project updates propagate key failures, but standalone transport/control methods still ignore the result.
 - Retirement queue is 1,024 and pending retirement list is 256; overflow can still leak.
 - Project-state budget is hardware-derived and enforced; graph working share has a conversion helper but is not yet connected to active Engine graph compilation. Compile and retirement shares are not yet consumed.
-- Export buffers remain fixed at 16; export references are coupled to per-slot buffers and need a prepared layout/snapshot solution before safely removing the cap.
+- Exports/imports are dynamically sized. Per-slot export buffers use a stable pointer table and lazily allocated storage bounded by EngineResourceBudget.graphWorkingBytes; allocation/budget failures are explicit. The graph-working share is currently also the export-pool budget and will need a shared allocator when GraphExecutor is integrated.
 - Fixed layer slots/voice pools and other budgets need to become explicit hardware/resource budgets with actionable failure paths, not silent project-content loss.
 
 ## Read first
