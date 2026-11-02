@@ -870,7 +870,7 @@ TEST(engine_routes_more_than_16_module_exports) {
     p.loopBars = 1;
     p.master = 1.0;
     p.modules.push_back({"source", source, {}});
-    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsrc.value19", {}});
+    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsource.value19", {}});
     LayerSpec sourceLayer;
     sourceLayer.id = "source_track";
     sourceLayer.chain = {"source"};
