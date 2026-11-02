@@ -17,8 +17,6 @@ constexpr int kMaxStateDoubles = 1 << 20;  // 8 MB: room for a few delay lines a
 // All playing modules together (each also has a seam copy, so twice this in memory). Layers past it stay silent.
 constexpr int64_t kMaxProjectStateDoubles = int64_t{1} << 23;  // 64 MB
 constexpr int kMaxCallArgs = 6;
-constexpr int kMaxParams = 32;
-constexpr int kMaxSynthParams = 64;  // a synth patch: its voice's params plus its effects'
 
 // Built-in variables a module can read.
 // Trig and after are the note variables a pattern drives. They are "soft": a `let` or argument of the same name
@@ -126,7 +124,8 @@ struct BlockCtx {
     int keyRoot = 9;   // project key: 0 = C … 11 = B (A by default)
     int keyScale = 1;  // scale id (scale.minor by default)
     const double* vars[static_cast<int>(Var::Count)] = {};
-    const double* paramValues[kMaxParams] = {};  // optional per-sample automation; null uses the held value
+    const double* const* paramValues = nullptr;  // optional per-sample automation; null uses the held value
+    uint32_t paramValueCount = 0;
     const double* const* imports = nullptr;  // one pointer per Program::imports entry (null reads 0)
     int importOffset = 0;                     // where this block starts inside those buffers
 };
