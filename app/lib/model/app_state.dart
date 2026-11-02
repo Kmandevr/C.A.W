@@ -885,6 +885,27 @@ class AppState extends ChangeNotifier {
         AutomationPointDoc(step: end.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
   }
 
+  void addProjectAutomationLane(String targetType, String target, [String? moduleId]) {
+    if (project.automation.length >= 256 || target.isEmpty) return;
+    if (targetType != 'global' && targetType != 'param') return;
+    if (targetType == 'param' && (moduleId == null || moduleId.isEmpty)) return;
+    if (project.automation.any((lane) => lane.targetType == targetType &&
+        lane.target == target && lane.moduleId == moduleId)) return;
+    final end = project.loopSteps.toDouble();
+    final value = targetType == 'global'
+        ? (project.globals[target] ?? 0.0)
+        : (project.module(moduleId)?.params[target] ?? 0.0);
+    project.automation.add(ProjectAutomationLaneDoc(targetType: targetType, target: target,
+      moduleId: moduleId, points: [AutomationPointDoc(step: 0, value: value),
+        AutomationPointDoc(step: end, value: value)]));
+    _changed();
+  }
+
+  void removeProjectAutomationLane(ProjectAutomationLaneDoc lane) {
+    project.automation.remove(lane);
+    _changed();
+  }
+
   void removeAutomationLane(LayerDoc layer, AutomationLaneDoc lane) {
     editLayer(layer, (l) => l.automation.remove(lane));
   }
