@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # App
@@ -58,7 +58,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - the separate Mixer panel edits the same track volume and pan values as the engine; it does not maintain duplicate mix state
   - project settings and global controls are available from the settings button rather than permanently occupying the timeline
   - folders can be nested, collapsed and moved; bus folders sum child stereo audio and apply group volume/pan, while organization-only folders simply group tracks
-  - volume and pan automation lanes are serialized and played by the native engine; the callback interpolates their points at song position
+  - track volume/pan lanes and project-level module-parameter/global lanes are serialized separately; project lanes have song-time point editing, curve previews and automation undo/redo, and the native VM evaluates parameter curves per sample
   - empty-lane drags make time selections; selected clips can be split, snapped, moved, resized or source-offset shifted with Alt-drag
   - Shift-tap selects companion clips; their notes appear as references in the existing piano roll. Explicit multi-edit mode mirrors note edits to selected independent sources while preserving local note IDs; clips sharing a pattern source stay linked
   - the playhead overlay reads the 30 Hz meter tick independently, so the moving line repaints without rebuilding the clip grid or track layout

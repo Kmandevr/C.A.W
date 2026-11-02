@@ -94,6 +94,8 @@ class AutomationLaneDoc {
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
+class ProjectAutomationLaneDoc { ProjectAutomationLaneDoc({required this.targetType, required this.target, this.moduleId, List<AutomationPointDoc>? points}) : points = points ?? []; String targetType; String target; String? moduleId; List<AutomationPointDoc> points; Map<String, dynamic> toJson() => {'target_type': targetType, 'target': target, if (moduleId != null) 'module': moduleId, 'points': [for (final p in points) p.toJson()]}; static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(targetType: j['target_type'] as String? ?? 'global', target: j['target'] as String? ?? '', moduleId: j['module'] as String?, points: ((j['points'] as List?) ?? const []).take(128).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList()); }
+
 class LayerDoc {
   LayerDoc({
     required this.id,
@@ -187,11 +189,13 @@ class ProjectDoc {
     Map<String, double>? globals,
     List<ModuleDoc>? modules,
     List<LayerDoc>? layers,
+    List<ProjectAutomationLaneDoc>? automation,
     List<String>? libraryFolders,
     Map<String, String>? savedLibrarySearches,
   })  : globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
+        automation = automation ?? [],
         libraryFolders = libraryFolders ?? [],
         savedLibrarySearches = savedLibrarySearches ?? {} {
     // Keep the in-memory model canonical: a track owns clip instances, not a legacy
@@ -230,6 +234,7 @@ class ProjectDoc {
   Map<String, double> globals; // project-wide control values by name
   List<ModuleDoc> modules;
   List<LayerDoc> layers;
+  List<ProjectAutomationLaneDoc> automation;
   List<String> libraryFolders;
   Map<String, String> savedLibrarySearches;
 
@@ -260,8 +265,11 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
-    final arrangementEnd = layers.fold<int>(loopSteps, (end, l) =>
-        max(end, l.clips.fold<int>(0, (e, clip) => max(e, clip.startSteps + clip.lengthSteps))));
+    final layerArrangementEnd = layers.fold<int>(loopSteps, (end, layer) =>
+        max(end, layer.clips.fold<int>(0, (value, clip) => max(value, clip.startSteps + clip.lengthSteps))));
+    final automationEnd = automation.fold<int>(0, (end, lane) =>
+        lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
+    final arrangementEnd = max(layerArrangementEnd, automationEnd);
     final engineLoopBars = min(64, max(loopBars, (arrangementEnd / stepsPerBar).ceil()));
     final result = jsonEncode({
         'caw_project': 1,
@@ -276,6 +284,7 @@ class ProjectDoc {
         'swap': swap,
         if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
         'globals': globals,
+        'automation': [for (final lane in automation) lane.toJson()],
         'modules': [
           for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
@@ -320,6 +329,7 @@ class ProjectDoc {
         'master': master,
         'seam_crossfade': seamCrossfade,
         'globals': globals,
+        'automation': [for (final lane in automation) lane.toJson()],
         'modules': [for (final m in modules) m.toJson()],
         'layers': [for (final l in layers) l.toJson()],
         'library_folders': libraryFolders,
@@ -338,6 +348,7 @@ class ProjectDoc {
       master: (j['master'] as num?)?.toDouble() ?? 0.7,
       seamCrossfade: j['seam_crossfade'] != false,
       globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
+      automation: ((j['automation'] as List?) ?? const []).take(256).map((lane) => ProjectAutomationLaneDoc.fromJson(lane as Map<String, dynamic>)).toList(),
       modules: ((j['modules'] as List?) ?? const [])
           .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().take(512).toList(),
@@ -391,7 +402,19 @@ class ProjectDoc {
     }
     project.libraryFolders = safeFolders.toList()..sort();
 
-    // Keep persisted clips and automation inside the same bounds enforced by the native parser.
+    project.automation = project.automation.where((lane) =>
+      lane.target.isNotEmpty && (lane.targetType == 'global' ||
+        (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true)))
+      .take(256).toList();
+    for (final lane in project.automation) {
+      lane.points = lane.points.take(128).toList()
+        ..forEach((point) {
+          point.step = point.step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
+          point.value = point.value.clamp(-1000000.0, 1000000.0).toDouble();
+        })
+        ..sort((a, b) => a.step.compareTo(b.step));
+    }
+    // Keep persisted track automation inside the same bounds enforced by the native parser.
     for (final layer in project.layers) {
       for (final clip in layer.clips) {
         clip.startSteps = clip.startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();

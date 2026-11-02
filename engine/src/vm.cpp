@@ -50,9 +50,12 @@ const double* Instance::process(const BlockCtx& ctx) noexcept {
                 else std::fill_n(d, n, 0.0);
                 break;
             }
-            case OpCode::Param:
-                std::fill_n(d, n, param(static_cast<int>(op.index)));
+            case OpCode::Param: {
+                const double* automated = op.index < kMaxParams ? ctx.paramValues[op.index] : nullptr;
+                if (automated) std::copy_n(automated, n, d);
+                else std::fill_n(d, n, param(static_cast<int>(op.index)));
                 break;
+            }
             case OpCode::Bin: {
                 const double* a = reg(op.a);
                 const double* b = reg(op.b);

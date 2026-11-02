@@ -127,6 +127,7 @@ struct BlockCtx {
     int keyRoot = 9;   // project key: 0 = C … 11 = B (A by default)
     int keyScale = 1;  // scale id (scale.minor by default)
     const double* vars[static_cast<int>(Var::Count)] = {};
+    const double* paramValues[kMaxParams] = {};  // optional per-sample automation; null uses the held value
     const double* const* imports = nullptr;  // one pointer per Program::imports entry (null reads 0)
     int importOffset = 0;                     // where this block starts inside those buffers
 };

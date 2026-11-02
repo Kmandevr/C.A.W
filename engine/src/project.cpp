@@ -168,6 +168,40 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             out.layers.push_back(std::move(spec));
         }
     }
+    if (const Json* lanes = root.get("automation"); lanes && lanes->type == Json::Type::Array) {
+        if (lanes->arr.size() > 256) {
+            error = "a project holds at most 256 parameter/global automation lanes";
+            return false;
+        }
+        for (const Json& laneJson : lanes->arr) {
+            if (laneJson.type != Json::Type::Object) continue;
+            ProjectAutomationLaneSpec lane;
+            lane.targetType = laneJson.string("target_type");
+            lane.target = laneJson.string("target");
+            lane.moduleId = laneJson.string("module");
+            if ((lane.targetType != "param" && lane.targetType != "global") || lane.target.empty() ||
+                (lane.targetType == "param" && lane.moduleId.empty())) continue;
+            if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
+                for (const Json& point : points->arr) {
+                    if (point.type != Json::Type::Object || lane.points.size() >= 128) continue;
+                    lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
+                                           clampd(point.number("value", 0), -1000000, 1000000)});
+                }
+            }
+            std::stable_sort(lane.points.begin(), lane.points.end(),
+                [](const auto& a, const auto& b) { return a.step < b.step; });
+            if (!lane.points.empty()) out.automation.push_back(std::move(lane));
+        }
+    }
+
+    int automationEndStep = 0;
+    for (const auto& lane : out.automation)
+        for (const auto& point : lane.points)
+            automationEndStep = std::max(automationEndStep, static_cast<int>(std::ceil(point.step)));
+    const int stepsPerBar = out.beatsPerBar * 4;
+    if (automationEndStep > 0 && stepsPerBar > 0)
+        out.loopBars = std::min(64, std::max(out.loopBars, (automationEndStep + stepsPerBar - 1) / stepsPerBar));
+
     // Reject malformed parent references and cycles before the audio thread sees routing indices.
     for (const LayerSpec& layer : out.layers) {
         std::string parent = layer.parentId;

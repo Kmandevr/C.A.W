@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-01
+updated: 2026-11-02
 covers: [engine/, app/]
 ---
 
@@ -22,7 +22,7 @@ C.A.W.'s primary focus is sound design and music-content creation: making, shapi
 
 **[Fact, checked 2026-11-01]** The Flutter app has eight workspaces and CI build artifacts for Android and Windows. Linux is used for app analysis/tests and has a local runner, but is not a shipped app artifact. The portable C++20 engine is built/tested by CI on Linux x64, Linux Arm64 and Windows x64, plus Linux sanitizers. iOS and macOS app builds are not currently in the app workflow.
 
-The current app and native implementation are documented in [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). The house synth, piano-roll expression editing, pattern generators, MIDI file import/export, native worker pool, adaptive workload planner and Engine Lab spectrum view have working implementations. Module/global parameter automation, SFZ and stems export remain the current approved app-usable v2 priorities. USB/Bluetooth device I/O, audio import/editing, complete mixer routing and external binary plugin hosting are not implemented. GitHub sync and in-app AI features are not implemented or in the current product scope.
+The current app and native implementation are documented in [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). The house synth, piano-roll expression editing, pattern generators, MIDI file import/export, native worker pool, adaptive workload planner and Engine Lab spectrum view have working implementations. Project-level module/global parameter automation is being integrated in PR #68; SFZ and stems export follow it in the approved app-usable v2 sequence. USB/Bluetooth device I/O, audio import/editing, complete mixer routing and external binary plugin hosting are not implemented. GitHub sync and in-app AI features are not implemented or in the current product scope.
 
 ## 1. Technology stack
 

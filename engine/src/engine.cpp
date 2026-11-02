@@ -97,6 +97,14 @@ struct Engine::Chain {
     double vvel[kBlock], vrel[kBlock], vout[kBlock], gen[kBlock];
     double vbend[kBlock], vpress[kBlock], vtimbre[kBlock];
     double dtrig[kBlock], ones[kBlock], dnote[kBlock], dfreq[kBlock];
+    struct ParamAutomation {
+        int moduleIndex = 0, paramIndex = 0;
+        double minimum = 0.0, maximum = 1.0, step = 0.0;
+        const ProjectAutomationLaneSpec* lane = nullptr;
+    };
+    double paramSamples[kMaxParams][kBlock] = {};
+    std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> automation;
+    std::vector<ParamAutomation> paramAutomation;
     std::vector<std::string> moduleIds;
     // How each module takes over the running state of the chain it replaces, so unchanged calls play on.
     struct Migration {
@@ -279,6 +287,21 @@ double automationValue(int count, const double* steps, const double* values, dou
     return values[lo] + (values[hi] - values[lo]) * t;
 }
 
+double automationValue(const std::vector<AutomationPointSpec>& points, double at, double fallback) noexcept {
+    if (points.empty()) return fallback;
+    if (at <= points.front().step) return points.front().value;
+    size_t lo = 0, hi = points.size() - 1;
+    while (lo + 1 < hi) {
+        const size_t mid = (lo + hi) / 2;
+        if (points[mid].step <= at) lo = mid; else hi = mid;
+    }
+    if (at >= points.back().step) return points.back().value;
+    const double span = points[hi].step - points[lo].step;
+    if (span <= 0.0) return points[hi].value;
+    const double t = (at - points[lo].step) / span;
+    return points[lo].value + (points[hi].value - points[lo].value) * t;
+}
+
 
 void storeMax(std::atomic<float>& a, float v) {
     float cur = a.load(std::memory_order_relaxed);
@@ -366,7 +389,7 @@ int Engine::freeSlot() {
 }
 
 Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring,
-                                  bool voiced, const Chain* prev) {
+                                  bool voiced, const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation) {
     auto* c = new Chain();
     c->voiced = voiced;
     int buf = 0;
@@ -401,6 +424,32 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
         for (int v = 2; v < c->voiceCount; ++v) c->voices[v].inst = c->extraVoices[static_cast<size_t>(v - 2)].get();
     }
     writeParams(*c);
+    c->automation = automation;
+    // Resolve automation targets and allocate their sample buffers on the control thread.
+    for (size_t moduleIndex = 0; moduleIndex < c->main.size(); ++moduleIndex) {
+        const Program& program = c->main[moduleIndex]->program();
+        const std::string& moduleId = c->moduleIds[moduleIndex];
+        for (size_t paramIndex = 0; paramIndex < program.params.size(); ++paramIndex) {
+            const ParamDef& def = program.params[paramIndex];
+            const ProjectAutomationLaneSpec* selected = nullptr;
+            for (const ProjectAutomationLaneSpec& lane : *automation) {
+                const bool matches = lane.targetType == "global"
+                    ? (def.global && lane.target == def.name)
+                    : (lane.targetType == "param" && !def.global && lane.moduleId == moduleId && lane.target == def.name);
+                if (matches) { selected = &lane; break; }
+            }
+            if (!selected || selected->points.empty()) continue;
+            if (c->paramAutomation.size() >= 256) break;
+            Chain::ParamAutomation binding;
+            binding.moduleIndex = static_cast<int>(moduleIndex);
+            binding.paramIndex = static_cast<int>(paramIndex);
+            binding.minimum = def.min;
+            binding.maximum = def.max;
+            binding.step = def.step;
+            binding.lane = selected;
+            c->paramAutomation.push_back(binding);
+        }
+    }
     // Plan how this chain takes over the running state of the one it replaces: every stateful call whose name
     // (position in the code) and size are unchanged keeps playing, within a copy budget for the audio thread.
     if (prev) {
@@ -493,6 +542,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
 
     globals_ = p.globals;
+    const auto projectAutomation = std::make_shared<const std::vector<ProjectAutomationLaneSpec>>(p.automation);
 
     // Project libraries (kind: library) compile first; every other module can call their functions.
     std::vector<std::string_view> moduleSources;
@@ -609,6 +659,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         std::shared_ptr<const Pattern> pattern;
         std::string arrangementSig;
         std::string automationSig;
+        std::string parameterAutomationSig;
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
@@ -625,7 +676,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     int64_t projectState = 0;
     std::vector<std::vector<int>> readsFrom(kSlots);
     for (Want& w : wants) {
-        Planned pl{w, {}, {}, {}, nullptr, {}, {}};
+        Planned pl{w, {}, {}, {}, nullptr, {}, {}, {}};
         int64_t layerState = 0;
         // A synth in the chain stands for its voice and effects; its project effect modules are found by name.
         std::vector<std::string> chain;
@@ -817,6 +868,12 @@ std::string Engine::setProject(const ProjectSpec& p) {
         LayerState& ls = pl.ls;
         const Want& w = pl.w;
         ls.arrangementSig = pl.arrangementSig;
+        for (const ProjectAutomationLaneSpec& lane : p.automation) {
+            pl.parameterAutomationSig += lane.targetType + "|" + lane.moduleId + "|" + lane.target + "|";
+            for (const AutomationPointSpec& point : lane.points)
+                pl.parameterAutomationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ";";
+        }
+        const bool parameterAutomationChanged = ls.parameterAutomationSig != pl.parameterAutomationSig;
         for (const AutomationLaneSpec& lane : w.automation) {
             pl.automationSig += lane.target + "|";
             for (const AutomationPointSpec& point : lane.points)
@@ -898,8 +955,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
             send(cmd);
             ls.pattern = pl.pattern;
         }
-        if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced) {
-            Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain);
+        if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced || parameterAutomationChanged) {
+            Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain, projectAutomation);
             Cmd cmd;
             cmd.type = Cmd::Install;
             cmd.slot = ls.slot;
@@ -923,6 +980,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 ls.steps = w.steps;
             }
         }
+        ls.parameterAutomationSig = pl.parameterAutomationSig;
         projectOrder.push_back(ls.slot);
         nextLayers[w.id] = ls;
     }
@@ -1411,7 +1469,7 @@ int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
     return static_cast<int64_t>(std::floor(static_cast<double>(k) * (s.steps * stepLen_) + 0.5));
 }
 
-void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, Slot* exportTo, int offset,
+void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, int len, double* out, Slot* exportTo, int offset,
                       const Pattern* pat, int64_t repeat) noexcept {
     auto& insts = shadow ? c.shadow : c.main;
     BlockCtx ctx;
@@ -1466,6 +1524,20 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, S
     ctx.importOffset = offset;
     for (size_t idx = 0; idx < insts.size(); ++idx) {
         auto& inst = insts[idx];
+        for (int param = 0; param < kMaxParams; ++param) ctx.paramValues[param] = nullptr;
+        for (Chain::ParamAutomation& binding : c.paramAutomation) {
+            if (binding.moduleIndex != static_cast<int>(idx)) continue;
+            for (int sample = 0; sample < len; ++sample) {
+                const double at = static_cast<double>(globalStart + sample) / stepLen_;
+                double value = std::clamp(automationValue(binding.lane->points, at,
+                    binding.lane->points.front().value), binding.minimum, binding.maximum);
+                if (binding.step > 0.0)
+                    value = std::clamp(binding.minimum + std::round((value - binding.minimum) / binding.step) * binding.step,
+                        binding.minimum, binding.maximum);
+                c.paramSamples[binding.paramIndex][sample] = value;
+            }
+            ctx.paramValues[binding.paramIndex] = c.paramSamples[binding.paramIndex];
+        }
         if (idx == 0 && c.voiced) {
             runVoices(c, pat, repeat, n0, len, c.gen, exportTo, offset, ctx);
             input = c.gen;
@@ -1628,6 +1700,8 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
             if (ctx.vars[k]) ctx.vars[k] += o;
+        for (int k = 0; k < kMaxParams; ++k)
+            if (ctx.paramValues[k]) ctx.paramValues[k] += o;
         ctx.vars[static_cast<int>(Var::T)] = c.vtb;
         ctx.vars[static_cast<int>(Var::Time)] = c.vtime;
         ctx.vars[static_cast<int>(Var::Phase)] = c.vphase;
@@ -1795,11 +1869,11 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         double* y = tmp_;
         s.cur->layerLen = layerLen;
         const Pattern* pat = s.pattern ? s.pattern->get() : nullptr;
-        runChain(*s.cur, false, n0, len, y, &s, j, pat, free ? epoch_ : k);
+        runChain(*s.cur, false, n0, gg, len, y, &s, j, pat, free ? epoch_ : k);
         if (s.seamLeft > 0) {
             const int sl = std::min(len, s.seamLeft);
             double z[kBlock];
-            runChain(*s.cur, true, s.shadowN, sl, z, nullptr, j, nullptr, k);
+            runChain(*s.cur, true, s.shadowN, gg, sl, z, nullptr, j, nullptr, k);
             for (int i = 0; i < sl; ++i) {
                 const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
                 y[i] = z[i] * (1.0 - w) + y[i] * w;
@@ -1809,7 +1883,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         }
         if (s.old) {
             s.old->layerLen = layerLen;
-            runChain(*s.old, false, n0, len, tmp2_, nullptr, j, nullptr, k);
+            runChain(*s.old, false, n0, gg, len, tmp2_, nullptr, j, nullptr, k);
             const int sl = std::min(len, s.swapLeft);
             for (int i = 0; i < len; ++i) {
                 double w = 1.0;

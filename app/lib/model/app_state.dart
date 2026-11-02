@@ -30,6 +30,18 @@ class _LibrarySnapshot {
   final Map<String, List<String>> moduleTags;
 }
 
+class _AutomationSnapshot {
+  _AutomationSnapshot(ProjectDoc project)
+      : projectLanes = [for (final lane in project.automation)
+          ProjectAutomationLaneDoc.fromJson(lane.toJson())],
+        trackLanes = {for (final layer in project.layers) layer.id: [
+          for (final lane in layer.automation) AutomationLaneDoc.fromJson(lane.toJson()),
+        ]};
+
+  final List<ProjectAutomationLaneDoc> projectLanes;
+  final Map<String, List<AutomationLaneDoc>> trackLanes;
+}
+
 class AppState extends ChangeNotifier {
   AppState({Settings? settings}) : settings = settings ?? Settings() {
     _light = this.settings.lightMode;
@@ -80,6 +92,8 @@ class AppState extends ChangeNotifier {
   String? selectedModuleId;
   final List<_LibrarySnapshot> _libraryUndo = [];
   final List<_LibrarySnapshot> _libraryRedo = [];
+  final List<_AutomationSnapshot> _automationUndo = [];
+  final List<_AutomationSnapshot> _automationRedo = [];
 
   bool get canUndoLibrary => _libraryUndo.isNotEmpty;
 
@@ -877,6 +891,7 @@ class AppState extends ChangeNotifier {
   void addAutomationLane(LayerDoc layer, String target) {
     if (target != 'volume' && target != 'pan') return;
     if (layer.automation.any((a) => a.target == target)) return;
+    _pushAutomationUndo();
     final end = project.layers.fold<int>(project.loopSteps, (v, item) =>
       item.clips.fold<int>(v, (e, clip) => e > clip.startSteps + clip.lengthSteps ? e : clip.startSteps + clip.lengthSteps))
         .clamp(1, project.maxArrangementSteps).toInt();
@@ -885,12 +900,118 @@ class AppState extends ChangeNotifier {
         AutomationPointDoc(step: end.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
   }
 
+  bool _automationGestureOpen = false;
+
+  void beginAutomationGesture() {
+    if (_automationGestureOpen) return;
+    _pushAutomationUndo();
+    _automationGestureOpen = true;
+  }
+
+  void endAutomationGesture() => _automationGestureOpen = false;
+
+  void _pushAutomationUndo() {
+    if (_automationGestureOpen) return;
+    _automationUndo.add(_AutomationSnapshot(project));
+    if (_automationUndo.length > 64) _automationUndo.removeAt(0);
+    _automationRedo.clear();
+  }
+
+  void _restoreAutomationSnapshot(_AutomationSnapshot snapshot) {
+    project.automation = snapshot.projectLanes;
+    for (final layer in project.layers) {
+      layer.automation = snapshot.trackLanes[layer.id] ?? [];
+    }
+  }
+
+  bool get canUndoAutomation => _automationUndo.isNotEmpty;
+  bool get canRedoAutomation => _automationRedo.isNotEmpty;
+
+  bool undoAutomation() {
+    if (_automationUndo.isEmpty) return false;
+    _automationRedo.add(_AutomationSnapshot(project));
+    _restoreAutomationSnapshot(_automationUndo.removeLast());
+    _changed();
+    return true;
+  }
+
+  bool redoAutomation() {
+    if (_automationRedo.isEmpty) return false;
+    _automationUndo.add(_AutomationSnapshot(project));
+    _restoreAutomationSnapshot(_automationRedo.removeLast());
+    _changed();
+    return true;
+  }
+
+  void addProjectAutomationLane(String targetType, String target, [String? moduleId]) {
+    if (project.automation.length >= 256 || target.isEmpty) return;
+    if (targetType != 'global' && targetType != 'param') return;
+    if (targetType == 'param' && (moduleId == null || moduleId.isEmpty)) return;
+    if (project.automation.any((lane) => lane.targetType == targetType &&
+        lane.target == target && lane.moduleId == moduleId)) {
+      return;
+    }
+    _pushAutomationUndo();
+    final end = project.layers.fold<int>(project.loopSteps, (value, layer) =>
+      layer.clips.fold<int>(value, (current, clip) =>
+        current > clip.startSteps + clip.lengthSteps ? current : clip.startSteps + clip.lengthSteps)).toDouble();
+    final definition = targetType == 'global'
+        ? info.values.expand((module) => module.params).where((param) => param.global && param.name == target).firstOrNull
+        : info[moduleId]?.params.where((param) => param.name == target).firstOrNull;
+    final value = targetType == 'global'
+        ? (project.globals[target] ?? definition?.defaultValue ?? 0.0)
+        : (project.module(moduleId)?.params[target] ?? definition?.defaultValue ?? 0.0);
+    project.automation.add(ProjectAutomationLaneDoc(targetType: targetType, target: target,
+      moduleId: moduleId, points: [AutomationPointDoc(step: 0, value: value),
+        AutomationPointDoc(step: end, value: value)]));
+    _changed();
+  }
+
+  void updateProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index, double step, double value) {
+    if (index < 0 || index >= lane.points.length) return;
+    _pushAutomationUndo();
+    final point = lane.points[index];
+    final ordered = [...lane.points]..sort((a, b) => a.step.compareTo(b.step));
+    final position = ordered.indexOf(point);
+    final lower = position > 0 ? ordered[position - 1].step + 0.01 : 0.0;
+    final upper = position < ordered.length - 1
+        ? ordered[position + 1].step - 0.01 : project.maxArrangementSteps.toDouble();
+    point.step = step.clamp(lower, math.max(lower, upper)).toDouble();
+    point.value = value.clamp(-1000000.0, 1000000.0).toDouble();
+    _changed();
+  }
+
+  void addProjectAutomationPoint(ProjectAutomationLaneDoc lane, double step, double value) {
+    if (lane.points.length >= 128) return;
+    _pushAutomationUndo();
+    final at = step.clamp(0.0, project.maxArrangementSteps.toDouble()).toDouble();
+    if (lane.points.any((point) => (point.step - at).abs() < 0.01)) return;
+    lane.points.add(AutomationPointDoc(step: at, value: value));
+    lane.points.sort((a, b) => a.step.compareTo(b.step));
+    _changed();
+  }
+
+  void removeProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index) {
+    if (index < 0 || index >= lane.points.length) return;
+    _pushAutomationUndo();
+    lane.points.removeAt(index);
+    _changed();
+  }
+
+  void removeProjectAutomationLane(ProjectAutomationLaneDoc lane) {
+    _pushAutomationUndo();
+    project.automation.remove(lane);
+    _changed();
+  }
+
   void removeAutomationLane(LayerDoc layer, AutomationLaneDoc lane) {
+    _pushAutomationUndo();
     editLayer(layer, (l) => l.automation.remove(lane));
   }
 
   void removeAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index) {
     if (index < 0 || index >= lane.points.length) return;
+    _pushAutomationUndo();
     editLayer(layer, (l) {
       l.automation.firstWhere((a) => a.target == lane.target).points.removeAt(index);
     });
@@ -898,6 +1019,7 @@ class AppState extends ChangeNotifier {
 
   void updateAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index, double step, double value) {
     if (index < 0 || index >= lane.points.length) return;
+    _pushAutomationUndo();
     editLayer(layer, (l) {
       final p = lane.points[index];
       final sorted = [...lane.points]..sort((a, b) => a.step.compareTo(b.step));
@@ -912,6 +1034,7 @@ class AppState extends ChangeNotifier {
 
   void addAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, double step, double value) {
     if (lane.points.length >= 128) return;
+    _pushAutomationUndo();
     final at = step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
     if (lane.points.any((p) => (p.step - at).abs() < 0.01)) return;
     editLayer(layer, (l) {
@@ -1186,6 +1309,8 @@ class AppState extends ChangeNotifier {
     _lastGoodRunSources.clear();
     _libraryUndo.clear();
     _libraryRedo.clear();
+    _automationUndo.clear();
+    _automationRedo.clear();
     for (final notifier in _moduleValueTicks.values) { notifier.dispose(); }
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
     _moduleValueTicks.clear();

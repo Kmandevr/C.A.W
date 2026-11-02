@@ -43,6 +43,30 @@ void main() {
     expect((layers[1]['automation'] as List).single['target'], 'pan');
   });
 
+  test('project parameter and global automation round-trip through app and engine JSON', () {
+    final p = sample();
+    p.automation.add(ProjectAutomationLaneDoc(targetType: 'param', moduleId: 'm1',
+      target: 'shift', points: [AutomationPointDoc(step: 0, value: 2),
+        AutomationPointDoc(step: 128, value: 8)]));
+    p.automation.add(ProjectAutomationLaneDoc(targetType: 'global', target: 'swing',
+      points: [AutomationPointDoc(step: 0, value: 0), AutomationPointDoc(step: 64, value: 0.5)]));
+    final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(back.automation, hasLength(2));
+    expect(back.automation.first.moduleId, 'm1');
+    final engine = jsonDecode(back.toEngineJson()) as Map<String, dynamic>;
+    expect(engine['automation'], hasLength(2));
+    expect(engine['loop_bars'], 8);
+    expect(engine['automation'][0]['target_type'], 'param');
+    expect(engine['automation'][1]['target_type'], 'global');
+  });
+
+  test('projects without project automation remain valid', () {
+    final legacy = sample().toJson()..remove('automation');
+    final back = ProjectDoc.fromJson(legacy);
+    expect(back.automation, isEmpty);
+    expect((jsonDecode(back.toEngineJson()) as Map<String, dynamic>)['automation'], isEmpty);
+  });
+
   test('legacy pattern layers migrate once into clip instances', () {
     final old = sample().toJson()..['caw_app_project'] = 1;
     final oldLayer = (old['layers'] as List)[1] as Map<String, dynamic>;

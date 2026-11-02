@@ -263,3 +263,104 @@ TEST(export_cycles_still_play) {
     // One side reads the other a block late, so after the first block both values are there.
     CHECK_NEAR(out[511], 0.3 * std::cos(kPi / 4.0), 1e-6);
 }
+
+
+TEST(project_parameter_and_global_automation_parse_with_legacy_compatibility) {
+    ProjectSpec legacy;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,"name":"legacy","modules":[],"layers":[]})", legacy, error));
+    CHECK(legacy.automation.empty());
+
+    ProjectSpec project;
+    const std::string json = R"({"caw_project":1,"bpm":120,"beats_per_bar":4,"loop_bars":4,"modules":[{"id":"synth","source":"param cutoff = 100\ncutoff"}],"layers":[],"automation":[{"target_type":"param","module":"synth","target":"cutoff","points":[{"step":16,"value":900},{"step":0,"value":100}]},{"target_type":"global","target":"swing","points":[{"step":0,"value":0},{"step":128,"value":0.5}]}]})";
+    CHECK(parseProject(json, project, error));
+    CHECK_EQ(project.automation.size(), size_t{2});
+    CHECK_EQ(project.loopBars, 8);
+    if (project.automation.size() == 2) {
+        CHECK_EQ(project.automation[0].targetType, std::string("param"));
+        CHECK_EQ(project.automation[0].moduleId, std::string("synth"));
+        CHECK_EQ(project.automation[0].target, std::string("cutoff"));
+        CHECK_EQ(project.automation[0].points.size(), size_t{2});
+        CHECK_EQ(project.automation[0].points[0].step, 0.0);
+        CHECK_EQ(project.automation[1].targetType, std::string("global"));
+    }
+}
+
+TEST(project_automation_rejects_excessive_lane_count) {
+    std::string json = R"({"caw_project":1,"modules":[],"layers":[],"automation":[)";
+    for (int i = 0; i < 257; ++i) {
+        if (i) json += ",";
+        json += R"({"target_type":"global","target":"g","points":[{"step":0,"value":0}]})";
+    }
+    json += "]}";
+    ProjectSpec project;
+    std::string error;
+    CHECK(!parseProject(json, project, error));
+    CHECK(has(error, "256"));
+}
+
+
+TEST(module_parameter_automation_matches_offline_render) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "param level = 0 in 0..1\nsine(100) * level", {}});
+    LayerSpec layer;
+    layer.id = "tone-track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "param";
+    lane.moduleId = "tone";
+    lane.target = "level";
+    lane.points = {{0, 0}, {4, 1}};
+    p.automation.push_back(lane);
+
+    Engine engine(48000);
+    const std::string setup = engine.setProject(p);
+    CHECK(!setup.empty());
+    engine.play();
+    const std::vector<float> live = run(engine, 14000);
+
+    RenderResult rendered;
+    ExportOptions options;
+    options.kind = ExportKind::Free;
+    options.seconds = 0.3;
+    CHECK(renderExport(p, options, rendered));
+    CHECK(live[12120] > 0.1f);
+    CHECK_NEAR(live[12120], rendered.samples[static_cast<size_t>(12120) * 2], 1e-6);
+}
+
+TEST(project_global_automation_reaches_global_parameters) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "global level = 0 in 0..1\nsine(100) * level", {}});
+    LayerSpec layer;
+    layer.id = "tone-track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "global";
+    lane.target = "level";
+    lane.points = {{0, 0}, {4, 1}};
+    p.automation.push_back(lane);
+
+    Engine engine(48000);
+    engine.setProject(p);
+    engine.play();
+    const std::vector<float> live = run(engine, 14000);
+    CHECK(live[12120] > 0.1f);
+    RenderResult rendered;
+    ExportOptions options;
+    options.kind = ExportKind::Free;
+    options.seconds = 0.3;
+    CHECK(renderExport(p, options, rendered));
+    CHECK_NEAR(live[12120], rendered.samples[static_cast<size_t>(12120) * 2], 1e-6);
+}

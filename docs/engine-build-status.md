@@ -2,7 +2,7 @@
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
 covers: [engine/, app/]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Modular engine implementation status
@@ -44,7 +44,7 @@ Stage 5 graph-to-Engine/VM/mixer integration is paused by the owner. The graph e
 
 The current app-usable v2 order is:
 
-1. Add automation lanes for module parameters and project globals.
+1. **In progress — PR #68:** project/timeline automation for module parameters and project globals, including native per-sample playback/render evaluation and app editing. Await full CI before marking it implemented.
 2. Add SFZ and stems export.
 
 Scenes and MIDI 2.0 device input/output remain deferred backlog items; the existing MIDI 2.0 decoder and bounded queue are not live device support.
