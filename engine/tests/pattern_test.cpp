@@ -404,3 +404,14 @@ TEST(notes_carry_their_own_bend_vibrato_press_and_timbre) {
     std::vector<double> plain = play("gate * (press - timbre) * 0.5", "0 C3 4\n", 1000);
     CHECK_NEAR(plain[500], 0.5, 1e-6);
 }
+
+TEST(pattern_parser_accepts_more_than_4096_notes) {
+    std::string source = "---\nkind: pattern\n---\n";
+    for (int i = 0; i < 4097; ++i)
+        source += std::to_string(i % 16) + " C4 1\n";
+    const PatternResult parsed = parsePattern(source);
+    CHECK(parsed.pattern != nullptr);
+    if (!parsed.pattern) return;
+    CHECK_EQ(parsed.pattern->notes.size(), size_t{4097});
+    CHECK_EQ(parsed.pattern->events.size(), size_t{8194});
+}
