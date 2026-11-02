@@ -952,7 +952,9 @@ class AppState extends ChangeNotifier {
       return;
     }
     _pushAutomationUndo();
-    final end = project.loopSteps.toDouble();
+    final end = project.layers.fold<int>(project.loopSteps, (value, layer) =>
+      layer.clips.fold<int>(value, (current, clip) =>
+        current > clip.startSteps + clip.lengthSteps ? current : clip.startSteps + clip.lengthSteps)).toDouble();
     final definition = targetType == 'global'
         ? info.values.expand((module) => module.params).where((param) => param.global && param.name == target).firstOrNull
         : info[moduleId]?.params.where((param) => param.name == target).firstOrNull;
