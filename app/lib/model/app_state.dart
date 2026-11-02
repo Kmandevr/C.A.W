@@ -32,8 +32,11 @@ class _LibrarySnapshot {
 
 class _AutomationSnapshot {
   _AutomationSnapshot(ProjectDoc project)
-      : projectLanes = project.automation,
-        trackLanes = {for (final layer in project.layers) layer.id: layer.automation};
+      : projectLanes = [for (final lane in project.automation)
+          ProjectAutomationLaneDoc.fromJson(lane.toJson())],
+        trackLanes = {for (final layer in project.layers) layer.id: [
+          for (final lane in layer.automation) AutomationLaneDoc.fromJson(lane.toJson()),
+        ]};
 
   final List<ProjectAutomationLaneDoc> projectLanes;
   final Map<String, List<AutomationLaneDoc>> trackLanes;
@@ -898,8 +901,7 @@ class AppState extends ChangeNotifier {
   }
 
   void _pushAutomationUndo() {
-    final copy = ProjectDoc.fromJson(project.toJson());
-    _automationUndo.add(_AutomationSnapshot(copy));
+    _automationUndo.add(_AutomationSnapshot(project));
     if (_automationUndo.length > 64) _automationUndo.removeAt(0);
     _automationRedo.clear();
   }
@@ -911,10 +913,12 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  bool get canUndoAutomation => _automationUndo.isNotEmpty;
+  bool get canRedoAutomation => _automationRedo.isNotEmpty;
+
   bool undoAutomation() {
     if (_automationUndo.isEmpty) return false;
-    final copy = ProjectDoc.fromJson(project.toJson());
-    _automationRedo.add(_AutomationSnapshot(copy));
+    _automationRedo.add(_AutomationSnapshot(project));
     _restoreAutomationSnapshot(_automationUndo.removeLast());
     _changed();
     return true;
@@ -922,8 +926,7 @@ class AppState extends ChangeNotifier {
 
   bool redoAutomation() {
     if (_automationRedo.isEmpty) return false;
-    final copy = ProjectDoc.fromJson(project.toJson());
-    _automationUndo.add(_AutomationSnapshot(copy));
+    _automationUndo.add(_AutomationSnapshot(project));
     _restoreAutomationSnapshot(_automationRedo.removeLast());
     _changed();
     return true;
