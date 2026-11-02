@@ -405,8 +405,6 @@ void parseLine(Patch& p, const std::vector<Word>& w, int line) {
     }
     if (k == "fx") {
         if (w.size() < 2) throw PatchError{line, head.col, "fx needs a type (drive, crush, delay, reverb, comp) or a module's name"};
-        // A track's chain holds a sound and at most 8 effects (project.h kMaxChain), so a patch does too.
-        if (p.fx.size() >= 8) throw PatchError{line, head.col, "a patch can have at most 8 fx lines"};
         Fx x;
         x.line = line;
         const std::string& t = w[1].text;
