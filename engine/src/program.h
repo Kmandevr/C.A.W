@@ -126,6 +126,7 @@ struct BlockCtx {
     const double* vars[static_cast<int>(Var::Count)] = {};
     const double* const* paramValues = nullptr;  // optional per-sample automation; null uses the held value
     uint32_t paramValueCount = 0;
+    int paramValueOffset = 0;
     const double* const* imports = nullptr;  // one pointer per Program::imports entry (null reads 0)
     int importOffset = 0;                     // where this block starts inside those buffers
 };
