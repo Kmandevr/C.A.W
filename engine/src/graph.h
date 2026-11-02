@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "execution.h"
 #include "module.h"
 
 namespace caw {
@@ -32,6 +33,9 @@ struct GraphResourceBudget {
     // Caller-owned GraphNode/GraphConnection storage and processor instances are excluded.
     std::size_t maxWorkingBytes = 0;
 };
+
+// Converts the Engine's hardware-derived graph working-set share to the graph compiler/executor budget.
+GraphResourceBudget makeGraphResourceBudget(const EngineResourceBudget& engineBudget) noexcept;
 
 enum class GraphError : uint8_t {
     Ok,
