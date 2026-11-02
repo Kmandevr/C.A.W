@@ -756,7 +756,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
         }
         // Memory is bounded for the whole project: a layer that would pass the budget stays silent.
         if (!pl.ids.empty() && projectState + layerState > kMaxProjectStateDoubles) {
-            warnings[pl.ids.front()].push_back("layer left silent: the project's delays, reverbs and other effects need more than 64 MB");
+            warnings[pl.ids.front()].push_back("layer not installed: the project's module state exceeds the current 64 MiB project-state budget");
+            allOk = false;
             pl.ids.clear();
             pl.sig.clear();
         }
@@ -772,14 +773,23 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 Cmd c;
                 c.type = Cmd::Remove;
                 c.slot = pl.ls.slot;
-                send(c);
+                if (!send(c)) {
+                    allOk = false;
+                    warnings[w.id].push_back("audio command queue rejected removal of an invalid layer");
+                    nextLayers[w.id] = pl.ls;
+                }
             }
             continue;
         }
         if (pl.ls.slot < 0) {
             pl.ls.slot = isAudition ? kAuditionSlot : freeSlot();
             if (isAudition) slotBusy_[kAuditionSlot] = true;
-            if (pl.ls.slot < 0) continue;  // all slots busy (removals still fading)
+            if (pl.ls.slot < 0) {
+                allOk = false;
+                warnings[w.id].push_back("no free engine layer slot; layer was not installed because previous removals are still fading");
+                nextLayers[w.id] = pl.ls;
+                continue;
+            }
             pl.ls.automationSig = "\x01new-slot";  // force an empty-or-populated automation command on slot reuse
             pl.ls.sig.clear();
             pl.ls.wiring.clear();
@@ -1072,13 +1082,19 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 break;
             }
         }
-        send(oc);
+        if (!send(oc)) {
+            allOk = false;
+            warnings["project"].push_back("audio command queue rejected project layer ordering");
+        }
     }
 
     Cmd a;
     a.type = Cmd::AuditionOnly;
     a.flag = p.auditionOnly;
-    send(a);
+    if (!send(a)) {
+        allOk = false;
+        warnings["project"].push_back("audio command queue rejected audition mode update");
+    }
 
     std::string mods;
     for (const ModuleSpec& m : p.modules) {
