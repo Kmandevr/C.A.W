@@ -55,6 +55,8 @@ class _ProjectAutomation extends StatelessWidget {
     return NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         const Expanded(child: Text('PROJECT AUTOMATION', style: TextStyle(fontWeight: FontWeight.w800))),
+        IconButton(tooltip: 'Undo automation', onPressed: state.canUndoAutomation ? state.undoAutomation : null, icon: const Icon(Icons.undo, size: 18)),
+        IconButton(tooltip: 'Redo automation', onPressed: state.canRedoAutomation ? state.redoAutomation : null, icon: const Icon(Icons.redo, size: 18)),
         PopupMenuButton<String>(
           tooltip: 'Add parameter or global lane',
           enabled: options.isNotEmpty && state.project.automation.length < 256,
