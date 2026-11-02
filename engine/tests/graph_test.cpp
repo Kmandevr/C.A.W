@@ -59,6 +59,12 @@ TEST(graph_compiler_enforces_optional_count_budgets) {
     CHECK(compileGraph(nodes, {}, nodeBudget).error == GraphError::ResourceBudgetExceeded);
     const GraphResourceBudget connectionBudget{2, 0, 1024u * 1024u};
     CHECK(compileGraph(nodes, {{0, 0, 1, 0}}, connectionBudget).error == GraphError::ResourceBudgetExceeded);
+    const GraphResourceBudget tinyMemoryBudget{
+        std::numeric_limits<std::size_t>::max(),
+        std::numeric_limits<std::size_t>::max(),
+        1,
+    };
+    CHECK(compileGraph(nodes, {}, tinyMemoryBudget).error == GraphError::ResourceBudgetExceeded);
 }
 
 TEST(graph_compiler_has_no_arbitrary_node_or_connection_cap) {

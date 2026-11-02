@@ -28,7 +28,7 @@ struct GraphResourceBudget {
     // Count ceilings are optional host policy. By default there is no arbitrary object-count cap.
     std::size_t maxNodes = std::numeric_limits<std::size_t>::max();
     std::size_t maxConnections = std::numeric_limits<std::size_t>::max();
-    // Required: maximum internal working memory for compile or prepared execution.
+    // Required: maximum estimated internal working memory for compile or prepared execution.
     // Caller-owned GraphNode/GraphConnection storage and processor instances are excluded.
     std::size_t maxWorkingBytes = 0;
 };
