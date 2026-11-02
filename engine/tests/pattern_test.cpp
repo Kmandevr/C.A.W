@@ -425,3 +425,19 @@ TEST(pattern_lengths_can_exceed_4096_steps) {
     CHECK_EQ(parsed.pattern->notes.size(), size_t{1});
     CHECK_NEAR(parsed.pattern->notes[0].at, 4500.0, 1e-9);
 }
+
+TEST(pattern_curves_can_exceed_16_points) {
+    std::string source = "---\nkind: pattern\n---\n0 C4 1 bend";
+    for (int i = 0; i < 20; ++i) {
+        const double t = static_cast<double>(i) / 19.0;
+        const double value = static_cast<double>(i) / 19.0;
+        source += " " + std::to_string(t) + ":" + std::to_string(value);
+    }
+    source += "\n";
+    const PatternResult parsed = parsePattern(source);
+    CHECK(parsed.pattern != nullptr);
+    if (!parsed.pattern) return;
+    CHECK_EQ(parsed.pattern->expressions.size(), size_t{1});
+    CHECK_EQ(parsed.pattern->expressions[0].bend.points.size(), size_t{20});
+    CHECK_NEAR(parsed.pattern->expressions[0].bend.at(1.0), 1.0, 1e-6);
+}
