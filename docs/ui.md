@@ -1,13 +1,13 @@
 ---
 title: UI design
-summary: Retro-neon, arrangement-first creative UI across eight shared-state workspaces on desktop and mobile.
-updated: 2026-11-01
+summary: Arrangement-first creative UI across eight shared-state workspaces, with touch-first phone layouts and keyboard/mouse desktop access.
+updated: 2026-11-02
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
 # UI design
 
-The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use on a phone and a PC. It should stay light on CPU and RAM, and leave out recording and other hard features for now. Everything here is a **[Proposal]** for v2 unless it is marked otherwise. It builds on the v1 app ([app](app.md)) and the v2 features ([architecture](architecture.md#variables-and-patterns-proposal)).
+The owner's goal (2026-10-28) is a capable, lightweight music-production workspace that is easy to understand and use on a phone and a PC. The original early UI slice left recording and other hard features for later; the permanent [roadmap](roadmap.md) now includes recording and the wider production workflow as later stages. This document describes current UI behavior and interaction design, not a separate feature roadmap. The app reference ([app](app.md)) is authoritative for shipped behavior.
 
 ## Owner's choices (2026-10-28)
 
@@ -42,15 +42,13 @@ The owner's goal (2026-10-28): a halfway DAW that is easy to understand and use 
   - Teenage Engineering's EP-133 is praised for speed. Its main move, Commit, copies the current scene and moves you into the copy, so trying a variation is one action ([Sound On Sound](https://www.soundonsound.com/reviews/teenage-engineering-ep-133-ko-ii?amp)).
 - **Fingers need big targets and no hidden clicks.**
   - Google's Android guidance is at least 48dp touch targets (about 9 mm), spaced 8dp apart ([Android accessibility](https://support.google.com/accessibility/android/answer/7101858)).
-  - Clip launchers built for a mouse are too small for fingers. Bitwig sizes buttons for a fingertip and puts options on tap-and-hold ([Ardour forum](https://discourse.ardour.org/t/adapt-clip-launcher-cue-view-so-it-is-better-adapted-for-touch-screens/108603)).
-  - Griid Pro triggers scenes only from one edge of a button, so scrolling never launches one by accident ([Crossfadr](https://crossfadr.com/2011/06/29/review-griid-pro/)).
+  - Clip launchers built for a mouse are too small for fingers. Apps need touch-sized controls and options on tap-and-hold.
 - **Piano rolls are the hardest part on a phone.**
   - Fingers aren't as accurate as a mouse, and touch has no right-click. Apps need bigger notes and a tool bar instead of modifier keys. Users liked hearing a chord when they move a note, and selecting several notes at once ([Loopy Pro forum](https://forum.loopypro.com/discussion/comment/359423/)).
   - Research on mobile piano rolls points the same way ([ISMIR 2022](https://archives.ismir.net/ismir2022/latebreaking/000034.pdf)).
-- **Per-step values without menus.** Elektron's parameter locks let any step carry its own sound settings. Steps that carry them blink, so you can see where they are ([Elektron quick start](https://www.elektron.se/wp-content/uploads/2024/09/Know-How-Mono-Quick-Start.pdf), [Elektronauts](https://www.elektronauts.com/t/see-what-trigs-are-parameter-locked/231976)). Our per-note custom values work the same way.
+- **Per-step values without menus.** Elektron's parameter locks let any step carry its own sound settings. Steps that carry them blink, so you can see where they are ([Elektron quick start](https://www.elektron.se/wp-content/uploads/2024/09/Know-How-Mono-Quick-Start.pdf), [Elektronauts](https://www.elektronauts.com/t/see-what-trigs-are-parameter-locked/231976)).
 - **Curves drawn on the note.**
   - Bitwig draws micro-pitch on the note itself. Its curves are edited by adding points, moving them and bending the segments between them ([Bitwig user guide](https://www.bitwig.com/userguide/latest/inspecting_note_clips), [Admiral Bumblebee](https://www.admiralbumblebee.com/music/2017/06/16/bitwig-feature-review-note-expression)).
-  - Bitwig Studio 6 edits gain and the other expressions on the notes too ([Plugin Boutique](https://www.pluginboutique.com/products/16950-Bitwig-Studio-6)). This is the model for curved notes here.
 
 ## Arrangement workspace
 
@@ -62,7 +60,7 @@ The Arranger is the main composition view. It is a horizontal song timeline with
 - The track header keeps mute/solo and generator selection close to the timeline. The mixer panel edits the same track values, not a second copy of them.
 - Folders nest, can collapse, and can be organization-only or enabled as stereo group buses. Children route through the nearest enabled ancestor bus; folder volume and pan act on the summed group.
 - Volume and pan automation lanes are editable under a track. Points follow song time and are interpolated by the native engine. Clip automation and plugin/global parameter automation are not implemented yet.
-- Tapping empty timeline space sets the edit cursor; long-press-drag creates a time selection without blocking horizontal scrolling. Selected clips can be split at the selection end. Snap resolution is adjustable and Shift bypasses snapping. Audio clips remain deferred, but the clip model is kept type-extensible.
+- Tapping empty timeline space sets the edit cursor; long-press-drag creates a time selection without blocking horizontal scrolling. Selected clips can be split at the selection end. Snap resolution is adjustable and Shift bypasses snapping. Audio clips are planned for a later roadmap stage; they are not implemented in the current app.
 
 ## Layout
 
@@ -137,26 +135,20 @@ The broader UI specification below records design intent as well as current beha
   - The pattern model stays the source of truth while editing. It's turned into text only when saving or sending to the engine, not on every touch.
 - **Keys:** a key press is a lookup in a per-area table. Search and completion run only while the action list or `:` is open.
 - **Auto-update:** compiles off the UI thread after the pause you set. A change that doesn't compile costs nothing on the audio side.
-
 - **The audio never depends on the UI.** The C++ engine runs on its own thread ([engine](engine.md)), so a slow frame can't cause a dropout.
-- **Repaint only what moves:**
-  - Meters, the playhead and scopes each sit in a small repaint region of their own, driven by the existing 30 Hz meter ticker. Engine Lab's mono master scope and spectrum are read from the native scope buffer. The ticker runs only while playing and visible, and stops when the app is in the background.
-  - **[Fact]** Fixed 2026-10-28: the meters are read only while playing, and the app does nothing periodic when stopped ([performance](performance.md)).
-  - Community advice warns that a repaint boundary around something that changes every frame only adds cost, so measure ([blog](https://omr.it.com/blog/flutter-engine-raster-cache-tuning/)).
-- **Draw grids, not widgets:** the session grid, drum grid and piano roll are each one painter that draws only the visible area, not one widget per cell. Lists are built lazily.
-- **No heavy assets:**
-  - system fonts and no images; icons come from the built-in icon font
-  - animations limited to short state changes, with glow used sparingly (the owner's "neon, calm")
+- **Repaint only what moves:** meters, the playhead and scopes use bounded repaint regions. Engine Lab's master scope and spectrum read from the native scope buffer; polling stops when stopped or hidden ([performance](performance.md)).
+- **Draw grids, not widgets:** use painters for dense grids and lists built lazily; do not create a widget for every note or cell.
+- **No heavy assets:** system fonts, built-in icons and restrained short animations.
 - **Compact data:** patterns are flat arrays of note events in the engine. A layer's memory is fixed when it is set up, never while playing.
 - **Budgets (targets to measure, not facts yet):**
   - near 0% CPU from the UI when stopped
   - RAM under 150 MB on the S22+ with a 16-layer project
   - an APK under 30 MB (v1's artifact zip is about 25 MB)
-- **Measure with:** Flutter DevTools, and Perfetto on Android.
+- **Measure with:** Flutter DevTools and Perfetto on Android.
 
-## Not yet
+## Not yet implemented
 
-Recording audio or MIDI, audio clips, clip-following automation and automation of globals or module parameters remain out of scope for this slice ([roadmap](roadmap.md)).
+Audio recording, MIDI recording, audio clips, clip-following automation and module/global parameter automation are not part of the current implementation. They are planned at the later stages in the permanent [roadmap](roadmap.md).
 
 ## Performance profiles
 
