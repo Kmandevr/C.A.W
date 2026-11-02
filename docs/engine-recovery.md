@@ -13,11 +13,11 @@ updated: 2026-11-02
 
 - Branch: `feature/native-engine-refactor-integration`
 - Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
-- Current head: `72502e87cc67506479216edb6ff8128520b15031` (29 ahead, 0 behind).
+- Current branch tip at this status record: 32 ahead, 0 behind. Native code commit: `07c796f8e745cd44e7be37992747b8263ac27e9a`.
 - Starting point: `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`.
 - Issue: #28, open and in progress. PR: none.
 - Milestones: M0 verified; M1 in progress.
-- CI at current checkpoint: Engine `41401950333` and Docs `41401950277` passed. App `41401179166` passed Dart analysis/tests, Windows app and Android APK; no app code changed after that run.
+- Previous baseline CI: App `41401179166` passed Dart analysis/tests, Windows app and Android APK; no app code changed after that run. Docs `41402930329` passed at docs-only checkpoint `1370a43`. Engine `41402930328` passed Linux x64, Linux Arm64 and sanitizers, but Windows remained in Build over 15 minutes; identical code at `eb465f4` had already passed Windows. New graph-budget code commit `07c796f8` is awaiting fresh Engine/Docs CI.
 
 ## Read first
 
@@ -29,13 +29,13 @@ updated: 2026-11-02
 
 ## Critical recovery facts
 
-The graph compiler no longer has the former 1,024-node/8,192-connection caps and has regression tests above those values. The executor no longer has the former 8,192-frame cap. Engine, App and Docs CI are green at the checkpoints above.
+The graph compiler no longer has the former 1,024-node/8,192-connection caps and has regression tests above those values. The executor no longer has the former 8,192-frame cap. The new `GraphResourceBudget` requires explicit working bytes and checks estimated compile/prepared-buffer memory before allocation; optional node/connection caps default to unlimited. Its tests are added but the new code commit still awaits CI.
 
-The graph executor remains stereo-only with one audio input and output per node, no explicit buffer byte budget, and no integration into active Engine/VM playback. The active path still uses `Engine::setProject`, `processChunk`, `processSlot` and `runChain`. Do not claim graph integration is complete.
+The graph executor remains stereo-only with one audio input and output per node, and is not integrated into active Engine/VM playback. The new low-level byte budget is not yet derived from hardware or wired through Engine. The active path still uses `Engine::setProject`, `processChunk`, `processSlot` and `runChain`. Do not claim graph integration is complete.
 
 Important remaining risks include fixed 64 layer slots, 32 voices, 9 chain modules, parameter/import/export caps, 64-bar arrangement clamp, silent parser truncation, project-state exhaustion that leaves layers silent, a project command queue timeout that can drop installs, retirement overflow that can leak, and slot exhaustion that can skip a layer. See `docs/engine-progress.md` for exact limits and source behavior.
 
-M0 audit is complete; do not repeat the repository-wide investigation without new evidence. The next implementation step is explicit graph resource budgeting, followed by prepared project snapshot publication and safe ownership/retirement, then multi-domain graph execution and Engine/VM integration.
+M0 audit is complete; do not repeat the repository-wide investigation without new evidence. The next implementation step is to verify the new graph budget commit in CI and wire its budget from hardware-aware Engine policy, followed by prepared project snapshot publication and safe ownership/retirement, then multi-domain graph execution and Engine/VM integration.
 
 The owner explicitly reopened full graph/runtime integration despite the older pause comment on issue #28. The issue body and current owner comment reflect the current scope.
 

@@ -12,13 +12,13 @@ updated: 2026-11-02
 - **Branch:** `feature/native-engine-refactor-integration`
 - **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch is 29 commits ahead and 0 behind.
 - **Starting point:** `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`, which was 15 commits ahead and 0 behind Main when selected.
-- **Current head:** `72502e87cc67506479216edb6ff8128520b15031`.
-- **Last native code checkpoint:** `eb465f4a1489d30beb34801e52bc1e7ddc2e7577`; later commits through current head are documentation/continuity updates only.
+- **Current branch tip at this status record:** 32 commits ahead and 0 behind Main; the accompanying native code commit is `07c796f8e745cd44e7be37992747b8263ac27e9a`.
+- **Previous fully verified native code checkpoint:** `eb465f4a1489d30beb34801e52bc1e7ddc2e7577`. The new graph-budget code commit `07c796f8e745cd44e7be37992747b8263ac27e9a` is implemented but awaits CI.
 - **Issue:** #28, open and `status: in progress`.
 - **PR:** none. Open one coherent PR only when the complete refactor is genuinely reviewable. Do not merge or approve it.
 - **Current milestone:** M1 — core execution foundations (**IN PROGRESS**). M0 is **VERIFIED**.
-- **Last implementation step:** removed the graph compiler's former fixed 1,024-node/8,192-connection caps; changed duplicate-ID validation to hash-based lookup; report allocation/length failures as `OutOfMemory`; removed the executor's fixed 8,192-frame cap; corrected the node-source sentinel width; added large-graph and large-block regression tests.
-- **Implementation commits:** `979d25abcd7794731c58fbce72c7522bc442612e` (graph caps); `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a` (scalable validation/OOM); `eb465f4a1489d30beb34801e52bc1e7ddc2e7577` (large graph/block tests).
+- **Last implementation step:** introduced mandatory `GraphResourceBudget.maxWorkingBytes` for graph compilation and executor preparation; optional node/connection ceilings default to `size_t` maximum rather than imposing product caps. Preflight estimates internal working memory, returns distinct invalid-budget/budget-exceeded/size-overflow errors, and still reports real allocation failure as `OutOfMemory`. Duplicate IDs now use deterministic sorted lookup; adjacency and ready-heap storage are reserved before use.
+- **Implementation commits:** `979d25abcd7794731c58fbce72c7522bc442612e` (graph caps); `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a` (scalable validation/OOM); `eb465f4a1489d30beb34801e52bc1e7ddc2e7577` (large graph/block tests); `07c796f8e745cd44e7be37992747b8263ac27e9a` (explicit graph working-memory budget and boundary tests).
 - **Current code changed:** `engine/src/graph.h`, `engine/src/graph.cpp`, `engine/tests/graph_test.cpp`. No graph/VM playback integration has been implemented yet.
 
 ## M0 — repository recovery and architecture audit
@@ -36,7 +36,7 @@ updated: 2026-11-02
 
 - Existing foundations include the .caw compiler/VM, synth patch translation, layer/chain mixer, folder buses, module import/export wiring, project parameter/global automation, MIDI file import/export, MIDI 2.0 UMP decoding/queue, typed module descriptors, static module registry, graph compiler/executor/publication helper, dependency resolver, hardware policy and bounded background worker pool.
 - **Critical integration gap:** `Engine::setProject` compiles programs and creates legacy `Chain` instances. `Engine::process` calls `processChunk`, which manually schedules layers/buses; `processSlot`/`runChain` execute the VM. `GraphExecutor`, `GraphRuntime` and `ModuleRegistry` have no production references from Engine, VM, C API or Flutter.
-- The graph compiler now has no arbitrary fixed node/connection count cap. Node references remain `uint32_t` (a representation boundary); allocation failure is surfaced. The executor's former 8,192-frame cap is removed.
+- The graph compiler now has no arbitrary fixed node/connection count cap. `GraphResourceBudget` requires a non-zero `maxWorkingBytes`; optional `maxNodes`/`maxConnections` ceilings default to unlimited. Compile and executor preparation estimate their internal working set before allocating; the estimate excludes caller-owned graph input and processor instances, and actual allocator failure remains a separate `OutOfMemory` result. Node references remain `uint32_t` (a representation boundary); the executor's former 8,192-frame cap is removed. This budget is not yet derived from hardware or passed by the active Engine.
 - **Graph runtime is still limited:** stereo audio only, one input and one output per node, one driver per input port, 8–192 kHz. No multi-input mixing, multiple outputs, custom/multichannel channel mapping, control/modulation/event/MIDI runtime buffers, timestamped event scheduling, cross-domain conversion or delayed feedback edges. There is no explicit prepared-buffer byte budget yet.
 - `ModuleProcessor` is still a borrowed stereo-block contract. Port descriptors identify audio/control/modulation/event types, but typed descriptors do not provide runtime buffers for those domains.
 - `ModuleRegistry` is static/in-process only. No dynamic loader, production host adapter, capability negotiation or native crash isolation exists. Trusted native code is not sandboxed; the .caw VM remains the constrained untrusted-code path.
@@ -46,7 +46,7 @@ updated: 2026-11-02
 
 ## Fixed limits and correctness risks
 
-The graph node/connection caps and executor 8,192-frame cap are removed. The following limits and loss paths remain in the current source and must be converted to explicit, configurable resource budgets or dynamic storage:
+Graph compile/prepare now require an explicit working-memory budget and preflight internal storage estimates; allocator overhead is implementation-dependent, so actual allocation failure is still handled. The budget is not yet derived from hardware or passed by the active Engine. The following limits and loss paths remain in the current source and must be converted to explicit, configurable resource budgets or dynamic storage:
 
 - **Project structure:** 64 layers/slots; 9 modules per layer chain; project module parsing stops at 256; clips stop at 512 per layer; project automation lanes stop at 256; automation points stop at 128; dependency records above 4,096 are rejected; arrangement length/loop is clamped to 64 bars.
 - **VM/module:** 32 parameters; 64 synth parameters; 16 exports; 32 imports; 6 call arguments; 1,024 VM registers; 64 KiB source; 8 MiB state per module; 32 voices; compiler depth/call budgets.
@@ -60,7 +60,7 @@ The graph node/connection caps and executor 8,192-frame cap are removed. The fol
 | ID | Objective | Status | Evidence / remaining work |
 |---|---|---|---|
 | M0 | Repository recovery and architecture audit | **VERIFIED** | Instructions, design/status docs, source, tests, workflows, branch/PR/issue state and app bridge inspected. Confirmed PR #68 merged, no open PRs, current branch ancestry and CI. |
-| M1 | Core execution foundations, lifecycle, buffers, ownership and graph publication | **IN PROGRESS (PARTIAL)** | Graph compiler scaling and large-size tests are implemented. Add explicit resource budgets, prepared processor ownership/lifecycle, project snapshot publication, safe retirement and integrate execution with Engine/VM. |
+| M1 | Core execution foundations, lifecycle, buffers, ownership and graph publication | **IN PROGRESS (PARTIAL)** | Graph scaling, explicit working-memory budget, deterministic ID validation and large-size/budget tests are implemented in code commit 07c796f8; CI is pending. Still needs hardware-derived Engine budget wiring, prepared processor ownership/lifecycle, project snapshot publication, safe retirement and Engine/VM integration. |
 | M2 | Universal typed routing | **NOT STARTED (FOUNDATION PARTIAL)** | Descriptors exist, but runtime remains stereo audio one-in/one-out. Add multichannel, fan-in/fan-out, buses/sends/returns, sidechains, control/modulation/events/MIDI and delayed feedback. |
 | M3 | Unified parameters/modulation/automation | **IN PROGRESS (PARTIAL)** | Synth modulation and project parameter/global automation exist. Unify manual controls, automation, modulation, MIDI/controller mappings, note expression and sidechain-derived control across VM/native modules/tracks/buses. |
 | M4 | Extensibility and mathematical processing | **IN PROGRESS (PARTIAL)** | .caw VM and static registry exist. Add capability declarations, stable API/state versioning, ownership, failure/bypass and advanced extension paths. Native in-process code remains trusted, not sandboxed. |
@@ -71,9 +71,9 @@ The graph node/connection caps and executor 8,192-frame cap are removed. The fol
 
 ## Verification record
 
-- **Current branch head:** `72502e87cc67506479216edb6ff8128520b15031`; 29 commits ahead, 0 behind Main.
-- **Engine:** workflow `41401950333` at current head — Linux x64, Linux Arm64, Windows x64 and Linux sanitizers all **SUCCESS**. The Linux CTest suite reports all four shards passed.
-- **Docs/hygiene:** workflow `41401950277` at current head — **SUCCESS**.
+- **Current branch tip at this status record:** 32 commits ahead, 0 behind Main; native code commit `07c796f8e745cd44e7be37992747b8263ac27e9a` is the implementation checkpoint recorded here.
+- **Latest graph-budget code commit:** `07c796f8` has not yet completed CI. The preceding docs-only checkpoint `1370a43` had Engine workflow `41402930328`: Linux x64, Linux Arm64 and Linux sanitizers passed; Windows remained in the Build step for over 15 minutes. The identical native code at `eb465f4` had already passed Windows x64 in Engine run `41401179084`; the new graph-budget code must receive a fresh Windows result before it is considered verified.
+- **Docs/hygiene:** workflow `41402930329` passed at the preceding docs-only checkpoint `1370a43`; the new status/code commit will trigger a fresh Docs check.
 - **App:** workflow `41401179166` at code checkpoint `eb465f4` — Dart analysis, Dart tests, Windows app and Android APK all **SUCCESS**. No app source changed after that run.
 - **Earlier Engine/Docs:** `41401179084` and `41401179017` at `eb465f4` both passed.
 - **Earlier Docs failure:** `41401014639` failed because progress/recovery docs were not linked from `docs/index.md`; fixed in `d1677c7`, later Docs workflows passed. Do not repeat this omission.
@@ -82,7 +82,7 @@ The graph node/connection caps and executor 8,192-frame cap are removed. The fol
 
 ## Exact next actions
 
-1. Add an explicit, host-configurable graph resource budget. Check node/edge and prepared-buffer memory requirements before allocation; distinguish budget exhaustion from allocator failure and test overflow/boundary cases.
+1. Wire `GraphResourceBudget` into a hardware-derived `EngineResourceBudget`; validate estimates against real allocator behavior and add profiling/overflow tests. The lower-level graph API and budget-boundary tests are implemented but the current code commit still needs CI verification.
 2. Establish a prepared project/runtime snapshot as the publication unit. Build modules, graph, routing, schedules, buffers and migration plan off the callback; publish atomically at a block boundary; reclaim old snapshots off the callback. Replace per-layer partial project command submission with a transactional update. Fix command timeout/drop, retirement overflow/leak and slot-exhaustion loss.
 3. Generalize the module process contract and graph executor: multichannel/custom layouts, multiple inputs/outputs, fan-in/fan-out, channel mapping, audio/control/modulation/event/MIDI buffers, timestamp ordering and explicit delayed feedback boundaries.
 4. Integrate the prepared graph with existing VM instances, voices, patterns, imports/exports, automation, folder buses, offline rendering and state migration. Do not create a second engine.
