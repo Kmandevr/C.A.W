@@ -296,9 +296,13 @@ TEST(project_parser_rejects_automation_payload_over_memory_budget) {
     }
     json += "]}]}";
     ProjectSpec project;
-    std::string error;
+    project.name = "previous valid project";
+    project.modules.push_back({"stale", "sine(440)", {}});
+    std::string error = "stale error";
     CHECK(!parseProject(json, project, error));
     CHECK(has(error, "8 MiB parser memory budget"));
+    CHECK(project.name.empty());
+    CHECK(project.modules.empty());
 }
 
 
