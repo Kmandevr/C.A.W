@@ -24,7 +24,8 @@ struct Engine::AutomationData {
 
 struct Engine::ExportPool {
     size_t capacityPerSlot = 0;
-    std::vector<std::array<double, kBlock>> buffers;
+    std::vector<std::array<double, kBlock>*> pointers;
+    std::vector<std::unique_ptr<std::array<double, kBlock>>> buffers;
 };
 
 // Per-layer audio and meter state. Fields above `vol` belong to the audio thread.
@@ -58,7 +59,7 @@ struct Engine::Slot {
     std::atomic<float> scope[kScopeSize];
     std::atomic<int> scopePos{0};
 
-    std::array<double, kBlock>* exportBuf = nullptr;  // stable slice in Engine::ExportPool
+    std::array<double, kBlock>** exportBuf = nullptr;  // stable slice in Engine::ExportPool
     size_t exportCapacity = 0;
     size_t exportCount = 0;  // grows to the largest active chain export count; audio-thread owned
     int64_t visited = -1;                         // chunk id when last processed
@@ -887,8 +888,9 @@ std::string Engine::setProject(const ProjectSpec& p) {
         }
     }
 
-    // Reserve stable per-slot export slices from the Engine's graph-working memory share.
-    // The pool is allocated once and never moved, so existing import pointers remain valid.
+    // Reserve a stable pointer table from the graph-working budget. Individual buffers are
+    // allocated only when a project needs them; their addresses never move during Engine life.
+    std::vector<size_t> requiredExportsPerSlot(static_cast<size_t>(kSlots), 0);
     size_t maxExportsPerSlot = 0;
     for (const Planned& pl : plan) {
         if (pl.ls.slot < 0 || pl.ls.slot >= kSlots || pl.ids.empty()) continue;
@@ -898,11 +900,13 @@ std::string Engine::setProject(const ProjectSpec& p) {
             if (module != modules_.end() && module->second.program)
                 count += module->second.program->exports.size();
         }
+        requiredExportsPerSlot[static_cast<size_t>(pl.ls.slot)] = count;
         maxExportsPerSlot = std::max(maxExportsPerSlot, count);
     }
     if (maxExportsPerSlot > 0) {
-        constexpr uint64_t bytesPerSlotExport = static_cast<uint64_t>(kBlock) * sizeof(double);
-        const uint64_t bytesPerAllSlots = static_cast<uint64_t>(kSlots) * bytesPerSlotExport;
+        constexpr uint64_t bytesPerBuffer = static_cast<uint64_t>(kBlock) * sizeof(double);
+        constexpr uint64_t bytesPerPointer = sizeof(std::array<double, kBlock>*);
+        const uint64_t bytesPerAllSlots = static_cast<uint64_t>(kSlots) * (bytesPerBuffer + bytesPerPointer);
         const size_t budgetCapacity = bytesPerAllSlots == 0 ? 0 :
             static_cast<size_t>(resourceBudget_.graphWorkingBytes / bytesPerAllSlots);
         if (!exportPool_) {
@@ -911,17 +915,32 @@ std::string Engine::setProject(const ProjectSpec& p) {
             try {
                 auto pool = std::make_unique<ExportPool>();
                 pool->capacityPerSlot = budgetCapacity;
-                pool->buffers.resize(budgetCapacity * static_cast<size_t>(kSlots));
+                pool->pointers.resize(budgetCapacity * static_cast<size_t>(kSlots), nullptr);
                 for (int slot = 0; slot < kSlots; ++slot) {
-                    slots_[slot].exportBuf = pool->buffers.data() + static_cast<size_t>(slot) * budgetCapacity;
+                    slots_[slot].exportBuf = pool->pointers.data() + static_cast<size_t>(slot) * budgetCapacity;
                     slots_[slot].exportCapacity = budgetCapacity;
                 }
                 exportPool_ = std::move(pool);
             } catch (const std::bad_alloc&) {
-                return R"({"ok":false,"error":"unable to allocate export buffers within the hardware-derived memory budget"})";
+                return R"({"ok":false,"error":"unable to allocate the export pointer table within the hardware-derived memory budget"})";
             }
         } else if (maxExportsPerSlot > exportPool_->capacityPerSlot) {
-            return R"({"ok":false,"error":"project requires more exports per layer than the existing stable export pool supports"})";
+            return R"({"ok":false,"error":"project requires more exports per layer than the hardware-derived stable export pool supports"})";
+        }
+        try {
+            for (int slot = 0; slot < kSlots; ++slot) {
+                const size_t required = requiredExportsPerSlot[static_cast<size_t>(slot)];
+                for (size_t index = 0; index < required; ++index) {
+                    if (slots_[slot].exportBuf[index]) continue;
+                    auto buffer = std::make_unique<std::array<double, kBlock>>();
+                    buffer->fill(0.0);
+                    auto* stable = buffer.get();
+                    exportPool_->buffers.push_back(std::move(buffer));
+                    slots_[slot].exportBuf[index] = stable;
+                }
+            }
+        } catch (const std::bad_alloc&) {
+            return R"({"ok":false,"error":"unable to allocate the required export buffers within the hardware-derived memory budget"})";
         }
     }
 
@@ -937,7 +956,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         for (const std::string& id : pl.ids) {
             const ModuleState& m = modules_.at(id);
             for (const ExportDef& e : m.program->exports) {
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, slots_[pl.ls.slot].exportBuf[buf].data()});
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, slots_[pl.ls.slot].exportBuf[buf]->data()});
                 ++buf;
             }
         }
@@ -1707,7 +1726,7 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
         if (exportTo && exportTo->exportBuf)
             for (const auto& [reg, buf] : c.exportMap[idx])
                 if (buf < exportTo->exportCapacity)
-                    std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf].data() + offset);
+                    std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf]->data() + offset);
     }
     std::copy_n(input, len, out);
 }
@@ -2131,7 +2150,7 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                     s.contiguous = false;
                     if (s.exportBuf)
                         for (size_t b = 0; b < s.exportCount; ++b)
-                            std::fill_n(s.exportBuf[b].data(), m, 0.0);
+                            std::fill_n(s.exportBuf[b]->data(), m, 0.0);
                     if (s.pending) { swapIn(s, s.pending); s.pending = nullptr; }
                     if (s.removing) {
                         retire(s.cur, -1, s.pattern);
