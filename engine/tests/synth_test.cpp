@@ -411,3 +411,11 @@ TEST(synth_oscillator_phase_warp_is_exposed_and_changes_the_waveform) {
         difference = std::max(difference, std::fabs(dry[i] - shaped[i]));
     CHECK(difference > 1e-4);
 }
+
+TEST(synth_patch_can_expose_more_than_64_parameters) {
+    std::string many = kPatch + "osc a\n";
+    for (int i = 0; i < 30; ++i) many += "fx delay\n";
+    const SynthResult translated = translateSynth(many);
+    CHECK(translated.ok);
+    if (translated.ok) CHECK(translated.program->params.size() > 64);
+}
