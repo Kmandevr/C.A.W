@@ -1704,8 +1704,10 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
         ctx.vars[static_cast<int>(Var::Rate)] = c.rateb;
         ctx.vars[static_cast<int>(Var::In)] = input;
         input = inst->process(ctx);
-        if (exportTo)
-            for (const auto& [reg, buf] : c.exportMap[idx]) std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf].data() + offset);
+        if (exportTo && exportTo->exportBuf)
+            for (const auto& [reg, buf] : c.exportMap[idx])
+                if (buf < exportTo->exportCapacity)
+                    std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf].data() + offset);
     }
     std::copy_n(input, len, out);
 }
@@ -1841,8 +1843,10 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         int newest = -1;
         for (int v = 0; v < c.voiceCount; ++v)
             if (c.voices[v].active && (newest < 0 || c.voices[v].started > c.voices[newest].started)) newest = v;
-        if (exportTo)
-            for (const auto& [reg, buf] : c.exportMap[0]) std::fill_n(exportTo->exportBuf[buf].data() + offset + o, n, 0.0);
+        if (exportTo && exportTo->exportBuf)
+            for (const auto& [reg, buf] : c.exportMap[0])
+                if (buf < exportTo->exportCapacity)
+                    std::fill_n(exportTo->exportBuf[buf].data() + offset + o, n, 0.0);
         BlockCtx ctx = base;
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
@@ -1928,8 +1932,10 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
                 v.lastY = s;
                 if (!v.gate) v.quiet = std::fabs(s) < kQuietLevel ? v.quiet + 1 : 0;
             }
-            if (exportTo && vi == newest)
-                for (const auto& [reg, buf] : c.exportMap[0]) std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf].data() + offset + o);
+            if (exportTo && exportTo->exportBuf && vi == newest)
+                for (const auto& [reg, buf] : c.exportMap[0])
+                    if (buf < exportTo->exportCapacity)
+                        std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf].data() + offset + o);
             if (!v.gate && (v.quiet >= quietMax || v.rel >= relMax || (engineFade && v.rel >= fadeLen))) {
                 c.declick += v.lastY;  // ending a voice that is still sounding: smooth over the jump
                 v.active = false;
