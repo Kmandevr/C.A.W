@@ -906,7 +906,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
     if (maxExportsPerSlot > 0) {
         constexpr uint64_t bytesPerBuffer = static_cast<uint64_t>(kBlock) * sizeof(double);
         constexpr uint64_t bytesPerPointer = sizeof(std::array<double, kBlock>*);
-        const uint64_t bytesPerAllSlots = static_cast<uint64_t>(kSlots) * (bytesPerBuffer + bytesPerPointer);
+        constexpr uint64_t bytesPerOwner = sizeof(std::unique_ptr<std::array<double, kBlock>>);
+        const uint64_t bytesPerAllSlots = static_cast<uint64_t>(kSlots) * (bytesPerBuffer + bytesPerPointer + bytesPerOwner);
         const size_t budgetCapacity = bytesPerAllSlots == 0 ? 0 :
             static_cast<size_t>(resourceBudget_.graphWorkingBytes / bytesPerAllSlots);
         if (!exportPool_) {
@@ -916,6 +917,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 auto pool = std::make_unique<ExportPool>();
                 pool->capacityPerSlot = budgetCapacity;
                 pool->pointers.resize(budgetCapacity * static_cast<size_t>(kSlots), nullptr);
+                pool->buffers.reserve(budgetCapacity * static_cast<size_t>(kSlots));
                 for (int slot = 0; slot < kSlots; ++slot) {
                     slots_[slot].exportBuf = pool->pointers.data() + static_cast<size_t>(slot) * budgetCapacity;
                     slots_[slot].exportCapacity = budgetCapacity;
