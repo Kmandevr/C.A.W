@@ -3,7 +3,7 @@
 
 An experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine and CLI are also built/tested on Linux and Windows CI targets. The app currently provides eight workspaces for code-based sound creation, pattern editing, arrangement, mixing, inspection, automation, file management and export. Audio runs locally; WAV and MIDI exports support handoff to other music tools.
 
-**Current status:** Android and Windows app builds are produced by CI. The app has eight workspaces, but not every planned capability is implemented. See [App](docs/app.md) for shipped behavior, [Engine status](docs/engine-build-status.md) for native implementation boundaries, and the [Core development plan](docs/core-and-feature-plan.md) for planned work.
+**Current status:** Android and Windows app builds are produced by CI. The app has eight workspaces, but not every planned capability is implemented. See [App](docs/app.md) for shipped behavior, [Engine status](docs/engine-build-status.md) for native implementation boundaries, and the [permanent roadmap](docs/roadmap.md) for planned work and sequencing.
 
 ## Where things are
 
@@ -12,7 +12,7 @@ An experimental, code-driven sound-design and music workspace. The current Flutt
 | `engine/` | The C++20 sound engine: module language, standard library, mixer, WAV exports, C API, the `caw` CLI and tests ([reference](docs/engine.md), [functions](docs/library.md), [agent guide](docs/agent-guide.md)) |
 | `app/` | Flutter app for Android and Windows with eight workspaces ([app](docs/app.md)) |
 | `examples/` | Starter sound modules (`.caw`), built into the engine as templates |
-| `docs/` | Project documentation: current app/engine facts, decisions, architecture, roadmap and feature plans ([index](docs/index.md)) |
+| `docs/` | Project documentation: current app/engine facts, decisions, architecture and the permanent roadmap ([index](docs/index.md)) |
 | `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository |
 | `.github/` | Issue and PR templates, CODEOWNERS, Dependabot, and the workflows below |
 | `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, hooks ([.claude/README.md](.claude/README.md)) |
