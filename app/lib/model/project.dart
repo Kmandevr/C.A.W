@@ -399,7 +399,19 @@ class ProjectDoc {
     }
     project.libraryFolders = safeFolders.toList()..sort();
 
-    // Keep persisted clips and automation inside the same bounds enforced by the native parser.
+    project.automation = project.automation.where((lane) =>
+      lane.target.isNotEmpty && (lane.targetType == 'global' ||
+        (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true)))
+      .take(256).toList();
+    for (final lane in project.automation) {
+      lane.points = lane.points.take(128).toList()
+        ..forEach((point) {
+          point.step = point.step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
+          point.value = point.value.clamp(-1000000.0, 1000000.0).toDouble();
+        })
+        ..sort((a, b) => a.step.compareTo(b.step));
+    }
+    // Keep persisted track automation inside the same bounds enforced by the native parser.
     for (final layer in project.layers) {
       for (final clip in layer.clips) {
         clip.startSteps = clip.startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
