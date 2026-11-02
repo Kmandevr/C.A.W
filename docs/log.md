@@ -1,4 +1,4 @@
-- 2026-11-02: Repaired the current red native CI inventory on `feature/native-engine-refactor-integration`. Project JSON automation no longer truncates at 128 points; parser input has an 8 MiB memory budget; the obsolete automation-lane count test now checks a byte-budget rejection; MIDI tests allow legitimate patterns above 4,096 steps; the nine-effect synth test now emits real newlines; routing/automation tests respect the VM's normalized output contract; and project memory-budget coverage injects a deterministic one-byte state budget. Engine run `41495601022` passed Windows x64, Linux x64, Linux ARM64 and sanitizers; App `41495601172` and Docs `41495601067` passed at `fa438f87`. Follow-up commit `5bd40eb` clears stale ProjectSpec/error state before rejecting oversized input; regression added in `1c88f05`, with Engine `41503176374` / App `41503176276` pending and Docs `41503176230` passed at update time.\n---
+---
 title: Log
 summary: Dated history of changes, newest first.
 updated: 2026-11-02
@@ -7,6 +7,8 @@ updated: 2026-11-02
 # Log
 
 - 2026-11-02: Added callback-safe retirement backpressure to the native Engine. SPSC now supports non-consuming peek and writable-capacity inspection; command processing reserves worst-case retirement capacity, and callback-side swaps/removals defer instead of dropping object ownership when the retirement queue plus pending list are full. Added queue-capacity regression coverage. Engine/App/Docs CI pending at the current checkpoint.
+
+- 2026-11-02: Follow-up parser safety: `parseProject` clears prior `ProjectSpec` output and stale error text before rejecting JSON over the 8 MiB input budget; regression coverage verifies stale state is not retained.
 
 - 2026-11-02: M0 repository recovery and architecture audit is verified. Confirmed PR #68 is merged, no open PR exists, and feature/native-engine-refactor-integration is 29 commits ahead/0 behind Main. Completed inspection of parameter/automation, MIDI, persistence/state migration, scheduler, project serialization, C API, Flutter bridge, relevant tests and CI. The active graph executor remains unintegrated; see engine-progress.md for the complete audit.
 - 2026-11-02: M1 first code slice removes the graph compiler's former 1,024-node/8,192-connection caps and the executor's 8,192-frame cap, adds allocation-failure reporting, fixes node-source sentinel width and tests 8,195 nodes/8,194 edges/8,193 frames. Code commit 07c796f adds mandatory graph working-memory budgets, optional caller-supplied count ceilings, preflight compile/executor estimates and boundary tests. It passed Engine, App and Docs CI at checkpoint 1269019. Follow-up commit e815b495 adds direct compiler working-set rejection coverage; its CI is pending.
