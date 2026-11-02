@@ -151,7 +151,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     if (lane.target != "volume" && lane.target != "pan") continue;
                     if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                         for (const Json& point : points->arr) {
-                            if (point.type != Json::Type::Object || lane.points.size() >= 128) continue;
+                            if (point.type != Json::Type::Object) continue;
                             lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
                                 clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1, 1)});
                         }
@@ -168,10 +168,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         }
     }
     if (const Json* lanes = root.get("automation"); lanes && lanes->type == Json::Type::Array) {
-        if (lanes->arr.size() > 256) {
-            error = "a project holds at most 256 parameter/global automation lanes";
-            return false;
-        }
         for (const Json& laneJson : lanes->arr) {
             if (laneJson.type != Json::Type::Object) continue;
             ProjectAutomationLaneSpec lane;
