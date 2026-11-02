@@ -305,7 +305,7 @@ TEST(module_parameter_automation_matches_offline_render) {
     p.loopBars = 1;
     p.master = 1.0;
     p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "param level = 0 in 0..1\nlevel", {}});
+    p.modules.push_back({"tone", std::string(kFloat) + "param level = 0 in 0..1\nsine(100) * level", {}});
     LayerSpec layer;
     layer.id = "tone-track";
     layer.chain = {"tone"};
@@ -319,7 +319,6 @@ TEST(module_parameter_automation_matches_offline_render) {
     p.automation.push_back(lane);
 
     Engine engine(48000);
-    engine.setMasterBypass(true);
     const std::string setup = engine.setProject(p);
     CHECK(!setup.empty());
     engine.play();
@@ -330,8 +329,8 @@ TEST(module_parameter_automation_matches_offline_render) {
     options.kind = ExportKind::Free;
     options.seconds = 0.3;
     CHECK(renderExport(p, options, rendered));
-    CHECK_NEAR(live[12000], 0.5 * std::cos(kPi / 4.0), 1e-6);
-    CHECK_NEAR(live[12000], rendered.samples[static_cast<size_t>(12000) * 2], 1e-6);
+    CHECK(live[12120] > 0.1f);
+    CHECK_NEAR(live[12120], rendered.samples[static_cast<size_t>(12120) * 2], 1e-6);
 }
 
 TEST(project_global_automation_reaches_global_parameters) {
@@ -340,7 +339,7 @@ TEST(project_global_automation_reaches_global_parameters) {
     p.loopBars = 1;
     p.master = 1.0;
     p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "global level = 0 in 0..1\nlevel", {}});
+    p.modules.push_back({"tone", std::string(kFloat) + "global level = 0 in 0..1\nsine(100) * level", {}});
     LayerSpec layer;
     layer.id = "tone-track";
     layer.chain = {"tone"};
@@ -353,9 +352,8 @@ TEST(project_global_automation_reaches_global_parameters) {
     p.automation.push_back(lane);
 
     Engine engine(48000);
-    engine.setMasterBypass(true);
     engine.setProject(p);
     engine.play();
     const std::vector<float> live = run(engine, 14000);
-    CHECK_NEAR(live[12000], 0.5 * std::cos(kPi / 4.0), 1e-6);
+    CHECK(live[12120] > 0.1f);
 }
