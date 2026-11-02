@@ -6,6 +6,9 @@ updated: 2026-11-02
 
 # Log
 
+- 2026-11-02: Added adaptive concurrency and batching as foundational engine requirements, including dependency-aware scheduling, bounded worker pools, SIMD/accelerator selection, deterministic behavior, deadline-safe fallbacks and measurement of total overhead.
+
+
 - 2026-11-02: Expanded the engine foundation requirements to target universal creative capability, typed audio/MIDI/control routing, first-class cross-domain sidechains, feedback networks, and resource-based rather than arbitrary architectural limits.
 
 - 2026-11-02: Added safe extensibility requirements so developers can implement unconventional creative behavior through declared, bounded extension points without compromising core stability, real-time safety or project compatibility.
