@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -339,16 +340,16 @@ std::string writePattern(Collected& c, const MidiImportOptions& o) {
             }
         }
     }
-    const int64_t limit = static_cast<int64_t>(kMaxPatternSteps) * c.ppq / 4;
+    const int64_t limit = static_cast<int64_t>(std::numeric_limits<int>::max()) * c.ppq / 4;
     int64_t lastEnd = 0;
     for (const RawNote& n : v) lastEnd = std::max(lastEnd, n.off);
-    if (lastEnd > limit) throw Fail{"the notes last longer than " + std::to_string(kMaxPatternSteps) + " steps, the most a pattern holds"};
+    if (lastEnd > limit) throw Fail{"the MIDI notes exceed the pattern step-index representation"};
 
     // Length: whole bars of the file's first time signature (4/4 without one), rounded up to a whole step.
     const double barSteps = c.tsNum * 16.0 / static_cast<double>(1 << c.tsDenPow);
     const double endSteps = static_cast<double>(lastEnd) * 4.0 / static_cast<double>(c.ppq);
     const double bars = std::max(1.0, std::ceil(endSteps / barSteps - 1e-9));
-    const int length = static_cast<int>(std::min<double>(kMaxPatternSteps, std::ceil(bars * barSteps - 1e-9)));
+    const int length = static_cast<int>(std::clamp(std::ceil(bars * barSteps - 1e-9), 1.0, static_cast<double>(std::numeric_limits<int>::max())));
 
     std::string name = o.name.empty() ? c.name : cleanName(o.name);
     if (name.empty()) name = "Imported MIDI";
