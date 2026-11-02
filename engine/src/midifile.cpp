@@ -519,7 +519,7 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
         if (sg.extra >= 0 && static_cast<size_t>(sg.extra) < p.expressions.size()) {
             const NoteExpression& x = p.expressions[static_cast<size_t>(sg.extra)];
             double most = 0;
-            for (int i = 0; i < x.bend.count; ++i) most = std::max(most, std::fabs(static_cast<double>(x.bend.v[i])));
+            for (const CurvePoint& point : x.bend.points) most = std::max(most, std::fabs(static_cast<double>(point.v)));
             w += most + x.vibDepth;
         }
         widest = std::max(widest, w);
@@ -561,7 +561,7 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
             const double u = std::clamp(into / static_cast<double>(s.sounding), 0.0, 1.0);
             double b = s.pitch - key;
             if (x) {
-                if (x->bend.count) b += x->bend.at(u);
+                if (!x->bend.points.empty()) b += x->bend.at(u);
                 if (x->vibDepth > 0) {
                     const double fade = x->vibDelay > 0 ? std::min(1.0, u / x->vibDelay) : 1.0;
                     b += x->vibDepth * fade * detSin(kTwoPi * x->vibRate * into / ticksPerSecond);
@@ -573,8 +573,8 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
         const uint8_t pb = static_cast<uint8_t>(0xE0 | ch), cp = static_cast<uint8_t>(0xD0 | ch), cc = static_cast<uint8_t>(0xB0 | ch);
         // Before the note on: where its expression starts (MPE sends these first so the attack is already right).
         int lastPb = bendAt(s.on);
-        uint8_t lastPress = to7(x && x->press.count ? x->press.at(0) : 1.0);
-        uint8_t lastTimbre = to7(x && x->timbre.count ? x->timbre.at(0) : 0.0);
+        uint8_t lastPress = to7(x && !x->press.points.empty() ? x->press.at(0) : 1.0);
+        uint8_t lastTimbre = to7(x && !x->timbre.points.empty() ? x->timbre.at(0) : 0.0);
         ev.push_back({s.on, 2, {pb, static_cast<uint8_t>(lastPb & 0x7F), static_cast<uint8_t>(lastPb >> 7)}, 3});
         ev.push_back({s.on, 2, {cc, 74, lastTimbre}, 3});
         ev.push_back({s.on, 2, {cp, lastPress, 0}, 2});
