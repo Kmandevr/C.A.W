@@ -10,14 +10,14 @@ updated: 2026-11-02
 ## Current state
 
 - **Branch:** `feature/native-engine-refactor-integration`
-- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison at code checkpoint `8ddbb1bf`: 191 commits ahead, 0 behind Main.
+- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; latest live comparison at `1c88f05e` is 200 commits ahead and 0 behind Main.
 - **Starting point:** `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`, which was 15 commits ahead and 0 behind Main when selected.
-- **Latest code checkpoint:** `8ddbb1bfabba5ca4eec6d3238e7a617d4dac0286` (Engine CI red); see `docs/engine-recovery.md` for exact failure inventory.
-- **Previous fully verified native code checkpoint:** `07c796f8e745cd44e7be37992747b8263ac27e9a`. Latest Engine run `41455843126` failed all four jobs; App `41455843138` and Docs `41455843017` passed.
+- **Latest code checkpoint:** `1c88f05e762eab3536a2a8ab6b599e71ee47ae9a`; follow-up parser failure-state cleanup and regression test. Its CI runs `41503176374` (Engine), `41503176276` (App) and `41503176230` (Docs) were pending/pending/passed when recorded.
+- **Previous fully verified full CI checkpoint:** `fa438f874571550515bccdeb193e1dde72747286`; Engine `41495601022` passed all four native jobs, App `41495601172` passed all four jobs, Docs `41495601067` passed.
 - **Issue:** #28, open and `status: in progress`.
 - **PR:** none. Open one coherent PR only when the complete refactor is genuinely reviewable. Do not merge or approve it.
 - **Current milestone:** M1 — core execution foundations (**IN PROGRESS**). M0 is **VERIFIED**.
-- **Last implementation step:** removed the fixed 16-export ceiling and added stable per-slot export pointer tables. Its end-to-end route test currently fails; dynamic automation, parser and budget regression tests also remain red. Fix these before extending the engine.
+- **Last implementation step:** repaired the CI regression set: removed the 128-point project automation truncation, added parser input memory budgeting, corrected invalid test assumptions/fixtures, and made project-state budget testing deterministic. Follow-up ensures an oversized parse clears stale output state. Original failures are covered by Engine CI pass at `fa438f87`; follow-up parser cleanup awaits CI.
 - **Implementation commits:** graph scaling/budgets: `979d25abcd7794731c58fbce72c7522bc442612e`, `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a`, `eb465f4a1489d30beb34801e52bc1e7ddc2e7577`, `07c796f8e745cd44e7be37992747b8263ac27e9a`, `e815b495a8055e58fd9f7079641173f24aa251d4`; latest VM capacity code/test checkpoint: `8f43d76036cadcc3998eed6747a94d9e0c3f0480`. See docs/log.md for intermediate code commits.
 - **Current code changed:** graph, project parser, Engine, VM/compiler/program contracts, MIDI/pattern/synth parsing and associated tests. No graph/VM playback integration has been implemented yet.
 
@@ -44,7 +44,7 @@ updated: 2026-11-02
 - The app C API/FFI remains API v1. The app submits project compilation, source checks and offline WAV renders to the native worker pool; it does not submit graph execution or native module work.
 - Existing synth modulation, sidechain ducking effects, per-note expression and project automation are partial foundations, not the unified parameter/routing system requested.
 
-## Latest implementation slice — dynamic effect-chain length
+## Latest implementation slice — parser failure-state safety (unverified)\n\n- `parseProject` now clears its output object and error string before applying the 8 MiB JSON input budget. A rejected oversized document cannot leave a caller's previous project appearing valid. Regression test pre-populates project state and verifies it is cleared on rejection. Commit `5bd40eb` contains implementation; `1c88f05` adds the regression. CI runs `41503176374` / `41503176276` pending at documentation update.\n\n## Latest implementation slice — dynamic effect-chain length
 
 - Removed the fixed nine-module/eight-effect limit from ProjectSpec, project JSON chain parsing, Engine chain preparation and synth patch parsing.
 - The project parser now preserves every string module ID in a chain; Engine no longer warns and truncates the chain after its ninth entry; synth patch translation no longer rejects the ninth effect.
