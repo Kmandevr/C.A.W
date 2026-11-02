@@ -2,14 +2,14 @@
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
 covers: [engine/, app/]
-updated: 2026-10-31
+updated: 2026-11-01
 ---
 
 # Modular engine implementation status
 
 This is the implementation ledger for the unified modular engine. A documented contract is not the same thing as a running feature. Status below separates code that exists from code that still needs integration or verification.
 
-## Implemented in the current branch
+## Implemented in the current repository snapshot
 
 - Portable deterministic workload policy for audition, preview, background generation, offline render and idle workloads.
 - App-side native job integration: the Flutter host binds the native hardware probe and workload planner, then submits project compilation, async source checks and offline WAV renders to the C++ `AdaptiveWorkerPool`. Dart owns job handles, polls status/progress and reads results; native workers never call Dart. Project jobs retain their engine handle until completion. Live platform pressure is not yet supplied.

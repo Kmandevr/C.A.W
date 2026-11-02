@@ -1,11 +1,13 @@
 ---
 title: Engine integration contract
 summary: How CAW's shared native engine is consumed by projects, add-ons, the app, the library and external build targets.
-covers: [engine/include/caw.h, engine/src/worker_api.cpp, app/lib/engine/bindings.dart, app/lib/engine/execution.dart]
-updated: 2026-10-31
+covers: [engine/, app/]
+updated: 2026-11-01
 ---
 
 # Engine integration contract
+
+**Status:** this is a target contract/blueprint. It deliberately describes some future ecosystem behavior. The current native implementation and integration gaps are recorded in [engine implementation status](engine-build-status.md); a C++ class or interface alone does not mean the app/library/plugin workflow is complete.
 
 This document makes one rule explicit: **engine capabilities belong to the product ecosystem, not only to the engine implementation.** A feature is not complete merely because a C++ class exists. It must have a supported route into projects, add-ons, the asset library, the app UI and external consumers where relevant.
 

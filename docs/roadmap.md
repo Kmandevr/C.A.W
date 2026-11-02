@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-summary: Staged plan from the bare-bones v1 (build sounds, stack them into loops, export) to commercial release, with v1's scope, acceptance test and build order.
+summary: Product milestones with historical v1 acceptance scope, current v2 implementation status and clearly marked future work.
 updated: 2026-11-01
 ---
 
@@ -82,32 +82,27 @@ CI runs the engine tests and golden renders, and checks the acceptance test's ti
 
 ## v2 — Variables, patterns, house synth and MIDI
 
-Scope set by the owner on 2026-10-28 ([decisions](decisions.md)); the design is in [architecture](architecture.md#variables-and-patterns-proposal).
+Owner-approved scope originating 2026-10-28 ([decisions](decisions.md)); the current implementation ledger is [engine-build-status](engine-build-status.md). This section separates what shipped from what remains.
 
-- **Unity-style variables:** local params with steps, tooltips, dropdowns, toggles and headers; project globals; exported signals for sidechain. Existing params, globals, exports and functions are built.
-- **Automation lanes:** volume and pan automation are supported on tracks and folder buses; automation for globals and module parameters remains future work.
-- **Pattern builder:** text patterns played through voices, chords, off-grid notes, probability, ratchets and slide; single-sound and kit patterns, drum grid and piano roll; expression curves; chord stamping and generators (Euclid, random in key, arpeggiate, humanize); procedural variation and Freeze.
-- **Scenes/session grid:** retired in favour of the arrangement timeline; no alternate launcher view is planned.
-- **Standard library:** envelopes and LFOs, filters and effects, MIDI and music theory, glitch and bit tools, user functions, generated docs and in-app help. Existing built-ins and library are documented in [library](library.md).
-- **Connectors:** sidechain, modulation links (LFOs and envelopes onto any param), and MIDI ports.
-- **UI:** arrangement-first timeline with reusable MIDI clips, nested folder buses, a separate mixer and track automation; one gesture vocabulary on phone/desktop; undo/redo and painted grids.
-- **MIDI:** MIDI 2.0 note representation, on-screen keys, USB/Bluetooth MIDI, CC learn, clock, MIDI file import and export.
-- **House synth:** play any generator as an instrument with voice mode and chord patterns.
-- **Multisample (WAV + SFZ) and stems export.**
-- More synthesis built-ins and instrument support.
-- A 1-day NKIDO/Cedar spike.
+**[Fact] Implemented:** module params/globals/exports/functions; code-defined pattern playback; piano roll and drum grid; note expressions and lane curves; pattern generator actions; house synth patch format and playback; MIDI pattern import/export; arrangement clips; nested folders and stereo folder buses; track/folder volume-pan automation; documented function library and in-app help.
 
-## Stage 3 — GitHub integration
+**[Fact] Partial:** MIDI 2.0 UMP decoder and bounded input queue exist, but no USB/Bluetooth device connection or live Engine voice routing. Export includes WAV loop/free-length/one-shot/wavetable and MIDI; SFZ multisample authoring and stems export are not implemented. Module/global parameter automation is not implemented. Export queue is in-memory, not persistent.
 
-GitHub App with device-flow sign-in, a library repo template, tree-diff sync, atomic commits, conflict branches, and a branch/PR source picker.
+**[Not implemented]:** kit-row pattern routing and procedural code patterns/Freeze. Scenes/session launcher are retired. **[Partial]:** module/global modulation tools and export-signal sidechain ducking exist, but a general routing/modulation connection workflow is incomplete. **[Not implemented]:** USB/Bluetooth MIDI device I/O, SFZ multisample workflow and stems export. The current app-usable v2 priority is module/global automation, then SFZ and stems export, unless the owner changes it.
 
-## Stage 4 — AI-assisted editing
+For exact implementation boundaries, use [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
 
-The earlier roadmap label describes a separate, owner-directed library-editing stage. It is not authorization to add AI to the current audio/creative feature plan. The current creative-audio plan explicitly excludes AI generation, editing, separation, inference and cloud audio processing.
+## Stage 3 — GitHub integration (proposal; not implemented)
 
-## Stage 4b — More platforms and plugins
+A possible future GitHub App workflow: device-flow sign-in, a library repo template, tree-diff sync, atomic commits, conflict branches and a branch/PR source picker. The current app has no GitHub library-sync/source-picker workflow; local/offline project creation and file import/export remain the supported path.
 
-macOS and Linux desktop apps, then iOS once its distribution question is settled. A CLAP plugin of the engine, wrapped into VST3 and AU by clap-wrapper.
+## Stage 4 — GitHub/AI-assisted editing (deferred)
+
+The earlier proposal for GitHub library synchronization, source picking and AI-assisted editing is **not implemented** and is **not in the current product scope**. The owner has explicitly directed no in-app AI integration for now. Do not add AI generation, editing, source separation, model inference or cloud audio processing. AI coding assistants remain external development tools, not a C.A.W. feature.
+
+## Stage 4b — More platforms and plugins (proposal; not implemented)
+
+Potential future targets are macOS and Linux desktop apps, then iOS once its distribution question is settled. CLAP/VST3/AU builds or hosting require a real native host/SDK, platform packaging, licensing review and tests; none is currently shipped.
 
 ## Stage 5 — Advanced instrument and complete workflow
 

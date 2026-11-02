@@ -1,13 +1,13 @@
 ---
 title: Actions, keys and macros
-summary: Every command as an action, customisable keys per area, macros and toolbars, and the full action catalogue with default keys.
-covers: [app/lib/actions/, app/lib/ui/key_router.dart]
-updated: 2026-10-31
+summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
+covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
+updated: 2026-11-01
 ---
 
 # Actions, keys and macros
 
-**[Fact]** The action catalogue, keymaps, macros, Vim core, configurable piano-roll toolbar and phone Quick Actions strips are implemented (`app/lib/actions/`, `app/lib/ui/key_router.dart`). The owner can still revise the defaults and open points below. The owner asked for Reaper-style customisation (2026-10-28). Their choices are in [decisions](decisions.md), and the screens are in [UI design](ui.md).
+**[Fact, checked 2026-11-01]** The action registry, keymap parser/serializer, per-area key routing, macros, Vim core, configurable piano-roll toolbar and phone Quick Actions strips are implemented. The app stores its keymap in a private app file named keys.txt. The action list searches actions, shows their current keys and runs them; it does **not** currently edit key bindings. Keymap files can describe toolbar and long-press menu entries, but there is no in-app general keymap/menu editor. The owner can still revise defaults and open points below. See [decisions](decisions.md) and [App](app.md).
 
 ## How it works
 
@@ -15,19 +15,19 @@ updated: 2026-10-31
 - **Areas, like Reaper's sections:** Global, Sounds (Builder), Tracks (Arranger), Pattern editor (roll and grid), Mixer, Engine Lab, Automation, Export, Files and Plugin Builder. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
 - **The action list** (`?`, or Help → Actions):
   - search every action by name, with its keys
-  - add or remove keys, with a warning when a key is already taken in that area
+  - show the current key bindings for each action (editing bindings in this screen is not implemented)
   - run the action
   - It also serves as the shortcut overlay the [UI design](ui.md#keyboard-pc) asked for.
 - **Triggers** (owner chose all four):
   - keys: any combination with Ctrl, Shift and Alt
   - on-screen toolbars you fill with your own actions and macros, so the phone gets one-tap macros without a keyboard
-  - entries in the long-press (right-click) menu
+  - long-press menu entries are supported by the keymap data format, but a user-facing menu editor/integration is not currently complete
   - later, MIDI controller notes and CCs, once device support is built ([architecture](architecture.md#variables-and-patterns-proposal))
-- **Macros (custom actions):** a named list of actions run in order. Any step can repeat N times (owner: chains plus repeat, no scripting for now). A macro is itself an action, so it can have keys, toolbar buttons and menu entries. You build one in a list on the phone: add a step, pick an action, set the repeat count, reorder.
+- **Macros (custom actions):** a named list of actions run in order. Any step can repeat N times. Macros can be recorded from keyboard actions with Alt+Q and then replayed, bound or added to toolbars. The model/parser supports named step lists and repeat counts. There is no in-app step-list macro editor yet; edit the app-private keys.txt file manually for custom macro definitions.
 - **Saving** (owner: both):
-  - one app keymap with your keys, toolbars and macros, exportable and importable as a file, and later synced through GitHub
-  - a project can also carry its own macros, which travel with it
-- **Readable files,** so the owner and AI agents can edit them. **[Proposal]** The format:
+  - the app keymap, toolbars and macros persist in the app-private keys.txt file and are loaded over the shipped defaults
+  - the file format can be edited manually; user-facing keymap import/export and project-carried macros are not implemented
+- **Readable files,** so the owner and AI agents can edit them. **[Fact]** The keymap parser/serializer supports this text format; direct in-app editing of all bindings and menus is not yet available:
 
 ```
 ---
@@ -187,7 +187,7 @@ Generators (buttons; no default keys):
 | Next export kind (loop, free, one-shot, wavetable) | K |
 | Cancel the export | Esc |
 
-## Open points for the owner
+## Remaining UI gaps and owner review
 
 Building the core turned up some clashes in this draft. They're resolved for now as follows, and are for the owner to change:
 - **Code editor:** in Vim mode, D moves right and A moves left, which clashes with Vim's `dd` (delete line) and `a` (append). Delete line is `X X` for now, and append has no key yet.

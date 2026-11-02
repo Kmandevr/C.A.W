@@ -40,16 +40,16 @@ Scores are planning estimates, not measured benchmarks.
 
 | Candidate | Impact | Priority | Effort | Runtime / memory expectation | Decision |
 |---|---:|---|---|---|---|
-| Deterministic math modulation | 4 | P0 | XS–S | Very low; constant state | Keep |
+| Extend deterministic math modulation | 4 | P0 | XS–S | Very low; constant state | Keep; existing math, seeded noise, LFO and parameter/global modulation are the foundation |
 | Compact cellular/bit-pattern generators | 4 | P0 | S–M | Very low with fixed-size state | Keep, bounded version |
-| Waveshaping and waveform morphing | 5 | P0 | S–M | Low per sample; small tables if used | Keep |
+| Extend waveshaping and waveform morphing | 5 | P0 | S–M | Low per sample; small tables if used | Keep; existing drive/fold/tanh and wavetable frame morph/phase warp are foundations |
 | Small seeded variation explorer | 5 | P0 | M | Background/offline render; capped candidate count | Keep |
 | Sound lineage/family metadata | 3 | P1 | S | Negligible DSP; small project metadata | Keep |
 | Non-destructive operation history | 4 | P1 | M | Small metadata; avoid duplicate audio buffers | Keep |
-| Basic waveform/transient inspection | 4 | P1 | S–M | On-demand background analysis; small cache | Keep |
-| Basic spectrum view | 3 | P1 | M | On-demand FFT; bounded scratch buffer | Keep, optional |
+| Asset/selection waveform and transient analysis | 4 | P1 | S–M | On-demand background analysis; small cache | Keep; Engine Lab already has a live master scope |
+| Expand spectrum and asset inspection | 3 | P1 | M | On-demand FFT; bounded scratch buffer | Keep, optional; Engine Lab already has a 512-point master FFT view |
 | Lightweight resonator models | 4 | P1 | M | Low–medium, fixed voice/state limits | Keep, small library |
-| Bounded granular/stutter processor | 4 | P2 | M–L | Medium; fixed grain and buffer limits | Prototype later |
+| Expanded granular processor beyond existing glitch.stutter | 4 | P2 | M–L | Medium; fixed grain and buffer limits | Prototype later; basic bounded stutter is already implemented |
 | Audio transformation stack / compositing | 4 | P2 | M–L | Depends on processing graph; reuse existing chains | Keep only as simple reusable modules |
 | Full spectral painting / arbitrary spectral masks | 4 | P3 | XL | High CPU, memory and UI complexity | Drop from current plan |
 | Full wavelet/reassignment editor | 2 | P3 | L–XL | High analysis and visualization complexity | Drop |
@@ -184,9 +184,9 @@ Scores are planning estimates, not measured benchmarks.
 
 **Acceptance:** undo/redo survives save/reopen as specified; restoring a checkpoint reproduces its sound; history pruning never deletes a source asset still in use.
 
-### 3.7 Basic waveform and transient inspection
+### 3.7 Asset waveform and transient inspection
 
-**Purpose:** make it easier to understand what a sound contains and locate useful attacks without building a scientific analysis suite.
+**Current foundation:** Engine Lab already shows a read-only live master scope. This proposal extends waveform inspection to selected renders or imported assets and adds optional transient markers; it does not claim that C.A.W. has no waveform display.
 
 **First version**
 - Reuse waveform data already available from preview/render when possible.
@@ -204,12 +204,12 @@ Scores are planning estimates, not measured benchmarks.
 
 **Acceptance:** tests use known impulses, drum hits, sustained tones and noisy material; false positives are visible/editable; analysis never blocks playback or file browsing.
 
-### 3.8 Basic spectrum inspection
+### 3.8 Expanded spectrum and asset inspection
 
-**Purpose:** give users a simple frequency view to understand brightness, low-frequency content and harmonics.
+**Current foundation:** Engine Lab already displays a read-only 512-point Hann-window FFT of the mono master scope, spanning 0–24 kHz. This proposal is for extending analysis to captured selections or imported assets, not adding C.A.W.'s first spectrum display.
 
 **First version**
-- Provide a single on-demand FFT spectrum view, with logarithmic frequency axis and peak hold.
+- Reuse the existing FFT implementation and add an on-demand logarithmic-frequency view with peak hold for a captured selection or asset, if the workflow proves useful.
 - Use a fixed maximum FFT size and preallocated scratch storage.
 - Compute on a worker from a captured preview/render block or asset, not in the callback.
 - Refresh only while the inspector is open and at a low, bounded rate.
@@ -242,12 +242,12 @@ Scores are planning estimates, not measured benchmarks.
 
 **Research basis:** digital waveguides are a well-established, comparatively efficient way to model acoustic propagation and have enabled real-time physical instruments and effects. This supports investigating a small waveguide/resonator family, not a broad simulation framework. [AES review, 2026](https://doi.org/10.17743/jaes.2026.0283).
 
-### 3.10 Bounded granular and stutter processing
+### 3.10 Expanded granular processing beyond existing stutter
 
 **Purpose:** add controlled micro-rearrangement, repeat, freeze and texture effects.
 
 **First version, only after earlier work**
-- Start with stutter/repeat and short fixed-window grain playback.
+- Start with short fixed-window grain playback and only add repeat variants if they are meaningfully different from the existing glitch.stutter.
 - Set hard limits for grain count, duration, overlap and buffer size.
 - Preallocate all buffers during preparation.
 - Provide a quality/voice limit that can be reduced under device pressure.
@@ -289,9 +289,9 @@ This is a priority order for the creative-systems work only. Complete or explici
 | 1 | Math modulation, bit-pattern/compact cellular primitives, waveshaping and waveform morphing | Highest creative value for lowest runtime cost | Unit/golden tests; templates; callback benchmark |
 | 2 | Seeded variation explorer | Builds on existing parameters, deterministic render and worker pool | 8–16 repeatable candidates; cancel/keep/discard; bounded memory |
 | 3 | Lineage metadata and bounded history/checkpoints | Makes exploration safe and reusable | Save/load, undo/redo and history tests |
-| 4 | Waveform/transient inspection and basic spectrum | Helps users understand and edit results | On-demand analysis, bounded cache, phone UI validation |
+| 4 | Waveform/transient inspection and expanded spectrum/asset analysis | Helps users understand and edit results | On-demand analysis, bounded cache, phone UI validation |
 | 5 | Small resonator/waveguide library | Distinctive instruments after state/voice budget patterns are proven | Several useful models, fixed state/voice caps, benchmark |
-| 6 | Granular/stutter prototype | Higher processing cost; only proceed if demand and headroom justify it | Measured worst-case profile and safe quality limit |
+| 6 | Expanded granular prototype beyond existing glitch.stutter | Higher processing cost; only proceed if demand and headroom justify it | Measured worst-case profile and safe quality limit |
 
 Do not start a later phase merely because an earlier phase is documented. Each phase must pass its exit condition and the owner can reprioritize based on actual use.
 

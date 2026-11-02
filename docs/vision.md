@@ -1,84 +1,97 @@
 ---
 title: Vision and principles
-summary: The owner's brief, condensed: what C.A.W is, its platforms, its principles, the sound-engine approaches, the interface and the AI workflow, plus the open-questions register. Guides decisions; not a spec.
-updated: 2026-10-28
+summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
+updated: 2026-11-01
 ---
 
 # Vision and principles
 
-The owner's brief (2026-10-28), condensed. Where this note and the code disagree, the code says what exists. The technical answer is in [architecture](architecture.md).
+This note records product direction, not a list of shipped features. For implementation truth, use [App](app.md), [Engine](engine.md), [Engine implementation status](engine-build-status.md) and the [core development plan](core-and-feature-plan.md). Code and tests take precedence over this vision when describing what exists.
 
-## What it is
+## Product identity and direction
 
-**Name (owner, 2026-10-28):** C.A.W stands for **Code Auditioning Workspace**. The logo is a crow.
+**Name:** C.A.W. means **Code Auditioning Workspace**. The logo is a crow.
 
-A cross-platform app that works as an experimental sound-design instrument: bytebeat, mathematical sound, procedural synthesis, raw audio manipulation and glitch music. It has the immediacy of an instrument and the flexibility of a programming environment. It isn't a DAW, a generic code editor or just a bytebeat player. It complements Reaper by making unusual sounds, instruments, effects and samples to export.
+C.A.W. is a code-driven sound-design and music workspace for creating, shaping, auditioning, arranging and exporting sounds, instruments, patterns and reusable musical content. Its centre of gravity is experimental sound creation, but that is not a reason to reject useful arrangement, editing and mixing workflows. It should be useful in a pinch without trying to reproduce every feature of a large conventional DAW.
 
-**Platforms (owner, 2026-10-28):** Android, iOS, Windows, macOS and Linux, and more where practical. Android comes first: the owner's phone is a Galaxy S22+.
+Code remains a first-class way to define sounds and effects. Visual controls and editors should expose the same underlying project and engine state rather than creating parallel systems. C.A.W. complements established production tools through practical WAV and MIDI handoff.
 
-**Bits (owner, 2026-10-28):** code works directly on the bits, so sounds can be chaotic and random-sounding yet exactly repeatable, like `t>>6<<5%t`.
+## Platforms and actual support
 
-**Instruments and exports (owner, 2026-10-28):** any sound can become a playable synth, a waveform or wavetable to load into other synths, or a sample (one-shot, loop or multisample). This is a core capability, not an extra.
+**Product targets:** Android, iOS, Windows, macOS and Linux, with Android first.
 
-**Synthesis, MIDI, ease of use (owner, 2026-10-28):** proper synthesis and MIDI support, and user-friendly helpers so musical results, such as a loop that fits the beat, are easy to make.
+**Current repository support (checked 2026-11-01):**
+- The Flutter app has CI build artifacts for Android and Windows.
+- Linux is used for app analysis/tests and has a local Flutter runner, but is not currently a shipped app artifact.
+- The portable C++ engine is built/tested by CI on Linux x64, Linux Arm64 and Windows x64, plus Linux sanitizers.
+- iOS and macOS app builds are not currently part of the app CI workflow. They remain portability targets, not verified shipped builds.
 
-**Layout and look (owner, 2026-10-28):** three areas: a **Builder** for making modules (sounds and effects), an **Arranger** for using them, and an **Exporter**; in the app they are called **Sounds**, **Tracks** and **Export** (owner, 2026-10-28, [UI design](ui.md)). What you build can later be played in a **house-built synth**. Neon on black: green, pink, yellow and blue.
+Do not describe a platform as supported for release solely because Flutter or the C++ engine could theoretically target it.
 
-**Variables and patterns (owner, 2026-10-28):** two features make C.A.W much more useful.
-- **Unity-style variables:** modules expose their variables as controls with sliders, tooltips and the like. Variables can be local to a module or global to the project, and other modules can use them.
-- **A pattern (MIDI) builder:** make chord, drum and melody patterns that any sound plays (kick, hats, everything). Patterns are files, like modules, that you drag onto a layer. They can be drawn or generated procedurally.
+## Current product capabilities — summary
 
-**A documented library (owner, 2026-10-28):** a custom library of functions for the complex audio jobs, such as envelopes, connectors and MIDI input, so they are easy to use. Each one is documented, so an agent or a person can see what it does and how it works.
+The app currently has eight workspaces: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder.
 
-**A light halfway DAW (owner, 2026-10-28):** C.A.W is aiming at a halfway DAW, without recording or other hard features yet. The UI must be easy to understand and use on phone and PC, and the app must run light on CPU and RAM ([UI design](ui.md)).
+The repository currently includes:
+- A portable C++20 engine and constrained .caw module language for code-defined generators, effects, patterns, libraries and synth patches.
+- Module parameters, project globals, exported signals and reusable functions.
+- Pattern editing with a piano roll and drum grid, note expressions, velocity/chance curves and pattern generators.
+- Arrangement clips, nested folders, stereo folder buses and track/folder volume-pan automation.
+- Track mixer controls, master output level and stereo peak meters.
+- Engine Lab scope/spectrum inspection and engine diagnostics.
+- MIDI pattern import/export, including Standard MIDI Files and MIDI 2.0 Clip Files, plus a native MIDI 2.0 UMP decoder/input-queue primitive.
+- Native offline WAV rendering, loop/free-length/one-shot/wavetable export, named profiles, export history and a bounded in-memory queue.
+- Portable .cawproj and .caw import/export, project-local folders, tags, saved searches and restore points.
+- Plugin Builder for validating and packaging .caw source modules.
 
-**Plugins (owner, 2026-10-28):** it may also ship as a VST3 or CLAP plugin. **Standalone (owner):** every build runs fully on its own and offline.
+Important boundaries:
+- USB/Bluetooth MIDI device discovery, connection and live Engine voice routing are not implemented.
+- Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
+- Sends, general sidechain routing, parallel mixer paths and master effect chains are not complete.
+- Module/global parameter automation and stems export remain approved v2 work.
+- The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting and dynamic native-module loading are not implemented.
+- See [engine implementation status](engine-build-status.md) for the complete native boundary and paused work.
 
-**Business direction (owner, 2026-10-28):** closed and commercial, sold only through AutoStacc, the owner's own store. The repository is public so CI is free, but the licence stays proprietary: the code is visible, not licensed for others to use (`LICENSE`). Until then, it's the owner's tool for making samples to sell on AutoStacc, so getting sound out as WAV comes before polish for other users.
+## Product principles
 
-## Principles (established direction)
+1. **Code and visual editing share one source of truth.** A visual control must update the same project/module data that code and playback use.
+2. **Fast experimentation.** Make a sound, audition it, adjust it and export it without unnecessary setup.
+3. **Local and offline first.** Core sound creation and rendering do not require a cloud service or account.
+4. **Modular and reusable.** Generators, effects, functions, patterns and project assets should be reusable without duplicating incompatible systems.
+5. **Phone-first, desktop-capable.** Touch workflows must be practical on a phone; desktop must support keyboard and mouse without becoming a separate product.
+6. **Resource-aware.** Work on weak devices with bounded memory and callback cost, while using stronger hardware when it benefits active work.
+7. **Safe real-time audio.** The callback stays bounded and avoids allocation, locks, I/O, logging and UI calls.
+8. **Evidence over claims.** Performance, platform support and feature completion require tests or device measurements.
 
-1. **Code is the source of truth.** Sounds and effects are defined in editable code, not locked behind conventional synth controls.
-2. **Immediate experimentation.** Change code, hear it, iterate.
-3. **Local audio.** Generation and playback run on the device, offline included.
-4. **Modular.** Instruments, effects, functions, patterns and tools are reusable across projects without copying source around.
-5. **AI-assisted creation.** AI assistants create and edit sound files through the file structure and GitHub. The instrument stays fully useful without AI, and all rendering is local.
-6. **Open architecture.** Not tied to one AI provider or one sound engine.
-7. **Built for commercial release** through AutoStacc. Licensing, security, maintainability, performance and user data ownership are considered from the start.
+## Sound-design direction
 
-## Sound engine approaches
+The creative direction includes bytebeat and mathematical audio, procedural synthesis, raw bit-level sound design, reusable effects, modulation, waveform/wavetable work, resonant and physical-model-inspired sounds, and controlled sound variation.
 
-- **Bytebeat and mathematical audio:** expressions of a time variable using bitwise logic, shifts, arithmetic and maths functions, from classic bytebeat to harsh noise and glitch textures.
-- **Procedural synthesis:** code-defined kicks, snares, basses, clicks, drones and unconventional instruments, with every component editable.
-- **Raw audio and byte manipulation:** import audio and transform it (bit depth, sample rate, bitwise ops, reinterpretation, distortion, repetition). Originals are preserved and processing is nondestructive.
-- **Sequencing and polyrhythms:** a compact language that is easy to read and fast to type on a phone, with independent loops, shared BPM and polyrhythms. The owner's examples (`kck`, `snr`, `hat`, `p8`, `p16`, `p4`) are ideas, not required syntax.
-- **Reusable effects and modules:** define once, reuse anywhere (bitcrushers, waveshapers, byte folding, granular stutter, delays, filters, sample manglers).
+These are not all implemented. The [lightweight creative audio systems plan](lightweight-creative-audio-systems.md) separates existing primitives from proposed additions and ranks them by impact, effort and runtime cost.
 
-## Interface
+Audio import, sample editing, multisampling and non-destructive audio transformations are desired workflow extensions, but remain future work until they appear in the app and engine implementation.
 
-It should feel like an instrument, not a desktop IDE on a phone. It has a touch-friendly syntax-highlighted editor, instant play, stop and restart, a waveform display (and spectrum where practical), auto-generated parameter controls, a library browser, a pattern area, import and WAV export, and clear feedback for errors and expensive code. It stays compact, with expandable panels and sensible defaults.
+## AI and external services
 
-## AI workflow
+**No in-app AI integration is in the current product scope.** Do not add AI generation, AI editing, source separation, model inference, cloud audio processing or AI-dependent sound features.
 
-1. The owner asks an AI for a sound.
-2. The AI edits files in the sound library.
-3. Changes are versioned on GitHub.
-4. The app fetches them, validates them and loads compatible modules.
-5. The owner hears the result and keeps editing.
+AI coding assistants may be used by the owner and contributors as development tools. That is separate from the shipped C.A.W. product and does not imply an AI feature, provider integration or network dependency in the app.
 
-GitHub stores and versions files; it never runs audio code. Downloaded code is untrusted. Auth never relies on a privileged token embedded in the app; per-user repositories let users own their work.
+GitHub-based library synchronization and source selection are also not implemented as an app workflow. Keep the app fully useful offline; revisit remote sync only as a separately approved product feature.
 
-## How the owner works
+## Commercial and licensing direction
 
-From an Android phone (Galaxy S22+), relying on AI-assisted development. Keep complexity, AI usage and manual steps low. Inspect before assuming, reuse what exists, separate facts from proposals, prefer a small working prototype over a large unfinished architecture, and present a short plan before large or irreversible changes.
+The owner has described AutoStacc as the intended commercial distribution channel. The repository is public but proprietary; public source visibility does not grant reuse rights. Do not claim that an AutoStacc purchase/unlock flow or commercial release pipeline is implemented.
 
-## Open questions
+New dependencies require licence review and an entry in [decisions](decisions.md).
 
-Only the owner can settle these. Never build one as settled; ask.
+## Open owner decisions
 
-| Question | Blocks | Status |
-| --- | --- | --- |
-| iOS: sell through the App Store as the one exception to AutoStacc-only, or skip iOS ([architecture](architecture.md#6-biggest-risks-and-simplest-mitigations)) | iOS release | Open |
-| Licence for the sound library's modules (e.g. CC0 or MIT) | Stage 3 (sharing modules) | Open |
-| How a purchase on AutoStacc unlocks or delivers the app (plain download, account check, licence key) | Stage 5 | Open |
-| Should echo and reverb tails carry over when a layer's loop restarts? Layers with a pattern already keep their tails; layers without one start every effect silent on each loop, so they repeat exactly but cut tails at the restart ([engine](engine.md#playback)) | Nothing yet; changes how effects sound | Open |
+Only the owner can settle these questions. Do not silently convert them into implementation requirements.
+
+| Question | Current status |
+|---|---|
+| iOS distribution: App Store exception or no iOS release | Open |
+| Licence for user-created/shared sound modules | Open |
+| How a future AutoStacc purchase would deliver/unlock the app | Open |
+| Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |

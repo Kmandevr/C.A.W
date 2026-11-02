@@ -1,7 +1,8 @@
 ---
 title: Modular adaptive engine blueprint
-summary: Owner direction for CAW's native sound engine, reusable modules, interactive creation interfaces, portable assets, expressive MIDI, exports and adaptive hardware use.
-updated: 2026-10-30
+summary: Deferred native-engine blueprint with implementation boundaries; current code status is tracked separately.
+updated: 2026-11-01
+covers: [engine/, app/]
 ---
 
 # Modular adaptive engine blueprint
@@ -12,7 +13,7 @@ updated: 2026-10-30
 
 C.A.W (Code Auditioning Workspace) is a programmable sound-design and content-creation environment. It creates sound assets and reusable audio capabilities for other applications.
 
-C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful recording, arranging, editing, mixing and export tools where they help users make complete music, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Recording/capturing generated audio while sound is playing remains supported. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
+C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful arranging, editing, mixing and export tools where they help users make complete music; audio recording remains deferred unless the owner reprioritizes it, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Audio recording/capture is not implemented; recording remains deferred in the current workflow plan. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
 
 CAW should natively create bytebeat and deterministic mathematical audio; procedural sounds, drums, instruments, effects, samples and wavetables; custom synthesizers and processing modules; MIDI patterns and expressive per-note data including MPE; reusable building blocks; and eventually distributable plugins. It should export content other software can consume, rather than recreate those applications' entire workflows.
 
@@ -24,10 +25,10 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 4. **Deterministic experimentation.** Seeded procedural and bitwise sound remains repeatable. Optimizations preserve defined semantics; golden renders protect intentional sound.
 5. **Native and local.** Core creation works offline and does not require a server, account, AI provider or DAW.
 6. **Reusable and composable.** A waveform, LFO, envelope, filter, effect, MIDI curve or generator can be reused outside its first intended purpose.
-7. **AI is optional.** The longer-term goal may let an LLM/agent work directly with CAW projects and files (Claude-Code/GitHub-like), rather than copy/paste prompts. CAW remains fully useful without AI.
-8. **Factory is a starting point.** Starter content remains under caw/factory. Users can start blank, modify a template, write code, use visual tools or hand-build a specialized implementation.
+7. **No in-app AI integration in current scope.** External coding assistants may be used as development tools, but do not add an LLM, model inference, AI generation/editing or cloud-audio feature to the shipped product without a new owner decision.
+8. **Starter content is a starting point.** The current repository ships starter modules under examples/. A separate factory asset hierarchy is a proposed future organization, not an existing caw/factory path. Users can start blank, modify a template, write code or use the current visual editors.
 9. **Local/global assets are explicit.** Local assets belong to a project; global assets are reusable across projects. Stable IDs and versions prevent path changes breaking projects.
-10. **Other applications are the destination.** CAW creates portable content for DAWs, games, custom software and plugin formats. It is not a general plugin host.
+10. **Other applications are a destination.** C.A.W. creates portable content for DAWs, games and custom software. External plugin formats/hosting remain future work, not a current capability.
 11. **Permissive dependencies only** unless the owner approves an exception. The proprietary project licence remains unchanged.
 12. **Low-end hardware is a first-class target.** Every feature needs a resource budget and graceful behavior on weak devices.
 
@@ -67,7 +68,7 @@ A module is a portable, versioned unit with identity, metadata, typed ports, par
 A curve may serve as a waveform, LFO, envelope, MIDI expression curve or parameter map where types permit. A filter can be inside a synth, a standalone effect or part of a custom processor.
 
 Three creation routes must coexist:
-- **Code-defined:** .caw and native APIs for exact control, procedural generation, repeatability and AI editing.
+- **Code-defined:** .caw source and native APIs provide exact control, procedural generation and repeatability. External coding tools may edit text files; no in-app AI editing feature is included.
 - **Visually assembled:** optional graph and parameter tools.
 - **Hand-built:** specialized native processing and custom interfaces when generated controls are insufficient.
 
@@ -91,7 +92,7 @@ Planned capabilities:
 - Stereo-native sources, filters, effects and routing.
 - Custom modules in effect slots and composite instruments.
 
-The previously accepted starting synth configuration remains a useful first implementation: three wavetable oscillators, sub/noise, unison up to 16, warp modes, two serial/parallel filters, three envelopes, four drawn LFOs, four macros, modulation matrix, drive/chorus/delay/reverb/EQ/compressor. These are not architectural ceilings. Voice, unison and resource limits must be explicit and workload-aware, not arbitrary product caps.
+The implemented synth patch currently supports three wavetable oscillator slots, sub/noise, unison up to 16, two serial/parallel filters, three ADSR envelopes, four tempo-synced LFOs (built-in shapes plus four-point curve parameters; a graphical curve editor is not implemented), four macros and a modulation matrix. A single bounded phase-distortion warp parameter is implemented; additional warp modes, custom table authoring, built-in chorus and EQ are not. Voice and resource limits are explicit (voices 1–32, subject to project cap); see [Synth](synth.md).
 
 ## 6. MIDI and expression
 
@@ -103,15 +104,15 @@ MIDI is a native event and asset model. Preserve and extend the existing pattern
 - MPE-compatible export and MIDI 2.0-oriented internal precision, including fractional pitches.
 - Shared expensive effects after voices are summed where routing permits, rather than duplicating reverb/delay per note.
 - Equation-generated modulation and procedural MIDI generation.
-- Pattern editing and preview come first; a lightweight arrangement/timeline and practical recording or editing can be added where they help complete music-making, without requiring full DAW parity or a feature-rich live-performance workstation.
+- Pattern editing and preview come first; a lightweight arrangement/timeline and practical audio editing can be added where they help complete music-making, without requiring full DAW parity. Audio recording remains deferred in the current workflow plan.
 
 ## 7. Factory, projects and asset scope
 
-Factory source stays under caw/factory, with meaningful nested categories. Each substantial asset keeps its source and documentation together. Project-wide documentation stays in docs/.
+The proposed factory catalog would use meaningful nested categories and keep substantial assets with their source/documentation. The current repository does not yet contain a caw/factory tree; starter examples remain under examples/. Project-wide documentation stays in docs/.
 
 Proposed organization (adapt existing content; do not blindly move files):
 
-    caw/factory/
+    examples/  # current starter modules; a dedicated factory catalog is future work
       drums/kicks/<asset>/
       drums/snares/<asset>/
       drums/hats/<asset>/
@@ -129,7 +130,7 @@ The app file manager should reflect this conceptual hierarchy while allowing arb
 
 - **Local:** stored within one project and travels with it.
 - **Global:** stored in the user's library and reusable across projects.
-- **Factory:** shipped starter content, never silently overwritten by user edits.
+- **Starter examples:** shipped under examples/ today. A future factory catalog should be read-only and never silently overwritten by user edits.
 
 Use stable IDs, explicit versions, dependency manifests and portable references—not absolute paths. Support linked global assets, pinned versions and embedded snapshots. Detect missing dependencies and offer recovery. Never silently change old project sound when a global asset changes.
 
@@ -165,7 +166,7 @@ Do not silently lower sound quality or change deterministic results to meet a bu
 
 ### Latency and headphones
 
-Latency is a workload property, not a universal requirement. Report known/estimated output-route latency and support suitable buffering/compensation for preview, capture and export. Do not assume low-latency headphones. For timing-sensitive audition, minimize latency within the route's capability; otherwise favor stability and efficiency. Capture while generated sound plays must remain synchronized and independent of UI frame rate.
+Latency is a workload property, not a universal requirement. Report known/estimated output-route latency and support suitable buffering/compensation for preview, capture and export. Do not assume low-latency headphones. For timing-sensitive audition, minimize latency within the route's capability; otherwise favor stability and efficiency. If audio capture is approved later, it must remain synchronized and independent of UI frame rate; audio recording/capture is not implemented today.
 
 ### Quality and determinism
 
@@ -175,7 +176,7 @@ Keep deterministic mode and golden-render contract. SIMD, multithreading and GPU
 
 The callback and everything it calls must avoid allocation, locks, I/O, logging, UI calls, exceptions and unbounded work. Prepare graphs, buffers, voice pools and state before publishing to audio. Use reviewed real-time-safe handoff; retire old graphs and free memory off callback.
 
-Untrusted/downloaded code stays sandboxed: no I/O, filesystem, network or system calls; bounded source/program size, memory, call depth, loops and per-block cost; fail closed with clear errors. Native modules/plugins require a separate trust boundary and are not automatically safe because they implement the module API.
+Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. Native SDK modules are trusted in-process code, not sandboxed; they require a separate isolation/trust boundary before third-party loading.
 
 ## 11. Verification: what “without compromise” means
 
@@ -213,6 +214,6 @@ This blueprint describes direction and proposed architecture, not a claim that e
 
 ## 14. Existing work to preserve
 
-This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, AI-friendly files, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities while keeping sound design and content creation primary and adding useful lightweight DAW capabilities where they help, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, factory content under caw/factory, local/global assets, optional direct AI project editing, CLAP-first plugin generation, VST3 later, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
+This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, plain-text files external coding tools can edit, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities while keeping sound design and content creation primary and adding useful lightweight DAW capabilities where they help, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, existing starter modules under examples/, local/offline project assets, no in-app AI integration, and future plugin work only after a real native host/SDK and release checks, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
 
 See [vision](vision.md), [architecture](architecture.md), [synth](synth.md), [performance](performance.md), [decisions](decisions.md) and [roadmap](roadmap.md). Where those notes conflict with this clarified product focus and capability boundary or adaptive-engine direction, reconcile them as implementation proceeds.

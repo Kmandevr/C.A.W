@@ -24,9 +24,9 @@ Where documentation conflicts, the app and engine implementation are authoritati
 
 - **[Fact] Implemented:** pattern files, piano-roll editor, draw/select/erase tools, adaptive grid, snapping/free timing, triplets, keyboard navigation, note preview, velocity lane, and per-note velocity, chance, ratchet and slide editing.
 - **[Fact] Implemented:** MIDI pattern import/export (.mid, .midi2) through the pattern editor. Imported MIDI tempo is not applied to project tempo.
-- **[Fact] Not implemented:** curve tool and per-note expression curves; the roll.gen.* generators including Euclidean, random-in-key, arpeggiate, humanize, chord stamp and reverse.
-- **[Proposal] Extend:** add the agreed curve workflow: curves on notes where appropriate, stacked lanes for other expressions, fixed points and handles, snap, and live preview. Keep the existing touch-first tools and keyboard/action-system access.
-- **[Proposal] Extend:** add advanced quantization controls (strength, timing and note-length handling), groove/swing templates, note chop/glue, legato and strum. These must complement—not replace—the existing grid and note model.
+- **[Fact] Implemented:** the Curve tool edits velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
+- **[Fact] Implemented:** pattern actions include Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion. These are implemented in the piano-roll action path and pattern model.
+- **[Proposal] Extend:** add advanced quantization controls (strength, timing and note-length handling), reusable groove/swing templates, note chop/glue and strum. These are enhancements, not missing implementations of the existing generators or curve tools.
 - **[Proposal] Extend:** add scale/chord assistance and ghost-note/reference editing where it improves composition, while retaining free notes outside the project key.
 
 ### Arrangement
@@ -77,7 +77,7 @@ Where documentation conflicts, the app and engine implementation are authoritati
 
 ### MIDI hardware and performance
 
-- **[Fact] Implemented:** MIDI 2.0/UMP decoding foundations, MIDI ports/functions and MIDI pattern file import/export.
+- **[Fact] Implemented:** MIDI 2.0 UMP decoding and bounded input-queue foundations, plus MIDI pattern file import/export. These primitives do not provide physical USB/Bluetooth port discovery or device connection.
 - **[Fact] Not implemented:** complete USB/Bluetooth MIDI device discovery/connection, controller learn/mapping and external MIDI clock/sync.
 - **[Proposal] Build:** reliable USB and Bluetooth MIDI input, device selection/status, note and CC routing, controller learn, clock input/output and clear disconnect/reconnect behavior.
 - **[Proposal] Build:** on-screen performance keys and a metronome/count-in where they support live pattern entry.
@@ -87,7 +87,7 @@ Where documentation conflicts, the app and engine implementation are authoritati
 
 This order deliberately finishes existing foundations before expanding into the larger audio workflow.
 
-1. **Finish the pattern editor.** Curves and expression lanes; curve points/handles/snap; chord stamp and pattern generators; quantization/groove; humanize and note-editing utilities. Reconcile ui.md and roadmap.md so the documented status matches the code.
+1. **Extend the existing pattern editor.** The piano roll, lane curves, per-note expression and current generator actions are implemented. Remaining candidates are advanced quantization/groove tools, strum/chop/glue and usability polish; verify each against the code before opening an issue.
 2. **Complete core mixer routing.** Sends, sidechains, parallel paths and master effects, with engine integration and tests. Keep the real-time callback bounded and allocation/lock free.
 3. **Add basic audio assets and clips.** Import, preview, waveform, arrangement placement, trim/split/move/duplicate, fades and clip gain. Preserve originals and make operations non-destructive.
 4. **Complete sample authoring.** Sample editor, loop points, zones, velocity layers, round-robin and WAV/SFZ multisample workflow.

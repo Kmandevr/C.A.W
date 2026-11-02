@@ -107,7 +107,7 @@ Bitwise operators convert their inputs the JavaScript way: they drop the fractio
 | `trig`, `gate` | The note: `trig` is 1 on its first sample, `gate` is 1 while it's held |
 | `note`, `freq`, `vel` | The note's pitch as a MIDI number (fractions allowed) and in Hz, and its velocity 0–1 |
 | `rel` | Samples since the note was released (0 while held) |
-| `bend` | Reserved for pitch curves; 0 for now |
+| `bend` | The current note's pitch-expression offset in semitones; 0 when no bend curve is active |
 | `pi` | π |
 
 - **Note variables** come from the layer's [pattern](#patterns). Each note runs the generator as its own voice, and inside a voice `t`, `time` and `phase` count from the note's start: `phase` goes 0→1 once per cycle at `freq`, and in byte mode `t` runs at `rate` when the note is C4, twice as fast an octave up. `step`, `beat`, `bar` and `pos` still follow the layer.
@@ -136,9 +136,12 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
   - `prob P`: the note plays with chance P. The choice comes from the project seed, the note and which repeat of the pattern this is, so every project loop plays the same way and exports match playback.
   - `ratchet N`: the note is split into N equal repeats (2–8).
   - `slide`: the next note starting exactly where this one ends takes over its voice. No new `trig`; the pitch glides over half a step. In a chord, sliding notes pair with the next chord's notes in written order.
+  - `bend`: per-note pitch curve in semitones, written as time/value points; optional segment bend handles use `~`.
+  - `vib`: vibrato depth, rate in Hz and optional fade-in.
+  - `press`: per-note pressure/volume curve; `timbre`: per-note timbre curve. These are preserved in the pattern model and emitted as MPE expression on MIDI export.
 - **Playback:**
   - The pattern sets the layer's loop length; a note running past the end is released there.
-  - A layer with a pattern plays up to 8 voices at once and steals the oldest when a ninth note starts.
+  - A pattern layer's voice count defaults to 8 and can be set from 1 to 32 in the module header, subject to the project's overall voice cap. When the layer reaches its configured voice limit, it steals the oldest voice.
   - A released voice ends after 0.1 s below −90 dB, or 10 s after release. Code that reads `gate` or `rel` shapes its own release and code that reads `trig` rings on like a one-shot; anything else (a plain bytebeat) is faded out by the engine over 10 ms at note-off.
   - A stolen or ended voice that is still sounding is smoothed over (its last value fades in about 2 ms), so it doesn't click. Effects in the chain run once on the sum of the voices.
   - A tempo change releases held notes. At most 16 note changes split one 64-sample block; further ones in that block start together (at most 1.3 ms early).
@@ -161,7 +164,7 @@ A pattern can be imported from, and exported to, MIDI files for use in Reaper an
 - **Export:** `caw midi export PATTERN.caw -o OUT.mid|OUT.midi2 [--bpm B] [--beats N] [--clip]`, or `caw_pattern_export(source, bpm, beats_per_bar, CAW_MIDI_SMF|CAW_MIDI_CLIP, path, error, len)`.
   - Both formats use 960 ticks per quarter and carry the tempo, the meter and the pattern's name.
   - Ratchets are written as their repeats, every note is written whatever its `prob`, and a slide is a legato overlap of 1/16 step. Notes are cut at the pattern's length, as in playback.
-  - `.mid` is a format 1 file. Microtonal notes round to the nearest note and play on a channel of their own (2–9, 11–16) with a pitch bend; RPN 0 sets the bend range to ±2 semitones.
+  - `.mid` is a format 1 file. Microtonal notes round to the nearest note and play on a channel of their own (2–9, 11–16) with a pitch bend; RPN 0 sets the bend range to ±2 semitones. If the pattern has note expressions (bend, vibrato, pressure or timbre), export uses an MPE lower zone with per-note pitch bend, channel pressure and CC74 timbre.
   - `.midi2` follows the MIDI Clip File specification (M2-116-U, read 2026-10-28): MIDI 2.0 notes with 16-bit velocity, and microtones through the Note On Pitch 7.9 attribute.
     - **[Assumption]** Some layout choices aren't fixed by the spec. Everything is on group 0, channel 1. Tempo, time signature and clip name sit right after Start of Clip. Note Off has velocity 0x8000.
     - **[Assumption]** Which DAWs read clip files is unverified ([architecture](architecture.md#variables-and-patterns-proposal)).
