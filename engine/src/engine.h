@@ -77,6 +77,7 @@ private:
     struct ExportPool;
 
     void drainRetired();
+    bool canRetire(size_t count) const noexcept;
     bool send(const Cmd& c);
     void applyCommands() noexcept;
     void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
