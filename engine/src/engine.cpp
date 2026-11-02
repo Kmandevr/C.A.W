@@ -640,6 +640,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         std::shared_ptr<const Pattern> pattern;
         std::string arrangementSig;
         std::string automationSig;
+        std::string parameterAutomationSig;
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
@@ -656,7 +657,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
     int64_t projectState = 0;
     std::vector<std::vector<int>> readsFrom(kSlots);
     for (Want& w : wants) {
-        Planned pl{w, {}, {}, {}, nullptr, {}, {}};
+        Planned pl{w, {}, {}, {}, nullptr, {}, {}, {}};
         int64_t layerState = 0;
         // A synth in the chain stands for its voice and effects; its project effect modules are found by name.
         std::vector<std::string> chain;
@@ -848,6 +849,12 @@ std::string Engine::setProject(const ProjectSpec& p) {
         LayerState& ls = pl.ls;
         const Want& w = pl.w;
         ls.arrangementSig = pl.arrangementSig;
+        for (const ProjectAutomationLaneSpec& lane : p.automation) {
+            pl.parameterAutomationSig += lane.targetType + "|" + lane.moduleId + "|" + lane.target + "|";
+            for (const AutomationPointSpec& point : lane.points)
+                pl.parameterAutomationSig += std::to_string(point.step) + ":" + std::to_string(point.value) + ";";
+        }
+        const bool parameterAutomationChanged = ls.parameterAutomationSig != pl.parameterAutomationSig;
         for (const AutomationLaneSpec& lane : w.automation) {
             pl.automationSig += lane.target + "|";
             for (const AutomationPointSpec& point : lane.points)
@@ -929,7 +936,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             send(cmd);
             ls.pattern = pl.pattern;
         }
-        if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced) {
+        if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced || parameterAutomationChanged) {
             Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain, p.automation);
             Cmd cmd;
             cmd.type = Cmd::Install;
@@ -954,6 +961,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 ls.steps = w.steps;
             }
         }
+        ls.parameterAutomationSig = pl.parameterAutomationSig;
         projectOrder.push_back(ls.slot);
         nextLayers[w.id] = ls;
     }
