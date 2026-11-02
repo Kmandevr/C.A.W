@@ -112,7 +112,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 for (const auto& [k, v] : ps->obj)
                     if (v.type == Json::Type::Number && std::isfinite(v.num)) spec.params[k] = v.num;
             out.modules.push_back(std::move(spec));
-            if (out.modules.size() >= 256) break;
         }
     }
     if (const Json* layers = root.get("layers"); layers && layers->type == Json::Type::Array) {
@@ -134,7 +133,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.busEnabled = l.boolean("bus", true);
             if (const Json* clips = l.get("clips"); clips && clips->type == Json::Type::Array) {
                 for (const Json& c : clips->arr) {
-                    if (c.type != Json::Type::Object || spec.clips.size() >= 512) continue;
+                    if (c.type != Json::Type::Object) continue;
                     ClipSpec clip;
                     clip.id = c.string("id");
                     clip.pattern = c.string("pattern");
