@@ -490,7 +490,7 @@ std::string patternFromMidi(const uint8_t* data, size_t size, const MidiImportOp
         if (!data || size == 0) throw Fail{"the file is empty"};
         if (size > kMaxMidiFileBytes) throw Fail{"the file is bigger than 16 MB"};
         MidiImportOptions o = options;
-        o.maxNotes = std::clamp(o.maxNotes, 1, kMaxPatternNotes);
+        o.maxNotes = std::max(1, o.maxNotes);
         if (o.channel > 15) throw Fail{"MIDI channels are 0 to 15"};
         Collected c;
         if (size >= 8 && std::memcmp(data, "SMF2CLIP", 8) == 0)
