@@ -1,7 +1,7 @@
 ---
 title: C.A.W vault
 summary: Vault home: links to every note.
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # C.A.W vault
@@ -14,6 +14,8 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 
 ## Notes
 
+- [Native engine recovery](engine-recovery.md): short resume protocol, current checkpoint and critical architecture facts for interrupted sessions.
+- [Native engine progress](engine-progress.md): milestone ledger with actual implementation status, evidence, commits, CI, blockers and exact next actions.
 - [Task 1 UI implementation handoff](task-1-ui-handoff.md): concise current UI implementation pointer and verified workflow gaps; no stale branch/CI snapshot.
 - [Roadmap](roadmap.md): the permanent, canonical product roadmap, including ordered stages, current implementation snapshot, future production capabilities, performance gates and scope boundaries.
 - [Master development design](CAW_MASTER_DEVELOPMENT_PLAN.md): approved UI and engine design specification; it is not a separate roadmap or a current implementation report.
