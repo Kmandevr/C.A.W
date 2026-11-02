@@ -138,6 +138,20 @@ public:
         }
     }
 };
+class TrackedPassThrough final : public ModuleProcessor {
+public:
+    explicit TrackedPassThrough(bool& destroyed) : destroyed_(destroyed) {}
+    ~TrackedPassThrough() override { destroyed_ = true; }
+    const ModuleDescriptor& descriptor() const noexcept override { return effect; }
+    void process(const StereoProcessBlock& block) noexcept override {
+        for (uint32_t i = 0; i < block.frames; ++i) {
+            block.outputLeft[i] = block.inputLeft ? block.inputLeft[i] : 0.0f;
+            block.outputRight[i] = block.inputRight ? block.inputRight[i] : 0.0f;
+        }
+    }
+private:
+    bool& destroyed_;
+};
 }
 
 TEST(graph_executor_processes_prepared_stereo_chain_without_changing_block_size) {
@@ -199,31 +213,46 @@ TEST(graph_executor_rejects_mono_runtime_layout_until_adapter_exists) {
 }
 
 
-TEST(graph_runtime_publishes_on_audio_thread_and_retires_off_thread) {
+TEST(graph_runtime_publishes_owned_processors_and_retires_them_off_thread) {
     const std::vector<GraphNode> nodes{{"input", &effect}, {"gain", &effect}};
     const std::vector<GraphConnection> edges{{0, 1, 1, 0}};
-    PassThrough pass;
-    GainProcessor gain;
-    const std::vector<ModuleProcessor*> processors{&pass, &gain};
-    auto* first = new GraphExecutor();
-    CHECK(first->prepare(nodes, edges, processors, 1, 64, 48000, kTestBudget) == GraphError::Ok);
+    bool firstDestroyed = false, secondDestroyed = false;
+    auto prepare = [&](bool& destroyed) {
+        auto graph = std::make_unique<PreparedGraph>();
+        std::vector<std::unique_ptr<ModuleProcessor>> processors;
+        processors.push_back(std::make_unique<TrackedPassThrough>(destroyed));
+        processors.push_back(std::make_unique<GainProcessor>());
+        CHECK(graph->prepare(nodes, edges, std::move(processors), 1, 64, 48000, kTestBudget) ==
+              GraphError::Ok);
+        return graph;
+    };
+
     GraphRuntime runtime;
-    CHECK(runtime.publish(first));
-    CHECK(!runtime.publish(first));
+    auto first = prepare(firstDestroyed);
+    PreparedGraph* firstRaw = first.release();
+    CHECK(runtime.publish(firstRaw));
+    CHECK(!runtime.publish(firstRaw));
     const float in[] = {4, 8};
     float outL[2] = {}, outR[2] = {};
     CHECK(runtime.process(in, in, outL, outR, 2));
     CHECK_NEAR(outL[0], 1.0, 1e-7);
     CHECK(runtime.collectRetired() == nullptr);
+    CHECK(!firstDestroyed);
 
-    auto* second = new GraphExecutor();
-    CHECK(second->prepare(nodes, edges, processors, 1, 64, 48000, kTestBudget) == GraphError::Ok);
-    CHECK(runtime.publish(second));
+    auto second = prepare(secondDestroyed);
+    PreparedGraph* secondRaw = second.release();
+    CHECK(runtime.publish(secondRaw));
     CHECK(runtime.process(in, in, outL, outR, 2));
-    GraphExecutor* retired = runtime.collectRetired();
-    CHECK(retired == first);
+    PreparedGraph* retired = runtime.collectRetired();
+    CHECK(retired == firstRaw);
+    CHECK(!firstDestroyed);
     delete retired;
-    delete runtime.takeActiveAfterStop();
+    CHECK(firstDestroyed);
+
+    PreparedGraph* active = runtime.takeActiveAfterStop();
+    CHECK(active == secondRaw);
+    delete active;
+    CHECK(secondDestroyed);
     CHECK(runtime.takePendingAfterStop() == nullptr);
 }
 
