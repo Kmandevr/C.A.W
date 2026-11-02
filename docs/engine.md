@@ -218,7 +218,7 @@ The language has no I/O, loops or recursion, so a program's cost is fixed when i
 - nesting 128 deep
 - 1024 values (registers)
 - dynamically sized params and globals (subject to source/register representation limits)
-- 16 exports
+- dynamically sized exports/imports, bounded by the Engine's hardware-derived graph-working memory share
 - functions nested 32 calls deep, and 4096 function calls expanded in all (each call is copied in place, so nested calls multiply)
 - 1,048,576 numbers (8 MB) of state for oscillators, envelopes, filters, delays and reverbs
 - across the whole project, a project-state share of the EngineResourceBudget, derived from the platform's conservative available-memory probe. Unknown memory uses an explicit 64 MiB project-state fallback. Over-budget layers are not installed and the project update returns an error.
