@@ -734,3 +734,23 @@ TEST(arrangement_compilation_keeps_notes_beyond_4096) {
     const auto out = run(e, 150100);
     CHECK(out[150000] > 0.05f); // clip 500 starts after the former 4096-note truncation point
 }
+
+TEST(project_parser_preserves_large_project_automation) {
+    std::string json = R"({"caw_project":1,"automation":[)";
+    for (int lane = 0; lane < 257; ++lane) {
+        if (lane) json += ",";
+        json += R"({"target_type":"global","target":"g)" + std::to_string(lane) + R"(","points":[)";
+        for (int point = 0; point < 129; ++point) {
+            if (point) json += ",";
+            json += R"({"step":)" + std::to_string(point) + R"(,"value":0.5})";
+        }
+        json += "]}";
+    }
+    json += "]}";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json, parsed, error));
+    CHECK_EQ(parsed.automation.size(), size_t{257});
+    CHECK_EQ(parsed.automation.back().points.size(), size_t{129});
+    CHECK_NEAR(parsed.automation.back().points.back().step, 128.0, 1e-9);
+}
