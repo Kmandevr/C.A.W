@@ -10,7 +10,7 @@ updated: 2026-11-02
 ## Current state
 
 - **Branch:** `feature/native-engine-refactor-integration`
-- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison before this ledger refresh: 127 commits ahead.
+- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison before this ledger refresh: 140 commits ahead.
 - **Starting point:** `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`, which was 15 commits ahead and 0 behind Main when selected.
 - **Latest code/test checkpoint:** `8f43d76036cadcc3998eed6747a94d9e0c3f0480`; latest docs/log checkpoint: `78bc7d2e4c8265337861511a09feae897fc0d223`.
 - **Previous fully verified native code checkpoint:** `07c796f8e745cd44e7be37992747b8263ac27e9a` (Engine, App and Docs CI all passed at `1269019`). The compiler-budget follow-up and all subsequent project-content changes still require fresh CI verification; the last known green Engine/App/Docs runs predate them.
@@ -98,13 +98,21 @@ updated: 2026-11-02
 - This is a conversion seam, not active graph integration: Engine still does not instantiate GraphExecutor, and graph/compile/retirement shares are not yet consumed by the runtime.
 - Added a regression test for the conversion from a 16 MiB hardware budget to a 4 MiB graph working budget.
 
+## Latest implementation slice — dynamic pattern step lengths and note curves
+
+- Removed the 4096-step pattern/MIDI import cap. Pattern length, note positions and MIDI import are now bounded by the signed 32-bit step representation and explicit file/event safety limits, not a fixed 4096-step product ceiling.
+- Replaced fixed 16-point bend/pressure/timbre arrays with dynamic curve vectors. Pattern parsing/evaluation uses vector points; Engine computes the maximum curve capacity for each prepared pattern and reserves each voice's curve storage before playback.
+- Chain rebuilds reserve at least the prior chain's expression capacity, so hot-swapping voices copies existing expressions without allocating on the audio callback. A larger new pattern forces preparation of a larger capacity before activation.
+- Added tests for 5000-step patterns, 20-point note curves, and Engine playback of a 20-point expression.
+- **Verification:** fresh CI for these changes is not yet inspectable.
+
 ## Fixed limits and correctness risks
 
 Graph compile/prepare now require an explicit working-memory budget and preflight internal storage estimates; allocator overhead is implementation-dependent, so actual allocation failure is still handled. The budget is not yet derived from hardware or passed by the active Engine. The following limits and loss paths remain in the current source and must be converted to explicit, configurable resource budgets or dynamic storage:
 
 - **Project structure:** 64 layers/slots; module chains, project module lists, arrangement clip lists and project-level parameter/global automation lanes/points are now dynamically stored; layer volume/pan automation is now vector-backed and dynamically sized, with control-thread preparation and off-callback retirement; dependency records above 4,096 are rejected; arrangement length/loop is clamped to 64 bars.
 - **VM/module:** parameters and imports are dynamically sized; 16 exports remain; 6 call arguments; 1,024 VM registers; 64 KiB source; 8 MiB state per module; 32 voices; compiler depth/call budgets.
-- **Pattern/MIDI:** pattern note arrays are dynamic; pattern length remains limited to 4,096 steps; note curves have 16 points; MIDI file size is limited to 16 MiB and MIDI event count to 65,536; MIDI import note allowance is caller-configurable; MIDI 2.0 input queue capacity is 1,024 (drop-newest with a counter).
+- **Pattern/MIDI:** pattern note arrays are dynamic; pattern step indices use the signed 32-bit representation boundary; note-expression curves are dynamically sized; MIDI file size is limited to 16 MiB and MIDI event count to 65,536; MIDI import note allowance is caller-configurable; MIDI 2.0 input queue capacity is 1,024 (drop-newest with a counter).
 - **Runtime queues/state:** 1,024-entry command queue; 1,024-entry retirement queue; 256 pending retirements; 2 MiB state-takeover threshold; hardware-derived project-state budget (64 MiB fallback when memory is unknown). Worker pool has a maximum of 16 workers and a 256-job queue.
 - **Confirmed silent/lossy behavior:** export collection stops at 16; no free layer slot now returns an explicit project error; bounded command submission can still time out after about two seconds, but project updates propagate failures and keep failed installs retryable (standalone transport controls still ignore the result); retirement overflow can leak after the pending list fills; project-state overflow returns an explicit error and does not install the over-budget layer. The known chain/module/clip/arrangement-note/pattern-note/project-automation truncations have been removed. Layer volume/pan automation and VM parameter/import collections are dynamic.
 - Some limits are legitimate sandbox/parser safety budgets. They must remain explicit, configurable within host policy where practical, and fail clearly. Project content must never be silently truncated or a track silently omitted. Real-time event queues may be bounded, but overflow must be visible and recoverable.
