@@ -99,6 +99,7 @@ struct Engine::Chain {
     double dtrig[kBlock], ones[kBlock], dnote[kBlock], dfreq[kBlock];
     struct ParamAutomation {
         int moduleIndex = 0, paramIndex = 0;
+        double minimum = 0.0, maximum = 1.0, step = 0.0;
         const ProjectAutomationLaneSpec* lane = nullptr;
         double samples[kBlock] = {};
     };
@@ -442,6 +443,9 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
             Chain::ParamAutomation binding;
             binding.moduleIndex = static_cast<int>(moduleIndex);
             binding.paramIndex = static_cast<int>(paramIndex);
+            binding.minimum = def.min;
+            binding.maximum = def.max;
+            binding.step = def.step;
             binding.lane = selected;
             c->paramAutomation.push_back(binding);
         }
@@ -1525,8 +1529,12 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
             if (binding.moduleIndex != static_cast<int>(idx)) continue;
             for (int sample = 0; sample < len; ++sample) {
                 const double at = static_cast<double>(globalStart + sample) / stepLen_;
-                binding.samples[sample] = automationValue(binding.lane->points, at,
-                    binding.lane->points.front().value);
+                double value = std::clamp(automationValue(binding.lane->points, at,
+                    binding.lane->points.front().value), binding.minimum, binding.maximum);
+                if (binding.step > 0.0)
+                    value = std::clamp(binding.minimum + std::round((value - binding.minimum) / binding.step) * binding.step,
+                        binding.minimum, binding.maximum);
+                binding.samples[sample] = value;
             }
             ctx.paramValues[binding.paramIndex] = binding.samples;
         }
