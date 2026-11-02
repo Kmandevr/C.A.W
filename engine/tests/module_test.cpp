@@ -71,3 +71,19 @@ TEST(module_descriptor_rejects_ui_ranges_outside_parameter_contract) {
     ModuleDescriptor d{"caw.test.bad-range", 1, nullptr, 0, params, 1, controls, 1, ""};
     CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidUiControlRange);
 }
+
+TEST(module_descriptor_rejects_unknown_port_type_values) {
+    const PortDescriptor ports[] = {
+        {"out", static_cast<PortType>(0xFF), ChannelLayout::None, false},
+    };
+    const ModuleDescriptor d{"caw.test.invalid-type", 1, ports, 1, nullptr, 0};
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidPortType);
+}
+
+TEST(module_descriptor_rejects_unknown_channel_layout_values) {
+    const PortDescriptor ports[] = {
+        {"out", PortType::Audio, static_cast<ChannelLayout>(0xFF), false},
+    };
+    const ModuleDescriptor d{"caw.test.invalid-layout", 1, ports, 1, nullptr, 0};
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidPortLayout);
+}
