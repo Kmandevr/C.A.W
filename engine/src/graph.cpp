@@ -7,78 +7,101 @@
 #include <limits>
 #include <functional>
 #include <queue>
+#include <unordered_set>
+#include <stdexcept>
 
 namespace caw {
 
 CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                            const std::vector<GraphConnection>& connections) {
     CompiledGraph out;
-    if (nodes.size() > kMaxGraphNodes) { out.error = GraphError::TooManyNodes; return out; }
-    if (connections.size() > kMaxGraphConnections) { out.error = GraphError::TooManyConnections; return out; }
+    try {
+        // Node references are uint32_t in the graph ABI. This is the representational
+        // limit, not a product cap; connection count is bounded by addressable memory.
+        if (nodes.size() > std::numeric_limits<uint32_t>::max()) {
+            out.error = GraphError::TooManyNodes;
+            return out;
+        }
 
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        const GraphNode& node = nodes[i];
-        if (node.id.empty()) { out.error = GraphError::EmptyNodeId; return out; }
-        if (!node.module) { out.error = GraphError::MissingModule; return out; }
-        if (validateModuleDescriptor(*node.module) != ModuleValidation::Ok) {
-            out.error = GraphError::InvalidModule; return out;
+        std::unordered_set<std::string_view> nodeIds;
+        nodeIds.reserve(nodes.size());
+        for (const GraphNode& node : nodes) {
+            if (node.id.empty()) { out.error = GraphError::EmptyNodeId; return out; }
+            if (!node.module) { out.error = GraphError::MissingModule; return out; }
+            if (validateModuleDescriptor(*node.module) != ModuleValidation::Ok) {
+                out.error = GraphError::InvalidModule;
+                return out;
+            }
+            if (!nodeIds.insert(node.id).second) {
+                out.error = GraphError::DuplicateNodeId;
+                return out;
+            }
         }
-        for (size_t j = 0; j < i; ++j) {
-            if (nodes[j].id == node.id) { out.error = GraphError::DuplicateNodeId; return out; }
-        }
-    }
 
-    std::vector<uint32_t> indegree(nodes.size(), 0);
-    std::vector<std::vector<uint32_t>> outgoing(nodes.size());
-    std::vector<std::vector<uint8_t>> connected;
-    connected.reserve(nodes.size());
-    for (const GraphNode& n : nodes) connected.emplace_back(n.module->portCount, 0);
+        std::vector<uint32_t> indegree(nodes.size(), 0);
+        std::vector<std::vector<uint32_t>> outgoing(nodes.size());
+        std::vector<std::vector<uint8_t>> connected;
+        connected.reserve(nodes.size());
+        for (const GraphNode& node : nodes) connected.emplace_back(node.module->portCount, 0);
 
-    for (uint32_t i = 0; i < connections.size(); ++i) {
-        const GraphConnection& c = connections[i];
-        auto fail = [&](GraphError e) { out.error = e; out.errorConnection = i; };
-        if (c.sourceNode >= nodes.size() || c.destinationNode >= nodes.size()) {
-            fail(GraphError::NodeIndexOutOfRange); return out;
+        for (std::size_t i = 0; i < connections.size(); ++i) {
+            const GraphConnection& connection = connections[i];
+            auto fail = [&](GraphError error) {
+                out.error = error;
+                out.errorConnection = i;
+            };
+            if (connection.sourceNode >= nodes.size() || connection.destinationNode >= nodes.size()) {
+                fail(GraphError::NodeIndexOutOfRange);
+                return out;
+            }
+            const ModuleDescriptor& source = *nodes[connection.sourceNode].module;
+            const ModuleDescriptor& destination = *nodes[connection.destinationNode].module;
+            if (connection.sourcePort >= source.portCount || connection.destinationPort >= destination.portCount) {
+                fail(GraphError::PortIndexOutOfRange);
+                return out;
+            }
+            const PortDescriptor& sourcePort = source.ports[connection.sourcePort];
+            const PortDescriptor& destinationPort = destination.ports[connection.destinationPort];
+            if (sourcePort.input || !destinationPort.input) { fail(GraphError::DirectionMismatch); return out; }
+            if (sourcePort.type != destinationPort.type) { fail(GraphError::PortTypeMismatch); return out; }
+            if (sourcePort.layout != destinationPort.layout) { fail(GraphError::ChannelLayoutMismatch); return out; }
+            if (connected[connection.destinationNode][connection.destinationPort]) {
+                fail(GraphError::InputAlreadyConnected);
+                return out;
+            }
+            connected[connection.destinationNode][connection.destinationPort] = 1;
+            outgoing[connection.sourceNode].push_back(connection.destinationNode);
+            ++indegree[connection.destinationNode];
         }
-        const ModuleDescriptor& src = *nodes[c.sourceNode].module;
-        const ModuleDescriptor& dst = *nodes[c.destinationNode].module;
-        if (c.sourcePort >= src.portCount || c.destinationPort >= dst.portCount) {
-            fail(GraphError::PortIndexOutOfRange); return out;
-        }
-        const PortDescriptor& sp = src.ports[c.sourcePort];
-        const PortDescriptor& dp = dst.ports[c.destinationPort];
-        if (sp.input || !dp.input) { fail(GraphError::DirectionMismatch); return out; }
-        if (sp.type != dp.type) { fail(GraphError::PortTypeMismatch); return out; }
-        if (sp.layout != dp.layout) { fail(GraphError::ChannelLayoutMismatch); return out; }
-        if (connected[c.destinationNode][c.destinationPort]) {
-            fail(GraphError::InputAlreadyConnected); return out;
-        }
-        connected[c.destinationNode][c.destinationPort] = 1;
-        outgoing[c.sourceNode].push_back(c.destinationNode);
-        ++indegree[c.destinationNode];
-    }
 
-    // Stable Kahn ordering with a min-heap: O((V + E) log V), preserving
-    // authored order among nodes that are simultaneously ready.
-    std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
-    for (uint32_t i = 0; i < nodes.size(); ++i)
-        if (indegree[i] == 0) ready.push(i);
-    out.executionOrder.reserve(nodes.size());
-    while (!ready.empty()) {
-        const uint32_t next = ready.top();
-        ready.pop();
-        out.executionOrder.push_back(next);
-        for (uint32_t dst : outgoing[next])
-            if (--indegree[dst] == 0) ready.push(dst);
-    }
-    if (out.executionOrder.size() != nodes.size()) {
-        out.error = GraphError::Cycle;
+        // Stable Kahn ordering with a min-heap preserves authored order among ready nodes.
+        std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
+        for (std::size_t i = 0; i < nodes.size(); ++i)
+            if (indegree[i] == 0) ready.push(static_cast<uint32_t>(i));
+        out.executionOrder.reserve(nodes.size());
+        while (!ready.empty()) {
+            const uint32_t next = ready.top();
+            ready.pop();
+            out.executionOrder.push_back(next);
+            for (uint32_t destination : outgoing[next])
+                if (--indegree[destination] == 0) ready.push(destination);
+        }
+        if (out.executionOrder.size() != nodes.size()) {
+            out.error = GraphError::Cycle;
+            out.executionOrder.clear();
+        }
+    } catch (const std::bad_alloc&) {
+        out.error = GraphError::OutOfMemory;
         out.executionOrder.clear();
-        return out;
+    } catch (const std::length_error&) {
+        out.error = GraphError::OutOfMemory;
+        out.executionOrder.clear();
+    } catch (...) {
+        out.error = GraphError::OutOfMemory;
+        out.executionOrder.clear();
     }
     return out;
 }
-
 void GraphExecutor::reset() noexcept {
     ready_ = false;
     processors_.clear();
@@ -103,7 +126,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
     reset();
     if (nodes.empty() || processors.size() != nodes.size()) return GraphError::ProcessorCountMismatch;
     if (outputNode >= nodes.size()) return GraphError::InvalidOutputNode;
-    if (maxFrames == 0 || maxFrames > 8192 || !std::isfinite(sampleRate) ||
+    if (maxFrames == 0 || !std::isfinite(sampleRate) ||
         sampleRate < 8000.0 || sampleRate > 192000.0) return GraphError::InvalidBlockSize;
 
     const CompiledGraph compiled = compileGraph(nodes, connections);
@@ -114,7 +137,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         left_.resize(nodes.size());
         right_.resize(nodes.size());
         zero_.assign(maxFrames, 0.0f);
-        inputSource_.assign(nodes.size(), -1);
+        inputSource_.assign(nodes.size(), UINT32_MAX);
         hasInput_.assign(nodes.size(), 0);
         hasOutput_.assign(nodes.size(), 0);
         for (size_t n = 0; n < nodes.size(); ++n) {
@@ -154,8 +177,8 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
             hasInput_[n] = audioInputs ? 1 : 0;
             hasOutput_[n] = audioOutputs ? 1 : 0;
             if (audioInputs) {
-                for (uint32_t e = 0; e < connections.size(); ++e)
-                    if (connections[e].destinationNode == n) inputSource_[n] = static_cast<int32_t>(connections[e].sourceNode);
+                for (std::size_t e = 0; e < connections.size(); ++e)
+                    if (connections[e].destinationNode == n) inputSource_[n] = connections[e].sourceNode;
             }
             left_[n].assign(maxFrames, 0.0f);
             right_[n].assign(maxFrames, 0.0f);
@@ -188,8 +211,8 @@ bool GraphExecutor::process(const float* inputLeft, const float* inputRight,
         float* inL = nullptr;
         float* inR = nullptr;
         if (hasInput_[nodeIndex]) {
-            const int32_t source = inputSource_[nodeIndex];
-            if (source >= 0) {
+            const uint32_t source = inputSource_[nodeIndex];
+            if (source != UINT32_MAX) {
                 inL = left_[static_cast<size_t>(source)].data();
                 inR = right_[static_cast<size_t>(source)].data();
             } else {
