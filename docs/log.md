@@ -6,6 +6,8 @@ updated: 2026-11-02
 
 # Log
 
+- 2026-11-02: Reopened the complete native engine refactor/integration as explicitly requested. Added the milestone ledger and recovery guide, indexed them, audited the current Engine/VM versus graph foundations, and removed arbitrary 1024-node/8192-connection graph caps plus the executor's 8192-frame cap. Duplicate-ID validation is hash-based; allocation failures return OutOfMemory; tests cover 8195 nodes/8194 connections and 8193 frames. Engine CI run 41401179084 passed Linux x64, sanitizers, Windows x64 and Linux Arm64; Docs run 41401179017 passed. App run 41401179166 had Dart analysis/tests and Windows app pass; Android APK was pending at checkpoint. See engine-progress.md for the exact gaps and next actions.
+
 - 2026-11-02: Started the native engine integration work on feature/native-engine-refactor-integration, based on the verified 49ba277 checkpoint from refactor/native-engine-foundation (Main ancestor 20fd3da). Added the durable milestone ledger and recovery guide. Initial audit confirms substantial existing foundations (worker pool, typed graph compiler/executor, module registry, UMP decoder, partial app job integration) but also confirms the prepared graph executor is not wired into the existing Engine/VM mixer. No engine code or CI result is claimed yet; see engine-progress.md for the exact continuation point.
 
 - 2026-11-02: Added adaptive concurrency and batching as foundational engine requirements, including dependency-aware scheduling, bounded worker pools, SIMD/accelerator selection, deterministic behavior, deadline-safe fallbacks and measurement of total overhead.
