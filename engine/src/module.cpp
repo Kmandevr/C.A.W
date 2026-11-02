@@ -14,6 +14,24 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
     for (uint32_t i = 0; i < d.portCount; ++i) {
         const PortDescriptor& p = d.ports[i];
         if (p.id.empty()) return ModuleValidation::EmptyPortId;
+        switch (p.type) {
+            case PortType::Audio:
+            case PortType::Control:
+            case PortType::Modulation:
+            case PortType::Event:
+                break;
+            default:
+                return ModuleValidation::InvalidPortType;
+        }
+        switch (p.layout) {
+            case ChannelLayout::None:
+            case ChannelLayout::Mono:
+            case ChannelLayout::Stereo:
+            case ChannelLayout::Discrete:
+                break;
+            default:
+                return ModuleValidation::InvalidPortLayout;
+        }
         if (p.type == PortType::Audio && p.layout == ChannelLayout::None)
             return ModuleValidation::InvalidPortLayout;
         if (p.type != PortType::Audio && p.layout != ChannelLayout::None)
