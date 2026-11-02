@@ -94,6 +94,8 @@ class AutomationLaneDoc {
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
+class ProjectAutomationLaneDoc { ProjectAutomationLaneDoc({required this.targetType, required this.target, this.moduleId, List<AutomationPointDoc>? points}) : points = points ?? []; String targetType; String target; String? moduleId; List<AutomationPointDoc> points; Map<String, dynamic> toJson() => {'target_type': targetType, 'target': target, if (moduleId != null) 'module': moduleId, 'points': [for (final p in points) p.toJson()]}; static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(targetType: j['target_type'] as String? ?? 'global', target: j['target'] as String? ?? '', moduleId: j['module'] as String?, points: ((j['points'] as List?) ?? const []).take(128).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList()); }
+
 class LayerDoc {
   LayerDoc({
     required this.id,
