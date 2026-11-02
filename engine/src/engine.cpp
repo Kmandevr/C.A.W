@@ -1016,19 +1016,6 @@ std::string Engine::setProject(const ProjectSpec& p) {
             ls.bus = false;
             ls.parentSlot = pl.ls.parentSlot;
         }
-        if (pl.pattern != ls.pattern) {
-            Cmd cmd;
-            cmd.type = Cmd::SetPattern;
-            cmd.slot = ls.slot;
-            cmd.pattern = pl.pattern ? new std::shared_ptr<const Pattern>(pl.pattern) : nullptr;
-            if (!send(cmd)) {
-                allOk = false;
-                warnings[w.id].push_back("audio command queue rejected pattern update");
-                nextLayers[w.id] = ls;
-                continue;
-            }
-            ls.pattern = pl.pattern;
-        }
         if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced || parameterAutomationChanged ||
             pl.expressionCapacity != ls.expressionCapacity) {
             Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain, projectAutomation, pl.expressionCapacity);
@@ -1065,6 +1052,19 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 }
                 ls.steps = w.steps;
             }
+        }
+        if (pl.pattern != ls.pattern) {
+            Cmd cmd;
+            cmd.type = Cmd::SetPattern;
+            cmd.slot = ls.slot;
+            cmd.pattern = pl.pattern ? new std::shared_ptr<const Pattern>(pl.pattern) : nullptr;
+            if (!send(cmd)) {
+                allOk = false;
+                warnings[w.id].push_back("audio command queue rejected pattern update");
+                nextLayers[w.id] = ls;
+                continue;
+            }
+            ls.pattern = pl.pattern;
         }
         ls.parameterAutomationSig = pl.parameterAutomationSig;
         projectOrder.push_back(ls.slot);
