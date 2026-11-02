@@ -1291,7 +1291,7 @@ void Engine::applyCommands() noexcept {
                     s.epoch = -1;
                     updateSolo();
                     const double initialTarget = slotTarget(s);
-                    s.gain = initialTarget > 0.0 && s.volumeAutomationCount > 0 ? s.volumeAutomationValue[0] : initialTarget;
+                    s.gain = initialTarget > 0.0 && s.automation && !s.automation->volume.empty() ? s.automation->volume.front().value : initialTarget;
                 } else if (swapMode_ > 0 && playing_ && stopFade_ == 0) {
                     // Wait for the next beat or bar; newer code replaces code still waiting.
                     retire(s.pending, -1);
@@ -1314,15 +1314,12 @@ void Engine::applyCommands() noexcept {
             }
             case Cmd::SetAutomation: {
                 Slot& s = slots_[c.slot];
-                s.volumeAutomationCount = c.volumeAutomationCount;
-                s.panAutomationCount = c.panAutomationCount;
-                std::copy_n(c.volumeAutomationStep, s.volumeAutomationCount, s.volumeAutomationStep);
-                std::copy_n(c.volumeAutomationValue, s.volumeAutomationCount, s.volumeAutomationValue);
-                std::copy_n(c.panAutomationStep, s.panAutomationCount, s.panAutomationStep);
-                std::copy_n(c.panAutomationValue, s.panAutomationCount, s.panAutomationValue);
+                retire(nullptr, -1, nullptr, s.automation);
+                s.automation = c.automation;
                 if (c.flag && s.bus) {
                     const double initialTarget = slotTarget(s);
-                    s.gain = initialTarget > 0.0 && s.volumeAutomationCount > 0 ? s.volumeAutomationValue[0] : initialTarget;
+                    s.gain = initialTarget > 0.0 && s.automation && !s.automation->volume.empty()
+                        ? s.automation->volume.front().value : initialTarget;
                 }
                 break;
             }
@@ -1336,7 +1333,10 @@ void Engine::applyCommands() noexcept {
                 s.active = true;
                 s.removing = false;
                 s.bus = true;
-                if (c.flag) s.volumeAutomationCount = s.panAutomationCount = 0;
+                if (c.flag) {
+                    retire(nullptr, -1, nullptr, s.automation);
+                    s.automation = nullptr;
+                }
                 s.parentSlot = c.parentSlot;
                 s.order = c.order;
                 s.gain = slotTarget(s);
@@ -1426,8 +1426,7 @@ void Engine::applyCommands() noexcept {
                     updateSolo();
                     const double target = slotTarget(s);
                     s.gain = target > 0.0
-                        ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
-                            s.volumeAutomationValue, 0.0, target)
+                        ? (s.automation ? automationValue(s.automation->volume, 0.0, target) : target)
                         : 0.0;
                 }
                 break;
@@ -1459,7 +1458,7 @@ double Engine::slotTarget(const Slot& s) const noexcept {
     if (idx == kAuditionSlot) return 0.0;
     if (s.mute.load(std::memory_order_relaxed)) return 0.0;
     if (anySolo_ && !s.solo.load(std::memory_order_relaxed)) return 0.0;
-    return s.volumeAutomationCount > 0 ? 1.0 : bitsToDouble(s.vol.load(std::memory_order_relaxed));
+    return s.automation && !s.automation->volume.empty() ? 1.0 : bitsToDouble(s.vol.load(std::memory_order_relaxed));
 }
 
 void Engine::updateSolo() noexcept {
