@@ -134,9 +134,11 @@ class _ProjectAutomationPoint extends StatelessWidget {
     return Row(children: [
       SizedBox(width: 24, child: Text('P${index + 1}', style: Neon.code(size: 9, color: Neon.dim))),
       Expanded(child: Slider(value: point.step.clamp(0.0, maxStep).toDouble(), min: 0, max: maxStep,
+        onChangeStart: (_) => state.beginAutomationGesture(), onChangeEnd: (_) => state.endAutomationGesture(),
         onChanged: (step) => state.updateProjectAutomationPoint(lane, index, step, point.value))),
       SizedBox(width: 34, child: Text(point.step.toStringAsFixed(0), style: Neon.code(size: 9, color: Neon.dim))),
       Expanded(child: Slider(value: point.value.clamp(minimum, maximum).toDouble(), min: minimum, max: maximum,
+        onChangeStart: (_) => state.beginAutomationGesture(), onChangeEnd: (_) => state.endAutomationGesture(),
         onChanged: (value) => state.updateProjectAutomationPoint(lane, index, point.step, value))),
       IconButton(tooltip: 'Remove point', onPressed: () => state.removeProjectAutomationPoint(lane, index),
         icon: const Icon(Icons.close, size: 16)),
