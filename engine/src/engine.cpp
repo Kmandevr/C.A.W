@@ -1954,7 +1954,7 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
             if (exportTo && exportTo->exportBuf && vi == newest)
                 for (const auto& [reg, buf] : c.exportMap[0])
                     if (buf < exportTo->exportCapacity)
-                        std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf].data() + offset + o);
+                        std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf]->data() + offset + o);
             if (!v.gate && (v.quiet >= quietMax || v.rel >= relMax || (engineFade && v.rel >= fadeLen))) {
                 c.declick += v.lastY;  // ending a voice that is still sounding: smooth over the jump
                 v.active = false;
