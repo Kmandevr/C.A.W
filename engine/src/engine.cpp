@@ -2110,6 +2110,11 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
     for (int i = 0; i < kSlots; ++i) {
         std::fill_n(slots_[i].outL, m, 0.0);
         std::fill_n(slots_[i].outR, m, 0.0);
+        Slot& slot = slots_[i];
+        if (slot.exportBuf) {
+            for (size_t b = 0; b < slot.exportCount; ++b)
+                if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), m, 0.0);
+        }
     }
     ++chunkId_;
     // Child tracks are rendered before their folder buses; exporters still precede readers.
@@ -2148,9 +2153,6 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                 if (!s.cur) continue;
                 if (target == 0.0 && s.gain == 0.0) {
                     s.contiguous = false;
-                    if (s.exportBuf)
-                        for (size_t b = 0; b < s.exportCount; ++b)
-                            std::fill_n(s.exportBuf[b]->data(), m, 0.0);
                     if (s.pending) { swapIn(s, s.pending); s.pending = nullptr; }
                     if (s.removing) {
                         retire(s.cur, -1, s.pattern);
