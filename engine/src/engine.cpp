@@ -92,6 +92,7 @@ constexpr uint32_t kOrphanNote = 0xFFFFFFFFu;  // a held note whose pattern was 
 struct Engine::Chain {
     std::vector<std::unique_ptr<Instance>> main, shadow;
     bool voiced = false;
+    size_t expressionCapacity = 0;
     std::vector<std::unique_ptr<Instance>> extraVoices;
     Voice voices[kMaxVoices];
     int voiceCount = 0;  // voices with an instance: the generator's voices: setting, at least 2 (main and shadow)
@@ -439,6 +440,12 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
         c->voices[1].inst = c->shadow[0].get();
         for (int v = 2; v < c->voiceCount; ++v) c->voices[v].inst = c->extraVoices[static_cast<size_t>(v - 2)].get();
     }
+    c->expressionCapacity = std::max(expressionCapacity, prev ? prev->expressionCapacity : size_t{0});
+    for (Voice& voice : c->voices) {
+        voice.ex.bend.points.reserve(c->expressionCapacity);
+        voice.ex.press.points.reserve(c->expressionCapacity);
+        voice.ex.timbre.points.reserve(c->expressionCapacity);
+    }
     size_t maxParams = 0;
     for (const auto& instance : c->main) maxParams = std::max(maxParams, instance->program().params.size());
     c->paramSamples.resize(maxParams);
@@ -680,6 +687,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         std::string arrangementSig;
         std::string automationSig;
         std::string parameterAutomationSig;
+        size_t expressionCapacity = 0;
     };
     std::vector<Planned> plan;
     std::map<std::string, std::vector<std::string>> warnings;
@@ -764,6 +772,13 @@ std::string Engine::setProject(const ProjectSpec& p) {
                     static_cast<uint64_t>(std::max(0, gen.stateSize));
             } else {
                 warnings[pl.ids.front()].push_back("pattern '" + w.pattern + "' is missing or has an error, so it plays without one");
+            }
+        }
+        if (pl.pattern) {
+            for (const NoteExpression& expression : pl.pattern->expressions) {
+                pl.expressionCapacity = std::max(pl.expressionCapacity, expression.bend.points.size());
+                pl.expressionCapacity = std::max(pl.expressionCapacity, expression.press.points.size());
+                pl.expressionCapacity = std::max(pl.expressionCapacity, expression.timbre.points.size());
             }
         }
         // The project-state share comes from the Engine's measured/fallback resource budget.
@@ -962,6 +977,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             ls.wiring.clear();
             ls.pattern.reset();
             ls.voiced = false;
+            ls.expressionCapacity = 0;
             ls.steps = 0;
             projectOrder.push_back(ls.slot);
             nextLayers[w.id] = ls;
@@ -1012,8 +1028,9 @@ std::string Engine::setProject(const ProjectSpec& p) {
             }
             ls.pattern = pl.pattern;
         }
-        if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced || parameterAutomationChanged) {
-            Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain, projectAutomation);
+        if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced || parameterAutomationChanged ||
+            pl.expressionCapacity != ls.expressionCapacity) {
+            Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain, projectAutomation, pl.expressionCapacity);
             Cmd cmd;
             cmd.type = Cmd::Install;
             cmd.slot = ls.slot;
@@ -1028,6 +1045,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             }
             ls.chain = c;
             ls.voiced = voiced;
+            ls.expressionCapacity = pl.expressionCapacity;
             ls.sig = pl.sig;
             ls.wiring = std::move(wiring);
             ls.steps = w.steps;
@@ -1658,13 +1676,13 @@ void Engine::takeExpression(Voice& v, const Pattern& pat, const PatternNote& n) 
 // The note's expression `into` samples after it took the voice: bend (curve + vibrato), press and timbre.
 static void expressionAt(const NoteExpression& x, double into, double len, double sr, double& bend, double& press, double& timbre) {
     const double u = std::clamp(into / len, 0.0, 1.0);
-    bend = x.bend.count ? x.bend.at(u) : 0.0;
+    bend = !x.bend.points.empty() ? x.bend.at(u) : 0.0;
     if (x.vibDepth > 0) {
         const double fade = x.vibDelay > 0 ? std::clamp(u / x.vibDelay, 0.0, 1.0) : 1.0;
         bend += x.vibDepth * fade * detSin(kTwoPi * x.vibRate * into / sr);
     }
-    press = x.press.count ? x.press.at(u) : 1.0;
-    timbre = x.timbre.count ? x.timbre.at(u) : 0.0;
+    press = !x.press.points.empty() ? x.press.at(u) : 1.0;
+    timbre = !x.timbre.points.empty() ? x.timbre.at(u) : 0.0;
 }
 
 void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept {
@@ -1854,7 +1872,7 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
                 v.phase -= std::floor(v.phase);
             }
             const double* y = v.inst->process(ctx);
-            const bool autoPress = v.expressive && v.ex.press.count > 0 && !reads(Var::Press);
+            const bool autoPress = v.expressive && !v.ex.press.points.empty() && !reads(Var::Press);
             for (int i = 0; i < n; ++i) {
                 double s = y[i];
                 if (engineFade && !v.gate) s *= std::max(0.0, 1.0 - c.vrel[i] / fadeLen);
