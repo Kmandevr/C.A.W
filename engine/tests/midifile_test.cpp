@@ -305,7 +305,12 @@ TEST(midi_import_rejects_malformed_files_without_crashing) {
     vlq(body, 5000);
     body.insert(body.end(), {0x80, 60, 0, 0x00, 0xFF, 0x2F, 0x00});
     track(longf, body);
-    fails(longf, "4096 steps");
+    const std::string importedLong = import(longf, err);
+    CHECK(!importedLong.empty());
+    CHECK(err.empty());
+    const PatternResult longPattern = parsePattern(importedLong);
+    CHECK(longPattern.pattern != nullptr);
+    if (longPattern.pattern) CHECK(longPattern.pattern->lengthSteps > 4096);
     Bytes many = header(0, 1, 96);
     Bytes mb;
     for (int i = 0; i < 20; ++i) mb.insert(mb.end(), {0x00, 0x90, uint8_t(40 + i), 100});
