@@ -792,7 +792,7 @@ TEST(engine_automates_parameters_beyond_32) {
     std::string source = "---\nmode: float\n---\n";
     for (int i = 0; i < 40; ++i)
         source += "param p" + std::to_string(i) + " = 0.5 in 0..2\n";
-    source += "p39";
+    source += "p39 * 0.5";
     p.modules.push_back({"tone", source, {}});
     LayerSpec layer;
     layer.id = "track";
@@ -812,8 +812,8 @@ TEST(engine_automates_parameters_beyond_32) {
     e.play();
     const auto out = run(e, 1100);
     const float pan = static_cast<float>(std::cos(kPi / 4.0));
-    CHECK_NEAR(out[0], 0.5 * pan, 1e-4);
-    CHECK_NEAR(out[1000], 1.5 * pan, 1e-4);
+    CHECK_NEAR(out[0], 0.25 * pan, 1e-4);
+    CHECK_NEAR(out[1000], 0.75 * pan, 1e-4);
 }
 
 TEST(engine_rejects_project_state_above_hardware_budget) {
@@ -872,7 +872,7 @@ TEST(engine_routes_more_than_16_module_exports) {
     p.loopBars = 1;
     p.master = 1.0;
     p.modules.push_back({"source", source, {}, "src"});
-    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsrc.value19", {}});
+    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsrc.value19 / 20", {}});
     LayerSpec sourceLayer;
     sourceLayer.id = "source_track";
     sourceLayer.chain = {"source"};
@@ -890,7 +890,7 @@ TEST(engine_routes_more_than_16_module_exports) {
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     e.play();
     const auto out = run(e, 1024);
-    CHECK_NEAR(out[out.size() - 2], 20.0 * std::cos(kPi / 4.0), 1e-3);
+    CHECK_NEAR(out[out.size() - 2], std::cos(kPi / 4.0), 1e-3);
 }
 
 TEST(engine_rejects_export_layout_above_memory_budget) {
