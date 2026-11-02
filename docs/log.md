@@ -77,3 +77,4 @@ Newest first.
 - 2026-10-28: Owner answered the remaining key questions (WASD in the code editor's Vim mode, Alt+Q to record, Ctrl+1/2/3 for areas, the cursor keys, the phone toolbar); updated [actions](actions.md). Still waiting for the go.
 
 - 2026-11-02: The docs-only checkpoint 1370a43 triggered a delayed Windows build that remained in Build for over 15 minutes but eventually passed; all four Engine targets completed successfully in run 41402930328. The later full Engine matrix at 1269019 also passed.
+- 2026-11-02: Removed the fixed nine-module/eight-effect chain ceiling from project parsing, synth patch parsing and Engine chain preparation. Added regression coverage for a 12-module parsed project chain and a nine-effect synth patch. Updated engine/synth documentation. Native CI for this new code checkpoint has not yet been observed; do not treat the earlier graph-budget CI as verification of these changes.
