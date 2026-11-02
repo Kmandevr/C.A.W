@@ -10,7 +10,7 @@ updated: 2026-11-02
 ## Current state
 
 - **Branch:** `feature/native-engine-refactor-integration`
-- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison before this ledger refresh: 108 commits ahead.
+- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison before this ledger refresh: 127 commits ahead.
 - **Starting point:** `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`, which was 15 commits ahead and 0 behind Main when selected.
 - **Latest code/test checkpoint:** `8f43d76036cadcc3998eed6747a94d9e0c3f0480`; latest docs/log checkpoint: `78bc7d2e4c8265337861511a09feae897fc0d223`.
 - **Previous fully verified native code checkpoint:** `07c796f8e745cd44e7be37992747b8263ac27e9a` (Engine, App and Docs CI all passed at `1269019`). The compiler-budget follow-up and all subsequent project-content changes still require fresh CI verification; the last known green Engine/App/Docs runs predate them.
@@ -91,6 +91,12 @@ updated: 2026-11-02
 - Added tests for budget partitioning, unknown-memory fallback and project rejection when delay state exceeds a 2 MiB hardware budget.
 - Graph/compile/retirement shares are defined but are not yet enforced by those subsystems. The active GraphExecutor is still not integrated into Engine.
 - **Verification:** fresh CI for these changes is not yet inspectable.
+
+## Latest implementation slice — graph budget sourced from Engine policy
+
+- Added makeGraphResourceBudget(EngineResourceBudget), mapping the Engine's graph-working share to GraphResourceBudget.maxWorkingBytes. The Engine budget is now the common policy source for project state and future graph/compile/retirement allocations.
+- This is a conversion seam, not active graph integration: Engine still does not instantiate GraphExecutor, and graph/compile/retirement shares are not yet consumed by the runtime.
+- Added a regression test for the conversion from a 16 MiB hardware budget to a 4 MiB graph working budget.
 
 ## Fixed limits and correctness risks
 
