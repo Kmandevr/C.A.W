@@ -70,11 +70,13 @@ private:
     struct Slot;
     struct Cmd;
     struct Retired;
+    struct AutomationData;
 
     void drainRetired();
     void send(const Cmd& c);
     void applyCommands() noexcept;
-    void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr) noexcept;
+    void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
+                AutomationData* automation = nullptr) noexcept;
     void processChunk(float* l, float* r, int m) noexcept;
     void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
