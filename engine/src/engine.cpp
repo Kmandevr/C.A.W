@@ -693,11 +693,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
             warnings[id].push_back(std::to_string(late) + " note" + (late == 1 ? " starts" : "s start") +
                                    " after the pattern's length and never play" + (late == 1 ? "s" : ""));
     }
-    int64_t projectState = 0;
+    uint64_t projectStateBytes = 0;
     std::vector<std::vector<int>> readsFrom(kSlots);
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}, nullptr, {}, {}, {}};
-        int64_t layerState = 0;
+        uint64_t layerStateDoubles = 0;
         // A synth in the chain stands for its voice and effects; its project effect modules are found by name.
         std::vector<std::string> chain;
         for (const std::string& id : w.chain) {
@@ -726,7 +726,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             if (it == modules_.end() || !it->second.program || it->second.program->kind == ModuleKind::Library) continue;
             pl.ids.push_back(id);
             pl.sig.push_back(it->second.program.get());
-            layerState += it->second.program->stateSize;
+            layerStateDoubles += static_cast<uint64_t>(std::max(0, it->second.program->stateSize));
         }
         // Arrangement clips are compiled into an immutable absolute-time event stream here,
         // on the control thread. A layer still uses one voice pool and one instrument/effect chain.
@@ -752,7 +752,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
             }
             pl.w.steps = 0;  // arrangement follows the project transport, not an individual clip loop
             const Program& gen = *modules_.at(pl.ids.front()).program;
-            layerState += static_cast<int64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) * gen.stateSize;
+            layerStateDoubles += static_cast<uint64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) *
+                static_cast<uint64_t>(std::max(0, gen.stateSize));
         } else if (!w.pattern.empty() && !pl.ids.empty()) {
             auto it = modules_.find(w.pattern);
             if (it != modules_.end() && it->second.pattern) {
@@ -764,14 +765,20 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 warnings[pl.ids.front()].push_back("pattern '" + w.pattern + "' is missing or has an error, so it plays without one");
             }
         }
-        // Memory is bounded for the whole project: a layer that would pass the budget stays silent.
-        if (!pl.ids.empty() && projectState + layerState > kMaxProjectStateDoubles) {
-            warnings[pl.ids.front()].push_back("layer not installed: the project's module state exceeds the current 64 MiB project-state budget");
+        // The project-state share comes from the Engine's measured/fallback resource budget.
+        const bool stateSizeOverflow = layerStateDoubles > std::numeric_limits<uint64_t>::max() / sizeof(double);
+        const uint64_t layerStateBytes = stateSizeOverflow
+            ? std::numeric_limits<uint64_t>::max() : layerStateDoubles * sizeof(double);
+        const bool overBudget = stateSizeOverflow || projectStateBytes > resourceBudget_.projectStateBytes ||
+            layerStateBytes > resourceBudget_.projectStateBytes - projectStateBytes;
+        if (!pl.ids.empty() && overBudget) {
+            warnings[pl.ids.front()].push_back("layer not installed: estimated module state exceeds this Engine's project-state budget of " +
+                std::to_string(resourceBudget_.projectStateBytes) + " bytes");
             allOk = false;
             pl.ids.clear();
             pl.sig.clear();
         }
-        projectState += layerState * !pl.ids.empty();
+        if (!pl.ids.empty()) projectStateBytes += layerStateBytes;
         auto it = layers_.find(w.id);
         if (it != layers_.end()) {
             pl.ls = it->second;
