@@ -329,7 +329,45 @@ bool GraphExecutor::process(const float* inputLeft, const float* inputRight,
     return true;
 }
 
-bool GraphRuntime::publish(GraphExecutor* prepared) noexcept {
+GraphError PreparedGraph::prepare(const std::vector<GraphNode>& nodes,
+                                  const std::vector<GraphConnection>& connections,
+                                  std::vector<std::unique_ptr<ModuleProcessor>> processors,
+                                  uint32_t outputNode,
+                                  uint32_t maxFrames,
+                                  double sampleRate,
+                                  const GraphResourceBudget& budget) {
+    reset();
+    try {
+        std::vector<ModuleProcessor*> borrowed;
+        borrowed.reserve(processors.size());
+        for (const auto& processor : processors) borrowed.push_back(processor.get());
+        const GraphError result = executor_.prepare(nodes, connections, borrowed, outputNode,
+                                                    maxFrames, sampleRate, budget);
+        if (result != GraphError::Ok) return result;
+        // Moving unique_ptrs preserves processor addresses already borrowed by executor_.
+        processors_ = std::move(processors);
+        return GraphError::Ok;
+    } catch (const std::bad_alloc&) {
+        reset();
+        return GraphError::OutOfMemory;
+    } catch (...) {
+        reset();
+        return GraphError::OutOfMemory;
+    }
+}
+
+void PreparedGraph::reset() noexcept {
+    // Drop borrowed pointers before destroying the processors they reference.
+    executor_.reset();
+    processors_.clear();
+}
+
+bool PreparedGraph::process(const float* inputLeft, const float* inputRight,
+                            float* outputLeft, float* outputRight, uint32_t frames) noexcept {
+    return executor_.process(inputLeft, inputRight, outputLeft, outputRight, frames);
+}
+
+bool GraphRuntime::publish(PreparedGraph* prepared) noexcept {
     if (!prepared || !prepared->ready()) return false;
     GraphExecutor* expected = nullptr;
     return pending_.compare_exchange_strong(expected, prepared, std::memory_order_release,
@@ -340,9 +378,9 @@ bool GraphRuntime::process(const float* inputLeft, const float* inputRight,
                            float* outputLeft, float* outputRight, uint32_t frames) noexcept {
     if (!outputLeft || !outputRight || frames == 0) return false;
     if (retired_.load(std::memory_order_acquire) == nullptr) {
-        GraphExecutor* next = pending_.exchange(nullptr, std::memory_order_acq_rel);
+        PreparedGraph* next = pending_.exchange(nullptr, std::memory_order_acq_rel);
         if (next) {
-            GraphExecutor* previous = active_;
+            PreparedGraph* previous = active_;
             active_ = next;
             if (previous) retired_.store(previous, std::memory_order_release);
         }
@@ -355,17 +393,17 @@ bool GraphRuntime::process(const float* inputLeft, const float* inputRight,
     return true;
 }
 
-GraphExecutor* GraphRuntime::collectRetired() noexcept {
+PreparedGraph* GraphRuntime::collectRetired() noexcept {
     return retired_.exchange(nullptr, std::memory_order_acq_rel);
 }
 
-GraphExecutor* GraphRuntime::takeActiveAfterStop() noexcept {
+PreparedGraph* GraphRuntime::takeActiveAfterStop() noexcept {
     GraphExecutor* result = active_;
     active_ = nullptr;
     return result;
 }
 
-GraphExecutor* GraphRuntime::takePendingAfterStop() noexcept {
+PreparedGraph* GraphRuntime::takePendingAfterStop() noexcept {
     return pending_.exchange(nullptr, std::memory_order_acq_rel);
 }
 
