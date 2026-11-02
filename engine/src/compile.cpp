@@ -483,7 +483,6 @@ private:
         Val v = expression(0);
         names_[name] = v;
         if (exported) {
-            if (p_.exports.size() >= static_cast<size_t>(kMaxExports)) fail(at, "too many exports");
             ExportDef e;
             e.name = name;
             e.doc = docFor(at.line);
