@@ -780,3 +780,36 @@ TEST(project_and_engine_preserve_layer_automation_beyond_128_points) {
     CHECK_NEAR(out[30000], unity, 1e-4); // automation point 100
     CHECK_NEAR(out[38400], 0.1 * unity, 1e-4); // point 128 must not be truncated
 }
+
+TEST(engine_automates_parameters_beyond_32) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    std::string source = "---\nmode: float\n---\n";
+    for (int i = 0; i < 40; ++i)
+        source += "param p" + std::to_string(i) + " = 0.5 in 0..2\n";
+    source += "p39";
+    p.modules.push_back({"tone", source, {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "param";
+    lane.moduleId = "tone";
+    lane.target = "p39";
+    lane.points = {{0.0, 0.5}, {1.0, 1.5}};
+    p.automation.push_back(lane);
+
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 1100);
+    const float pan = static_cast<float>(std::cos(kPi / 4.0));
+    CHECK_NEAR(out[100], 0.5 * pan, 1e-4);
+    CHECK_NEAR(out[1000], 1.5 * pan, 1e-4);
+}
