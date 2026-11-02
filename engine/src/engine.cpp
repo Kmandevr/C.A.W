@@ -701,11 +701,6 @@ std::string Engine::setProject(const ProjectSpec& p) {
                     chain.push_back(found);
             }
         }
-        if (chain.size() > static_cast<size_t>(kMaxChain)) {
-            warnings[w.chain.front()].push_back("this track's chain has more than " + std::to_string(kMaxChain - 1) +
-                                                " effects; the rest are left out");
-            chain.resize(static_cast<size_t>(kMaxChain));
-        }
         for (const std::string& id : chain) {
             auto it = modules_.find(id);
             if (it == modules_.end() || !it->second.program || it->second.program->kind == ModuleKind::Library) continue;
