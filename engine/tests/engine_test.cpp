@@ -687,3 +687,24 @@ TEST(project_parser_preserves_long_module_chains) {
     CHECK_EQ(parsed.layers[0].chain.back(), std::string("module_11"));
 }
 
+
+TEST(project_parser_preserves_large_module_and_clip_lists) {
+    std::string json = R"({"caw_project":1,"modules":[)";
+    for (int i = 0; i < 300; ++i) {
+        if (i) json += ",";
+        json += R"({"id":"module_)" + std::to_string(i) + R"(","source":"0"})";
+    }
+    json += R"(],"layers":[{"id":"track","clips":[)";
+    for (int i = 0; i < 520; ++i) {
+        if (i) json += ",";
+        json += R"({"id":"clip_)" + std::to_string(i) + R"(","pattern":"pattern","start_steps":0,"length_steps":1})";
+    }
+    json += R"(]}]})";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json, parsed, error));
+    CHECK_EQ(parsed.modules.size(), size_t{300});
+    CHECK_EQ(parsed.layers.size(), size_t{1});
+    CHECK_EQ(parsed.layers[0].clips.size(), size_t{520});
+    CHECK_EQ(parsed.layers[0].clips.back().id, std::string("clip_519"));
+}
