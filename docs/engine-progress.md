@@ -10,16 +10,16 @@ updated: 2026-11-02
 ## Current state
 
 - **Branch:** `feature/native-engine-refactor-integration`
-- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch is 29 commits ahead and 0 behind.
+- **Base:** `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`; branch remains 0 commits behind Main. Last live comparison before this ledger refresh: 108 commits ahead.
 - **Starting point:** `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`, which was 15 commits ahead and 0 behind Main when selected.
-- **Current branch tip at this status record:** 34 commits ahead and 0 behind Main; the accompanying native test commit is `e815b495a8055e58fd9f7079641173f24aa251d4`.
+- **Latest code/test checkpoint:** `8f43d76036cadcc3998eed6747a94d9e0c3f0480`; latest docs/log checkpoint: `78bc7d2e4c8265337861511a09feae897fc0d223`.
 - **Previous fully verified native code checkpoint:** `07c796f8e745cd44e7be37992747b8263ac27e9a` (Engine, App and Docs CI all passed at `1269019`). The compiler-budget follow-up and all subsequent project-content changes still require fresh CI verification; the last known green Engine/App/Docs runs predate them.
 - **Issue:** #28, open and `status: in progress`.
 - **PR:** none. Open one coherent PR only when the complete refactor is genuinely reviewable. Do not merge or approve it.
 - **Current milestone:** M1 — core execution foundations (**IN PROGRESS**). M0 is **VERIFIED**.
-- **Last implementation step:** added a direct regression test that rejects graph compilation when its estimated working set exceeds `maxWorkingBytes`; clarified that the byte budget is an estimate. The underlying budget implementation, deterministic ID validation and pre-reserved adjacency/ready-heap storage passed Engine, App and Docs CI at checkpoint `1269019`.
-- **Implementation commits:** `979d25abcd7794731c58fbce72c7522bc442612e` (graph caps); `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a` (scalable validation/OOM); `eb465f4a1489d30beb34801e52bc1e7ddc2e7577` (large graph/block tests); `07c796f8e745cd44e7be37992747b8263ac27e9a` (explicit graph working-memory budget and boundary tests); `e815b495a8055e58fd9f7079641173f24aa251d4` (compiler working-set rejection test).
-- **Current code changed:** `engine/src/graph.h`, `engine/src/graph.cpp`, `engine/tests/graph_test.cpp`. No graph/VM playback integration has been implemented yet.
+- **Last implementation step:** removed fixed VM parameter/import ceilings and the synth-generated parameter ceiling. BlockCtx now borrows a dynamically sized parameter pointer table with an explicit count and sample offset; Engine allocates parameter sample buffers per prepared chain. Tests cover 40 VM parameters with live automation, 40 imports and more than 64 synth parameters. This code is not yet CI-verified.
+- **Implementation commits:** graph scaling/budgets: `979d25abcd7794731c58fbce72c7522bc442612e`, `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a`, `eb465f4a1489d30beb34801e52bc1e7ddc2e7577`, `07c796f8e745cd44e7be37992747b8263ac27e9a`, `e815b495a8055e58fd9f7079641173f24aa251d4`; latest VM capacity code/test checkpoint: `8f43d76036cadcc3998eed6747a94d9e0c3f0480`. See docs/log.md for intermediate code commits.
+- **Current code changed:** graph, project parser, Engine, VM/compiler/program contracts, MIDI/pattern/synth parsing and associated tests. No graph/VM playback integration has been implemented yet.
 
 ## M0 — repository recovery and architecture audit
 
@@ -76,15 +76,23 @@ updated: 2026-11-02
 - Remaining command-path gap: standalone setMaster/play/stop/clearOverload methods still ignore the bool result. Retirement overflow can still leak when both the SPSC retirement queue and pending list are full.
 - **Verification:** no inspectable fresh Engine/App/Docs workflow result is available for this slice. Prior green runs predate it.
 
+## Latest implementation slice — dynamic VM parameters and imports
+
+- Removed the 32-parameter module cap, 64-generated-parameter synth cap and 32-import cap.
+- BlockCtx now exposes a borrowed pointer table, count and sample offset for parameter automation. Each prepared Chain allocates its parameter sample buffers and pointer table off callback; VM reads use bounds-checked count and the per-voice offset.
+- Program imports remain vector-backed and now have no arbitrary compiler count cap; VM receives the prepared pointer array for the exact import list.
+- Tests cover 40 parameters with runtime setParam, 40 imports through actual VM processing, Engine automation of parameter 40, and a synth patch exposing more than 64 generated parameters.
+- **Verification:** fresh CI is not inspectable through the current commit workflow reader. Earlier green runs predate these changes.
+
 ## Fixed limits and correctness risks
 
 Graph compile/prepare now require an explicit working-memory budget and preflight internal storage estimates; allocator overhead is implementation-dependent, so actual allocation failure is still handled. The budget is not yet derived from hardware or passed by the active Engine. The following limits and loss paths remain in the current source and must be converted to explicit, configurable resource budgets or dynamic storage:
 
 - **Project structure:** 64 layers/slots; module chains, project module lists, arrangement clip lists and project-level parameter/global automation lanes/points are now dynamically stored; layer volume/pan automation is now vector-backed and dynamically sized, with control-thread preparation and off-callback retirement; dependency records above 4,096 are rejected; arrangement length/loop is clamped to 64 bars.
-- **VM/module:** 32 parameters; 64 synth parameters; 16 exports; 32 imports; 6 call arguments; 1,024 VM registers; 64 KiB source; 8 MiB state per module; 32 voices; compiler depth/call budgets.
+- **VM/module:** parameters and imports are dynamically sized; 16 exports remain; 6 call arguments; 1,024 VM registers; 64 KiB source; 8 MiB state per module; 32 voices; compiler depth/call budgets.
 - **Pattern/MIDI:** pattern note arrays are dynamic; pattern length remains limited to 4,096 steps; note curves have 16 points; MIDI file size is limited to 16 MiB and MIDI event count to 65,536; MIDI import note allowance is caller-configurable; MIDI 2.0 input queue capacity is 1,024 (drop-newest with a counter).
 - **Runtime queues/state:** 1,024-entry command queue; 1,024-entry retirement queue; 256 pending retirements; 2 MiB state-takeover threshold; 64 MiB project-state budget. Worker pool has a maximum of 16 workers and a 256-job queue.
-- **Confirmed silent/lossy behavior:** export collection stops at 16; no free layer slot now returns an explicit project error; bounded command submission can still time out after about two seconds, but project updates propagate failures and keep failed installs retryable (standalone transport controls still ignore the result); retirement overflow can leak after the pending list fills; project-state overflow returns an explicit error while the over-budget layer remains silent. The known chain/module/clip/arrangement-note/pattern-note/project-automation parser truncations have been removed. Layer volume/pan automation above 128 points now fails clearly.
+- **Confirmed silent/lossy behavior:** export collection stops at 16; no free layer slot now returns an explicit project error; bounded command submission can still time out after about two seconds, but project updates propagate failures and keep failed installs retryable (standalone transport controls still ignore the result); retirement overflow can leak after the pending list fills; project-state overflow returns an explicit error while the over-budget layer remains silent. The known chain/module/clip/arrangement-note/pattern-note/project-automation truncations have been removed. Layer volume/pan automation and VM parameter/import collections are dynamic.
 - Some limits are legitimate sandbox/parser safety budgets. They must remain explicit, configurable within host policy where practical, and fail clearly. Project content must never be silently truncated or a track silently omitted. Real-time event queues may be bounded, but overflow must be visible and recoverable.
 
 ## Milestones
@@ -103,8 +111,8 @@ Graph compile/prepare now require an explicit working-memory budget and prefligh
 
 ## Verification record
 
-- **Current branch tip at this status record:** 34 commits ahead, 0 behind Main; native test commit `e815b495a8055e58fd9f7079641173f24aa251d4` is the implementation checkpoint recorded here.
-- **Verified graph-budget implementation:** code commit `07c796f8` at branch checkpoint `1269019` passed Engine workflow `41403872524` on Linux x64, Linux Arm64, Windows x64 and Linux sanitizers; all four CTest shards passed. The follow-up compiler-budget test commit `e815b495` is awaiting fresh CI. The earlier docs-only checkpoint `1370a43` also eventually passed all four Engine jobs in run `41402930328`; Windows was delayed but did not fail.
+- **Last live compare before this ledger refresh:** 108 commits ahead and 0 behind Main. Latest code/test checkpoint: `8f43d76036cadcc3998eed6747a94d9e0c3f0480`.
+- **Verified graph-budget implementation:** code commit `07c796f8` at branch checkpoint `1269019` passed Engine workflow `41403872524` on Linux x64, Linux Arm64, Windows x64 and Linux sanitizers; all four CTest shards passed. The compiler-budget follow-up and all later content/VM-capacity tests await fresh CI. The earlier docs-only checkpoint `1370a43` also eventually passed all four Engine jobs in run `41402930328`; Windows was delayed but did not fail.
 - **Docs/hygiene:** workflow `41403872717` passed at checkpoint `1269019`; the follow-up test/status commit will trigger a fresh Docs check.
 - **App:** workflow `41403872504` at checkpoint `1269019` — Dart analysis, Dart tests, Windows app and Android APK all **SUCCESS**. Earlier App run `41401179166` also passed at `eb465f4`. Fresh App CI is required for the subsequent chain-cap removal commits.
 - **Earlier Engine/Docs:** `41401179084` and `41401179017` at `eb465f4` both passed.
@@ -115,12 +123,12 @@ Graph compile/prepare now require an explicit working-memory budget and prefligh
 ## Exact next actions
 
 1. Inspect actual push-triggered Engine/App/Docs CI for the latest code checkpoint before relying on these changes. The current workflow-run reader exposes PR-triggered runs only, so use an alternate supported way to inspect the push runs or wait until checks are visible.
-2. Replace layer volume/pan automation's fixed 128-point Slot/Cmd arrays with control-thread-prepared immutable storage and safe off-callback retirement. Preserve the audio callback's no-allocation/no-free rule; only then remove the parser's explicit 128-point rejection.
+2. Remove the 16-export ceiling by replacing per-slot fixed export buffers with prepared dynamically sized storage and safe source-pointer rebinding; preserve the audio callback's no-allocation/no-free rule.
 3. Establish prepared project/runtime snapshots as the publication unit. Build modules, graph, routing, schedules, buffers and migration plans off callback; publish atomically at a block boundary; reclaim old snapshots off callback. Replace per-layer partial command submission with transactional updates. Fix command timeout/drop, retirement overflow/leak and slot-exhaustion loss.
 4. Wire hardware-derived Engine resource budgets into graph compile/prepare and project/state allocation. Validate estimates against actual allocation behavior and profile on weak and strong targets.
 5. Generalize the module process contract and graph executor: multichannel/custom layouts, multiple inputs/outputs, fan-in/fan-out, channel mapping, audio/control/modulation/event/MIDI buffers, timestamp ordering and delayed feedback boundaries.
 6. Integrate the prepared graph with existing VM instances, voices, patterns, imports/exports, automation, folder buses, offline rendering and state migration. Do not create a second engine.
-7. Replace remaining fixed project/VM/voice/export/automation/event caps with resource-derived storage and actionable errors; remove the 64-bar clamp and 64 MiB layer-silencing behavior. Continue unified parameters, native module lifecycle, MIDI device/event routing, adaptive scheduling/batching and Flutter integration. Update docs/tests and open one coherent PR only when all acceptance criteria are met.
+7. Replace remaining fixed project/voice/export/curve/event caps with resource-derived storage and actionable errors; remove the 64-bar clamp and 64 MiB layer-silencing behavior. Surface standalone transport command failures and make retirement overflow lossless. Continue unified parameters, native module lifecycle, MIDI device/event routing, adaptive scheduling/batching and Flutter integration. Update docs/tests and open one coherent PR only when all acceptance criteria are met.
 
 ## Non-negotiable decisions
 
