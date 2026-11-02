@@ -339,21 +339,25 @@ Engine::~Engine() {
     while (cmds_->pop(c)) {
         if (c.type == Cmd::Install) delete c.chain;
         delete c.pattern;
+        delete c.automation;
     }
     Retired r;
     while (retired_->pop(r)) {
         delete r.chain;
         delete r.pattern;
+        delete r.automation;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
         delete pending_[i].pattern;
+        delete pending_[i].automation;
     }
     for (int s = 0; s < kSlots; ++s) {
         delete slots_[s].cur;
         delete slots_[s].old;
         delete slots_[s].pending;
         delete slots_[s].pattern;
+        delete slots_[s].automation;
     }
     delete[] pending_;
 }
@@ -365,6 +369,7 @@ void Engine::drainRetired() {
     while (retired_->pop(r)) {
         delete r.chain;
         delete r.pattern;
+        delete r.automation;
         if (r.freedSlot >= 0) slotBusy_[r.freedSlot] = false;
     }
 }
@@ -376,6 +381,7 @@ void Engine::send(const Cmd& c) {
         if (tries > 2000) {
             if (c.type == Cmd::Install) delete c.chain;  // audio stalled; drop rather than hang the app
             delete c.pattern;
+            delete c.automation;
             return;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1193,12 +1199,13 @@ void Engine::updateTiming() noexcept {
     if (loopLen_ < 1) loopLen_ = 1;
 }
 
-void Engine::retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern) noexcept {
-    if (!c && freedSlot < 0 && !pattern) return;
-    Retired r{c, freedSlot, pattern};
+void Engine::retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern,
+                    AutomationData* automation) noexcept {
+    if (!c && freedSlot < 0 && !pattern && !automation) return;
+    Retired r{c, freedSlot, pattern, automation};
     if (pendingCount_ == 0 && retired_->push(r)) return;
     if (pendingCount_ < kPendingMax) pending_[pendingCount_++] = r;
-    // If even the pending list is full the chain leaks; that needs 1280 swaps without the app reading meters.
+    // If even the pending list is full, reclamation is deferred by the existing overflow policy.
 }
 
 void Engine::swapIn(Slot& s, Chain* c) noexcept {
