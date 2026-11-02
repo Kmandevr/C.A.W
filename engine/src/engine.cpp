@@ -366,7 +366,7 @@ int Engine::freeSlot() {
 }
 
 Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring,
-                                  bool voiced, const Chain* prev) {
+                                  bool voiced, const Chain* prev, const std::vector<ProjectAutomationLaneSpec>& automation) {
     auto* c = new Chain();
     c->voiced = voiced;
     int buf = 0;
@@ -401,6 +401,32 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
         for (int v = 2; v < c->voiceCount; ++v) c->voices[v].inst = c->extraVoices[static_cast<size_t>(v - 2)].get();
     }
     writeParams(*c);
+    // Resolve automation targets and allocate their sample buffers on the control thread.
+    for (size_t moduleIndex = 0; moduleIndex < c->main.size(); ++moduleIndex) {
+        const Program& program = c->main[moduleIndex]->program();
+        const std::string& moduleId = c->moduleIds[moduleIndex];
+        for (size_t paramIndex = 0; paramIndex < program.params.size(); ++paramIndex) {
+            const ParamDef& def = program.params[paramIndex];
+            const ProjectAutomationLaneSpec* selected = nullptr;
+            for (const ProjectAutomationLaneSpec& lane : automation) {
+                const bool matches = lane.targetType == "global"
+                    ? (def.global && lane.target == def.name)
+                    : (lane.targetType == "param" && !def.global && lane.moduleId == moduleId && lane.target == def.name);
+                if (matches) { selected = &lane; break; }
+            }
+            if (!selected || selected->points.empty()) continue;
+            if (c->paramAutomation.size() >= 256) break;
+            Chain::ParamAutomation binding;
+            binding.moduleIndex = static_cast<int>(moduleIndex);
+            binding.paramIndex = static_cast<int>(paramIndex);
+            binding.count = static_cast<int>(std::min<size_t>(128, selected->points.size()));
+            for (int point = 0; point < binding.count; ++point) {
+                binding.steps[point] = selected->points[static_cast<size_t>(point)].step;
+                binding.values[point] = std::clamp(selected->points[static_cast<size_t>(point)].value, def.min, def.max);
+            }
+            c->paramAutomation.push_back(binding);
+        }
+    }
     // Plan how this chain takes over the running state of the one it replaces: every stateful call whose name
     // (position in the code) and size are unchanged keeps playing, within a copy budget for the audio thread.
     if (prev) {
@@ -899,7 +925,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             ls.pattern = pl.pattern;
         }
         if (pl.sig != ls.sig || wiring != ls.wiring || voiced != ls.voiced) {
-            Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain);
+            Chain* c = buildChain(pl.ids, wiring, voiced, ls.chain, p.automation);
             Cmd cmd;
             cmd.type = Cmd::Install;
             cmd.slot = ls.slot;
@@ -1411,7 +1437,7 @@ int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
     return static_cast<int64_t>(std::floor(static_cast<double>(k) * (s.steps * stepLen_) + 0.5));
 }
 
-void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, Slot* exportTo, int offset,
+void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, int len, double* out, Slot* exportTo, int offset,
                       const Pattern* pat, int64_t repeat) noexcept {
     auto& insts = shadow ? c.shadow : c.main;
     BlockCtx ctx;
@@ -1472,6 +1498,16 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int len, double* out, S
             continue;
         }
         ctx.imports = c.importPtrs[idx].empty() ? nullptr : c.importPtrs[idx].data();
+        for (int param = 0; param < kMaxParams; ++param) ctx.paramValues[param] = nullptr;
+        for (Chain::ParamAutomation& binding : c.paramAutomation) {
+            if (binding.moduleIndex != static_cast<int>(idx)) continue;
+            for (int sample = 0; sample < len; ++sample) {
+                const double at = static_cast<double>(globalStart + sample) / stepLen_;
+                binding.samples[sample] = automationValue(binding.count, binding.steps, binding.values, at,
+                    binding.values[0]);
+            }
+            ctx.paramValues[binding.paramIndex] = binding.samples;
+        }
         const Program& p = inst->program();
         if (p.mode == OutputMode::Byte) {
             const double ratio = p.rate / sr_;
@@ -1628,6 +1664,8 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
             if (ctx.vars[k]) ctx.vars[k] += o;
+        for (int k = 0; k < kMaxParams; ++k)
+            if (ctx.paramValues[k]) ctx.paramValues[k] += o;
         ctx.vars[static_cast<int>(Var::T)] = c.vtb;
         ctx.vars[static_cast<int>(Var::Time)] = c.vtime;
         ctx.vars[static_cast<int>(Var::Phase)] = c.vphase;
@@ -1795,11 +1833,11 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         double* y = tmp_;
         s.cur->layerLen = layerLen;
         const Pattern* pat = s.pattern ? s.pattern->get() : nullptr;
-        runChain(*s.cur, false, n0, len, y, &s, j, pat, free ? epoch_ : k);
+        runChain(*s.cur, false, n0, gg, len, y, &s, j, pat, free ? epoch_ : k);
         if (s.seamLeft > 0) {
             const int sl = std::min(len, s.seamLeft);
             double z[kBlock];
-            runChain(*s.cur, true, s.shadowN, sl, z, nullptr, j, nullptr, k);
+            runChain(*s.cur, true, s.shadowN, gg, sl, z, nullptr, j, nullptr, k);
             for (int i = 0; i < sl; ++i) {
                 const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
                 y[i] = z[i] * (1.0 - w) + y[i] * w;
@@ -1809,7 +1847,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         }
         if (s.old) {
             s.old->layerLen = layerLen;
-            runChain(*s.old, false, n0, len, tmp2_, nullptr, j, nullptr, k);
+            runChain(*s.old, false, n0, gg, len, tmp2_, nullptr, j, nullptr, k);
             const int sl = std::min(len, s.swapLeft);
             for (int i = 0; i < len; ++i) {
                 double w = 1.0;
