@@ -185,6 +185,21 @@ TEST(graph_executor_rejects_prepared_buffers_over_working_memory_budget) {
     CHECK(!executor.ready());
 }
 
+TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
+    const std::vector<GraphNode> nodes{{"input", &effect}, {"gain", &effect}};
+    const std::vector<GraphConnection> edges{{0, 1, 1, 0}};
+    PassThrough pass;
+    GainProcessor gain;
+    const std::vector<ModuleProcessor*> processors{&pass, &gain};
+    // Compile storage and prepared buffers each fit 1500 bytes separately, but their
+    // simultaneous peak does not. Preparation must reject before allocating runtime state.
+    const GraphResourceBudget budget{2, 1, 1500};
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, edges, processors, 1, 64, 48000, budget) ==
+          GraphError::ResourceBudgetExceeded);
+    CHECK(!executor.ready());
+}
+
 TEST(graph_executor_accepts_block_sizes_above_legacy_fixed_cap) {
     const std::vector<GraphNode> nodes{{"processor", &effect}};
     PassThrough pass;
