@@ -50,7 +50,7 @@ updated: 2026-11-02
 - The project parser now preserves every string module ID in a chain; Engine no longer warns and truncates the chain after its ninth entry; synth patch translation no longer rejects the ninth effect.
 - Added regression tests for a 12-entry project chain and a nine-effect synth patch. Updated engine, synth, decisions and log documentation.
 - This is a targeted removal only. Fixed layer slots, export buffers, voice arrays and automation arrays remain separate work.
-- **Verification:** no fresh Engine/App/Docs workflow result has yet been observed for the dynamic chain and content-cap changes. The previously green runs at 1269019 predate these changes and do not verify them.
+- **Verification:** no fresh Engine/App/Docs workflow result has yet been inspected for the dynamic chain and content-cap changes. The previously green runs at 1269019 predate these changes and do not verify them.
 
 ## Latest implementation slice — remove silent content ceilings
 
@@ -61,11 +61,18 @@ updated: 2026-11-02
 - These changes remove specific fixed ceilings; they do not yet establish a complete hardware-derived project memory budget. MIDI file byte/event safety bounds, pattern step length, layer slots, voices, exports, automation point arrays and other limits remain.
 - **Verification:** the current Engine/App/Docs push-triggered runs have not been readable through the available commit-workflow result view, which only returns pull-request-triggered runs. Do not claim these changes passed CI until the actual checks are inspected.
 
+## Latest implementation slice — dynamic project automation
+
+- Removed the 256 project-level parameter/global automation-lane rejection and the 128-point silent skip. Both collections are already vector-backed; all valid lanes and points now survive parsing.
+- Added a parser regression with 257 lanes and 129 points per lane.
+- The separate layer volume/pan automation path still uses fixed 128-point arrays in Slot/Cmd and is not changed by this slice. Parameter automation binding count is dynamic, but the VM's parameter-value arrays remain fixed at 32.
+- **Verification:** fresh CI results for the implementation commits remain uninspected. Earlier green runs predate these changes.
+
 ## Fixed limits and correctness risks
 
 Graph compile/prepare now require an explicit working-memory budget and preflight internal storage estimates; allocator overhead is implementation-dependent, so actual allocation failure is still handled. The budget is not yet derived from hardware or passed by the active Engine. The following limits and loss paths remain in the current source and must be converted to explicit, configurable resource budgets or dynamic storage:
 
-- **Project structure:** 64 layers/slots; 9 modules per layer chain; project module parsing stops at 256; clips stop at 512 per layer; project automation lanes stop at 256; automation points stop at 128; dependency records above 4,096 are rejected; arrangement length/loop is clamped to 64 bars.
+- **Project structure:** 64 layers/slots; 9 modules per layer chain; project module parsing stops at 256; clips stop at 512 per layer; project-level parameter/global automation lanes and points are now dynamic; layer volume/pan automation still uses fixed 128-point arrays; dependency records above 4,096 are rejected; arrangement length/loop is clamped to 64 bars.
 - **VM/module:** 32 parameters; 64 synth parameters; 16 exports; 32 imports; 6 call arguments; 1,024 VM registers; 64 KiB source; 8 MiB state per module; 32 voices; compiler depth/call budgets.
 - **Pattern/MIDI:** 4,096 pattern notes/steps; 16 points per note curve; 16 MiB JSON/MIDI file limits; 65,536 MIDI events; 4,096 MIDI notes/steps; MIDI 2.0 input queue capacity 1,024 (drop-newest with a counter).
 - **Runtime queues/state:** 1,024-entry command queue; 1,024-entry retirement queue; 256 pending retirements; 2 MiB state-takeover threshold; 64 MiB project-state budget. Worker pool has a maximum of 16 workers and a 256-job queue.
