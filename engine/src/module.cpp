@@ -54,6 +54,17 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
     for (uint32_t i = 0; i < d.uiControlCount; ++i) {
         const UiControlDescriptor& ui = d.uiControls[i];
         if (ui.id.empty()) return ModuleValidation::EmptyUiControlId;
+        switch (ui.kind) {
+            case UiControlKind::Slider:
+            case UiControlKind::Toggle:
+            case UiControlKind::Dropdown:
+            case UiControlKind::XYPad:
+            case UiControlKind::Button:
+            case UiControlKind::Curve:
+                break;
+            default:
+                return ModuleValidation::InvalidUiControlKind;
+        }
         if (!std::isfinite(ui.minimum) || !std::isfinite(ui.maximum) || ui.minimum > ui.maximum)
             return ModuleValidation::InvalidUiControlRange;
         for (uint32_t j = 0; j < i; ++j)

@@ -63,6 +63,7 @@ enum class ModuleValidation : uint8_t {
     DefaultOutsideRange,
     MissingUiControlArray,
     EmptyUiControlId,
+    InvalidUiControlKind,
     DuplicateUiControlId,
     UiControlMissingParameter,
     InvalidUiControlRange

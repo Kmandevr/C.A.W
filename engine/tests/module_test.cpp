@@ -107,3 +107,12 @@ TEST(module_descriptor_matching_covers_parameters_and_ui_metadata) {
     CHECK(!moduleDescriptorsMatch(original, changedParameter));
     CHECK(!moduleDescriptorsMatch(original, changedUi));
 }
+
+TEST(module_descriptor_rejects_unknown_ui_control_kinds) {
+    const UiControlDescriptor controls[] = {
+        {"unknown-kind", "Unknown", "", static_cast<UiControlKind>(0xFF), 0.0, 1.0},
+    };
+    const ModuleDescriptor d{"caw.test.invalid-ui-kind", 1, nullptr, 0, nullptr, 0,
+                             controls, 1, ""};
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidUiControlKind);
+}
