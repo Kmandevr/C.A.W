@@ -2,7 +2,7 @@
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
 covers: [engine/, app/]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Modular engine implementation status
