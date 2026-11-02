@@ -925,6 +925,44 @@ std::string Engine::setProject(const ProjectSpec& p) {
         }
     }
 
+    // Reserve stable per-slot export slices from the Engine's graph-working memory share.
+    // The pool is allocated once and never moved, so existing import pointers remain valid.
+    size_t maxExportsPerSlot = 0;
+    for (const Planned& pl : plan) {
+        if (pl.ls.slot < 0 || pl.ls.slot >= kSlots || pl.ids.empty()) continue;
+        size_t count = 0;
+        for (const std::string& id : pl.ids) {
+            auto module = modules_.find(id);
+            if (module != modules_.end() && module->second.program)
+                count += module->second.program->exports.size();
+        }
+        maxExportsPerSlot = std::max(maxExportsPerSlot, count);
+    }
+    if (maxExportsPerSlot > 0) {
+        constexpr uint64_t bytesPerSlotExport = static_cast<uint64_t>(kBlock) * sizeof(double);
+        const uint64_t bytesPerAllSlots = static_cast<uint64_t>(kSlots) * bytesPerSlotExport;
+        const size_t budgetCapacity = bytesPerAllSlots == 0 ? 0 :
+            static_cast<size_t>(resourceBudget_.graphWorkingBytes / bytesPerAllSlots);
+        if (!exportPool_) {
+            if (budgetCapacity < maxExportsPerSlot)
+                return R"({"ok":false,"error":"project exports exceed the hardware-derived graph working-memory budget"})";
+            try {
+                auto pool = std::make_unique<ExportPool>();
+                pool->capacityPerSlot = budgetCapacity;
+                pool->buffers.resize(budgetCapacity * static_cast<size_t>(kSlots));
+                for (int slot = 0; slot < kSlots; ++slot) {
+                    slots_[slot].exportBuf = pool->buffers.data() + static_cast<size_t>(slot) * budgetCapacity;
+                    slots_[slot].exportCapacity = budgetCapacity;
+                }
+                exportPool_ = std::move(pool);
+            } catch (const std::bad_alloc&) {
+                return R"({"ok":false,"error":"unable to allocate export buffers within the hardware-derived memory budget"})";
+            }
+        } else if (maxExportsPerSlot > exportPool_->capacityPerSlot) {
+            return R"({"ok":false,"error":"project requires more exports per layer than the existing stable export pool supports"})";
+        }
+    }
+
     // Pass 2: where each exported value lives. The first layer (in project order) playing a module provides it.
     struct Source {
         int slot;
