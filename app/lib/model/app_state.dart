@@ -888,6 +888,7 @@ class AppState extends ChangeNotifier {
   void addAutomationLane(LayerDoc layer, String target) {
     if (target != 'volume' && target != 'pan') return;
     if (layer.automation.any((a) => a.target == target)) return;
+    _pushAutomationUndo();
     final end = project.layers.fold<int>(project.loopSteps, (v, item) =>
       item.clips.fold<int>(v, (e, clip) => e > clip.startSteps + clip.lengthSteps ? e : clip.startSteps + clip.lengthSteps))
         .clamp(1, project.maxArrangementSteps).toInt();
@@ -896,12 +897,45 @@ class AppState extends ChangeNotifier {
         AutomationPointDoc(step: end.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
   }
 
+  void _pushAutomationUndo() {
+    final copy = ProjectDoc.fromJson(project.toJson());
+    _automationUndo.add(_AutomationSnapshot(copy));
+    if (_automationUndo.length > 64) _automationUndo.removeAt(0);
+    _automationRedo.clear();
+  }
+
+  void _restoreAutomationSnapshot(_AutomationSnapshot snapshot) {
+    project.automation = snapshot.projectLanes;
+    for (final layer in project.layers) {
+      layer.automation = snapshot.trackLanes[layer.id] ?? [];
+    }
+  }
+
+  bool undoAutomation() {
+    if (_automationUndo.isEmpty) return false;
+    final copy = ProjectDoc.fromJson(project.toJson());
+    _automationRedo.add(_AutomationSnapshot(copy));
+    _restoreAutomationSnapshot(_automationUndo.removeLast());
+    _changed();
+    return true;
+  }
+
+  bool redoAutomation() {
+    if (_automationRedo.isEmpty) return false;
+    final copy = ProjectDoc.fromJson(project.toJson());
+    _automationUndo.add(_AutomationSnapshot(copy));
+    _restoreAutomationSnapshot(_automationRedo.removeLast());
+    _changed();
+    return true;
+  }
+
   void addProjectAutomationLane(String targetType, String target, [String? moduleId]) {
     if (project.automation.length >= 256 || target.isEmpty) return;
     if (targetType != 'global' && targetType != 'param') return;
     if (targetType == 'param' && (moduleId == null || moduleId.isEmpty)) return;
     if (project.automation.any((lane) => lane.targetType == targetType &&
         lane.target == target && lane.moduleId == moduleId)) return;
+    _pushAutomationUndo();
     final end = project.loopSteps.toDouble();
     final definition = targetType == 'global'
         ? info.values.expand((module) => module.params).where((param) => param.global && param.name == target).firstOrNull
@@ -917,6 +951,7 @@ class AppState extends ChangeNotifier {
 
   void updateProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index, double step, double value) {
     if (index < 0 || index >= lane.points.length) return;
+    _pushAutomationUndo();
     final point = lane.points[index];
     final ordered = [...lane.points]..sort((a, b) => a.step.compareTo(b.step));
     final position = ordered.indexOf(point);
@@ -930,6 +965,7 @@ class AppState extends ChangeNotifier {
 
   void addProjectAutomationPoint(ProjectAutomationLaneDoc lane, double step, double value) {
     if (lane.points.length >= 128) return;
+    _pushAutomationUndo();
     final at = step.clamp(0.0, project.maxArrangementSteps.toDouble()).toDouble();
     if (lane.points.any((point) => (point.step - at).abs() < 0.01)) return;
     lane.points.add(AutomationPointDoc(step: at, value: value));
@@ -939,21 +975,25 @@ class AppState extends ChangeNotifier {
 
   void removeProjectAutomationPoint(ProjectAutomationLaneDoc lane, int index) {
     if (index < 0 || index >= lane.points.length) return;
+    _pushAutomationUndo();
     lane.points.removeAt(index);
     _changed();
   }
 
   void removeProjectAutomationLane(ProjectAutomationLaneDoc lane) {
+    _pushAutomationUndo();
     project.automation.remove(lane);
     _changed();
   }
 
   void removeAutomationLane(LayerDoc layer, AutomationLaneDoc lane) {
+    _pushAutomationUndo();
     editLayer(layer, (l) => l.automation.remove(lane));
   }
 
   void removeAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index) {
     if (index < 0 || index >= lane.points.length) return;
+    _pushAutomationUndo();
     editLayer(layer, (l) {
       l.automation.firstWhere((a) => a.target == lane.target).points.removeAt(index);
     });
@@ -961,6 +1001,7 @@ class AppState extends ChangeNotifier {
 
   void updateAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, int index, double step, double value) {
     if (index < 0 || index >= lane.points.length) return;
+    _pushAutomationUndo();
     editLayer(layer, (l) {
       final p = lane.points[index];
       final sorted = [...lane.points]..sort((a, b) => a.step.compareTo(b.step));
@@ -975,6 +1016,7 @@ class AppState extends ChangeNotifier {
 
   void addAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, double step, double value) {
     if (lane.points.length >= 128) return;
+    _pushAutomationUndo();
     final at = step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
     if (lane.points.any((p) => (p.step - at).abs() < 0.01)) return;
     editLayer(layer, (l) {
