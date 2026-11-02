@@ -6,6 +6,8 @@ updated: 2026-11-02
 
 # Log
 
+- 2026-11-02: Extended the native engine refactor plan with one unified parameter model for visible manual controls, conventional automation and hidden modulation; specified deterministic source combination, sample/block-rate evaluation, mathematical generators/effects, bounded expression execution and resource-aware fallbacks.
+
 - 2026-11-02: Established docs/roadmap.md as the permanent canonical C.A.W. roadmap. Consolidated the long-term production direction into ordered stages, including audio/MIDI recording, monitoring and latency compensation, loop recording, take lanes/comping, plugin hosting, tempo maps, control surfaces, mastering tools, optional collaboration and surround/immersive audio. Explicitly excluded video synchronization for now. Converted the former two-part core plan into a compatibility pointer and the music workflow plan into a factual gap reference; aligned vision and UI scope notes.
 
 - 2026-11-01: Repository-wide documentation accuracy pass: reconciled current app/engine facts, corrected piano-roll curves and generator status, separated shipped/partial/deferred capabilities, updated synth and worker-pool references, and removed stale claims of AI, MIDI-device, audio-recording, plugin-host and platform support.
