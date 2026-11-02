@@ -1865,7 +1865,7 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         if (exportTo && exportTo->exportBuf)
             for (const auto& [reg, buf] : c.exportMap[0])
                 if (buf < exportTo->exportCapacity)
-                    std::fill_n(exportTo->exportBuf[buf].data() + offset + o, n, 0.0);
+                    std::fill_n(exportTo->exportBuf[buf]->data() + offset + o, n, 0.0);
         BlockCtx ctx = base;
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
