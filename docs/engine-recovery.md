@@ -13,8 +13,9 @@ updated: 2026-11-02
 
 - Branch: `feature/native-engine-refactor-integration`
 - Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
-- Last live comparison before this recovery refresh: **148 ahead, 0 behind Main**.
+- Last live comparison before this recovery refresh: **180 ahead, 0 behind Main**.
 - Latest code/test checkpoint: `80e2664a5f9af2c3f6628ba94a0529ead4a42165`.
+- Latest progress/log checkpoint: `2c45cfcff9c3681e6a5a216f97d001db28c96885` / `431b83fca657c4dc38f058d6bbf3bdbdc9ff8aaf`.
 - Working tree/remote state is represented by GitHub branch commits; no local build/test environment is available through the current connector workflow.
 - PR: none. Do not open a PR until the complete assignment is reviewable; do not merge, approve or delete branches.
 
