@@ -1769,8 +1769,7 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
             if (ctx.vars[k]) ctx.vars[k] += o;
-        for (uint32_t k = 0; ctx.paramValues && k < ctx.paramValueCount; ++k)
-            if (ctx.paramValues[k]) const_cast<const double*&>(ctx.paramValues[k]) += o;
+        ctx.paramValueOffset = o;
         ctx.vars[static_cast<int>(Var::T)] = c.vtb;
         ctx.vars[static_cast<int>(Var::Time)] = c.vtime;
         ctx.vars[static_cast<int>(Var::Phase)] = c.vphase;
