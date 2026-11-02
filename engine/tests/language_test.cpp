@@ -1,5 +1,7 @@
 // Language tests: JavaScript bytebeat semantics, defined edge cases, built-ins, params and compile errors.
+#include <array>
 #include <string>
+#include <vector>
 
 #include "compile.h"
 #include "detmath.h"
@@ -241,7 +243,20 @@ TEST(module_imports_are_not_capped_at_32) {
     }
     const CompileResult compiled = compileModule("---\nkind: effect\n---\n" + expression);
     CHECK(compiled.program != nullptr);
-    if (compiled.program) CHECK_EQ(compiled.program->imports.size(), size_t{40});
+    if (!compiled.program) return;
+    CHECK_EQ(compiled.program->imports.size(), size_t{40});
+    Instance instance(compiled.program);
+    std::vector<std::array<double, kBlock>> values(40);
+    std::vector<const double*> imports(40);
+    for (size_t i = 0; i < values.size(); ++i) {
+        values[i].fill(1.0);
+        imports[i] = values[i].data();
+    }
+    BlockCtx context;
+    context.n = kBlock;
+    context.imports = imports.data();
+    instance.process(context);
+    CHECK_NEAR(instance.rawOutput()[0], 40.0, 1e-9);
 }
 
 TEST(module_parameters_are_not_capped_at_32) {
