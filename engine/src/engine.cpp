@@ -1497,12 +1497,6 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
     ctx.importOffset = offset;
     for (size_t idx = 0; idx < insts.size(); ++idx) {
         auto& inst = insts[idx];
-        if (idx == 0 && c.voiced) {
-            runVoices(c, pat, repeat, n0, len, c.gen, exportTo, offset, ctx);
-            input = c.gen;
-            continue;
-        }
-        ctx.imports = c.importPtrs[idx].empty() ? nullptr : c.importPtrs[idx].data();
         for (int param = 0; param < kMaxParams; ++param) ctx.paramValues[param] = nullptr;
         for (Chain::ParamAutomation& binding : c.paramAutomation) {
             if (binding.moduleIndex != static_cast<int>(idx)) continue;
@@ -1513,6 +1507,12 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
             }
             ctx.paramValues[binding.paramIndex] = binding.samples;
         }
+        if (idx == 0 && c.voiced) {
+            runVoices(c, pat, repeat, n0, len, c.gen, exportTo, offset, ctx);
+            input = c.gen;
+            continue;
+        }
+        ctx.imports = c.importPtrs[idx].empty() ? nullptr : c.importPtrs[idx].data();
         const Program& p = inst->program();
         if (p.mode == OutputMode::Byte) {
             const double ratio = p.rate / sr_;
