@@ -9,7 +9,6 @@
 
 namespace caw {
 
-constexpr int kMaxPatternSteps = 4096;  // 64 bars of 16/4; whole bars are checked against the project's meter
 constexpr int kMaxRatchet = 8;
 
 constexpr int kMaxCurvePoints = 16;
