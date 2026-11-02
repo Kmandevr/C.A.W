@@ -586,12 +586,12 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
                 const int b = bendAt(t);
                 if (b != lastPb) ev.push_back({t, 2, {pb, static_cast<uint8_t>(b & 0x7F), static_cast<uint8_t>(b >> 7)}, 3});
                 lastPb = b;
-                if (x->press.count) {
+                if (!x->press.points.empty()) {
                     const uint8_t v = to7(x->press.at(u));
                     if (v != lastPress) ev.push_back({t, 2, {cp, v, 0}, 2});
                     lastPress = v;
                 }
-                if (x->timbre.count) {
+                if (!x->timbre.points.empty()) {
                     const uint8_t v = to7(x->timbre.at(u));
                     if (v != lastTimbre) ev.push_back({t, 2, {cc, 74, v}, 3});
                     lastTimbre = v;
