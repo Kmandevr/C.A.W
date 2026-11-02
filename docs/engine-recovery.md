@@ -13,15 +13,17 @@ updated: 2026-11-02
 
 - Branch: `feature/native-engine-refactor-integration`
 - Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
-- Current branch tip at this status record: 44 ahead, 0 behind. Latest documentation commit: `6734c29443317b348572f4faafb72d920b1d85e0`.
+- Current branch tip at this status record: 58 ahead, 0 behind. Latest implementation/test commit: `8f310708617e742a53cb00896a9715d41883d5cd`.
 - Starting point: `refactor/native-engine-foundation` at `49ba277f91bc9349f70d492c32e5f498d692e9b3`.
 - Issue: #28, open and in progress. PR: none.
 - Milestones: M0 verified; M1 in progress.
 - Graph-budget implementation commit `07c796f8` passed Engine `41403872524` on Linux x64, Linux Arm64, Windows x64 and sanitizers; Docs `41403872717` passed; App `41403872504` passed Dart analysis/tests, Windows app and Android APK. The graph compiler-budget follow-up and subsequent chain-cap removal changes require fresh CI; the last known green run predates those changes. The earlier delayed Windows job at `1370a43` eventually passed all four targets.
 
-## Latest implementation slice
+## Latest implementation slices
 
 Dynamic signal-chain length is now preserved through project parsing and Engine chain preparation; synth patch parsing also accepts more than eight effects. See the 2026-11-02 entry in docs/log.md and the decision in docs/decisions.md. Do not reintroduce the old chain cap. Fixed export-buffer, layer-slot, voice and automation limits remain.
+
+The parser still has an explicit 4096-step pattern-length limit, MIDI file byte/event limits, and the current engine still has fixed layer slots, voices, export buffers and automation point arrays. Do not assume those were removed by the dynamic-storage changes.
 
 ## Read first
 
@@ -39,7 +41,7 @@ The graph executor remains stereo-only with one audio input and output per node,
 
 Important remaining risks include fixed 64 layer slots, 32 voices, 9 chain modules, parameter/import/export caps, 64-bar arrangement clamp, silent parser truncation, project-state exhaustion that leaves layers silent, a project command queue timeout that can drop installs, retirement overflow that can leak, and slot exhaustion that can skip a layer. See `docs/engine-progress.md` for exact limits and source behavior.
 
-M0 audit is complete; do not repeat the repository-wide investigation without new evidence. The latest code slice removes the fixed nine-module/eight-effect chain cap from parsing, Engine preparation and synth patches, with tests for 12 project-chain entries and nine synth effects. It is not yet CI-verified. Next, check CI as soon as a workflow is available, then continue with hardware-aware Engine budgets and transactional prepared-project publication, safe retirement, typed multi-domain graph execution and Engine/VM integration.
+M0 audit is complete; do not repeat the repository-wide investigation without new evidence. The latest code slices remove fixed chain, project module/clip, project parameter-automation binding, arrangement note-output and pattern note-count ceilings. Regression coverage includes 12 chain modules, nine synth effects, 300 project modules, 520 clips, 520×9 arrangement notes and 4097 parsed pattern notes. These changes are not yet verified by an inspectable fresh CI result. Next, check CI as soon as a workflow is available, then continue with hardware-aware Engine budgets and transactional prepared-project publication, safe retirement, typed multi-domain graph execution and Engine/VM integration.
 
 The owner explicitly reopened full graph/runtime integration despite the older pause comment on issue #28. The issue body and current owner comment reflect the current scope.
 
