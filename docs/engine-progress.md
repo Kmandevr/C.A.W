@@ -17,7 +17,7 @@ updated: 2026-11-02
 - **Issue:** #28, open and `status: in progress`.
 - **PR:** none. Open one coherent PR only when the complete refactor is genuinely reviewable. Do not merge or approve it.
 - **Current milestone:** M1 — core execution foundations (**IN PROGRESS**). M0 is **VERIFIED**.
-- **Last implementation step:** removed the 4096-step pattern/MIDI cap and fixed 16-point note-expression curves. Engine reserves per-voice curve capacity off callback and preserves prior capacity during hot swaps. Tests cover 5000-step patterns and 20-point curve parsing/playback. This code is not yet CI-verified.
+- **Last implementation step:** removed the fixed 16-export ceiling and added stable per-slot export pointer tables with lazily allocated, heap-stable buffers bounded by the hardware-derived graph-working share. Tests cover 20 exports end-to-end and explicit low-memory rejection. This code is not yet CI-verified.
 - **Implementation commits:** graph scaling/budgets: `979d25abcd7794731c58fbce72c7522bc442612e`, `37d75466cf1b58944aa5e4be8a0d91ecd9834c2a`, `eb465f4a1489d30beb34801e52bc1e7ddc2e7577`, `07c796f8e745cd44e7be37992747b8263ac27e9a`, `e815b495a8055e58fd9f7079641173f24aa251d4`; latest VM capacity code/test checkpoint: `8f43d76036cadcc3998eed6747a94d9e0c3f0480`. See docs/log.md for intermediate code commits.
 - **Current code changed:** graph, project parser, Engine, VM/compiler/program contracts, MIDI/pattern/synth parsing and associated tests. No graph/VM playback integration has been implemented yet.
 
