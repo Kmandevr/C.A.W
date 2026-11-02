@@ -406,7 +406,8 @@ int Engine::freeSlot() {
 }
 
 Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring,
-                                  bool voiced, const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation) {
+                                  bool voiced, const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation,
+                                   size_t expressionCapacity) {
     auto* c = new Chain();
     c->voiced = voiced;
     int buf = 0;
