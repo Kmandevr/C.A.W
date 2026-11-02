@@ -708,3 +708,29 @@ TEST(project_parser_preserves_large_module_and_clip_lists) {
     CHECK_EQ(parsed.layers[0].clips.size(), size_t{520});
     CHECK_EQ(parsed.layers[0].clips.back().id, std::string("clip_519"));
 }
+
+TEST(arrangement_compilation_keeps_notes_beyond_4096) {
+    ProjectSpec p;
+    p.bpm = 400;
+    p.loopBars = 64;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.voices = 32;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * 0.1", {}});
+    p.modules.push_back({"chord",
+        "---\nkind: pattern\nlength: 1\n---\n0 C3,D3,E3,F3,G3,A3,B3,C4,D4 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    for (int i = 0; i < 520; ++i)
+        layer.clips.push_back({"clip_" + std::to_string(i), "chord", i, 1, 0, false});
+    p.layers.push_back(std::move(layer));
+
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 150100);
+    CHECK(out[150000] > 0.05f); // clip 500 starts after the former 4096-note truncation point
+}
