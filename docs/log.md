@@ -6,6 +6,8 @@ updated: 2026-11-02
 
 # Log
 
+- 2026-11-02: Added callback-safe retirement backpressure on the native Engine. SPSC now supports non-consuming peek and writable-capacity inspection; command processing reserves worst-case retirement capacity, and callback-side swaps/removals defer instead of dropping object ownership when the retirement queue plus pending list are full. Added queue-capacity regression coverage. CI pending at `c0dbeeb`.
+
 - 2026-11-02: Native-engine CI repair follow-up. Engine tests now cover clearing stale project state when the 8 MiB parser budget rejects input. Docs CI caught a malformed log frontmatter replacement; restore the canonical log history and preserve its frontmatter. Retirement overflow remains a known ownership defect requiring a callback-safe backpressure design.
 
 - 2026-11-02: Established docs/roadmap.md as the permanent canonical C.A.W. roadmap. Consolidated the long-term production direction into ordered stages, including audio/MIDI recording, monitoring and latency compensation, loop recording, take lanes/comping, plugin hosting, tempo maps, control surfaces, mastering tools, optional collaboration and surround/immersive audio. Explicitly excluded video synchronization for now. Converted the former two-part core plan into a compatibility pointer and the music workflow plan into a factual gap reference; aligned vision and UI scope notes.
