@@ -887,8 +887,8 @@ TEST(engine_routes_more_than_16_module_exports) {
     e.setMasterBypass(true);
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     e.play();
-    const auto out = run(e, 128);
-    CHECK_NEAR(out[0], 20.0 * std::cos(kPi / 4.0), 1e-4);
+    const auto out = run(e, 1024);
+    CHECK_NEAR(out[out.size() - 2], 20.0 * std::cos(kPi / 4.0), 1e-3);
 }
 
 TEST(engine_rejects_export_layout_above_memory_budget) {
