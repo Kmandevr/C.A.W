@@ -101,8 +101,8 @@ struct Engine::Chain {
         int moduleIndex = 0, paramIndex = 0;
         double minimum = 0.0, maximum = 1.0, step = 0.0;
         const ProjectAutomationLaneSpec* lane = nullptr;
-        double samples[kBlock] = {};
     };
+    double paramSamples[kMaxParams][kBlock] = {};
     std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> automation;
     std::vector<ParamAutomation> paramAutomation;
     std::vector<std::string> moduleIds;
@@ -1534,9 +1534,9 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
                 if (binding.step > 0.0)
                     value = std::clamp(binding.minimum + std::round((value - binding.minimum) / binding.step) * binding.step,
                         binding.minimum, binding.maximum);
-                binding.samples[sample] = value;
+                c.paramSamples[binding.paramIndex][sample] = value;
             }
-            ctx.paramValues[binding.paramIndex] = binding.samples;
+            ctx.paramValues[binding.paramIndex] = c.paramSamples[binding.paramIndex];
         }
         if (idx == 0 && c.voiced) {
             runVoices(c, pat, repeat, n0, len, c.gen, exportTo, offset, ctx);
