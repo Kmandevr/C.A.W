@@ -675,7 +675,7 @@ TEST(project_parser_preserves_long_module_chains) {
     std::string chain = "[";
     for (int i = 0; i < 12; ++i) {
         if (i) chain += ",";
-        chain += "\\\"module_" + std::to_string(i) + "\\\"";
+        chain += "\"module_" + std::to_string(i) + "\"";
     }
     chain += "]";
     const std::string json = R"({"caw_project":1,"layers":[{"id":"track","chain":)" + chain + R"(}]})";
