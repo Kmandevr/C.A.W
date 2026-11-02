@@ -73,7 +73,7 @@ private:
     struct AutomationData;
 
     void drainRetired();
-    void send(const Cmd& c);
+    bool send(const Cmd& c);
     void applyCommands() noexcept;
     void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr) noexcept;
