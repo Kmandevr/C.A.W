@@ -161,6 +161,7 @@ private:
         bool mute = false, solo = false, bus = false;
         int parentSlot = -1;
         std::string automationSig;
+        std::string parameterAutomationSig;
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
