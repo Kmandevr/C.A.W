@@ -147,7 +147,7 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
   - A tempo change releases held notes. At most 16 note changes split one 64-sample block; further ones in that block start together (at most 1.3 ms early).
   - Notes that start at or after the pattern's length never play, and the project result warns about them.
   - An `export let` in a voiced generator shares the newest voice's value.
-- **Limits:** note collections grow dynamically; there is no fixed 4096-note parser cap. Pattern length remains limited to 4096 steps, and ratchets to 8. Errors give a line and column. Kit rows (`[kick]` lines) are reserved for kit patterns and are an error for now.
+- **Limits:** note collections grow dynamically; there is no fixed 4096-note parser cap. Pattern step indices use the signed 32-bit representation boundary rather than a fixed 4096-step product cap; note-expression curves are dynamically sized. Ratchets remain limited to 8. Errors give a line and column. Kit rows (`[kick]` lines) are reserved for kit patterns and are an error for now.
 
 ### MIDI files
 
