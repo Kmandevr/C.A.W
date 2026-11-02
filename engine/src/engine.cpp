@@ -1804,7 +1804,7 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
     const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
     const int swapLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-    if (s.panAutomationCount == 0 && pan != s.panCache) {
+    if ((!s.automation || s.automation->pan.empty()) && pan != s.panCache) {
         s.panCache = pan;
         const double th = (pan + 1.0) * (kPi / 4.0);
         s.gl = detCos(th);
@@ -1898,9 +1898,10 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
         int sp = s.scopePos.load(std::memory_order_relaxed);
         for (int i = 0; i < len; ++i) {
             const double step = static_cast<double>(g_ + j + i) / stepLen_;
-            const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
-                s.volumeAutomationValue, step, target) : 0.0;
-            if (s.volumeAutomationCount > 0) {
+            const bool volumeAutomated = s.automation && !s.automation->volume.empty();
+            const double desired = target > 0.0
+                ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
+            if (volumeAutomated) {
                 // The interpolated automation curve is already continuous; don't add lag on top.
                 s.gain = desired;
             } else if (s.gain != desired) {
@@ -1909,9 +1910,8 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
             }
             const double v = finiteOr0(y[i]) * s.gain;
             double gl = s.gl, gr = s.gr;
-            if (s.panAutomationCount > 0) {
-                const double automatedPan = automationValue(s.panAutomationCount, s.panAutomationStep,
-                    s.panAutomationValue, step, pan);
+            if (s.automation && !s.automation->pan.empty()) {
+                const double automatedPan = automationValue(s.automation->pan, step, pan);
                 const double th = (automatedPan + 1.0) * (kPi / 4.0);
                 gl = detCos(th); gr = detSin(th);
             }
@@ -1955,16 +1955,17 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                 const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
                 for (int j = 0; j < m; ++j) {
                     const double step = static_cast<double>(g_ + j) / stepLen_;
-                    const double desired = target > 0.0 ? automationValue(s.volumeAutomationCount, s.volumeAutomationStep,
-                        s.volumeAutomationValue, step, target) : 0.0;
-                    if (s.volumeAutomationCount > 0) {
+                    const bool volumeAutomated = s.automation && !s.automation->volume.empty();
+                    const double desired = target > 0.0
+                        ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
+                    if (volumeAutomated) {
                         s.gain = desired;
                     } else if (s.gain != desired) {
                         s.gain += (desired - s.gain) * gainCoef;
                         if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
                     }
-                    const double automatedPan = automationValue(s.panAutomationCount, s.panAutomationStep,
-                        s.panAutomationValue, step, pan);
+                    const double automatedPan = s.automation && !s.automation->pan.empty()
+                        ? automationValue(s.automation->pan, step, pan) : pan;
                     const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
                     const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
                     s.outL[j] *= s.gain * leftPan;
