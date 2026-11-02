@@ -247,8 +247,8 @@ TEST(projects_have_a_memory_budget) {
     }
     Engine e(48000);
     const std::string res = e.setProject(p);
-    CHECK(res.find("layer left silent") != std::string::npos);
-    CHECK(res.find("\"m7\":{\"ok\":true") == std::string::npos || res.find("layer left silent") > res.find("\"m7\""));
+    CHECK(res.find("project-state budget") != std::string::npos);
+    CHECK(res.find("\"ok\":false") != std::string::npos);
 }
 
 TEST(music_helpers_treat_nan_the_same_everywhere) {
