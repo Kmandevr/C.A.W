@@ -833,3 +833,29 @@ TEST(engine_rejects_project_state_above_hardware_budget) {
     CHECK(result.find("\"ok\":false") != std::string::npos);
     CHECK(result.find("project-state budget") != std::string::npos);
 }
+
+TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
+    std::string pattern = "---\nkind: pattern\n---\n0 C4 1 bend";
+    for (int i = 0; i < 20; ++i) {
+        const double t = static_cast<double>(i) / 19.0;
+        const double value = static_cast<double>(i) / 19.0;
+        pattern += " " + std::to_string(t) + ":" + std::to_string(value);
+    }
+    pattern += "\n";
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"tone", std::string(kFloat) + "sin(2*pi*freq*t)", {}});
+    p.modules.push_back({"pattern", pattern, {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.pattern = "pattern";
+    p.layers.push_back(layer);
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 2000);
+    CHECK(std::any_of(out.begin(), out.end(), [](float sample) { return std::abs(sample) > 1e-5f; }));
+}
