@@ -305,7 +305,7 @@ TEST(module_parameter_automation_matches_offline_render) {
     p.loopBars = 1;
     p.master = 1.0;
     p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "param level = 0 in 0..1\\nlevel", {}});
+    p.modules.push_back({"tone", std::string(kFloat) + "param level = 0 in 0..1\nlevel", {}});
     LayerSpec layer;
     layer.id = "tone-track";
     layer.chain = {"tone"};
@@ -321,7 +321,7 @@ TEST(module_parameter_automation_matches_offline_render) {
     Engine engine(48000);
     engine.setMasterBypass(true);
     const std::string setup = engine.setProject(p);
-    CHECK(!has(setup, "\\\"ok\\\":false"));
+    CHECK(has(setup, "\\\"ok\\\":true"));
     engine.play();
     const std::vector<float> live = run(engine, 14000);
 
@@ -340,7 +340,7 @@ TEST(project_global_automation_reaches_global_parameters) {
     p.loopBars = 1;
     p.master = 1.0;
     p.seamCrossfade = false;
-    p.modules.push_back({"tone", std::string(kFloat) + "global level = 0 in 0..1\\nlevel", {}});
+    p.modules.push_back({"tone", std::string(kFloat) + "global level = 0 in 0..1\nlevel", {}});
     LayerSpec layer;
     layer.id = "tone-track";
     layer.chain = {"tone"};
