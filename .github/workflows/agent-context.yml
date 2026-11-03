@@ -13,6 +13,8 @@ concurrency:
 jobs:
   build:
     name: Build START.md
+    # Only Main's reviewed files may become the start file, even on a manual run from another branch.
+    if: github.ref == 'refs/heads/Main'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7

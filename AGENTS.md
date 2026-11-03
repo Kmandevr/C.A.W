@@ -75,18 +75,47 @@ Then follow "The loop" and "Stop rules" in its AGENTS.md section.
 
 ### The two records
 
-- **The report:** `quick-check/<branch, with each / written as -->.md` on the `agent-results` branch. For `gpt/28-planar-executor` that is `quick-check/gpt--28-planar-executor.md`. The repository is public, so `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/quick-check/gpt--28-planar-executor.md` also works (it can lag a few minutes). It gives the commit tested, PASS/FAIL per check and the error lines of each failure. The test results are the evidence; they replace reading the code to decide whether something works.
+- **The report:** `quick-check/<branch, with each / written as -->.md` on the `agent-results` branch. For `gpt/28-planar-executor` that is `quick-check/gpt--28-planar-executor.md`. The repository is public, so `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/quick-check/gpt--28-planar-executor.md` also works (it can lag a few minutes). It gives the commit tested, PASS/FAIL per command with its time, the output of search commands, and the failing program's own error lines. The results are the evidence; they replace reading the code to decide whether something works.
 - **The progress comment:** one comment on the task's issue that you edit (or replace) after every step: branch, numbered plan, each step's status with the commit that passed, open failures, and the single next action. It is the only memory a new chat needs.
+
+### Running commands: `run:` lines
+
+CI is your terminal. Put `run:` lines in the message of the **last commit of a push**, one command per line or several separated by `;`. Only those commands run, in order, and the report shows each result. A push with no `run:` lines runs the default set: `docs`, `build`, `test`, `examples`, plus `analyze` and `dart-test` when `app/` changed. Example message:
+
+```text
+Make the executor use planar channel buffers
+
+run: test graph_
+run: grep "left_|right_" engine/src/graph.cpp; refs StereoProcessBlock
+```
+
+| Command | Does |
+| --- | --- |
+| `test [name]` | Builds only `caw_tests` and runs the tests whose `TEST(name)` contains `name`. No name runs the whole ctest suite |
+| `sanitize [name]` | The same under AddressSanitizer and UBSan (Debug build) |
+| `build [target]` | Engine build; targets `caw_core`, `caw_engine`, `caw_cli`, `caw_tests`, `caw_bench` |
+| `examples` | `caw check` of every example and the generated language-docs check |
+| `check <file.caw>…` | `caw check` of the given modules |
+| `render <file.caw> [bpm]` | Renders to WAV (run artifact `renders`) |
+| `bench` | Engine benchmark |
+| `analyze [app/path]…` / `dart-test [app/test/file] [name]` | Dart analysis; Dart tests against the native engine, optionally one file and a name filter |
+| `docs` | Docs guard, strict (as on a pull request) |
+| `grep <regex> [path]…` / `refs <identifier>` | ripgrep search with line numbers; whole-word uses of a name |
+| `tree [dir]` | Repo map: each file with its purpose |
+| `graph query\|explain\|affected "<text>"` | Graphify: what relates to what, what a change affects |
+| `symbols <file>` / `def <name>` | Symbols in a file with line numbers; where a symbol is defined |
+
+Commands run without a shell, so arguments are taken literally. Paths must be relative to the repository root. A bad command is reported as INVALID and the others still run. Engine builds are incremental (ccache), so a targeted `test` after a small change takes about a minute. `node scripts/agent-run.js help` prints this list. The owner can also start a run with chosen commands from the Actions tab (Quick check, "Run workflow").
 
 ### The loop
 
 1. **Start or resume.** Fetch `START.md` from the `agent-results` branch (https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md). CI regenerates it from `Main` whenever this file, `CLAUDE.md`, `docs/vision.md` or a rule changes, and it bundles all of them, so this one fetch replaces reading them separately. Answer its confirmation list, then read the progress comment and the report if they exist and resume at the next action. Don't re-read files or re-review steps the comment marks done.
-2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check (Linux build and tests, docs guard, and Dart checks when `app/` changed). No full CI matrix, no app builds and no pull request are needed.
+2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check, never the full CI matrix or the app builds, and need no pull request.
 3. **Plan.** Write at most five small steps into the progress comment. A step is one logical change that can pass the Quick check by itself.
-4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and wait only on the last.
-5. **Read the report** for the step's last commit. If its `Commit:` is older, the run is still going: wait and read it again; don't re-review the code meanwhile. If the verdict is FAIL, fix only what the failing sections name, push and read the report again.
+4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Use `grep`, `refs`, `def`, `graph` and `tree` (above) to find what to open. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and put the `run:` lines (the narrowest tests that prove the step, such as `test <name>`) in the last commit.
+5. **Read the report** for the step's last commit. If its `Commit:` is older, the run is still going: wait and read it again; don't re-review the code meanwhile. If the verdict is FAIL, fix only what the failing sections name, push with `run:` lines for just the failing commands, and read the report again.
 6. **Record and move on.** Update the progress comment (step done, commit) and start the next step.
-7. **Finish.** When every step passes, open the pull request with `Closes #N` and a **Where I left off** note. Full Engine, App and Docs CI (all platforms and the app builds) runs there. Claude then reviews the work (owner's role split, `docs/decisions.md`).
+7. **Finish.** When every step passes, push once with no `run:` lines so the default set runs. When that passes, open the pull request with `Closes #N` and a **Where I left off** note. Full Engine, App and Docs CI (all platforms and the app builds) runs there. Claude then reviews the work (owner's role split, `docs/decisions.md`).
 
 ### Stop rules (to avoid getting stuck)
 

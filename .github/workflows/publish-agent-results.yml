@@ -32,19 +32,24 @@ jobs:
           REPO: ${{ github.repository }}
           TOKEN: ${{ github.token }}
         run: |
+          # Only report files and the start file may be written, whatever a caller passes.
+          [[ "$TARGET" =~ ^(quick-check/[A-Za-z0-9._-]+\.md|START\.md)$ ]] || { echo "Refusing to publish to $TARGET"; exit 1; }
           src="$PWD/$SOURCE"
           git init -q results && cd results
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote add origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
+          # The token goes in a per-command header, not the remote URL, so it is never written to .git/config.
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          echo "::add-mask::$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git remote add origin "https://github.com/${REPO}.git"
           for attempt in 1 2 3 4; do
-            if git fetch -q --depth 1 origin agent-results 2>/dev/null; then git checkout -q -B agent-results FETCH_HEAD
+            if git -c http.extraheader="$auth" fetch -q --depth 1 origin agent-results 2>/dev/null; then git checkout -q -B agent-results FETCH_HEAD
             else git checkout -q --orphan agent-results; git rm -rfq . 2>/dev/null || true; fi
             mkdir -p "$(dirname "$TARGET")" && cp "$src" "$TARGET"
             git add "$TARGET"
             git diff --cached --quiet && { echo "$TARGET unchanged"; exit 0; }
             git commit -qm "Update $TARGET"
-            git push -q origin agent-results && { echo "Published $TARGET"; exit 0; }
+            git -c http.extraheader="$auth" push -q origin agent-results && { echo "Published $TARGET"; exit 0; }
             sleep $((attempt * 3))
           done
           echo "Could not publish $TARGET after 4 attempts." && exit 1

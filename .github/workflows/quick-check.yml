@@ -1,12 +1,16 @@
-# Quick checks for chat agents: pushes to gpt/** run Linux-only tests (no app builds) and publish a short report file.
+# Quick checks for chat agents: pushes to gpt/** run the commands named by `run:` lines in the commit message (or a default set) and publish a short report.
 name: Quick check
 on:
   push:
-    branches: ["gpt/**"]
+    branches: ["gpt/**", ccr-55caa33d-vxei5s]  # TEMP: self-test on this branch, removed in the next commit
   workflow_dispatch:
     inputs:
+      run:
+        description: "Commands, separated by ';' (same as commit-message run: lines). Empty runs the default set."
+        type: string
+        default: ""
       app:
-        description: Also run Dart analysis and tests
+        description: Add Dart analysis and tests to the default set
         type: boolean
         default: false
 permissions:
@@ -23,6 +27,7 @@ jobs:
   check:
     name: Quick check (Linux x64)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     outputs:
       verdict: ${{ steps.report.outputs.verdict }}
     steps:
@@ -32,127 +37,90 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - name: Work out what changed
-        id: scope
+      - name: Plan the commands
+        id: plan
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+          REQUEST: ${{ inputs.run }}
+          APP: ${{ inputs.app }}
+          BASE: origin/${{ github.event.repository.default_branch }}
         run: |
-          base="origin/${{ github.event.repository.default_branch }}"
-          git diff --name-only "$base"...HEAD > changed.txt || git ls-files > changed.txt
-          app=false
-          grep -q '^app/' changed.txt && app=true
-          [ "${{ inputs.app }}" = "true" ] && app=true
-          echo "app=$app" >> "$GITHUB_OUTPUT"
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-          mkdir -p logs
-      - name: Docs guard
-        id: docs
-        continue-on-error: true
+          printf '%s\n' "$MESSAGE" > message.txt
+          printf '%s' "$REQUEST" | tr ';' '\n' | sed '/^ *$/d; s/^/run: /' > request.txt
+          git diff --name-only "$BASE"...HEAD > changed.txt || git ls-files > changed.txt
+          node scripts/agent-run.js plan --message-file message.txt --request "$(cat request.txt)" \
+            --changed changed.txt --app "${APP:-false}" --out plan.json
+      - name: Install ccache and ctags
+        if: steps.plan.outputs.engine == 'true' || steps.plan.outputs.ctags == 'true'
         run: |
-          set -o pipefail
-          node scripts/docs-test.js --strict --base "${{ steps.scope.outputs.base }}" 2>&1 | tee logs/docs.log
-      - name: Install ccache
-        run: |
-          if ! command -v ccache >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y ccache
-          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ccache universal-ctags
           ccache --max-size=500M
       - name: Restore compiler cache
+        if: steps.plan.outputs.engine == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
           key: ccache-engine-Linux x64-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
           restore-keys: |
             ccache-engine-Linux x64-
-      - name: Engine build
-        id: build
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          { cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            && cmake --build engine/build --parallel; } 2>&1 | tee logs/build.log
-      - name: Engine tests
-        id: tests
-        if: steps.build.outcome == 'success'
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          ctest --test-dir engine/build --output-on-failure --parallel 4 2>&1 | tee logs/tests.log
-      - name: Examples and language docs
-        id: examples
-        if: steps.build.outcome == 'success'
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          { engine/build/caw check examples/*.caw && engine/build/caw docs --check --dir docs; } 2>&1 | tee logs/examples.log
+      - name: Install uv (for Graphify)
+        if: steps.plan.outputs.graph == 'true'
+        run: pipx install uv
       - name: Restore Flutter SDK
-        if: steps.scope.outputs.app == 'true'
+        if: steps.plan.outputs.flutter == 'true'
         id: flutter-cache
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/flutter
           key: flutter-linux-${{ env.FLUTTER_VERSION }}-${{ env.FLUTTER_SHA_LINUX }}
       - name: Install Flutter
-        if: steps.scope.outputs.app == 'true' && steps.flutter-cache.outputs.cache-hit != 'true'
+        if: steps.plan.outputs.flutter == 'true' && steps.flutter-cache.outputs.cache-hit != 'true'
         run: |
           curl -sSfL -o flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
           echo "${FLUTTER_SHA_LINUX}  flutter.tar.xz" | sha256sum -c -
           tar xf flutter.tar.xz -C "$RUNNER_TEMP" && rm flutter.tar.xz
       - name: Add Flutter to PATH
-        if: steps.scope.outputs.app == 'true'
+        if: steps.plan.outputs.flutter == 'true'
         run: echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
       - name: Restore Dart packages
-        if: steps.scope.outputs.app == 'true'
+        if: steps.plan.outputs.flutter == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.pub-cache
           key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
           restore-keys: pub-linux-
-      - name: Dart analysis
-        id: analyze
-        if: steps.scope.outputs.app == 'true'
-        continue-on-error: true
-        working-directory: app
-        run: |
-          set -o pipefail
-          { flutter --disable-analytics && flutter pub get && flutter analyze; } 2>&1 | tee ../logs/analyze.log
-      - name: Dart tests
-        id: dart
-        if: steps.scope.outputs.app == 'true'
-        continue-on-error: true
-        working-directory: app
-        env:
-          CAW_LIB: ${{ github.workspace }}/engine/build/libcaw.so
-        run: |
-          set -o pipefail
-          flutter test --concurrency=4 2>&1 | tee ../logs/dart.log
-      - name: Write the report
+      - name: Run the commands and write the report
         id: report
-        if: always()
+        if: always() && steps.plan.outcome == 'success'
+        env:
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BASE: origin/${{ github.event.repository.default_branch }}
         run: |
-          node scripts/quick-report.js report.md \
-            --branch "${{ github.ref_name }}" --commit "${{ github.sha }}" \
-            --changed changed.txt \
-            --run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            "Docs guard=${{ steps.docs.outcome }}=logs/docs.log" \
-            "Engine build=${{ steps.build.outcome }}=logs/build.log" \
-            "Engine tests=${{ steps.tests.outcome }}=logs/tests.log" \
-            "Examples and language docs=${{ steps.examples.outcome }}=logs/examples.log" \
-            "Dart analysis=${{ steps.analyze.outcome }}=logs/analyze.log" \
-            "Dart tests=${{ steps.dart.outcome }}=logs/dart.log"
+          node scripts/agent-run.js run --plan plan.json --out report.md \
+            --branch "$BRANCH" --commit "$COMMIT" --run "$RUN_URL" --base "$BASE"
           cat report.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
-        if: always()
+        if: always() && steps.report.outcome == 'success'
         with:
           name: quick-check-report
           path: report.md
           retention-days: 7
-      - name: Fail when a check failed
+      - uses: actions/upload-artifact@v7
+        if: always() && hashFiles('renders/*.wav') != ''
+        with:
+          name: renders
+          path: renders/
+          retention-days: 7
+      - name: Fail when a command failed
         if: steps.report.outputs.verdict != 'PASS'
         run: |
           echo "Quick check failed: see the report on the agent-results branch or this run's summary."
           exit 1
 
-  # Separate job so the write token never sits next to the branch's own build and test code.
+  # The write token lives only in the reusable publish job, which never checks out or runs the branch's code.
   report-path:
     name: Report path
     needs: check
