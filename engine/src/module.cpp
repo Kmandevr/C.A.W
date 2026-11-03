@@ -27,15 +27,22 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
             case ChannelLayout::None:
             case ChannelLayout::Mono:
             case ChannelLayout::Stereo:
-            case ChannelLayout::Discrete:
-                break;
-            default:
-                return ModuleValidation::InvalidPortLayout;
+            case ChannelLayout::Quad:
+            case ChannelLayout::Surround51:
+            case ChannelLayout::Surround71:
+            case ChannelLayout::Discrete: break;
+            default: return ModuleValidation::InvalidPortLayout;
         }
-        if (p.type == PortType::Audio && p.layout == ChannelLayout::None)
+        if (p.type == PortType::Audio) {
+            if (p.layout == ChannelLayout::None ||
+                channelCountForLayout(p.layout, p.channelCount) == 0)
+                return ModuleValidation::InvalidPortLayout;
+            if (p.layout == ChannelLayout::Discrete) {
+                if (p.channelCount == 0) return ModuleValidation::InvalidPortLayout;
+            } else if (p.channelCount != 0) return ModuleValidation::InvalidPortLayout;
+        } else if (p.layout != ChannelLayout::None || p.channelCount != 0) {
             return ModuleValidation::InvalidPortLayout;
-        if (p.type != PortType::Audio && p.layout != ChannelLayout::None)
-            return ModuleValidation::InvalidPortLayout;
+        }
         for (uint32_t j = 0; j < i; ++j)
             if (d.ports[j].id == p.id) return ModuleValidation::DuplicatePortId;
     }
@@ -93,7 +100,7 @@ bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b
     for (uint32_t i = 0; i < a.portCount; ++i) {
         const PortDescriptor& x = a.ports[i];
         const PortDescriptor& y = b.ports[i];
-        if (x.id != y.id || x.type != y.type || x.layout != y.layout || x.input != y.input)
+        if (x.id != y.id || x.type != y.type || x.layout != y.layout || x.input != y.input || x.channelCount != y.channelCount)
             return false;
     }
     for (uint32_t i = 0; i < a.parameterCount; ++i) {

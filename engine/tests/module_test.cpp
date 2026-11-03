@@ -116,3 +116,80 @@ TEST(module_descriptor_rejects_unknown_ui_control_kinds) {
                              controls, 1, ""};
     CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidUiControlKind);
 }
+
+TEST(channel_layouts_resolve_standard_and_discrete_counts) {
+    CHECK_EQ(channelCountForLayout(ChannelLayout::Mono), 1u);
+    CHECK_EQ(channelCountForLayout(ChannelLayout::Stereo), 2u);
+    CHECK_EQ(channelCountForLayout(ChannelLayout::Quad), 4u);
+    CHECK_EQ(channelCountForLayout(ChannelLayout::Surround51), 6u);
+    CHECK_EQ(channelCountForLayout(ChannelLayout::Surround71), 8u);
+    CHECK_EQ(channelCountForLayout(ChannelLayout::Discrete, 13), 13u);
+    CHECK_EQ(channelCountForLayout(ChannelLayout::Discrete), 0u);
+    CHECK_EQ(channelCountForLayout(ChannelLayout::None), 0u);
+}
+TEST(module_descriptor_accepts_discrete_audio_channel_count) {
+    const PortDescriptor ports[] = {
+        {"in", PortType::Audio, ChannelLayout::Discrete, true, 12},
+        {"out", PortType::Audio, ChannelLayout::Discrete, false, 12},
+    };
+    const ModuleDescriptor d{"caw.test.discrete", 1, ports, 2, nullptr, 0};
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+}
+TEST(module_descriptor_rejects_discrete_audio_without_channel_count) {
+    const PortDescriptor ports[] = {{"in", PortType::Audio, ChannelLayout::Discrete, true}};
+    const ModuleDescriptor d{"caw.test.discrete.missing", 1, ports, 1, nullptr, 0};
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidPortLayout);
+}
+TEST(module_descriptor_rejects_channel_count_on_named_layout) {
+    const PortDescriptor ports[] = {{"in", PortType::Audio, ChannelLayout::Stereo, true, 4}};
+    const ModuleDescriptor d{"caw.test.named.count", 1, ports, 1, nullptr, 0};
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidPortLayout);
+}
+TEST(module_descriptor_matching_includes_discrete_channel_count) {
+    const PortDescriptor aPorts[] = {{"in", PortType::Audio, ChannelLayout::Discrete, true, 4}};
+    const PortDescriptor bPorts[] = {{"in", PortType::Audio, ChannelLayout::Discrete, true, 6}};
+    const ModuleDescriptor a{"caw.test.match.discrete", 1, aPorts, 1, nullptr, 0};
+    const ModuleDescriptor b{"caw.test.match.discrete", 1, bPorts, 1, nullptr, 0};
+    CHECK(!moduleDescriptorsMatch(a, b));
+}
+TEST(channel_buffer_views_validate_planar_pointer_tables) {
+    const float a[2] = {1.0f, 2.0f}, b[2] = {-1.0f, -2.0f};
+    const float* inputs[] = {a, b};
+    float outA[2] = {}, outB[2] = {};
+    float* outputs[] = {outA, outB};
+    CHECK((ConstChannelBufferView{inputs, 2, 2}.valid()));
+    CHECK((ChannelBufferView{outputs, 2, 2}.valid()));
+    CHECK((!ConstChannelBufferView{nullptr, 2, 2}.valid()));
+    CHECK((!ChannelBufferView{nullptr, 1, 2}.valid()));
+    const float* bad[] = {a, nullptr};
+    CHECK((!ConstChannelBufferView{bad, 2, 2}.valid()));
+}
+TEST(generic_processor_contract_preserves_legacy_stereo_processors) {
+    const PortDescriptor ports[] = {
+        {"in", PortType::Audio, ChannelLayout::Stereo, true},
+        {"out", PortType::Audio, ChannelLayout::Stereo, false},
+    };
+    const ModuleDescriptor descriptor{"caw.test.legacy.adapter", 1, ports, 2, nullptr, 0};
+    class Legacy final : public ModuleProcessor {
+    public:
+        explicit Legacy(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        void process(const StereoProcessBlock& block) noexcept override {
+            for (uint32_t i = 0; i < block.frames; ++i) {
+                block.outputLeft[i] = block.inputLeft[i] * 0.5f;
+                block.outputRight[i] = block.inputRight[i] * 0.25f;
+            }
+        }
+    private: const ModuleDescriptor& d_;
+    } processor(descriptor);
+    const float left[] = {2.0f, 4.0f}, right[] = {-4.0f, -8.0f};
+    const float* inputs[] = {left, right};
+    float outLeft[2] = {}, outRight[2] = {};
+    float* outputs[] = {outLeft, outRight};
+    const AudioProcessBlock block{{inputs, 2, 2}, {outputs, 2, 2}, 2, 48000.0};
+    CHECK(processor.process(block));
+    CHECK_NEAR(outLeft[0], 1.0, 1e-7);
+    CHECK_NEAR(outRight[1], -2.0, 1e-7);
+    const AudioProcessBlock unsupported{{inputs, 2, 2}, {outputs, 1, 2}, 2, 48000.0};
+    CHECK(!processor.process(unsupported));
+}
