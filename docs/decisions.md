@@ -10,7 +10,7 @@ updated: 2026-11-03
 
 - **Claude may merge (owner).** Claude may merge its own pull requests, including the #28 engine branch into `Main`, when CI is green and nothing breaks. The no-merge rule is for the chat-agent (GPT) route. Flow: each Foundation item merges into `feature/native-engine-refactor-integration`, which then merges into `Main` after each item.
 - **No backwards compatibility before Release 1 (owner).** The app hasn't shipped and the owner, its only user, has no projects to keep, so older project files need not keep opening. The project file format stays at version 2; real versioning starts at Release 1, once adding features no longer needs core rework. Roadmap F9 (migrations) moves to before Release 1 (R.7), and Foundation changes to the project model need no migration. Changes to the project file are still listed in each pull request.
-- **Unchanged:** golden hashes still guard sound. Stereo templates must render bit-identically through the graph (F4), and any golden-hash change still goes to the owner first.
+- **F4 precision: float graph edges, golden hashes re-recorded once (owner).** The live mixer sums tracks, folder buses and the master in 64-bit `double`, while graph audio edges are 32-bit float. Measured on 2026-11-03: rounding each track's output to float where it enters a bus or the master changes 10 of the 12 golden hashes (rounding of about 1e-7, inaudible). The owner chose to keep float edges and re-record those hashes once, in F4.2, where the old mixer is changed to round at exactly the points the graph will. F4.3 (the graph runs playback) must then reproduce the F4.2 hashes bit-for-bit. Any other golden-hash change still goes to the owner first.
 
 ## 2026-11-03: Roadmap order, first release and per-item tables
 

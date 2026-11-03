@@ -41,7 +41,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 ### Modules and plugins
 
 - **[Implemented]** Code-defined generators/effects, parameter metadata, reusable functions and Plugin Builder for validating/packaging native .caw modules.
-- **[Partial]** Native module SDK and graph-processing foundations exist, but the prepared graph runtime is not the universal Engine/VM mixer path.
+- **[Partial]** Native module SDK and graph-processing foundations exist (planar N-channel executor with fan-in since Foundation F3/F4.1), but the prepared graph runtime is not the universal Engine/VM mixer path.
 - **[Incomplete]** Dynamic native loading/isolation and external CLAP/VST3/AU hosting.
 
 ### Audio assets and sampling
