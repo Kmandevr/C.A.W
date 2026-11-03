@@ -69,7 +69,8 @@ enum class GraphError : uint8_t {
     InvalidBlockSize,
     OutOfMemory,
     TooManyChannels,
-    RuntimeHostInputMismatch
+    RuntimeHostInputMismatch,
+    DuplicateConnection
 };
 
 struct CompiledGraph {

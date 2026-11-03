@@ -582,3 +582,50 @@ TEST(graph_executor_fan_in_never_allocates) {
     CHECK(ok);
     CHECK_EQ(operations, 0u);
 }
+
+TEST(graph_compiler_rejects_duplicate_edge_into_summing_input) {
+    // The same source routed twice into one mix bus would play 6 dB louder; reject it.
+    ChannelModules six(ChannelLayout::Surround51, 0);
+    BusModule bus;
+    const std::vector<GraphNode> nodes{{"a", &six.source}, {"b", &six.source}, {"bus", &bus.bus}};
+    const CompiledGraph duplicate = compileGraph(nodes, {{0, 0, 2, 0}, {1, 0, 2, 0}, {0, 0, 2, 0}}, kBudget);
+    CHECK(duplicate.error == GraphError::DuplicateConnection);
+    CHECK_EQ(duplicate.errorConnection, 2u);
+}
+
+TEST(graph_executor_prepares_wide_fan_in_in_linear_time) {
+    // 8,192 sources into one bus plus a 2,048-bus chain: prepare must stay O(nodes + edges).
+    const PortDescriptor monoOut[] = {{"out", PortType::Audio, ChannelLayout::Mono, false}};
+    const PortDescriptor monoBus[] = {{"in", PortType::Audio, ChannelLayout::Mono, true, 0, true},
+                                      {"out", PortType::Audio, ChannelLayout::Mono, false}};
+    const ModuleDescriptor source{"test.wide.src", 1, monoOut, 1, nullptr, 0};
+    const ModuleDescriptor bus{"test.wide.bus", 1, monoBus, 2, nullptr, 0};
+    constexpr uint32_t sources = 8192, buses = 2048;
+    std::vector<std::string> ids;
+    ids.reserve(sources + buses);
+    std::vector<GraphNode> nodes;
+    std::vector<GraphConnection> edges;
+    std::vector<std::unique_ptr<ModuleProcessor>> owned;
+    std::vector<ModuleProcessor*> processors;
+    for (uint32_t i = 0; i < sources; ++i) {
+        ids.push_back("s" + std::to_string(i));
+        owned.push_back(std::make_unique<OffsetGenerator>(source, i));
+    }
+    for (uint32_t i = 0; i < buses; ++i) {
+        ids.push_back("b" + std::to_string(i));
+        owned.push_back(std::make_unique<Copy>(bus));
+    }
+    for (uint32_t i = 0; i < sources + buses; ++i) {
+        nodes.push_back({ids[i], i < sources ? &source : &bus});
+        processors.push_back(owned[i].get());
+    }
+    for (uint32_t i = 0; i < sources; ++i) edges.push_back({i, 0, sources, 0});
+    for (uint32_t i = 1; i < buses; ++i) edges.push_back({sources + i - 1, 1, sources + i, 0});
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, edges, processors, sources + buses - 1, 16, 48000.0, kBudget) == GraphError::Ok);
+    Planar out(1, 16);
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
+    float expected = 0.0f;
+    for (uint32_t i = 0; i < sources; ++i) expected += signal(0, 3 + i);
+    CHECK_EQ(out.data[0][3], expected);
+}

@@ -8,6 +8,7 @@
 #include <functional>
 #include <queue>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace caw {
@@ -33,7 +34,8 @@ bool estimateGraphWorkingBytes(std::size_t nodeCount, std::size_t connectionCoun
         !addEstimatedBytes(total, connectionCount, sizeof(uint32_t)) ||
         !addEstimatedBytes(total, portCount, sizeof(uint8_t)) ||
         !addEstimatedBytes(total, nodeCount, sizeof(uint32_t)) ||
-        !addEstimatedBytes(total, nodeCount, sizeof(uint32_t))) return false;
+        !addEstimatedBytes(total, nodeCount, sizeof(uint32_t)) ||
+        !addEstimatedBytes(total, connectionCount, sizeof(std::size_t))) return false;  // summing-edge sort
     bytes = total;
     return true;
 }
@@ -55,8 +57,6 @@ struct ExecutorShape {
 bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames,
                                   std::size_t& bytes) noexcept {
     std::size_t total = 0;
-    // Fixed vector headers: processors, channel storage, zero block, two pointer tables,
-    // host-input slots, four per-node metadata arrays and the execution order.
     // Fixed vector headers: processors, channel storage, zero block and sum storage, three
     // pointer tables, host-input slots, four per-node metadata arrays, the per-node sum index,
     // sum sources, the sum-input list and the execution order.
@@ -196,6 +196,34 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
             connected[connection.destinationNode][connection.destinationPort] = 1;
             ++indegree[connection.destinationNode];
             ++outdegree[connection.sourceNode];
+        }
+
+        // A summing input may take many connections, but never the same one twice: that would
+        // sum one source twice (+6 dB) silently. Sorting keeps this O(E log E).
+        std::vector<std::size_t> summingEdges;
+        summingEdges.reserve(connections.size());
+        for (std::size_t i = 0; i < connections.size(); ++i) {
+            const GraphConnection& c = connections[i];
+            if (nodes[c.destinationNode].module->ports[c.destinationPort].summing) summingEdges.push_back(i);
+        }
+        auto key = [&](std::size_t i) {
+            const GraphConnection& c = connections[i];
+            return std::make_tuple(c.destinationNode, c.destinationPort, c.sourceNode, c.sourcePort, i);
+        };
+        std::sort(summingEdges.begin(), summingEdges.end(),
+                  [&](std::size_t a, std::size_t b) { return key(a) < key(b); });
+        std::size_t firstDuplicate = static_cast<std::size_t>(-1);
+        for (std::size_t k = 1; k < summingEdges.size(); ++k) {
+            const GraphConnection& a = connections[summingEdges[k - 1]];
+            const GraphConnection& b = connections[summingEdges[k]];
+            if (a.destinationNode == b.destinationNode && a.destinationPort == b.destinationPort &&
+                a.sourceNode == b.sourceNode && a.sourcePort == b.sourcePort)
+                firstDuplicate = std::min(firstDuplicate, summingEdges[k]);
+        }
+        if (firstDuplicate != static_cast<std::size_t>(-1)) {
+            out.error = GraphError::DuplicateConnection;
+            out.errorConnection = firstDuplicate;
+            return out;
         }
 
         for (std::size_t i = 0; i < outgoing.size(); ++i) outgoing[i].reserve(outdegree[i]);
@@ -361,33 +389,40 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                     outputTable_[outputBase_[edge.sourceNode] + c];
         }
 
-        // Fan-in: give each connected summing input its own buffers and source list, in
-        // connection order. A summing input without connections stays host-fed.
-        uint32_t sumChannels = 0, sumCount = 0;
+        // Fan-in, in O(nodes + edges): sumIndex_ first counts each summing input's sources
+        // (0 marks a summing input, UINT32_MAX any other), then becomes its sumInputs_ index.
+        for (const GraphConnection& edge : connections)
+            if (sumIndex_[edge.destinationNode] != UINT32_MAX) ++sumIndex_[edge.destinationNode];
+        uint32_t sumChannels = 0, sumCount = 0, sourceTotal = 0;
         for (std::size_t n = 0; n < nodeCount; ++n) {
             if (sumIndex_[n] == UINT32_MAX) continue;
-            uint32_t sources = 0;
-            for (const GraphConnection& edge : connections) sources += edge.destinationNode == n ? 1u : 0u;
-            if (sources == 0) { sumIndex_[n] = UINT32_MAX; continue; }
+            if (sumIndex_[n] == 0) { sumIndex_[n] = UINT32_MAX; continue; }  // unconnected: host-fed
             sumChannels += inputCount_[n];
+            sourceTotal += sumIndex_[n];
             ++sumCount;
         }
         sumInputs_.reserve(sumCount);
-        sumSources_.reserve(connections.size());
+        sumSources_.assign(sourceTotal, 0);
         sumStorage_.assign(static_cast<std::size_t>(sumChannels) * maxFrames, 0.0f);
         sumTable_.resize(sumChannels);
-        uint32_t tableCursor = 0;
+        uint32_t tableCursor = 0, sourceCursor = 0;
         for (std::size_t n = 0; n < nodeCount; ++n) {
             if (sumIndex_[n] == UINT32_MAX) continue;
-            const SumInput entry{static_cast<uint32_t>(sumSources_.size()), 0, tableCursor};
+            const uint32_t sources = sumIndex_[n];
             sumIndex_[n] = static_cast<uint32_t>(sumInputs_.size());
-            sumInputs_.push_back(entry);
-            for (const GraphConnection& edge : connections)
-                if (edge.destinationNode == n) { sumSources_.push_back(edge.sourceNode); ++sumInputs_.back().sourceCount; }
+            sumInputs_.push_back(SumInput{sourceCursor, 0, tableCursor});  // sourceCount fills below
+            sourceCursor += sources;
             for (uint32_t c = 0; c < inputCount_[n]; ++c, ++tableCursor) {
                 sumTable_[tableCursor] = sumStorage_.data() + static_cast<std::size_t>(tableCursor) * maxFrames;
                 inputTable_[inputBase_[n] + c] = sumTable_[tableCursor];
             }
+        }
+        // Connection order within each summing input is the summation order.
+        for (const GraphConnection& edge : connections) {
+            const uint32_t index = sumIndex_[edge.destinationNode];
+            if (index == UINT32_MAX) continue;
+            SumInput& sum = sumInputs_[index];
+            sumSources_[sum.sourceBase + sum.sourceCount++] = edge.sourceNode;
         }
 
         uint32_t hostChannels = 0;
