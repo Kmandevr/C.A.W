@@ -554,7 +554,8 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
         const ModuleDescriptor& to = processors_[edge.destinationNode]->descriptor();
         if (edge.sourcePort >= from.portCount || from.ports[edge.sourcePort].input ||
             from.ports[edge.sourcePort].type != PortType::Audio) return false;
-        if (edge.destinationPort >= to.portCount || !to.ports[edge.destinationPort].summing) return false;
+        if (edge.destinationPort >= to.portCount || !to.ports[edge.destinationPort].input ||
+            !to.ports[edge.destinationPort].summing) return false;
         // Both ends must run, the source first (an unlisted node's position is UINT32_MAX).
         if (routePosition_[edge.destinationNode] == UINT32_MAX ||
             routePosition_[edge.sourceNode] >= routePosition_[edge.destinationNode]) return false;

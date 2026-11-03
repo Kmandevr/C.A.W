@@ -5,6 +5,7 @@
 #include "hardware.h"
 
 #include <algorithm>
+#include <cassert>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -453,7 +454,6 @@ Engine::~Engine() {
         delete slots_[s].pattern;
         delete slots_[s].automation;
     }
-    delete[] pending_;
 }
 
 // ===================== control thread =====================
@@ -2302,8 +2302,12 @@ void Engine::updateRouting() noexcept {
         if (to < 0 || g.position[x] >= g.position[to]) continue;
         g.edges[edgeCount++] = GraphConnection{static_cast<uint32_t>(x), 1, static_cast<uint32_t>(to), 0};
     }
-    // Valid by construction; on a (never expected) rejection the previous routing stays in effect.
-    (void)g.executor.setRouting(g.edges, edgeCount, g.order, count);
+    // Valid by construction. A rejection would keep the previous routing (safe: stale nodes output
+    // zeros) but must never pass unnoticed: it is counted and asserts in debug builds.
+    if (!g.executor.setRouting(g.edges, edgeCount, g.order, count)) {
+        routingRejections_.fetch_add(1, std::memory_order_relaxed);
+        assert(!"mix graph rejected a derived route");
+    }
 }
 
 void Engine::runSlotNode(int i, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {

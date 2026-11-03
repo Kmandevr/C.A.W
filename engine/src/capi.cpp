@@ -60,11 +60,14 @@ char* caw_check(const char* source) try {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"line\":0,\"col\":0}");
 }
 
-CawEngine* caw_engine_create(int32_t sample_rate) {
+CawEngine* caw_engine_create(int32_t sample_rate) try {
     if (sample_rate < 8000 || sample_rate > 192000) return nullptr;
-    auto* e = new CawEngine();
+    auto e = std::make_unique<CawEngine>();
     e->engine = std::make_unique<caw::Engine>(sample_rate);
-    return e;
+    return e.release();
+} catch (...) {
+    // No C++ exception may cross the C ABI (and the Dart FFI behind it): report failure instead.
+    return nullptr;
 }
 
 void caw_engine_destroy(CawEngine* e) {

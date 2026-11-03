@@ -1,6 +1,7 @@
 // Mixer tests: block-size independence, per-layer loop lengths, hot swap, broken code, mute/solo, overload, stop.
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -973,4 +974,42 @@ TEST(track_removed_inside_folder_fades_out_like_a_root_track) {
     const float root = removalStep(false);
     const float folder = removalStep(true);
     CHECK(folder <= root * 1.5f + 1e-4f);
+}
+
+TEST(engine_rejects_unsupported_sample_rates_with_an_exception) {
+    // The mix graph accepts 8,000-192,000 Hz; outside that the Engine can't be built. The C API
+    // checks the range and catches any construction failure, so it never crosses the C ABI.
+    bool threw = false;
+    try { Engine e(4000); } catch (const std::runtime_error&) { threw = true; }
+    CHECK(threw);
+    bool ok = true;
+    try { Engine e(8000); Engine f(192000); } catch (...) { ok = false; }
+    CHECK(ok);
+}
+
+TEST(mix_graph_routing_is_never_rejected_through_reparenting_and_removal) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "sine(220) * 0.3"}, {"b", std::string(kFloat) + "sine(330) * 0.3"},
+                             {"c", std::string(kFloat) + "sine(440) * 0.3"}});
+    LayerSpec outer, inner;
+    outer.id = "outer"; outer.name = "outer"; outer.folder = true; outer.busEnabled = true;
+    inner.id = "inner"; inner.name = "inner"; inner.folder = true; inner.busEnabled = true; inner.parentId = "outer";
+    p.layers.insert(p.layers.begin(), inner);
+    p.layers.insert(p.layers.begin(), outer);
+    p.layers[2].parentId = "inner";
+    p.layers[3].parentId = "outer";
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    run(e, 4800);
+    p.layers[2].parentId = "outer";   // reparent a track
+    p.layers[1].parentId.clear();     // detach the inner bus
+    e.setProject(p);
+    run(e, 4800);
+    p.layers.erase(p.layers.begin()); // remove the outer folder
+    e.setProject(p);
+    run(e, 9600);
+    p.layers.pop_back();              // remove a root track
+    e.setProject(p);
+    run(e, 9600);
+    CHECK_EQ(e.routingRejections(), 0u);
 }
