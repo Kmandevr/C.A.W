@@ -37,6 +37,8 @@ struct LayerMeter {
 
 class Engine {
 public:
+    // sampleRate must be 8,000-192,000 Hz. Throws std::runtime_error if the mix graph cannot be
+    // prepared there, or std::bad_alloc; the C API turns either into a null engine.
     explicit Engine(double sampleRate);
     Engine(double sampleRate, EngineResourceBudget resourceBudget);
     ~Engine();
@@ -60,6 +62,8 @@ public:
     bool layerMeter(int index, LayerMeter& out);
     int scope(int index, float* out, int n);  // index -1 is the master output
     int64_t loopLength();                     // samples in the project loop
+    // Mix-graph routing updates the graph refused; always 0 unless the routing derivation is wrong.
+    uint32_t routingRejections() const noexcept { return routingRejections_.load(std::memory_order_relaxed); }
     // Tests only: skip the master DC blocker and limiter so layer output can be checked exactly.
     void setMasterBypass(bool on) { bypass_.store(on, std::memory_order_relaxed); }
 
@@ -75,6 +79,7 @@ private:
     struct Retired;
     struct AutomationData;
     struct ExportPool;
+    struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
 
     void drainRetired();
     bool canRetire(size_t count) const noexcept;
@@ -83,6 +88,10 @@ private:
     void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr) noexcept;
     void processChunk(float* l, float* r, int m) noexcept;
+    // Graph nodes (audio thread): one per slot, plus the master stage.
+    void runSlotNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
+    void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
+    void updateRouting() noexcept;
     void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
@@ -99,6 +108,7 @@ private:
     const double sr_;
     const EngineResourceBudget resourceBudget_;
     std::unique_ptr<ExportPool> exportPool_;
+    std::unique_ptr<MixGraph> mixGraph_;  // built in the constructor; routed on the audio thread
 
     // ---- audio-thread state ----
     std::unique_ptr<Slot[]> slots_;
@@ -128,9 +138,10 @@ private:
     int processOrder_[kSlots] = {};  // slots in dependency order (exporters before readers)
     int processCount_ = 0;
     int64_t chunkId_ = 0;
-    Retired* pending_ = nullptr;  // retired chains waiting for room in the queue
+    bool routingDirty_ = true;  // re-derive graph routing before the next chunk
+    std::unique_ptr<Retired[]> pending_;  // retired chains waiting for room in the queue (owned, so a throwing constructor cannot leak it)
     int pendingCount_ = 0;
-    double mixL_[kBlock], mixR_[kBlock], tmp_[kBlock], tmp2_[kBlock];
+    double tmp_[kBlock], tmp2_[kBlock];
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
@@ -140,6 +151,7 @@ private:
     std::atomic<bool> bypass_{false};
     std::atomic<int64_t> posFlag_{0}, loopLenFlag_{0};
     std::atomic<int> overloadedFlag_{0};
+    std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)
     std::unique_ptr<std::atomic<float>[]> masterScope_;
     std::atomic<int> masterScopePos_{0};
 

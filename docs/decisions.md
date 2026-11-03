@@ -6,11 +6,25 @@ updated: 2026-11-03
 
 # Decisions
 
+## 2026-11-03: Seeded randomness everywhere, per project and per module
+
+- **Every random source is seeded (owner).** Any randomness in `.caw` modules, built-in nodes and native plugins comes from a seed, so the same project gives the same result every time. **[Fact, 2026-11-03]** `.caw` already works this way for `rand`, `randi`, `hash`, `noise` and pattern note probability, all from the single project seed; there is no per-module seed, and the native SDK (`caw_module_sdk.h` v1) passes plugins no seed and offers no random source.
+- **Per-module seeds follow the project unless pinned (owner).** By default a module's seed is derived from the project seed with a per-module offset, so modules differ but all move when the project seed changes. A module can be pinned to its own seed, which then ignores project seed changes.
+- **Seeding can be switched off per module or per project (owner).** Off means fresh randomness on each play or export.
+- **[Proposal]** When seeding is off, the seed actually used is still recorded (shown and saved with each export), so a take you like can be pinned and reproduced; exports with seeding on stay bit-identical across platforms.
+- **Open:** giving native plugins a seed needs a native SDK ABI change, which the owner approves when that step is built (roadmap F10).
+
+## 2026-11-03: Reliability over old-engine compatibility
+
+- **The old engine's sound and behavior carry no weight (owner).** The goal is the most reliable engine possible. There is no need to reproduce how the pre-Foundation engine sounded or worked, and no support for its quirks.
+- **Golden hashes guard determinism and regressions, not the old sound.** Same source and settings must still give the same bits on every platform and every run. When an intended engine change alters output, the pull request re-records the hashes and states why, with a measurement; it does not need the owner's approval first. This replaces the earlier rule that every golden-hash change goes to the owner.
+- **Unchanged:** exports bit-identical across platforms; a real-time-safe callback; tests never weakened; bug fixes start with a failing test; the owner is asked before native SDK ABI changes and new dependencies.
+
 ## 2026-11-03: Merging, and no project compatibility before Release 1
 
 - **Claude may merge (owner).** Claude may merge its own pull requests, including the #28 engine branch into `Main`, when CI is green and nothing breaks. The no-merge rule is for the chat-agent (GPT) route. Flow: each Foundation item reaches `Main` once its CI is green. Until 2026-11-03 that went through `feature/native-engine-refactor-integration`; that branch merged fully into `Main` in PR #73 and was then deleted by the repository's delete-on-merge setting, so Foundation pull requests now target `Main` directly.
 - **No backwards compatibility before Release 1 (owner).** The app hasn't shipped and the owner, its only user, has no projects to keep, so older project files need not keep opening. The project file format stays at version 2; real versioning starts at Release 1, once adding features no longer needs core rework. Roadmap F9 (migrations) moves to before Release 1 (R.7), and Foundation changes to the project model need no migration. Changes to the project file are still listed in each pull request.
-- **F4 precision: float graph edges, golden hashes re-recorded once (owner).** The live mixer sums tracks, folder buses and the master in 64-bit `double`, while graph audio edges are 32-bit float. Measured on 2026-11-03: rounding each track's output to float where it enters a bus or the master changes 10 of the 12 golden hashes (rounding of about 1e-7, inaudible). The owner chose to keep float edges and re-record those hashes once, in F4.2, where the old mixer is changed to round at exactly the points the graph will. F4.3 (the graph runs playback) must then reproduce the F4.2 hashes bit-for-bit. Any other golden-hash change still goes to the owner first.
+- **F4 precision: float graph edges, golden hashes re-recorded once (owner).** The live mixer sums tracks, folder buses and the master in 64-bit `double`, while graph audio edges are 32-bit float. Measured on 2026-11-03: rounding each track's output to float where it enters a bus or the master changes 10 of the 12 golden hashes (rounding of about 1e-7, inaudible). The owner chose to keep float edges and re-record those hashes once, in F4.2, where the old mixer is changed to round at exactly the points the graph will. F4.3 (the graph runs playback) reproduces the F4.2 hashes bit-for-bit. Later golden-hash changes follow the 2026-11-03 "reliability over old-engine compatibility" entry above.
 
 ## 2026-11-03: Roadmap order, first release and per-item tables
 
