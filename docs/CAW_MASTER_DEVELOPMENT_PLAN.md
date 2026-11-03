@@ -1,12 +1,12 @@
 ---
 title: C.A.W. master development plan
 summary: Design specification for the UI/workflow overhaul and engine integration; current implementation status is tracked separately.
-updated: 2026-11-01
+updated: 2026-11-03
 ---
 
 # C.A.W. — Master Development Plan
 
-**Status:** This is an owner-approved design specification, not a current implementation report. Task 1 implementation was authorized on 2026-10-31; the current shipped UI and remaining gaps are recorded in [App](app.md), [UI design](ui.md) and the [core development plan](core-and-feature-plan.md). Task 2 remains architectural context; its graph-to-Engine/VM integration is paused as recorded in [engine implementation status](engine-build-status.md).  
+**Status:** This is an owner-approved design specification, not a current implementation report. Task 1 implementation was authorized on 2026-10-31; the current shipped UI and remaining gaps are recorded in [App](app.md), [UI design](ui.md) and the [core development plan](core-and-feature-plan.md). Task 2 remains architectural context; its graph-to-Engine/VM integration is the [roadmap](roadmap.md)'s Foundation stage (issue #28).  
 **Project:** C.A.W. (Code Auditioning Workspace), repository `Kmandevr/C.A.W`.  
 **Purpose:** Preserve the agreed design scope for future contributors without implying that every requirement below is implemented.
 

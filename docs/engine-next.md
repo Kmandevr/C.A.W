@@ -34,7 +34,7 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 
 ## 3. Engine architecture
 
-**Owner decision (2026-11-03): one graph runs everything.** The typed module graph is the eventual core: .caw layers, synth voices, effects, folder buses, sends and master all become graph nodes, replacing the fixed layer → effects → bus → master mixer through migration. Integration timing stays paused (see the [implementation ledger](engine-build-status.md)).
+**Owner decision (2026-11-03): one graph runs everything.** The typed module graph is the eventual core: .caw layers, synth voices, effects, folder buses, sends and master all become graph nodes, replacing the fixed layer → effects → bus → master mixer through migration. It is the roadmap's first stage (Foundation, issue #28; owner, 2026-11-03).
 
 **Owner decision (2026-10-30): one engine, modular by construction.** The engine must behave as one coherent system; modularity is not a bolt-on option or a collection of loosely connected sub-engines. Its module boundaries are the architecture itself. The app, project runtime, synth, add-ons, CLI and future plugin wrappers all use the same module identities, typed ports, parameter/state model, processing semantics and dependency rules. Hosts may omit unused capabilities from a build, but they do not get separate competing implementations or incompatible module models.
 
@@ -206,7 +206,7 @@ No one can promise bugs are impossible. The engineering commitment is explicit i
 
 ## 12. Engine dependency order
 
-This is the technical dependency order for the modular engine foundations. It is not the product schedule: [roadmap](roadmap.md) is the single source for sequencing, and the [implementation ledger](engine-build-status.md) records which steps are paused (graph integration, step 3, is paused by the owner).
+This is the technical dependency order for the modular engine foundations. It is not the product schedule: [roadmap](roadmap.md) is the single source for sequencing, and the [implementation ledger](engine-build-status.md) records what is built; graph integration (step 3) is the roadmap's Foundation stage.
 
 1. **Audit and contracts:** map runtime, synth, patterns, C API, app bridge, project serialization, benchmarks and tests. Define signal/port types, module contract, asset IDs/versioning, execution modes and capability profile before adding a graph.
 2. **Adaptive execution foundation:** separate task scheduling from callback; establish workload policies, bounded workers, hardware profile, telemetry and benchmarks. Preserve current behavior by default.
