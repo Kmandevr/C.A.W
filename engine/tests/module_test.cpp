@@ -187,9 +187,9 @@ TEST(generic_processor_contract_preserves_legacy_stereo_processors) {
     float outLeft[2] = {}, outRight[2] = {};
     float* outputs[] = {outLeft, outRight};
     const AudioProcessBlock block{{inputs, 2, 2}, {outputs, 2, 2}, 2, 48000.0};
-    CHECK(processor.process(block));
+    CHECK(static_cast<ModuleProcessor&>(processor).process(block));
     CHECK_NEAR(outLeft[0], 1.0, 1e-7);
     CHECK_NEAR(outRight[1], -2.0, 1e-7);
     const AudioProcessBlock unsupported{{inputs, 2, 2}, {outputs, 1, 2}, 2, 48000.0};
-    CHECK(!processor.process(unsupported));
+    CHECK(!static_cast<ModuleProcessor&>(processor).process(unsupported));
 }
