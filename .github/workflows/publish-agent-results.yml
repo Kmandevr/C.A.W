@@ -25,6 +25,7 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.artifact }}
+          path: payload
       - name: Commit to agent-results
         env:
           SOURCE: ${{ inputs.source }}
@@ -32,9 +33,10 @@ jobs:
           REPO: ${{ github.repository }}
           TOKEN: ${{ github.token }}
         run: |
-          # Only report files and the start file may be written, whatever a caller passes.
-          [[ "$TARGET" =~ ^(quick-check/[A-Za-z0-9._-]+\.md|START\.md)$ ]] || { echo "Refusing to publish to $TARGET"; exit 1; }
-          src="$PWD/$SOURCE"
+          # Only reports, the start file and a branch's screenshot folder may be written, whatever a caller passes.
+          [[ "$TARGET" =~ ^(quick-check/[A-Za-z0-9._-]+\.md|START\.md|screens/[A-Za-z0-9._-]+)$ ]] || { echo "Refusing to publish to $TARGET"; exit 1; }
+          [[ "$SOURCE" =~ ^(\.|[A-Za-z0-9._-]+)$ ]] || { echo "Refusing source $SOURCE"; exit 1; }
+          src="$PWD/payload/$SOURCE"
           git init -q results && cd results
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -45,8 +47,18 @@ jobs:
           for attempt in 1 2 3 4; do
             if git -c http.extraheader="$auth" fetch -q --depth 1 origin agent-results 2>/dev/null; then git checkout -q -B agent-results FETCH_HEAD
             else git checkout -q --orphan agent-results; git rm -rfq . 2>/dev/null || true; fi
-            mkdir -p "$(dirname "$TARGET")" && cp "$src" "$TARGET"
-            git add "$TARGET"
+            if [ -d "$src" ]; then rm -rf "$TARGET"; mkdir -p "$TARGET"; cp "$src"/*.png "$TARGET"/
+            else mkdir -p "$(dirname "$TARGET")" && cp "$src" "$TARGET"; fi
+            git add -A "$TARGET"
+            # One line per branch report, so a new chat can find its branch and state without knowing the file name.
+            if [[ "$TARGET" == quick-check/* ]]; then
+              { echo "# Quick check index"; echo; echo "| Report | Status | Verdict | Commit | Time |"; echo "| --- | --- | --- | --- | --- |"
+                for f in quick-check/*.md; do [ "$f" = quick-check/INDEX.md ] && continue
+                  v() { sed -n "s/^- $1: *//p" "$f" | head -1 | tr -d '*\`' | cut -c1-40; }
+                  echo "| [$(basename "$f" .md)]($(basename "$f")) | $(v Status) | $(v Verdict) | $(v Commit | cut -d" " -f1 | cut -c1-12) | $(v Finished)$(v Started) |"
+                done; } > quick-check/INDEX.md
+              git add quick-check/INDEX.md
+            fi
             git diff --cached --quiet && { echo "$TARGET unchanged"; exit 0; }
             git commit -qm "Update $TARGET"
             git -c http.extraheader="$auth" push -q origin agent-results && { echo "Published $TARGET"; exit 0; }

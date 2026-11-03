@@ -99,11 +99,20 @@ run: grep "left_|right_" engine/src/graph.cpp; refs StereoProcessBlock
 | `render <file.caw> [bpm]` | Renders to WAV (run artifact `renders`) |
 | `bench` | Engine benchmark |
 | `analyze [app/path]…` / `dart-test [app/test/file] [name]` | Dart analysis; Dart tests against the native engine, optionally one file and a name filter |
+| `screenshot <app/test/x_test.dart> [name]` | Runs that widget test with `--update-goldens` and publishes every PNG it writes to `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/screens/<branch-name>/<file>.png`. In the test: `await expectLater(find.byType(MaterialApp), matchesGoldenFile('screens/home.png'));`. Text renders in Flutter's test font (blocks), so check layout, not lettering |
 | `docs` | Docs guard, strict (as on a pull request) |
+| `diff [path]` / `log [n] [path]` | This branch against `Main`: changed files and the patch; recent commits |
+| `show <hash\|HEAD~N> [path]` / `blame <file> [START-END]` | One commit with its patch; who last changed each line |
 | `grep <regex> [path]…` / `refs <identifier>` | ripgrep search with line numbers; whole-word uses of a name |
 | `tree [dir]` | Repo map: each file with its purpose |
 | `graph query\|explain\|affected "<text>"` | Graphify: what relates to what, what a change affects |
 | `symbols <file>` / `def <name>` | Symbols in a file with line numbers; where a symbol is defined |
+
+**Testing the app like a user:** widget tests in `app/test` drive the real app shell (tap, drag, type, scroll; see `pattern_editor_test.dart`), and `dart-test` runs them. Flutter's `meetsGuideline(androidTapTargetGuideline)`, `iOSTapTargetGuideline`, `labeledTapTargetGuideline` and `textContrastGuideline` add accessibility checks to any of them, and `screenshot` shows the result.
+
+**What the runner is:** every report states its environment, a GitHub-hosted Linux x64 runner with no audio device, GPU, phone or Windows. A PASS there is simulated evidence only; behaviour on the owner's phone or on Windows is verified only by the owner running the CI-built app.
+
+**Watching a run:** the report file says `Status: RUNNING` (with the commands queued) as soon as a run starts for your commit, then is replaced by the finished report. `quick-check/INDEX.md` on `agent-results` lists every branch's latest status, verdict and commit, so a new chat can find its branch.
 
 Commands run without a shell, so arguments are taken literally. Paths must be relative to the repository root. A bad command is reported as INVALID and the others still run. Engine builds are incremental (ccache), so a targeted `test` after a small change takes about a minute. `node scripts/agent-run.js help` prints this list. The owner can also start a run with chosen commands from the Actions tab (Quick check, "Run workflow").
 

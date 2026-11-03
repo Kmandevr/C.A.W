@@ -24,12 +24,55 @@ env:
   FLUTTER_VERSION: 3.47.7
   FLUTTER_SHA_LINUX: af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230
 jobs:
+  # Publishes a RUNNING notice right away, so a new commit's report never looks stale while its run is going.
+  announce:
+    name: Announce the run
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Write the RUNNING notice
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+          REQUEST: ${{ inputs.run }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          printf '%s\n' "$MESSAGE" > message.txt
+          if [ -n "$REQUEST" ]; then printf 'run: %s\n' "$REQUEST" > request.txt; else : > request.txt; fi
+          node scripts/agent-run.js plan --message-file message.txt --request "$(cat request.txt)" --out plan.json
+          node scripts/agent-run.js running --plan plan.json --out report.md --branch "$BRANCH" --commit "$COMMIT" --run "$RUN_URL"
+          echo "target=quick-check/$(printf '%s' "$BRANCH" | sed 's#/#--#g').md" >> "$GITHUB_OUTPUT"
+        id: notice
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quick-check-running
+          path: report.md
+          retention-days: 1
+    outputs:
+      target: ${{ steps.notice.outputs.target }}
+  publish-running:
+    needs: announce
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-agent-results.yml
+    with:
+      artifact: quick-check-running
+      source: report.md
+      target: ${{ needs.announce.outputs.target }}
+
   check:
     name: Quick check (Linux x64)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
       verdict: ${{ steps.report.outputs.verdict }}
+      screens: ${{ steps.screens.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,7 +89,7 @@ jobs:
           BASE: origin/${{ github.event.repository.default_branch }}
         run: |
           printf '%s\n' "$MESSAGE" > message.txt
-          printf '%s' "$REQUEST" | tr ';' '\n' | sed '/^ *$/d; s/^/run: /' > request.txt
+          if [ -n "$REQUEST" ]; then printf 'run: %s\n' "$REQUEST" > request.txt; else : > request.txt; fi
           git diff --name-only "$BASE"...HEAD > changed.txt || git ls-files > changed.txt
           node scripts/agent-run.js plan --message-file message.txt --request "$(cat request.txt)" \
             --changed changed.txt --app "${APP:-false}" --out plan.json
@@ -109,6 +152,13 @@ jobs:
           path: report.md
           retention-days: 7
       - uses: actions/upload-artifact@v7
+        id: screens
+        if: always() && hashFiles('screens/*.png') != ''
+        with:
+          name: screens
+          path: screens/
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
         if: always() && hashFiles('renders/*.wav') != ''
         with:
           name: renders
@@ -121,24 +171,36 @@ jobs:
           exit 1
 
   # The write token lives only in the reusable publish job, which never checks out or runs the branch's code.
+  # `always()` matters: without it a failing check skips publishing, and failed reports are the ones agents need most.
   report-path:
     name: Report path
     needs: check
     if: always() && needs.check.result != 'cancelled' && needs.check.result != 'skipped'
     runs-on: ubuntu-24.04
     outputs:
-      target: ${{ steps.path.outputs.target }}
+      slug: ${{ steps.path.outputs.slug }}
     steps:
       - id: path
         env:
           BRANCH: ${{ github.ref_name }}
-        run: echo "target=quick-check/$(printf '%s' "$BRANCH" | sed 's#/#--#g').md" >> "$GITHUB_OUTPUT"
+        run: echo "slug=$(printf '%s' "$BRANCH" | sed 's#/#--#g')" >> "$GITHUB_OUTPUT"
   publish:
-    needs: report-path
+    needs: [report-path, publish-running]
+    if: always() && needs.report-path.result == 'success'
     permissions:
       contents: write
     uses: ./.github/workflows/publish-agent-results.yml
     with:
       artifact: quick-check-report
       source: report.md
-      target: ${{ needs.report-path.outputs.target }}
+      target: quick-check/${{ needs.report-path.outputs.slug }}.md
+  publish-screens:
+    needs: [check, report-path, publish]
+    if: always() && needs.report-path.result == 'success' && needs.check.outputs.screens == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-agent-results.yml
+    with:
+      artifact: screens
+      source: .
+      target: screens/${{ needs.report-path.outputs.slug }}

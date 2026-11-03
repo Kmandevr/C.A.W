@@ -1,5 +1,6 @@
 // Runs a chat agent's requested commands in CI (tests, builds, search, Graphify) and writes its Quick check report.
 // Usage: node scripts/agent-run.js plan --message-file F [--request TEXT] [--changed F] [--app true] --out plan.json
+//        node scripts/agent-run.js running --plan plan.json --out report.md --branch B --commit SHA [--run URL]
 //        node scripts/agent-run.js run --plan plan.json --out report.md --branch B --commit SHA [--run URL] [--base REF]
 // A commit message line `run: <command> [args]` (several lines, or `;` between commands) asks for exactly those
 // commands; with none, the default set runs. Commands are a fixed list run without a shell, so arguments can't inject.
@@ -17,6 +18,9 @@ const FAIL_LINES = 40;      // output shown for a failure
 const BUILD = { release: 'engine/build', asan: 'engine/build-asan' };
 const TARGETS = ['caw_core', 'caw_engine', 'caw_cli', 'caw_tests', 'caw_bench'];
 const GRAPH_SUBCOMMANDS = ['query', 'explain', 'affected'];
+const LONG_LINES = 300;     // output shown for diff, show and blame
+const ENVIRONMENT = 'GitHub-hosted Linux x64 runner (ubuntu-24.04): no audio device, GPU, phone or Windows. A PASS here never proves behaviour on real hardware; only the owner\'s device runs can.';
+const RAW = 'https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results';
 const PROBLEM = /\b(error|FAIL(ED)?|failed|failure|Exception|assert(ion)?|undefined reference|No such file)\b|^\s*(✗|x) /i;
 
 // name: [needs, minArgs, maxArgs, one-line help]. `needs` decides which toolchains the workflow installs.
@@ -31,6 +35,11 @@ const COMMANDS = {
   bench: [['engine'], 0, 0, 'engine benchmark (callback time, real-time load, memory)'],
   analyze: [['flutter'], 0, 20, 'flutter analyze; optional paths under app/'],
   'dart-test': [['flutter', 'engine'], 0, 2, 'flutter test against the native engine; optional test path under app/, then a name filter'],
+  screenshot: [['flutter', 'engine'], 1, 2, 'runs one widget test under app/test with --update-goldens and publishes the PNGs it writes (matchesGoldenFile); optional name filter'],
+  diff: [[], 0, 1, 'this branch against the default branch: changed files, then the patch; optional path'],
+  log: [[], 0, 2, 'recent commits on this branch; optional count (default 20), then a path'],
+  show: [[], 1, 2, 'one commit (hash or HEAD~N) with its patch; optional path'],
+  blame: [[], 1, 2, 'who last changed each line; file, then optional START-END lines'],
   grep: [[], 1, 20, 'ripgrep: regex, then optional paths'],
   refs: [[], 1, 1, 'whole-word uses of an identifier in engine/, app/, examples/ and scripts/'],
   tree: [[], 0, 1, 'repo map with each file\'s purpose; optional directory'],
@@ -65,11 +74,24 @@ function words(text) {
   return out;
 }
 
+// Splits on `;` outside quotes, so `grep "a;b"` stays one command.
+function splitCommands(text) {
+  const out = []; let cur = ''; let q = null;
+  for (const ch of text) {
+    if (q) { if (ch === q) q = null; cur += ch; continue; }
+    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+    if (ch === ';') { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim()).filter(Boolean);
+}
+
 function requested(message, extra) {
   const lines = [];
   for (const l of `${message}\n${extra || ''}`.split(/\r?\n/)) {
     const m = l.match(/^\s*run:\s*(.*)$/i);
-    if (m) lines.push(...m[1].split(';').map((s) => s.trim()).filter(Boolean));
+    if (m) lines.push(...splitCommands(m[1]));
   }
   return lines;
 }
@@ -96,6 +118,20 @@ function validate(name, a) {
   }
   if (name === 'analyze') for (const p of a) { const e = safePath(p, { under: 'app' }); if (e) return e; }
   if (name === 'dart-test' && a[0]) { const e = safePath(a[0], { under: 'app' }); if (e) return e; }
+  if (name === 'screenshot') { const e = safePath(a[0], { under: 'app/test' }); if (e) return e; if (!a[0].endsWith('_test.dart')) return `"${a[0]}" is not a *_test.dart file`; }
+  if (name === 'diff' && a[0]) { const e = safePath(a[0], { mustExist: false }); if (e) return e; }
+  if (name === 'log') {
+    if (a[0] && !/^\d{1,3}$/.test(a[0])) return `count "${a[0]}" must be a number up to 999`;
+    if (a[1]) { const e = safePath(a[1], { mustExist: false }); if (e) return e; }
+  }
+  if (name === 'show') {
+    if (!/^([0-9a-f]{7,40}|HEAD(~\d{1,3})?)$/.test(a[0])) return `"${a[0]}" must be a commit hash or HEAD~N`;
+    if (a[1]) { const e = safePath(a[1], { mustExist: false }); if (e) return e; }
+  }
+  if (name === 'blame') {
+    const e = safePath(a[0]); if (e) return e;
+    if (a[1] && !/^\d+-\d+$/.test(a[1])) return `lines "${a[1]}" must look like 40-80`;
+  }
   if (name === 'grep') for (const p of a.slice(1)) { const e = safePath(p); if (e) return e; }
   if (name === 'refs' && !/^[A-Za-z_][A-Za-z0-9_:~]*$/.test(a[0])) return `"${a[0]}" is not an identifier`;
   if (name === 'tree' && a[0]) { const e = safePath(a[0]); if (e) return e; }
@@ -161,8 +197,21 @@ function flutterSetup(log) {
 }
 const seq = (...fns) => { for (const f of fns) { const s = f(); if (s !== 0) return s; } return 0; };
 
+// PNGs a screenshot test wrote or changed under app/, copied to screens/ for publishing.
+function collectScreens(slug) {
+  const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=all', '--', 'app'], { cwd: ROOT, encoding: 'utf8' });
+  const pngs = (r.stdout || '').split('\n').map((l) => l.slice(3).trim()).filter((f) => f.endsWith('.png'));
+  if (!pngs.length) return ['No PNG was written. Add `await expectLater(find.byType(MaterialApp), matchesGoldenFile(\'screens/<name>.png\'));` to the test.'];
+  fs.mkdirSync(path.join(ROOT, 'screens'), { recursive: true });
+  return pngs.map((f) => {
+    const name = f.replace(/^app\/test\//, '').replace(/[^A-Za-z0-9._-]+/g, '-');
+    fs.copyFileSync(path.join(ROOT, f), path.join(ROOT, 'screens', name));
+    return `${RAW}/screens/${slug}/${name}`;
+  });
+}
+
 // Returns [exit status, kind] for one validated step; kind 'info' shows its output, 'check' only a tail or errors.
-function runStep(step, log, base) {
+function runStep(step, log, base, slug) {
   const a = step.args;
   const cli = `${BUILD.release}/caw`;
   switch (step.name) {
@@ -190,6 +239,20 @@ function runStep(step, log, base) {
       return [seq(() => build(log, 'release', 'caw_engine'), () => flutterSetup(log),
         () => exec(log, 'flutter', ['test', '--concurrency=4', ...t, ...name], { cwd: path.join(ROOT, 'app'), env: { CAW_LIB: path.join(ROOT, BUILD.release, 'libcaw.so') } })), 'check'];
     }
+    case 'screenshot': {
+      const name = a[1] ? ['--plain-name', a[1]] : [];
+      const s = seq(() => build(log, 'release', 'caw_engine'), () => flutterSetup(log),
+        () => exec(log, 'flutter', ['test', '--update-goldens', path.posix.relative('app', a[0]), ...name], { cwd: path.join(ROOT, 'app'), env: { CAW_LIB: path.join(ROOT, BUILD.release, 'libcaw.so') } }));
+      fs.appendFileSync(log, `Screenshots (they appear a few minutes after the report):\n${collectScreens(slug).join('\n')}\n`);
+      return [s, 'info'];
+    }
+    case 'diff': {
+      const only = a[0] ? ['--', a[0]] : [];
+      return [seq(() => exec(log, 'git', ['diff', '--stat', `${base}...HEAD`, ...only]), () => exec(log, 'git', ['diff', `${base}...HEAD`, ...only])), 'long'];
+    }
+    case 'log': return [exec(log, 'git', ['log', '--format=%h %ad %s', '--date=short', '-n', a[0] || '20', ...(a[1] ? ['--', a[1]] : [])]), 'info'];
+    case 'show': return [exec(log, 'git', ['show', '--stat', '--patch', a[0], ...(a[1] ? ['--', a[1]] : [])]), 'long'];
+    case 'blame': return [exec(log, 'git', ['blame', '--date=short', ...(a[1] ? ['-L', a[1].replace('-', ',')] : []), '--', a[0]]), 'long'];
     case 'grep': {
       const s = exec(log, 'rg', ['-n', '--no-heading', '--max-columns', '300', '-e', a[0], ...(a.length > 1 ? a.slice(1) : ['.'])]);
       return [s === 1 ? 0 : s, 'info'];
@@ -224,10 +287,11 @@ function summarize(text, status, kind) {
     const pick = [...new Set([...problems.slice(0, FAIL_LINES - tail.length), ...tail])];
     return pick.map(clip);
   }
-  if (kind === 'info') {
+  if (kind === 'info' || kind === 'long') {
+    const limit = kind === 'long' ? LONG_LINES : INFO_LINES;
     const body = lines.filter((l) => !l.startsWith('$ '));
-    const shown = body.slice(0, INFO_LINES).map(clip);
-    if (body.length > INFO_LINES) shown.push(`… ${body.length - INFO_LINES} more lines (narrow the search)`);
+    const shown = body.slice(0, limit).map(clip);
+    if (body.length > limit) shown.push(`… ${body.length - limit} more lines (narrow it with a path or line range)`);
     return shown.length ? shown : ['(no output)'];
   }
   return lines.filter((l) => !l.startsWith('$ ')).slice(-PASS_TAIL).map(clip);
@@ -255,7 +319,7 @@ function run(o) {
     const log = path.join(logDir, `${i + 1}-${step.name}.log`);
     fs.writeFileSync(log, '');
     const t0 = Date.now();
-    const [status, kind] = runStep(step, log, o.base || 'origin/Main');
+    const [status, kind] = runStep(step, log, o.base || 'origin/Main', (o.branch || 'unknown').replace(/\//g, '--'));
     const seconds = Math.round((Date.now() - t0) / 1000);
     return { step, result: status === 0 ? 'PASS' : 'FAIL', seconds, lines: summarize(readOr(log, ''), status, kind) };
   });
@@ -264,7 +328,9 @@ function run(o) {
   const md = [`# Quick check: ${o.branch || '(unknown branch)'}`, ''];
   md.push(`- Commit: \`${o.commit || 'unknown'}\` (trust this report only if it is your latest commit)`);
   md.push(`- Finished: ${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}`);
+  md.push('- Status: FINISHED');
   md.push(`- Verdict: **${verdict}**`);
+  md.push(`- Environment: ${ENVIRONMENT}`);
   md.push(`- Commands: ${p.source === 'requested' ? 'as requested by `run:` lines in the commit message' : 'default set (no `run:` lines in the commit message)'}`);
   if (rules.length) md.push(`- Rules for the files you changed: ${rules.map((r) => `\`${r}\``).join(', ')} (all bundled in \`START.md\` on \`agent-results\`)`);
   if (o.run) md.push(`- Full logs: ${o.run}`);
@@ -279,9 +345,24 @@ function run(o) {
   console.log(`PASS agent-run - verdict ${verdict}: ${results.map((r) => `${r.step.text} ${r.result}`).join('; ')} (${o.out})`);
 }
 
+// Published as soon as a run starts, so an agent can tell "still running" from "stale" without watching the job.
+function running(o) {
+  const p = JSON.parse(fs.readFileSync(o.plan, 'utf8'));
+  const md = [`# Quick check: ${o.branch || '(unknown branch)'}`, '',
+    `- Commit: \`${o.commit || 'unknown'}\``,
+    `- Started: ${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}`,
+    '- Status: RUNNING',
+    `- Commands: ${p.steps.map((s) => `\`${s.text.replace(/`/g, "'")}\``).join(', ')}`,
+    o.run ? `- Watch: ${o.run}` : '', '',
+    'The run for this commit is in progress. Read this file again in a few minutes; it is replaced by the finished report. Don\'t re-review code while waiting.', ''];
+  fs.writeFileSync(o.out, md.filter((l, i) => l !== '' || i < 2 || md[i - 1] !== '').join('\n'));
+  console.log(`PASS agent-run - running notice for ${p.steps.length} commands (${o.out})`);
+}
+
 const o = args(process.argv.slice(2));
 const mode = o._[0];
 if (mode === 'plan' && o.out) plan(o);
 else if (mode === 'run' && o.plan && o.out) run(o);
+else if (mode === 'running' && o.plan && o.out) running(o);
 else if (mode === 'help') for (const [n, s] of Object.entries(COMMANDS)) console.log(`${n.padEnd(10)} ${s[3]}`);
 else { console.log('FAIL agent-run - usage: agent-run.js plan|run|help (see the header comment)'); process.exit(1); }
