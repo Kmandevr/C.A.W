@@ -12,7 +12,7 @@ The roadmap is the single source for feature sequencing. [App](app.md), [Engine]
 
 ## Product direction
 
-C.A.W. is a phone-first, code-driven sound-design and music-production workspace. It should support serious, useful music-production workflows—including arrangement, recording, editing, instruments, mixing and delivery—without requiring a heavyweight conventional-DAW architecture.
+C.A.W. is a phone-first, code-driven sound-design and music-production workspace. It is not a conventional DAW and needn't work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile ([vision](vision.md), owner 2026-11-03). That covers arrangement, recording, editing, instruments, mixing and delivery, without a heavyweight conventional-DAW architecture.
 
 - **One product and project model:** code, visual editors, instruments, patterns, audio assets and automation share the same underlying project and engine state.
 - **Phone-first, desktop-capable:** practical touch workflows on phones, with full keyboard/mouse access on desktop.
