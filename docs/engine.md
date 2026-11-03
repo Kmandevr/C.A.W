@@ -27,7 +27,7 @@ Build and test (Linux or macOS, CMake 3.22+ and a C++20 compiler):
 
 ```
 cmake -S engine -B engine/build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build engine/build && engine/build/caw_tests
+cmake --build engine/build && ctest --test-dir engine/build --output-on-failure
 ```
 
 ## Module files (`.caw`)
