@@ -1,13 +1,13 @@
 ---
 title: Native module SDK
 summary: C ABI contract for trusted native CAW DSP modules, validation, real-time rules, state and packaging.
-updated: 2026-11-01
+updated: 2026-11-03
 covers: [engine/include/caw_module_sdk.h, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
 ---
 
 # Native module SDK v1
 
-**Status [Fact, checked 2026-11-01]:** the versioned C ABI header, internal descriptor validation, static in-process registry and graph/processor foundations exist. Dynamic loading, host-side adapter, project integration, signing, crash isolation and platform packaging are not implemented. Third-party native binaries cannot currently be loaded by the app.
+**Status [Fact, checked 2026-11-01]:** the versioned C ABI header, internal descriptor validation, static in-process registry and graph/processor foundations exist. Dynamic loading, host-side adapter, project integration, signing, crash isolation and platform packaging are not implemented. Third-party native binaries cannot currently be loaded by the app, and the owner has decided they will not be (2026-11-03): others share .caw only.
 
 ## One module system
 

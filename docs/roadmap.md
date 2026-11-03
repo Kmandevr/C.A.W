@@ -61,7 +61,7 @@ The stages are ordered by dependency and product value. Work may be split into s
 These commitments remain first unless the owner changes their order.
 
 1. **[Implemented]** Automation for module parameters and project globals, including serialization and native engine integration (PR #68).
-2. Complete the WAV/SFZ multisample workflow.
+2. Complete the WAV/SFZ multisample workflow: import WAV samples, map zones (key ranges, velocity layers) by hand, play them in C.A.W and export WAV + SFZ (owner, 2026-11-03). This brings forward the audio-import part of Stage 3 and the sampler-zone and WAV/SFZ interchange parts of Stage 4; the rest of those stages stays in place.
 3. Complete stems export and integrate it with the native export pipeline.
 
 **Exit gate:** each feature is usable through the app, tested, documented and verified by CI. A partial engine API or design does not count as complete integration.

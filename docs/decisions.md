@@ -1,10 +1,17 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Decisions
+
+## 2026-11-03: Engine shape, SFZ scope, determinism and third-party modules
+
+- **One graph runs everything (eventual engine core).** Code (.caw) layers, synth voices, effects, folder buses, sends and master all become nodes of the one typed module graph. The current layer → effects → folder bus → master mixer is migrated into it, not kept as a parallel path. Graph integration stays paused until the owner resumes it; this fixes the target, not the timing.
+- **Stage 0 SFZ means full import and mapping.** The first multisample version imports WAV samples (own or third-party), maps zones (key ranges, velocity layers) by hand, plays them in C.A.W and exports WAV + .sfz. This pulls the needed parts of roadmap Stage 3 (audio import) and Stage 4 (sampler zones, WAV/SFZ interchange) into Stage 0.
+- **Exports are always bit-identical.** Offline renders and exports produce the same bits on every platform. Live preview may use faster maths (SIMD, threads, reduced quality) only when it is labelled as a preview mode; golden tests cover the export path.
+- **Others share only .caw.** Third-party content is sandboxed .caw source. Native SDK modules are built-in or the owner's own; dynamic loading of other people's native binaries is not planned.
 
 ## 2026-11-02: Permanent roadmap and full production direction
 

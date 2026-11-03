@@ -34,6 +34,8 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 
 ## 3. Engine architecture
 
+**Owner decision (2026-11-03): one graph runs everything.** The typed module graph is the eventual core: .caw layers, synth voices, effects, folder buses, sends and master all become graph nodes, replacing the fixed layer → effects → bus → master mixer through migration. Integration timing stays paused (see the [implementation ledger](engine-build-status.md)).
+
 **Owner decision (2026-10-30): one engine, modular by construction.** The engine must behave as one coherent system; modularity is not a bolt-on option or a collection of loosely connected sub-engines. Its module boundaries are the architecture itself. The app, project runtime, synth, add-ons, CLI and future plugin wrappers all use the same module identities, typed ports, parameter/state model, processing semantics and dependency rules. Hosts may omit unused capabilities from a build, but they do not get separate competing implementations or incompatible module models.
 
 Keep a portable C++20 engine independent of Flutter, OS APIs, audio backends and external hosts. The app, CLI, offline renderer and future plugin wrappers are hosts of the same engine.
@@ -170,13 +172,15 @@ Latency is a workload property, not a universal requirement. Report known/estima
 
 ### Quality and determinism
 
+**Owner decision (2026-11-03):** offline renders and exports are bit-identical on every platform. Live preview may use faster, non-identical paths only when they are labelled as preview modes.
+
 Keep deterministic mode and golden-render contract. SIMD, multithreading and GPU paths must be bit-equivalent where promised, or explicitly identified as a different render mode with separate tests and a user-visible choice. Parallelize independent work; never introduce races or nondeterministic ordering into shared state. Optimization is not permission to change sound silently.
 
 ## 10. Safety, stability and security
 
 The callback and everything it calls must avoid allocation, locks, I/O, logging, UI calls, exceptions and unbounded work. Prepare graphs, buffers, voice pools and state before publishing to audio. Use reviewed real-time-safe handoff; retire old graphs and free memory off callback.
 
-Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. Native SDK modules are trusted in-process code, not sandboxed; they require a separate isolation/trust boundary before third-party loading.
+Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. Native SDK modules are trusted in-process code, not sandboxed. **Owner decision (2026-11-03):** third-party content is shared only as .caw; loading other people's native binaries is not planned.
 
 ## 11. Verification: what “without compromise” means
 

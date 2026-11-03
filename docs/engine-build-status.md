@@ -40,12 +40,12 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Current implementation order
 
-Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is paused by the owner. The graph executor, runtime publication helper, native module lifecycle and their remaining integration work remain documented technical backlog, but they are not the active implementation sequence. Do not resume that work or add speculative framework layers unless the owner explicitly asks.
+Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is paused by the owner. The graph executor, runtime publication helper, native module lifecycle and their remaining integration work remain documented technical backlog, but they are not the active implementation sequence. Do not resume that work or add speculative framework layers unless the owner explicitly asks. When it resumes, the target is one graph running everything ([decisions](decisions.md), 2026-11-03).
 
 The current app-usable v2 order is:
 
 1. **Implemented — PR #68 (merged; Engine, App and Docs CI green on 2026-11-02):** project/timeline automation for module parameters and project globals, including native per-sample playback/render evaluation and app editing.
-2. WAV/SFZ multisample export ([roadmap](roadmap.md) Stage 0 item 2).
+2. WAV/SFZ multisample workflow: sample import, hand-mapped zones, in-app playback and WAV + SFZ export ([roadmap](roadmap.md) Stage 0 item 2).
 3. Stems export ([roadmap](roadmap.md) Stage 0 item 3).
 
 Scenes and MIDI 2.0 device input/output remain deferred backlog items; the existing MIDI 2.0 decoder and bounded queue are not live device support.
