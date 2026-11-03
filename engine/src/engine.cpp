@@ -2200,16 +2200,18 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
                 }
             }
             // Route exactly once. A parent bus receives the child's stereo signal; only root tracks hit master.
+            // Routing carries 32-bit float, as graph audio edges do (owner, 2026-11-03): each output is
+            // rounded to float and summed in float, in processing order, from +0.0 (a summing input).
             if (s.parentSlot >= 0 && s.parentSlot < kMaxLayers && s.parentSlot != i) {
                 Slot& parent = slots_[s.parentSlot];
                 for (int j = 0; j < m; ++j) {
-                    parent.outL[j] += s.outL[j];
-                    parent.outR[j] += s.outR[j];
+                    parent.outL[j] = static_cast<float>(static_cast<float>(parent.outL[j]) + static_cast<float>(s.outL[j]));
+                    parent.outR[j] = static_cast<float>(static_cast<float>(parent.outR[j]) + static_cast<float>(s.outR[j]));
                 }
             } else {
                 for (int j = 0; j < m; ++j) {
-                    mixL_[j] += s.outL[j];
-                    mixR_[j] += s.outR[j];
+                    mixL_[j] = static_cast<float>(static_cast<float>(mixL_[j]) + static_cast<float>(s.outL[j]));
+                    mixR_[j] = static_cast<float>(static_cast<float>(mixR_[j]) + static_cast<float>(s.outR[j]));
                 }
             }
         }
