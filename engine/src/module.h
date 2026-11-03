@@ -18,6 +18,9 @@ constexpr uint32_t channelCountForLayout(ChannelLayout layout, uint32_t discrete
     }
     return 0;
 }
+// Hard ceiling on channels per audio port, for every layout including Discrete. It bounds
+// pointer tables and buffer sizes; hosts may set a lower limit in their graph budget.
+inline constexpr uint32_t kMaxPortChannels = 64;
 struct PortDescriptor {
     std::string_view id;
     PortType type = PortType::Audio;
@@ -25,6 +28,10 @@ struct PortDescriptor {
     bool input = true;
     uint32_t channelCount = 0;
 };
+// Resolved channel count of a port: the layout's fixed count, or channelCount for Discrete.
+constexpr uint32_t portChannelCount(const PortDescriptor& port) noexcept {
+    return channelCountForLayout(port.layout, port.channelCount);
+}
 struct ParameterDescriptor {
     std::string_view id;
     double defaultValue = 0.0;
@@ -57,7 +64,7 @@ enum class ModuleValidation : uint8_t {
     EmptyPortId, DuplicatePortId, InvalidPortType, InvalidPortLayout, EmptyParameterId,
     DuplicateParameterId, InvalidParameterRange, DefaultOutsideRange, MissingUiControlArray,
     EmptyUiControlId, InvalidUiControlKind, DuplicateUiControlId, UiControlMissingParameter,
-    InvalidUiControlRange
+    InvalidUiControlRange, TooManyChannels
 };
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& descriptor) noexcept;
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept;
@@ -81,12 +88,20 @@ struct ChannelBufferView {
         return true;
     }
 };
+// Frames rule: `frames` is the number of frames to process in this call. Each view's `frames`
+// is its per-channel capacity and must be at least `frames`; a view with no channels needs none.
 struct AudioProcessBlock {
     ConstChannelBufferView input;
     ChannelBufferView output;
     uint32_t frames = 0;
     double sampleRate = 48000.0;
 };
+inline bool audioProcessBlockValid(const AudioProcessBlock& block) noexcept {
+    if (block.frames == 0 || !block.input.valid() || !block.output.valid()) return false;
+    if (block.input.channelCount != 0 && block.input.frames < block.frames) return false;
+    if (block.output.channelCount != 0 && block.output.frames < block.frames) return false;
+    return true;
+}
 struct StereoProcessBlock {
     const float* inputLeft = nullptr;
     const float* inputRight = nullptr;
@@ -95,19 +110,24 @@ struct StereoProcessBlock {
     uint32_t frames = 0;
     double sampleRate = 48000.0;
 };
+// Implement process(const AudioProcessBlock&) for any channel count, or only the legacy stereo
+// overload for a 2-in/2-out module. Hosts call the generic overload; its default adapts a stereo
+// block to the stereo overload. A processor that implements neither fails every call (false)
+// instead of silently leaving its output untouched. Overriding one overload hides the other in
+// the derived class; add `using ModuleProcessor::process;` if callers use the derived type.
 class ModuleProcessor {
 public:
     virtual ~ModuleProcessor() = default;
     virtual const ModuleDescriptor& descriptor() const noexcept = 0;
-    virtual void process(const StereoProcessBlock&) noexcept {}
+    virtual void process(const StereoProcessBlock&) noexcept { stereoImplemented_ = false; }
     virtual bool process(const AudioProcessBlock& block) noexcept {
         if (block.input.channelCount != 2 || block.output.channelCount != 2 ||
-            !block.input.valid() || !block.output.valid() ||
-            block.input.frames < block.frames || block.output.frames < block.frames) return false;
+            !audioProcessBlockValid(block)) return false;
         const StereoProcessBlock stereo{block.input.channels[0], block.input.channels[1],
             block.output.channels[0], block.output.channels[1], block.frames, block.sampleRate};
+        stereoImplemented_ = true;
         process(stereo);
-        return true;
+        return stereoImplemented_;
     }
     virtual void reset() noexcept {}
     virtual uint32_t stateVersion() const noexcept { return 1; }
@@ -117,5 +137,8 @@ public:
     virtual bool loadState(const uint8_t* source, uint32_t size, uint32_t version) noexcept {
         (void)source; return size == 0 && version == stateVersion();
     }
+
+private:
+    bool stereoImplemented_ = true;  // cleared only by the default stereo overload
 };
 }  // namespace caw

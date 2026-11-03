@@ -34,6 +34,8 @@ struct GraphResourceBudget {
     // own peak; GraphExecutor preparation checks the combined compile + prepared-runtime peak.
     // Caller-owned GraphNode/GraphConnection storage and processor instances are excluded.
     std::size_t maxWorkingBytes = 0;
+    // Host limit on channels per audio port (1..kMaxPortChannels); larger ports fail with TooManyChannels.
+    uint32_t maxChannelsPerPort = kMaxPortChannels;
 };
 
 // Converts the Engine's hardware-derived graph working-set share to the graph compiler/executor budget.
@@ -64,7 +66,9 @@ enum class GraphError : uint8_t {
     RuntimeUnsupportedPortCount,
     InvalidOutputNode,
     InvalidBlockSize,
-    OutOfMemory
+    OutOfMemory,
+    TooManyChannels,
+    RuntimeHostInputMismatch
 };
 
 struct CompiledGraph {
@@ -79,9 +83,17 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                            const std::vector<GraphConnection>& connections,
                            const GraphResourceBudget& budget);
 
-// Prepared native stereo executor. Processor instances and descriptors are borrowed and must outlive the executor.
-// reset() never destroys processors. prepare() allocates on a control thread; process() performs
-// no allocation, locking, I/O or graph traversal and is suitable for a bounded audio callback.
+// Prepared planar N-channel executor. Processor instances and descriptors are borrowed and must
+// outlive the executor. reset() never destroys processors. prepare() allocates every channel buffer
+// and pointer table on a control thread, sized from the validated port descriptors and counted in
+// the working-memory budget. process() performs no allocation, locking, I/O or graph traversal and
+// is suitable for a bounded audio callback.
+//
+// F3 scope: each node has at most one audio input and one audio output port, of any layout; control,
+// modulation and event ports are rejected until the typed runtime ports exist (roadmap F5).
+// Unconnected audio inputs read the host input, so they must all have the same channel count.
+// Processors are called only through process(const AudioProcessBlock&). If one returns false the
+// block fails: process() returns false, zeroes the host output and records the failing node.
 class GraphExecutor {
 public:
     GraphError prepare(const std::vector<GraphNode>& nodes,
@@ -92,21 +104,39 @@ public:
                        double sampleRate,
                        const GraphResourceBudget& budget);
     void reset() noexcept;
+    // `input` may have no channels (silence); otherwise its channel count must equal
+    // inputChannels(). `output` must have exactly outputChannels(). Counts are never adapted.
+    bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                 uint32_t frames) noexcept;
+    // Thin stereo wrapper over the planar path. Null inputs are silence.
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
     bool ready() const noexcept { return ready_; }
+    uint32_t inputChannels() const noexcept { return hostInputChannels_; }
+    uint32_t outputChannels() const noexcept { return outputChannels_; }
+    // Failure reporting for the control thread (relaxed atomics; values, not synchronization).
+    uint32_t lastFailedNode() const noexcept { return failedNode_.load(std::memory_order_relaxed); }
+    uint64_t failureCount() const noexcept { return failures_.load(std::memory_order_relaxed); }
 
 private:
+    void fail(uint32_t node, const ChannelBufferView& output, uint32_t frames) noexcept;
+
     std::vector<ModuleProcessor*> processors_;
-    std::vector<std::vector<float>> left_, right_;
+    std::vector<float> channelStorage_;           // every node output channel, planar, maxFrames each
+    std::vector<float*> outputTable_;             // per-node output channel pointers, concatenated
+    std::vector<const float*> inputTable_;        // per-node input channel pointers, concatenated
+    std::vector<uint32_t> hostInputSlots_;        // inputTable_ entries fed by the host input
+    std::vector<uint32_t> inputBase_, inputCount_, outputBase_, outputCount_;
     std::vector<float> zero_;
-    std::vector<uint32_t> inputSource_;
-    std::vector<uint8_t> hasInput_, hasOutput_;
     std::vector<uint32_t> order_;
     uint32_t outputNode_ = UINT32_MAX;
+    uint32_t hostInputChannels_ = 0;
+    uint32_t outputChannels_ = 0;
     uint32_t maxFrames_ = 0;
     double sampleRate_ = 48000.0;
     bool ready_ = false;
+    std::atomic<uint32_t> failedNode_{UINT32_MAX};
+    std::atomic<uint64_t> failures_{0};
 };
 
 // Owns every processor referenced by its prepared executor. Build and destroy on a
@@ -129,9 +159,12 @@ public:
                        double sampleRate,
                        const GraphResourceBudget& budget);
     void reset() noexcept;
+    bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                 uint32_t frames) noexcept;
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
     bool ready() const noexcept { return executor_.ready(); }
+    const GraphExecutor& executor() const noexcept { return executor_; }
 
 private:
     // Declaration order is intentional: executor_ is destroyed before processors_.
@@ -145,6 +178,9 @@ private:
 class GraphRuntime {
 public:
     bool publish(PreparedGraph* prepared) noexcept;
+    // Both overloads output silence and return false when no graph is active or the block fails.
+    bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                 uint32_t frames) noexcept;
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
     PreparedGraph* collectRetired() noexcept;
@@ -153,6 +189,7 @@ public:
     PreparedGraph* takePendingAfterStop() noexcept;
 
 private:
+    PreparedGraph* adopt() noexcept;
     PreparedGraph* active_ = nullptr; // audio-thread only except after stop
     std::atomic<PreparedGraph*> pending_{nullptr};
     std::atomic<PreparedGraph*> retired_{nullptr};

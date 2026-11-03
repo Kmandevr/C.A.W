@@ -193,3 +193,76 @@ TEST(generic_processor_contract_preserves_legacy_stereo_processors) {
     const AudioProcessBlock unsupported{{inputs, 2, 2}, {outputs, 1, 2}, 2, 48000.0};
     CHECK(!static_cast<ModuleProcessor&>(processor).process(unsupported));
 }
+TEST(module_descriptor_bounds_discrete_channel_count) {
+    const PortDescriptor atLimit[] = {{"out", PortType::Audio, ChannelLayout::Discrete, false, kMaxPortChannels}};
+    const PortDescriptor overLimit[] = {{"out", PortType::Audio, ChannelLayout::Discrete, false, kMaxPortChannels + 1}};
+    const PortDescriptor huge[] = {{"out", PortType::Audio, ChannelLayout::Discrete, false, 0xffffffffu}};
+    const ModuleDescriptor ok{"caw.test.discrete.limit", 1, atLimit, 1, nullptr, 0};
+    const ModuleDescriptor over{"caw.test.discrete.over", 1, overLimit, 1, nullptr, 0};
+    const ModuleDescriptor tooMany{"caw.test.discrete.huge", 1, huge, 1, nullptr, 0};
+    CHECK_EQ(kMaxPortChannels, 64u);
+    CHECK(validateModuleDescriptor(ok) == ModuleValidation::Ok);
+    CHECK(validateModuleDescriptor(over) == ModuleValidation::TooManyChannels);
+    CHECK(validateModuleDescriptor(tooMany) == ModuleValidation::TooManyChannels);
+    CHECK_EQ(portChannelCount(atLimit[0]), kMaxPortChannels);
+    CHECK_EQ(portChannelCount(PortDescriptor{"s", PortType::Audio, ChannelLayout::Surround51, true}), 6u);
+}
+TEST(audio_process_block_frames_rule_uses_block_frames_and_view_capacity) {
+    float a[8] = {}, b[8] = {};
+    const float* in[] = {a, b};
+    float* out[] = {a, b};
+    // block.frames is the work size; each view's frames is its per-channel capacity.
+    CHECK((audioProcessBlockValid(AudioProcessBlock{{in, 2, 8}, {out, 2, 8}, 4, 48000.0})));
+    CHECK((audioProcessBlockValid(AudioProcessBlock{{in, 2, 8}, {out, 2, 8}, 8, 48000.0})));
+    CHECK((!audioProcessBlockValid(AudioProcessBlock{{in, 2, 4}, {out, 2, 8}, 8, 48000.0})));
+    CHECK((!audioProcessBlockValid(AudioProcessBlock{{in, 2, 8}, {out, 2, 4}, 8, 48000.0})));
+    CHECK((!audioProcessBlockValid(AudioProcessBlock{{in, 2, 8}, {out, 2, 8}, 0, 48000.0})));
+    // A port-less side needs no capacity.
+    CHECK((audioProcessBlockValid(AudioProcessBlock{{}, {out, 2, 8}, 8, 48000.0})));
+    CHECK((!audioProcessBlockValid(AudioProcessBlock{{nullptr, 2, 8}, {out, 2, 8}, 8, 48000.0})));
+}
+TEST(generic_processor_contract_fails_when_no_process_is_implemented) {
+    const PortDescriptor ports[] = {
+        {"in", PortType::Audio, ChannelLayout::Stereo, true},
+        {"out", PortType::Audio, ChannelLayout::Stereo, false},
+    };
+    const ModuleDescriptor descriptor{"caw.test.unimplemented", 1, ports, 2, nullptr, 0};
+    class Neither final : public ModuleProcessor {
+    public:
+        explicit Neither(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+    private: const ModuleDescriptor& d_;
+    } processor(descriptor);
+    float l[2] = {1, 1}, r[2] = {1, 1}, outL[2] = {}, outR[2] = {};
+    const float* inputs[] = {l, r};
+    float* outputs[] = {outL, outR};
+    ModuleProcessor& base = processor;
+    CHECK(!base.process(AudioProcessBlock{{inputs, 2, 2}, {outputs, 2, 2}, 2, 48000.0}));
+    // Repeated calls keep failing; the fallback never latches into success.
+    CHECK(!base.process(AudioProcessBlock{{inputs, 2, 2}, {outputs, 2, 2}, 2, 48000.0}));
+}
+TEST(generic_only_processor_needs_no_stereo_override) {
+    const PortDescriptor ports[] = {
+        {"in", PortType::Audio, ChannelLayout::Quad, true},
+        {"out", PortType::Audio, ChannelLayout::Quad, false},
+    };
+    const ModuleDescriptor descriptor{"caw.test.generic.only", 1, ports, 2, nullptr, 0};
+    class GenericOnly final : public ModuleProcessor {
+    public:
+        explicit GenericOnly(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        using ModuleProcessor::process;
+        bool process(const AudioProcessBlock& block) noexcept override {
+            for (uint32_t c = 0; c < block.output.channelCount; ++c)
+                for (uint32_t i = 0; i < block.frames; ++i)
+                    block.output.channels[c][i] = block.input.channels[c][i] + static_cast<float>(c);
+            return true;
+        }
+    private: const ModuleDescriptor& d_;
+    } processor(descriptor);
+    float in[4][2] = {}, out[4][2] = {};
+    const float* inputs[] = {in[0], in[1], in[2], in[3]};
+    float* outputs[] = {out[0], out[1], out[2], out[3]};
+    CHECK(processor.process(AudioProcessBlock{{inputs, 4, 2}, {outputs, 4, 2}, 2, 48000.0}));
+    CHECK_EQ(out[3][1], 3.0f);
+}

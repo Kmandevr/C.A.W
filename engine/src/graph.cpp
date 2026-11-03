@@ -1,4 +1,4 @@
-// Typed graph validation and prepared stereo execution. Build/prepare are control-thread operations.
+// Typed graph validation and prepared planar N-channel execution. Build/prepare are control-thread operations.
 #include "graph.h"
 
 #include <algorithm>
@@ -38,25 +38,32 @@ bool estimateGraphWorkingBytes(std::size_t nodeCount, std::size_t connectionCoun
     return true;
 }
 
-bool estimateExecutorWorkingBytes(std::size_t nodeCount, uint32_t maxFrames,
+struct ExecutorShape {
+    std::size_t nodes = 0;
+    std::size_t inputChannels = 0;   // sum over nodes of audio input channels
+    std::size_t outputChannels = 0;  // sum over nodes of audio output channels
+    std::size_t hostInputSlots = 0;  // input channels fed by the host input
+};
+
+bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames,
                                   std::size_t& bytes) noexcept {
     std::size_t total = 0;
-    const std::size_t perNodeBuffer = static_cast<std::size_t>(maxFrames) * 2u * sizeof(float);
-    if (maxFrames != 0 && perNodeBuffer / maxFrames != 2u * sizeof(float)) return false;
-    // Per-node metadata: two vector headers, processor pointer, input source, port flags,
-    // and execution-order index. Buffer payloads and the shared zero-input block follow.
-    constexpr std::size_t perNodeMetadata =
-        sizeof(std::vector<float>) * 2u + sizeof(ModuleProcessor*) +
-        sizeof(uint32_t) + sizeof(uint8_t) * 2u + sizeof(uint32_t);
-    // Include the fixed headers for every executor-owned vector, in addition to
-    // the per-node inner buffer headers and payloads.
+    // Fixed vector headers: processors, channel storage, zero block, two pointer tables,
+    // host-input slots, four per-node metadata arrays and the execution order.
     if (!addEstimatedBytes(total, 1, sizeof(std::vector<ModuleProcessor*>)) ||
-        !addEstimatedBytes(total, 2, sizeof(std::vector<std::vector<float>>)) ||
-        !addEstimatedBytes(total, 1, sizeof(std::vector<float>)) ||
-        !addEstimatedBytes(total, 2, sizeof(std::vector<uint32_t>)) ||
-        !addEstimatedBytes(total, 2, sizeof(std::vector<uint8_t>)) ||
-        !addEstimatedBytes(total, nodeCount, perNodeMetadata) ||
-        !addEstimatedBytes(total, nodeCount, perNodeBuffer) ||
+        !addEstimatedBytes(total, 2, sizeof(std::vector<float>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<float*>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<const float*>)) ||
+        !addEstimatedBytes(total, 6, sizeof(std::vector<uint32_t>))) return false;
+    // Per node: processor pointer, input/output base and count, execution-order index.
+    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u;
+    std::size_t channelFrames = 0;
+    if (!addEstimatedBytes(channelFrames, shape.outputChannels, maxFrames)) return false;
+    if (!addEstimatedBytes(total, shape.nodes, perNodeMetadata) ||
+        !addEstimatedBytes(total, channelFrames, sizeof(float)) ||
+        !addEstimatedBytes(total, shape.outputChannels, sizeof(float*)) ||
+        !addEstimatedBytes(total, shape.inputChannels, sizeof(const float*)) ||
+        !addEstimatedBytes(total, shape.hostInputSlots, sizeof(uint32_t)) ||
         !addEstimatedBytes(total, maxFrames, sizeof(float))) return false;
     bytes = total;
     return true;
@@ -75,7 +82,8 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                            const GraphResourceBudget& budget) {
     CompiledGraph out;
     try {
-        if (budget.maxWorkingBytes == 0) {
+        if (budget.maxWorkingBytes == 0 || budget.maxChannelsPerPort == 0 ||
+            budget.maxChannelsPerPort > kMaxPortChannels) {
             out.error = GraphError::InvalidResourceBudget;
             return out;
         }
@@ -98,6 +106,11 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                 out.error = GraphError::InvalidModule;
                 return out;
             }
+            for (uint32_t p = 0; p < node.module->portCount; ++p)
+                if (portChannelCount(node.module->ports[p]) > budget.maxChannelsPerPort) {
+                    out.error = GraphError::TooManyChannels;
+                    return out;
+                }
             if (node.module->portCount > std::numeric_limits<std::size_t>::max() - portCount) {
                 out.error = GraphError::SizeOverflow;
                 return out;
@@ -152,7 +165,13 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
             const PortDescriptor& destinationPort = destination.ports[connection.destinationPort];
             if (sourcePort.input || !destinationPort.input) { fail(GraphError::DirectionMismatch); return out; }
             if (sourcePort.type != destinationPort.type) { fail(GraphError::PortTypeMismatch); return out; }
-            if (sourcePort.layout != destinationPort.layout) { fail(GraphError::ChannelLayoutMismatch); return out; }
+            // Discrete ports share one layout value, so compare resolved channel counts too:
+            // routing is never truncated or padded.
+            if (sourcePort.layout != destinationPort.layout ||
+                portChannelCount(sourcePort) != portChannelCount(destinationPort)) {
+                fail(GraphError::ChannelLayoutMismatch);
+                return out;
+            }
             if (connected[connection.destinationNode][connection.destinationPort]) {
                 fail(GraphError::InputAlreadyConnected);
                 return out;
@@ -200,16 +219,23 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 void GraphExecutor::reset() noexcept {
     ready_ = false;
     processors_.clear();
-    left_.clear();
-    right_.clear();
+    channelStorage_.clear();
+    outputTable_.clear();
+    inputTable_.clear();
+    hostInputSlots_.clear();
+    inputBase_.clear();
+    inputCount_.clear();
+    outputBase_.clear();
+    outputCount_.clear();
     zero_.clear();
-    inputSource_.clear();
-    hasInput_.clear();
-    hasOutput_.clear();
     order_.clear();
     outputNode_ = UINT32_MAX;
+    hostInputChannels_ = 0;
+    outputChannels_ = 0;
     maxFrames_ = 0;
     sampleRate_ = 48000.0;
+    failedNode_.store(UINT32_MAX, std::memory_order_relaxed);
+    failures_.store(0, std::memory_order_relaxed);
 }
 
 GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
@@ -228,62 +254,105 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
     if (maxFrames == 0 || !std::isfinite(sampleRate) ||
         sampleRate < 8000.0 || sampleRate > 192000.0) return GraphError::InvalidBlockSize;
 
-    std::size_t executorBytes = 0;
-    if (!estimateExecutorWorkingBytes(nodes.size(), maxFrames, executorBytes))
-        return GraphError::SizeOverflow;
-    if (executorBytes > budget.maxWorkingBytes) return GraphError::ResourceBudgetExceeded;
-
     CompiledGraph compiled = compileGraph(nodes, connections, budget);
     if (!compiled) return compiled.error;
 
-    // Graph compilation has already checked its own peak. Its temporary adjacency and
-    // scheduling storage is gone now; only the returned execution order remains live while
-    // prepared buffers are allocated. Account for that retained plan plus executor storage.
-    std::size_t retainedPlanBytes = 0;
-    if (!addEstimatedBytes(retainedPlanBytes, compiled.executionOrder.capacity(), sizeof(uint32_t)))
-        return GraphError::SizeOverflow;
-    if (retainedPlanBytes > budget.maxWorkingBytes - executorBytes)
-        return GraphError::ResourceBudgetExceeded;
+    // Descriptors are validated now. Resolve each node's single audio input/output port and
+    // its channel count; the runtime does not execute other port types yet (roadmap F5).
+    const std::size_t nodeCount = nodes.size();
+    ExecutorShape shape;
+    shape.nodes = nodeCount;
+    for (std::size_t n = 0; n < nodeCount; ++n) {
+        if (!processors[n]) return GraphError::MissingProcessor;
+        const ModuleDescriptor& descriptor = processors[n]->descriptor();
+        if (!moduleDescriptorsMatch(descriptor, *nodes[n].module)) return GraphError::ProcessorDescriptorMismatch;
+        uint32_t audioInputs = 0, audioOutputs = 0;
+        for (uint32_t p = 0; p < descriptor.portCount; ++p) {
+            const PortDescriptor& port = descriptor.ports[p];
+            if (port.type != PortType::Audio) return GraphError::RuntimeUnsupportedPortType;
+            if (port.input) { ++audioInputs; shape.inputChannels += portChannelCount(port); }
+            else { ++audioOutputs; shape.outputChannels += portChannelCount(port); }
+        }
+        if (audioInputs > 1 || audioOutputs > 1) return GraphError::RuntimeUnsupportedPortCount;
+    }
 
+    std::size_t executorBytes = 0, retainedPlanBytes = 0;
     try {
-        processors_.reserve(nodes.size());
-        left_.resize(nodes.size());
-        right_.resize(nodes.size());
-        zero_.assign(maxFrames, 0.0f);
-        inputSource_.assign(nodes.size(), UINT32_MAX);
-        hasInput_.assign(nodes.size(), 0);
-        hasOutput_.assign(nodes.size(), 0);
-        for (size_t n = 0; n < nodes.size(); ++n) {
-            if (!processors[n]) { reset(); return GraphError::MissingProcessor; }
-            const ModuleDescriptor& descriptor = processors[n]->descriptor();
-            if (!moduleDescriptorsMatch(descriptor, *nodes[n].module)) {
-                reset(); return GraphError::ProcessorDescriptorMismatch;
-            }
-            uint32_t audioInputs = 0, audioOutputs = 0;
+        // Host-input slots are known only after connections are resolved; bound them by every
+        // input channel so the budget check happens before any executor allocation.
+        shape.hostInputSlots = shape.inputChannels;
+        if (!estimateExecutorWorkingBytes(shape, maxFrames, executorBytes)) return GraphError::SizeOverflow;
+        // Graph compilation has already checked its own peak. Its temporary adjacency and
+        // scheduling storage is gone now; only the returned execution order remains live while
+        // prepared buffers are allocated. Account for that retained plan plus executor storage.
+        if (!addEstimatedBytes(retainedPlanBytes, compiled.executionOrder.capacity(), sizeof(uint32_t)))
+            return GraphError::SizeOverflow;
+        if (executorBytes > budget.maxWorkingBytes ||
+            retainedPlanBytes > budget.maxWorkingBytes - executorBytes)
+            return GraphError::ResourceBudgetExceeded;
+
+        inputBase_.assign(nodeCount, 0);
+        inputCount_.assign(nodeCount, 0);
+        outputBase_.assign(nodeCount, 0);
+        outputCount_.assign(nodeCount, 0);
+        std::vector<uint8_t> hasInput(nodeCount, 0), hasOutput(nodeCount, 0);
+        uint32_t inputCursor = 0, outputCursor = 0;
+        for (std::size_t n = 0; n < nodeCount; ++n) {
+            const ModuleDescriptor& descriptor = *nodes[n].module;
             for (uint32_t p = 0; p < descriptor.portCount; ++p) {
                 const PortDescriptor& port = descriptor.ports[p];
-                if (port.type != PortType::Audio) { reset(); return GraphError::RuntimeUnsupportedPortType; }
-                if (port.layout != ChannelLayout::Stereo) { reset(); return GraphError::RuntimeUnsupportedPortLayout; }
-                if (port.input) ++audioInputs; else ++audioOutputs;
+                const uint32_t channels = portChannelCount(port);
+                if (port.input) { hasInput[n] = 1; inputBase_[n] = inputCursor; inputCount_[n] = channels; inputCursor += channels; }
+                else { hasOutput[n] = 1; outputBase_[n] = outputCursor; outputCount_[n] = channels; outputCursor += channels; }
             }
-            if (audioInputs > 1 || audioOutputs > 1) { reset(); return GraphError::RuntimeUnsupportedPortCount; }
-            hasInput_[n] = audioInputs ? 1 : 0;
-            hasOutput_[n] = audioOutputs ? 1 : 0;
-            if (audioInputs) {
-                for (std::size_t e = 0; e < connections.size(); ++e)
-                    if (connections[e].destinationNode == n) inputSource_[n] = connections[e].sourceNode;
-            }
-            left_[n].assign(maxFrames, 0.0f);
-            right_[n].assign(maxFrames, 0.0f);
-            processors_.push_back(processors[n]);
         }
-        if (!hasOutput_[outputNode]) { reset(); return GraphError::InvalidOutputNode; }
-        for (const GraphConnection& edge : connections)
-            if (!hasOutput_[edge.sourceNode] || !hasInput_[edge.destinationNode]) {
+        if (!hasOutput[outputNode]) { reset(); return GraphError::InvalidOutputNode; }
+
+        std::vector<uint32_t> inputSource(nodeCount, UINT32_MAX);
+        for (const GraphConnection& edge : connections) {
+            if (!hasOutput[edge.sourceNode] || !hasInput[edge.destinationNode]) {
                 reset(); return GraphError::ProcessorDescriptorMismatch;
             }
+            // compileGraph already rejects this; keep the executor safe on its own.
+            if (outputCount_[edge.sourceNode] != inputCount_[edge.destinationNode]) {
+                reset(); return GraphError::ChannelLayoutMismatch;
+            }
+            inputSource[edge.destinationNode] = edge.sourceNode;
+        }
+
+        uint32_t hostChannels = 0;
+        std::size_t hostSlots = 0;
+        for (std::size_t n = 0; n < nodeCount; ++n) {
+            if (!hasInput[n] || inputSource[n] != UINT32_MAX) continue;
+            if (hostSlots != 0 && inputCount_[n] != hostChannels) {
+                reset(); return GraphError::RuntimeHostInputMismatch;
+            }
+            hostChannels = inputCount_[n];
+            hostSlots += inputCount_[n];
+        }
+
+        channelStorage_.assign(static_cast<std::size_t>(outputCursor) * maxFrames, 0.0f);
+        zero_.assign(maxFrames, 0.0f);
+        outputTable_.resize(outputCursor);
+        for (uint32_t c = 0; c < outputCursor; ++c)
+            outputTable_[c] = channelStorage_.data() + static_cast<std::size_t>(c) * maxFrames;
+        inputTable_.assign(inputCursor, zero_.data());
+        hostInputSlots_.reserve(hostSlots);
+        for (std::size_t n = 0; n < nodeCount; ++n) {
+            if (!hasInput[n]) continue;
+            for (uint32_t c = 0; c < inputCount_[n]; ++c) {
+                const uint32_t slot = inputBase_[n] + c;
+                if (inputSource[n] != UINT32_MAX)
+                    inputTable_[slot] = outputTable_[outputBase_[inputSource[n]] + c];
+                else
+                    hostInputSlots_.push_back(slot);
+            }
+        }
+        processors_.assign(processors.begin(), processors.end());
         order_ = std::move(compiled.executionOrder);
         outputNode_ = outputNode;
+        hostInputChannels_ = hostChannels;
+        outputChannels_ = outputCount_[outputNode];
         maxFrames_ = maxFrames;
         sampleRate_ = sampleRate;
         ready_ = true;
@@ -297,32 +366,48 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
     }
 }
 
+void GraphExecutor::fail(uint32_t node, const ChannelBufferView& output, uint32_t frames) noexcept {
+    failedNode_.store(node, std::memory_order_relaxed);
+    failures_.fetch_add(1, std::memory_order_relaxed);
+    for (uint32_t c = 0; c < output.channelCount; ++c) std::fill_n(output.channels[c], frames, 0.0f);
+}
+
+bool GraphExecutor::process(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                            uint32_t frames) noexcept {
+    if (!ready_ || frames == 0 || frames > maxFrames_) return false;
+    if (output.channelCount != outputChannels_ || !output.valid() || output.frames < frames) return false;
+    if (input.channelCount != 0 &&
+        (input.channelCount != hostInputChannels_ || !input.valid() || input.frames < frames)) return false;
+
+    // Bind this call's host channels (or silence) into the prepared input table.
+    const std::size_t slots = hostInputSlots_.size();
+    for (std::size_t s = 0; s < slots; ++s)
+        inputTable_[hostInputSlots_[s]] =
+            input.channelCount ? input.channels[s % hostInputChannels_] : zero_.data();
+
+    for (uint32_t node : order_) {
+        const AudioProcessBlock block{
+            {inputTable_.data() + inputBase_[node], inputCount_[node], frames},
+            {outputTable_.data() + outputBase_[node], outputCount_[node], maxFrames_},
+            frames, sampleRate_};
+        if (!processors_[node]->process(block)) { fail(node, output, frames); return false; }
+    }
+    float* const* result = outputTable_.data() + outputBase_[outputNode_];
+    for (uint32_t c = 0; c < outputChannels_; ++c) std::copy_n(result[c], frames, output.channels[c]);
+    return true;
+}
+
 bool GraphExecutor::process(const float* inputLeft, const float* inputRight,
                             float* outputLeft, float* outputRight, uint32_t frames) noexcept {
-    if (!ready_ || !outputLeft || !outputRight || frames == 0 || frames > maxFrames_) return false;
-    for (uint32_t nodeIndex : order_) {
-        float* inL = nullptr;
-        float* inR = nullptr;
-        if (hasInput_[nodeIndex]) {
-            const uint32_t source = inputSource_[nodeIndex];
-            if (source != UINT32_MAX) {
-                inL = left_[static_cast<size_t>(source)].data();
-                inR = right_[static_cast<size_t>(source)].data();
-            } else {
-                inL = const_cast<float*>(inputLeft ? inputLeft : zero_.data());
-                inR = const_cast<float*>(inputRight ? inputRight : zero_.data());
-            }
-        }
-        float* outL = hasOutput_[nodeIndex] ? left_[nodeIndex].data() : nullptr;
-        float* outR = hasOutput_[nodeIndex] ? right_[nodeIndex].data() : nullptr;
-        StereoProcessBlock block{inL, inR, outL, outR, frames, sampleRate_};
-        processors_[nodeIndex]->process(block);
-    }
-    const float* finalL = left_[outputNode_].data();
-    const float* finalR = right_[outputNode_].data();
-    std::copy_n(finalL, frames, outputLeft);
-    std::copy_n(finalR, frames, outputRight);
-    return true;
+    if (!ready_ || !outputLeft || !outputRight || outputChannels_ != 2) return false;
+    if (frames == 0 || frames > maxFrames_) return false;
+    const bool hasHostInput = inputLeft || inputRight;
+    if (hasHostInput && hostInputChannels_ != 0 && hostInputChannels_ != 2) return false;
+    const float* inputs[2] = {inputLeft ? inputLeft : zero_.data(), inputRight ? inputRight : zero_.data()};
+    float* outputs[2] = {outputLeft, outputRight};
+    const ConstChannelBufferView in = hasHostInput && hostInputChannels_ == 2
+        ? ConstChannelBufferView{inputs, 2, frames} : ConstChannelBufferView{};
+    return process(in, ChannelBufferView{outputs, 2, frames}, frames);
 }
 
 GraphError PreparedGraph::prepare(const std::vector<GraphNode>& nodes,
@@ -358,6 +443,11 @@ void PreparedGraph::reset() noexcept {
     processors_.clear();
 }
 
+bool PreparedGraph::process(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                            uint32_t frames) noexcept {
+    return executor_.process(input, output, frames);
+}
+
 bool PreparedGraph::process(const float* inputLeft, const float* inputRight,
                             float* outputLeft, float* outputRight, uint32_t frames) noexcept {
     return executor_.process(inputLeft, inputRight, outputLeft, outputRight, frames);
@@ -370,9 +460,7 @@ bool GraphRuntime::publish(PreparedGraph* prepared) noexcept {
                                             std::memory_order_relaxed);
 }
 
-bool GraphRuntime::process(const float* inputLeft, const float* inputRight,
-                           float* outputLeft, float* outputRight, uint32_t frames) noexcept {
-    if (!outputLeft || !outputRight || frames == 0) return false;
+PreparedGraph* GraphRuntime::adopt() noexcept {
     if (retired_.load(std::memory_order_acquire) == nullptr) {
         PreparedGraph* next = pending_.exchange(nullptr, std::memory_order_acq_rel);
         if (next) {
@@ -381,7 +469,25 @@ bool GraphRuntime::process(const float* inputLeft, const float* inputRight,
             if (previous) retired_.store(previous, std::memory_order_release);
         }
     }
-    if (!active_ || !active_->process(inputLeft, inputRight, outputLeft, outputRight, frames)) {
+    return active_;
+}
+
+bool GraphRuntime::process(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                           uint32_t frames) noexcept {
+    if (frames == 0 || !output.valid() || output.frames < frames) return false;
+    PreparedGraph* active = adopt();
+    if (!active || !active->process(input, output, frames)) {
+        for (uint32_t c = 0; c < output.channelCount; ++c) std::fill_n(output.channels[c], frames, 0.0f);
+        return false;
+    }
+    return true;
+}
+
+bool GraphRuntime::process(const float* inputLeft, const float* inputRight,
+                           float* outputLeft, float* outputRight, uint32_t frames) noexcept {
+    if (!outputLeft || !outputRight || frames == 0) return false;
+    PreparedGraph* active = adopt();
+    if (!active || !active->process(inputLeft, inputRight, outputLeft, outputRight, frames)) {
         std::fill_n(outputLeft, frames, 0.0f);
         std::fill_n(outputRight, frames, 0.0f);
         return false;

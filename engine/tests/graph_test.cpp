@@ -191,21 +191,26 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     PassThrough pass;
     GainProcessor gain;
     const std::vector<ModuleProcessor*> processors{&pass, &gain};
-    constexpr std::size_t perNodeMetadata =
-        sizeof(std::vector<float>) * 2u + sizeof(ModuleProcessor*) +
-        sizeof(uint32_t) + sizeof(uint8_t) * 2u + sizeof(uint32_t);
+    // Planar executor storage for two stereo in/out nodes at 64 frames: fixed vector headers,
+    // per-node metadata, four output channels, both pointer tables, the host-input slot bound
+    // (every input channel) and the shared zero block.
     constexpr std::size_t fixedHeaders =
-        sizeof(std::vector<ModuleProcessor*>) +
-        sizeof(std::vector<std::vector<float>>) * 2u +
-        sizeof(std::vector<float>) +
-        sizeof(std::vector<uint32_t>) * 2u +
-        sizeof(std::vector<uint8_t>) * 2u;
+        sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 2u +
+        sizeof(std::vector<float*>) + sizeof(std::vector<const float*>) +
+        sizeof(std::vector<uint32_t>) * 6u;
+    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u;
     constexpr std::size_t executorBytes =
-        fixedHeaders + 2u * perNodeMetadata + 2u * 64u * 2u * sizeof(float) + 64u * sizeof(float);
+        fixedHeaders + 2u * perNodeMetadata + 4u * 64u * sizeof(float) +
+        4u * sizeof(float*) + 4u * sizeof(const float*) + 4u * sizeof(uint32_t) + 64u * sizeof(float);
     constexpr std::size_t retainedPlanBytes = 2u * sizeof(uint32_t);
     // Each phase fits independently, but the live execution order plus prepared
-    // executor storage exceeds the budget by one byte.
+    // executor storage exceeds the budget by one byte; the exact total fits.
     const GraphResourceBudget budget{2, 1, executorBytes + retainedPlanBytes - 1u};
+    const GraphResourceBudget exact{2, 1, executorBytes + retainedPlanBytes};
+    {
+        GraphExecutor fits;
+        CHECK(fits.prepare(nodes, edges, processors, 1, 64, 48000, exact) == GraphError::Ok);
+    }
     GraphExecutor executor;
     CHECK(executor.prepare(nodes, edges, processors, 1, 64, 48000, budget) ==
           GraphError::ResourceBudgetExceeded);
@@ -226,19 +231,39 @@ TEST(graph_executor_accepts_block_sizes_above_legacy_fixed_cap) {
     CHECK_NEAR(outputRight.back(), 0.375, 1e-7);
 }
 
-TEST(graph_executor_rejects_mono_runtime_layout_until_adapter_exists) {
+TEST(graph_executor_runs_mono_layout_and_fails_stereo_only_mono_processor) {
+    // Mono now runs through the planar path. A processor that only implements the legacy
+    // stereo overload cannot serve a mono port, and says so instead of outputting nothing.
     class MonoProcessor final : public ModuleProcessor {
     public:
         const ModuleDescriptor& descriptor() const noexcept override { return monoRuntime; }
+        bool process(const AudioProcessBlock& block) noexcept override {
+            if (block.input.channelCount != 1 || block.output.channelCount != 1) return false;
+            for (uint32_t i = 0; i < block.frames; ++i) block.output.channels[0][i] = block.input.channels[0][i] * 2.0f;
+            return true;
+        }
+    } mono;
+    class StereoOnly final : public ModuleProcessor {
+    public:
+        const ModuleDescriptor& descriptor() const noexcept override { return monoRuntime; }
         void process(const StereoProcessBlock&) noexcept override {}
-    } processor;
+    } stereoOnly;
     const std::vector<GraphNode> nodes{{"mono", &monoRuntime}};
-    const std::vector<ModuleProcessor*> processors{&processor};
+    const float in[] = {0.25f, -0.5f};
+    const float* inputs[] = {in};
+    float out[2] = {};
+    float* outputs[] = {out};
     GraphExecutor executor;
-    CHECK(executor.prepare(nodes, {}, processors, 0, 64, 48000, kTestBudget) == GraphError::RuntimeUnsupportedPortLayout);
-    CHECK(!executor.ready());
+    CHECK(executor.prepare(nodes, {}, {&mono}, 0, 64, 48000, kTestBudget) == GraphError::Ok);
+    CHECK_EQ(executor.inputChannels(), 1u);
+    CHECK_EQ(executor.outputChannels(), 1u);
+    CHECK(executor.process(ConstChannelBufferView{inputs, 1, 2}, ChannelBufferView{outputs, 1, 2}, 2));
+    CHECK_EQ(out[0], 0.5f);
+    CHECK_EQ(out[1], -1.0f);
+    CHECK(executor.prepare(nodes, {}, {&stereoOnly}, 0, 64, 48000, kTestBudget) == GraphError::Ok);
+    CHECK(!executor.process(ConstChannelBufferView{inputs, 1, 2}, ChannelBufferView{outputs, 1, 2}, 2));
+    CHECK_EQ(executor.lastFailedNode(), 0u);
 }
-
 
 TEST(graph_runtime_publishes_owned_processors_and_retires_them_off_thread) {
     const std::vector<GraphNode> nodes{{"input", &effect}, {"gain", &effect}};
