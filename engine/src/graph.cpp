@@ -38,11 +38,18 @@ bool estimateGraphWorkingBytes(std::size_t nodeCount, std::size_t connectionCoun
     return true;
 }
 
+// Same layout as GraphExecutor::SumInput (private), for the byte estimate.
+struct GraphExecutorSumInputBytes { uint32_t sourceBase, sourceCount, tableBase; };
+
 struct ExecutorShape {
     std::size_t nodes = 0;
     std::size_t inputChannels = 0;   // sum over nodes of audio input channels
     std::size_t outputChannels = 0;  // sum over nodes of audio output channels
     std::size_t hostInputSlots = 0;  // input channels fed by the host input
+    // Fan-in upper bounds, known before allocation without temporaries.
+    std::size_t sumInputs = 0;       // summing input ports
+    std::size_t sumChannels = 0;     // channels of summing input ports
+    std::size_t sumSources = 0;      // connections (any of them may feed a summing input)
 };
 
 bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames,
@@ -50,16 +57,25 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
     std::size_t total = 0;
     // Fixed vector headers: processors, channel storage, zero block, two pointer tables,
     // host-input slots, four per-node metadata arrays and the execution order.
+    // Fixed vector headers: processors, channel storage, zero block and sum storage, three
+    // pointer tables, host-input slots, four per-node metadata arrays, the per-node sum index,
+    // sum sources, the sum-input list and the execution order.
     if (!addEstimatedBytes(total, 1, sizeof(std::vector<ModuleProcessor*>)) ||
-        !addEstimatedBytes(total, 2, sizeof(std::vector<float>)) ||
-        !addEstimatedBytes(total, 1, sizeof(std::vector<float*>)) ||
+        !addEstimatedBytes(total, 3, sizeof(std::vector<float>)) ||
+        !addEstimatedBytes(total, 2, sizeof(std::vector<float*>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<const float*>)) ||
-        !addEstimatedBytes(total, 6, sizeof(std::vector<uint32_t>))) return false;
-    // Per node: processor pointer, input/output base and count. The execution order is the
-    // retained plan, which prepare() counts separately.
-    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 4u;
-    std::size_t channelFrames = 0;
+        !addEstimatedBytes(total, 8, sizeof(std::vector<uint32_t>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorSumInputBytes>))) return false;
+    // Per node: processor pointer, input/output base and count, sum index. The execution order
+    // is the retained plan, which prepare() counts separately.
+    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u;
+    std::size_t channelFrames = 0, sumFrames = 0;
     if (!addEstimatedBytes(channelFrames, shape.outputChannels, maxFrames)) return false;
+    if (!addEstimatedBytes(sumFrames, shape.sumChannels, maxFrames)) return false;
+    if (!addEstimatedBytes(total, sumFrames, sizeof(float)) ||
+        !addEstimatedBytes(total, shape.sumChannels, sizeof(float*)) ||
+        !addEstimatedBytes(total, shape.sumSources, sizeof(uint32_t)) ||
+        !addEstimatedBytes(total, shape.sumInputs, sizeof(GraphExecutorSumInputBytes))) return false;
     if (!addEstimatedBytes(total, shape.nodes, perNodeMetadata) ||
         !addEstimatedBytes(total, channelFrames, sizeof(float)) ||
         !addEstimatedBytes(total, shape.outputChannels, sizeof(float*)) ||
@@ -173,7 +189,7 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
                 fail(GraphError::ChannelLayoutMismatch);
                 return out;
             }
-            if (connected[connection.destinationNode][connection.destinationPort]) {
+            if (!destinationPort.summing && connected[connection.destinationNode][connection.destinationPort]) {
                 fail(GraphError::InputAlreadyConnected);
                 return out;
             }
@@ -229,6 +245,11 @@ void GraphExecutor::reset() noexcept {
     outputBase_.clear();
     outputCount_.clear();
     zero_.clear();
+    sumInputs_.clear();
+    sumIndex_.clear();
+    sumSources_.clear();
+    sumTable_.clear();
+    sumStorage_.clear();
     order_.clear();
     outputNode_ = UINT32_MAX;
     hostInputChannels_ = 0;
@@ -271,7 +292,11 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         for (uint32_t p = 0; p < descriptor.portCount; ++p) {
             const PortDescriptor& port = descriptor.ports[p];
             if (port.type != PortType::Audio) return GraphError::RuntimeUnsupportedPortType;
-            if (port.input) { ++audioInputs; shape.inputChannels += portChannelCount(port); }
+            if (port.input) {
+                ++audioInputs;
+                shape.inputChannels += portChannelCount(port);
+                if (port.summing) { ++shape.sumInputs; shape.sumChannels += portChannelCount(port); }
+            }
             else { ++audioOutputs; shape.outputChannels += portChannelCount(port); }
         }
         if (audioInputs > 1 || audioOutputs > 1) return GraphError::RuntimeUnsupportedPortCount;
@@ -282,6 +307,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         // Host-input slots are known only after connections are resolved; bound them by every
         // input channel so the budget check happens before any executor allocation.
         shape.hostInputSlots = shape.inputChannels;
+        shape.sumSources = connections.size();
         if (!estimateExecutorWorkingBytes(shape, maxFrames, executorBytes)) return GraphError::SizeOverflow;
         // Graph compilation has already checked its own peak. Its temporary adjacency and
         // scheduling storage is gone now; only the returned execution order remains live while
@@ -298,13 +324,17 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         inputCount_.assign(nodeCount, 0);
         outputBase_.assign(nodeCount, 0);
         outputCount_.assign(nodeCount, 0);
+        sumIndex_.assign(nodeCount, UINT32_MAX);
         uint32_t inputCursor = 0, outputCursor = 0;
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
             for (uint32_t p = 0; p < descriptor.portCount; ++p) {
                 const PortDescriptor& port = descriptor.ports[p];
                 const uint32_t channels = portChannelCount(port);
-                if (port.input) { inputBase_[n] = inputCursor; inputCount_[n] = channels; inputCursor += channels; }
+                if (port.input) {
+                    inputBase_[n] = inputCursor; inputCount_[n] = channels; inputCursor += channels;
+                    if (port.summing) sumIndex_[n] = 0;  // marked; resolved once connections are known
+                }
                 else { outputBase_[n] = outputCursor; outputCount_[n] = channels; outputCursor += channels; }
             }
         }
@@ -325,9 +355,39 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
             if (outputCount_[edge.sourceNode] != inputCount_[edge.destinationNode]) {
                 reset(); return GraphError::ChannelLayoutMismatch;
             }
+            if (sumIndex_[edge.destinationNode] != UINT32_MAX) continue;  // summed below
             for (uint32_t c = 0; c < inputCount_[edge.destinationNode]; ++c)
                 inputTable_[inputBase_[edge.destinationNode] + c] =
                     outputTable_[outputBase_[edge.sourceNode] + c];
+        }
+
+        // Fan-in: give each connected summing input its own buffers and source list, in
+        // connection order. A summing input without connections stays host-fed.
+        uint32_t sumChannels = 0, sumCount = 0;
+        for (std::size_t n = 0; n < nodeCount; ++n) {
+            if (sumIndex_[n] == UINT32_MAX) continue;
+            uint32_t sources = 0;
+            for (const GraphConnection& edge : connections) sources += edge.destinationNode == n ? 1u : 0u;
+            if (sources == 0) { sumIndex_[n] = UINT32_MAX; continue; }
+            sumChannels += inputCount_[n];
+            ++sumCount;
+        }
+        sumInputs_.reserve(sumCount);
+        sumSources_.reserve(connections.size());
+        sumStorage_.assign(static_cast<std::size_t>(sumChannels) * maxFrames, 0.0f);
+        sumTable_.resize(sumChannels);
+        uint32_t tableCursor = 0;
+        for (std::size_t n = 0; n < nodeCount; ++n) {
+            if (sumIndex_[n] == UINT32_MAX) continue;
+            const SumInput entry{static_cast<uint32_t>(sumSources_.size()), 0, tableCursor};
+            sumIndex_[n] = static_cast<uint32_t>(sumInputs_.size());
+            sumInputs_.push_back(entry);
+            for (const GraphConnection& edge : connections)
+                if (edge.destinationNode == n) { sumSources_.push_back(edge.sourceNode); ++sumInputs_.back().sourceCount; }
+            for (uint32_t c = 0; c < inputCount_[n]; ++c, ++tableCursor) {
+                sumTable_[tableCursor] = sumStorage_.data() + static_cast<std::size_t>(tableCursor) * maxFrames;
+                inputTable_[inputBase_[n] + c] = sumTable_[tableCursor];
+            }
         }
 
         uint32_t hostChannels = 0;
@@ -391,6 +451,17 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
             input.channelCount ? input.channels[s % hostInputChannels_] : zero_.data();
 
     for (uint32_t node : order_) {
+        if (sumIndex_[node] != UINT32_MAX) {
+            const SumInput& sum = sumInputs_[sumIndex_[node]];
+            for (uint32_t c = 0; c < inputCount_[node]; ++c) {
+                float* destination = sumTable_[sum.tableBase + c];
+                std::fill_n(destination, frames, 0.0f);
+                for (uint32_t s = 0; s < sum.sourceCount; ++s) {
+                    const float* source = outputTable_[outputBase_[sumSources_[sum.sourceBase + s]] + c];
+                    for (uint32_t i = 0; i < frames; ++i) destination[i] += source[i];
+                }
+            }
+        }
         const AudioProcessBlock block{
             {inputTable_.data() + inputBase_[node], inputCount_[node], frames},
             {outputTable_.data() + outputBase_[node], outputCount_[node], frames},

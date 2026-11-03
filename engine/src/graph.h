@@ -90,8 +90,11 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 // the working-memory budget. process() performs no allocation, locking, I/O or graph traversal and
 // is suitable for a bounded audio callback.
 //
-// F3 scope: each node has at most one audio input and one audio output port, of any layout; control,
+// Each node has at most one audio input and one audio output port, of any layout; control,
 // modulation and event ports are rejected until the typed runtime ports exist (roadmap F5).
+// A summing input (PortDescriptor::summing) takes any number of connections: before the node
+// runs, the executor sums them into a prepared buffer per channel, in connection order,
+// starting from +0.0f, in float. Any other input takes at most one connection.
 // Unconnected audio inputs read the host input, so they must all have the same channel count.
 // Processors are called only through process(const AudioProcessBlock&); both views' capacity is
 // the block's frame count. If one returns false the block fails: process() returns false, zeroes
@@ -135,6 +138,13 @@ private:
     std::vector<uint32_t> hostInputSlots_;        // inputTable_ entries fed by the host input
     std::vector<uint32_t> inputBase_, inputCount_, outputBase_, outputCount_;
     std::vector<float> zero_;
+    // Fan-in: one entry per summing input that has connections.
+    struct SumInput { uint32_t sourceBase, sourceCount, tableBase; };
+    std::vector<SumInput> sumInputs_;
+    std::vector<uint32_t> sumIndex_;              // per node: index into sumInputs_, or UINT32_MAX
+    std::vector<uint32_t> sumSources_;            // source nodes per summing input, connection order
+    std::vector<float*> sumTable_;                // summed channel buffers, per summing input
+    std::vector<float> sumStorage_;
     std::vector<uint32_t> order_;
     uint32_t outputNode_ = UINT32_MAX;
     uint32_t hostInputChannels_ = 0;

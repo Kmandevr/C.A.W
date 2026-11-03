@@ -27,6 +27,9 @@ struct PortDescriptor {
     ChannelLayout layout = ChannelLayout::None;
     bool input = true;
     uint32_t channelCount = 0;
+    // Audio inputs only: accepts any number of connections, summed by the host in connection
+    // order starting from +0.0f (a mix bus). A non-summing input takes at most one connection.
+    bool summing = false;
 };
 // Resolved channel count of a port: the layout's fixed count, or channelCount for Discrete.
 constexpr uint32_t portChannelCount(const PortDescriptor& port) noexcept {
@@ -64,7 +67,7 @@ enum class ModuleValidation : uint8_t {
     EmptyPortId, DuplicatePortId, InvalidPortType, InvalidPortLayout, EmptyParameterId,
     DuplicateParameterId, InvalidParameterRange, DefaultOutsideRange, MissingUiControlArray,
     EmptyUiControlId, InvalidUiControlKind, DuplicateUiControlId, UiControlMissingParameter,
-    InvalidUiControlRange, TooManyChannels
+    InvalidUiControlRange, TooManyChannels, InvalidSummingPort
 };
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& descriptor) noexcept;
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept;

@@ -460,3 +460,125 @@ TEST(allocation_counter_detects_allocations_and_frees) {
     CHECK_EQ(allocations, 1u);
     CHECK_EQ(deallocations, 1u);
 }
+
+namespace {
+// A 6-channel mix-bus shape: a summing input (fan-in) and one output.
+struct BusModule {
+    BusModule()
+        : ports{{"in", PortType::Audio, ChannelLayout::Surround51, true, 0, true},
+                {"out", PortType::Audio, ChannelLayout::Surround51, false}},
+          bus{"test.channels.bus", 1, ports, 2, nullptr, 0} {}
+    PortDescriptor ports[2];
+    ModuleDescriptor bus;
+};
+
+// Generator with a per-instance offset so every source is distinct.
+class OffsetGenerator final : public ModuleProcessor {
+public:
+    OffsetGenerator(const ModuleDescriptor& d, uint32_t offset) : d_(d), offset_(offset) {}
+    const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+    bool process(const AudioProcessBlock& block) noexcept override {
+        for (uint32_t c = 0; c < block.output.channelCount; ++c)
+            for (uint32_t i = 0; i < block.frames; ++i) block.output.channels[c][i] = signal(c, i + offset_);
+        return true;
+    }
+private:
+    const ModuleDescriptor& d_;
+    uint32_t offset_;
+};
+
+class Copy final : public ModuleProcessor {
+public:
+    explicit Copy(const ModuleDescriptor& d) : d_(d) {}
+    const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+    bool process(const AudioProcessBlock& block) noexcept override {
+        for (uint32_t c = 0; c < block.output.channelCount; ++c)
+            for (uint32_t i = 0; i < block.frames; ++i) block.output.channels[c][i] = block.input.channels[c][i];
+        return true;
+    }
+private:
+    const ModuleDescriptor& d_;
+};
+}  // namespace
+
+TEST(graph_executor_sums_fan_in_in_connection_order_bit_exactly) {
+    ChannelModules six(ChannelLayout::Surround51, 0);
+    BusModule bus;
+    OffsetGenerator a(six.source, 0), b(six.source, 1000), c(six.source, 2000);
+    Copy busCopy(bus.bus);
+    // Connection order (c, a, b) differs from node order on purpose: summation follows connections.
+    const std::vector<GraphNode> nodes{{"a", &six.source}, {"b", &six.source}, {"c", &six.source}, {"bus", &bus.bus}};
+    const std::vector<GraphConnection> edges{{2, 0, 3, 0}, {0, 0, 3, 0}, {1, 0, 3, 0}};
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, edges, {&a, &b, &c, &busCopy}, 3, 64, 48000.0, kBudget) == GraphError::Ok);
+    Planar out(6, 64);
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(64), 64));
+    for (uint32_t ch = 0; ch < 6; ++ch)
+        for (uint32_t i = 0; i < 64; ++i) {
+            float expected = 0.0f;
+            expected += signal(ch, i + 2000);
+            expected += signal(ch, i);
+            expected += signal(ch, i + 1000);
+            CHECK_EQ(out.data[ch][i], expected);
+        }
+}
+
+TEST(graph_executor_summing_input_with_one_source_still_starts_from_positive_zero) {
+    // A mix bus always accumulates from +0.0f, so a lone -0.0f source arrives as +0.0f,
+    // exactly as an accumulating mixer behaves.
+    const PortDescriptor monoOut[] = {{"out", PortType::Audio, ChannelLayout::Mono, false}};
+    const PortDescriptor monoBus[] = {{"in", PortType::Audio, ChannelLayout::Mono, true, 0, true},
+                                      {"out", PortType::Audio, ChannelLayout::Mono, false}};
+    const ModuleDescriptor source{"test.negzero", 1, monoOut, 1, nullptr, 0};
+    const ModuleDescriptor bus{"test.monobus", 1, monoBus, 2, nullptr, 0};
+    class NegativeZero final : public ModuleProcessor {
+    public:
+        explicit NegativeZero(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        bool process(const AudioProcessBlock& b) noexcept override {
+            for (uint32_t i = 0; i < b.frames; ++i) b.output.channels[0][i] = -0.0f;
+            return true;
+        }
+    private: const ModuleDescriptor& d_;
+    } negative(source);
+    Copy copy(bus);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"s", &source}, {"bus", &bus}}, {{0, 0, 1, 0}}, {&negative, &copy}, 1, 8, 48000.0, kBudget) ==
+          GraphError::Ok);
+    Planar out(1, 8, 5.0f);
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(8), 8));
+    CHECK(!std::signbit(out.data[0][0]));
+}
+
+TEST(graph_compiler_allows_multiple_drivers_only_on_summing_inputs) {
+    ChannelModules six(ChannelLayout::Surround51, 0);
+    BusModule bus;
+    const std::vector<GraphNode> toBus{{"a", &six.source}, {"b", &six.source}, {"bus", &bus.bus}};
+    CHECK(compileGraph(toBus, {{0, 0, 2, 0}, {1, 0, 2, 0}}, kBudget).error == GraphError::Ok);
+    const std::vector<GraphNode> toEffect{{"a", &six.source}, {"b", &six.source}, {"fx", &six.effect}};
+    const CompiledGraph rejected = compileGraph(toEffect, {{0, 0, 2, 0}, {1, 0, 2, 0}}, kBudget);
+    CHECK(rejected.error == GraphError::InputAlreadyConnected);
+    CHECK_EQ(rejected.errorConnection, 1u);
+}
+
+TEST(graph_executor_fan_in_never_allocates) {
+    ChannelModules six(ChannelLayout::Surround51, 0);
+    BusModule bus;
+    OffsetGenerator a(six.source, 0), b(six.source, 7);
+    Copy busCopy(bus.bus);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"a", &six.source}, {"b", &six.source}, {"bus", &bus.bus}},
+                           {{0, 0, 2, 0}, {1, 0, 2, 0}}, {&a, &b, &busCopy}, 2, 192, 48000.0, kBudget) ==
+          GraphError::Ok);
+    Planar out(6, 192);
+    const ChannelBufferView view = out.view(192);
+    std::size_t operations = 0;
+    bool ok = true;
+    {
+        cawtest::AllocationScope scope;
+        for (int block = 0; block < 8; ++block) ok = executor.process(ConstChannelBufferView{}, view, 192) && ok;
+        operations = scope.count();
+    }
+    CHECK(ok);
+    CHECK_EQ(operations, 0u);
+}
