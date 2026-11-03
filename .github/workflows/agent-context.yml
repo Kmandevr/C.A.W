@@ -2,7 +2,7 @@
 name: Agent start file
 on:
   push:
-    branches: [Main, ccr-55caa33d-vxei5s]  # TEMP: self-test on this branch, removed in the next commit
+    branches: [Main]
     paths: [AGENTS.md, CLAUDE.md, docs/vision.md, .claude/rules/**, scripts/agent-context.js, .github/workflows/agent-context.yml]
   workflow_dispatch:
 permissions:
