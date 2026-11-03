@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `638b279d8513f67ae00ff9a384c46baea040439c` on the default branch at 2026-11-03T15:36:40Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `f0d10387561030a55af48c5bb007ad6916ad706e` on the default branch at 2026-11-03T15:45:44Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`638b279`).
+1. The commit this file was generated from (`f0d1038`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -185,7 +185,7 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 - Keep facts, proposals, assumptions and open questions apart, as `docs/vision.md` and `docs/architecture.md` label them. Never present a proposal as built, and never build an open question as settled: ask the owner.
 - Never invent facts about libraries, versions, licences, platform behaviour or devices. Check a primary source and date it, or label it an assumption.
 - The audio callback never allocates, locks, logs, does I/O or calls into the UI layer (details: `.claude/rules/engine.md`).
-- Downloaded `.caw` modules are untrusted: the constrained language has no filesystem/network/system calls and is bounded. Native SDK modules are trusted in-process code, not sandboxed; do not load third-party binaries without isolation. Never ship a GitHub token or other secret.
+- Downloaded `.caw` modules are untrusted: the constrained language has no filesystem/network/system calls and is bounded. Native SDK modules are in-process code, not sandboxed; third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.
 - Dependencies must have permissive licences (no GPL) unless the owner decides otherwise. Record each new one in `docs/decisions.md`.
 - The owner works from Android (Galaxy S22+): every build, test and installable comes from GitHub Actions; do not assume a PC/IDE.
 - Record decisions and new facts in `docs/` before ending a session, and rewrite superseded text where it stands instead of appending (details: `.claude/rules/docs.md`).
@@ -232,7 +232,7 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Vision and principles
@@ -327,6 +327,8 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | iOS distribution: App Store exception or no iOS release | Open |
 | Licence for user-created/shared sound modules | Open |
 | How a future AutoStacc purchase would deliver/unlock the app | Open |
+| Default trust mode (Isolated, Trusted or Blocked) for a plugin or native module the user hasn't seen before | Open; the three modes are decided ([decisions](decisions.md), 2026-11-03) |
+| How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
 
 ---
