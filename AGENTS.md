@@ -61,6 +61,18 @@ Use GitHub Issues as the task/bug tracker; do not create a separate task list. A
 
 For agents working from a chat window through a GitHub connector, with no checkout, shell, hooks, Graphify or Serena. A new chat remembers nothing from the last one, and connector writes can be mangled (literal `\n`, flattened lines, broken links). This route replaces local runs with the **Quick check** and replaces chat memory with two durable records.
 
+### Start prompt (paste once into the ChatGPT project's instructions)
+
+ChatGPT has no hooks, so this prompt is what makes every chat start from the right files:
+
+```text
+You work on the GitHub repository Kmandevr/C.A.W through the GitHub connector.
+Before anything else in every chat, fetch START.md from the agent-results branch
+(https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md), read all of it,
+and answer its "Before you start" list in your first reply. Do no other work until you have.
+Then follow "The loop" and "Stop rules" in its AGENTS.md section.
+```
+
 ### The two records
 
 - **The report:** `quick-check/<branch, with each / written as -->.md` on the `agent-results` branch. For `gpt/28-planar-executor` that is `quick-check/gpt--28-planar-executor.md`. The repository is public, so `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/quick-check/gpt--28-planar-executor.md` also works (it can lag a few minutes). It gives the commit tested, PASS/FAIL per check and the error lines of each failure. The test results are the evidence; they replace reading the code to decide whether something works.
@@ -68,7 +80,7 @@ For agents working from a chat window through a GitHub connector, with no checko
 
 ### The loop
 
-1. **Start or resume.** Read this file and `CLAUDE.md` once. If the issue has a progress comment, read it and the report, and resume at its next action. Don't re-read files or re-review steps it marks done.
+1. **Start or resume.** Fetch `START.md` from the `agent-results` branch (https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md). CI regenerates it from `Main` whenever this file, `CLAUDE.md`, `docs/vision.md` or a rule changes, and it bundles all of them, so this one fetch replaces reading them separately. Answer its confirmation list, then read the progress comment and the report if they exist and resume at the next action. Don't re-read files or re-review steps the comment marks done.
 2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check (Linux build and tests, docs guard, and Dart checks when `app/` changed). No full CI matrix, no app builds and no pull request are needed.
 3. **Plan.** Write at most five small steps into the progress comment. A step is one logical change that can pass the Quick check by itself.
 4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and wait only on the last.

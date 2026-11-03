@@ -1,0 +1,36 @@
+# Regenerates START.md on the agent-results branch: the single file chat agents fetch before starting any task.
+name: Agent start file
+on:
+  push:
+    branches: [Main, ccr-55caa33d-vxei5s]  # TEMP: self-test on this branch, removed in the next commit
+    paths: [AGENTS.md, CLAUDE.md, docs/vision.md, .claude/rules/**, scripts/agent-context.js, .github/workflows/agent-context.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: Build START.md
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node scripts/agent-context.js START.md --commit "${{ github.sha }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agent-start-file
+          path: START.md
+          retention-days: 7
+  publish:
+    needs: build
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-agent-results.yml
+    with:
+      artifact: agent-start-file
+      source: START.md
+      target: START.md

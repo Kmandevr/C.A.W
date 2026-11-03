@@ -3,6 +3,7 @@
 // Outcomes are GitHub step outcomes (success, failure, cancelled, skipped, or empty when the step never ran).
 'use strict';
 const fs = require('fs');
+const path = require('path');
 
 const MAX_EXCERPT_LINES = 30;
 const MAX_LINE_CHARS = 240;
@@ -32,6 +33,26 @@ function excerpt(logFile) {
   return picked.map((l) => (l.length > MAX_LINE_CHARS ? l.slice(0, MAX_LINE_CHARS) + ' …' : l));
 }
 
+// Names the .claude/rules files whose `paths:` globs match a changed file, so the agent rereads only those.
+function globToRegex(glob) {
+  const s = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\//g, '\u0000').replace(/\*\*/g, '\u0001')
+    .replace(/\*/g, '[^/]*').replace(/\u0000/g, '(.*/)?').replace(/\u0001/g, '.*');
+  return new RegExp(`^${s}$`);
+}
+function rulesFor(changedFile) {
+  if (!changedFile) return [];
+  let changed = [];
+  try { changed = fs.readFileSync(changedFile, 'utf8').split('\n').filter(Boolean); } catch { return []; }
+  const dir = path.join(__dirname, '..', '.claude', 'rules');
+  let files = [];
+  try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort(); } catch { return []; }
+  return files.filter((f) => {
+    const m = fs.readFileSync(path.join(dir, f), 'utf8').replace(/\r\n/g, '\n').match(/^---\npaths:\n([\s\S]*?)\n---/);
+    const globs = m ? m[1].split('\n').map((l) => l.replace(/^\s*-\s*"?|"?\s*$/g, '')).filter(Boolean) : [];
+    return globs.some((g) => changed.some((c) => globToRegex(g).test(c)));
+  }).map((f) => `.claude/rules/${f}`);
+}
+
 function label(outcome) {
   if (outcome === 'success') return 'PASS';
   if (outcome === 'failure') return 'FAIL';
@@ -51,6 +72,8 @@ md.push(`- Commit: \`${meta.commit || 'unknown'}\` (trust this report only if it
 md.push(`- Finished: ${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}`);
 md.push(`- Verdict: **${verdict}**`);
 if (meta.run) md.push(`- Full logs: ${meta.run}`);
+const rules = rulesFor(meta.changed);
+if (rules.length) md.push(`- Rules for the files you changed: ${rules.map((r) => `\`${r}\``).join(', ')} (all bundled in \`START.md\` on \`agent-results\`)`);
 md.push('', '| Check | Result |', '| --- | --- |');
 for (const r of results) md.push(`| ${r.name} | ${r.result} |`);
 for (const r of failed) {

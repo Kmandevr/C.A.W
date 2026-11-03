@@ -1,0 +1,50 @@
+# Reusable: commits one file from a run's artifact to the agent-results branch, where chat agents read it.
+name: Publish agent results
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: Artifact holding the file
+        type: string
+        required: true
+      source:
+        description: File name inside the artifact
+        type: string
+        required: true
+      target:
+        description: Path on the agent-results branch
+        type: string
+        required: true
+permissions:
+  contents: write
+jobs:
+  publish:
+    name: Publish to agent-results
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.artifact }}
+      - name: Commit to agent-results
+        env:
+          SOURCE: ${{ inputs.source }}
+          TARGET: ${{ inputs.target }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ github.token }}
+        run: |
+          src="$PWD/$SOURCE"
+          git init -q results && cd results
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
+          for attempt in 1 2 3 4; do
+            if git fetch -q --depth 1 origin agent-results 2>/dev/null; then git checkout -q -B agent-results FETCH_HEAD
+            else git checkout -q --orphan agent-results; git rm -rfq . 2>/dev/null || true; fi
+            mkdir -p "$(dirname "$TARGET")" && cp "$src" "$TARGET"
+            git add "$TARGET"
+            git diff --cached --quiet && { echo "$TARGET unchanged"; exit 0; }
+            git commit -qm "Update $TARGET"
+            git push -q origin agent-results && { echo "Published $TARGET"; exit 0; }
+            sleep $((attempt * 3))
+          done
+          echo "Could not publish $TARGET after 4 attempts." && exit 1

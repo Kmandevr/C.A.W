@@ -6,7 +6,7 @@ updated: 2026-11-03
 
 # Log
 
-- 2026-11-03: Added the chat-agent route: `gpt/**` branches run the Quick check (Linux tests, no app builds) and get a report file on `agent-results`; `AGENTS.md` now holds the loop and stop rules that keep GPT from re-review cycles.
+- 2026-11-03: Added the chat-agent route: `gpt/**` branches run the Quick check (Linux tests, no app builds) and get a report file on `agent-results`, and a generated `START.md` there bundles everything a chat must read first; `AGENTS.md` now holds the loop and stop rules that keep GPT from re-review cycles.
 
 - 2026-11-03: Agent tooling made the default and fully wired: Serena's remind hook now covers Bash and Serena calls, the session-start hook prints the Graphify/Serena navigation order and restores a missing `origin/HEAD` so the docs Stop hook's stale check runs.
 

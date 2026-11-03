@@ -131,6 +131,7 @@ jobs:
         run: |
           node scripts/quick-report.js report.md \
             --branch "${{ github.ref_name }}" --commit "${{ github.sha }}" \
+            --changed changed.txt \
             --run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             "Docs guard=${{ steps.docs.outcome }}=logs/docs.log" \
             "Engine build=${{ steps.build.outcome }}=logs/build.log" \
@@ -152,36 +153,24 @@ jobs:
           exit 1
 
   # Separate job so the write token never sits next to the branch's own build and test code.
-  publish:
-    name: Publish report
+  report-path:
+    name: Report path
     needs: check
     if: always() && needs.check.result != 'cancelled' && needs.check.result != 'skipped'
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
+    outputs:
+      target: ${{ steps.path.outputs.target }}
     steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: quick-check-report
-      - name: Commit the report to agent-results
+      - id: path
         env:
           BRANCH: ${{ github.ref_name }}
-          REPO: ${{ github.repository }}
-          TOKEN: ${{ github.token }}
-        run: |
-          file="quick-check/$(printf '%s' "$BRANCH" | sed 's#/#--#g').md"
-          git init -q results && cd results
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote add origin "https://x-access-token:${TOKEN}@github.com/${REPO}.git"
-          for attempt in 1 2 3 4; do
-            if git fetch -q --depth 1 origin agent-results 2>/dev/null; then git checkout -q -B agent-results FETCH_HEAD
-            else git checkout -q --orphan agent-results; git rm -rfq . 2>/dev/null || true; fi
-            mkdir -p quick-check && cp ../report.md "$file"
-            git add "$file"
-            git diff --cached --quiet && exit 0
-            git commit -qm "Quick check report for $BRANCH"
-            git push -q origin agent-results && { echo "Published $file"; exit 0; }
-            sleep $((attempt * 3))
-          done
-          echo "Could not publish the report after 4 attempts." && exit 1
+        run: echo "target=quick-check/$(printf '%s' "$BRANCH" | sed 's#/#--#g').md" >> "$GITHUB_OUTPUT"
+  publish:
+    needs: report-path
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-agent-results.yml
+    with:
+      artifact: quick-check-report
+      source: report.md
+      target: ${{ needs.report-path.outputs.target }}
