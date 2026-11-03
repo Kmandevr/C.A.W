@@ -1,5 +1,6 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+#include "graph.h"
 #include "route_math.h"
 #include "hardware.h"
 
@@ -8,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cmath>
+#include <stdexcept>
 #include <thread>
 
 #include "compile.h"
@@ -63,7 +65,6 @@ struct Engine::Slot {
     std::array<double, kBlock>** exportBuf = nullptr;  // stable slice in Engine::ExportPool
     size_t exportCapacity = 0;
     size_t exportCount = 0;  // grows to the largest active chain export count; audio-thread owned
-    int64_t visited = -1;                         // chunk id when last processed
 };
 
 // One sounding note of a pattern layer's generator.
@@ -327,6 +328,82 @@ void storeMax(std::atomic<float>& a, float v) {
 
 }  // namespace
 
+// The engine's mix graph: node i runs slot i (a track or a folder bus) and node kSlots is the master
+// stage. Every node has a summing stereo input; routing (child -> folder bus, root -> master) and the
+// execution order are set on the audio thread from the slots' state (Engine::updateRouting).
+struct Engine::MixGraph {
+    class SlotNode final : public ModuleProcessor {
+    public:
+        SlotNode(Engine& e, int slot, const ModuleDescriptor& d) : e_(e), slot_(slot), d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        using ModuleProcessor::process;
+        bool process(const AudioProcessBlock& b) noexcept override {
+            e_.runSlotNode(slot_, b.input.channels[0], b.input.channels[1], b.output.channels[0],
+                           b.output.channels[1], static_cast<int>(b.frames));
+            return true;
+        }
+    private:
+        Engine& e_;
+        int slot_;
+        const ModuleDescriptor& d_;
+    };
+    class MasterNode final : public ModuleProcessor {
+    public:
+        MasterNode(Engine& e, const ModuleDescriptor& d) : e_(e), d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        using ModuleProcessor::process;
+        bool process(const AudioProcessBlock& b) noexcept override {
+            e_.runMasterNode(b.input.channels[0], b.input.channels[1], b.output.channels[0],
+                             b.output.channels[1], static_cast<int>(b.frames));
+            return true;
+        }
+    private:
+        Engine& e_;
+        const ModuleDescriptor& d_;
+    };
+
+    static constexpr int kMaster = kSlots;
+    static constexpr int kNodes = kSlots + 1;
+    // The mixer graph is fixed engine structure (kSlots + 1 nodes of kBlock frames), not project
+    // content, so it gets its own budget floor rather than competing with project graphs.
+    static constexpr std::size_t kMinBudgetBytes = 4u * 1024u * 1024u;
+
+    const PortDescriptor ports[2] = {{"in", PortType::Audio, ChannelLayout::Stereo, true, 0, true},
+                                     {"out", PortType::Audio, ChannelLayout::Stereo, false}};
+    const ModuleDescriptor slotDescriptor{"caw.mixer.slot", 1, ports, 2, nullptr, 0};
+    const ModuleDescriptor masterDescriptor{"caw.mixer.master", 1, ports, 2, nullptr, 0};
+    std::vector<std::string> ids;
+    std::vector<std::unique_ptr<ModuleProcessor>> nodes;
+    GraphExecutor executor;
+
+    // Routing scratch, audio thread only.
+    int target[kSlots] = {};          // routed destination node, or -1
+    int pending[kNodes] = {};         // routed children not yet ordered
+    bool deferred[kNodes] = {};
+    bool emitted[kNodes] = {};
+    uint32_t order[kNodes] = {};
+    uint32_t position[kNodes] = {};
+    GraphConnection edges[kSlots] = {};
+
+    MixGraph(Engine& e, double sampleRate, const EngineResourceBudget& engineBudget) {
+        ids.reserve(kNodes);
+        std::vector<GraphNode> graphNodes;
+        std::vector<ModuleProcessor*> processors;
+        for (int i = 0; i < kNodes; ++i) {
+            ids.push_back(i == kMaster ? std::string("master") : "slot" + std::to_string(i));
+            if (i == kMaster) nodes.push_back(std::make_unique<MasterNode>(e, masterDescriptor));
+            else nodes.push_back(std::make_unique<SlotNode>(e, i, slotDescriptor));
+            graphNodes.push_back({ids.back(), i == kMaster ? &masterDescriptor : &slotDescriptor});
+            processors.push_back(nodes.back().get());
+        }
+        GraphResourceBudget budget = makeGraphResourceBudget(engineBudget);
+        budget.maxWorkingBytes = std::max(budget.maxWorkingBytes, kMinBudgetBytes);
+        if (executor.prepare(graphNodes, {}, processors, kMaster, kBlock, sampleRate, budget) != GraphError::Ok ||
+            executor.reserveRouting(kSlots, budget) != GraphError::Ok)
+            throw std::runtime_error("mix graph could not be prepared");
+    }
+};
+
 Engine::Engine(double sampleRate)
     : Engine(sampleRate, makeEngineResourceBudget(detectHardwareProfile())) {}
 
@@ -341,9 +418,8 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
     for (int s = 0; s < kSlots; ++s)
         for (int i = 0; i < kScopeSize; ++i) slots_[s].scope[i].store(0);
-    std::fill_n(mixL_, kBlock, 0.0);
-    std::fill_n(mixR_, kBlock, 0.0);
     ctlSr_ = sampleRate;
+    mixGraph_.reset(new MixGraph(*this, sampleRate, resourceBudget_));
     warmTables();  // the built-in wavetables are built here, never on the audio thread
     updateTiming();
     ctlLoopLen_ = loopLen_;
@@ -1454,6 +1530,7 @@ void Engine::applyCommands() noexcept {
             default: break;
         }
         if (!canRetire(retirementNeed) || !cmds_->pop(c)) break;
+        routingDirty_ = true;  // any command may change slots, buses or order
         switch (c.type) {
             case Cmd::Install: {
                 Slot& s = slots_[c.slot];
@@ -2137,8 +2214,6 @@ void Engine::processSlot(Slot& s, int m, double target) noexcept {
 }
 
 void Engine::processChunk(float* l, float* r, int m) noexcept {
-    std::fill_n(mixL_, m, 0.0);
-    std::fill_n(mixR_, m, 0.0);
     for (int i = 0; i < kSlots; ++i) {
         std::fill_n(slots_[i].outL, m, 0.0);
         std::fill_n(slots_[i].outR, m, 0.0);
@@ -2151,73 +2226,140 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
         }
     }
     ++chunkId_;
-    // Child tracks are rendered before their folder buses; exporters still precede readers.
-    for (int pass = 0; pass < 2; ++pass) {
-        const int count = pass == 0 ? processCount_ : kSlots;
-        for (int k = 0; k < count; ++k) {
-            const int i = pass == 0 ? processOrder_[k] : k;
-            Slot& s = slots_[i];
-            if (s.visited == chunkId_) continue;
-            s.visited = chunkId_;
-            if (!s.active) continue;
-            const double target = slotTarget(s);
-            if (s.bus) {
-                const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-                const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
-                for (int j = 0; j < m; ++j) {
-                    const double step = static_cast<double>(g_ + j) / stepLen_;
-                    const bool volumeAutomated = s.automation && !s.automation->volume.empty();
-                    const double desired = target > 0.0
-                        ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
-                    if (volumeAutomated) {
-                        s.gain = desired;
-                    } else if (s.gain != desired) {
-                        s.gain += (desired - s.gain) * gainCoef;
-                        if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
-                    }
-                    const double automatedPan = s.automation && !s.automation->pan.empty()
-                        ? automationValue(s.automation->pan, step, pan) : pan;
-                    const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
-                    const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
-                    s.outL[j] *= s.gain * leftPan;
-                    s.outR[j] *= s.gain * rightPan;
-                }
-                if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; }
-            } else {
-                if (!s.cur) continue;
-                if (target == 0.0 && s.gain == 0.0) {
-                    s.contiguous = false;
-                    if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; }
-                    if (s.removing && canRetire(2)) {
-                        retire(s.cur, -1, s.pattern);
-                        s.pattern = nullptr;
-                        retire(s.old, i);
-                        s.cur = s.old = nullptr;
-                        s.active = false;
-                        s.removing = false;
-                    }
-                } else {
-                    processSlot(s, m, target);
-                }
-            }
-            // Route exactly once. A parent bus receives the child's stereo signal; only root tracks hit master.
-            // Routing carries 32-bit float, as graph audio edges do (owner, 2026-11-03): each output is
-            // rounded to float and summed in float, in processing order, from +0.0 (a summing input),
-            // saturating at +/-FLT_MAX (route_math.h).
+    // One graph runs the mix: slots in dependency order (exporters before readers), each folder bus
+    // after its children, then the master stage. Routing changes only between chunks.
+    if (routingDirty_) {
+        routingDirty_ = false;
+        updateRouting();
+    }
+    float* outputs[2] = {l, r};
+    if (!mixGraph_->executor.process(ConstChannelBufferView{}, ChannelBufferView{outputs, 2, static_cast<uint32_t>(m)},
+                                     static_cast<uint32_t>(m))) {
+        std::fill_n(l, m, 0.0f);
+        std::fill_n(r, m, 0.0f);
+    }
+}
+
+// Routing as the old two-pass mixer did it, now as graph edges: a routable slot (active, and a bus or
+// a track with a chain) goes to its parent when that parent is an active folder bus, is dropped when
+// its parent is anything else (as the old mixer discarded it), and goes to master at the root. Order
+// is the old pass order (processOrder_, then the remaining slots by index) with each bus held back
+// until its routed children have run, so a track always reaches its bus in the same chunk (issue
+// #76). Edges follow that order, which is the old accumulation order, so mixes stay bit-identical.
+void Engine::updateRouting() noexcept {
+    MixGraph& g = *mixGraph_;
+    const int master = MixGraph::kMaster;
+    for (int i = 0; i < kSlots; ++i) {
+        const Slot& s = slots_[i];
+        int to = -1;
+        if (s.active && (s.bus || s.cur)) {
             if (s.parentSlot >= 0 && s.parentSlot < kMaxLayers && s.parentSlot != i) {
-                Slot& parent = slots_[s.parentSlot];
-                for (int j = 0; j < m; ++j) {
-                    parent.outL[j] = routeAdd(static_cast<float>(parent.outL[j]), routeSample(s.outL[j]));
-                    parent.outR[j] = routeAdd(static_cast<float>(parent.outR[j]), routeSample(s.outR[j]));
-                }
+                const Slot& parent = slots_[s.parentSlot];
+                to = parent.active && parent.bus ? s.parentSlot : -1;
             } else {
-                for (int j = 0; j < m; ++j) {
-                    mixL_[j] = routeAdd(static_cast<float>(mixL_[j]), routeSample(s.outL[j]));
-                    mixR_[j] = routeAdd(static_cast<float>(mixR_[j]), routeSample(s.outR[j]));
-                }
+                to = master;
             }
         }
+        g.target[i] = to;
     }
+    for (int n = 0; n < MixGraph::kNodes; ++n) { g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false; }
+    for (int i = 0; i < kSlots; ++i)
+        if (g.target[i] >= 0 && g.target[i] != master) ++g.pending[g.target[i]];
+    uint32_t count = 0;
+    auto emit = [&](int x) noexcept {
+        while (x >= 0) {
+            g.emitted[x] = true;
+            g.order[count++] = static_cast<uint32_t>(x);
+            const int parent = g.target[x];
+            x = -1;
+            if (parent >= 0 && parent != master && --g.pending[parent] == 0 && g.deferred[parent]) {
+                g.deferred[parent] = false;
+                x = parent;
+            }
+        }
+    };
+    auto visit = [&](int x) noexcept {
+        if (x < 0 || x >= kSlots || g.emitted[x] || g.deferred[x]) return;
+        if (g.pending[x] > 0) { g.deferred[x] = true; return; }
+        emit(x);
+    };
+    for (int k = 0; k < processCount_; ++k) visit(processOrder_[k]);
+    for (int k = 0; k < kSlots; ++k) visit(k);
+    // A routing cycle is never sent by the control thread; if one appears, keep everything ordered
+    // and drop the edges that would point backwards.
+    for (int k = 0; k < kSlots; ++k)
+        if (!g.emitted[k]) { g.emitted[k] = true; g.order[count++] = static_cast<uint32_t>(k); }
+    g.order[count++] = static_cast<uint32_t>(master);
+    for (uint32_t k = 0; k < count; ++k) g.position[g.order[k]] = k;
+    uint32_t edgeCount = 0;
+    for (uint32_t k = 0; k + 1 < count; ++k) {
+        const int x = static_cast<int>(g.order[k]);
+        const int to = g.target[x];
+        if (to < 0 || g.position[x] >= g.position[to]) continue;
+        g.edges[edgeCount++] = GraphConnection{static_cast<uint32_t>(x), 1, static_cast<uint32_t>(to), 0};
+    }
+    // Valid by construction; on a (never expected) rejection the previous routing stays in effect.
+    (void)g.executor.setRouting(g.edges, edgeCount, g.order, count);
+}
+
+void Engine::runSlotNode(int i, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
+    Slot& s = slots_[i];
+    if (!s.active || (!s.bus && !s.cur)) {
+        std::fill_n(outL, m, 0.0f);
+        std::fill_n(outR, m, 0.0f);
+        return;
+    }
+    const double target = slotTarget(s);
+    if (s.bus) {
+        // A folder bus: its children arrive summed in float on the graph's summing input.
+        for (int j = 0; j < m; ++j) {
+            s.outL[j] = inL[j];
+            s.outR[j] = inR[j];
+        }
+        const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
+        const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
+        for (int j = 0; j < m; ++j) {
+            const double step = static_cast<double>(g_ + j) / stepLen_;
+            const bool volumeAutomated = s.automation && !s.automation->volume.empty();
+            const double desired = target > 0.0
+                ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
+            if (volumeAutomated) {
+                s.gain = desired;
+            } else if (s.gain != desired) {
+                s.gain += (desired - s.gain) * gainCoef;
+                if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
+            }
+            const double automatedPan = s.automation && !s.automation->pan.empty()
+                ? automationValue(s.automation->pan, step, pan) : pan;
+            const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
+            const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
+            s.outL[j] *= s.gain * leftPan;
+            s.outR[j] *= s.gain * rightPan;
+        }
+        if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; routingDirty_ = true; }
+    } else if (target == 0.0 && s.gain == 0.0) {
+        s.contiguous = false;
+        if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; }
+        if (s.removing && canRetire(2)) {
+            retire(s.cur, -1, s.pattern);
+            s.pattern = nullptr;
+            retire(s.old, i);
+            s.cur = s.old = nullptr;
+            s.active = false;
+            s.removing = false;
+            routingDirty_ = true;
+        }
+    } else {
+        processSlot(s, m, target);
+    }
+    // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
+    for (int j = 0; j < m; ++j) {
+        outL[j] = routeSample(s.outL[j]);
+        outR[j] = routeSample(s.outR[j]);
+    }
+}
+
+void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
     // Master: gain, DC blocker, then the safety limiter, always last.
     const double R = 1.0 - kTwoPi * 5.0 / sr_;
     const double rel = detExp(-1.0 / (0.1 * sr_));
@@ -2230,8 +2372,8 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
             master_ += masterStep_;
             if (--masterRamp_ == 0) master_ = masterTarget_;
         }
-        const double xl = finiteOr0(mixL_[i]) * master_;
-        const double xr = finiteOr0(mixR_[i]) * master_;
+        const double xl = finiteOr0(static_cast<double>(inL[i])) * master_;
+        const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
         double yl = xl - dcL_[0] + R * dcL_[1];
         dcL_[0] = xl;
         dcL_[1] = yl;
@@ -2254,8 +2396,8 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
         }
         const float ol = static_cast<float>(yl * gain * fade);
         const float orr = static_cast<float>(yr * gain * fade);
-        l[i] = ol;
-        r[i] = orr;
+        outL[i] = ol;
+        outR[i] = orr;
         pl = std::max(pl, std::fabs(ol));
         pr = std::max(pr, std::fabs(orr));
         masterScope_[sp].store(0.5f * (ol + orr), std::memory_order_relaxed);

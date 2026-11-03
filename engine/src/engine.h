@@ -75,6 +75,7 @@ private:
     struct Retired;
     struct AutomationData;
     struct ExportPool;
+    struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
 
     void drainRetired();
     bool canRetire(size_t count) const noexcept;
@@ -83,6 +84,10 @@ private:
     void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr) noexcept;
     void processChunk(float* l, float* r, int m) noexcept;
+    // Graph nodes (audio thread): one per slot, plus the master stage.
+    void runSlotNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
+    void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
+    void updateRouting() noexcept;
     void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
@@ -99,6 +104,7 @@ private:
     const double sr_;
     const EngineResourceBudget resourceBudget_;
     std::unique_ptr<ExportPool> exportPool_;
+    std::unique_ptr<MixGraph> mixGraph_;  // built in the constructor; routed on the audio thread
 
     // ---- audio-thread state ----
     std::unique_ptr<Slot[]> slots_;
@@ -128,9 +134,10 @@ private:
     int processOrder_[kSlots] = {};  // slots in dependency order (exporters before readers)
     int processCount_ = 0;
     int64_t chunkId_ = 0;
+    bool routingDirty_ = true;  // re-derive graph routing before the next chunk
     Retired* pending_ = nullptr;  // retired chains waiting for room in the queue
     int pendingCount_ = 0;
-    double mixL_[kBlock], mixR_[kBlock], tmp_[kBlock], tmp2_[kBlock];
+    double tmp_[kBlock], tmp2_[kBlock];
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;

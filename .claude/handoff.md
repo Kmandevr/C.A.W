@@ -1,24 +1,20 @@
 # Handoff
 
-Commit: a20e99a
-Branch: claude/caw-engine-foundation-skpirb (F4.2 + multi-track mixer goldens)
+Commit: e2bb9b6
+Branch: claude/caw-engine-foundation-skpirb (reset to Main after #75; F4.3 next)
 
 ## Goal
 Owner (2026-11-03): finish the roadmap Foundation stage (#28) F4 → F5 → F6 → F7 → F8; F9 deferred to Release 1 (no project compatibility needed yet). One small PR per step, now targeting `Main` directly (the #28 branch merged into Main in PR #73 and was deleted on merge); Claude merges when CI is green. Rules: no allocation/locks/IO in the callback; exports bit-identical across platforms; stereo stays low-overhead (callgrind via `caw_bench SECONDS -1`); never weaken tests; bug fixes start with a failing test; audio-reviewer on each engine change; release-check before each PR; update the roadmap Foundation row + `docs/engine-build-status.md` per PR. Ask before: SDK ABI changes, any golden-hash change other than F4.2's approved one, new dependencies, app/ changes beyond F4.
 
 ## Done and verified
-- F3 merged (PR #72 → 7f06839). F4.1 fan-in merged (PR #74 → 2d27815).
-- F4.2: mixer rounds track/bus outputs to float at routing and sums in float; owner-approved re-record of 10 golden hashes (CLI WAV diff <= 1 LSB of 24-bit).
-- Multi-track mixer goldens (engine/tests/mix_golden_test.cpp, 6 projects) recorded on the F4.2 mixer: the bit-exact target for F4.3. Local caw_tests 231/0, caw_rt_tests 24/0.
-- PR #73 merged: Main = old #28 branch + F3 + F4.1 (6cd8b5c). PR #75 (F4.2) was retargeted to Main.
+- On Main: F3 (PR #72), F4.1 fan-in (#74), old #28 branch (#73), F4.2 float routing + 8 mixer goldens + saturating route_math.h (#75 → e2bb9b6). Full CI green on each.
 
 ## Open
-- F4.3 design: slots (each a layer chain with its effects), folder buses and master become graph nodes; dual-run test must reproduce F4.2 output bit-for-bit. Undecided: publish a prepared graph from setProject alongside routing commands (needs the control thread to know every slot's parent, including removing slots), or add executor runtime routing with prepared capacity. Legacy quirk: a slot processed after its parent bus (pass 1) loses its signal that chunk.
-- F4.3 constraints: create connections in the mixer processing order (processOrder_, then slot index); keep track-to-track exports (double exportBuf) as a side channel, not float edges, or every export project changes; fix issue #76 (removal fade lost in folders) with a test.
+- F4.3 chosen design (2026-11-03): Engine owns ONE GraphExecutor prepared at construction: kSlots slot nodes + master node, each with a summing stereo input whose source capacity is reserved for every slot. New executor API: control-thread reserve of dynamic summing capacity; realtime `setRouting(edges, order)` that validates (each node once, sources before destinations, channel counts) using preallocated scratch and rebuilds sum source lists without allocation. Engine re-derives edges (child → parentSlot bus, else → master) and order (legacy pass order: processOrder_ then remaining slots by index; a bus waits until its children ran; master last) on the audio thread when routing changed, then calls graph process per chunk. Slot node = processSlot or bus gain/pan into a float output; master node = existing master stage. Exports stay the double side channel. Must keep golden.txt and mix_golden_test.cpp hashes; add test for issue #76 (child removed from folder fades out: no step above normal fade).
 - F4.4 later: split each slot's chain into source and effect nodes.
 
 ## Next
-Merge PR #75 when green; then build F4.3 (publish a prepared graph from setProject with node indices in legacy processing order; mix goldens must hold).
+Build F4.3 on claude/caw-engine-foundation-skpirb (reset to Main e2bb9b6): executor dynamic routing + tests first, then Engine integration, then remove the old pass loop.
 
 ## Read first
 - `docs/roadmap.md`

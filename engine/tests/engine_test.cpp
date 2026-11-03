@@ -946,3 +946,31 @@ TEST(routing_saturates_out_of_float_range_tracks_instead_of_silencing_the_mix) {
     CHECK_EQ(dropouts(run(f, 4800), finite), 0);
     CHECK(finite);
 }
+
+TEST(track_removed_inside_folder_fades_out_like_a_root_track) {
+    // Issue #76: a removed child kept its parent but was processed after the folder bus, so its fade
+    // never reached the mix and it cut off with a step. It must fade like a removed root track.
+    auto removalStep = [](bool inFolder) {
+        ProjectSpec p = project({{"keep", std::string(kFloat) + "sine(110) * 0.2"},
+                                 {"gone", std::string(kFloat) + "sine(220) * 0.5"}});
+        if (inFolder) {
+            LayerSpec bus;
+            bus.id = "bus"; bus.name = "bus"; bus.folder = true; bus.busEnabled = true; bus.volume = 1.0;
+            p.layers.insert(p.layers.begin(), bus);
+            p.layers[2].parentId = "bus";  // "gone"
+        }
+        Engine e(48000);
+        e.setMasterBypass(true);
+        e.setProject(p);
+        e.play();
+        const auto before = run(e, 9655);  // a quarter period of 220 Hz past a zero crossing: near its peak
+        p.layers.erase(p.layers.end() - 1);  // remove "gone"
+        e.setProject(p);
+        std::vector<float> after = run(e, 9600);
+        after.insert(after.begin(), before.back());  // measure the step across the removal too
+        return maxStep(after, 0, after.size());
+    };
+    const float root = removalStep(false);
+    const float folder = removalStep(true);
+    CHECK(folder <= root * 1.5f + 1e-4f);
+}
