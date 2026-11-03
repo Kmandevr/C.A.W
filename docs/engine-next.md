@@ -30,7 +30,7 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 9. **Local/global assets are explicit.** Local assets belong to a project; global assets are reusable across projects. Stable IDs and versions prevent path changes breaking projects.
 10. **Other applications are a destination.** C.A.W. creates portable content for DAWs, games and custom software. External plugin formats/hosting remain future work, not a current capability.
 11. **Permissive dependencies only** unless the owner approves an exception. The proprietary project licence remains unchanged.
-12. **Low-end hardware is a first-class target.** Every feature needs a resource budget and graceful behavior on weak devices.
+12. **Low-end hardware is a first-class target.** Every feature needs a resource budget and graceful behavior on weak devices. The floor is budget phones (Galaxy A1x-class, 3–4 GB RAM, Android 10+; owner, 2026-11-03).
 
 ## 3. Engine architecture
 
@@ -54,6 +54,8 @@ Core layers:
 ### Stereo and typed connections
 
 Stereo is native, not an effect bolted onto mono output. Signal ports declare channel layout and conversion behavior. Support mono and stereo first, with room for additional layouts. Pan, width, left/right and mid/side processing are explicit. Never silently collapse or duplicate channels.
+
+Audio buffers are 32-bit float, with 64-bit where accuracy needs it (phase/time accumulators, sensitive filter state); the .caw VM keeps 64-bit JavaScript number semantics (owner, 2026-11-03).
 
 Keep connection types distinct:
 - **Audio:** continuous audio buffers.
@@ -167,6 +169,8 @@ A bounded worker pool schedules work by task class, foreground priority, availab
 Do not silently lower sound quality or change deterministic results to meet a budget. If work cannot fit, warn, offer explicit resource/quality choices, or fail in a controlled way. Existing overload protection is a safety net, not the scheduler.
 
 ### Latency and headphones
+
+**Owner decision (2026-11-03):** latency is user-adjustable: a low-latency mode for live playing when timing matters, and a lighter, more stable mode when it doesn't.
 
 Latency is a workload property, not a universal requirement. Report known/estimated output-route latency and support suitable buffering/compensation for preview, capture and export. Do not assume low-latency headphones. For timing-sensitive audition, minimize latency within the route's capability; otherwise favor stability and efficiency. Recording (roadmap Stage 7) must stay synchronized and independent of UI frame rate; it is not implemented today.
 

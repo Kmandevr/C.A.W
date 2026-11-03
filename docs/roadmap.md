@@ -80,6 +80,8 @@ Preserve and extend the existing shared text-backed pattern model, piano roll an
 
 ### Stage 2 — Complete the mixer and signal routing
 
+**Prerequisite (owner, 2026-11-03):** move the mixer into the typed module graph first (one graph runs everything, see [decisions](decisions.md)), then build this stage on the graph.
+
 - Flexible sends and returns.
 - General sidechain routing and modulation connections.
 - Parallel routing and effect paths.
@@ -87,7 +89,7 @@ Preserve and extend the existing shared text-backed pattern model, piano roll an
 - Track, folder, bus and master routing visualization.
 - Useful metering: level, peak, clipping, stereo width/correlation, phase and loudness where measurement cost is justified.
 
-Extend the existing folder-bus and engine processing models. Do not create a second mixer or a UI-only routing graph.
+Migrate the existing folder-bus model into the engine graph. Do not keep a second mixer alongside it or create a UI-only routing graph.
 
 **Exit gate:** tests prove actual audio routing, send levels, sidechain behavior, parallel paths, master processing, channel isolation, stereo behavior and overload handling.
 

@@ -40,7 +40,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Current implementation order
 
-Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is paused by the owner. The graph executor, runtime publication helper, native module lifecycle and their remaining integration work remain documented technical backlog, but they are not the active implementation sequence. Do not resume that work or add speculative framework layers unless the owner explicitly asks. When it resumes, the target is one graph running everything ([decisions](decisions.md), 2026-11-03).
+Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is paused by the owner. The graph executor, runtime publication helper, native module lifecycle and their remaining integration work remain documented technical backlog, but they are not the active implementation sequence. Do not resume that work or add speculative framework layers unless the owner explicitly asks. It resumes after roadmap Stage 0 and Stage 1, before Stage 2, with the target of one graph running everything ([decisions](decisions.md), 2026-11-03).
 
 The current app-usable v2 order is:
 
