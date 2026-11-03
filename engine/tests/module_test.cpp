@@ -266,3 +266,16 @@ TEST(generic_only_processor_needs_no_stereo_override) {
     CHECK(processor.process(AudioProcessBlock{{inputs, 4, 2}, {outputs, 4, 2}, 2, 48000.0}));
     CHECK_EQ(out[3][1], 3.0f);
 }
+TEST(module_descriptor_allows_summing_only_on_audio_inputs) {
+    const PortDescriptor input[] = {{"in", PortType::Audio, ChannelLayout::Stereo, true, 0, true}};
+    const PortDescriptor output[] = {{"out", PortType::Audio, ChannelLayout::Stereo, false, 0, true}};
+    const PortDescriptor control[] = {{"cv", PortType::Control, ChannelLayout::None, true, 0, true}};
+    CHECK(validateModuleDescriptor(ModuleDescriptor{"caw.test.sum.in", 1, input, 1, nullptr, 0}) == ModuleValidation::Ok);
+    CHECK(validateModuleDescriptor(ModuleDescriptor{"caw.test.sum.out", 1, output, 1, nullptr, 0}) ==
+          ModuleValidation::InvalidSummingPort);
+    CHECK(validateModuleDescriptor(ModuleDescriptor{"caw.test.sum.cv", 1, control, 1, nullptr, 0}) ==
+          ModuleValidation::InvalidSummingPort);
+    const PortDescriptor plain[] = {{"in", PortType::Audio, ChannelLayout::Stereo, true}};
+    CHECK(!moduleDescriptorsMatch(ModuleDescriptor{"caw.test.sum", 1, input, 1, nullptr, 0},
+                                  ModuleDescriptor{"caw.test.sum", 1, plain, 1, nullptr, 0}));
+}

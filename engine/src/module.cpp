@@ -41,8 +41,11 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
                 if (p.channelCount == 0) return ModuleValidation::InvalidPortLayout;
             } else if (p.channelCount != 0) return ModuleValidation::InvalidPortLayout;
             if (portChannelCount(p) > kMaxPortChannels) return ModuleValidation::TooManyChannels;
+            if (p.summing && !p.input) return ModuleValidation::InvalidSummingPort;
         } else if (p.layout != ChannelLayout::None || p.channelCount != 0) {
             return ModuleValidation::InvalidPortLayout;
+        } else if (p.summing) {
+            return ModuleValidation::InvalidSummingPort;
         }
         for (uint32_t j = 0; j < i; ++j)
             if (d.ports[j].id == p.id) return ModuleValidation::DuplicatePortId;
@@ -101,7 +104,8 @@ bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b
     for (uint32_t i = 0; i < a.portCount; ++i) {
         const PortDescriptor& x = a.ports[i];
         const PortDescriptor& y = b.ports[i];
-        if (x.id != y.id || x.type != y.type || x.layout != y.layout || x.input != y.input || x.channelCount != y.channelCount)
+        if (x.id != y.id || x.type != y.type || x.layout != y.layout || x.input != y.input || x.channelCount != y.channelCount ||
+            x.summing != y.summing)
             return false;
     }
     for (uint32_t i = 0; i < a.parameterCount; ++i) {

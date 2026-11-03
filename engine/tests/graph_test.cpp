@@ -194,14 +194,16 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     // Planar executor storage for two stereo in/out nodes at 64 frames: fixed vector headers,
     // per-node metadata, four output channels, both pointer tables, the host-input slot bound
     // (every input channel) and the shared zero block.
+    // The private sum-input list's header is counted like any std::vector header.
     constexpr std::size_t fixedHeaders =
-        sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 2u +
-        sizeof(std::vector<float*>) + sizeof(std::vector<const float*>) +
-        sizeof(std::vector<uint32_t>) * 6u;
-    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 4u;
+        sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 3u +
+        sizeof(std::vector<float*>) * 2u + sizeof(std::vector<const float*>) +
+        sizeof(std::vector<uint32_t>) * 9u;
+    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u;
     constexpr std::size_t executorBytes =
         fixedHeaders + 2u * perNodeMetadata + 4u * 64u * sizeof(float) +
-        4u * sizeof(float*) + 4u * sizeof(const float*) + 4u * sizeof(uint32_t) + 64u * sizeof(float);
+        4u * sizeof(float*) + 4u * sizeof(const float*) + 4u * sizeof(uint32_t) + 64u * sizeof(float) +
+        1u * sizeof(uint32_t);  // sum-source bound: one per connection
     constexpr std::size_t retainedPlanBytes = 2u * sizeof(uint32_t);
     // Each phase fits independently, but the live execution order plus prepared
     // executor storage exceeds the budget by one byte; the exact total fits.

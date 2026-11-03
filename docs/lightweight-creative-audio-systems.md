@@ -23,7 +23,7 @@ A feature belongs in this plan only when it:
 
 ### Existing architecture to preserve
 
-**[Fact, checked 2026-11-01]** C.A.W. has a portable C++20 engine, deterministic module VM, code-defined generators and effects, `param`, `global`, `export` and reusable `fn` functions, arithmetic and bitwise operations, patterns, a stereo mixer, offline rendering, a native worker pool and an adaptive workload planner. See [engine](engine.md), [architecture](architecture.md), [engine implementation status](engine-build-status.md) and [performance](performance.md).
+**[Fact, checked 2026-11-03]** C.A.W. has a portable C++20 engine, deterministic module VM, code-defined generators and effects, `param`, `global`, `export` and reusable `fn` functions, arithmetic and bitwise operations, patterns, a stereo mixer, offline rendering, a native worker pool and an adaptive workload planner. A planar N-channel graph executor with fan-in exists (Foundation F3/F4.1) but does not run playback yet. See [engine](engine.md), [architecture](architecture.md), [engine implementation status](engine-build-status.md) and [performance](performance.md).
 
 **[Fact]** The module language is intentionally constrained: functions expand inline, cannot recurse, and the language is not a general-purpose array/loop environment. Stateful DSP built-ins own their state. New ideas must fit that model or be implemented as small, explicit native built-ins/modules—not by quietly turning the VM into a general programming runtime.
 
