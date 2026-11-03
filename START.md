@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `cd862841be4056e9019f64ae21ee05fe5b5702f7` on the default branch at 2026-11-03T14:04:45Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `638b279d8513f67ae00ff9a384c46baea040439c` on the default branch at 2026-11-03T15:36:40Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`cd86284`).
+1. The commit this file was generated from (`638b279`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -107,18 +107,56 @@ Then follow "The loop" and "Stop rules" in its AGENTS.md section.
 
 ### The two records
 
-- **The report:** `quick-check/<branch, with each / written as -->.md` on the `agent-results` branch. For `gpt/28-planar-executor` that is `quick-check/gpt--28-planar-executor.md`. The repository is public, so `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/quick-check/gpt--28-planar-executor.md` also works (it can lag a few minutes). It gives the commit tested, PASS/FAIL per check and the error lines of each failure. The test results are the evidence; they replace reading the code to decide whether something works.
+- **The report:** `quick-check/<branch, with each / written as -->.md` on the `agent-results` branch. For `gpt/28-planar-executor` that is `quick-check/gpt--28-planar-executor.md`. The repository is public, so `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/quick-check/gpt--28-planar-executor.md` also works (it can lag a few minutes). It gives the commit tested, PASS/FAIL per command with its time, the output of search commands, and the failing program's own error lines. The results are the evidence; they replace reading the code to decide whether something works.
 - **The progress comment:** one comment on the task's issue that you edit (or replace) after every step: branch, numbered plan, each step's status with the commit that passed, open failures, and the single next action. It is the only memory a new chat needs.
+
+### Running commands: `run:` lines
+
+CI is your terminal. Put `run:` lines in the message of the **last commit of a push**, one command per line or several separated by `;`. Only those commands run, in order, and the report shows each result. A push with no `run:` lines runs the default set: `docs`, `build`, `test`, `examples`, plus `analyze` and `dart-test` when `app/` changed. Example message:
+
+```text
+Make the executor use planar channel buffers
+
+run: test graph_
+run: grep "left_|right_" engine/src/graph.cpp; refs StereoProcessBlock
+```
+
+| Command | Does |
+| --- | --- |
+| `test [name]` | Builds only `caw_tests` and runs the tests whose `TEST(name)` contains `name`. No name runs the whole ctest suite |
+| `sanitize [name]` | The same under AddressSanitizer and UBSan (Debug build) |
+| `build [target]` | Engine build; targets `caw_core`, `caw_engine`, `caw_cli`, `caw_tests`, `caw_bench` |
+| `examples` | `caw check` of every example and the generated language-docs check |
+| `check <file.caw>…` | `caw check` of the given modules |
+| `render <file.caw> [bpm]` | Renders to WAV (run artifact `renders`) |
+| `bench` | Engine benchmark |
+| `analyze [app/path]…` / `dart-test [app/test/file] [name]` | Dart analysis; Dart tests against the native engine, optionally one file and a name filter |
+| `screenshot <app/test/x_test.dart> [name]` | Runs that widget test with `--update-goldens` and publishes every PNG it writes to `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/screens/<branch-name>/<file>.png`. In the test: `await expectLater(find.byType(MaterialApp), matchesGoldenFile('screens/home.png'));`. Text renders in Flutter's test font (blocks), so check layout, not lettering. Delete a screenshot test before the pull request, or commit its PNG with it: without the PNG it fails the pull request's Dart tests |
+| `docs` | Docs guard, strict (as on a pull request) |
+| `diff [path]` / `log [n] [path]` | This branch against `Main`: changed files and the patch; recent commits |
+| `show <hash\|HEAD~N> [path]` / `blame <file> [START-END]` | One commit with its patch; who last changed each line |
+| `grep <regex> [path]…` / `refs <identifier>` | ripgrep search with line numbers; whole-word uses of a name |
+| `tree [dir]` | Repo map: each file with its purpose |
+| `graph query\|explain\|affected "<text>"` | Graphify: what relates to what, what a change affects |
+| `symbols <file>` / `def <name>` | Symbols in a file with line numbers; where a symbol is defined |
+
+**Testing the app like a user:** widget tests in `app/test` drive the real app shell (tap, drag, type, scroll; see `pattern_editor_test.dart`), and `dart-test` runs them. Flutter's `meetsGuideline(androidTapTargetGuideline)`, `iOSTapTargetGuideline`, `labeledTapTargetGuideline` and `textContrastGuideline` add accessibility checks to any of them, and `screenshot` shows the result.
+
+**What the runner is:** every report states its environment, a GitHub-hosted Linux x64 runner with no audio device, GPU, phone or Windows. A PASS there is simulated evidence only; behaviour on the owner's phone or on Windows is verified only by the owner running the CI-built app.
+
+**Watching a run:** the report file says `Status: RUNNING` (with the commands queued) as soon as a run starts for your commit, then is replaced by the finished report. `quick-check/INDEX.md` on `agent-results` lists every branch's latest status, verdict and commit, so a new chat can find its branch.
+
+Commands run without a shell, so arguments are taken literally. Paths must be relative to the repository root. A bad command is reported as INVALID and the others still run. Engine builds are incremental (ccache), so a targeted `test` after a small change takes about a minute. `node scripts/agent-run.js help` prints this list. The owner can also start a run with chosen commands from the Actions tab (Quick check, "Run workflow").
 
 ### The loop
 
 1. **Start or resume.** Fetch `START.md` from the `agent-results` branch (https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md). CI regenerates it from `Main` whenever this file, `CLAUDE.md`, `docs/vision.md` or a rule changes, and it bundles all of them, so this one fetch replaces reading them separately. Answer its confirmation list, then read the progress comment and the report if they exist and resume at the next action. Don't re-read files or re-review steps the comment marks done.
-2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check (Linux build and tests, docs guard, and Dart checks when `app/` changed). No full CI matrix, no app builds and no pull request are needed.
+2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check, never the full CI matrix or the app builds, and need no pull request.
 3. **Plan.** Write at most five small steps into the progress comment. A step is one logical change that can pass the Quick check by itself.
-4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and wait only on the last.
-5. **Read the report** for the step's last commit. If its `Commit:` is older, the run is still going: wait and read it again; don't re-review the code meanwhile. If the verdict is FAIL, fix only what the failing sections name, push and read the report again.
+4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Use `grep`, `refs`, `def`, `graph` and `tree` (above) to find what to open. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and put the `run:` lines (the narrowest tests that prove the step, such as `test <name>`) in the last commit.
+5. **Read the report** for the step's last commit. If its `Commit:` is older, the run is still going: wait and read it again; don't re-review the code meanwhile. If the verdict is FAIL, fix only what the failing sections name, push with `run:` lines for just the failing commands, and read the report again.
 6. **Record and move on.** Update the progress comment (step done, commit) and start the next step.
-7. **Finish.** When every step passes, open the pull request with `Closes #N` and a **Where I left off** note. Full Engine, App and Docs CI (all platforms and the app builds) runs there. Claude then reviews the work (owner's role split, `docs/decisions.md`).
+7. **Finish.** When every step passes, push once with no `run:` lines so the default set runs. When that passes, open the pull request with `Closes #N` and a **Where I left off** note. Full Engine, App and Docs CI (all platforms and the app builds) runs there. Claude then reviews the work (owner's role split, `docs/decisions.md`).
 
 ### Stop rules (to avoid getting stuck)
 
