@@ -57,25 +57,81 @@ Use GitHub Issues as the task/bug tracker; do not create a separate task list. A
 - Ask before actions that are hard to undo. If an instruction conflicts with project docs or the owner's decision, explain the conflict once with a reason and proposed alternative; otherwise follow the owner's decision.
 - The owner often sends short messages from a phone. Infer the likely intent from context, ask only when ambiguity materially affects the work, and give concise, verdict-first updates.
 
-## Agent limitations and workarounds
+## Chat-agent route (GitHub connector only)
 
-These notes apply to chat-based agents operating only through a GitHub connector, without a local checkout or shell. They are capability limits, not project requirements for agents that do have a proper development environment.
+For agents working from a chat window through a GitHub connector, with no checkout, shell, hooks, Graphify or Serena. A new chat remembers nothing from the last one, and connector writes can be mangled (literal `\n`, flattened lines, broken links). This route replaces local runs with the **Quick check** and replaces chat memory with two durable records.
 
-### Limitations
+### Start prompt (paste once into the ChatGPT project's instructions)
 
-- The agent is working through a GitHub connector in a chat window, not a local repository checkout.
-- It cannot run the repository's build, tests, `.claude/tools/tree.sh`, `.claude/tools/graph.sh`, or `node scripts/docs-test.js` in that environment.
-- Claude hooks, subagents, and Serena MCP tools are not available there.
-- A new chat does not retain the prior chat's working context.
-- Connector-written files can be malformed (for example, literal `\n` sequences, flattened lines, or broken Markdown links/includes).
+ChatGPT has no hooks, so this prompt is what makes every chat start from the right files:
 
-### Workarounds
+```text
+You work on the GitHub repository Kmandevr/C.A.W through the GitHub connector.
+Before anything else in every chat, fetch START.md from the agent-results branch
+(https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md), read all of it,
+and answer its "Before you start" list in your first reply. Do no other work until you have.
+Then follow "The loop" and "Stop rules" in its AGENTS.md section.
+```
 
-1. **Re-establish context.** Start each chat by reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md`, and the applicable `.claude/rules/*.md` files. Use the GitHub file browser/search to inspect named files directly. Do not claim that a session-start hook or repository map ran when it did not.
-2. **Use CI as the execution environment.** Make small, reviewable changes and push them to the task branch. Wait for all applicable Engine, App and Docs checks to finish green before starting another change or calling the work done. Never build on a red or still-running branch. If a required workflow did not run, say so; do not infer a pass.
-3. **Verify connector writes.** After writing each file, fetch it again and inspect the complete contents. Check line breaks, headings, tables, relative links and includes for mangling. Do not trust the write response alone.
-4. **Substitute for unavailable tools honestly.** When a skill calls for a shell tool, read the files it names and inspect the corresponding CI results/logs instead. If the skill calls for Graphify or Serena, use repository search and direct file reads for what they can establish. State which checks could not be run; never report a substitute as equivalent to the unavailable tool.
-5. **Keep commits and handoffs durable.** Prefer one commit per logical change where the connector supports it. If its API forces separate commits or prevents a normal checkout workflow, disclose that limitation rather than claiming a local Git commit. Put a **Where I left off** note in the PR description so the next chat can resume without relying on chat memory.
-6. **Handle failures from evidence.** Reproduce failures locally when possible. In a connector-only session, inspect the failed CI job and its logs before proposing a fix; if the failure cannot be reproduced in that environment, say so explicitly. Never skip or weaken a test.
+### The two records
+
+- **The report:** `quick-check/<branch, with each / written as -->.md` on the `agent-results` branch. For `gpt/28-planar-executor` that is `quick-check/gpt--28-planar-executor.md`. The repository is public, so `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/quick-check/gpt--28-planar-executor.md` also works (it can lag a few minutes). It gives the commit tested, PASS/FAIL per command with its time, the output of search commands, and the failing program's own error lines. The results are the evidence; they replace reading the code to decide whether something works.
+- **The progress comment:** one comment on the task's issue that you edit (or replace) after every step: branch, numbered plan, each step's status with the commit that passed, open failures, and the single next action. It is the only memory a new chat needs.
+
+### Running commands: `run:` lines
+
+CI is your terminal. Put `run:` lines in the message of the **last commit of a push**, one command per line or several separated by `;`. Only those commands run, in order, and the report shows each result. A push with no `run:` lines runs the default set: `docs`, `build`, `test`, `examples`, plus `analyze` and `dart-test` when `app/` changed. Example message:
+
+```text
+Make the executor use planar channel buffers
+
+run: test graph_
+run: grep "left_|right_" engine/src/graph.cpp; refs StereoProcessBlock
+```
+
+| Command | Does |
+| --- | --- |
+| `test [name]` | Builds only `caw_tests` and runs the tests whose `TEST(name)` contains `name`. No name runs the whole ctest suite |
+| `sanitize [name]` | The same under AddressSanitizer and UBSan (Debug build) |
+| `build [target]` | Engine build; targets `caw_core`, `caw_engine`, `caw_cli`, `caw_tests`, `caw_bench` |
+| `examples` | `caw check` of every example and the generated language-docs check |
+| `check <file.caw>…` | `caw check` of the given modules |
+| `render <file.caw> [bpm]` | Renders to WAV (run artifact `renders`) |
+| `bench` | Engine benchmark |
+| `analyze [app/path]…` / `dart-test [app/test/file] [name]` | Dart analysis; Dart tests against the native engine, optionally one file and a name filter |
+| `screenshot <app/test/x_test.dart> [name]` | Runs that widget test with `--update-goldens` and publishes every PNG it writes to `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/screens/<branch-name>/<file>.png`. In the test: `await expectLater(find.byType(MaterialApp), matchesGoldenFile('screens/home.png'));`. Text renders in Flutter's test font (blocks), so check layout, not lettering. Delete a screenshot test before the pull request, or commit its PNG with it: without the PNG it fails the pull request's Dart tests |
+| `docs` | Docs guard, strict (as on a pull request) |
+| `diff [path]` / `log [n] [path]` | This branch against `Main`: changed files and the patch; recent commits |
+| `show <hash\|HEAD~N> [path]` / `blame <file> [START-END]` | One commit with its patch; who last changed each line |
+| `grep <regex> [path]…` / `refs <identifier>` | ripgrep search with line numbers; whole-word uses of a name |
+| `tree [dir]` | Repo map: each file with its purpose |
+| `graph query\|explain\|affected "<text>"` | Graphify: what relates to what, what a change affects |
+| `symbols <file>` / `def <name>` | Symbols in a file with line numbers; where a symbol is defined |
+
+**Testing the app like a user:** widget tests in `app/test` drive the real app shell (tap, drag, type, scroll; see `pattern_editor_test.dart`), and `dart-test` runs them. Flutter's `meetsGuideline(androidTapTargetGuideline)`, `iOSTapTargetGuideline`, `labeledTapTargetGuideline` and `textContrastGuideline` add accessibility checks to any of them, and `screenshot` shows the result.
+
+**What the runner is:** every report states its environment, a GitHub-hosted Linux x64 runner with no audio device, GPU, phone or Windows. A PASS there is simulated evidence only; behaviour on the owner's phone or on Windows is verified only by the owner running the CI-built app.
+
+**Watching a run:** the report file says `Status: RUNNING` (with the commands queued) as soon as a run starts for your commit, then is replaced by the finished report. `quick-check/INDEX.md` on `agent-results` lists every branch's latest status, verdict and commit, so a new chat can find its branch.
+
+Commands run without a shell, so arguments are taken literally. Paths must be relative to the repository root. A bad command is reported as INVALID and the others still run. Engine builds are incremental (ccache), so a targeted `test` after a small change takes about a minute. `node scripts/agent-run.js help` prints this list. The owner can also start a run with chosen commands from the Actions tab (Quick check, "Run workflow").
+
+### The loop
+
+1. **Start or resume.** Fetch `START.md` from the `agent-results` branch (https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/START.md). CI regenerates it from `Main` whenever this file, `CLAUDE.md`, `docs/vision.md` or a rule changes, and it bundles all of them, so this one fetch replaces reading them separately. Answer its confirmation list, then read the progress comment and the report if they exist and resume at the next action. Don't re-read files or re-review steps the comment marks done.
+2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check, never the full CI matrix or the app builds, and need no pull request.
+3. **Plan.** Write at most five small steps into the progress comment. A step is one logical change that can pass the Quick check by itself.
+4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Use `grep`, `refs`, `def`, `graph` and `tree` (above) to find what to open. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and put the `run:` lines (the narrowest tests that prove the step, such as `test <name>`) in the last commit.
+5. **Read the report** for the step's last commit. If its `Commit:` is older, the run is still going: wait and read it again; don't re-review the code meanwhile. If the verdict is FAIL, fix only what the failing sections name, push with `run:` lines for just the failing commands, and read the report again.
+6. **Record and move on.** Update the progress comment (step done, commit) and start the next step.
+7. **Finish.** When every step passes, push once with no `run:` lines so the default set runs. When that passes, open the pull request with `Closes #N` and a **Where I left off** note. Full Engine, App and Docs CI (all platforms and the app builds) runs there. Claude then reviews the work (owner's role split, `docs/decisions.md`).
+
+### Stop rules (to avoid getting stuck)
+
+- **Each file is reviewed at most once per chat.** Record the verdict in the progress comment instead of reviewing it again.
+- **Two failed fixes for the same failure means stop.** Write the failure, what you tried and your best guess into the progress comment, and tell the owner it's blocked. Don't keep cycling.
+- **When the chat gets long, hand off.** That means you notice re-reading, repeating a review, losing track of the plan, or about 30 messages. Bring the progress comment up to date and tell the owner to start a new chat that begins at step 1 of the loop.
+- **No silent substitutes.** Say which checks did not run. A Quick check pass is not the full CI; never call the task done before the pull request's CI is green.
+- **Never skip, weaken or disable a test** to get a PASS.
 
 The owner's decisions and repository documentation take precedence over an agent's preference. If you disagree, state the reason once as a proposal or question, then follow the owner's direction unless it changes.

@@ -15,15 +15,18 @@ Project automation supports song-time lanes for module parameters and shared glo
 | `app/` | Flutter app for Android and Windows with eight workspaces ([app](docs/app.md)) |
 | `examples/` | Starter sound modules (`.caw`), built into the engine as templates |
 | `docs/` | Project documentation: current app/engine facts, decisions, architecture and the permanent roadmap ([index](docs/index.md)) |
-| `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository |
+| `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository; `agent-run.js` runs a chat agent's requested commands and writes its report, `agent-context.js` its start file |
 | `.github/` | Issue and PR templates, CODEOWNERS, Dependabot, and the workflows below |
-| `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, hooks ([.claude/README.md](.claude/README.md)) |
+| `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, and hooks that make Graphify and Serena the default way to navigate code ([.claude/README.md](.claude/README.md)) |
 | `CLAUDE.md` | Instructions every AI session follows |
 
 Workflows:
-- `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push and pull request; superseded runs are cancelled per branch/PR.
+- `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push (except `gpt/**`) and pull request; superseded runs are cancelled per branch/PR.
 - `.github/workflows/app.yml`: runs Dart analysis, Dart tests, Android APK and Windows app as independent jobs. Flutter SDK and Dart packages are cached; native test builds use ccache; Dart tests run with bounded parallelism. The APK (`caw-android-apk`) and Windows app (`caw-windows`) are downloadable artifacts; superseded runs are cancelled.
-- `.github/workflows/engine.yml`: builds and tests Linux x64, Linux Arm64, Windows x64 and Linux sanitizers in a four-job matrix. Linux native builds cache compiler outputs; CTest runs the native suite in four deterministic parallel shards. The Linux x64 job also checks generated function docs and renders each example except patterns (they need a sound to play); superseded runs are cancelled.
+- `.github/workflows/engine.yml`: on every push (except `gpt/**`) and pull request, builds and tests Linux x64, Linux Arm64, Windows x64 and Linux sanitizers in a four-job matrix. Linux native builds cache compiler outputs; CTest runs the native suite in four deterministic parallel shards. The Linux x64 job also checks generated function docs and renders each example except patterns (they need a sound to play); superseded runs are cancelled.
+- `.github/workflows/quick-check.yml`: the chat-agent route. Pushes to `gpt/**` branches run the commands named by `run:` lines in the commit message (targeted tests, sanitizer runs, builds, renders, widget-test screenshots, git diff/log/show/blame, search and Graphify; `scripts/agent-run.js`) or, with none, the docs guard, a Linux x64 engine build and tests, the example checks and (when `app/` changed) Dart analysis and tests. No app builds. It writes one short report per branch to `quick-check/<branch with / as -->.md` on the `agent-results` branch (RUNNING as soon as a run starts, with `quick-check/INDEX.md` listing every branch; screenshots under `screens/`) ([AGENTS.md](AGENTS.md)). Full CI runs once the branch opens a pull request.
+- `.github/workflows/agent-context.yml`: on pushes to `Main` that change `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` or a rule, rebuilds `START.md` on `agent-results`: one file bundling everything a chat agent reads first (`scripts/agent-context.js`).
+- `.github/workflows/publish-agent-results.yml`: reusable step the two workflows above use to commit their file to `agent-results`; it is the only job with write access and never runs branch code.
 - `.github/workflows/clear-status-on-close.yml`: removes `status:` labels when an issue closes.
 
 ## Working on it

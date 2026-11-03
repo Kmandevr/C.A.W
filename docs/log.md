@@ -1,10 +1,14 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Log
+
+- 2026-11-03: Added the chat-agent route: `gpt/**` branches run the Quick check (commands chosen by `run:` lines in the commit message, else a default Linux set; no app builds) and get a report file on `agent-results`, and a generated `START.md` there bundles everything a chat must read first; `AGENTS.md` now holds the loop and stop rules that keep GPT from re-review cycles.
+
+- 2026-11-03: Agent tooling made the default and fully wired: Serena's remind hook now covers Bash and Serena calls, the session-start hook prints the Graphify/Serena navigation order and restores a missing `origin/HEAD` so the docs Stop hook's stale check runs.
 
 - 2026-11-02: Established docs/roadmap.md as the permanent canonical C.A.W. roadmap. Consolidated the long-term production direction into ordered stages, including audio/MIDI recording, monitoring and latency compensation, loop recording, take lanes/comping, plugin hosting, tempo maps, control surfaces, mastering tools, optional collaboration and surround/immersive audio. Explicitly excluded video synchronization for now. Converted the former two-part core plan into a compatibility pointer and the music workflow plan into a factual gap reference; aligned vision and UI scope notes.
 
