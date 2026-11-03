@@ -1,10 +1,15 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Decisions
+
+## 2026-11-03: Agent navigation tools are the default path
+
+- Owner: Graphify and Serena (with the repo map) are how agents find and read code by default; plain Read, Grep and shell `cat`/`sed`/`grep` are for what those tools already named.
+- Enforced by tooling rather than wording: the session-start hook prints the navigation order and how to load Serena's deferred tools, and Serena's `remind` hook now watches Bash and Serena calls as well as Read/Grep (`.claude/README.md`).
 
 ## 2026-11-02: Permanent roadmap and full production direction
 

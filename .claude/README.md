@@ -5,12 +5,12 @@ Adapted from the AutoStacc repository's setup. `tools/`, `hooks/` and `workflows
 | Piece | Loads | Purpose |
 | --- | --- | --- |
 | [`../AGENTS.md`](../AGENTS.md) | every task for non-Claude agents | Portable entry point: links to project-wide guidance, area rules and skills, and explains connector-only workarounds. |
-| `hooks/session-start.sh` | every session | Prints the branch, last 5 commits, uncommitted count, the newest `docs/log.md` lines, `.claude/handoff.md` if one exists, and the brief repo map. Installs Serena, and refreshes the Graphify graph in the background. Runs again after a compaction. |
+| `hooks/session-start.sh` | every session | Prints the branch, last 5 commits, uncommitted count, the newest `docs/log.md` lines, `.claude/handoff.md` if one exists, the default navigation order (map, Graphify, Serena; how to load Serena's deferred tools) and the brief repo map. Installs Serena, restores a missing `origin/HEAD` for the stale-notes check, and refreshes the Graphify graph in the background. Runs again after a compaction. |
 | `hooks/docs-reminder.sh` | when Claude stops (`Stop` hook) | Runs `node scripts/docs-test.js --stale`. When this branch changed files a note covers but not the note, it asks Claude once to check those notes before finishing. |
 | `tools/tree.sh` | on call | Repo map built from each file's own purpose line. `<dir>` expands one directory, `--all` lists every file. A directory's purpose is the first line of its `.purpose` file; a `.caw` module's is its `summary:`. |
 | `tools/graph.sh` | on call | Single entry to [Graphify](https://github.com/Graphify-Labs/graphify) (project and file level). Installs it and rebuilds the graph only when files were added, edited or deleted. |
 | `tools/serena.sh`, `.mcp.json` | when Serena's tools are used | Starts the [Serena](https://github.com/oraios/serena) MCP server (symbol level). Config: `.serena/project.yml`, with the Dart and C++ language servers; its file, shell, memory and onboarding tools are off. |
-| `tools/serena-hook.sh` | on Read/Grep, session end | Runs Serena's `remind` and `cleanup` hooks. Does nothing if Serena isn't installed. |
+| `tools/serena-hook.sh` | on Read, Grep, Bash and Serena calls; session end | Runs Serena's `remind` and `cleanup` hooks. `remind` counts Read/Grep and shell `cat`/`sed`/`grep` reads of code, denies a burst once with a nudge to use Serena, and resets when a Serena tool is used. Does nothing if Serena isn't installed. |
 | `skills/tasks` | description every session, body when invoked | Find, claim, work and finish tasks through GitHub Issues and labels. The only task system. |
 | `skills/release-check` | same | Final check before calling a change ready: docs guard, repo hygiene (`check.sh`), diff scope, and reviewers when the diff calls for them. |
 | `skills/code-nav` | same | Using Graphify and Serena together, with `check.sh`, a self-test for both. |

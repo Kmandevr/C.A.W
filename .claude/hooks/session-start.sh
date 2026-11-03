@@ -13,6 +13,8 @@ T=$(mktemp -d) || exit 0
 trap 'rm -rf "$T"' EXIT
 "$(dirname "$0")/../tools/tree.sh" --brief > "$T/map" 2>/dev/null &
 if git rev-parse --git-dir >/dev/null 2>&1; then
+  # A fresh clone may lack origin/HEAD, which the docs guard's stale check (the Stop hook) compares against.
+  git symbolic-ref -q refs/remotes/origin/HEAD >/dev/null || (timeout 20 git remote set-head origin -a >/dev/null 2>&1 &)
   { printf 'Branch: %s; uncommitted changes: ' "$(git branch --show-current 2>/dev/null || echo detached)"; git status --porcelain 2>/dev/null | wc -l | tr -d ' '; } > "$T/branch" &
   git log -5 --format='  %h %<(72,trunc)%s' 2>/dev/null | sed 's/ *$//' > "$T/commits" &
 fi
@@ -33,7 +35,8 @@ if [ -f "$H" ]; then
   echo "Handoff ($H, written at ${c:-unknown}; $n commit(s) since: verify against the repo before relying on it):"
   head -40 "$H"
 fi
-echo 'Repo map, top level (layer 0). Stop here if it answers the task. Details: .claude/tools/tree.sh <dir>; questions: .claude/tools/graph.sh query "<keywords>", then Serena for symbols (code-nav skill).'
+echo 'Default navigation, before any Read, Grep or cat/sed/grep of code: map below, then .claude/tools/graph.sh query|explain|affected for files and dependencies, then Serena for symbols (load it first: ToolSearch "select:mcp__serena__initial_instructions,mcp__serena__serena_repl", call initial_instructions once, then serena_repl). Use Read/Grep only for what those tools named (code-nav skill).'
+echo 'Repo map, top level (layer 0). Details: .claude/tools/tree.sh <dir>.'
 cat "$T/map" 2>/dev/null
 # Install Graphify if needed and bring the graph up to date in the background, so the first graph.sh query of the
 # session doesn't wait for either.
