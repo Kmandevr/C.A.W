@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: d8e362a
+Commit: 09805eb
 Branch: claude/caw-engine-foundation-skpirb (reset to Main after #75; F4.3 next)
 
 ## Goal
@@ -11,6 +11,7 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28) F4 → F5 → F6 �
 
 ## Open
 - F4.3 chosen design (2026-11-03): Engine owns ONE GraphExecutor prepared at construction: kSlots slot nodes + master node, each with a summing stereo input whose source capacity is reserved for every slot. New executor API: control-thread reserve of dynamic summing capacity; realtime `setRouting(edges, order)` that validates (each node once, sources before destinations, channel counts) using preallocated scratch and rebuilds sum source lists without allocation. Engine re-derives edges (child → parentSlot bus, else → master) and order (legacy pass order: processOrder_ then remaining slots by index; a bus waits until its children ran; master last) on the audio thread when routing changed, then calls graph process per chunk. Slot node = processSlot or bus gain/pan into a float output; master node = existing master stage. Exports stay the double side channel. Must keep golden.txt and mix_golden_test.cpp hashes; add test for issue #76 (child removed from folder fades out: no step above normal fade).
+- F10 (owner, 2026-11-03): seeded randomness everywhere; per-module seeds follow the project unless pinned; seeding switchable off per module/project; native plugins need a seed (SDK ABI change, ask owner). In docs/decisions.md and the roadmap.
 - F4.4 later: split each slot's chain into source and effect nodes.
 
 ## Next
