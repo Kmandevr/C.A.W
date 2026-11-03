@@ -367,7 +367,7 @@ TEST(notes_carry_their_own_bend_vibrato_press_and_timbre) {
         CHECK_EQ(r.pattern->notes[0].extra, 0);
         CHECK_EQ(r.pattern->notes[1].extra, -1);
         const NoteExpression& ex = r.pattern->expressions[0];
-        CHECK_EQ(ex.bend.count, 3);
+        CHECK_EQ(ex.bend.points.size(), size_t{3});
         CHECK_NEAR(ex.bend.at(0.0), 0.0, 1e-9);
         CHECK_NEAR(ex.bend.at(0.5), 12.0, 1e-6);
         CHECK(ex.bend.at(0.25) < 6.0);  // bend 0.5 eases in
@@ -403,4 +403,41 @@ TEST(notes_carry_their_own_bend_vibrato_press_and_timbre) {
     // A note without expression is unchanged, and press reads 1, timbre 0.
     std::vector<double> plain = play("gate * (press - timbre) * 0.5", "0 C3 4\n", 1000);
     CHECK_NEAR(plain[500], 0.5, 1e-6);
+}
+
+TEST(pattern_parser_accepts_more_than_4096_notes) {
+    std::string source = "---\nkind: pattern\n---\n";
+    for (int i = 0; i < 4097; ++i)
+        source += std::to_string(i % 16) + " C4 1\n";
+    const PatternResult parsed = parsePattern(source);
+    CHECK(parsed.pattern != nullptr);
+    if (!parsed.pattern) return;
+    CHECK_EQ(parsed.pattern->notes.size(), size_t{4097});
+    CHECK_EQ(parsed.pattern->events.size(), size_t{8194});
+}
+
+TEST(pattern_lengths_can_exceed_4096_steps) {
+    const PatternResult parsed = parsePattern(
+        "---\nkind: pattern\nlength: 5000\n---\n4500 C4 1\n");
+    CHECK(parsed.pattern != nullptr);
+    if (!parsed.pattern) return;
+    CHECK_EQ(parsed.pattern->steps(4), 5000);
+    CHECK_EQ(parsed.pattern->notes.size(), size_t{1});
+    CHECK_NEAR(parsed.pattern->notes[0].at, 4500.0, 1e-9);
+}
+
+TEST(pattern_curves_can_exceed_16_points) {
+    std::string source = "---\nkind: pattern\n---\n0 C4 1 bend";
+    for (int i = 0; i < 20; ++i) {
+        const double t = static_cast<double>(i) / 19.0;
+        const double value = static_cast<double>(i) / 19.0;
+        source += " " + std::to_string(t) + ":" + std::to_string(value);
+    }
+    source += "\n";
+    const PatternResult parsed = parsePattern(source);
+    CHECK(parsed.pattern != nullptr);
+    if (!parsed.pattern) return;
+    CHECK_EQ(parsed.pattern->expressions.size(), size_t{1});
+    CHECK_EQ(parsed.pattern->expressions[0].bend.points.size(), size_t{20});
+    CHECK_NEAR(parsed.pattern->expressions[0].bend.at(1.0), 1.0, 1e-6);
 }

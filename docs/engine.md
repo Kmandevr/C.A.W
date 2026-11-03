@@ -27,7 +27,7 @@ Build and test (Linux or macOS, CMake 3.22+ and a C++20 compiler):
 
 ```
 cmake -S engine -B engine/build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build engine/build && engine/build/caw_tests
+cmake --build engine/build && ctest --test-dir engine/build --output-on-failure
 ```
 
 ## Module files (`.caw`)
@@ -147,7 +147,7 @@ length: 16          # in 16ths, or `length: 2 bars`; without it, the whole bars 
   - A tempo change releases held notes. At most 16 note changes split one 64-sample block; further ones in that block start together (at most 1.3 ms early).
   - Notes that start at or after the pattern's length never play, and the project result warns about them.
   - An `export let` in a voiced generator shares the newest voice's value.
-- **Limits:** 4096 notes, 4096 steps, ratchets up to 8. Errors give a line and column. Kit rows (`[kick]` lines) are reserved for kit patterns and are an error for now.
+- **Limits:** note collections grow dynamically; there is no fixed 4096-note parser cap. Pattern step indices use the signed 32-bit representation boundary rather than a fixed 4096-step product cap; note-expression curves are dynamically sized. Ratchets remain limited to 8. Errors give a line and column. Kit rows (`[kick]` lines) are reserved for kit patterns and are an error for now.
 
 ### MIDI files
 
@@ -217,18 +217,18 @@ The language has no I/O, loops or recursion, so a program's cost is fixed when i
 - 64 KB of source
 - nesting 128 deep
 - 1024 values (registers)
-- 32 params and globals
-- 16 exports and 32 imports
+- dynamically sized params and globals (subject to source/register representation limits)
+- dynamically sized exports/imports, bounded by the Engine's hardware-derived graph-working memory share
 - functions nested 32 calls deep, and 4096 function calls expanded in all (each call is copied in place, so nested calls multiply)
 - 1,048,576 numbers (8 MB) of state for oscillators, envelopes, filters, delays and reverbs
-- across the whole project, 64 MB of such state (each module also keeps a copy for seams). A layer that would pass it stays silent, with a warning
+- across the whole project, a project-state share of the EngineResourceBudget, derived from the platform's conservative available-memory probe. Unknown memory uses an explicit 64 MiB project-state fallback. Over-budget layers are not installed and the project update returns an error.
 
 Errors give a line and column, counting the header lines, for example `line 5, col 5: unknown name 'nope'`.
 
 ## Playback
 
 - **Project:** BPM, beats per bar, loop length in bars, seed and master volume. The project loop is `round(steps × 60 × sr / (bpm × 4))` samples, and every layer restarts when it wraps.
-- **Layers:** up to 64. Each layer is a generator followed by up to 8 effects. A layer loops at its own length in 16ths, or its pattern's length; 0 means it follows the project loop. Each loop start falls at `round(k × length)`, so a 3-bar layer against a 4-bar loop stays in time.
+- **Layers:** up to 64. Each layer is a generator followed by a dynamically sized effect chain; chain length is constrained by explicit host resource budgets, not a fixed product limit. A layer loops at its own length in 16ths, or its pattern's length; 0 means it follows the project loop. Each loop start falls at `round(k × length)`, so a 3-bar layer against a 4-bar loop stays in time.
 - **Pattern layers:** notes start and end on the exact sample (`round(at × samples per 16th)`). At a pattern restart, held notes are released, but voices and effects carry on, so tails ring across it and there's no seam crossfade. Editing a pattern swaps it in at the next block without rebuilding the sound. A note that is already sounding finishes where the old pattern ended it, and the edit is heard from the note's next start. Editing the generator's code keeps held notes playing in the new code (see Hot swap).
 - **Seams:** when a layer restarts, the end of its previous pass crossfades into the new one over 3 ms. This can be turned off per project with `seam_crossfade`.
 - **Hot swap:** changed code replaces the old program with a 20 ms crossfade, without stopping. Code that fails to compile reports an error and leaves the old program playing.
@@ -272,7 +272,7 @@ The app, the CLI and exports share one format:
   "audition": { "chain": ["m1"], "pattern": "p1", "length_steps": 0 }, "audition_only": false }
 ```
 
-- Optional project-level `automation` lanes target module parameters or named project globals. A parameter lane uses `target_type: "param"`, its stable `module` ID and parameter `target`; a global lane uses `target_type: "global"` and the global `target` name. Each lane has song-time `points` with `step` and `value`. Points are linearly interpolated; the lane holds its first/last value outside its point range. The project loop extends far enough to include the latest arrangement or automation point, then repeats. Parameter values are clamped to the declared parameter range. A global lane reaches every module declaring that global name. The field is optional, so older project files remain valid. Limits: 256 project lanes and 128 points per lane.
+- Optional project-level `automation` lanes target module parameters or named project globals. A parameter lane uses `target_type: "param"`, its stable `module` ID and parameter `target`; a global lane uses `target_type: "global"` and the global `target` name. Each lane has song-time `points` with `step` and `value`. Points are linearly interpolated; the lane holds its first/last value outside its point range. The project loop extends far enough to include the latest arrangement or automation point, then repeats. Parameter values are clamped to the declared parameter range. A global lane reaches every module declaring that global name. The field is optional, so older project files remain valid. Project-level lane and point collections are dynamically sized; they are constrained by the overall project memory budget rather than fixed lane/point counts.
 - A module's `name` is what `module.export` uses; without it, the header's `name:` is used.
 - `key_root` is 0–11 from C and `key_scale` is a `scale.*` index (0 major, 1 minor); they default to A minor.
 - A legacy layer's \`pattern\` names one pattern module; its notes play the generator, and its length replaces \`length_steps\`.
@@ -342,7 +342,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 87 tests:
+`engine/build/caw_tests` runs 230 tests and `engine/build/caw_rt_tests` 22 more (CTest runs both):
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
@@ -350,6 +350,8 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 - **Patterns:** the note format and its errors, sample-exact note starts and ends, chords and voice stealing without clicks, the note variables, ratchets, slides, repeatable probability, pattern length, byte-mode pitch, the engine's release fade, notes released by seed and tempo changes, packed patterns, late-note warnings, pattern edits letting sounding notes finish, code edits keeping held notes, the default note without a pattern, and exports checking patterns.
 - **Mixer:** block-size independence, layer lengths, seams, hot swap (calls keeping their state, swaps waiting for the bar), broken code, mute, solo and pan, overload, stop and removal, effects, params and the limiter.
 - **Exports:** loop lengths, export equal to playback, free-length renders and cancel, one-shots, wavetables, broken modules and WAV bytes.
+- **Modules and graph:** descriptor validation (layouts, the 64-channel port ceiling), the processor contract and its stereo adapter, graph compile errors and budgets, and the planar N-channel executor: distinct generated signals per channel for mono, stereo, quad, 5.1, 7.1 and Discrete(3), channel isolation, fan-in summing order (summing inputs), host channel-count mismatches, processor failure reporting, re-prepare/reset, runtime publication, and no allocation or free in `process()`. These real-time tests are in `caw_rt_tests`, whose `engine/tests/alloc_counter.cpp` replaces the global `operator new`/`delete` to count calls; keeping it out of `caw_tests` keeps AddressSanitizer's new/delete mismatch checks there.
+- **Native SDK:** the C header compiles as C, and SDK channel layouts map to engine layouts only through `engine/src/sdk_layout.h` (SDK Discrete has no channel count in ABI v1, so it is rejected).
 - **Golden renders:** one hash per template in `engine/tests/golden.txt`. A hash changes only with an intended sound change; then run `caw_tests --update-golden` and say why in the commit.
 
 The suite passes under GCC 13, Clang 18, and GCC with AddressSanitizer and UBSan (`-DCAW_SANITIZE=ON`). GCC and Clang give identical golden hashes.

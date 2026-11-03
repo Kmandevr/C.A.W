@@ -14,12 +14,14 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 
 ## Notes
 
+- [Native engine recovery](engine-recovery.md): short resume protocol, current checkpoint and critical architecture facts for interrupted sessions.
+- [Native engine progress](engine-progress.md): milestone ledger with actual implementation status, evidence, commits, CI, blockers and exact next actions.
 - [Task 1 UI implementation handoff](task-1-ui-handoff.md): concise current UI implementation pointer and verified workflow gaps; no stale branch/CI snapshot.
 - [Roadmap](roadmap.md): the permanent, canonical product roadmap, including ordered stages, current implementation snapshot, future production capabilities, performance gates and scope boundaries.
 - [Master development design](CAW_MASTER_DEVELOPMENT_PLAN.md): approved UI and engine design specification; it is not a separate roadmap or a current implementation report.
 - [Vision](vision.md): owner-approved product direction, actual platform support, current scope boundaries and open decisions.
 - [Architecture](architecture.md): verified technical architecture plus explicitly labelled future design proposals
-- [Modular adaptive engine](engine-next.md): owner direction for the next native engine, modular creation, UI extensions, adaptive hardware use and implementation order
+- [Native engine refactor plan](engine-next.md): owner-approved refactor strategy, DSP/precomputation, hardware acceleration, permissive dependency candidates, migration phases and verification gates.
 - [Engine integration contract](engine-integration.md): how projects, add-ons, the app, library and CLI share native capabilities and assets
 - [How it works](how-it-works.md): the path from a .caw file to sound and to a WAV, the file that owns each step, and where to change what; start here in a new session
 - [Engine and language reference](engine.md): the built engine: module language, playback, project file, exports, C API, CLI, tests

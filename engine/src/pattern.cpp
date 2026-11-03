@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <stdexcept>
 
@@ -89,9 +90,9 @@ std::vector<double> pitches(const Word& w, int line) {
     return out;
 }
 
-// A curve's points: `t:v` or `t:v~k`, as many as follow (2..16), times rising from 0 to 1.
+// A curve's points: `t:v` or `t:v~k`, as many as fit the source/resource budget, times rising from 0 to 1.
 size_t curvePoints(const std::vector<Word>& w, size_t k, int line, const Word& key, double lo, double hi, NoteCurve& c) {
-    c.count = 0;
+    c.points.clear();
     double last = -1;
     while (k < w.size()) {
         const std::string& s = w[k].text;
@@ -110,16 +111,11 @@ size_t curvePoints(const std::vector<Word>& w, size_t k, int line, const Word& k
             throw PatternError(line, w[k].col, msg);
         }
         if (b < -1 || b > 1) throw PatternError(line, w[k].col, "a bend (after ~) must be -1 to 1");
-        if (c.count >= kMaxCurvePoints) throw PatternError(line, w[k].col, "a curve has at most 16 points");
-        c.t[c.count] = static_cast<float>(t);
-        c.v[c.count] = static_cast<float>(v);
-        c.k[c.count] = static_cast<float>(b);
-        c.e[c.count] = detPow(4.0, c.k[c.count]);
-        ++c.count;
+        c.points.push_back({static_cast<float>(t), static_cast<float>(v), static_cast<float>(b), detPow(4.0, b)});
         last = t;
         ++k;
     }
-    if (c.count == 0) throw PatternError(line, key.col, "'" + key.text + "' needs points such as 0:0 0.5:2 1:0");
+    if (c.points.empty()) throw PatternError(line, key.col, "'" + key.text + "' needs points such as 0:0 0.5:2 1:0");
     return k;
 }
 
@@ -133,25 +129,32 @@ uint64_t mix64(uint64_t x) {
 }  // namespace
 
 double NoteCurve::at(double u) const {
-    if (count == 0) return 0;
-    if (u <= t[0]) return v[0];
-    for (int i = 0; i + 1 < count; ++i) {
-        if (u <= t[i + 1]) {
-            const double span = static_cast<double>(t[i + 1]) - t[i];
-            double x = span > 0 ? (u - t[i]) / span : 1.0;
-            if (k[i] != 0) x = detPow(x, e[i]);
-            return v[i] + (static_cast<double>(v[i + 1]) - v[i]) * x;
+    if (points.empty()) return 0;
+    if (u <= points.front().t) return points.front().v;
+    for (size_t i = 0; i + 1 < points.size(); ++i) {
+        const CurvePoint& a = points[i];
+        const CurvePoint& b = points[i + 1];
+        if (u <= b.t) {
+            const double span = static_cast<double>(b.t) - a.t;
+            double x = span > 0 ? (u - a.t) / span : 1.0;
+            if (a.k != 0) x = detPow(x, a.exponent);
+            return a.v + (static_cast<double>(b.v) - a.v) * x;
         }
     }
-    return v[count - 1];
+    return points.back().v;
 }
 
 int Pattern::steps(int beatsPerBar) const {
-    const int bar = std::max(1, beatsPerBar) * 4;
-    int s = lengthSteps;
-    if (lengthBars > 0) s = lengthBars * bar;
-    if (s <= 0) s = std::max(1, static_cast<int>(std::ceil(lastEnd / bar - 1e-9))) * bar;
-    return std::min(s, kMaxPatternSteps);
+    const int bar = std::clamp(beatsPerBar, 1, 16) * 4;
+    int64_t steps = lengthSteps;
+    if (lengthBars > 0) steps = static_cast<int64_t>(lengthBars) * bar;
+    if (steps <= 0) {
+        const double bars = std::ceil(lastEnd / static_cast<double>(bar) - 1e-9);
+        if (!std::isfinite(bars) || bars >= static_cast<double>(std::numeric_limits<int>::max()) / bar)
+            return std::numeric_limits<int>::max();
+        steps = static_cast<int64_t>(std::max(1.0, bars)) * bar;
+    }
+    return static_cast<int>(std::clamp<int64_t>(steps, 1, std::numeric_limits<int>::max()));
 }
 
 bool notePlays(const PatternNote& n, uint32_t index, int64_t repeat, uint32_t seed) {
@@ -201,7 +204,7 @@ PatternResult parsePattern(std::string_view src) {
                     const bool bars = w.size() == 2 && (w[1].text == "bars" || w[1].text == "bar");
                     if (w.empty() || w.size() > 2 || (w.size() == 2 && !bars))
                         throw PatternError(lineNo, col, "length is a number of steps (16) or bars (4 bars)");
-                    const double n = needNumber(w[0], lineNo, "length", 1, bars ? 256 : kMaxPatternSteps);
+                    const double n = needNumber(w[0], lineNo, "length", 1, bars ? std::numeric_limits<int>::max() / 64 : std::numeric_limits<int>::max());
                     if (n != std::floor(n)) throw PatternError(lineNo, col, "length must be a whole number");
                     (bars ? p->lengthBars : p->lengthSteps) = static_cast<int>(n);
                 }
@@ -223,9 +226,9 @@ PatternResult parsePattern(std::string_view src) {
             if (w.size() < 3) throw PatternError(lineNo, w[0].col, "a note line is: at  note  length  [velocity]  [extras]");
             PatternNote n;
             n.line = lineNo;
-            n.at = needNumber(w[0], lineNo, "the start (in steps)", 0, kMaxPatternSteps);
+            n.at = needNumber(w[0], lineNo, "the start (in steps)", 0, std::numeric_limits<int>::max());
             const std::vector<double> chord = pitches(w[1], lineNo);
-            n.len = needNumber(w[2], lineNo, "the length (in steps)", 1e-3, kMaxPatternSteps);
+            n.len = needNumber(w[2], lineNo, "the length (in steps)", 1e-3, std::numeric_limits<int>::max());
             size_t k = 3;
             double v = 0;
             if (k < w.size() && number(w[k].text, v)) n.vel = needNumber(w[k++], lineNo, "velocity", 0, 1);
@@ -263,15 +266,13 @@ PatternResult parsePattern(std::string_view src) {
             }
             if (expressive) {
                 double most = 0;
-                for (int q = 0; q < ex.bend.count; ++q) most = std::max(most, std::fabs(static_cast<double>(ex.bend.v[q])));
+                for (const CurvePoint& point : ex.bend.points) most = std::max(most, std::fabs(static_cast<double>(point.v)));
                 if (most + ex.vibDepth > kMaxBend)
                     throw PatternError(lineNo, w[0].col, "a note's bend plus its vibrato depth can be at most 48 semitones");
                 n.extra = static_cast<int>(p->expressions.size());
                 p->expressions.push_back(ex);
             }
             for (double pitch : chord) {
-                if (static_cast<int>(p->notes.size()) >= kMaxPatternNotes)
-                    throw PatternError(lineNo, w[0].col, "a pattern holds at most 4096 notes");
                 n.pitch = pitch;
                 p->notes.push_back(n);
             }

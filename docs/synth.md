@@ -2,7 +2,7 @@
 title: Synth
 summary: Implemented synth patch compiler, supported patch features, app behavior and verified gaps.
 covers: [engine/src/synth.cpp, engine/tests/synth_test.cpp, app/lib/ui/builder_screen.dart, app/lib/ui/modulation_panel.dart]
-updated: 2026-11-01
+updated: 2026-11-02
 ---
 
 # Synth
@@ -29,7 +29,7 @@ A synth patch is a code-editable module. In the current app, it is handled throu
 | LFOs | Four tempo-synced LFOs: sine, triangle, saw, square, stepped random or a four-point curve |
 | Macros | Four named macro controls |
 | Modulation | Sources: envelopes 2/3, LFOs 1–4, macros 1–4 and velocity. Destinations: oscillator position/level/pitch, filter cutoff/resonance and master volume |
-| Effects | Drive, bit-crush, delay, reverb and compressor; project effect modules can also be referenced in the patch effect chain |
+| Effects | Drive, bit-crush, delay, reverb and compressor; project effect modules can also be referenced in a dynamically sized patch effect chain |
 | Validation | Patch values are range-checked; errors identify the source line/column; caw check --code prints generated code |
 
 The synth modulation matrix is editable through the Builder's Modulation links panel. The general module/global modulation editor also supports expression-based modulation through the existing modulation path.

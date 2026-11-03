@@ -483,7 +483,6 @@ private:
         Val v = expression(0);
         names_[name] = v;
         if (exported) {
-            if (p_.exports.size() >= static_cast<size_t>(kMaxExports)) fail(at, "too many exports");
             ExportDef e;
             e.name = name;
             e.doc = docFor(at.line);
@@ -614,7 +613,6 @@ private:
             }
         }
         if (d.def < d.min || d.def > d.max) fail(at, "param default is outside its range");
-        if (p_.params.size() >= static_cast<size_t>(kMaxParams)) fail(at, "too many params");
         Op op{};
         op.code = OpCode::Param;
         op.index = static_cast<uint32_t>(p_.params.size());
@@ -994,7 +992,6 @@ private:
     Val importVal(const Token& tok) {
         auto it = importRegs_.find(tok.text);
         if (it == importRegs_.end()) {
-            if (p_.imports.size() >= static_cast<size_t>(kMaxImports)) fail(tok, "too many shared values read");
             Op op{};
             op.code = OpCode::Import;
             op.index = static_cast<uint32_t>(p_.imports.size());
@@ -1299,11 +1296,6 @@ CompileResult compileModule(std::string_view source, const std::vector<LibrarySo
                     return r;
                 }
                 for (ParamDef d : fx.program->params) {
-                    if (out->params.size() >= static_cast<size_t>(kMaxSynthParams)) {
-                        r.line = r.col = 1;
-                        r.error = "line 1, col 1: this patch has more than 64 values to set; remove an effect or a part";
-                        return r;
-                    }
                     d.header = "Effects";
                     out->params.push_back(std::move(d));
                 }

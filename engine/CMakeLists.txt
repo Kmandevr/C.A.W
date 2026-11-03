@@ -82,7 +82,7 @@ ${_lsrcs}nullptr};
 
 add_library(caw_core STATIC
   src/builtins.cpp src/compile.cpp src/detmath.cpp src/docs.cpp src/pattern.cpp
-  src/engine.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/engine.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/graph.cpp src/scheduler.cpp src/sdk_layout.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
   "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
 target_include_directories(caw_core PUBLIC include src)
@@ -134,6 +134,13 @@ if(CAW_TOOLS)
   endforeach()
   set_tests_properties(caw_tests_shard_0 caw_tests_shard_1 caw_tests_shard_2 caw_tests_shard_3
     PROPERTIES PROCESSORS 1)
+  # Real-time contract tests in their own binary: it replaces global operator new/delete to count
+  # allocations, which would turn off AddressSanitizer's new/delete mismatch checks in caw_tests.
+  add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/alloc_counter.cpp)
+  target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
+  target_compile_definitions(caw_rt_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
+  target_link_libraries(caw_rt_tests PRIVATE caw_core)
+  add_test(NAME caw_rt_tests COMMAND caw_rt_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
 add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)

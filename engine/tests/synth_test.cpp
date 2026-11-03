@@ -339,17 +339,19 @@ TEST(setting_a_synth_param_reaches_its_voice_and_its_effects) {
     CHECK(rms(before) > 0.0);
 }
 
-TEST(a_patch_cannot_grow_the_chain_or_params_past_the_limits) {
-    // At most 8 fx lines: more is an error at its line, so a patch can't make the engine build thousands of modules.
+TEST(a_patch_can_grow_its_effect_chain_without_truncation) {
+    // Effect-chain length is dynamic; resource limits belong to the host's explicit budget, not a product cap.
     std::string many = kPatch + "osc a\n";
-    for (int i = 0; i < 9; ++i) many += (i % 2 ? "fx drive\n" : "fx zz\n");
-    CHECK(translateSynth(many).error.find("line 15, col 1: a patch can have at most 8 fx lines") == 0);
-    // A full patch with 8 effects stays under the 64-value limit and compiles.
+    for (int i = 0; i < 9; ++i) many += "fx delay\n";
+    const SynthResult translated = translateSynth(many);
+    if (!translated.ok) cawtest::fail(__FILE__, __LINE__, "nine-effect patch translation failed: " + translated.error);
+    if (translated.ok) CHECK_EQ(translated.fx.size(), size_t{9});
+    // A full patch with several effects compiles with its complete generated parameter list.
     std::string full = kPatch + "osc a\nosc b\nosc c\nsub\nnoise\nfilter 1 lowpass\nfilter 2 highpass\n";
     for (int i = 0; i < 8; ++i) full += "fx delay\n";
     CompileResult r = compileModule(full);
     if (!r.program) cawtest::fail(__FILE__, __LINE__, "full synth patch does not compile: " + r.error);
-    if (r.program) CHECK(r.program->params.size() <= static_cast<size_t>(kMaxSynthParams));
+    if (r.program) CHECK(r.program->params.size() > 0);
     // Ids with control characters never reach the engine (it names hidden modules with them).
     ProjectSpec p;
     std::string err;
@@ -408,4 +410,24 @@ TEST(synth_oscillator_phase_warp_is_exposed_and_changes_the_waveform) {
     for (size_t i = 0; i < dry.size(); ++i)
         difference = std::max(difference, std::fabs(dry[i] - shaped[i]));
     CHECK(difference > 1e-4);
+}
+
+TEST(synth_patch_can_expose_more_than_64_parameters) {
+    std::string many = kPatch + "osc a\n";
+    for (int i = 0; i < 30; ++i) many += "fx delay\n";
+    const SynthResult translated = translateSynth(many);
+    CHECK(translated.ok);
+    if (translated.ok) {
+        auto countParams = [](const std::string& code) {
+            size_t count = 0, pos = 0;
+            while ((pos = code.find("param ", pos)) != std::string::npos) {
+                ++count;
+                pos += 6;
+            }
+            return count;
+        };
+        size_t count = countParams(translated.generator);
+        for (const SynthFx& fx : translated.fx) count += countParams(fx.source);
+        CHECK(count > 64);
+    }
 }

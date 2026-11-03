@@ -14,6 +14,21 @@ uint16_t boundedWorkers(uint16_t wanted, const HardwareProfile& hw) noexcept {
 
 }  // namespace
 
+EngineResourceBudget makeEngineResourceBudget(const HardwareProfile& hardware) noexcept {
+    constexpr uint64_t kMiB = 1024ull * 1024ull;
+    constexpr uint64_t kUnknownFallbackBytes = 128ull * kMiB;
+    const bool unknown = hardware.memoryBudgetMiB == 0;
+    const uint64_t total = unknown ? kUnknownFallbackBytes : static_cast<uint64_t>(hardware.memoryBudgetMiB) * kMiB;
+    EngineResourceBudget budget;
+    budget.totalBytes = total;
+    budget.projectStateBytes = total / 2;
+    budget.graphWorkingBytes = total / 4;
+    budget.compileWorkingBytes = total / 8;
+    budget.retirementBytes = total - budget.projectStateBytes - budget.graphWorkingBytes - budget.compileWorkingBytes;
+    budget.usedUnknownMemoryFallback = unknown;
+    return budget;
+}
+
 ExecutionPlan makeExecutionPlan(const HardwareProfile& hardware, const ExecutionRequest& request) noexcept {
     const uint16_t cores = std::max<uint16_t>(1, hardware.logicalCores);
     ExecutionPlan plan;

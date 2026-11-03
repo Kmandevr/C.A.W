@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -339,16 +340,16 @@ std::string writePattern(Collected& c, const MidiImportOptions& o) {
             }
         }
     }
-    const int64_t limit = static_cast<int64_t>(kMaxPatternSteps) * c.ppq / 4;
+    const int64_t limit = static_cast<int64_t>(std::numeric_limits<int>::max()) * c.ppq / 4;
     int64_t lastEnd = 0;
     for (const RawNote& n : v) lastEnd = std::max(lastEnd, n.off);
-    if (lastEnd > limit) throw Fail{"the notes last longer than " + std::to_string(kMaxPatternSteps) + " steps, the most a pattern holds"};
+    if (lastEnd > limit) throw Fail{"the MIDI notes exceed the pattern step-index representation"};
 
     // Length: whole bars of the file's first time signature (4/4 without one), rounded up to a whole step.
     const double barSteps = c.tsNum * 16.0 / static_cast<double>(1 << c.tsDenPow);
     const double endSteps = static_cast<double>(lastEnd) * 4.0 / static_cast<double>(c.ppq);
     const double bars = std::max(1.0, std::ceil(endSteps / barSteps - 1e-9));
-    const int length = static_cast<int>(std::min<double>(kMaxPatternSteps, std::ceil(bars * barSteps - 1e-9)));
+    const int length = static_cast<int>(std::clamp(std::ceil(bars * barSteps - 1e-9), 1.0, static_cast<double>(std::numeric_limits<int>::max())));
 
     std::string name = o.name.empty() ? c.name : cleanName(o.name);
     if (name.empty()) name = "Imported MIDI";
@@ -490,7 +491,7 @@ std::string patternFromMidi(const uint8_t* data, size_t size, const MidiImportOp
         if (!data || size == 0) throw Fail{"the file is empty"};
         if (size > kMaxMidiFileBytes) throw Fail{"the file is bigger than 16 MB"};
         MidiImportOptions o = options;
-        o.maxNotes = std::clamp(o.maxNotes, 1, kMaxPatternNotes);
+        o.maxNotes = std::max(1, o.maxNotes);
         if (o.channel > 15) throw Fail{"MIDI channels are 0 to 15"};
         Collected c;
         if (size >= 8 && std::memcmp(data, "SMF2CLIP", 8) == 0)
@@ -518,7 +519,7 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
         if (sg.extra >= 0 && static_cast<size_t>(sg.extra) < p.expressions.size()) {
             const NoteExpression& x = p.expressions[static_cast<size_t>(sg.extra)];
             double most = 0;
-            for (int i = 0; i < x.bend.count; ++i) most = std::max(most, std::fabs(static_cast<double>(x.bend.v[i])));
+            for (const CurvePoint& point : x.bend.points) most = std::max(most, std::fabs(static_cast<double>(point.v)));
             w += most + x.vibDepth;
         }
         widest = std::max(widest, w);
@@ -560,7 +561,7 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
             const double u = std::clamp(into / static_cast<double>(s.sounding), 0.0, 1.0);
             double b = s.pitch - key;
             if (x) {
-                if (x->bend.count) b += x->bend.at(u);
+                if (!x->bend.points.empty()) b += x->bend.at(u);
                 if (x->vibDepth > 0) {
                     const double fade = x->vibDelay > 0 ? std::min(1.0, u / x->vibDelay) : 1.0;
                     b += x->vibDepth * fade * detSin(kTwoPi * x->vibRate * into / ticksPerSecond);
@@ -572,8 +573,8 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
         const uint8_t pb = static_cast<uint8_t>(0xE0 | ch), cp = static_cast<uint8_t>(0xD0 | ch), cc = static_cast<uint8_t>(0xB0 | ch);
         // Before the note on: where its expression starts (MPE sends these first so the attack is already right).
         int lastPb = bendAt(s.on);
-        uint8_t lastPress = to7(x && x->press.count ? x->press.at(0) : 1.0);
-        uint8_t lastTimbre = to7(x && x->timbre.count ? x->timbre.at(0) : 0.0);
+        uint8_t lastPress = to7(x && !x->press.points.empty() ? x->press.at(0) : 1.0);
+        uint8_t lastTimbre = to7(x && !x->timbre.points.empty() ? x->timbre.at(0) : 0.0);
         ev.push_back({s.on, 2, {pb, static_cast<uint8_t>(lastPb & 0x7F), static_cast<uint8_t>(lastPb >> 7)}, 3});
         ev.push_back({s.on, 2, {cc, 74, lastTimbre}, 3});
         ev.push_back({s.on, 2, {cp, lastPress, 0}, 2});
@@ -585,12 +586,12 @@ std::vector<MidiEvent> mpeEvents(const Pattern& p, const std::vector<Segment>& s
                 const int b = bendAt(t);
                 if (b != lastPb) ev.push_back({t, 2, {pb, static_cast<uint8_t>(b & 0x7F), static_cast<uint8_t>(b >> 7)}, 3});
                 lastPb = b;
-                if (x->press.count) {
+                if (!x->press.points.empty()) {
                     const uint8_t v = to7(x->press.at(u));
                     if (v != lastPress) ev.push_back({t, 2, {cp, v, 0}, 2});
                     lastPress = v;
                 }
-                if (x->timbre.count) {
+                if (!x->timbre.points.empty()) {
                     const uint8_t v = to7(x->timbre.at(u));
                     if (v != lastTimbre) ev.push_back({t, 2, {cc, 74, v}, 3});
                     lastTimbre = v;

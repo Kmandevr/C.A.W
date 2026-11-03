@@ -22,7 +22,7 @@ std::vector<std::string> idList(const Json* arr) {
     std::vector<std::string> out;
     if (!arr || arr->type != Json::Type::Array) return out;
     for (const Json& j : arr->arr)
-        if (j.type == Json::Type::String && out.size() < static_cast<size_t>(kMaxChain)) out.push_back(j.str);
+        if (j.type == Json::Type::String) out.push_back(j.str);
     return out;
 }
 
@@ -35,6 +35,14 @@ const ModuleSpec* ProjectSpec::module(const std::string& id) const {
 }
 
 bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
+    // A failed parse must never leave a caller's previous project looking valid.
+    out = ProjectSpec{};
+    error.clear();
+    constexpr size_t kMaxProjectJsonBytes = 8u << 20;  // Bound hostile JSON parsing by input memory, not object counts.
+    if (text.size() > kMaxProjectJsonBytes) {
+        error = "project JSON exceeds the 8 MiB parser memory budget";
+        return false;
+    }
     Json root;
     if (!parseJson(text, root, error)) return false;
     if (root.type != Json::Type::Object) {
@@ -112,7 +120,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 for (const auto& [k, v] : ps->obj)
                     if (v.type == Json::Type::Number && std::isfinite(v.num)) spec.params[k] = v.num;
             out.modules.push_back(std::move(spec));
-            if (out.modules.size() >= 256) break;
         }
     }
     if (const Json* layers = root.get("layers"); layers && layers->type == Json::Type::Array) {
@@ -134,7 +141,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.busEnabled = l.boolean("bus", true);
             if (const Json* clips = l.get("clips"); clips && clips->type == Json::Type::Array) {
                 for (const Json& c : clips->arr) {
-                    if (c.type != Json::Type::Object || spec.clips.size() >= 512) continue;
+                    if (c.type != Json::Type::Object) continue;
                     ClipSpec clip;
                     clip.id = c.string("id");
                     clip.pattern = c.string("pattern");
@@ -152,7 +159,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     if (lane.target != "volume" && lane.target != "pan") continue;
                     if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                         for (const Json& point : points->arr) {
-                            if (point.type != Json::Type::Object || lane.points.size() >= 128) continue;
+                            if (point.type != Json::Type::Object) continue;
                             lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
                                 clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1, 1)});
                         }
@@ -169,10 +176,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         }
     }
     if (const Json* lanes = root.get("automation"); lanes && lanes->type == Json::Type::Array) {
-        if (lanes->arr.size() > 256) {
-            error = "a project holds at most 256 parameter/global automation lanes";
-            return false;
-        }
         for (const Json& laneJson : lanes->arr) {
             if (laneJson.type != Json::Type::Object) continue;
             ProjectAutomationLaneSpec lane;
@@ -183,7 +186,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 (lane.targetType == "param" && lane.moduleId.empty())) continue;
             if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                 for (const Json& point : points->arr) {
-                    if (point.type != Json::Type::Object || lane.points.size() >= 128) continue;
+                    if (point.type != Json::Type::Object) continue;
                     lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
                                            clampd(point.number("value", 0), -1000000, 1000000)});
                 }

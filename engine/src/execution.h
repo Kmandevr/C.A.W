@@ -32,6 +32,21 @@ struct HardwareProfile {
     bool supportsGpuCompute = false;
 };
 
+// Explicit engine working-set budget derived from the platform's conservative available-memory probe.
+// The host may pass an adjusted budget to Engine when it has better application-level measurements.
+struct EngineResourceBudget {
+    uint64_t totalBytes = 0;
+    uint64_t projectStateBytes = 0;
+    uint64_t graphWorkingBytes = 0;
+    uint64_t compileWorkingBytes = 0;
+    uint64_t retirementBytes = 0;
+    bool usedUnknownMemoryFallback = false;
+};
+
+// The measured memoryBudgetMiB is already conservative (the platform reserves most available RAM).
+// Unknown measurements use a documented 128 MiB total fallback to preserve existing startup behavior.
+EngineResourceBudget makeEngineResourceBudget(const HardwareProfile& hardware) noexcept;
+
 struct ExecutionRequest {
     WorkloadClass workload = WorkloadClass::InteractivePreview;
     DevicePressure pressure = DevicePressure::Unknown;

@@ -2,7 +2,7 @@
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
 covers: [engine/, app/]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Performance
@@ -16,6 +16,7 @@ The owner's requirement (2026-10-28): run as light as possible, down to low-end 
   - the time `setProject` takes
   - the compile time per template, the time to re-send an unchanged project, the speed of a loop export, and memory (RSS)
 - **Instruction counts** are the reliable before/after numbers: `valgrind --tool=callgrind ./caw_bench 2 N` runs scenario N for 2 s. Timings on a shared cloud server vary by ±30% from run to run, and instruction counts don't vary at all.
+- **Graph executor scenarios** (`caw_bench SECONDS -1`, also run at the end of a full run): 8-node chains through `GraphExecutor`, reported in nanoseconds: a stereo chain of legacy stereo-only processors through the stereo wrapper, and planar chains at 1, 2, 6 and 8 channels. On 2026-11-03 (F3, callgrind, 192-frame callbacks) the stereo-wrapper chain cost 4,640 instructions per callback on the old left/right executor (`9b2f059`) and 5,086 on the planar executor (+9.6%, about 56 per node, from the generic-to-stereo adapter). The live mixer does not run the graph yet (roadmap F4).
 - **Scenarios:**
   1. 1 bytebeat layer
   2. the starter project (4 layers)

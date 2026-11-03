@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "execution.h"
 #include "pattern.h"
 #include "program.h"
 #include "project.h"
@@ -37,11 +38,13 @@ struct LayerMeter {
 class Engine {
 public:
     explicit Engine(double sampleRate);
+    Engine(double sampleRate, EngineResourceBudget resourceBudget);
     ~Engine();
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
     double sampleRate() const { return sr_; }
+    const EngineResourceBudget& resourceBudget() const noexcept { return resourceBudget_; }
 
     // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
     std::string setProject(const ProjectSpec& p);  // result JSON: per-module ok/error and params
@@ -70,11 +73,15 @@ private:
     struct Slot;
     struct Cmd;
     struct Retired;
+    struct AutomationData;
+    struct ExportPool;
 
     void drainRetired();
-    void send(const Cmd& c);
+    bool canRetire(size_t count) const noexcept;
+    bool send(const Cmd& c);
     void applyCommands() noexcept;
-    void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr) noexcept;
+    void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
+                AutomationData* automation = nullptr) noexcept;
     void processChunk(float* l, float* r, int m) noexcept;
     void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
@@ -90,6 +97,8 @@ private:
     void pickOverloadVictim() noexcept;
 
     const double sr_;
+    const EngineResourceBudget resourceBudget_;
+    std::unique_ptr<ExportPool> exportPool_;
 
     // ---- audio-thread state ----
     std::unique_ptr<Slot[]> slots_;
@@ -161,6 +170,7 @@ private:
         bool mute = false, solo = false, bus = false;
         int parentSlot = -1;
         std::string automationSig;
+        size_t expressionCapacity = 0;
         std::string parameterAutomationSig;
     };
     std::map<std::string, ModuleState> modules_;
@@ -172,7 +182,8 @@ private:
     int64_t ctlLoopLen_ = 0;
 
     Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced,
-                      const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation);
+                      const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation,
+                      size_t expressionCapacity);
     void swapIn(Slot& s, Chain* c) noexcept;  // hot swap with a crossfade, keeping what can keep playing
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);

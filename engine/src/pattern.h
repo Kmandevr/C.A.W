@@ -9,20 +9,20 @@
 
 namespace caw {
 
-constexpr int kMaxPatternNotes = 4096;
-constexpr int kMaxPatternSteps = 4096;  // 64 bars of 16/4; whole bars are checked against the project's meter
 constexpr int kMaxRatchet = 8;
 
-constexpr int kMaxCurvePoints = 16;
 constexpr double kMaxBend = 48.0;  // semitones either way (the app draws within +-12 by default)
 
 // A curve over one note: points at times 0..1 through the note, each with a value and a bend for the segment after
-// it (0 straight, + eases in, - eases out; the shape is u^(4^bend)). Fixed size, so a voice can copy it at note start
-// on the audio thread without allocating.
+// it (0 straight, + eases in, - eases out; the shape is u^(4^bend)). Point storage is dynamic;
+// the Engine reserves voice-copy capacity before playback so note-on never allocates.
+struct CurvePoint {
+    float t = 0, v = 0, k = 0;
+    double exponent = 1;
+};
+
 struct NoteCurve {
-    int count = 0;
-    float t[kMaxCurvePoints] = {}, v[kMaxCurvePoints] = {}, k[kMaxCurvePoints] = {};
-    double e[kMaxCurvePoints] = {};  // 4^k for each segment, worked out once when the pattern is read
+    std::vector<CurvePoint> points;
     double at(double u) const;  // the value at u (0..1); holds the first and last values outside the points
 };
 

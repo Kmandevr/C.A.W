@@ -14,10 +14,39 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
     for (uint32_t i = 0; i < d.portCount; ++i) {
         const PortDescriptor& p = d.ports[i];
         if (p.id.empty()) return ModuleValidation::EmptyPortId;
-        if (p.type == PortType::Audio && p.layout == ChannelLayout::None)
+        switch (p.type) {
+            case PortType::Audio:
+            case PortType::Control:
+            case PortType::Modulation:
+            case PortType::Event:
+                break;
+            default:
+                return ModuleValidation::InvalidPortType;
+        }
+        switch (p.layout) {
+            case ChannelLayout::None:
+            case ChannelLayout::Mono:
+            case ChannelLayout::Stereo:
+            case ChannelLayout::Quad:
+            case ChannelLayout::Surround51:
+            case ChannelLayout::Surround71:
+            case ChannelLayout::Discrete: break;
+            default: return ModuleValidation::InvalidPortLayout;
+        }
+        if (p.type == PortType::Audio) {
+            if (p.layout == ChannelLayout::None ||
+                channelCountForLayout(p.layout, p.channelCount) == 0)
+                return ModuleValidation::InvalidPortLayout;
+            if (p.layout == ChannelLayout::Discrete) {
+                if (p.channelCount == 0) return ModuleValidation::InvalidPortLayout;
+            } else if (p.channelCount != 0) return ModuleValidation::InvalidPortLayout;
+            if (portChannelCount(p) > kMaxPortChannels) return ModuleValidation::TooManyChannels;
+            if (p.summing && !p.input) return ModuleValidation::InvalidSummingPort;
+        } else if (p.layout != ChannelLayout::None || p.channelCount != 0) {
             return ModuleValidation::InvalidPortLayout;
-        if (p.type != PortType::Audio && p.layout != ChannelLayout::None)
-            return ModuleValidation::InvalidPortLayout;
+        } else if (p.summing) {
+            return ModuleValidation::InvalidSummingPort;
+        }
         for (uint32_t j = 0; j < i; ++j)
             if (d.ports[j].id == p.id) return ModuleValidation::DuplicatePortId;
     }
@@ -36,6 +65,17 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
     for (uint32_t i = 0; i < d.uiControlCount; ++i) {
         const UiControlDescriptor& ui = d.uiControls[i];
         if (ui.id.empty()) return ModuleValidation::EmptyUiControlId;
+        switch (ui.kind) {
+            case UiControlKind::Slider:
+            case UiControlKind::Toggle:
+            case UiControlKind::Dropdown:
+            case UiControlKind::XYPad:
+            case UiControlKind::Button:
+            case UiControlKind::Curve:
+                break;
+            default:
+                return ModuleValidation::InvalidUiControlKind;
+        }
         if (!std::isfinite(ui.minimum) || !std::isfinite(ui.maximum) || ui.minimum > ui.maximum)
             return ModuleValidation::InvalidUiControlRange;
         for (uint32_t j = 0; j < i; ++j)
@@ -50,6 +90,39 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
         }
     }
     return ModuleValidation::Ok;
+}
+
+bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept {
+    if (validateModuleDescriptor(a) != ModuleValidation::Ok ||
+        validateModuleDescriptor(b) != ModuleValidation::Ok)
+        return false;
+    if (a.id != b.id || a.apiVersion != b.apiVersion ||
+        a.portCount != b.portCount || a.parameterCount != b.parameterCount ||
+        a.uiControlCount != b.uiControlCount || a.customUiId != b.customUiId)
+        return false;
+
+    for (uint32_t i = 0; i < a.portCount; ++i) {
+        const PortDescriptor& x = a.ports[i];
+        const PortDescriptor& y = b.ports[i];
+        if (x.id != y.id || x.type != y.type || x.layout != y.layout || x.input != y.input || x.channelCount != y.channelCount ||
+            x.summing != y.summing)
+            return false;
+    }
+    for (uint32_t i = 0; i < a.parameterCount; ++i) {
+        const ParameterDescriptor& x = a.parameters[i];
+        const ParameterDescriptor& y = b.parameters[i];
+        if (x.id != y.id || x.defaultValue != y.defaultValue || x.minimum != y.minimum ||
+            x.maximum != y.maximum || x.automatable != y.automatable)
+            return false;
+    }
+    for (uint32_t i = 0; i < a.uiControlCount; ++i) {
+        const UiControlDescriptor& x = a.uiControls[i];
+        const UiControlDescriptor& y = b.uiControls[i];
+        if (x.id != y.id || x.label != y.label || x.parameterId != y.parameterId ||
+            x.kind != y.kind || x.minimum != y.minimum || x.maximum != y.maximum)
+            return false;
+    }
+    return true;
 }
 
 }  // namespace caw

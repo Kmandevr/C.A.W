@@ -11,7 +11,7 @@ covers: [engine/include/caw_module_sdk.h, engine/src/module.*, engine/src/module
 
 ## One module system
 
-Built-in modules and add-on modules share the same stable identity, typed ports, parameter metadata, graph validation, state versioning and stereo processing model. The C ABI in `engine/include/caw_module_sdk.h` is the native boundary; it intentionally avoids a C++ ABI so modules can be built with different compilers.
+Built-in modules and add-on modules share the same stable identity, typed ports, parameter metadata, graph validation, state versioning and processing model: internally N-channel planar buffers with a stereo adapter, and summing (mix-bus) inputs since F4.1 (2026-11-03). The C ABI v1 below stays stereo with no channel count; `engine/src/sdk_layout.h` maps its layout values explicitly. The C ABI in `engine/include/caw_module_sdk.h` is the native boundary; it intentionally avoids a C++ ABI so modules can be built with different compilers.
 
 ## Entry point
 

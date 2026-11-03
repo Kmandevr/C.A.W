@@ -12,7 +12,6 @@
 namespace caw {
 
 constexpr int kMaxLayers = 64;
-constexpr int kMaxChain = 9;  // a generator plus up to 8 effects
 
 struct ModuleSpec {
     std::string id;

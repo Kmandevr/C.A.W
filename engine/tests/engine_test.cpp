@@ -644,7 +644,9 @@ TEST(master_gain_updates_without_recompiling_and_ramps_smoothly) {
     p.master = 1.0;
     Engine e(48000);
     e.setMasterBypass(true);
-    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    const std::string projectResult = e.setProject(p);
+    CHECK(projectResult.find("\"ok\":true") != std::string::npos);
+    CHECK(projectResult.find("nothing exports") == std::string::npos);
     e.play();
     run(e, 256);
 
@@ -669,4 +671,243 @@ TEST(project_parser_clamps_clips_to_the_meter_aware_song_limit) {
     CHECK_EQ(p.layers[0].clips[0].startSteps, 760);
     CHECK_EQ(p.layers[0].clips[0].lengthSteps, 8);
     CHECK_EQ(p.layers[0].clips[0].sourceOffsetSteps, 768);
+}
+
+TEST(project_parser_preserves_long_module_chains) {
+    std::string chain = "[";
+    for (int i = 0; i < 12; ++i) {
+        if (i) chain += ",";
+        chain += "\"module_" + std::to_string(i) + "\"";
+    }
+    chain += "]";
+    const std::string json = R"({"caw_project":1,"layers":[{"id":"track","chain":)" + chain + R"(}]})";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json, parsed, error));
+    CHECK_EQ(parsed.layers.size(), size_t{1});
+    CHECK_EQ(parsed.layers[0].chain.size(), size_t{12});
+    CHECK_EQ(parsed.layers[0].chain.back(), std::string("module_11"));
+}
+
+
+TEST(project_parser_preserves_large_module_and_clip_lists) {
+    std::string json = R"({"caw_project":1,"modules":[)";
+    for (int i = 0; i < 300; ++i) {
+        if (i) json += ",";
+        json += R"({"id":"module_)" + std::to_string(i) + R"(","source":"0"})";
+    }
+    json += R"(],"layers":[{"id":"track","clips":[)";
+    for (int i = 0; i < 520; ++i) {
+        if (i) json += ",";
+        json += R"({"id":"clip_)" + std::to_string(i) + R"(","pattern":"pattern","start_steps":0,"length_steps":1})";
+    }
+    json += R"(]}]})";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json, parsed, error));
+    CHECK_EQ(parsed.modules.size(), size_t{300});
+    CHECK_EQ(parsed.layers.size(), size_t{1});
+    CHECK_EQ(parsed.layers[0].clips.size(), size_t{520});
+    CHECK_EQ(parsed.layers[0].clips.back().id, std::string("clip_519"));
+}
+
+TEST(arrangement_compilation_keeps_notes_beyond_4096) {
+    ProjectSpec p;
+    p.bpm = 400;
+    p.loopBars = 64;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.voices = 32;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * 0.1", {}});
+    p.modules.push_back({"chord",
+        "---\nkind: pattern\nlength: 1\n---\n0 C3,D3,E3,F3,G3,A3,B3,C4,D4 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    for (int i = 0; i < 520; ++i)
+        layer.clips.push_back({"clip_" + std::to_string(i), "chord", i, 1, 0, false});
+    p.layers.push_back(std::move(layer));
+
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 150100);
+    CHECK(out[150000] > 0.05f); // clip 500 starts after the former 4096-note truncation point
+}
+
+TEST(project_parser_preserves_large_project_automation) {
+    std::string json = R"({"caw_project":1,"automation":[)";
+    for (int lane = 0; lane < 257; ++lane) {
+        if (lane) json += ",";
+        json += R"({"target_type":"global","target":"g)" + std::to_string(lane) + R"(","points":[)";
+        for (int point = 0; point < 129; ++point) {
+            if (point) json += ",";
+            json += R"({"step":)" + std::to_string(point) + R"(,"value":0.5})";
+        }
+        json += "]}";
+    }
+    json += "]}";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json, parsed, error));
+    CHECK_EQ(parsed.automation.size(), size_t{257});
+    CHECK_EQ(parsed.automation.back().points.size(), size_t{129});
+    CHECK_NEAR(parsed.automation.back().points.back().step, 128.0, 1e-9);
+}
+
+TEST(project_and_engine_preserve_layer_automation_beyond_128_points) {
+    std::string json = R"({"caw_project":1,"bpm":400,"loop_bars":64,"master":1,
+      "modules":[{"id":"tone","source":"---\nmode: float\n---\n1"}],
+      "layers":[{"id":"track","chain":["tone"],"volume":1,"automation":[
+        {"target":"volume","points":[)";
+    for (int point = 0; point < 129; ++point) {
+        if (point) json += ",";
+        const double value = point == 128 ? 0.1 : 1.0;
+        json += R"({"step":)" + std::to_string(point) + R"(,"value":)" + std::to_string(value) + "}";
+    }
+    json += R"(]}]}]})";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json, parsed, error));
+    CHECK_EQ(parsed.layers[0].automation[0].points.size(), size_t{129});
+
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(parsed).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 38500);
+    const float unity = static_cast<float>(std::cos(kPi / 4.0));
+    CHECK_NEAR(out[30000], unity, 1e-4); // automation point 100
+    CHECK_NEAR(out[38400], 0.1 * unity, 1e-4); // point 128 must not be truncated
+}
+
+TEST(engine_automates_parameters_beyond_32) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    std::string source = "---\nmode: float\n---\n";
+    for (int i = 0; i < 40; ++i)
+        source += "param p" + std::to_string(i) + " = 0.5 in 0..2\n";
+    source += "p39 * 0.5";
+    p.modules.push_back({"tone", source, {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "param";
+    lane.moduleId = "tone";
+    lane.target = "p39";
+    lane.points = {{0.0, 0.5}, {1.0, 1.5}};
+    p.automation.push_back(lane);
+
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 1100);
+    const float pan = static_cast<float>(std::cos(kPi / 4.0));
+    CHECK_NEAR(out[0], 0.25 * pan, 1e-4);
+    CHECK_NEAR(out[1000], 0.75 * pan, 1e-4);
+}
+
+TEST(engine_rejects_project_state_above_hardware_budget) {
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 2;
+    Engine e(8000, makeEngineResourceBudget(hardware));
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"tone", std::string(kFloat) + "1", {}});
+    const std::string delay = "---\nkind: effect\nmode: float\n---\nfx.delay(in, 0.5, 0.3, 0.5)";
+    p.modules.push_back({"delay_a", delay, {}});
+    p.modules.push_back({"delay_b", delay, {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone", "delay_a", "delay_b"};
+    p.layers.push_back(layer);
+    const std::string result = e.setProject(p);
+    CHECK(result.find("\"ok\":false") != std::string::npos);
+    CHECK(result.find("project-state budget") != std::string::npos);
+}
+
+TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
+    std::string pattern = "---\nkind: pattern\n---\n0 C4 1 bend";
+    for (int i = 0; i < 20; ++i) {
+        const double t = static_cast<double>(i) / 19.0;
+        const double value = static_cast<double>(i) / 19.0;
+        pattern += " " + std::to_string(t) + ":" + std::to_string(value);
+    }
+    pattern += "\n";
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"tone", std::string(kFloat) + "sin(2*pi*freq*t)", {}});
+    p.modules.push_back({"pattern", pattern, {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.pattern = "pattern";
+    p.layers.push_back(layer);
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 2000);
+    CHECK(std::any_of(out.begin(), out.end(), [](float sample) { return std::abs(sample) > 1e-5f; }));
+}
+
+TEST(engine_routes_more_than_16_module_exports) {
+    std::string source = "---\nmode: float\n---\n";
+    for (int i = 0; i < 20; ++i)
+        source += "export let value" + std::to_string(i) + " = " + std::to_string(i + 1) + "\n";
+    source += "0";
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"source", source, {}, "src"});
+    p.modules.push_back({"consumer", "---\nkind: effect\nmode: float\n---\nsrc.value19 / 20", {}});
+    LayerSpec sourceLayer;
+    sourceLayer.id = "source_track";
+    sourceLayer.chain = {"source"};
+    sourceLayer.volume = 1.0;
+    LayerSpec consumerLayer;
+    consumerLayer.id = "consumer_track";
+    consumerLayer.chain = {"consumer"};
+    consumerLayer.volume = 1.0;
+    p.layers = {sourceLayer, consumerLayer};
+
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 16;
+    Engine e(8000, makeEngineResourceBudget(hardware));
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 1024);
+    CHECK_NEAR(out[out.size() - 2], std::cos(kPi / 4.0), 1e-3);
+}
+
+TEST(engine_rejects_export_layout_above_memory_budget) {
+    std::string source = "---\nmode: float\n---\n";
+    for (int i = 0; i < 20; ++i)
+        source += "export let value" + std::to_string(i) + " = " + std::to_string(i + 1) + "\n";
+    source += "1";
+    ProjectSpec p;
+    p.modules.push_back({"source", source, {}, "source"});
+    LayerSpec layer;
+    layer.id = "source_track";
+    layer.chain = {"source"};
+    p.layers.push_back(layer);
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 1;
+    Engine e(8000, makeEngineResourceBudget(hardware));
+    const std::string result = e.setProject(p);
+    CHECK(result.find("\"ok\":false") != std::string::npos);
+    CHECK(result.find("hardware-derived graph working-memory budget") != std::string::npos);
 }

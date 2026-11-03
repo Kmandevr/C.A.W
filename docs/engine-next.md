@@ -1,13 +1,13 @@
 ---
 title: Modular adaptive engine blueprint
-summary: Deferred native-engine blueprint with implementation boundaries; current code status is tracked separately.
+summary: Complete native-engine architecture and implementation requirements; actual progress and recovery are tracked separately.
 updated: 2026-11-03
 covers: [engine/, app/]
 ---
 
 # Modular adaptive engine blueprint
 
-**Status: owner direction and implementation blueprint.** This combines earlier CAW decisions with the clarified 2026-10-30 direction. It describes planned work, not features already built. Current implementation remains documented in [engine](engine.md), [app](app.md) and [performance](performance.md).
+**Status: owner direction and implementation blueprint.** This combines earlier CAW decisions with the clarified 2026-10-30 direction. It describes planned work, not features already built. Actual implementation status is documented in [engine implementation status](engine-build-status.md), [milestone progress](engine-progress.md), [recovery instructions](engine-recovery.md), [engine](engine.md), [app](app.md) and [performance](performance.md).
 
 ## 1. Product boundary
 
@@ -34,7 +34,7 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 
 ## 3. Engine architecture
 
-**Owner decision (2026-11-03): one graph runs everything.** The typed module graph is the eventual core: .caw layers, synth voices, effects, folder buses, sends and master all become graph nodes, replacing the fixed layer → effects → bus → master mixer through migration. It is the roadmap's first stage (Foundation, issue #28; owner, 2026-11-03).
+**Owner decision (2026-11-03): one graph runs everything.** The typed module graph is the eventual core: .caw layers, synth voices, effects, folder buses, sends and master all become graph nodes, replacing the fixed layer → effects → bus → master mixer through migration. It is the roadmap's first stage (Foundation, issue #28; owner, 2026-11-03). Progress: the planar N-channel executor (F3) and fan-in (F4.1) are built; the graph does not run playback yet (see the [implementation ledger](engine-build-status.md)).
 
 **Owner decision (2026-10-30): one engine, modular by construction.** The engine must behave as one coherent system; modularity is not a bolt-on option or a collection of loosely connected sub-engines. Its module boundaries are the architecture itself. The app, project runtime, synth, add-ons, CLI and future plugin wrappers all use the same module identities, typed ports, parameter/state model, processing semantics and dependency rules. Hosts may omit unused capabilities from a build, but they do not get separate competing implementations or incompatible module models.
 
@@ -229,3 +229,172 @@ This blueprint describes direction and proposed architecture, not a claim that e
 This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, plain-text files external coding tools can edit, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities while keeping sound design and content creation primary and adding useful lightweight DAW capabilities where they help, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, existing starter modules under examples/, local/offline project assets, no in-app AI integration, and future plugin work only after a real native host/SDK and release checks, permissive licensing, and GitHub Actions as the build path so the owner can work from Android without a PC/IDE.
 
 See [vision](vision.md), [architecture](architecture.md), [synth](synth.md), [performance](performance.md), [decisions](decisions.md) and [roadmap](roadmap.md). Where those notes conflict with this clarified product focus and capability boundary or adaptive-engine direction, reconcile them as implementation proceeds.
+
+
+## 15. Unified parameters, modulation, automation and mathematical modules
+
+**Owner clarification:** standard audio parameter control must be a native engine capability, whether it is visible to the user or used internally. The same parameter and modulation machinery must support ordinary manual controls, conventional automation and hidden/internal modulation. Internal complexity must not force a complicated UI; expose simple controls by default and make advanced routing available when wanted.
+
+### One parameter model
+
+Use one typed, addressable parameter model across built-in instruments, effects, native modules, the .caw VM, tracks, buses and project-level controls. Each parameter defines a stable identity, value type, range, default, units, scaling/curve, smoothing behavior, automation eligibility and serialization/version rules.
+
+A parameter must be controllable through any supported source without requiring a separate implementation for each module type. UI controls, MIDI/controller input, project automation, modulation links and mathematical expressions all resolve to the same parameter contract. Keep control and UI presentation separate: a parameter can be internally controllable without being displayed, while user-facing parameters can be exposed as knobs, sliders, text/numeric entry, curves or custom controls.
+
+### Manual and conventional control
+
+Support familiar hands-on workflows, including:
+- Direct editing and live manipulation of exposed parameters.
+- MIDI CC and supported controller mappings, macros and external control surfaces.
+- Track, bus, instrument, effect and project-level parameter control.
+- Automation lanes with editable points and curves, tempo/time positioning, interpolation, snapping and undo/redo.
+- Envelopes, LFOs, note velocity, key tracking and per-note expression as reusable modulation sources.
+- Modulation assignment/depth/polarity/scaling and multiple destinations.
+- Sidechain/audio-following control where the routing graph supplies the required signal.
+
+Do not require every parameter to have a visible automation lane. Users can reveal or create lanes when needed. Internal modulation may run without adding UI clutter.
+
+### Modulation and automation execution
+
+Treat automation and modulation as related inputs to a shared parameter-resolution stage, not as unrelated features bolted onto individual effects. Define deterministic combination and precedence rules. Support common operations such as replace, add, multiply, min/max and scaled/bipolar modulation, with explicit clamping, units and parameter-specific smoothing. Conflicting sources must have documented, testable behavior; no implicit ordering based on UI or graph traversal.
+
+Use sample-accurate evaluation where audible timing or modulation rate requires it. Use block/control-rate evaluation for slower controls when it is measurably cheaper and does not change the intended behavior. Compile and prepare the control/modulation plan off the audio thread; preallocate its state and buffers. Do not allocate, lock, resolve strings, traverse arbitrary graphs or rebuild automation data in the callback. Reuse constant values and unchanged control signals rather than recalculating them every sample. Preserve the existing per-sample automation path where required for correctness and migrate incrementally.
+
+### Mathematical expressions as first-class generators and effects
+
+Mathematical expressions are not limited to bytebeat or hidden modulation. They must be usable as:
+- Audio generators and oscillators.
+- Waveform and wavetable definitions.
+- Control/modulation sources and parameter curves.
+- Complete effects/processors that transform incoming audio.
+- Mathematical utility modules that combine signals, events and parameter values where the type system allows.
+
+Keep the existing .caw language and VM as a first-class route for this work. Provide reusable, typed interfaces so a mathematical generator/effect can be used like any other instrument or processor in a track, bus or module chain. Do not force users to write code for ordinary controls or force code-defined modules into a visual graph.
+
+Expression execution must be bounded and sandboxed: validate types and limits before playback, define operation/instruction budgets, prevent unbounded loops and unsafe access, and prepare reusable state outside the callback. Prefer direct formulas for cheap operations; use precomputed tables or compiled/specialized paths only when profiling demonstrates a benefit. Preserve deterministic seeded behavior and defined numerical semantics.
+
+### Resource-aware implementation
+
+The unified parameter system must avoid unnecessary work:
+- Constant parameters should remain constants; do not create per-sample streams for values that never change.
+- Block-rate controls should not be evaluated per sample unless required.
+- Share a modulation source's computed output across destinations where semantics permit.
+- Reuse curves, envelopes and expression results when their inputs and timing are unchanged.
+- Smooth only parameters that need smoothing; do not add generic smoothing overhead to every value.
+- Bound modulation fan-out and expression cost, and include them in graph preparation and workload estimates.
+- If a prepared optimization or cache is unavailable, fall back to the ordinary correct calculation path.
+
+### Required verification
+
+Test parameter identity and serialization, manual edits during playback, MIDI/controller mapping, automation interpolation and tempo behavior, multiple-source combination/precedence, modulation fan-out, sample-accurate events, block-rate equivalence, smoothing, expression safety/budgets, deterministic output, project save/reopen and live/offline render parity. Include CPU and memory benchmarks for common cases (static parameters, one LFO, many lanes, high modulation fan-out and mathematical effects). Internal modulation must not add visible UI or recurring idle work when unused.
+
+
+## 16. Universal creative capability, safe extensibility and unrestricted composition
+
+The engine's goal is to make any technically realizable audio or music idea straightforward to express, connect, run, save and share. It must not be limited to the feature set or workflows its original designers anticipated. Standard workflows are convenient defaults and optimized fast paths, never creative boundaries.
+
+A developer should be able to build a new instrument, effect, generator, processor, routing topology, control system, synthesis method, event behavior or complete custom signal-processing environment by composing documented capabilities or implementing an extension. The architecture should make common work easy and unusual work possible without requiring a fork or invasive core rewrite.
+
+### Universal signal, event and routing model
+
+Use a typed, multi-domain graph with explicit ports and connections. It must support, combine and route at minimum:
+- Mono, stereo, multichannel and custom channel layouts, with explicit channel mapping, splitting, merging, encoding and conversion.
+- Audio streams, sidechain/key inputs, control-rate signals, sample-accurate control signals, modulation, envelopes and parameter streams.
+- MIDI 1.0, MIDI 2.0/UMP, note events, per-note expression, controller data, clock, transport, tempo and arbitrary timestamped events.
+- Internal and external inputs/outputs, tracks, buses, groups, sends, returns, parallel paths, nested processing, instrument outputs and effect sidechains.
+- Cross-domain routing where meaningful: audio to envelope/follower/control, MIDI or events to parameters and generators, control to audio processing, and custom extension-defined data types.
+- Feedback and cyclic networks when explicitly declared and made schedulable through appropriate delay/state boundaries. Detect and explain instantaneous cycles that cannot be scheduled safely.
+
+Sidechain must be a first-class connection type, not a special case tied to one mixer layout. Any compatible source may feed a processor's declared sidechain input, including audio channels, buses, tracks, external inputs, MIDI/event streams, envelopes or control signals. Support multiple sidechain inputs and destinations, independent channel mapping, filtering and gain, and sidechain routing between buses and processors. Sidechain and ordinary routing must work through the same graph and project model.
+
+Provide a discoverable routing UI and APIs that make connections easy to create, inspect, edit, save, validate and automate. The engine graph must not assume a fixed track/bus/master hierarchy.
+
+### Extension surfaces
+
+Provide documented, versioned extension points for:
+- Custom generators, instruments, effects, processors, analyzers and complete module subgraphs.
+- Custom signal, sidechain, control and event routing.
+- Custom parameter types, modulation sources, mappings and resolution behaviors.
+- Alternative synthesis and processing algorithms, including hybrid, physical, granular, spectral, physical-modeling, feedback-based and future approaches not yet anticipated.
+- Custom control surfaces, UI presentations and module-specific workflows without coupling UI code to the audio callback.
+- New processing domains, execution strategies, state models and specialized hardware paths.
+
+Prefer composing existing primitives and registering modules over modifying core engine code. Do not force every technique into one generic processor abstraction when that would constrain the idea or add needless overhead. Offer simple common interfaces and advanced escape hatches with explicit contracts.
+
+### No arbitrary architectural limits
+
+Do not impose arbitrary fixed caps on tracks, buses, channels, routing connections, graph depth, module count, parameters, modulation links, automation lanes, events, voices, or project size merely for implementation convenience. Do not silently truncate or drop user content at an arbitrary threshold.
+
+The real limits are available memory, CPU/GPU/DSP capacity, platform/API constraints, declared module requirements and the user's chosen resource budget. Discover and use available capacity; allocate and schedule according to actual needs; expose meaningful resource diagnostics; degrade gracefully where possible. Any unavoidable platform or format limit must be documented, surfaced before destructive action, and handled with a clear alternative. Avoid unlimited allocation or unbounded real-time work: scalable does not mean unchecked.
+
+Resource budgets for untrusted or potentially runaway work must be configurable and enforceable, not hidden arbitrary product caps. Support sensible defaults, user/developer overrides within host safety policy, per-module budgets, global budgets, monitoring, graceful throttling/bypass and clear explanations when a requested graph exceeds the resources actually available. Never claim a configuration is safe if it cannot be bounded.
+
+### Safety and real-time contracts
+
+Every extension declares input/output types and channel layouts, sample-rate and block-size requirements, latency, tail behavior, state needs, parameter/event interfaces, resource estimates and real-time properties. Validate and prepare the graph before activation.
+
+- Keep allocation, blocking locks, file/network I/O, logging, UI calls and unbounded work off the hard real-time audio thread.
+- Preallocate or reserve resources during preparation; use bounded callback work and lock-free or otherwise real-time-safe communication where needed.
+- Define handling for non-finite values, excessive gain, unstable feedback, denormals, deadline misses, resource exhaustion and processor failure.
+- Provide safe bypass, mute, isolation, recovery and diagnostics without stalling the audio callback.
+- Make feedback stability tools available (delay boundaries, gain/energy monitoring, optional limiting and cycle diagnostics) without forbidding intentional feedback designs.
+- Use the strongest practical isolation for untrusted third-party code. In-process native extensions are trusted code, not sandboxed. Keep sandboxed .caw VM execution bounded and explicit.
+- Where a hard safety boundary prevents a requested operation, explain the exact constraint and offer a safe supported route rather than silently changing behavior.
+
+### Efficient execution without creative restrictions
+
+Compile/prepare graph topology, routing, parameter resolution and scheduling away from the audio callback. Choose efficient execution paths based on measured benefit and available hardware. Support parallel independent branches, specialized processors, vectorization and accelerators where useful, while retaining portable CPU fallbacks. Do not impose advanced-path overhead on ordinary modules that do not use those features.
+
+### Compatibility and evolution
+
+Version extension APIs, graph data and serialized module state. Preserve existing projects through migrations and defaults. Capability negotiation must identify unavailable modules or features and provide a clear fallback or actionable error rather than silently changing project behavior. Experimental interfaces may evolve, but isolate them from stable contracts and provide migration paths.
+
+### Required verification
+
+Test complex mixed-domain routing; audio/MIDI/control sidechains; multichannel mapping; nested buses, sends and returns; feedback with and without valid delay boundaries; graph compilation and cycle diagnostics; large projects without arbitrary truncation; resource-budget exhaustion and recovery; extension/API version mismatch; malicious or runaway VM programs; processor failure and bypass; state migration; deterministic output; and live/offline parity. Benchmark graph compilation, routing, extension dispatch and callback costs across small and large projects. Confirm that standard paths remain lightweight while advanced projects remain possible within actual hardware and safety constraints.
+
+
+## 17. Adaptive concurrency, batching and minimum-overhead execution
+
+Concurrency is a foundational engine capability. The engine should automatically exploit useful parallelism and batching across the complete workload while minimizing scheduling, synchronization, memory movement, latency and power overhead. The goal is not maximum thread count; it is maximum useful work completed within the audio deadline and available resource budget.
+
+### Dependency-aware execution
+
+- Compile the typed signal/event graph into a dependency-aware execution plan. Run independent branches concurrently; preserve required ordering, sample accuracy and explicit feedback/delay boundaries.
+- Schedule work at useful task sizes. Avoid creating tiny tasks whose dispatch and synchronization cost exceeds their processing cost.
+- Support parallel work across independent tracks, buses, voices, instruments, effects, channels, generators, analysis tasks and offline render ranges where dependencies permit.
+- Support nested or internally parallel modules through declared execution capabilities. Prevent uncontrolled nested thread pools and oversubscription.
+- Use serial execution for small workloads or latency-critical paths when it is faster or more predictable.
+- Use bounded worker pools and real-time-safe coordination. The audio callback must never wait on an unbounded queue, worker startup, blocking barrier or non-real-time task.
+- Ensure tasks required for the next audio deadline are scheduled with appropriate priority; background analysis, waveform generation, indexing, asset preparation and UI work must not starve audio.
+
+### Batching and vectorized processing
+
+Batch wherever it reduces overhead without changing required timing or semantics:
+- Process multiple voices, events, parameter updates, channels or compatible module instances together.
+- Group similar operations and reuse prepared kernels, coefficient sets, lookup data and shared modulation results.
+- Use SIMD/vector instructions and cache-friendly layouts when supported, with portable scalar fallbacks.
+- Batch control/event dispatch while preserving timestamps, ordering, note-off safety and sample-accurate events.
+- Batch graph preparation, project loading, asset work and offline rendering outside the real-time callback.
+- Do not force batching where it adds latency, increases memory pressure, breaks dependencies or makes the workload less efficient.
+
+### Adaptive hardware use
+
+Detect available CPU cores, instruction sets, memory capacity and supported accelerators. Select CPU parallelism, SIMD, GPU/DSP or other hardware paths only when profiling and workload characteristics show a net benefit. Account for transfer, setup, synchronization, power and thermal costs. Keep a correct portable CPU fallback and avoid requiring any specific accelerator.
+
+Choose worker count, task granularity, batch size, buffering and quality settings based on workload size, device capacity, current load and audio deadline. Adapt without audible discontinuities. Avoid excessive thread creation, context switching, busy waiting, cache contention, false sharing and unnecessary buffer copies.
+
+### Determinism, stability and deadline safety
+
+- Define deterministic ordering and reduction behavior wherever output depends on the order of operations. Parallel floating-point reductions must have documented reproducibility semantics.
+- Never parallelize across a dependency that changes results or violates sample-accurate timing.
+- Keep callback work bounded. If a worker or accelerator misses a deadline, use a defined safe fallback, previous valid state, bypass or controlled degradation rather than blocking the callback.
+- Avoid races in shared module state; declare whether modules are serial, internally parallel or safely reentrant, and enforce those declarations in the execution plan.
+- Make project save/load, graph changes, module replacement and resource reclamation safe across audio-thread boundaries.
+- Prefer stable predictable execution over a small benchmark gain that increases glitches, jitter or failure risk.
+
+### Measurement and validation
+
+Profile real workloads on low-end phones, ordinary mobile devices, desktop CPUs and accelerator-equipped systems. Measure end-to-end audio deadline margin, worst-case and tail processing time, glitch/dropout rate, CPU utilization, memory use, power where measurable, scheduling overhead, synchronization cost, cache behavior and scaling efficiency.
+
+Test serial versus parallel parity, deterministic modes, high voice counts, large routing graphs, mixed audio/MIDI/control workloads, simultaneous background tasks, CPU saturation, worker failure, thermal/resource pressure and live/offline rendering. Require evidence that each batching or parallel path improves total cost for its target workload; otherwise retain the simpler path.
