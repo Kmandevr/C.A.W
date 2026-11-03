@@ -57,25 +57,31 @@ Use GitHub Issues as the task/bug tracker; do not create a separate task list. A
 - Ask before actions that are hard to undo. If an instruction conflicts with project docs or the owner's decision, explain the conflict once with a reason and proposed alternative; otherwise follow the owner's decision.
 - The owner often sends short messages from a phone. Infer the likely intent from context, ask only when ambiguity materially affects the work, and give concise, verdict-first updates.
 
-## Agent limitations and workarounds
+## Chat-agent route (GitHub connector only)
 
-These notes apply to chat-based agents operating only through a GitHub connector, without a local checkout or shell. They are capability limits, not project requirements for agents that do have a proper development environment.
+For agents working from a chat window through a GitHub connector, with no checkout, shell, hooks, Graphify or Serena. A new chat remembers nothing from the last one, and connector writes can be mangled (literal `\n`, flattened lines, broken links). This route replaces local runs with the **Quick check** and replaces chat memory with two durable records.
 
-### Limitations
+### The two records
 
-- The agent is working through a GitHub connector in a chat window, not a local repository checkout.
-- It cannot run the repository's build, tests, `.claude/tools/tree.sh`, `.claude/tools/graph.sh`, or `node scripts/docs-test.js` in that environment.
-- Claude hooks, subagents, and Serena MCP tools are not available there.
-- A new chat does not retain the prior chat's working context.
-- Connector-written files can be malformed (for example, literal `\n` sequences, flattened lines, or broken Markdown links/includes).
+- **The report:** `quick-check/<branch, with each / written as -->.md` on the `agent-results` branch. For `gpt/28-planar-executor` that is `quick-check/gpt--28-planar-executor.md`. The repository is public, so `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/quick-check/gpt--28-planar-executor.md` also works (it can lag a few minutes). It gives the commit tested, PASS/FAIL per check and the error lines of each failure. The test results are the evidence; they replace reading the code to decide whether something works.
+- **The progress comment:** one comment on the task's issue that you edit (or replace) after every step: branch, numbered plan, each step's status with the commit that passed, open failures, and the single next action. It is the only memory a new chat needs.
 
-### Workarounds
+### The loop
 
-1. **Re-establish context.** Start each chat by reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md`, and the applicable `.claude/rules/*.md` files. Use the GitHub file browser/search to inspect named files directly. Do not claim that a session-start hook or repository map ran when it did not.
-2. **Use CI as the execution environment.** Make small, reviewable changes and push them to the task branch. Wait for all applicable Engine, App and Docs checks to finish green before starting another change or calling the work done. Never build on a red or still-running branch. If a required workflow did not run, say so; do not infer a pass.
-3. **Verify connector writes.** After writing each file, fetch it again and inspect the complete contents. Check line breaks, headings, tables, relative links and includes for mangling. Do not trust the write response alone.
-4. **Substitute for unavailable tools honestly.** When a skill calls for a shell tool, read the files it names and inspect the corresponding CI results/logs instead. If the skill calls for Graphify or Serena, use repository search and direct file reads for what they can establish. State which checks could not be run; never report a substitute as equivalent to the unavailable tool.
-5. **Keep commits and handoffs durable.** Prefer one commit per logical change where the connector supports it. If its API forces separate commits or prevents a normal checkout workflow, disclose that limitation rather than claiming a local Git commit. Put a **Where I left off** note in the PR description so the next chat can resume without relying on chat memory.
-6. **Handle failures from evidence.** Reproduce failures locally when possible. In a connector-only session, inspect the failed CI job and its logs before proposing a fix; if the failure cannot be reproduced in that environment, say so explicitly. Never skip or weaken a test.
+1. **Start or resume.** Read this file and `CLAUDE.md` once. If the issue has a progress comment, read it and the report, and resume at its next action. Don't re-read files or re-review steps it marks done.
+2. **Branch.** New tasks work on `gpt/<issue>-<short-name>`, created from `Main`. Pushes there run only the Quick check (Linux build and tests, docs guard, and Dart checks when `app/` changed). No full CI matrix, no app builds and no pull request are needed.
+3. **Plan.** Write at most five small steps into the progress comment. A step is one logical change that can pass the Quick check by itself.
+4. **One step at a time.** Open only the files the step needs; prefer search and line ranges to whole files. Write the change, then fetch each written file again to check for connector mangling. A newer push cancels the older run, so commit the step's files one after another and wait only on the last.
+5. **Read the report** for the step's last commit. If its `Commit:` is older, the run is still going: wait and read it again; don't re-review the code meanwhile. If the verdict is FAIL, fix only what the failing sections name, push and read the report again.
+6. **Record and move on.** Update the progress comment (step done, commit) and start the next step.
+7. **Finish.** When every step passes, open the pull request with `Closes #N` and a **Where I left off** note. Full Engine, App and Docs CI (all platforms and the app builds) runs there. Claude then reviews the work (owner's role split, `docs/decisions.md`).
+
+### Stop rules (to avoid getting stuck)
+
+- **Each file is reviewed at most once per chat.** Record the verdict in the progress comment instead of reviewing it again.
+- **Two failed fixes for the same failure means stop.** Write the failure, what you tried and your best guess into the progress comment, and tell the owner it's blocked. Don't keep cycling.
+- **When the chat gets long, hand off.** That means you notice re-reading, repeating a review, losing track of the plan, or about 30 messages. Bring the progress comment up to date and tell the owner to start a new chat that begins at step 1 of the loop.
+- **No silent substitutes.** Say which checks did not run. A Quick check pass is not the full CI; never call the task done before the pull request's CI is green.
+- **Never skip, weaken or disable a test** to get a PASS.
 
 The owner's decisions and repository documentation take precedence over an agent's preference. If you disagree, state the reason once as a proposal or question, then follow the owner's direction unless it changes.

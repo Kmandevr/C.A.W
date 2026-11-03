@@ -21,9 +21,10 @@ Project automation supports song-time lanes for module parameters and shared glo
 | `CLAUDE.md` | Instructions every AI session follows |
 
 Workflows:
-- `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push and pull request; superseded runs are cancelled per branch/PR.
+- `.github/workflows/docs.yml`: runs the docs guard and repo hygiene checks on every push (except `gpt/**`) and pull request; superseded runs are cancelled per branch/PR.
 - `.github/workflows/app.yml`: runs Dart analysis, Dart tests, Android APK and Windows app as independent jobs. Flutter SDK and Dart packages are cached; native test builds use ccache; Dart tests run with bounded parallelism. The APK (`caw-android-apk`) and Windows app (`caw-windows`) are downloadable artifacts; superseded runs are cancelled.
-- `.github/workflows/engine.yml`: builds and tests Linux x64, Linux Arm64, Windows x64 and Linux sanitizers in a four-job matrix. Linux native builds cache compiler outputs; CTest runs the native suite in four deterministic parallel shards. The Linux x64 job also checks generated function docs and renders each example except patterns (they need a sound to play); superseded runs are cancelled.
+- `.github/workflows/engine.yml`: on every push (except `gpt/**`) and pull request, builds and tests Linux x64, Linux Arm64, Windows x64 and Linux sanitizers in a four-job matrix. Linux native builds cache compiler outputs; CTest runs the native suite in four deterministic parallel shards. The Linux x64 job also checks generated function docs and renders each example except patterns (they need a sound to play); superseded runs are cancelled.
+- `.github/workflows/quick-check.yml`: the chat-agent route. Pushes to `gpt/**` branches run the docs guard, a Linux x64 engine build and tests, the example and language-docs checks, and (when `app/` changed) Dart analysis and tests, with no app builds. It writes one short report per branch to `quick-check/<branch with / as -->.md` on the `agent-results` branch ([AGENTS.md](AGENTS.md)). Full CI runs once the branch opens a pull request.
 - `.github/workflows/clear-status-on-close.yml`: removes `status:` labels when an issue closes.
 
 ## Working on it
