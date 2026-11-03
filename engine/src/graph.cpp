@@ -1,5 +1,6 @@
 // Typed graph validation and prepared planar N-channel execution. Build/prepare are control-thread operations.
 #include "graph.h"
+#include "route_math.h"
 
 #include <algorithm>
 #include <cmath>
@@ -493,7 +494,7 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
                 std::fill_n(destination, frames, 0.0f);
                 for (uint32_t s = 0; s < sum.sourceCount; ++s) {
                     const float* source = outputTable_[outputBase_[sumSources_[sum.sourceBase + s]] + c];
-                    for (uint32_t i = 0; i < frames; ++i) destination[i] += source[i];
+                    for (uint32_t i = 0; i < frames; ++i) destination[i] = routeAdd(destination[i], routeSample(source[i]));
                 }
             }
         }

@@ -629,3 +629,32 @@ TEST(graph_executor_prepares_wide_fan_in_in_linear_time) {
     for (uint32_t i = 0; i < sources; ++i) expected += signal(0, 3 + i);
     CHECK_EQ(out.data[0][3], expected);
 }
+
+TEST(graph_fan_in_saturates_non_finite_sources) {
+    // Same rule as the mixer's float routing: inf saturates at +/-FLT_MAX, NaN counts as 0.
+    const PortDescriptor monoOut[] = {{"out", PortType::Audio, ChannelLayout::Mono, false}};
+    const PortDescriptor monoBus[] = {{"in", PortType::Audio, ChannelLayout::Mono, true, 0, true},
+                                      {"out", PortType::Audio, ChannelLayout::Mono, false}};
+    const ModuleDescriptor source{"test.nonfinite", 1, monoOut, 1, nullptr, 0};
+    const ModuleDescriptor bus{"test.satbus", 1, monoBus, 2, nullptr, 0};
+    class Constant final : public ModuleProcessor {
+    public:
+        Constant(const ModuleDescriptor& d, float v) : d_(d), v_(v) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        bool process(const AudioProcessBlock& b) noexcept override {
+            for (uint32_t i = 0; i < b.frames; ++i) b.output.channels[0][i] = v_;
+            return true;
+        }
+    private: const ModuleDescriptor& d_; float v_;
+    };
+    Constant inf(source, std::numeric_limits<float>::infinity()), nan(source, std::numeric_limits<float>::quiet_NaN()),
+        big(source, std::numeric_limits<float>::max());
+    Copy copy(bus);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"inf", &source}, {"nan", &source}, {"big", &source}, {"bus", &bus}},
+                           {{0, 0, 3, 0}, {1, 0, 3, 0}, {2, 0, 3, 0}}, {&inf, &nan, &big, &copy}, 3, 8, 48000.0, kBudget) ==
+          GraphError::Ok);
+    Planar out(1, 8);
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(8), 8));
+    CHECK_EQ(out.data[0][0], std::numeric_limits<float>::max());
+}

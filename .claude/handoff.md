@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: f7e6e9b
+Commit: 14b507e
 Branch: claude/caw-engine-foundation-skpirb (F4.2 + multi-track mixer goldens)
 
 ## Goal
@@ -14,6 +14,7 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28) F4 → F5 → F6 �
 
 ## Open
 - F4.3 design: slots (each a layer chain with its effects), folder buses and master become graph nodes; dual-run test must reproduce F4.2 output bit-for-bit. Undecided: publish a prepared graph from setProject alongside routing commands (needs the control thread to know every slot's parent, including removing slots), or add executor runtime routing with prepared capacity. Legacy quirk: a slot processed after its parent bus (pass 1) loses its signal that chunk.
+- F4.3 constraints: create connections in the mixer processing order (processOrder_, then slot index); keep track-to-track exports (double exportBuf) as a side channel, not float edges, or every export project changes; fix issue #76 (removal fade lost in folders) with a test.
 - F4.4 later: split each slot's chain into source and effect nodes.
 
 ## Next

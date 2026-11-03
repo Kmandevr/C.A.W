@@ -911,3 +911,38 @@ TEST(engine_rejects_export_layout_above_memory_budget) {
     CHECK(result.find("\"ok\":false") != std::string::npos);
     CHECK(result.find("hardware-derived graph working-memory budget") != std::string::npos);
 }
+
+TEST(routing_saturates_out_of_float_range_tracks_instead_of_silencing_the_mix) {
+    // A runaway module can output finite doubles beyond float range. Routing carries float (F4.2),
+    // so those samples must saturate at the largest float: inf (or NaN after a zero gain) would make
+    // the master drop the whole mix. The limiter then holds the output near its ceiling.
+    // Dropped samples show up as exact zeros where the master zeroed a non-finite mix.
+    auto dropouts = [](const std::vector<float>& v, bool& finite) {
+        int zeros = 0;
+        finite = true;
+        for (size_t i = 2400; i < v.size(); ++i) {
+            if (!std::isfinite(v[i])) finite = false;
+            if (v[i] == 0.0f) ++zeros;
+        }
+        return zeros;
+    };
+    ProjectSpec p = project({{"huge", std::string(kFloat) + "sine(220) * 1e39"}, {"ok", std::string(kFloat) + "sine(330) * 0.5"}});
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    bool finite = false;
+    CHECK_EQ(dropouts(run(e, 4800), finite), 0);
+    CHECK(finite);
+    // Inside a muted-by-gain folder (volume 0) the saturated value must give 0, not NaN, so the
+    // root track still plays.
+    ProjectSpec q = project({{"huge", std::string(kFloat) + "sine(220) * 1e39"}, {"ok", std::string(kFloat) + "sine(330) * 0.5"}});
+    LayerSpec bus;
+    bus.id = "bus"; bus.name = "bus"; bus.folder = true; bus.busEnabled = true; bus.volume = 0.0;
+    q.layers.insert(q.layers.begin(), bus);
+    q.layers[1].parentId = "bus";
+    Engine f(48000);
+    f.setProject(q);
+    f.play();
+    CHECK_EQ(dropouts(run(f, 4800), finite), 0);
+    CHECK(finite);
+}

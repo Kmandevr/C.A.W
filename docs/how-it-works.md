@@ -54,7 +54,7 @@ The synth and built-in language also gained concrete capabilities in this branch
 | --- | --- | --- |
 | Add or change a built-in function | `engine/src/builtins.cpp` (and `builtins.h` for a new kind) | `caw docs` to regenerate [library](library.md) and [agent guide](agent-guide.md); `caw_tests` |
 | Change module descriptors, ports or parameter/UI metadata | `engine/src/module.*` | `module_test.cpp`, `module_registry_test.cpp`; update [engine build status](engine-build-status.md) |
-| Change graph validation, execution order or prepared N-channel processing | `engine/src/graph.*` | `graph_test.cpp`, `graph_channels_test.cpp`; preserve the no-allocation/no-lock process contract (checked by `alloc_counter.cpp`) |
+| Change graph validation, execution order or prepared N-channel processing | `engine/src/graph.*` | `graph_test.cpp`, `graph_channels_test.cpp`; preserve the no-allocation/no-lock process contract (checked by `alloc_counter.cpp`) and the shared float routing rule in `route_math.h` |
 | Change hardware policy or background scheduling | `engine/src/execution.*`, `hardware.*`, `scheduler.*` | matching execution, hardware and scheduler tests; keep worker jobs off the audio callback |
 | Change dependency identity or resolution | `engine/src/dependency.*`, `engine/src/project.*` | `dependency_test.cpp`, project tests; document what is parsed versus actually resolved |
 | The synth's patch lines and the code they become | `engine/src/synth.cpp` | [synth](synth.md); `synth_test.cpp`; `caw check --code` |

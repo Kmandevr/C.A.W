@@ -86,7 +86,7 @@ uint64_t render(const ProjectSpec& p, int64_t frames, float* peak = nullptr) {
     return h;
 }
 
-struct Case { const char* name; ProjectSpec project; uint64_t hash; };
+struct Case { const char* name; ProjectSpec project; uint64_t hash; float minPeak = 0.01f; };
 
 std::vector<Case> cases() {
     std::vector<Case> out;
@@ -126,11 +126,29 @@ std::vector<Case> cases() {
         out.push_back({"folder and track automation", p, 0xb847da2ce0d9fa0full});
     }
     {
+        // Mute alone: the muted child drops out and its sibling and the root track keep playing.
+        ProjectSpec p = base();
+        p.layers = {folder("drums", 0.7, 0.0), track("k", "kick", 0.9, 0.0, "drums"),
+                    track("h", "hats", 0.6, -0.5, "drums"), track("b", "bass", 0.7, 0.3)};
+        p.layers[1].mute = true;
+        out.push_back({"mute only inside a folder", p, 0xb8f6842b72e99828ull});
+    }
+    {
+        // Solo of one child: its unmuted, non-soloed sibling and the root track fall silent.
+        ProjectSpec p = base();
+        p.layers = {folder("drums", 0.7, 0.0), track("k", "kick", 0.9, 0.0, "drums"),
+                    track("h", "hats", 0.6, -0.5, "drums"), track("b", "bass", 0.7, 0.3)};
+        p.layers[1].solo = true;
+        out.push_back({"solo of one child silences its sibling", p, 0x8fe6dc1ea7b4ce23ull});
+    }
+    {
         ProjectSpec p = base();
         p.master = 2.5;  // drives the safety limiter
         p.layers = {folder("all", 1.0, 0.0), track("k", "kick", 1.0, 0.0, "all"), track("b", "bass", 1.0, 0.0, "all"),
                     track("a", "acid-synth", 1.0, 0.0, "all")};
-        out.push_back({"limiter driven through a bus", p, 0xcd5fad8550b7b2e7ull});
+        // The limiter must actually engage: the peak sits at its ceiling, far above the unlimited
+        // level of these tracks, but never above 1.
+        out.push_back({"limiter driven through a bus", p, 0xcd5fad8550b7b2e7ull, 0.9f});
     }
     return out;
 }
@@ -143,7 +161,8 @@ TEST(multi_track_mixes_match_golden_renders) {
     for (const Case& c : cases()) {
         float peak = 0.0f;
         const uint64_t h = render(c.project, frames, &peak);
-        if (!(peak > 0.01f)) cawtest::fail(__FILE__, __LINE__, std::string(c.name) + " renders silence");
+        if (!(peak > c.minPeak)) cawtest::fail(__FILE__, __LINE__, std::string(c.name) + " peak too low");
+        CHECK(peak <= 1.0f);
         if (h != c.hash) {
             char buf[160];
             std::snprintf(buf, sizeof buf, "%s renders 0x%016llxull", c.name, static_cast<unsigned long long>(h));
@@ -152,4 +171,24 @@ TEST(multi_track_mixes_match_golden_renders) {
         // Determinism: a second engine renders the same bits.
         CHECK_EQ(render(c.project, frames), h);
     }
+}
+
+// Mute and solo silence exactly: the mix equals the same project with those tracks left out.
+TEST(mute_and_solo_mixes_equal_projects_without_the_silenced_tracks) {
+    const int64_t frames = 48000;
+    ProjectSpec muted = base();
+    muted.layers = {folder("drums", 0.7, 0.0), track("k", "kick", 0.9, 0.0, "drums"),
+                    track("h", "hats", 0.6, -0.5, "drums"), track("b", "bass", 0.7, 0.3)};
+    muted.layers[1].mute = true;
+    ProjectSpec withoutKick = base();
+    withoutKick.layers = {folder("drums", 0.7, 0.0), track("h", "hats", 0.6, -0.5, "drums"), track("b", "bass", 0.7, 0.3)};
+    CHECK_EQ(render(muted, frames), render(withoutKick, frames));
+
+    ProjectSpec soloed = base();
+    soloed.layers = {folder("drums", 0.7, 0.0), track("k", "kick", 0.9, 0.0, "drums"),
+                     track("h", "hats", 0.6, -0.5, "drums"), track("b", "bass", 0.7, 0.3)};
+    soloed.layers[1].solo = true;
+    ProjectSpec onlyKick = base();
+    onlyKick.layers = {folder("drums", 0.7, 0.0), track("k", "kick", 0.9, 0.0, "drums")};
+    CHECK_EQ(render(soloed, frames), render(onlyKick, frames));
 }
