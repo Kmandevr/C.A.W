@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `f0d10387561030a55af48c5bb007ad6916ad706e` on the default branch at 2026-11-03T15:45:44Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `fadc354bb376870aa7858b8e84c00c871baa7b21` on the default branch at 2026-11-03T16:24:52Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`f0d1038`).
+1. The commit this file was generated from (`fadc354`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -243,7 +243,9 @@ This note records product direction, not a list of shipped features. The permane
 
 **Name:** C.A.W. means **Code Auditioning Workspace**. The logo is a crow.
 
-C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content. Its centre of gravity is experimental sound creation, but that is not a reason to reject useful production workflows. The long-term direction includes a broad set of DAW capabilities while retaining a lightweight, phone-first architecture rather than copying a heavyweight DAW wholesale.
+C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content.
+
+**Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design.
 
 Code remains a first-class way to define sounds and effects. Visual controls and editors expose the same underlying project and engine state rather than creating parallel systems. C.A.W. complements established production tools through practical WAV, MIDI, SFZ, stem and plugin handoff.
 
