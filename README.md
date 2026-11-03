@@ -17,7 +17,7 @@ Project automation supports song-time lanes for module parameters and shared glo
 | `docs/` | Project documentation: current app/engine facts, decisions, architecture and the permanent roadmap ([index](docs/index.md)) |
 | `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository |
 | `.github/` | Issue and PR templates, CODEOWNERS, Dependabot, and the workflows below |
-| `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, hooks ([.claude/README.md](.claude/README.md)) |
+| `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, and hooks that make Graphify and Serena the default way to navigate code ([.claude/README.md](.claude/README.md)) |
 | `CLAUDE.md` | Instructions every AI session follows |
 
 Workflows:
