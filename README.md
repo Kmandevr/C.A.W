@@ -5,7 +5,7 @@ An experimental, code-driven sound-design and music workspace. The current Flutt
 
 Project automation supports song-time lanes for module parameters and shared globals; track volume and pan keep their existing lanes.
 
-**Current status:** Android and Windows app builds are produced by CI. The app has eight workspaces, but not every planned capability is implemented. See [App](docs/app.md) for shipped behavior, [Engine status](docs/engine-build-status.md) for native implementation boundaries, the [engine blueprint](docs/engine-next.md) for the target engine design, and the [permanent roadmap](docs/roadmap.md) for planned work and sequencing: the engine graph Foundation stage first (in progress: the planar N-channel executor with fan-in is built and the mixer already routes in float as graph edges will, but the graph does not run playback yet), then Stages 0–7, then the first release.
+**Current status:** Android and Windows app builds are produced by CI. The app has eight workspaces, but not every planned capability is implemented. See [App](docs/app.md) for shipped behavior, [Engine status](docs/engine-build-status.md) for native implementation boundaries, the [engine blueprint](docs/engine-next.md) for the target engine design, and the [permanent roadmap](docs/roadmap.md) for planned work and sequencing: the engine graph Foundation stage first (in progress: one graph now runs playback and export; splitting tracks into source and effect nodes, typed control/MIDI ports and the remaining items follow), then Stages 0–7, then the first release.
 
 ## Where things are
 

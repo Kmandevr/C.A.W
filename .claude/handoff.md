@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: deadb4c
+Commit: d8e362a
 Branch: claude/caw-engine-foundation-skpirb (reset to Main after #75; F4.3 next)
 
 ## Goal
