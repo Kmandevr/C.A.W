@@ -70,7 +70,8 @@ enum class GraphError : uint8_t {
     OutOfMemory,
     TooManyChannels,
     RuntimeHostInputMismatch,
-    DuplicateConnection
+    DuplicateConnection,
+    RoutingUnavailable
 };
 
 struct CompiledGraph {
@@ -117,6 +118,17 @@ public:
     // outputChannels(). Counts are never adapted, truncated or padded.
     bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
                  uint32_t frames) noexcept;
+    // Dynamic routing (control thread): for a graph prepared without connections, give every
+    // summing input room for maxSourcesPerInput routed sources, counted against the budget. Summing
+    // inputs then never read the host input; with no routes they are silence.
+    GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget);
+    // Audio-thread safe once reserveRouting() succeeded: replaces every summing-input route and the
+    // execution order in one step. `order` lists each node exactly once; every edge goes from a
+    // node's audio output to a summing input later in `order`, with equal channel counts, no
+    // duplicates and at most the reserved number per input. Edge order is summation order. A
+    // rejected call returns false and leaves the previous routing in effect.
+    bool setRouting(const GraphConnection* edges, uint32_t edgeCount, const uint32_t* order,
+                    uint32_t orderCount) noexcept;
     // Thin stereo wrapper over the planar path. Null inputs are silence.
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
@@ -148,6 +160,11 @@ private:
     std::vector<float*> sumTable_;                // summed channel buffers, per summing input
     std::vector<float> sumStorage_;
     std::vector<uint32_t> order_;
+    // Dynamic routing scratch, preallocated by reserveRouting().
+    std::vector<uint32_t> routePosition_, routeCount_, routeStaging_;
+    std::size_t preparedBytes_ = 0;
+    uint32_t staticConnections_ = 0;
+    uint32_t routingCapacity_ = 0;
     uint32_t outputNode_ = UINT32_MAX;
     uint32_t hostInputChannels_ = 0;
     uint32_t outputChannels_ = 0;
