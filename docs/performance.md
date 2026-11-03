@@ -65,6 +65,8 @@ The owner's requirement (2026-10-28): run as light as possible, down to low-end 
 
 ### Fixes (all bit-identical: golden hashes unchanged)
 
+These fixes kept the golden hashes of their time. On 2026-11-03 Foundation F4.2 changed 10 template hashes on purpose (float routing, owner-approved, at most 1 LSB of a 24-bit WAV).
+
 1. **`toUint32` fast path:** a value inside the int32 range is truncated straight to an integer, which gives the same bits as the full JavaScript rule.
 2. **`%` fast path:** whole numbers use integer remainder, which gives exactly what `fmod` does, including the sign of a zero result.
 3. **Solo checked once per callback,** and again whenever a layer's starting gain is set, instead of per layer per block.
