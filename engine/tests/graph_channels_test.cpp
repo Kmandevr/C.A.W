@@ -396,3 +396,67 @@ TEST(graph_runtime_publishes_and_retires_n_channel_graphs) {
     delete runtime.takeActiveAfterStop();
     CHECK(runtime.takePendingAfterStop() == nullptr);
 }
+
+TEST(graph_executor_runs_legacy_stereo_generator_and_sink_without_input_or_output) {
+    // Legacy stereo-only modules with no input port (generators) or no output port (sinks)
+    // ran with null left/right pointers before F3 and must keep running.
+    ChannelModules stereo(ChannelLayout::Stereo, 0);
+    const PortDescriptor sinkPorts[] = {{"in", PortType::Audio, ChannelLayout::Stereo, true}};
+    const ModuleDescriptor sink{"test.channels.sink", 1, sinkPorts, 1, nullptr, 0};
+    class LegacyGenerator final : public ModuleProcessor {
+    public:
+        explicit LegacyGenerator(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        void process(const StereoProcessBlock& b) noexcept override {
+            if (b.inputLeft || b.inputRight) return;
+            for (uint32_t i = 0; i < b.frames; ++i) { b.outputLeft[i] = signal(0, i); b.outputRight[i] = signal(1, i); }
+        }
+    private: const ModuleDescriptor& d_;
+    } generator(stereo.source);
+    class LegacySink final : public ModuleProcessor {
+    public:
+        explicit LegacySink(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        void process(const StereoProcessBlock& b) noexcept override {
+            if (!b.outputLeft && !b.outputRight) last = b.inputLeft[b.frames - 1];
+        }
+        float last = 0.0f;
+    private: const ModuleDescriptor& d_;
+    } legacySink(sink);
+    ChannelGain gain(stereo.effect);
+    const std::vector<GraphNode> nodes{{"gen", &stereo.source}, {"gain", &stereo.effect}, {"sink", &sink}};
+    const std::vector<GraphConnection> edges{{0, 0, 1, 0}, {1, 1, 2, 0}};
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, edges, {&generator, &gain, &legacySink}, 1, 32, 48000.0, kBudget) == GraphError::Ok);
+    float outL[32] = {}, outR[32] = {};
+    CHECK(executor.process(nullptr, nullptr, outL, outR, 32));
+    CHECK_EQ(outL[31], signal(0, 31) * gainFor(0));
+    CHECK_EQ(outR[31], signal(1, 31) * gainFor(1));
+    CHECK_EQ(legacySink.last, signal(0, 31) * gainFor(0));
+}
+
+TEST(graph_executor_ignores_host_input_when_graph_has_no_host_fed_inputs) {
+    // A host may always pass its capture channels; a generator graph ignores them.
+    ChannelModules quad(ChannelLayout::Quad, 0);
+    Generator generator(quad.source);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"gen", &quad.source}}, {}, {&generator}, 0, 32, 48000.0, kBudget) == GraphError::Ok);
+    CHECK_EQ(executor.inputChannels(), 0u);
+    Planar capture(2, 32, 0.75f), out(4, 32);
+    CHECK(executor.process(capture.constView(32), out.view(32), 32));
+    CHECK_EQ(out.data[3][5], signal(3, 5));
+}
+
+TEST(allocation_counter_detects_allocations_and_frees) {
+    // Proves the zero counts above are real: direct operator calls cannot be elided.
+    std::size_t allocations = 0, deallocations = 0;
+    {
+        cawtest::AllocationScope scope;
+        void* p = ::operator new(16);
+        ::operator delete(p);
+        allocations = scope.allocations();
+        deallocations = scope.deallocations();
+    }
+    CHECK_EQ(allocations, 1u);
+    CHECK_EQ(deallocations, 1u);
+}

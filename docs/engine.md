@@ -342,7 +342,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 244 tests:
+`engine/build/caw_tests` runs 229 tests and `engine/build/caw_rt_tests` 18 more (CTest runs both):
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
@@ -350,7 +350,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 - **Patterns:** the note format and its errors, sample-exact note starts and ends, chords and voice stealing without clicks, the note variables, ratchets, slides, repeatable probability, pattern length, byte-mode pitch, the engine's release fade, notes released by seed and tempo changes, packed patterns, late-note warnings, pattern edits letting sounding notes finish, code edits keeping held notes, the default note without a pattern, and exports checking patterns.
 - **Mixer:** block-size independence, layer lengths, seams, hot swap (calls keeping their state, swaps waiting for the bar), broken code, mute, solo and pan, overload, stop and removal, effects, params and the limiter.
 - **Exports:** loop lengths, export equal to playback, free-length renders and cancel, one-shots, wavetables, broken modules and WAV bytes.
-- **Modules and graph:** descriptor validation (layouts, the 64-channel port ceiling), the processor contract and its stereo adapter, graph compile errors and budgets, and the planar N-channel executor: distinct generated signals per channel for mono, stereo, quad, 5.1, 7.1 and Discrete(3), channel isolation, host channel-count mismatches, processor failure reporting, re-prepare/reset, runtime publication, and no allocation in `process()` (a test-only counting `operator new`, `engine/tests/alloc_counter.cpp`).
+- **Modules and graph:** descriptor validation (layouts, the 64-channel port ceiling), the processor contract and its stereo adapter, graph compile errors and budgets, and the planar N-channel executor: distinct generated signals per channel for mono, stereo, quad, 5.1, 7.1 and Discrete(3), channel isolation, host channel-count mismatches, processor failure reporting, re-prepare/reset, runtime publication, and no allocation or free in `process()`. These real-time tests are in `caw_rt_tests`, whose `engine/tests/alloc_counter.cpp` replaces the global `operator new`/`delete` to count calls; keeping it out of `caw_tests` keeps AddressSanitizer's new/delete mismatch checks there.
 - **Native SDK:** the C header compiles as C, and SDK channel layouts map to engine layouts only through `engine/src/sdk_layout.h` (SDK Discrete has no channel count in ABI v1, so it is rejected).
 - **Golden renders:** one hash per template in `engine/tests/golden.txt`. A hash changes only with an intended sound change; then run `caw_tests --update-golden` and say why in the commit.
 

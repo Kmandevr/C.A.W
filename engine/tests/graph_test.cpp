@@ -198,7 +198,7 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
         sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 2u +
         sizeof(std::vector<float*>) + sizeof(std::vector<const float*>) +
         sizeof(std::vector<uint32_t>) * 6u;
-    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u;
+    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 4u;
     constexpr std::size_t executorBytes =
         fixedHeaders + 2u * perNodeMetadata + 4u * 64u * sizeof(float) +
         4u * sizeof(float*) + 4u * sizeof(const float*) + 4u * sizeof(uint32_t) + 64u * sizeof(float);

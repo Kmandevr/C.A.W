@@ -32,7 +32,8 @@ struct GraphResourceBudget {
     std::size_t maxConnections = std::numeric_limits<std::size_t>::max();
     // Required: maximum estimated internal working memory. Graph compilation checks its
     // own peak; GraphExecutor preparation checks the combined compile + prepared-runtime peak.
-    // Caller-owned GraphNode/GraphConnection storage and processor instances are excluded.
+    // Caller-owned GraphNode/GraphConnection storage, processor instances and the caller's
+    // processor-pointer list (PreparedGraph's borrowed list) are excluded.
     std::size_t maxWorkingBytes = 0;
     // Host limit on channels per audio port (1..kMaxPortChannels); larger ports fail with TooManyChannels.
     uint32_t maxChannelsPerPort = kMaxPortChannels;
@@ -92,8 +93,10 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 // F3 scope: each node has at most one audio input and one audio output port, of any layout; control,
 // modulation and event ports are rejected until the typed runtime ports exist (roadmap F5).
 // Unconnected audio inputs read the host input, so they must all have the same channel count.
-// Processors are called only through process(const AudioProcessBlock&). If one returns false the
-// block fails: process() returns false, zeroes the host output and records the failing node.
+// Processors are called only through process(const AudioProcessBlock&); both views' capacity is
+// the block's frame count. If one returns false the block fails: process() returns false, zeroes
+// the host output and records the failing node. process() rebinds host channels into the prepared
+// input table, so one executor must never be processed by two threads (e.g. playback and export).
 class GraphExecutor {
 public:
     GraphError prepare(const std::vector<GraphNode>& nodes,
@@ -104,8 +107,9 @@ public:
                        double sampleRate,
                        const GraphResourceBudget& budget);
     void reset() noexcept;
-    // `input` may have no channels (silence); otherwise its channel count must equal
-    // inputChannels(). `output` must have exactly outputChannels(). Counts are never adapted.
+    // `input` may have no channels (silence). If inputChannels() is 0 the input is ignored;
+    // otherwise its channel count must equal inputChannels(). `output` must have exactly
+    // outputChannels(). Counts are never adapted, truncated or padded.
     bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
                  uint32_t frames) noexcept;
     // Thin stereo wrapper over the planar path. Null inputs are silence.
@@ -120,6 +124,9 @@ public:
 
 private:
     void fail(uint32_t node, const ChannelBufferView& output, uint32_t frames) noexcept;
+    // Runs the graph; the caller has checked ready_, frames and both host views.
+    bool processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                          uint32_t frames) noexcept;
 
     std::vector<ModuleProcessor*> processors_;
     std::vector<float> channelStorage_;           // every node output channel, planar, maxFrames each

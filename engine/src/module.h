@@ -111,20 +111,23 @@ struct StereoProcessBlock {
     double sampleRate = 48000.0;
 };
 // Implement process(const AudioProcessBlock&) for any channel count, or only the legacy stereo
-// overload for a 2-in/2-out module. Hosts call the generic overload; its default adapts a stereo
-// block to the stereo overload. A processor that implements neither fails every call (false)
-// instead of silently leaving its output untouched. Overriding one overload hides the other in
-// the derived class; add `using ModuleProcessor::process;` if callers use the derived type.
+// overload for a stereo module. Hosts call the generic overload; its default adapts a block whose
+// input and output each have 0 or 2 channels to the stereo overload, passing null pointers for a
+// side with no channels (a generator has no input, a sink no output). A processor that implements
+// neither fails every call (false) instead of silently leaving its output untouched, so never call
+// the base stereo overload from an override. Overriding one overload hides the other in the
+// derived class; add `using ModuleProcessor::process;` if callers use the derived type.
 class ModuleProcessor {
 public:
     virtual ~ModuleProcessor() = default;
     virtual const ModuleDescriptor& descriptor() const noexcept = 0;
     virtual void process(const StereoProcessBlock&) noexcept { stereoImplemented_ = false; }
     virtual bool process(const AudioProcessBlock& block) noexcept {
-        if (block.input.channelCount != 2 || block.output.channelCount != 2 ||
-            !audioProcessBlockValid(block)) return false;
-        const StereoProcessBlock stereo{block.input.channels[0], block.input.channels[1],
-            block.output.channels[0], block.output.channels[1], block.frames, block.sampleRate};
+        const uint32_t in = block.input.channelCount, out = block.output.channelCount;
+        if ((in != 0 && in != 2) || (out != 0 && out != 2) || !audioProcessBlockValid(block)) return false;
+        const StereoProcessBlock stereo{in ? block.input.channels[0] : nullptr,
+            in ? block.input.channels[1] : nullptr, out ? block.output.channels[0] : nullptr,
+            out ? block.output.channels[1] : nullptr, block.frames, block.sampleRate};
         stereoImplemented_ = true;
         process(stereo);
         return stereoImplemented_;

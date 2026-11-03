@@ -119,7 +119,7 @@ if(CAW_TOOLS)
   target_link_libraries(caw_cli PRIVATE caw_core)
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
     tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
-    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/graph_channels_test.cpp tests/alloc_counter.cpp
+    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp
     src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
@@ -134,6 +134,13 @@ if(CAW_TOOLS)
   endforeach()
   set_tests_properties(caw_tests_shard_0 caw_tests_shard_1 caw_tests_shard_2 caw_tests_shard_3
     PROPERTIES PROCESSORS 1)
+  # Real-time contract tests in their own binary: it replaces global operator new/delete to count
+  # allocations, which would turn off AddressSanitizer's new/delete mismatch checks in caw_tests.
+  add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/alloc_counter.cpp)
+  target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
+  target_compile_definitions(caw_rt_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
+  target_link_libraries(caw_rt_tests PRIVATE caw_core)
+  add_test(NAME caw_rt_tests COMMAND caw_rt_tests)
   
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
 add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
