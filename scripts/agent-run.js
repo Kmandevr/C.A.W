@@ -20,6 +20,7 @@ const TARGETS = ['caw_core', 'caw_engine', 'caw_cli', 'caw_tests', 'caw_bench'];
 const GRAPH_SUBCOMMANDS = ['query', 'explain', 'affected'];
 const LONG_LINES = 300;     // output shown for diff, show and blame
 const ENVIRONMENT = 'GitHub-hosted Linux x64 runner (ubuntu-24.04): no audio device, GPU, phone or Windows. A PASS here never proves behaviour on real hardware; only the owner\'s device runs can.';
+const SCREENS_MARK = 'Screenshots (published a minute or two after this report):';
 const RAW = 'https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results';
 const PROBLEM = /\b(error|FAIL(ED)?|failed|failure|Exception|assert(ion)?|undefined reference|No such file)\b|^\s*(✗|x) /i;
 
@@ -40,8 +41,8 @@ const COMMANDS = {
   log: [[], 0, 2, 'recent commits on this branch; optional count (default 20), then a path'],
   show: [[], 1, 2, 'one commit (hash or HEAD~N) with its patch; optional path'],
   blame: [[], 1, 2, 'who last changed each line; file, then optional START-END lines'],
-  grep: [[], 1, 20, 'ripgrep: regex, then optional paths'],
-  refs: [[], 1, 1, 'whole-word uses of an identifier in engine/, app/, examples/ and scripts/'],
+  grep: [['search'], 1, 20, 'ripgrep: regex, then optional paths'],
+  refs: [['search'], 1, 1, 'whole-word uses of an identifier in engine/, app/, examples/ and scripts/'],
   tree: [[], 0, 1, 'repo map with each file\'s purpose; optional directory'],
   graph: [['graph'], 2, 10, `Graphify: ${GRAPH_SUBCOMMANDS.join('|')} then its arguments`],
   symbols: [['ctags'], 1, 1, 'symbols defined in one file, with line numbers'],
@@ -159,7 +160,7 @@ function plan(o) {
   for (const s of steps) if (!s.error) for (const n of COMMANDS[s.name][0]) needs.add(n);
   fs.writeFileSync(o.out, JSON.stringify({ source, changed, steps }, null, 2));
   if (process.env.GITHUB_OUTPUT) {
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, ['engine', 'flutter', 'graph', 'ctags'].map((n) => `${n}=${needs.has(n)}\n`).join(''));
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, ['engine', 'flutter', 'graph', 'ctags', 'search'].map((n) => `${n}=${needs.has(n)}\n`).join(''));
   }
   console.log(`PASS agent-run - ${source} plan: ${steps.map((s) => s.text).join('; ')} (${o.out})`);
 }
@@ -243,7 +244,7 @@ function runStep(step, log, base, slug) {
       const name = a[1] ? ['--plain-name', a[1]] : [];
       const s = seq(() => build(log, 'release', 'caw_engine'), () => flutterSetup(log),
         () => exec(log, 'flutter', ['test', '--update-goldens', path.posix.relative('app', a[0]), ...name], { cwd: path.join(ROOT, 'app'), env: { CAW_LIB: path.join(ROOT, BUILD.release, 'libcaw.so') } }));
-      fs.appendFileSync(log, `Screenshots (they appear a few minutes after the report):\n${collectScreens(slug).join('\n')}\n`);
+      fs.appendFileSync(log, `${SCREENS_MARK}\n${collectScreens(slug).join('\n')}\n`);
       return [s, 'info'];
     }
     case 'diff': {
@@ -289,7 +290,11 @@ function summarize(text, status, kind) {
   }
   if (kind === 'info' || kind === 'long') {
     const limit = kind === 'long' ? LONG_LINES : INFO_LINES;
-    const body = lines.filter((l) => !l.startsWith('$ '));
+    // Only the last program's output: a build that ran first succeeded and isn't what was asked for.
+    const lastCmd = lines.map((l, i) => (l.startsWith('$ ') ? i : -1)).filter((i) => i >= 0).pop();
+    let body = (lastCmd === undefined ? lines : lines.slice(lastCmd + 1));
+    const mark = body.indexOf(SCREENS_MARK);
+    if (mark >= 0) body = [...body.slice(mark), '', ...body.slice(0, mark).slice(-PASS_TAIL)];
     const shown = body.slice(0, limit).map(clip);
     if (body.length > limit) shown.push(`… ${body.length - limit} more lines (narrow it with a path or line range)`);
     return shown.length ? shown : ['(no output)'];

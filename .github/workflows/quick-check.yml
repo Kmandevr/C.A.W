@@ -2,7 +2,7 @@
 name: Quick check
 on:
   push:
-    branches: ["gpt/**"]
+    branches: ["gpt/**", ccr-55caa33d-vxei5s]  # TEMP: self-test on this branch, removed in the next commit
   workflow_dispatch:
     inputs:
       run:
@@ -93,11 +93,11 @@ jobs:
           git diff --name-only "$BASE"...HEAD > changed.txt || git ls-files > changed.txt
           node scripts/agent-run.js plan --message-file message.txt --request "$(cat request.txt)" \
             --changed changed.txt --app "${APP:-false}" --out plan.json
-      - name: Install ccache and ctags
-        if: steps.plan.outputs.engine == 'true' || steps.plan.outputs.ctags == 'true'
+      - name: Install ccache, ctags and ripgrep
+        if: steps.plan.outputs.engine == 'true' || steps.plan.outputs.ctags == 'true' || steps.plan.outputs.search == 'true'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ccache universal-ctags
+          sudo apt-get install -y -qq ccache universal-ctags ripgrep
           ccache --max-size=500M
       - name: Restore compiler cache
         if: steps.plan.outputs.engine == 'true'

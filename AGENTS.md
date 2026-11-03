@@ -99,7 +99,7 @@ run: grep "left_|right_" engine/src/graph.cpp; refs StereoProcessBlock
 | `render <file.caw> [bpm]` | Renders to WAV (run artifact `renders`) |
 | `bench` | Engine benchmark |
 | `analyze [app/path]…` / `dart-test [app/test/file] [name]` | Dart analysis; Dart tests against the native engine, optionally one file and a name filter |
-| `screenshot <app/test/x_test.dart> [name]` | Runs that widget test with `--update-goldens` and publishes every PNG it writes to `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/screens/<branch-name>/<file>.png`. In the test: `await expectLater(find.byType(MaterialApp), matchesGoldenFile('screens/home.png'));`. Text renders in Flutter's test font (blocks), so check layout, not lettering |
+| `screenshot <app/test/x_test.dart> [name]` | Runs that widget test with `--update-goldens` and publishes every PNG it writes to `https://raw.githubusercontent.com/Kmandevr/C.A.W/agent-results/screens/<branch-name>/<file>.png`. In the test: `await expectLater(find.byType(MaterialApp), matchesGoldenFile('screens/home.png'));`. Text renders in Flutter's test font (blocks), so check layout, not lettering. Delete a screenshot test before the pull request, or commit its PNG with it: without the PNG it fails the pull request's Dart tests |
 | `docs` | Docs guard, strict (as on a pull request) |
 | `diff [path]` / `log [n] [path]` | This branch against `Main`: changed files and the patch; recent commits |
 | `show <hash\|HEAD~N> [path]` / `blame <file> [START-END]` | One commit with its patch; who last changed each line |
