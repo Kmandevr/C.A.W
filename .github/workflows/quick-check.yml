@@ -2,7 +2,7 @@
 name: Quick check
 on:
   push:
-    branches: ["gpt/**", ccr-55caa33d-vxei5s]  # TEMP: self-test on this branch, removed in the next commit
+    branches: ["gpt/**"]
   workflow_dispatch:
     inputs:
       run:
