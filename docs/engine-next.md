@@ -55,7 +55,7 @@ Core layers:
 
 Stereo is native, not an effect bolted onto mono output. Signal ports declare channel layout and conversion behavior. **Owner decision (2026-11-03):** ports and buses are N-channel by design (never hard-coded to two); only mono and stereo are implemented until surround. Every built-in node must also be plugin-exportable (no app or OS dependencies). Projects set their own render sample rate (default 48 kHz); live playback resamples to the device when needed. Pan, width, left/right and mid/side processing are explicit. Never silently collapse or duplicate channels.
 
-Audio buffers are 32-bit float, with 64-bit where accuracy needs it (phase/time accumulators, sensitive filter state); the .caw VM keeps 64-bit JavaScript number semantics (owner, 2026-11-03).
+Audio buffers are 32-bit float, with 64-bit where accuracy needs it (phase/time accumulators, sensitive filter state); the .caw VM keeps 64-bit JavaScript number semantics (owner, 2026-11-03). The live mixer already routes in 32-bit float between tracks, buses and master (F4.2), so the graph can take over routing bit-exactly.
 
 Keep connection types distinct:
 - **Audio:** continuous audio buffers.

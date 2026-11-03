@@ -1,26 +1,27 @@
 # Handoff
 
-Commit: 125f1b8
-Branch: claude/caw-engine-foundation-skpirb
+Commit: a20e99a
+Branch: claude/caw-engine-foundation-skpirb (F4.2 + multi-track mixer goldens)
 
 ## Goal
-Owner (2026-11-03): build the roadmap Foundation stage (issue #28, `docs/roadmap.md`) in order F3 → F4 → F5 → F6 → F7 → F8 (F9 deferred to before Release 1: no project compatibility needed yet), one smallest complete PR each against `feature/native-engine-refactor-integration`, full CI green before the next. Never push to that branch or Main. Rules: no allocation/locks/IO in the callback; exports bit-identical; stereo stays low-overhead (measure with `caw_bench`, callgrind); never weaken tests; bug fixes start with a failing test; audio-reviewer on every engine change; release-check before each PR; update the roadmap Foundation row and `docs/engine-build-status.md` in the same PR; keep the #28 progress comment current. Claude may merge its PRs when CI is green: Foundation PR → #28 branch, then #28 branch → Main after each item. Ask before: SDK ABI changes, any golden-hash change (never `--update-golden` to pass), new dependencies, app/ changes beyond F4/F9. Owner approved a 64-channel port ceiling.
+Owner (2026-11-03): finish the roadmap Foundation stage (#28) F4 → F5 → F6 → F7 → F8; F9 deferred to Release 1 (no project compatibility needed yet). One small PR per step, now targeting `Main` directly (the #28 branch merged into Main in PR #73 and was deleted on merge); Claude merges when CI is green. Rules: no allocation/locks/IO in the callback; exports bit-identical across platforms; stereo stays low-overhead (callgrind via `caw_bench SECONDS -1`); never weaken tests; bug fixes start with a failing test; audio-reviewer on each engine change; release-check before each PR; update the roadmap Foundation row + `docs/engine-build-status.md` per PR. Ask before: SDK ABI changes, any golden-hash change other than F4.2's approved one, new dependencies, app/ changes beyond F4.
 
 ## Done and verified
-- F3 planar N-channel executor: PR #72 (open, subscribed). `ctest --test-dir engine/build` 5/5 (caw_tests 229, caw_rt_tests 18) Release and `-DCAW_SANITIZE=ON`. Callgrind stereo wrapper 4,640 → 5,086 Ir/callback.
-- Progress comment posted on #28 (issuecomment-6609966082).
+- F3 merged (PR #72 → 7f06839). F4.1 fan-in merged (PR #74 → 2d27815).
+- F4.2: mixer rounds track/bus outputs to float at routing and sums in float; owner-approved re-record of 10 golden hashes (CLI WAV diff <= 1 LSB of 24-bit).
+- Multi-track mixer goldens (engine/tests/mix_golden_test.cpp, 6 projects) recorded on the F4.2 mixer: the bit-exact target for F4.3. Local caw_tests 231/0, caw_rt_tests 24/0.
+- PR #73 merged: Main = old #28 branch + F3 + F4.1 (6cd8b5c). PR #75 (F4.2) was retargeted to Main.
 
 ## Open
-- Engine/App/Docs CI on PR #72 not yet reported.
-- F4 must keep golden hashes unchanged; stop and ask if one would change.
-- Native SDK (`engine/include/caw_module_sdk.h`) is still left/right with no channel count; ABI change needs the owner.
+- F4.3 design: slots (each a layer chain with its effects), folder buses and master become graph nodes; dual-run test must reproduce F4.2 output bit-for-bit. Undecided: publish a prepared graph from setProject alongside routing commands (needs the control thread to know every slot's parent, including removing slots), or add executor runtime routing with prepared capacity. Legacy quirk: a slot processed after its parent bus (pass 1) loses its signal that chunk.
+- F4.3 constraints: create connections in the mixer processing order (processOrder_, then slot index); keep track-to-track exports (double exportBuf) as a side channel, not float edges, or every export project changes; fix issue #76 (removal fade lost in folders) with a test.
+- F4.4 later: split each slot's chain into source and effect nodes.
 
 ## Next
-Merge PR #72 into the #28 branch, PR the #28 branch into Main and merge when green, then restart this branch from the #28 branch and start F4 (migrate the live mixer into the graph, golden hashes unchanged).
+Merge PR #75 when green; then build F4.3 (publish a prepared graph from setProject with node indices in legacy processing order; mix goldens must hold).
 
 ## Read first
 - `docs/roadmap.md`
-- `docs/engine-build-status.md`
+- `docs/decisions.md`
 - `engine/src/graph.h`
-- `engine/src/module.h`
 - `engine/src/engine.cpp`

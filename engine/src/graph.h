@@ -95,7 +95,8 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 // modulation and event ports are rejected until the typed runtime ports exist (roadmap F5).
 // A summing input (PortDescriptor::summing) takes any number of connections: before the node
 // runs, the executor sums them into a prepared buffer per channel, in connection order,
-// starting from +0.0f, in float. Any other input takes at most one connection.
+// starting from +0.0f, in float, saturating at +/-FLT_MAX with NaN as 0 (route_math.h). Any other input
+// takes at most one connection.
 // Unconnected audio inputs read the host input, so they must all have the same channel count.
 // Processors are called only through process(const AudioProcessBlock&); both views' capacity is
 // the block's frame count. If one returns false the block fails: process() returns false, zeroes
