@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
 covers: [app/lib/ui/, app/lib/model/, engine/]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Music workflow implementation gaps
