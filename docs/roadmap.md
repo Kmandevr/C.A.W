@@ -61,7 +61,7 @@ The stages are ordered by dependency and product value. Work may be split into s
 These commitments remain first unless the owner changes their order.
 
 1. **[Implemented]** Automation for module parameters and project globals, including serialization and native engine integration (PR #68).
-2. Complete the WAV/SFZ multisample workflow: import WAV samples, map zones (key ranges, velocity layers) by hand, play them in C.A.W and export WAV + SFZ (owner, 2026-11-03). This brings forward the audio-import part of Stage 3 and the sampler-zone and WAV/SFZ interchange parts of Stage 4; the rest of those stages stays in place.
+2. Complete the WAV/SFZ multisample workflow: import WAV samples, map zones (key ranges, velocity layers) by hand, play them in C.A.W and export WAV + SFZ (owner, 2026-11-03). Samples live in the project folder or the global library; projects become folders that can be packaged with all their dependencies (see [decisions](decisions.md)). This brings forward the audio-import part of Stage 3 and the sampler-zone and WAV/SFZ interchange parts of Stage 4; the rest of those stages stays in place.
 3. Complete stems export and integrate it with the native export pipeline.
 
 **Exit gate:** each feature is usable through the app, tested, documented and verified by CI. A partial engine API or design does not count as complete integration.
@@ -96,6 +96,7 @@ Migrate the existing folder-bus model into the engine graph. Do not keep a secon
 ### Stage 3 — Audio assets and non-destructive arrangement clips
 
 - Import and locally preview common audio formats.
+- Each audio clip is *musical* (follows tempo, time-stretched) or *fixed* (original speed); positions are stored in beats (owner, 2026-11-03).
 - Show waveform summaries and place audio clips on the existing arrangement timeline.
 - Trim, split, move, duplicate, source-offset, loop, fade, adjust clip gain and reverse.
 - Preserve original source assets; save edits as non-destructive clip operations.
@@ -167,18 +168,20 @@ Recording is part of the long-term product direction. It is not implemented toda
 
 ### Stage 9 — Plugins, platforms and extensibility
 
-- Complete the native module host, lifecycle and isolation requirements before loading third-party native code.
-- Support external CLAP hosting, then VST3 and AU where licensing, platform APIs and packaging permit.
+- Complete the native module host and lifecycle, with three user-chosen modes per external plugin or native module: Isolated (separate process), Trusted (in-process) or Blocked (owner, 2026-11-03).
+- Support external CLAP hosting, then VST3 and AU where licensing, platform APIs and packaging permit. **[Assumption]** Out-of-process isolation on Android is unverified and may be desktop-first.
+- Every built-in graph node is plugin-exportable, so any C.A.W graph can be exported as CLAP, then VST3.
 - Support building/packaging C.A.W. as a plugin where a stable host-facing interface is available.
 - Complete iOS, macOS and Linux app builds and platform-specific audio/device testing.
 - Preserve the shared C++ engine and CLI across supported platforms.
 - Keep Plugin Builder for .caw modules distinct from external binary plugin hosting.
 
-**Exit gate:** each claimed plugin format and platform has real build, host/device and lifecycle tests; native third-party code has an explicit trust/isolation model.
+**Exit gate:** each claimed plugin format and platform has real build, host/device and lifecycle tests; all three trust modes work and a crash in an Isolated plugin cannot take down the app.
 
 ### Stage 10 — Collaboration and expanded audio formats
 
 - Optional project sharing and collaboration workflows.
+- Optional sync with the owner's AutoStacc cloud library, built on the project-folder and global-library format.
 - Conflict-aware project synchronization and shared asset handling.
 - A collaboration model that supports offline work first and never makes network access necessary for core creation.
 - Expanded channel layouts, including surround and immersive/spatial audio workflows, as supported by the engine and target devices.

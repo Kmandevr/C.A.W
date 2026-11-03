@@ -7,7 +7,7 @@ covers: [engine/include/caw_module_sdk.h, engine/src/module.*, engine/src/module
 
 # Native module SDK v1
 
-**Status [Fact, checked 2026-11-01]:** the versioned C ABI header, internal descriptor validation, static in-process registry and graph/processor foundations exist. Dynamic loading, host-side adapter, project integration, signing, crash isolation and platform packaging are not implemented. Third-party native binaries cannot currently be loaded by the app, and the owner has decided they will not be (2026-11-03): others share .caw only.
+**Status [Fact, checked 2026-11-01]:** the versioned C ABI header, internal descriptor validation, static in-process registry and graph/processor foundations exist. Dynamic loading, host-side adapter, project integration, signing, crash isolation and platform packaging are not implemented. Third-party native binaries cannot currently be loaded by the app. When loading is built, each one runs in a user-chosen mode: Isolated, Trusted (in-process) or Blocked (owner, 2026-11-03).
 
 ## One module system
 

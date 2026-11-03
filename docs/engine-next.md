@@ -13,7 +13,7 @@ covers: [engine/, app/]
 
 C.A.W (Code Auditioning Workspace) is a programmable sound-design and content-creation environment. It creates sound assets and reusable audio capabilities for other applications.
 
-C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful arranging, editing, mixing, recording and export tools where they help users make complete music, and should work as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Recording is not implemented; it is scheduled in [roadmap](roadmap.md) Stage 7. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
+C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful arranging, editing, mixing, recording and export tools where they help users make complete music, and should work as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment. External plugins can be hosted under the user-chosen trust modes in §10 (roadmap Stage 9). Recording is not implemented; it is scheduled in [roadmap](roadmap.md) Stage 7. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
 
 CAW should natively create bytebeat and deterministic mathematical audio; procedural sounds, drums, instruments, effects, samples and wavetables; custom synthesizers and processing modules; MIDI patterns and expressive per-note data including MPE; reusable building blocks; and eventually distributable plugins. It should export content other software can consume, rather than recreate those applications' entire workflows.
 
@@ -53,7 +53,7 @@ Core layers:
 
 ### Stereo and typed connections
 
-Stereo is native, not an effect bolted onto mono output. Signal ports declare channel layout and conversion behavior. Support mono and stereo first, with room for additional layouts. Pan, width, left/right and mid/side processing are explicit. Never silently collapse or duplicate channels.
+Stereo is native, not an effect bolted onto mono output. Signal ports declare channel layout and conversion behavior. **Owner decision (2026-11-03):** ports and buses are N-channel by design (never hard-coded to two); only mono and stereo are implemented until surround. Every built-in node must also be plugin-exportable (no app or OS dependencies). Projects set their own render sample rate (default 48 kHz); live playback resamples to the device when needed. Pan, width, left/right and mid/side processing are explicit. Never silently collapse or duplicate channels.
 
 Audio buffers are 32-bit float, with 64-bit where accuracy needs it (phase/time accumulators, sensitive filter state); the .caw VM keeps 64-bit JavaScript number semantics (owner, 2026-11-03).
 
@@ -136,11 +136,13 @@ The app file manager should reflect this conceptual hierarchy while allowing arb
 - **Global:** stored in the user's library and reusable across projects.
 - **Starter examples:** shipped under examples/ today. A future factory catalog should be read-only and never silently overwritten by user edits.
 
+**Owner decision (2026-11-03):** a project is a folder that works like a repository: project file plus local assets, with links to the global library and a "package build" step that collects every dependency so the folder works on its own. Keep it compatible with a future, optional AutoStacc cloud library.
+
 Use stable IDs, explicit versions, dependency manifests and portable references—not absolute paths. Support linked global assets, pinned versions and embedded snapshots. Detect missing dependencies and offer recovery. Never silently change old project sound when a global asset changes.
 
 ## 8. Export and external use
 
-CAW is a creator/exporter, not a plugin host. Support WAV, wavetables, multisamples (WAV/SFZ where appropriate), standard MIDI and expressive MPE/MIDI 2.0-compatible exports, portable module packages and documented presets. Eventually generate CLAP plugins first, then VST3 and other formats where practical.
+CAW is primarily a creator/exporter; external plugin hosting follows the trust modes in §10. Support WAV, wavetables, multisamples (WAV/SFZ where appropriate), standard MIDI and expressive MPE/MIDI 2.0-compatible exports, portable module packages and documented presets. Eventually generate CLAP plugins first, then VST3 and other formats where practical.
 
 Plugin packages embed the required processing and state; CAW need not be running. A phone can author and validate while native compilation runs in GitHub Actions or another build service, with a desktop build path too. Define a supported exportable DSP subset and return precise validation errors for unsupported operations. Test generated plugins in target hosts.
 
@@ -184,7 +186,7 @@ Keep deterministic mode and golden-render contract. SIMD, multithreading and GPU
 
 The callback and everything it calls must avoid allocation, locks, I/O, logging, UI calls, exceptions and unbounded work. Prepare graphs, buffers, voice pools and state before publishing to audio. Use reviewed real-time-safe handoff; retire old graphs and free memory off callback.
 
-Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. Native SDK modules are trusted in-process code, not sandboxed. **Owner decision (2026-11-03):** third-party content is shared only as .caw; loading other people's native binaries is not planned.
+Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. Native SDK modules are not sandboxed. **Owner decision (2026-11-03):** each external plugin or third-party native module runs in a mode the user chooses: Isolated (separate process), Trusted (in-process) or Blocked.
 
 ## 11. Verification: what “without compromise” means
 

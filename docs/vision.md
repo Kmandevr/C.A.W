@@ -1,7 +1,7 @@
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Vision and principles
@@ -96,4 +96,6 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | iOS distribution: App Store exception or no iOS release | Open |
 | Licence for user-created/shared sound modules | Open |
 | How a future AutoStacc purchase would deliver/unlock the app | Open |
+| Default trust mode (Isolated, Trusted or Blocked) for a plugin or native module the user hasn't seen before | Open; the three modes are decided ([decisions](decisions.md), 2026-11-03) |
+| How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
