@@ -1,10 +1,10 @@
 # Handoff
 
-Commit: e2bb9b6
+Commit: deadb4c
 Branch: claude/caw-engine-foundation-skpirb (reset to Main after #75; F4.3 next)
 
 ## Goal
-Owner (2026-11-03): finish the roadmap Foundation stage (#28) F4 → F5 → F6 → F7 → F8; F9 deferred to Release 1 (no project compatibility needed yet). One small PR per step, now targeting `Main` directly (the #28 branch merged into Main in PR #73 and was deleted on merge); Claude merges when CI is green. Rules: no allocation/locks/IO in the callback; exports bit-identical across platforms; stereo stays low-overhead (callgrind via `caw_bench SECONDS -1`); never weaken tests; bug fixes start with a failing test; audio-reviewer on each engine change; release-check before each PR; update the roadmap Foundation row + `docs/engine-build-status.md` per PR. Ask before: SDK ABI changes, any golden-hash change other than F4.2's approved one, new dependencies, app/ changes beyond F4.
+Owner (2026-11-03): finish the roadmap Foundation stage (#28) F4 → F5 → F6 → F7 → F8; F9 deferred to Release 1 (no project compatibility needed yet). One small PR per step, now targeting `Main` directly (the #28 branch merged into Main in PR #73 and was deleted on merge); Claude merges when CI is green. Rules: no allocation/locks/IO in the callback; exports bit-identical across platforms; stereo stays low-overhead (callgrind via `caw_bench SECONDS -1`); never weaken tests; bug fixes start with a failing test; audio-reviewer on each engine change; release-check before each PR; update the roadmap Foundation row + `docs/engine-build-status.md` per PR. Owner (2026-11-03): reliability over old-engine compatibility; golden hashes may be re-recorded for intended engine changes (state why, with a measurement). Ask before: SDK ABI changes, new dependencies, app/ changes beyond F4.
 
 ## Done and verified
 - On Main: F3 (PR #72), F4.1 fan-in (#74), old #28 branch (#73), F4.2 float routing + 8 mixer goldens + saturating route_math.h (#75 → e2bb9b6). Full CI green on each.

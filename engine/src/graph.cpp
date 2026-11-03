@@ -286,6 +286,7 @@ void GraphExecutor::reset() noexcept {
     preparedBytes_ = 0;
     staticConnections_ = 0;
     routingCapacity_ = 0;
+    runCount_ = 0;
     outputNode_ = UINT32_MAX;
     hostInputChannels_ = 0;
     outputChannels_ = 0;
@@ -453,6 +454,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         processors_.assign(processors.begin(), processors.end());
         order_ = std::move(compiled.executionOrder);
         preparedBytes_ = executorBytes + retainedPlanBytes;
+        runCount_ = static_cast<uint32_t>(order_.size());
         staticConnections_ = static_cast<uint32_t>(connections.size());
         outputNode_ = outputNode;
         hostInputChannels_ = hostChannels;
@@ -533,13 +535,15 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
 bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount, const uint32_t* order,
                                uint32_t orderCount) noexcept {
     const std::size_t nodeCount = processors_.size();
-    if (!ready_ || routingCapacity_ == 0 || !order || orderCount != nodeCount || (edgeCount && !edges)) return false;
+    if (!ready_ || routingCapacity_ == 0 || !order || orderCount == 0 || orderCount > nodeCount ||
+        (edgeCount && !edges)) return false;
     std::fill(routePosition_.begin(), routePosition_.end(), UINT32_MAX);
     for (uint32_t k = 0; k < orderCount; ++k) {
         const uint32_t n = order[k];
         if (n >= nodeCount || routePosition_[n] != UINT32_MAX) return false;
         routePosition_[n] = k;
     }
+    if (routePosition_[outputNode_] == UINT32_MAX) return false;
     std::fill(routeCount_.begin(), routeCount_.end(), 0u);
     for (uint32_t e = 0; e < edgeCount; ++e) {
         const GraphConnection& edge = edges[e];
@@ -551,7 +555,9 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
         if (edge.sourcePort >= from.portCount || from.ports[edge.sourcePort].input ||
             from.ports[edge.sourcePort].type != PortType::Audio) return false;
         if (edge.destinationPort >= to.portCount || !to.ports[edge.destinationPort].summing) return false;
-        if (routePosition_[edge.sourceNode] >= routePosition_[edge.destinationNode]) return false;
+        // Both ends must run, the source first (an unlisted node's position is UINT32_MAX).
+        if (routePosition_[edge.destinationNode] == UINT32_MAX ||
+            routePosition_[edge.sourceNode] >= routePosition_[edge.destinationNode]) return false;
         uint32_t& count = routeCount_[index];
         if (count >= routingCapacity_) return false;
         const uint32_t base = sumInputs_[index].sourceBase;
@@ -563,6 +569,7 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
     sumSources_.swap(routeStaging_);
     for (std::size_t k = 0; k < sumInputs_.size(); ++k) sumInputs_[k].sourceCount = routeCount_[k];
     std::copy_n(order, orderCount, order_.begin());
+    runCount_ = orderCount;
     return true;
 }
 
@@ -590,7 +597,8 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
         inputTable_[hostInputSlots_[s]] =
             input.channelCount ? input.channels[s % hostInputChannels_] : zero_.data();
 
-    for (uint32_t node : order_) {
+    for (uint32_t k = 0; k < runCount_; ++k) {
+        const uint32_t node = order_[k];
         if (sumIndex_[node] != UINT32_MAX) {
             const SumInput& sum = sumInputs_[sumIndex_[node]];
             for (uint32_t c = 0; c < inputCount_[node]; ++c) {

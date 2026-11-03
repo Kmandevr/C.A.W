@@ -123,10 +123,11 @@ public:
     // inputs then never read the host input; with no routes they are silence.
     GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget);
     // Audio-thread safe once reserveRouting() succeeded: replaces every summing-input route and the
-    // execution order in one step. `order` lists each node exactly once; every edge goes from a
-    // node's audio output to a summing input later in `order`, with equal channel counts, no
-    // duplicates and at most the reserved number per input. Edge order is summation order. A
-    // rejected call returns false and leaves the previous routing in effect.
+    // execution order in one step. `order` lists the nodes to run, each at most once, and must
+    // include the output node; nodes left out are not run at all. Every edge goes from a listed
+    // node's audio output to the summing input of a node later in `order`, with equal channel
+    // counts, no duplicates and at most the reserved number per input. Edge order is summation
+    // order. A rejected call returns false and leaves the previous routing in effect.
     bool setRouting(const GraphConnection* edges, uint32_t edgeCount, const uint32_t* order,
                     uint32_t orderCount) noexcept;
     // Thin stereo wrapper over the planar path. Null inputs are silence.
@@ -165,6 +166,7 @@ private:
     std::size_t preparedBytes_ = 0;
     uint32_t staticConnections_ = 0;
     uint32_t routingCapacity_ = 0;
+    uint32_t runCount_ = 0;  // leading entries of order_ that process() runs
     uint32_t outputNode_ = UINT32_MAX;
     uint32_t hostInputChannels_ = 0;
     uint32_t outputChannels_ = 0;

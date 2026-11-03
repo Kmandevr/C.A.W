@@ -378,6 +378,7 @@ struct Engine::MixGraph {
 
     // Routing scratch, audio thread only.
     int target[kSlots] = {};          // routed destination node, or -1
+    bool routable[kSlots] = {};       // runs this chunk: active, and a bus or a track with a chain
     int pending[kNodes] = {};         // routed children not yet ordered
     bool deferred[kNodes] = {};
     bool emitted[kNodes] = {};
@@ -2245,14 +2246,16 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
 // its parent is anything else (as the old mixer discarded it), and goes to master at the root. Order
 // is the old pass order (processOrder_, then the remaining slots by index) with each bus held back
 // until its routed children have run, so a track always reaches its bus in the same chunk (issue
-// #76). Edges follow that order, which is the old accumulation order, so mixes stay bit-identical.
+// #76). Edges follow that order, which is the old accumulation order. Idle slots are left out of
+// the order, so they cost nothing.
 void Engine::updateRouting() noexcept {
     MixGraph& g = *mixGraph_;
     const int master = MixGraph::kMaster;
     for (int i = 0; i < kSlots; ++i) {
         const Slot& s = slots_[i];
         int to = -1;
-        if (s.active && (s.bus || s.cur)) {
+        g.routable[i] = s.active && (s.bus || s.cur);
+        if (g.routable[i]) {
             if (s.parentSlot >= 0 && s.parentSlot < kMaxLayers && s.parentSlot != i) {
                 const Slot& parent = slots_[s.parentSlot];
                 to = parent.active && parent.bus ? s.parentSlot : -1;
@@ -2279,7 +2282,7 @@ void Engine::updateRouting() noexcept {
         }
     };
     auto visit = [&](int x) noexcept {
-        if (x < 0 || x >= kSlots || g.emitted[x] || g.deferred[x]) return;
+        if (x < 0 || x >= kSlots || !g.routable[x] || g.emitted[x] || g.deferred[x]) return;
         if (g.pending[x] > 0) { g.deferred[x] = true; return; }
         emit(x);
     };
@@ -2288,8 +2291,9 @@ void Engine::updateRouting() noexcept {
     // A routing cycle is never sent by the control thread; if one appears, keep everything ordered
     // and drop the edges that would point backwards.
     for (int k = 0; k < kSlots; ++k)
-        if (!g.emitted[k]) { g.emitted[k] = true; g.order[count++] = static_cast<uint32_t>(k); }
+        if (g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.order[count++] = static_cast<uint32_t>(k); }
     g.order[count++] = static_cast<uint32_t>(master);
+    for (int n = 0; n < MixGraph::kNodes; ++n) g.position[n] = UINT32_MAX;  // not run this chunk
     for (uint32_t k = 0; k < count; ++k) g.position[g.order[k]] = k;
     uint32_t edgeCount = 0;
     for (uint32_t k = 0; k + 1 < count; ++k) {

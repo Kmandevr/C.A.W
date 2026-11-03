@@ -715,13 +715,15 @@ TEST(graph_dynamic_routing_rejects_invalid_routes_and_keeps_the_previous_one) {
     CHECK(executor.process(ConstChannelBufferView{}, before.view(16), 16));
 
     const uint32_t duplicate[] = {0, 0, 2, 3};
-    const uint32_t shortOrder[] = {0, 1, 2};
+    const uint32_t withoutOutput[] = {0, 1, 3};    // the output node (2) must run
+    const uint32_t withoutSource[] = {1, 2, 3};    // edge 0 -> 2 needs node 0 to run
     const uint32_t busFirst[] = {2, 0, 1, 3};
     const GraphConnection intoPlain[] = {{0, 0, 3, 0}};
     const GraphConnection overCapacity[] = {{0, 0, 2, 0}, {1, 0, 2, 0}};
     const GraphConnection badNode[] = {{9, 0, 2, 0}};
     CHECK(!executor.setRouting(good, 1, duplicate, 4));
-    CHECK(!executor.setRouting(good, 1, shortOrder, 3));
+    CHECK(!executor.setRouting(good, 1, withoutOutput, 3));
+    CHECK(!executor.setRouting(good, 1, withoutSource, 3));
     CHECK(!executor.setRouting(good, 1, busFirst, 4));       // a source must run before its bus
     CHECK(!executor.setRouting(intoPlain, 1, order, 4));     // only summing inputs are routable
     CHECK(!executor.setRouting(overCapacity, 2, order, 4));  // reserved capacity is 1
@@ -781,4 +783,41 @@ TEST(graph_dynamic_routing_requires_a_graph_without_static_connections) {
     CHECK(executor.reserveRouting(4, kBudget) == GraphError::RoutingUnavailable);
     GraphExecutor unprepared;
     CHECK(unprepared.reserveRouting(4, kBudget) == GraphError::RoutingUnavailable);
+}
+
+TEST(graph_dynamic_routing_skips_nodes_left_out_of_the_order) {
+    // Nodes not listed in the order are not run at all, so idle nodes cost nothing.
+    StereoRoutingModules m;
+    class Counting final : public ModuleProcessor {
+    public:
+        explicit Counting(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        bool process(const AudioProcessBlock& b) noexcept override {
+            ++calls;
+            for (uint32_t c = 0; c < b.output.channelCount; ++c)
+                for (uint32_t i = 0; i < b.frames; ++i) b.output.channels[c][i] = 0.25f;
+            return true;
+        }
+        int calls = 0;
+    private: const ModuleDescriptor& d_;
+    } used(m.source), idle(m.source);
+    Copy bus(m.bus);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"used", &m.source}, {"idle", &m.source}, {"bus", &m.bus}}, {}, {&used, &idle, &bus}, 2, 16,
+                           48000.0, kBudget) == GraphError::Ok);
+    CHECK(executor.reserveRouting(2, kBudget) == GraphError::Ok);
+    const uint32_t order[] = {0, 2};
+    const GraphConnection edges[] = {{0, 0, 2, 0}};
+    CHECK(executor.setRouting(edges, 1, order, 2));
+    Planar out(2, 16);
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
+    CHECK_EQ(used.calls, 2);
+    CHECK_EQ(idle.calls, 0);
+    CHECK_EQ(out.data[1][15], 0.25f);
+    // Listing it again runs it again.
+    const uint32_t all[] = {0, 1, 2};
+    CHECK(executor.setRouting(edges, 1, all, 3));
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
+    CHECK_EQ(idle.calls, 1);
 }
