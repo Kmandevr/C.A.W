@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # App
@@ -152,7 +152,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Android:** `android/app/build.gradle.kts` builds `engine/CMakeLists.txt` into `libcaw.so` for arm64-v8a and x86_64, with `minSdk` 26.
   - The application id is `com.kmandevr.caw`. It becomes permanent once a release is installed, because updates only install over the same id and key.
 - **Windows and Linux:** `windows/CMakeLists.txt` and `linux/CMakeLists.txt` add the engine and bundle `caw.dll` or `libcaw.so` next to the app. The Linux folder is for local testing; it isn't shipped in v1.
-- **CI** (`.github/workflows/app.yml`) runs on changes to `app/`, `engine/` or `examples/`, or on demand:
+- **CI** (`.github/workflows/app.yml`) runs on changes to `app/`, `engine/` or `examples/`, or on demand. Pushes to `gpt/**` branches skip it until they open a pull request; their Dart analysis and tests run in the Quick check (`README.md`). It runs:
   - `flutter analyze` and `flutter test` against a Linux build of the engine
   - the release APK, as artifact `caw-android-apk`
   - the Windows app folder, as artifact `caw-windows`. Run `caw.exe` from it.

@@ -1,7 +1,7 @@
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Vision and principles
@@ -12,7 +12,9 @@ This note records product direction, not a list of shipped features. The permane
 
 **Name:** C.A.W. means **Code Auditioning Workspace**. The logo is a crow.
 
-C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content. Its centre of gravity is experimental sound creation, but that is not a reason to reject useful production workflows. The long-term direction includes a broad set of DAW capabilities while retaining a lightweight, phone-first architecture rather than copying a heavyweight DAW wholesale.
+C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content.
+
+**Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design.
 
 Code remains a first-class way to define sounds and effects. Visual controls and editors expose the same underlying project and engine state rather than creating parallel systems. C.A.W. complements established production tools through practical WAV, MIDI, SFZ, stem and plugin handoff.
 
@@ -96,4 +98,6 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | iOS distribution: App Store exception or no iOS release | Open |
 | Licence for user-created/shared sound modules | Open |
 | How a future AutoStacc purchase would deliver/unlock the app | Open |
+| Default trust mode (Isolated, Trusted or Blocked) for a plugin or native module the user hasn't seen before | Open; the three modes are decided ([decisions](decisions.md), 2026-11-03) |
+| How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |

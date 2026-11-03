@@ -2,6 +2,8 @@
 name: Engine
 on:
   push:
+    # gpt/** branches get the Quick check until they open a pull request; agent-results holds only reports.
+    branches-ignore: ["gpt/**", agent-results]
   pull_request:
 permissions:
   contents: read

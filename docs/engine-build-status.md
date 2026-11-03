@@ -2,7 +2,7 @@
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
 covers: [engine/, app/]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Modular engine implementation status
@@ -54,9 +54,19 @@ See [engine progress](engine-progress.md) for the complete source-level audit an
 
 ## Current implementation order
 
-The owner's 2026-11-02 instruction explicitly reopens and prioritizes the complete native engine refactor/integration, superseding the older pause note. The active branch is feature/native-engine-refactor-integration, 32 commits ahead and 0 behind Main through refactor/native-engine-foundation. M0 repository recovery/audit is verified; M1 core execution foundations are in progress. Graph cap removal and explicit low-level working-memory budget code are implemented and passed Engine/App/Docs CI at checkpoint 1269019; a follow-up compiler-budget test awaits CI. Graph runtime integration remains incomplete. This is one coherent engine migration, not a second engine.
+Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is the active first stage: the roadmap's **Foundation** stage (issue #28), ahead of the remaining Stage 0 and Stage 1 features, with the target of one graph running everything ([decisions](decisions.md), 2026-11-03). Its items, statuses and gaps are the Foundation table in the [roadmap](roadmap.md).
 
-PR #68 (project parameter/global automation) is merged into Main at 20fd3da9a37f8936f1c3ff6069878978d064ae37. Preserve that behavior and project compatibility. SFZ and stems export remain next after the refactor gate. Scenes and MIDI 2.0 device input/output remain later work; the decoder and bounded queue are not live device support.
+The prior engine work is on `feature/native-engine-refactor-integration` (the #28 branch, not yet on `Main`): the M0 repository audit, graph cap removal with explicit working-memory budgets, the owning prepared-graph lifecycle, and the N-channel module contract (`373dea1`, `9b2f059`; Engine CI green on `9b2f059`). Graph runtime integration is not done.
+
+After the Foundation stage, the app-usable v2 order is:
+
+1. **Implemented — PR #68 (merged; Engine, App and Docs CI green on 2026-11-02):** project/timeline automation for module parameters and project globals, including native per-sample playback/render evaluation and app editing.
+2. WAV/SFZ multisample workflow: sample import, hand-mapped zones, in-app playback and WAV + SFZ export ([roadmap](roadmap.md) Stage 0 item 2).
+3. Stems export ([roadmap](roadmap.md) Stage 0 item 3).
+
+Scenes and MIDI 2.0 device input/output remain deferred backlog items; the existing MIDI 2.0 decoder and bounded queue are not live device support.
+
+Each item should be delivered as its own small PR, with app-facing functionality, tests and CI. Hardware validation must be documented separately from cloud CI. The implementation ledger above records what is built and what remains unintegrated.
 
 ## Verification
 
