@@ -1,0 +1,206 @@
+# Quick checks for chat agents: pushes to gpt/** run the commands named by `run:` lines in the commit message (or a default set) and publish a short report.
+name: Quick check
+on:
+  push:
+    branches: ["gpt/**"]
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "Commands, separated by ';' (same as commit-message run: lines). Empty runs the default set."
+        type: string
+        default: ""
+      app:
+        description: Add Dart analysis and tests to the default set
+        type: boolean
+        default: false
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older run, so only the latest commit gets a report.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  FLUTTER_VERSION: 3.47.7
+  FLUTTER_SHA_LINUX: af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230
+jobs:
+  # Publishes a RUNNING notice right away, so a new commit's report never looks stale while its run is going.
+  announce:
+    name: Announce the run
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Write the RUNNING notice
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+          REQUEST: ${{ inputs.run }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          printf '%s\n' "$MESSAGE" > message.txt
+          if [ -n "$REQUEST" ]; then printf 'run: %s\n' "$REQUEST" > request.txt; else : > request.txt; fi
+          node scripts/agent-run.js plan --message-file message.txt --request "$(cat request.txt)" --out plan.json
+          node scripts/agent-run.js running --plan plan.json --out report.md --branch "$BRANCH" --commit "$COMMIT" --run "$RUN_URL"
+          echo "target=quick-check/$(printf '%s' "$BRANCH" | sed 's#/#--#g').md" >> "$GITHUB_OUTPUT"
+        id: notice
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quick-check-running
+          path: report.md
+          retention-days: 1
+    outputs:
+      target: ${{ steps.notice.outputs.target }}
+  publish-running:
+    needs: announce
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-agent-results.yml
+    with:
+      artifact: quick-check-running
+      source: report.md
+      target: ${{ needs.announce.outputs.target }}
+
+  check:
+    name: Quick check (Linux x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      verdict: ${{ steps.report.outputs.verdict }}
+      screens: ${{ steps.screens.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Plan the commands
+        id: plan
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+          REQUEST: ${{ inputs.run }}
+          APP: ${{ inputs.app }}
+          BASE: origin/${{ github.event.repository.default_branch }}
+        run: |
+          printf '%s\n' "$MESSAGE" > message.txt
+          if [ -n "$REQUEST" ]; then printf 'run: %s\n' "$REQUEST" > request.txt; else : > request.txt; fi
+          git diff --name-only "$BASE"...HEAD > changed.txt || git ls-files > changed.txt
+          node scripts/agent-run.js plan --message-file message.txt --request "$(cat request.txt)" \
+            --changed changed.txt --app "${APP:-false}" --out plan.json
+      - name: Install ccache, ctags and ripgrep
+        if: steps.plan.outputs.engine == 'true' || steps.plan.outputs.ctags == 'true' || steps.plan.outputs.search == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ccache universal-ctags ripgrep
+          ccache --max-size=500M
+      - name: Restore compiler cache
+        if: steps.plan.outputs.engine == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-engine-Linux x64-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
+          restore-keys: |
+            ccache-engine-Linux x64-
+      - name: Install uv (for Graphify)
+        if: steps.plan.outputs.graph == 'true'
+        run: pipx install uv
+      - name: Restore Flutter SDK
+        if: steps.plan.outputs.flutter == 'true'
+        id: flutter-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter
+          key: flutter-linux-${{ env.FLUTTER_VERSION }}-${{ env.FLUTTER_SHA_LINUX }}
+      - name: Install Flutter
+        if: steps.plan.outputs.flutter == 'true' && steps.flutter-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL -o flutter.tar.xz "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
+          echo "${FLUTTER_SHA_LINUX}  flutter.tar.xz" | sha256sum -c -
+          tar xf flutter.tar.xz -C "$RUNNER_TEMP" && rm flutter.tar.xz
+      - name: Add Flutter to PATH
+        if: steps.plan.outputs.flutter == 'true'
+        run: echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Restore Dart packages
+        if: steps.plan.outputs.flutter == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
+          restore-keys: pub-linux-
+      - name: Run the commands and write the report
+        id: report
+        if: always() && steps.plan.outcome == 'success'
+        env:
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BASE: origin/${{ github.event.repository.default_branch }}
+        run: |
+          node scripts/agent-run.js run --plan plan.json --out report.md \
+            --branch "$BRANCH" --commit "$COMMIT" --run "$RUN_URL" --base "$BASE"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.report.outcome == 'success'
+        with:
+          name: quick-check-report
+          path: report.md
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        id: screens
+        if: always() && hashFiles('screens/*.png') != ''
+        with:
+          name: screens
+          path: screens/
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        if: always() && hashFiles('renders/*.wav') != ''
+        with:
+          name: renders
+          path: renders/
+          retention-days: 7
+      - name: Fail when a command failed
+        if: steps.report.outputs.verdict != 'PASS'
+        run: |
+          echo "Quick check failed: see the report on the agent-results branch or this run's summary."
+          exit 1
+
+  # The write token lives only in the reusable publish job, which never checks out or runs the branch's code.
+  # `always()` matters: without it a failing check skips publishing, and failed reports are the ones agents need most.
+  report-path:
+    name: Report path
+    needs: check
+    if: always() && needs.check.result != 'cancelled' && needs.check.result != 'skipped'
+    runs-on: ubuntu-24.04
+    outputs:
+      slug: ${{ steps.path.outputs.slug }}
+    steps:
+      - id: path
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: echo "slug=$(printf '%s' "$BRANCH" | sed 's#/#--#g')" >> "$GITHUB_OUTPUT"
+  publish:
+    needs: [report-path, publish-running]
+    if: always() && needs.report-path.result == 'success'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-agent-results.yml
+    with:
+      artifact: quick-check-report
+      source: report.md
+      target: quick-check/${{ needs.report-path.outputs.slug }}.md
+  publish-screens:
+    needs: [check, report-path, publish]
+    if: always() && needs.report-path.result == 'success' && needs.check.outputs.screens == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-agent-results.yml
+    with:
+      artifact: screens
+      source: .
+      target: screens/${{ needs.report-path.outputs.slug }}

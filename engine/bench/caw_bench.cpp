@@ -12,6 +12,7 @@
 #include "capi_internal.h"
 #include "compile.h"
 #include "engine.h"
+#include "graph.h"
 #include "project.h"
 #include "render.h"
 
@@ -124,6 +125,127 @@ void report(const char* name, const Result& r) {
 
 double ms(Clock::time_point a) { return std::chrono::duration<double, std::milli>(Clock::now() - a).count(); }
 
+// Times `seconds` of kCallback-frame calls of `call`, the same way play() times Engine::process.
+Result timeCalls(double seconds, const std::function<bool()>& call) {
+    const int calls = static_cast<int>(seconds * kRate / kCallback);
+    std::vector<double> us;
+    us.reserve(static_cast<size_t>(calls));
+    for (int c = 0; c < calls; ++c) {
+        const auto t0 = Clock::now();
+        if (!call()) { std::fprintf(stderr, "graph process failed\n"); std::exit(3); }
+        us.push_back(std::chrono::duration<double, std::micro>(Clock::now() - t0).count());
+    }
+    Result res;
+    for (double v : us) res.meanUs += v;
+    res.meanUs /= static_cast<double>(us.size());
+    std::sort(us.begin(), us.end());
+    res.p99Us = us[us.size() * 99 / 100];
+    res.maxUs = us.back();
+    res.load = res.meanUs / (1e6 * kCallback / kRate);
+    return res;
+}
+
+// Graph scenarios are sub-microsecond, so they report nanoseconds.
+void reportNs(const char* name, const Result& r) {
+    std::printf("%-34s mean %8.0f ns  p99 %8.0f ns  max %8.0f ns  load %7.3f%%\n", name, 1e3 * r.meanUs,
+                1e3 * r.p99Us, 1e3 * r.maxUs, 100.0 * r.load);
+}
+
+constexpr uint32_t kGraphNodes = 8;
+const char* const kGraphIds[kGraphNodes] = {"n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7"};
+
+GraphResourceBudget graphBudget() {
+    GraphResourceBudget budget;
+    budget.maxWorkingBytes = 64u * 1024u * 1024u;
+    return budget;
+}
+
+const PortDescriptor kStereoEffectPorts[] = {
+    {"in", PortType::Audio, ChannelLayout::Stereo, true},
+    {"out", PortType::Audio, ChannelLayout::Stereo, false},
+};
+const ModuleDescriptor kStereoEffect{"bench.stereo.gain", 1, kStereoEffectPorts, 2, nullptr, 0, nullptr, 0, {}};
+
+// A legacy stereo-only processor, as existing native modules are written.
+class StereoGain final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kStereoEffect; }
+    void process(const StereoProcessBlock& b) noexcept override {
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            b.outputLeft[i] = b.inputLeft[i] * 0.999f;
+            b.outputRight[i] = b.inputRight[i] * 0.999f;
+        }
+    }
+};
+
+// An 8-node stereo chain through the stereo wrapper: the cost existing callers see.
+void graphStereoBench(double secs) {
+    std::vector<StereoGain> gains(kGraphNodes);
+    std::vector<GraphNode> nodes;
+    std::vector<GraphConnection> edges;
+    std::vector<ModuleProcessor*> processors;
+    for (uint32_t n = 0; n < kGraphNodes; ++n) {
+        nodes.push_back({kGraphIds[n], &kStereoEffect});
+        processors.push_back(&gains[n]);
+        if (n) edges.push_back({n - 1, 1, n, 0});
+    }
+    GraphExecutor executor;
+    if (executor.prepare(nodes, edges, processors, kGraphNodes - 1, kCallback, kRate, graphBudget()) !=
+        GraphError::Ok) { std::fprintf(stderr, "graph prepare failed\n"); std::exit(3); }
+    std::vector<float> inL(kCallback, 0.5f), inR(kCallback, -0.5f), outL(kCallback), outR(kCallback);
+    reportNs("graph: 8 stereo nodes (wrapper)", timeCalls(secs, [&] {
+        return executor.process(inL.data(), inR.data(), outL.data(), outR.data(), kCallback);
+    }));
+}
+
+// A generic planar processor for any channel count.
+class PlanarGain final : public ModuleProcessor {
+public:
+    explicit PlanarGain(const ModuleDescriptor& d) : d_(&d) {}
+    const ModuleDescriptor& descriptor() const noexcept override { return *d_; }
+    bool process(const AudioProcessBlock& b) noexcept override {
+        for (uint32_t c = 0; c < b.output.channelCount; ++c)
+            for (uint32_t i = 0; i < b.frames; ++i) b.output.channels[c][i] = b.input.channels[c][i] * 0.999f;
+        return true;
+    }
+private:
+    const ModuleDescriptor* d_;
+};
+
+// 8-node planar chains at 1, 2, 6 and 8 channels through process(AudioProcessBlock).
+void graphPlanarBench(double secs) {
+    struct Shape { const char* name; ChannelLayout layout; uint32_t channels; };
+    const Shape shapes[] = {{"graph: 8 mono nodes (planar)", ChannelLayout::Mono, 1},
+                            {"graph: 8 stereo nodes (planar)", ChannelLayout::Stereo, 2},
+                            {"graph: 8 5.1 nodes (planar)", ChannelLayout::Surround51, 6},
+                            {"graph: 8 7.1 nodes (planar)", ChannelLayout::Surround71, 8}};
+    for (const Shape& shape : shapes) {
+        const PortDescriptor ports[] = {{"in", PortType::Audio, shape.layout, true},
+                                        {"out", PortType::Audio, shape.layout, false}};
+        const ModuleDescriptor effect{"bench.planar.gain", 1, ports, 2, nullptr, 0, nullptr, 0, {}};
+        std::vector<PlanarGain> gains(kGraphNodes, PlanarGain(effect));
+        std::vector<GraphNode> nodes;
+        std::vector<GraphConnection> edges;
+        std::vector<ModuleProcessor*> processors;
+        for (uint32_t n = 0; n < kGraphNodes; ++n) {
+            nodes.push_back({kGraphIds[n], &effect});
+            processors.push_back(&gains[n]);
+            if (n) edges.push_back({n - 1, 1, n, 0});
+        }
+        GraphExecutor executor;
+        if (executor.prepare(nodes, edges, processors, kGraphNodes - 1, kCallback, kRate, graphBudget()) !=
+            GraphError::Ok) { std::fprintf(stderr, "graph prepare failed\n"); std::exit(3); }
+        std::vector<std::vector<float>> in(shape.channels, std::vector<float>(kCallback, 0.5f));
+        std::vector<std::vector<float>> out(shape.channels, std::vector<float>(kCallback));
+        std::vector<const float*> inPtr;
+        std::vector<float*> outPtr;
+        for (uint32_t c = 0; c < shape.channels; ++c) { inPtr.push_back(in[c].data()); outPtr.push_back(out[c].data()); }
+        const ConstChannelBufferView inView{inPtr.data(), shape.channels, kCallback};
+        const ChannelBufferView outView{outPtr.data(), shape.channels, kCallback};
+        reportNs(shape.name, timeCalls(secs, [&] { return executor.process(inView, outView, kCallback); }));
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -147,6 +269,11 @@ int main(int argc, char** argv) {
                                {"64 layers", manyLayers(64)},
                                {"pattern layers (acid + chords)", patterns()},
                                {"starter + delay + reverb each", effects()}};
+    if (only < 0) {  // `caw_bench SECONDS -1`: graph executor scenarios only
+        graphStereoBench(secs);
+        graphPlanarBench(secs);
+        return 0;
+    }
     if (only > 0) {
         Case& c = cases[static_cast<size_t>(std::min<int>(only, static_cast<int>(cases.size())) - 1)];
         Engine e(kRate);
@@ -215,5 +342,7 @@ int main(int argc, char** argv) {
         e.setProject(manyLayers(64));
         std::printf("RSS: %ld kB before, %ld kB with 64 layers set up\n", before, rssKb());
     }
+    graphStereoBench(secs);
+    graphPlanarBench(secs);
     return 0;
 }

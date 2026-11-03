@@ -1,10 +1,20 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Log
+
+- 2026-11-03: Foundation F3, the planar N-channel graph executor: per-channel planar buffers and pointer tables prepared and budgeted from port descriptors, processors called only through `process(AudioProcessBlock)` with failures reported and the output silenced, Discrete channel counts compared at compile time, a 64-channel port ceiling and host `maxChannelsPerPort`, a loud fallback for processors implementing neither overload, a defined frames rule, and an explicit native SDK layout mapping. 229 `caw_tests` plus 18 `caw_rt_tests` (allocation-counting, own binary) pass locally in Release and ASan/UBSan. Callgrind on an 8-node stereo chain through the stereo wrapper, 192-frame callbacks: 4,640 instructions per callback before and 5,086 after (+9.6%, about 56 per node, from the generic-to-stereo adapter every processor call now goes through); the live mixer callback runs no graph code yet, so its bench is unchanged. The audio-reviewer's findings were fixed with tests first: stereo-only generators and sinks run again, generator graphs ignore host input, prepare allocates nothing outside its budget estimate, and node views carry the block's frame count as capacity.
+
+- 2026-11-03: Reworked the roadmap with the owner: a Foundation stage for the engine graph and N-channel core (#28) now comes first, Release 1 sits after Stage 7, missing items (app-wide undo, crash recovery, project migrations, output settings, onboarding/help/presets) were placed, and every stage is a per-item table with status, where, dependencies and gaps. Notes that said graph work was paused were rewritten. The product goal is now stated in vision, roadmap and architecture: not a conventional DAW, but able to do everything a good DAW can, since there is no good one on mobile.
+
+- 2026-11-03: Recorded owner engine decisions (one graph runs everything, Stage 0 SFZ = import + mapping, bit-identical exports, per-item Isolated/Trusted/Blocked trust modes for third-party native code, project folders with package build and AutoStacc cloud-library compatibility, per-clip musical/fixed timing, N-channel graph shipping stereo, plugin-exportable nodes, project render sample rate) plus graph resumption before Stage 2, budget-phone floor, 32-bit float buffers and adjustable latency, in decisions, roadmap, engine-next, ledger and native SDK notes. Engine-plan consistency pass: marked module/global automation (PR #68, CI green) implemented in the ledger, roadmap and architecture; split the next steps into WAV/SFZ multisample then stems export; renamed the paused "Stage 5" graph integration to avoid clashing with roadmap Stage 5 (live MIDI); mapped old architecture "Stage 5" references to roadmap stages; aligned engine-next recording text with roadmap Stage 7; relabelled engine-next §12 as dependency order, not schedule.
+
+- 2026-11-03: Added the chat-agent route: `gpt/**` branches run the Quick check (commands chosen by `run:` lines in the commit message, else a default Linux set; no app builds) and get a report file on `agent-results`, and a generated `START.md` there bundles everything a chat must read first; `AGENTS.md` now holds the loop and stop rules that keep GPT from re-review cycles.
+
+- 2026-11-03: Agent tooling made the default and fully wired: Serena's remind hook now covers Bash and Serena calls, the session-start hook prints the Graphify/Serena navigation order and restores a missing `origin/HEAD` so the docs Stop hook's stale check runs.
 
 - 2026-11-02: Added callback-safe retirement backpressure to the native Engine. SPSC now supports non-consuming peek and writable-capacity inspection; command processing reserves worst-case retirement capacity, and callback-side swaps/removals defer instead of dropping object ownership when the retirement queue plus pending list are full. Added queue-capacity regression coverage. Engine/App/Docs CI pending at the current checkpoint.
 

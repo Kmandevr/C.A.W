@@ -40,6 +40,7 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
             if (p.layout == ChannelLayout::Discrete) {
                 if (p.channelCount == 0) return ModuleValidation::InvalidPortLayout;
             } else if (p.channelCount != 0) return ModuleValidation::InvalidPortLayout;
+            if (portChannelCount(p) > kMaxPortChannels) return ModuleValidation::TooManyChannels;
         } else if (p.layout != ChannelLayout::None || p.channelCount != 0) {
             return ModuleValidation::InvalidPortLayout;
         }

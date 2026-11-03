@@ -45,7 +45,7 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 
 - The active Engine still uses `Engine::setProject`, `processChunk`, `processSlot`, `runChain` and `runVoices`.
 - `GraphExecutor` and `ModuleRegistry` still have no production playback integration with Engine/VM.
-- GraphExecutor remains stereo-only with one audio input and one audio output per node. It does not yet implement multiport/fan-in/fan-out, typed control/modulation/event/MIDI routing, sidechains, sends/returns, feedback boundaries or nested graphs.
+- GraphExecutor is planar N-channel (F3) but still has at most one audio input and one audio output per node. It does not yet implement multiport/fan-in/fan-out, typed control/modulation/event/MIDI routing, sidechains, sends/returns, feedback boundaries or nested graphs.
 - Do not create a second engine. Integrate existing VM Instances, voices, imports/exports, automation, folder buses, offline rendering and project migration into one prepared execution model.
 - Audio callback must remain allocation-free, lock-free, I/O-free and logging-free. No worker waits on callback. Prepare data before activation and reclaim it off callback.
 - Existing `.caw` VM remains the constrained untrusted-code path; trusted native code is not sandboxed without process isolation.
