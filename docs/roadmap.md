@@ -72,9 +72,9 @@ Comes first (owner, 2026-11-03), before the remaining Stage 0 and Stage 1 featur
 | F6 | One parameter model for manual values, automation, modulation and MIDI mappings | Partial | engine | F4, F5 | Parameter and global automation work on the current engine (PR #68); not unified in the graph |
 | F7 | Explicit resource budgets instead of fixed object caps | Partial | engine | — | Graph compile/prepare budgets exist on the #28 branch; the rest of the engine still uses fixed limits |
 | F8 | Latency modes (low latency for live playing, stable for lighter CPU) and adaptive concurrency | Partial | both | F4 | Worker pool, workload planner and performance profiles exist; the per-mode buffer/latency behavior is not built |
-| F9 | Project format versions and migration of older projects | Partial | app | — | Project files carry a version and newer versions are refused; there is no migration path or migration test suite yet. Needed before F4 changes the project model |
+| F9 | Project format versions and migration of older projects | Later | app | — | Deferred by the owner (2026-11-03): the app hasn't shipped and there are no projects to keep, so no backwards compatibility is promised before Release 1 and the format stays at version 2. Today files carry a version and the file-manager import refuses newer ones; storage loads don't check it. The migration framework and its tests are built before Release 1 (R.7) |
 
-**Exit gate:** live playback and offline render both run through the one graph; existing stereo projects open and render bit-identically (golden hashes unchanged); N-channel buffers are tested with real processing beyond stereo; budgets fail with clear errors instead of silent truncation; older projects migrate under test; Engine, App and Docs CI are green.
+**Exit gate:** live playback and offline render both run through the one graph; existing stereo projects open and render bit-identically (golden hashes unchanged); N-channel buffers are tested with real processing beyond stereo; budgets fail with clear errors instead of silent truncation; Engine, App and Docs CI are green.
 
 ### Stage 0 — Complete approved v2 commitments and the engine foundation
 

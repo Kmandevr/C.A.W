@@ -6,6 +6,12 @@ updated: 2026-11-03
 
 # Decisions
 
+## 2026-11-03: Merging, and no project compatibility before Release 1
+
+- **Claude may merge (owner).** Claude may merge its own pull requests, including the #28 engine branch into `Main`, when CI is green and nothing breaks. The no-merge rule is for the chat-agent (GPT) route. Flow: each Foundation item merges into `feature/native-engine-refactor-integration`, which then merges into `Main` after each item.
+- **No backwards compatibility before Release 1 (owner).** The app hasn't shipped and the owner, its only user, has no projects to keep, so older project files need not keep opening. The project file format stays at version 2; real versioning starts at Release 1, once adding features no longer needs core rework. Roadmap F9 (migrations) moves to before Release 1 (R.7), and Foundation changes to the project model need no migration. Changes to the project file are still listed in each pull request.
+- **Unchanged:** golden hashes still guard sound. Stereo templates must render bit-identically through the graph (F4), and any golden-hash change still goes to the owner first.
+
 ## 2026-11-03: Roadmap order, first release and per-item tables
 
 - **Goal restated (owner):** C.A.W. is not trying to be a conventional DAW and needn't work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile. This replaces the older "lightweight DAW in a pinch, no full feature parity" wording in `architecture.md`. The goal is stated in [vision](vision.md).
