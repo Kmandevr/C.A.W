@@ -1,7 +1,7 @@
 ---
 title: Modular adaptive engine blueprint
 summary: Deferred native-engine blueprint with implementation boundaries; current code status is tracked separately.
-updated: 2026-11-02
+updated: 2026-11-03
 covers: [engine/, app/]
 ---
 
@@ -13,7 +13,7 @@ covers: [engine/, app/]
 
 C.A.W (Code Auditioning Workspace) is a programmable sound-design and content-creation environment. It creates sound assets and reusable audio capabilities for other applications.
 
-C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful arranging, editing, mixing and export tools where they help users make complete music; audio recording remains deferred unless the owner reprioritizes it, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Audio recording/capture is not implemented; recording remains deferred in the current workflow plan. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
+C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful arranging, editing, mixing, recording and export tools where they help users make complete music, and should work as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Recording is not implemented; it is scheduled in [roadmap](roadmap.md) Stage 7. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
 
 CAW should natively create bytebeat and deterministic mathematical audio; procedural sounds, drums, instruments, effects, samples and wavetables; custom synthesizers and processing modules; MIDI patterns and expressive per-note data including MPE; reusable building blocks; and eventually distributable plugins. It should export content other software can consume, rather than recreate those applications' entire workflows.
 
@@ -104,7 +104,7 @@ MIDI is a native event and asset model. Preserve and extend the existing pattern
 - MPE-compatible export and MIDI 2.0-oriented internal precision, including fractional pitches.
 - Shared expensive effects after voices are summed where routing permits, rather than duplicating reverb/delay per note.
 - Equation-generated modulation and procedural MIDI generation.
-- Pattern editing and preview come first; a lightweight arrangement/timeline and practical audio editing can be added where they help complete music-making, without requiring full DAW parity. Audio recording remains deferred in the current workflow plan.
+- Pattern editing and preview come first; a lightweight arrangement/timeline and practical audio editing can be added where they help complete music-making, without requiring full DAW parity. Recording is scheduled in [roadmap](roadmap.md) Stage 7.
 
 ## 7. Factory, projects and asset scope
 
@@ -166,7 +166,7 @@ Do not silently lower sound quality or change deterministic results to meet a bu
 
 ### Latency and headphones
 
-Latency is a workload property, not a universal requirement. Report known/estimated output-route latency and support suitable buffering/compensation for preview, capture and export. Do not assume low-latency headphones. For timing-sensitive audition, minimize latency within the route's capability; otherwise favor stability and efficiency. If audio capture is approved later, it must remain synchronized and independent of UI frame rate; audio recording/capture is not implemented today.
+Latency is a workload property, not a universal requirement. Report known/estimated output-route latency and support suitable buffering/compensation for preview, capture and export. Do not assume low-latency headphones. For timing-sensitive audition, minimize latency within the route's capability; otherwise favor stability and efficiency. Recording (roadmap Stage 7) must stay synchronized and independent of UI frame rate; it is not implemented today.
 
 ### Quality and determinism
 
@@ -194,7 +194,9 @@ No one can promise bugs are impossible. The engineering commitment is explicit i
 - UI responsiveness while background jobs run.
 - Real Android hardware tests for heat, battery, latency and audio-route changes. CI alone is not proof of device performance.
 
-## 12. Implementation order
+## 12. Engine dependency order
+
+This is the technical dependency order for the modular engine foundations. It is not the product schedule: [roadmap](roadmap.md) is the single source for sequencing, and the [implementation ledger](engine-build-status.md) records which steps are paused (graph integration, step 3, is paused by the owner).
 
 1. **Audit and contracts:** map runtime, synth, patterns, C API, app bridge, project serialization, benchmarks and tests. Define signal/port types, module contract, asset IDs/versioning, execution modes and capability profile before adding a graph.
 2. **Adaptive execution foundation:** separate task scheduling from callback; establish workload policies, bounded workers, hardware profile, telemetry and benchmarks. Preserve current behavior by default.

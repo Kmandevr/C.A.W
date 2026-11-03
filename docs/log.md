@@ -1,10 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Log
+
+- 2026-11-03: Engine-plan consistency pass: marked module/global automation (PR #68, CI green) implemented in the ledger, roadmap and architecture; split the next steps into WAV/SFZ multisample then stems export; renamed the paused "Stage 5" graph integration to avoid clashing with roadmap Stage 5 (live MIDI); mapped old architecture "Stage 5" references to roadmap stages; aligned engine-next recording text with roadmap Stage 7; relabelled engine-next §12 as dependency order, not schedule.
 
 - 2026-11-02: Established docs/roadmap.md as the permanent canonical C.A.W. roadmap. Consolidated the long-term production direction into ordered stages, including audio/MIDI recording, monitoring and latency compensation, loop recording, take lanes/comping, plugin hosting, tempo maps, control surfaces, mastering tools, optional collaboration and surround/immersive audio. Explicitly excluded video synchronization for now. Converted the former two-part core plan into a compatibility pointer and the music workflow plan into a factual gap reference; aligned vision and UI scope notes.
 

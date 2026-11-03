@@ -2,7 +2,7 @@
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
 covers: [engine/, app/]
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # Modular engine implementation status
@@ -40,16 +40,17 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Current implementation order
 
-Stage 5 graph-to-Engine/VM/mixer integration is paused by the owner. The graph executor, runtime publication helper, native module lifecycle and their remaining integration work remain documented technical backlog, but they are not the active implementation sequence. Do not resume that work or add speculative framework layers unless the owner explicitly asks.
+Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is paused by the owner. The graph executor, runtime publication helper, native module lifecycle and their remaining integration work remain documented technical backlog, but they are not the active implementation sequence. Do not resume that work or add speculative framework layers unless the owner explicitly asks.
 
 The current app-usable v2 order is:
 
-1. **In progress — PR #68:** project/timeline automation for module parameters and project globals, including native per-sample playback/render evaluation and app editing. Await full CI before marking it implemented.
-2. Add SFZ and stems export.
+1. **Implemented — PR #68 (merged; Engine, App and Docs CI green on 2026-11-02):** project/timeline automation for module parameters and project globals, including native per-sample playback/render evaluation and app editing.
+2. WAV/SFZ multisample export ([roadmap](roadmap.md) Stage 0 item 2).
+3. Stems export ([roadmap](roadmap.md) Stage 0 item 3).
 
 Scenes and MIDI 2.0 device input/output remain deferred backlog items; the existing MIDI 2.0 decoder and bounded queue are not live device support.
 
-Each item should be delivered as its own small PR, with app-facing functionality, tests and CI. Hardware validation must be documented separately from cloud CI. This sequence supersedes the older Stage 5-first order; the implementation ledger above still records what is built, what remains unintegrated and what is paused.
+Each item should be delivered as its own small PR, with app-facing functionality, tests and CI. Hardware validation must be documented separately from cloud CI. This sequence supersedes the older graph-integration-first order; the implementation ledger above still records what is built, what remains unintegrated and what is paused.
 
 ## Verification
 

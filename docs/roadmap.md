@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # C.A.W. roadmap
@@ -35,14 +35,14 @@ A feature appearing in this roadmap is not evidence that it has shipped. Verify 
 
 ## Current implementation snapshot
 
-Checked against the repository on 2026-11-01; re-check before each implementation task.
+Checked against the repository on 2026-11-01; the Arrangement row and Stage 0 item 1 were updated on 2026-11-03 after PR #68 merged with green CI. Re-check before each implementation task.
 
 | Area | Implemented today | Remaining work |
 |---|---|---|
 | App/platforms | Eight Flutter workspaces; Android and Windows app CI artifacts | iOS/macOS release builds; Linux app is not a shipped CI artifact |
 | Engine | Portable C++20 engine, constrained module VM, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | Modular graph/native-module foundations are not all integrated into the active playback/mixer path |
 | Patterns | Piano roll, drum grid, note expressions, lane curves, generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze and advanced groove/quantize extensions |
-| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
+| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
 | Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths and master effect chain |
 | Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
 | MIDI | MIDI pattern import/export and MIDI 2.0 UMP decoder/input-queue primitive | USB/Bluetooth device I/O, controller learn, clock and live Engine voice routing |
@@ -60,7 +60,7 @@ The stages are ordered by dependency and product value. Work may be split into s
 
 These commitments remain first unless the owner changes their order.
 
-1. Complete automation for module parameters and project globals, including serialization and native engine integration.
+1. **[Implemented]** Automation for module parameters and project globals, including serialization and native engine integration (PR #68).
 2. Complete the WAV/SFZ multisample workflow.
 3. Complete stems export and integrate it with the native export pipeline.
 
