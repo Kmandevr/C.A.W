@@ -12,7 +12,9 @@ This note records product direction, not a list of shipped features. The permane
 
 **Name:** C.A.W. means **Code Auditioning Workspace**. The logo is a crow.
 
-C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content. Its centre of gravity is experimental sound creation, but that is not a reason to reject useful production workflows. The long-term direction includes a broad set of DAW capabilities while retaining a lightweight, phone-first architecture rather than copying a heavyweight DAW wholesale.
+C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content.
+
+**Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design.
 
 Code remains a first-class way to define sounds and effects. Visual controls and editors expose the same underlying project and engine state rather than creating parallel systems. C.A.W. complements established production tools through practical WAV, MIDI, SFZ, stem and plugin handoff.
 

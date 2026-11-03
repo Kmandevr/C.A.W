@@ -40,9 +40,9 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Current implementation order
 
-Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is paused by the owner. The graph executor, runtime publication helper, native module lifecycle and their remaining integration work remain documented technical backlog, but they are not the active implementation sequence. Do not resume that work or add speculative framework layers unless the owner explicitly asks. It resumes after roadmap Stage 0 and Stage 1, before Stage 2, with the target of one graph running everything ([decisions](decisions.md), 2026-11-03).
+Module-graph integration into the Engine/VM/mixer path ([engine blueprint](engine-next.md) §12 step 3) is the active first stage: the roadmap's **Foundation** stage (issue #28), ahead of the remaining Stage 0 and Stage 1 features, with the target of one graph running everything ([decisions](decisions.md), 2026-11-03). Its items, statuses and gaps are the Foundation table in the [roadmap](roadmap.md).
 
-The current app-usable v2 order is:
+After the Foundation stage, the app-usable v2 order is:
 
 1. **Implemented — PR #68 (merged; Engine, App and Docs CI green on 2026-11-02):** project/timeline automation for module parameters and project globals, including native per-sample playback/render evaluation and app editing.
 2. WAV/SFZ multisample workflow: sample import, hand-mapped zones, in-app playback and WAV + SFZ export ([roadmap](roadmap.md) Stage 0 item 2).
@@ -50,7 +50,7 @@ The current app-usable v2 order is:
 
 Scenes and MIDI 2.0 device input/output remain deferred backlog items; the existing MIDI 2.0 decoder and bounded queue are not live device support.
 
-Each item should be delivered as its own small PR, with app-facing functionality, tests and CI. Hardware validation must be documented separately from cloud CI. This sequence supersedes the older graph-integration-first order; the implementation ledger above still records what is built, what remains unintegrated and what is paused.
+Each item should be delivered as its own small PR, with app-facing functionality, tests and CI. Hardware validation must be documented separately from cloud CI. The implementation ledger above records what is built and what remains unintegrated.
 
 ## Verification
 

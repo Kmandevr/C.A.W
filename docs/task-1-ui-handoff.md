@@ -1,7 +1,7 @@
 ---
 title: Task 1 UI implementation handoff
 summary: Current UI implementation pointer and verified outstanding workflow gaps; no stale branch or CI snapshot.
-updated: 2026-11-02
+updated: 2026-11-03
 covers: [app/]
 ---
 
@@ -44,4 +44,4 @@ Do not infer current CI status from old commit hashes or historical handoff note
 
 ## Next steps
 
-Follow [Core development plan and complete feature list](core-and-feature-plan.md) and [Engine implementation status](engine-build-status.md). Do not resume the paused graph-to-Engine/VM integration or introduce AI product integration without explicit owner authorization.
+Follow [Core development plan and complete feature list](core-and-feature-plan.md) and [Engine implementation status](engine-build-status.md). Graph-to-Engine/VM integration is the roadmap's Foundation stage (issue #28); don't build UI on top of it before it lands. Don't introduce AI product integration without explicit owner authorization.
