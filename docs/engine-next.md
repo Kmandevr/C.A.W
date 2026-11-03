@@ -1,7 +1,7 @@
 ---
 title: Modular adaptive engine blueprint
 summary: Deferred native-engine blueprint with implementation boundaries; current code status is tracked separately.
-updated: 2026-11-02
+updated: 2026-11-03
 covers: [engine/, app/]
 ---
 
@@ -13,7 +13,7 @@ covers: [engine/, app/]
 
 C.A.W (Code Auditioning Workspace) is a programmable sound-design and content-creation environment. It creates sound assets and reusable audio capabilities for other applications.
 
-C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful arranging, editing, mixing and export tools where they help users make complete music; audio recording remains deferred unless the owner reprioritizes it, and should be capable of functioning as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment, and it is not intended to become a general plugin host. Audio recording/capture is not implemented; recording remains deferred in the current workflow plan. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
+C.A.W.'s primary purpose is sound design and music-content creation, not reproducing a traditional DAW as its main identity. That focus is not a ban on DAW capabilities: the app should include useful arranging, editing, mixing, recording and export tools where they help users make complete music, and should work as a useful lightweight DAW in a pinch. It does not need full feature parity with a dedicated DAW or a feature-rich live-performance environment. External plugins can be hosted under the user-chosen trust modes in §10 (roadmap Stage 9). Recording is not implemented; it is scheduled in [roadmap](roadmap.md) Stage 7. The purpose is to create, audition, refine, package and export content, with enough integrated production capability to stand on its own when needed.
 
 CAW should natively create bytebeat and deterministic mathematical audio; procedural sounds, drums, instruments, effects, samples and wavetables; custom synthesizers and processing modules; MIDI patterns and expressive per-note data including MPE; reusable building blocks; and eventually distributable plugins. It should export content other software can consume, rather than recreate those applications' entire workflows.
 
@@ -30,9 +30,11 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 9. **Local/global assets are explicit.** Local assets belong to a project; global assets are reusable across projects. Stable IDs and versions prevent path changes breaking projects.
 10. **Other applications are a destination.** C.A.W. creates portable content for DAWs, games and custom software. External plugin formats/hosting remain future work, not a current capability.
 11. **Permissive dependencies only** unless the owner approves an exception. The proprietary project licence remains unchanged.
-12. **Low-end hardware is a first-class target.** Every feature needs a resource budget and graceful behavior on weak devices.
+12. **Low-end hardware is a first-class target.** Every feature needs a resource budget and graceful behavior on weak devices. The floor is budget phones (Galaxy A1x-class, 3–4 GB RAM, Android 10+; owner, 2026-11-03).
 
 ## 3. Engine architecture
+
+**Owner decision (2026-11-03): one graph runs everything.** The typed module graph is the eventual core: .caw layers, synth voices, effects, folder buses, sends and master all become graph nodes, replacing the fixed layer → effects → bus → master mixer through migration. Integration timing stays paused (see the [implementation ledger](engine-build-status.md)).
 
 **Owner decision (2026-10-30): one engine, modular by construction.** The engine must behave as one coherent system; modularity is not a bolt-on option or a collection of loosely connected sub-engines. Its module boundaries are the architecture itself. The app, project runtime, synth, add-ons, CLI and future plugin wrappers all use the same module identities, typed ports, parameter/state model, processing semantics and dependency rules. Hosts may omit unused capabilities from a build, but they do not get separate competing implementations or incompatible module models.
 
@@ -51,7 +53,9 @@ Core layers:
 
 ### Stereo and typed connections
 
-Stereo is native, not an effect bolted onto mono output. Signal ports declare channel layout and conversion behavior. Support mono and stereo first, with room for additional layouts. Pan, width, left/right and mid/side processing are explicit. Never silently collapse or duplicate channels.
+Stereo is native, not an effect bolted onto mono output. Signal ports declare channel layout and conversion behavior. **Owner decision (2026-11-03):** ports and buses are N-channel by design (never hard-coded to two); only mono and stereo are implemented until surround. Every built-in node must also be plugin-exportable (no app or OS dependencies). Projects set their own render sample rate (default 48 kHz); live playback resamples to the device when needed. Pan, width, left/right and mid/side processing are explicit. Never silently collapse or duplicate channels.
+
+Audio buffers are 32-bit float, with 64-bit where accuracy needs it (phase/time accumulators, sensitive filter state); the .caw VM keeps 64-bit JavaScript number semantics (owner, 2026-11-03).
 
 Keep connection types distinct:
 - **Audio:** continuous audio buffers.
@@ -104,7 +108,7 @@ MIDI is a native event and asset model. Preserve and extend the existing pattern
 - MPE-compatible export and MIDI 2.0-oriented internal precision, including fractional pitches.
 - Shared expensive effects after voices are summed where routing permits, rather than duplicating reverb/delay per note.
 - Equation-generated modulation and procedural MIDI generation.
-- Pattern editing and preview come first; a lightweight arrangement/timeline and practical audio editing can be added where they help complete music-making, without requiring full DAW parity. Audio recording remains deferred in the current workflow plan.
+- Pattern editing and preview come first; a lightweight arrangement/timeline and practical audio editing can be added where they help complete music-making, without requiring full DAW parity. Recording is scheduled in [roadmap](roadmap.md) Stage 7.
 
 ## 7. Factory, projects and asset scope
 
@@ -132,11 +136,13 @@ The app file manager should reflect this conceptual hierarchy while allowing arb
 - **Global:** stored in the user's library and reusable across projects.
 - **Starter examples:** shipped under examples/ today. A future factory catalog should be read-only and never silently overwritten by user edits.
 
+**Owner decision (2026-11-03):** a project is a folder that works like a repository: project file plus local assets, with links to the global library and a "package build" step that collects every dependency so the folder works on its own. Keep it compatible with a future, optional AutoStacc cloud library.
+
 Use stable IDs, explicit versions, dependency manifests and portable references—not absolute paths. Support linked global assets, pinned versions and embedded snapshots. Detect missing dependencies and offer recovery. Never silently change old project sound when a global asset changes.
 
 ## 8. Export and external use
 
-CAW is a creator/exporter, not a plugin host. Support WAV, wavetables, multisamples (WAV/SFZ where appropriate), standard MIDI and expressive MPE/MIDI 2.0-compatible exports, portable module packages and documented presets. Eventually generate CLAP plugins first, then VST3 and other formats where practical.
+CAW is primarily a creator/exporter; external plugin hosting follows the trust modes in §10. Support WAV, wavetables, multisamples (WAV/SFZ where appropriate), standard MIDI and expressive MPE/MIDI 2.0-compatible exports, portable module packages and documented presets. Eventually generate CLAP plugins first, then VST3 and other formats where practical.
 
 Plugin packages embed the required processing and state; CAW need not be running. A phone can author and validate while native compilation runs in GitHub Actions or another build service, with a desktop build path too. Define a supported exportable DSP subset and return precise validation errors for unsupported operations. Test generated plugins in target hosts.
 
@@ -166,9 +172,13 @@ Do not silently lower sound quality or change deterministic results to meet a bu
 
 ### Latency and headphones
 
-Latency is a workload property, not a universal requirement. Report known/estimated output-route latency and support suitable buffering/compensation for preview, capture and export. Do not assume low-latency headphones. For timing-sensitive audition, minimize latency within the route's capability; otherwise favor stability and efficiency. If audio capture is approved later, it must remain synchronized and independent of UI frame rate; audio recording/capture is not implemented today.
+**Owner decision (2026-11-03):** latency is user-adjustable: a low-latency mode for live playing when timing matters, and a lighter, more stable mode when it doesn't.
+
+Latency is a workload property, not a universal requirement. Report known/estimated output-route latency and support suitable buffering/compensation for preview, capture and export. Do not assume low-latency headphones. For timing-sensitive audition, minimize latency within the route's capability; otherwise favor stability and efficiency. Recording (roadmap Stage 7) must stay synchronized and independent of UI frame rate; it is not implemented today.
 
 ### Quality and determinism
+
+**Owner decision (2026-11-03):** offline renders and exports are bit-identical on every platform. Live preview may use faster, non-identical paths only when they are labelled as preview modes.
 
 Keep deterministic mode and golden-render contract. SIMD, multithreading and GPU paths must be bit-equivalent where promised, or explicitly identified as a different render mode with separate tests and a user-visible choice. Parallelize independent work; never introduce races or nondeterministic ordering into shared state. Optimization is not permission to change sound silently.
 
@@ -176,7 +186,7 @@ Keep deterministic mode and golden-render contract. SIMD, multithreading and GPU
 
 The callback and everything it calls must avoid allocation, locks, I/O, logging, UI calls, exceptions and unbounded work. Prepare graphs, buffers, voice pools and state before publishing to audio. Use reviewed real-time-safe handoff; retire old graphs and free memory off callback.
 
-Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. Native SDK modules are trusted in-process code, not sandboxed; they require a separate isolation/trust boundary before third-party loading.
+Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. Native SDK modules are not sandboxed. **Owner decision (2026-11-03):** each external plugin or third-party native module runs in a mode the user chooses: Isolated (separate process), Trusted (in-process) or Blocked.
 
 ## 11. Verification: what “without compromise” means
 
@@ -194,7 +204,9 @@ No one can promise bugs are impossible. The engineering commitment is explicit i
 - UI responsiveness while background jobs run.
 - Real Android hardware tests for heat, battery, latency and audio-route changes. CI alone is not proof of device performance.
 
-## 12. Implementation order
+## 12. Engine dependency order
+
+This is the technical dependency order for the modular engine foundations. It is not the product schedule: [roadmap](roadmap.md) is the single source for sequencing, and the [implementation ledger](engine-build-status.md) records which steps are paused (graph integration, step 3, is paused by the owner).
 
 1. **Audit and contracts:** map runtime, synth, patterns, C API, app bridge, project serialization, benchmarks and tests. Define signal/port types, module contract, asset IDs/versioning, execution modes and capability profile before adding a graph.
 2. **Adaptive execution foundation:** separate task scheduling from callback; establish workload policies, bounded workers, hardware profile, telemetry and benchmarks. Preserve current behavior by default.

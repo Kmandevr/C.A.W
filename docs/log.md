@@ -6,6 +6,8 @@ updated: 2026-11-03
 
 # Log
 
+- 2026-11-03: Recorded owner engine decisions (one graph runs everything, Stage 0 SFZ = import + mapping, bit-identical exports, per-item Isolated/Trusted/Blocked trust modes for third-party native code, project folders with package build and AutoStacc cloud-library compatibility, per-clip musical/fixed timing, N-channel graph shipping stereo, plugin-exportable nodes, project render sample rate) plus graph resumption before Stage 2, budget-phone floor, 32-bit float buffers and adjustable latency, in decisions, roadmap, engine-next, ledger and native SDK notes. Engine-plan consistency pass: marked module/global automation (PR #68, CI green) implemented in the ledger, roadmap and architecture; split the next steps into WAV/SFZ multisample then stems export; renamed the paused "Stage 5" graph integration to avoid clashing with roadmap Stage 5 (live MIDI); mapped old architecture "Stage 5" references to roadmap stages; aligned engine-next recording text with roadmap Stage 7; relabelled engine-next §12 as dependency order, not schedule.
+
 - 2026-11-03: Added the chat-agent route: `gpt/**` branches run the Quick check (commands chosen by `run:` lines in the commit message, else a default Linux set; no app builds) and get a report file on `agent-results`, and a generated `START.md` there bundles everything a chat must read first; `AGENTS.md` now holds the loop and stop rules that keep GPT from re-review cycles.
 
 - 2026-11-03: Agent tooling made the default and fully wired: Serena's remind hook now covers Bash and Serena calls, the session-start hook prints the Graphify/Serena navigation order and restores a missing `origin/HEAD` so the docs Stop hook's stale check runs.

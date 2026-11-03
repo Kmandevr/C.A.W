@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-02
+updated: 2026-11-03
 ---
 
 # C.A.W. roadmap
@@ -35,14 +35,14 @@ A feature appearing in this roadmap is not evidence that it has shipped. Verify 
 
 ## Current implementation snapshot
 
-Checked against the repository on 2026-11-01; re-check before each implementation task.
+Checked against the repository on 2026-11-01; the Arrangement row and Stage 0 item 1 were updated on 2026-11-03 after PR #68 merged with green CI. Re-check before each implementation task.
 
 | Area | Implemented today | Remaining work |
 |---|---|---|
 | App/platforms | Eight Flutter workspaces; Android and Windows app CI artifacts | iOS/macOS release builds; Linux app is not a shipped CI artifact |
 | Engine | Portable C++20 engine, constrained module VM, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | Modular graph/native-module foundations are not all integrated into the active playback/mixer path |
 | Patterns | Piano roll, drum grid, note expressions, lane curves, generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze and advanced groove/quantize extensions |
-| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
+| Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
 | Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths and master effect chain |
 | Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
 | MIDI | MIDI pattern import/export and MIDI 2.0 UMP decoder/input-queue primitive | USB/Bluetooth device I/O, controller learn, clock and live Engine voice routing |
@@ -60,8 +60,8 @@ The stages are ordered by dependency and product value. Work may be split into s
 
 These commitments remain first unless the owner changes their order.
 
-1. Complete automation for module parameters and project globals, including serialization and native engine integration.
-2. Complete the WAV/SFZ multisample workflow.
+1. **[Implemented]** Automation for module parameters and project globals, including serialization and native engine integration (PR #68).
+2. Complete the WAV/SFZ multisample workflow: import WAV samples, map zones (key ranges, velocity layers) by hand, play them in C.A.W and export WAV + SFZ (owner, 2026-11-03). Samples live in the project folder or the global library; projects become folders that can be packaged with all their dependencies (see [decisions](decisions.md)). This brings forward the audio-import part of Stage 3 and the sampler-zone and WAV/SFZ interchange parts of Stage 4; the rest of those stages stays in place.
 3. Complete stems export and integrate it with the native export pipeline.
 
 **Exit gate:** each feature is usable through the app, tested, documented and verified by CI. A partial engine API or design does not count as complete integration.
@@ -80,6 +80,8 @@ Preserve and extend the existing shared text-backed pattern model, piano roll an
 
 ### Stage 2 — Complete the mixer and signal routing
 
+**Prerequisite (owner, 2026-11-03):** move the mixer into the typed module graph first (one graph runs everything, see [decisions](decisions.md)), then build this stage on the graph.
+
 - Flexible sends and returns.
 - General sidechain routing and modulation connections.
 - Parallel routing and effect paths.
@@ -87,13 +89,14 @@ Preserve and extend the existing shared text-backed pattern model, piano roll an
 - Track, folder, bus and master routing visualization.
 - Useful metering: level, peak, clipping, stereo width/correlation, phase and loudness where measurement cost is justified.
 
-Extend the existing folder-bus and engine processing models. Do not create a second mixer or a UI-only routing graph.
+Migrate the existing folder-bus model into the engine graph. Do not keep a second mixer alongside it or create a UI-only routing graph.
 
 **Exit gate:** tests prove actual audio routing, send levels, sidechain behavior, parallel paths, master processing, channel isolation, stereo behavior and overload handling.
 
 ### Stage 3 — Audio assets and non-destructive arrangement clips
 
 - Import and locally preview common audio formats.
+- Each audio clip is *musical* (follows tempo, time-stretched) or *fixed* (original speed); positions are stored in beats (owner, 2026-11-03).
 - Show waveform summaries and place audio clips on the existing arrangement timeline.
 - Trim, split, move, duplicate, source-offset, loop, fade, adjust clip gain and reverse.
 - Preserve original source assets; save edits as non-destructive clip operations.
@@ -165,18 +168,20 @@ Recording is part of the long-term product direction. It is not implemented toda
 
 ### Stage 9 — Plugins, platforms and extensibility
 
-- Complete the native module host, lifecycle and isolation requirements before loading third-party native code.
-- Support external CLAP hosting, then VST3 and AU where licensing, platform APIs and packaging permit.
+- Complete the native module host and lifecycle, with three user-chosen modes per external plugin or native module: Isolated (separate process), Trusted (in-process) or Blocked (owner, 2026-11-03).
+- Support external CLAP hosting, then VST3 and AU where licensing, platform APIs and packaging permit. **[Assumption]** Out-of-process isolation on Android is unverified and may be desktop-first.
+- Every built-in graph node is plugin-exportable, so any C.A.W graph can be exported as CLAP, then VST3.
 - Support building/packaging C.A.W. as a plugin where a stable host-facing interface is available.
 - Complete iOS, macOS and Linux app builds and platform-specific audio/device testing.
 - Preserve the shared C++ engine and CLI across supported platforms.
 - Keep Plugin Builder for .caw modules distinct from external binary plugin hosting.
 
-**Exit gate:** each claimed plugin format and platform has real build, host/device and lifecycle tests; native third-party code has an explicit trust/isolation model.
+**Exit gate:** each claimed plugin format and platform has real build, host/device and lifecycle tests; all three trust modes work and a crash in an Isolated plugin cannot take down the app.
 
 ### Stage 10 — Collaboration and expanded audio formats
 
 - Optional project sharing and collaboration workflows.
+- Optional sync with the owner's AutoStacc cloud library, built on the project-folder and global-library format.
 - Conflict-aware project synchronization and shared asset handling.
 - A collaboration model that supports offline work first and never makes network access necessary for core creation.
 - Expanded channel layouts, including surround and immersive/spatial audio workflows, as supported by the engine and target devices.

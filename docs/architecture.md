@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-02
+updated: 2026-11-03
 covers: [engine/, app/]
 ---
 
@@ -22,7 +22,7 @@ C.A.W.'s primary focus is sound design and music-content creation: making, shapi
 
 **[Fact, checked 2026-11-01]** The Flutter app has eight workspaces and CI build artifacts for Android and Windows. Linux is used for app analysis/tests and has a local runner, but is not a shipped app artifact. The portable C++20 engine is built/tested by CI on Linux x64, Linux Arm64 and Windows x64, plus Linux sanitizers. iOS and macOS app builds are not currently in the app workflow.
 
-The current app and native implementation are documented in [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). The house synth, piano-roll expression editing, pattern generators, MIDI file import/export, native worker pool, adaptive workload planner and Engine Lab spectrum view have working implementations. Project-level module/global parameter automation is being integrated in PR #68; SFZ and stems export follow it in the approved app-usable v2 sequence. USB/Bluetooth device I/O, audio import/editing, complete mixer routing and external binary plugin hosting are not implemented. GitHub sync and in-app AI features are not implemented or in the current product scope.
+The current app and native implementation are documented in [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). The house synth, piano-roll expression editing, pattern generators, MIDI file import/export, native worker pool, adaptive workload planner and Engine Lab spectrum view have working implementations. Project-level module/global parameter automation is implemented (PR #68); WAV/SFZ multisample and stems export follow it in [roadmap](roadmap.md) Stage 0. USB/Bluetooth device I/O, audio import/editing, complete mixer routing and external binary plugin hosting are not implemented. GitHub sync and in-app AI features are not implemented or in the current product scope.
 
 ## 1. Technology stack
 
@@ -107,7 +107,7 @@ The owner's requirement: code works directly on the bits, so sounds come out cha
 
 - **[Fact]** **JavaScript's number semantics**, so pasted formulas sound identical: values are 64-bit floats, and bitwise operators work on 32-bit wrapping integers. Shift counts are masked to 0–31. `>>` is arithmetic and `>>>` logical. `%` keeps the sign of the left side, and `x/0` and `x%0` give 0. Operator precedence follows C and JavaScript, so `t>>6<<5%t` reads as `(t>>6) << (5%t)`. The full reference is in [engine](engine.md).
 - **No undefined behaviour inside:** bit operations convert through unsigned 32-bit values, so C++'s signed-overflow and oversized-shift traps can't leak into the sound.
-- **Bit tools as built-ins**, using C++20's `<bit>`: rotate (`rotl`, `rotr`), `popcount`, count leading/trailing zeros, bit reverse, byte swap, and reinterpreting a float's bits as an integer and back (`bits(x)`, `float(i)`). Later, the same tools work on the bytes of imported audio (Stage 5).
+- **Bit tools as built-ins**, using C++20's `<bit>`: rotate (`rotl`, `rotr`), `popcount`, count leading/trailing zeros, bit reverse, byte swap, and reinterpreting a float's bits as an integer and back (`bits(x)`, `float(i)`). Later, the same tools work on the bytes of imported audio (roadmap Stage 3).
 - **Randomness is seeded, never live:** `hash(x)` and `noise(seed, t)` are counter-based hash functions (no hidden state, so jumping to any `t` gives the same value), and a project-level `seed` changes all of them at once. There's no clock or system randomness anywhere in the language.
 - **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits.
 
@@ -277,14 +277,14 @@ The owner's requirement (2026-10-28): a built-in library of documented building 
     - **Sidechain** between layers, through `export` signals ([Variables and patterns](#variables-and-patterns-proposal)).
     - **Modulation links:** connect an LFO, envelope or pattern curve to any `param` or `global` with an amount, like Bitwig's modulators. You drag from the source onto a slider; in code, it's `mod(target, source, amount)`.
     - **MIDI ports:** USB and Bluetooth MIDI devices feed `midi.*`, and MIDI clock can drive the tempo.
-  - **Later:** sends, returns and buses (Stage 5), and free module patching like a modular synth, beyond the fixed generator → effects chain.
+  - **Later:** sends, returns and buses (roadmap Stage 2), and free module patching like a modular synth, beyond the fixed generator → effects chain.
 
 ### Language direction **[Proposal]**
 
 - Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
 - **[Fact]** v1 has `let`, `param` and the stateful built-ins (envelope, filter, oscillators, noise).
 - **[Fact]** v2 adds user functions (`fn`), library modules and the standard library ([above](#standard-library-and-connectors-proposal)).
-- Add a sequencing mini-language in Stage 5, designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
+- Add a sequencing mini-language later (not yet scheduled in the roadmap), designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
 
 ### NKIDO evaluation
 
