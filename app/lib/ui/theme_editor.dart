@@ -74,6 +74,26 @@ class SettingsPage extends StatelessWidget {
               value: settings.haptics,
               onChanged: (v) => settings.update((s) => s.haptics = v),
             ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.touch_app, color: Neon.yellow),
+              title: const Text('Quick actions bar'),
+              subtitle: const Text('A floating row of shortcut buttons at the bottom of a phone screen'),
+              value: settings.quickActions,
+              onChanged: (v) => settings.update((s) => s.quickActions = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.blur_on, color: Neon.blue),
+              title: const Text('Glass'),
+              subtitle: Text(
+                  Neon.performanceMode >= 2
+                      ? 'Off while the Lightweight or Minimal profile is on'
+                      : 'Frosted toolbars, menus and sheets; see-through panels',
+                  style: TextStyle(color: Neon.dim)),
+              value: settings.glass,
+              onChanged: (v) => settings.update((s) => s.glass = v),
+            ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.graphic_eq, color: Neon.green),

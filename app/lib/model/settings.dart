@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../ui/glass.dart';
 import '../ui/motion.dart';
 import '../ui/theme.dart';
 
@@ -159,6 +160,7 @@ class Settings extends ChangeNotifier {
     Neon.showScopes = performanceMode != PerformanceMode.minimal;
     Motion.setting = motion;
     Motion.haptics = haptics;
+    Glass.enabled = glass;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
   }
 
@@ -167,6 +169,16 @@ class Settings extends ChangeNotifier {
 
   /// Haptic ticks on snaps, detents and placed notes; on by default (owner).
   bool haptics = true;
+
+  /// The docking layouts by screen shape (`phonePortrait`, `phoneLandscape`, `desktop`), kept as raw JSON: the dock
+  /// reads them and falls back to a preset when one is missing or damaged.
+  Map<String, Object?> dockLayouts = {};
+
+  /// The phone's floating quick-actions bar (owner, 2026-11-04: not very useful yet, so off by default).
+  bool quickActions = false;
+
+  /// Glass surfaces (owner, 2026-11-04): frosted blur on floating things, a glass look on panels; on by default.
+  bool glass = true;
 
   /// How strongly clips and track headers glow with their track's level: 0 is off, 1 is strong; subtle by default.
   double reactiveGlow = 0.35;
@@ -232,6 +244,9 @@ class Settings extends ChangeNotifier {
         'vim_code': vimCode,
         'motion': motion.name,
         'haptics': haptics,
+        'glass': glass,
+        'quick_actions': quickActions,
+        'dock_layouts': dockLayouts,
         'reactive_glow': reactiveGlow,
         'export_profiles': [for (final profile in exportProfiles) profile.toJson()],
         'export_history': [for (final entry in exportHistory) entry.toJson()],
@@ -257,6 +272,10 @@ class Settings extends ChangeNotifier {
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     motion = pick(MotionLevel.values, j['motion'], motion);
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
+    if (j['glass'] is bool) glass = j['glass'] as bool;
+    if (j['quick_actions'] is bool) quickActions = j['quick_actions'] as bool;
+    final dock = j['dock_layouts'];
+    if (dock is Map) dockLayouts = {for (final e in dock.entries) if (e.key is String) e.key as String: e.value};
     final glow = j['reactive_glow'];
     if (glow is num && glow.isFinite) reactiveGlow = glow.toDouble().clamp(0.0, 1.0);
     exportProfiles = ((j['export_profiles'] is List ? j['export_profiles'] as List : const []))

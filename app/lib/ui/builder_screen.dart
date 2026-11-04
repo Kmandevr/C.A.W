@@ -646,24 +646,34 @@ class _BuilderScreenState extends State<BuilderScreen> {
           if (!look.barOnTop) bar,
         ]);
       }
-      // Phone: one view at a time. Controls (or a pattern's notes) first; the code is one tap away.
+      // Phone, or a narrow panel: one view at a time. Controls (or a pattern's notes) first; the code is one tap
+      // away. The picker and track controls scroll with the rest, so a short docked panel never overflows.
       final top = [header, const SizedBox(height: 8), Center(child: viewSwitch), const SizedBox(height: 10)];
       if (roll != null) {
         return Column(children: [
-          picker,
-          trackControls,
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Column(children: [...top, status])),
+          // Above the notes the header takes at most 45% of the panel and scrolls inside that.
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: box.maxHeight * 0.45),
+            child: SingleChildScrollView(
+              child: Column(children: [
+                picker,
+                trackControls,
+                Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Column(children: [...top, status])),
+              ]),
+            ),
+          ),
           const SizedBox(height: 6),
           Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: roll)),
           const SizedBox(height: 8),
         ]);
       }
       if (!showCode) {
-        return Column(children: [
+        return ListView(padding: const EdgeInsets.only(bottom: 24), children: [
           picker,
           trackControls,
-          Expanded(
-            child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 24), children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Column(children: [
               ...top,
               scope,
               connections,
@@ -675,18 +685,23 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ]);
       }
       return Column(children: [
-        picker,
-        trackControls,
         if (look.barOnTop) bar,
         Expanded(
-          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-            ...top,
-            status,
-            const SizedBox(height: 6),
-            editor,
-            const SizedBox(height: 8),
-            connections,
-            const SizedBox(height: 12),
+          child: ListView(children: [
+            picker,
+            trackControls,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Column(children: [
+                ...top,
+                status,
+                const SizedBox(height: 6),
+                editor,
+                const SizedBox(height: 8),
+                connections,
+                const SizedBox(height: 12),
+              ]),
+            ),
           ]),
         ),
         if (!look.barOnTop) bar,

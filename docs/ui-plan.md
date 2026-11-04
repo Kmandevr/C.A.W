@@ -41,7 +41,7 @@ updated: 2026-11-04
 
 **[Fact, 2026-11-04]** These findings come from the Linux debug build under Xvfb with the "First loop" template, at 390×844 (phone portrait) and 1280×800 (desktop).
 
-1. **The quick-action strip covers content.** It floats over the bottom of every phone screen.
+1. **The quick-action strip covers content.** It floats over the bottom of every phone screen. Until it becomes a per-panel toolbar it is off by default, behind a Settings switch (owner, 2026-11-04).
 2. **The inline piano roll is about 200 px tall on a phone,** under the track card, the pattern header and the description.
 3. **The timeline hides sound that plays.** A layer with no clips plays its module all song long (`project.dart` sends its pattern directly), but its row says "Add MIDI clip with +". That is four of five template tracks.
 4. **The transport has only play, BPM and CPU.** There is no stop, no position, no loop toggle, and no undo or redo.
@@ -274,6 +274,7 @@ updated: 2026-11-04
   - On release, it settles onto the ghost with the distance-aware motion above.
   - Points and handles grow slightly under the finger.
 - **Haptics (owner):** on by default, and can be switched off. On Android a light tick plays when something snaps, a handle clicks into a detent, or a note is placed.
+- **Glass (owner):** real frosted blur on floating surfaces only (toolbars, menus, sheets, drag previews, the transport). Docked panels get a translucent tint, a soft top highlight and a thin bright edge, with no blur. A Settings switch, on by default; Lightweight and Minimal turn it off. Built: `lib/ui/glass.dart` (`GlassPanel`, `GlassOverlay`).
 - **Motion setting (owner):** Full, Reduced or Off.
   - Reduced keeps fades only, with no springs or movement.
   - The Minimal profile sets Off, and the system's reduce-motion setting sets Reduced.
@@ -286,7 +287,7 @@ updated: 2026-11-04
 
 Each step is one small PR to `Main`. It includes widget tests, screenshot (golden) tests at phone portrait, landscape and desktop, a code-reviewer pass and release-check. It updates [app](app.md) and [UI design](ui.md). Engine changes go to GPT as issues.
 
-1. **U0, foundations** (built: the motion rules, the Motion/Haptics/Glow settings, golden tests, design tokens, eight track colours, and the shared toolbar row, tool and info buttons):
+1. **U0, foundations** (built: the motion rules, the Motion/Haptics/Glow settings, the Glass setting and surfaces, golden tests, design tokens, eight track colours, and the shared toolbar row, tool and info buttons):
    - design tokens (spacing, type scale, one accent plus colours for meaning, track colours)
    - shared widgets
    - motion and snapping helpers
@@ -294,17 +295,18 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
 2. **U1, the docking shell.** Five PRs, in the order an architect review recommended (2026-11-04):
    1. **The layout model** (`lib/ui/dock/layout.dart`, built): splits and tab groups, dock, remove, reveal, activate and weights, presets per form factor, and damage-tolerant JSON.
       - Panel ids are strings, so a renamed panel drops out of a saved layout instead of breaking it.
-   2. **The dock view** (`lib/ui/dock/dock_view.dart`), not yet wired in:
-      - dividers with 48 dp grab zones and minimum sizes
-      - tabs, a long-press drag onto five drop zones, and maximise
-      - each panel body keeps a `GlobalObjectKey(panelId)`, so a moved panel keeps its state
+   2. **The dock view** (`lib/ui/dock/dock_view.dart`, built, not yet wired in):
+      - dividers that stop at the 12% minimum and follow the pointer from the drag's start. The grab zone reaches only 10 dp into each panel, not the 48 dp first planned, because a review found a wider zone takes scrolls that start near a panel's edge. Every group keeps room for its tab strip, however small its share.
+      - glass tab strips, a long-press drag onto five drop zones (the middle half joins the group, near an edge splits there) with a preview of where it lands, and maximise
+      - each panel body keeps a `GlobalObjectKey(panelId)` and its own `RepaintBoundary`, so a moved or maximised panel keeps its state; hidden tabs stay mounted with tickers off
       - goldens at the three sizes
-   3. **The shell switch:**
-      - a `DockController.reveal(panel)` replaces the tab-switching callbacks
+   3. **The shell switch** (built):
+      - `DockController` (`lib/ui/dock/dock_controller.dart`) keeps a layout per screen shape; `DockController.of(context).reveal(panel)` shows a panel. The screens' open-the-Builder callbacks and the view shortcuts call it.
       - the last-touched panel sets the key area
-      - hidden tabs stay mounted under `TickerMode(enabled: false)` and don't rebuild on the 30 Hz tick
-      - Settings keeps `dock_layouts` as raw JSON, so a damaged layout falls back on its own
-      - screens read their panel's size, not the screen's
+      - hidden tabs stay mounted with their tickers off. **Not yet:** they still rebuild on the 30 Hz tick, as the old IndexedStack did; a `PanelVisible` check is left for later.
+      - Settings keeps `dock_layouts` as raw JSON, so a damaged layout falls back to its preset on its own
+      - screens read their panel's size, not the screen's (the piano roll's finger-size taps still follow the device's screen). The Builder's narrow layouts scroll, so a short panel doesn't overflow.
+      - the layout button in the transport: presets and every panel
    4. **Open straight into the arrangement:** the startup screen goes, and New, Template and Open move to the project menu.
    5. **The transport bar:** undo and redo, and tap tempo (#19).
 3. **U2, arrangement:**

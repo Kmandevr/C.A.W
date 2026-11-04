@@ -1,4 +1,4 @@
-// App shell: transport, project menu and eight workspaces. Mobile groups advanced destinations under More.
+// App shell: transport, project menu, and the eight workspaces as docking panels (one layout per screen shape).
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
@@ -10,6 +10,9 @@ import 'builder_screen.dart';
 import 'exporter_screen.dart';
 import 'mixer_screen.dart';
 import 'automation_screen.dart';
+import 'dock/dock_controller.dart';
+import 'dock/dock_view.dart';
+import 'dock/layout.dart';
 import 'engine_lab_screen.dart';
 import 'file_manager_screen.dart';
 import 'plugin_builder_screen.dart';
@@ -19,8 +22,32 @@ import 'theme.dart';
 import 'theme_editor.dart';
 import 'widgets.dart';
 
-/// The open area, kept when the shell is rebuilt after a theme change.
-int _lastTab = 1;
+/// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
+const _viewPanels = [
+  Panels.builder,
+  Panels.arrangement,
+  Panels.mixer,
+  Panels.engineLab,
+  Panels.automation,
+  Panels.exporter,
+  Panels.files,
+  Panels.pluginBuilder,
+];
+
+/// The keyboard area of each panel.
+Area _areaOf(String panel) => switch (panel) {
+      Panels.builder => Area.builder,
+      Panels.arrangement => Area.arranger,
+      Panels.exporter => Area.exporter,
+      _ => Area.global,
+    };
+
+/// The screen shape that keeps its own layout, from the shell's size.
+FormFactor formFactorFor(Size size) => size.width >= 900
+    ? FormFactor.desktop
+    : size.width > size.height
+        ? FormFactor.phoneLandscape
+        : FormFactor.phonePortrait;
 
 class Shell extends StatefulWidget {
   const Shell({super.key, required this.state});
@@ -31,8 +58,8 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
-  int _tab = _lastTab;
   late final AppLifecycleListener _life;
+  late final DockController _dock = DockController(s.settings);
 
   AppState get s => widget.state;
 
@@ -40,9 +67,13 @@ class _ShellState extends State<Shell> {
   void initState() {
     super.initState();
     _life = AppLifecycleListener(
-      onPause: () => s.lifecycle(foreground: false),
+      onPause: () {
+        _dock.flush();
+        s.lifecycle(foreground: false);
+      },
       onResume: () => s.lifecycle(foreground: true),
       onExitRequested: () async {
+        await _dock.flush();
         await s.flush();
         return AppExitResponse.exit;
       },
@@ -52,25 +83,29 @@ class _ShellState extends State<Shell> {
   @override
   void dispose() {
     _life.dispose();
+    _dock.dispose();
     super.dispose();
   }
 
-  @override
-  void setState(VoidCallback fn) {
-    super.setState(fn);
-    _lastTab = _tab;
-  }
+  void _openBuilder() => _dock.reveal(Panels.builder);
 
-  static const _dest = [
-    (Icons.code, 'Builder'),
-    (Icons.view_timeline, 'Arranger'),
-    (Icons.tune, 'Mixer'),
-    (Icons.account_tree, 'Engine Lab'),
-    (Icons.show_chart, 'Automation'),
-    (Icons.ios_share, 'Exporter'),
-    (Icons.folder_open, 'Files'),
-    (Icons.extension, 'Plugin Builder'),
-  ];
+  Map<String, Widget> _screens() => {
+        Panels.builder: BuilderScreen(state: s),
+        Panels.arrangement: ArrangerScreen(
+          state: s,
+          onOpenPattern: _openBuilder,
+          onOpenModule: (id) {
+            s.selectModule(id);
+            _openBuilder();
+          },
+        ),
+        Panels.mixer: MixerScreen(state: s, onOpenBuilder: _openBuilder),
+        Panels.engineLab: EngineLabScreen(state: s, onOpenBuilder: _openBuilder),
+        Panels.automation: AutomationScreen(state: s),
+        Panels.exporter: ExporterScreen(state: s),
+        Panels.files: FileManagerScreen(state: s, onOpenBuilder: _openBuilder),
+        Panels.pluginBuilder: PluginBuilderScreen(state: s, onOpenBuilder: _openBuilder),
+      };
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -78,108 +113,112 @@ class _ShellState extends State<Shell> {
         builder: (context, _) {
           if (!s.ready) return const Scaffold(body: Center(child: CrowLogo(size: 64)));
           if (s.starting) return StartupScreen(state: s);
-          final screens = [
-            BuilderScreen(state: s),
-            ArrangerScreen(
-              state: s,
-              onOpenPattern: () => setState(() => _tab = 0),
-              onOpenModule: (id) { s.selectModule(id); setState(() => _tab = 0); },
-            ),
-            MixerScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
-            EngineLabScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
-            AutomationScreen(state: s),
-            ExporterScreen(state: s),
-            FileManagerScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
-            PluginBuilderScreen(state: s, onOpenBuilder: () => setState(() => _tab = 0)),
-          ];
-          return LayoutBuilder(builder: (context, box) {
-            final wide = box.maxWidth >= 900;
-            final body = Column(children: [
-              _TransportBar(state: s),
-              if (s.engineError != null || s.audioError != null)
-                Container(
-                  width: double.infinity,
-                  color: Neon.pink.withValues(alpha: 0.15),
-                  padding: const EdgeInsets.all(8),
-                  child: Text(s.engineError ?? s.audioError!, style: const TextStyle(color: Neon.pink)),
-                ),
-              Expanded(child: IndexedStack(index: _tab, children: screens)),
-            ]);
-            return KeyRouter(
-              state: s,
-              screenArea: const [Area.builder, Area.arranger, Area.global, Area.global, Area.global, Area.exporter, Area.global, Area.global][_tab],
-              onView: (i) => setState(() => _tab = i),
-              child: Scaffold(
-                body: SafeArea(
-                  child: wide
-                      ? Row(children: [
-                          NavigationRail(
-                            selectedIndex: _tab,
-                            labelType: NavigationRailLabelType.all,
-                            onDestinationSelected: (i) => setState(() => _tab = i),
-                            destinations: [
-                              for (final d in _dest) NavigationRailDestination(icon: Icon(d.$1), label: Text(d.$2)),
-                            ],
+          // Built once per app-state change; a layout change (a divider drag, a tab) reuses them, so it rebuilds
+          // only the dock, not the screens.
+          final screens = _screens();
+          return DockScope(
+            controller: _dock,
+            child: Scaffold(
+              body: SafeArea(
+                child: LayoutBuilder(builder: (context, box) {
+                  _dock.form = formFactorFor(box.biggest);
+                  return ListenableBuilder(
+                    listenable: _dock,
+                    builder: (context, _) => KeyRouter(
+                      state: s,
+                      screenArea: _areaOf(_dock.keyPanel),
+                      onView: (i) => _dock.reveal(_viewPanels[i]),
+                      child: Column(children: [
+                        _TransportBar(state: s, dock: _dock),
+                        if (s.engineError != null || s.audioError != null)
+                          Container(
+                            width: double.infinity,
+                            color: Neon.pink.withValues(alpha: 0.15),
+                            padding: const EdgeInsets.all(8),
+                            child: Text(s.engineError ?? s.audioError!, style: const TextStyle(color: Neon.pink)),
                           ),
-                          const VerticalDivider(width: 1),
-                          Expanded(child: body),
-                        ])
-                      : body,
-                ),
-                bottomNavigationBar: wide
-                    ? null
-                    : NavigationBar(
-                        height: 64,
-                        selectedIndex: _tab < 3 ? _tab : 3,
-                        onDestinationSelected: (i) {
-                          if (i < 3) {
-                            setState(() => _tab = i);
-                          } else {
-                            showModalBottomSheet<void>(
-                              context: context,
-                              backgroundColor: Neon.panel,
-                              builder: (sheetContext) => SafeArea(child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  for (final entry in const [
-                                    (3, Icons.account_tree, 'Engine Lab'),
-                                    (4, Icons.show_chart, 'Automation'),
-                                    (5, Icons.ios_share, 'Exporter'),
-                                    (6, Icons.folder_open, 'Files'),
-                                    (7, Icons.extension, 'Plugin Builder'),
-                                  ])
-                                    ListTile(
-                                      leading: Icon(entry.$2, color: _tab == entry.$1 ? Neon.green : Neon.dim),
-                                      title: Text(entry.$3),
-                                      selected: _tab == entry.$1,
-                                      onTap: () {
-                                        Navigator.pop(sheetContext);
-                                        setState(() => _tab = entry.$1);
-                                      },
-                                    ),
-                                ],
-                              )),
-                            );
-                          }
-                        },
-                        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-                        destinations: const [
-                          NavigationDestination(icon: Icon(Icons.code), label: 'Builder'),
-                          NavigationDestination(icon: Icon(Icons.view_timeline), label: 'Arranger'),
-                          NavigationDestination(icon: Icon(Icons.tune), label: 'Mixer'),
-                          NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
-                        ],
-                      ),
+                        Expanded(
+                          child: DockView(
+                            layout: _dock.layout,
+                            onChanged: _dock.set,
+                            panelBuilder: (_, id) => Listener(
+                              behavior: HitTestBehavior.translucent,
+                              onPointerDown: (_) => _dock.touch(id),
+                              child: screens[id] ?? const SizedBox.shrink(),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  );
+                }),
               ),
-            );
-          });
+            ),
+          );
         },
       );
 }
 
+/// The layout menu: the presets, and every panel (tap to show it).
+Future<void> showLayoutMenu(BuildContext context, DockController dock) => showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Neon.panel,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(sheet).size.height * 0.75),
+          child: ListView(shrinkWrap: true, children: [
+            const Heading('Layout'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: SegmentedButton<DockPreset>(
+                showSelectedIcon: false,
+                emptySelectionAllowed: true,
+                segments: const [
+                  ButtonSegment(value: DockPreset.arrange, label: Text('Arrange')),
+                  ButtonSegment(value: DockPreset.mix, label: Text('Mix')),
+                  ButtonSegment(value: DockPreset.code, label: Text('Code')),
+                ],
+                selected: const {},
+                onSelectionChanged: (v) {
+                  Navigator.pop(sheet);
+                  dock.usePreset(v.first);
+                },
+              ),
+            ),
+            const Heading('Panels'),
+            for (final id in Panels.all)
+              ListTile(
+                leading: Icon(_panelIcon(id), color: dock.layout.visible.contains(id) ? Neon.green : Neon.dim),
+                title: Text(dockPanelTitle(id)),
+                subtitle: dock.layout.contains(id) ? null : const Text('Closed', style: TextStyle(color: Neon.dim)),
+                selected: dock.layout.visible.contains(id),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  dock.reveal(id);
+                },
+              ),
+          ]),
+        ),
+      ),
+    );
+
+IconData _panelIcon(String id) => switch (id) {
+      Panels.builder => Icons.code,
+      Panels.arrangement => Icons.view_timeline,
+      Panels.mixer => Icons.tune,
+      Panels.engineLab => Icons.account_tree,
+      Panels.automation => Icons.show_chart,
+      Panels.exporter => Icons.ios_share,
+      Panels.files => Icons.folder_open,
+      Panels.pluginBuilder => Icons.extension,
+      _ => Icons.dashboard,
+    };
+
 class _TransportBar extends StatelessWidget {
-  const _TransportBar({required this.state});
+  const _TransportBar({required this.state, required this.dock});
   final AppState state;
+  final DockController dock;
 
   @override
   Widget build(BuildContext context) {
@@ -219,7 +258,12 @@ class _TransportBar extends StatelessWidget {
             ]);
           },
         ),
-        const SizedBox(width: 10),
+        IconButton(
+          tooltip: 'Layout and panels',
+          color: Neon.dim,
+          icon: const Icon(Icons.dashboard_customize),
+          onPressed: () => showLayoutMenu(context, dock),
+        ),
         Tooltip(
           message: playing ? 'Stop (Space)' : 'Play (Space)',
           child: InkWell(
