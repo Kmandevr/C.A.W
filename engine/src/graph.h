@@ -76,7 +76,19 @@ enum class GraphError : uint8_t {
     TooManyChannels,
     RuntimeHostInputMismatch,
     DuplicateConnection,
-    RoutingUnavailable
+    RoutingUnavailable,
+    InvalidParameterLink
+};
+
+// A modulation link (F6.3): a node's modulation output drives another node's parameter.
+// Links on one parameter apply in ascending `id` (never list or graph order); see params.h
+// for the ops and depth (a fraction of the parameter's range, -1..1).
+struct ParameterLink {
+    uint32_t id = 0;
+    uint32_t sourceNode = 0, sourcePort = 0;          // a Modulation output port
+    uint32_t destinationNode = 0, parameter = 0;      // index into the node's descriptor parameters
+    ModulationOp op = ModulationOp::Add;
+    double depth = 0.0;
 };
 
 struct CompiledGraph {
@@ -153,7 +165,8 @@ public:
     // routable too: it takes at most one route, reads that source's buffer directly (no copy,
     // bits unchanged) and is silence without one; the graph then reads no host input at all.
     // Modulation, control and event inputs keep their unconnected values (silence, default, the
-    // first event input the host events).
+    // first event input the host events). Refused (RoutingUnavailable) while modulation links are
+    // set, since routing could run a link's source late or not at all.
     GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget,
                               bool routePlainInputs = false);
     // prepare() with no connections plus reserveRouting(maxSourcesPerInput, budget, true) in one
@@ -180,6 +193,15 @@ public:
     // The same queue: ends every touch (call when playback starts or restarts), so automation
     // rules again.
     bool queueClearTouch() noexcept;
+    // Control thread, only while process() is not running (like prepare()): replace every
+    // modulation link. Each source must be a node's modulation output and its node must run
+    // before the destination node; ids are unique per parameter, at most kMaxParameterLinks
+    // per parameter, ops and depths as ParameterResolver::setLinks accepts. Not available once
+    // routing is reserved (the order can change). On an error nothing changes. Errors:
+    // NodeIndexOutOfRange, PortIndexOutOfRange (port or parameter), PortTypeMismatch (not a
+    // modulation output), Cycle (source does not run first), InvalidParameterLink, RoutingUnavailable,
+    // InvalidOutputNode (not prepared), OutOfMemory (its control-thread scratch).
+    GraphError setModulationLinks(const ParameterLink* links, uint32_t count);
     // Control thread, only while process() is not running (after prepare(), before the audio
     // thread starts or resumes, like prepare() itself): restore a parameter's value directly, with
     // no ramp and no touch. A rebuild calls it for every value it keeps, as prepare() starts each
@@ -276,6 +298,9 @@ private:
     // queueClearTouch() is O(1): it starts a new epoch, and each resolver drops its touch the
     // next time it is set or resolved in a newer epoch than it last saw.
     std::vector<uint64_t> touchEpoch_;
+    // Per parameter, kMaxParameterLinks signal pointers in link id order (null: no link there).
+    std::vector<const float*> linkSignals_;
+    uint32_t linkCount_ = 0;  // links set; reserveRouting() refuses while any exist
     uint64_t clearEpoch_ = 0;
     void syncTouch(uint32_t p) noexcept;
     struct ParameterCommand { uint32_t node, parameter; double value; bool clearTouch; };
