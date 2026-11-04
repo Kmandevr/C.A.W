@@ -128,6 +128,50 @@ void main() {
     s.dispose();
   }, skip: skip);
 
+  testWidgets('taps right after a drawn note keep drawing (its outside end zone takes only drags)', (tester) async {
+    final (s, m) = await open(tester, '');
+    await tester.tapAt(const Offset(200, 300));
+    await settle(tester);
+    final first = notes(m).single;
+    // Just past the new (selected) note's end, twice in quick succession: two more notes, the first one kept.
+    final end = _x(first.end.toDouble());
+    await tester.tapAt(Offset(end + 10, 300));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(Offset(end + 10 + 28 * first.len.toDouble(), 300));
+    await settle(tester);
+    expect(notes(m), hasLength(3), reason: m.source);
+    expect(notes(m).first.at, first.at, reason: m.source);
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('a held finger during the bypass does not open the extras; a pinch from a note still zooms',
+      (tester) async {
+    final (s, m) = await open(tester, '0 C3 4\n');
+    final drag = await tester.startGesture(Offset(_x(2), _c3), pointer: 1);
+    final rest = await tester.startGesture(const Offset(600, 400), pointer: 2);
+    await tester.pump(const Duration(milliseconds: 1600));
+    expect(find.textContaining('Note at'), findsNothing);
+    await drag.up();
+    await rest.up();
+    await settle(tester);
+    // A pinch whose first finger lands on the note: the second finger moves first, so it zooms and edits nothing.
+    final a = await tester.startGesture(Offset(_x(2), _c3), pointer: 3);
+    final b = await tester.startGesture(Offset(_x(2) + 100, _c3), pointer: 4);
+    await b.moveBy(const Offset(60, 0));
+    await b.moveBy(const Offset(60, 0));
+    await tester.pump();
+    await a.up();
+    await b.up();
+    await settle(tester);
+    expect((notes(m).single.at, notes(m).single.len), (Steps.zero, Steps(4)), reason: m.source);
+    // Zoomed in, a tap just past where the end was at 28 px a step lands on the note instead of drawing.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+    await tester.tapAt(Offset(_x(4) + 6, _c3));
+    await settle(tester);
+    expect(notes(m), hasLength(1), reason: m.source);
+    s.dispose();
+  }, skip: skip);
+
   testWidgets('a drag held at the right edge scrolls and keeps stretching', (tester) async {
     final (s, m) = await open(tester, '0 C3 4\n');
     final g = await tester.startGesture(Offset(_x(4) - 6, _c3));

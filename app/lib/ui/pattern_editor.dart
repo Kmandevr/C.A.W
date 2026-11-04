@@ -95,6 +95,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   // Snap bypass: a second finger resting on the roll during a note drag frees it from the grid until it lifts.
   int? _editPointer;
   bool _bypass = false;
+  Offset _restAt = Offset.zero, _editAtBypass = Offset.zero; // where the resting and dragging fingers were then
   bool _touch = false; // the drag is a finger's, so the note ends get finger-sized zones
   // Edge auto-scroll while a drag sits near the grid's edge.
   late final Ticker _scroller = createTicker(_scrollTick);
@@ -382,7 +383,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case 'roll.cursor.jumpRight':
         jump(3);
       case 'roll.notes.insert':
-        final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _resSteps);
+        final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _resSteps, vel: _lastVel);
         if (r.id != null) _apply(r.doc, select: {r.id!});
       case 'roll.select.copyafter':
         var x = d;
@@ -602,7 +603,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     if (ctrl) return KeyEventResult.ignored;
     switch (k) {
       case LogicalKeyboardKey.keyQ:
-        final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? g);
+        final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? g, vel: _lastVel);
         if (r.id != null) _apply(r.doc, select: {r.id!});
       case LogicalKeyboardKey.keyE:
         if (_sel.isNotEmpty) {
@@ -971,7 +972,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
           _pending = p;
           _panning = false;
         }
-      } else if (p.dy >= _gridH || _noteAt(p) != null || _edgeAt(p) != null || _tool == PatternTool.select) {
+      } else if (p.dy >= _gridH || _noteAt(p) != null || _tool == PatternTool.select) {
         _down(p);
       } else {
         _pending = p;
@@ -980,7 +981,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       }
     } else if (_pointers.length == 2 && _dragNote != null && _dragStart != null && _lane == 0) {
       // A second finger during a note drag frees it from the grid while it rests.
+      _hold?.cancel();
+      _hold = null;
+      _tapCandidate = null; // two fingers aren't a tap: lifting them doesn't arm the double tap
       _bypass = true;
+      _restAt = e.localPosition;
+      _editAtBypass = _pointers[_editPointer] ?? e.localPosition;
       _move(_lastP!);
     } else if (_pointers.length == 2) {
       _cancelEdit();
@@ -988,19 +994,30 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _bendEnd(cancel: true);
       _pending = null;
       _clearGhost();
-      final ps = _pointers.values.toList();
-      _pinchSpan = (ps[0].dx - ps[1].dx).abs();
-      _pinchFocal = (ps[0] + ps[1]) / 2;
-      _zoomStart = _pxPerStep;
+      _startPinch();
     }
+  }
+
+  void _startPinch() {
+    final ps = _pointers.values.take(2).toList();
+    _pinchSpan = (ps[0].dx - ps[1].dx).abs();
+    _pinchFocal = (ps[0] + ps[1]) / 2;
+    _zoomStart = _pxPerStep;
   }
 
   void _pointerMove(PointerMoveEvent e) {
     if (!_pointers.containsKey(e.pointer)) return;
     _pointers[e.pointer] = e.localPosition;
     if (_bypass) {
-      // Only the finger that started the drag moves it; the resting one just holds the bypass.
-      if (e.pointer == _editPointer) _dragTo(e.localPosition - _origin);
+      // Only the finger that started the drag moves it; the resting one just holds the bypass. A second finger that
+      // moves first (the dragging one still) is a pinch after all: the edit is dropped and the view zooms.
+      if (e.pointer == _editPointer) {
+        _dragTo(e.localPosition - _origin);
+      } else if ((e.localPosition - _restAt).distance > kTouchSlop &&
+          (_pointers[_editPointer]! - _editAtBypass).distance <= kTouchSlop) {
+        _cancelEdit();
+        _startPinch();
+      }
       return;
     }
     if (_pointers.length >= 2) {
@@ -1019,6 +1036,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     if (pending != null) {
       if (!_panning && (p - pending).distance > kTouchSlop) {
         _clearGhost();
+        // A drag from just outside a selected note's end stretches it (a tap there still draws).
+        if (_tool != PatternTool.curve && _edgeAt(pending) != null) {
+          _pending = null;
+          _down(pending, outside: true);
+          _dragTo(p);
+          return;
+        }
         // A drag from empty grid does what the settings say: scroll, select, or the tool's own drag.
         if (_look.emptyDrag != EmptyDrag.scroll && _tool != PatternTool.curve) {
           _pending = null;
@@ -1076,7 +1100,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     if (dt <= 0 || dt > 0.1) return; // the first frame, or a stall: no jump
     final nx = (_scrollX + v.dx * dt).clamp(0.0, _maxScrollX), ny = (_scrollY + v.dy * dt).clamp(0.0, _maxScrollY);
     final moved = Offset(nx - _scrollX, ny - _scrollY);
-    if (moved == Offset.zero) return;
+    if (moved == Offset.zero) {
+      _scroller.stop(); // at the end of the view: the next move near the edge starts it again
+      return;
+    }
+    // The content moves under the finger, so a held finger isn't a long press.
+    _hold?.cancel();
+    _hold = null;
     // The drag's start is in screen space: it moves with the content, so the edit grows by what scrolled.
     _dragStart = _dragStart! - moved;
     setState(() {
@@ -1097,10 +1127,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         }
         return;
       }
-      // The dragging finger lifted first: the edit ends, and the resting one scrolls until it lifts.
+      // The dragging finger lifted first: the edit ends; one finger left scrolls until it lifts, two pinch.
       _bypass = false;
       cancel ? _cancelEdit() : _up();
-      if (_pointers.isNotEmpty) {
+      if (_pointers.length >= 2) {
+        _startPinch();
+      } else if (_pointers.isNotEmpty) {
         _pending = _pointers.values.first - _origin;
         _panning = true;
       }
@@ -1209,7 +1241,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     return null;
   }
 
-  void _down(Offset p, {bool rect = false}) {
+  /// Starts a one-finger edit at [p]. [outside]: the drag began just outside a selected note's end and stretches it.
+  void _down(Offset p, {bool rect = false, bool outside = false}) {
     _focus.requestFocus();
     final d = _doc;
     if (d == null) return;
@@ -1230,7 +1263,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
     var hit = _noteAt(p);
     var edge = hit == null ? 0 : (_partAt(d.byId(hit)!, p.dx) ?? 0);
-    if (hit == null && !_rectSelect) {
+    if (hit == null && outside && !_rectSelect) {
       final e = _edgeAt(p);
       if (e != null) (hit, edge) = (e.id, e.edge);
     }
@@ -1238,7 +1271,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
     _tapCandidate = null;
     final tapAt = _tapAt;
-    if (hit != null && hit == _tapNote && tapAt != null &&
+    if (hit != null && !outside && hit == _tapNote && tapAt != null &&
         DateTime.now().difference(tapAt) < const Duration(milliseconds: 350)) {
       _tapNote = null;
       _dragStart = null;

@@ -124,6 +124,11 @@ void main() {
     final header = tester.getTopLeft(find.text(second.name).first);
     final firstHeader = tester.getTopLeft(find.text(first.name).first);
     expect(header.dy - firstHeader.dy, closeTo(76 + 30 + 12, 1));
+    // One grid behind all the tracks, reaching the bottom of the view below the last one (owner: like Reaper).
+    final grid = find.byWidgetPredicate((w) => w is CustomPaint && '${w.painter.runtimeType}' == '_ArrangementGrid');
+    expect(grid, findsOneWidget);
+    final lastLane = tester.getBottomLeft(find.text(s.project.layers.last.name).first).dy;
+    expect(tester.getRect(grid).bottom, greaterThan(lastLane + 100));
     await tester.drag(find.byKey(ValueKey('spacer-grip-${first.id}')), const Offset(0, 40));
     await tester.pumpAndSettle();
     expect(first.spaceBelow, greaterThan(50));

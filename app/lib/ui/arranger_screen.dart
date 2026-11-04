@@ -135,7 +135,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       ),
       Expanded(child: p.layers.isEmpty
         ? const Center(child: Text('Add a track, choose a generator, then add a MIDI clip.'))
-        : SingleChildScrollView(child: Column(children: [
+        : LayoutBuilder(builder: (context, view) => SingleChildScrollView(child: Column(children: [
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               SizedBox(width: headW, child: Column(children: [
                 const SizedBox(height: 30, child: Padding(
@@ -151,17 +151,21 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
               ])),
               Expanded(child: SingleChildScrollView(controller: _hScroll, scrollDirection: Axis.horizontal,
                 child: SizedBox(width: width, child: Stack(children: [
-                  Column(children: [
+                  // One grid behind every track, through the gaps and spacers and down to the bottom of the view
+                  // below the last track (owner: like Reaper).
+                  Positioned(left: 0, right: 0, top: 30, bottom: 0, child: IgnorePointer(child: CustomPaint(
+                    painter: _ArrangementGrid(stepW, p.stepsPerBar, _hScroll)))),
+                  ConstrainedBox(constraints: BoxConstraints(minHeight: view.maxHeight), child: Column(children: [
                     SizedBox(height: 30, width: width,
                       child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll))),
                     for (final layer in visible) ...[
-                      _TimelineLane(state: s, layer: layer, width: width, stepW: stepW, scroll: _hScroll,
+                      _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
                         trackHeight: trackHeight, selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
                       // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
                       if (layer.spaceBelow > 0) SizedBox(height: layer.spaceBelow),
                       SizedBox(height: gap),
                     ],
-                  ]),
+                  ])),
                   Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
                     valueListenable: s.tick,
                     builder: (context, _, _) {
@@ -172,7 +176,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                   ))),
                 ])))),
             ]),
-          ]))),
+          ])))),
       if (mixer) _ArrangementMixer(state: s),
     ]);
   }
@@ -325,10 +329,9 @@ class _TimelineHeader extends StatelessWidget {
 
 class _TimelineLane extends StatelessWidget {
   const _TimelineLane({required this.state, required this.layer, required this.width,
-    required this.stepW, required this.scroll, required this.trackHeight, required this.selectedIds, this.onOpen});
+    required this.stepW, required this.trackHeight, required this.selectedIds, this.onOpen});
   final AppState state;
   final LayerDoc layer;
-  final ScrollController scroll;
   final double width, stepW, trackHeight;
   final Set<String> selectedIds;
   final VoidCallback? onOpen;
@@ -338,7 +341,6 @@ class _TimelineLane extends StatelessWidget {
     final height = trackHeight + layer.automation.length * 34.0;
     return SizedBox(width: width, height: height,
     child: Stack(children: [
-      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar, scroll)),
       Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
         // A plain horizontal drag belongs to the enclosing scroll view. Long-press
         // drag creates a time selection without stealing normal timeline navigation.
