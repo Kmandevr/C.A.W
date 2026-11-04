@@ -204,6 +204,9 @@ constexpr double kStopSeconds = 0.01;
 constexpr double kGainSeconds = 0.005;
 constexpr double kLimitCeiling = 0.977;  // about -0.2 dBFS
 constexpr int kPendingMax = 256;
+// Play retires up to two entries per slot and must always find room, even with the retired queue full; part B,
+// which grows the slot table, has to size these from the largest capacity instead.
+static_assert(2 * (kMaxLayers + 1) <= kPendingMax, "the pending list must hold a Play's retirements");
 constexpr double kVoiceQuietSeconds = 0.1;   // a released voice ends after this long below -90 dB
 constexpr double kVoiceMaxRelease = 10.0;    // or this long after release, whatever its level
 constexpr double kQuietLevel = 3.1622776601683795e-5;  // -90 dB
