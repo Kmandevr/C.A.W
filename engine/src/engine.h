@@ -105,6 +105,7 @@ private:
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
     void prepareLane(Chain& c, int lane, int64_t n0, int len) noexcept;
+    void resolveParams(Chain& c, const Instance& inst, size_t idx, int64_t globalStart, int len) noexcept;
     const double* runModule(Chain& c, int lane, bool shadow, size_t idx, int64_t n0, int64_t globalStart, int len,
                             const double* input, Slot* exportTo, const Pattern* pat, int64_t repeat) noexcept;
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
@@ -126,6 +127,7 @@ private:
     int stopFade_ = 0;  // samples left in the stop fade, 0 when not stopping
     int64_t g_ = 0;     // position in the project loop
     int64_t epoch_ = 0; // project loops completed since play
+    uint64_t touchEpoch_ = 0;  // Play commands handled (audio thread); ends parameter touches
     double bpm_ = 120.0;
     int beatsPerBar_ = 4;
     int loopSteps_ = 64;

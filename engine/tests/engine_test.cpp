@@ -1072,3 +1072,34 @@ TEST(mix_graph_routing_is_never_rejected_through_reparenting_and_removal) {
     run(e, 9600);
     CHECK_EQ(e.routingRejections(), 0u);
 }
+
+TEST(engine_param_touch_overrides_automation_until_playback_restarts) {
+    // F6.6: the Engine's .caw params resolve through the shared parameter model (owner, 2026-11-04).
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"tone", std::string(kFloat) + "param g = 0.5 in 0..2 step 0.25\ng", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "param";
+    lane.moduleId = "tone";
+    lane.target = "g";
+    lane.points = {{0.0, 0.3}};  // stepped to 0.25
+    p.automation.push_back(lane);
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    // Compared with the lane's level, so the layer's gain and pan law cancel out.
+    const double lane025 = run(e, 512).back();
+    CHECK(lane025 > 0.05);
+    e.setParam("tone", "g", 0.8);  // a touch: the manual value (stepped to 0.75) wins over the lane
+    CHECK_NEAR(run(e, 512).back() / lane025, 3.0, 1e-4);
+    CHECK_NEAR(run(e, 512).back() / lane025, 3.0, 1e-4);
+    e.play();  // playback restarts: the lane rules again
+    CHECK_NEAR(run(e, 512).back() / lane025, 1.0, 1e-4);
+}
