@@ -44,7 +44,7 @@ bool estimateGraphWorkingBytes(std::size_t nodeCount, std::size_t connectionCoun
 // Same layouts as GraphExecutor's private Port, NodeBlock and SumInput, for the byte estimate.
 struct GraphExecutorSumInputBytes { uint32_t sourceBase, sourceCount, tableBase, channels; };
 struct GraphExecutorPortBytes { PortType type; bool input, summing, host; uint32_t channels, table, sum; };
-struct GraphExecutorNodeBlockBytes { uint32_t fields[20]; bool typed; };
+struct GraphExecutorNodeBlockBytes { uint32_t fields[22]; bool typed; };
 struct GraphExecutorEventMergeBytes { uint32_t sourceBase, sourceCount, input; std::size_t storage; };
 
 struct ExecutorShape {
@@ -63,6 +63,7 @@ struct ExecutorShape {
     std::size_t eventMergeInputs = 0;                       // summing event inputs: a buffer and a merge each
     std::size_t eventMergeSources = 0;                      // connections into summing event inputs
     std::size_t eventCapacity = 0;                          // events per buffer
+    std::size_t parameters = 0;                             // descriptor parameters of every node
 };
 
 bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames,
@@ -71,7 +72,7 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
     // Fixed vector headers: processors, channel, control, zero and sum storage, five pointer
     // tables, host-input slots, per-node metadata arrays, sum sources, the port, node-block,
     // view and sum-input lists, the execution order, and the event storage, tables, sources,
-    // merges, merge sources and merge cursors.
+    // merges, merge sources and merge cursors, and the parameter resolvers, values and storage.
     if (!addEstimatedBytes(total, 1, sizeof(std::vector<ModuleProcessor*>)) ||
         !addEstimatedBytes(total, 4, sizeof(std::vector<float>)) ||
         !addEstimatedBytes(total, 3, sizeof(std::vector<float*>)) ||
@@ -81,6 +82,9 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         !addEstimatedBytes(total, 1, sizeof(std::vector<EventOutput>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<EventInput>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorEventMergeBytes>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterResolver>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterValue>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<double>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorPortBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorNodeBlockBytes>)) ||
         !addEstimatedBytes(total, 2, sizeof(std::vector<ChannelBufferView>)) ||
@@ -99,6 +103,12 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         !addEstimatedBytes(total, shape.eventMergeSources, 2u * sizeof(uint32_t)) ||
         !addEstimatedBytes(eventBuffers, shape.eventOutputs + shape.eventMergeInputs, shape.eventCapacity) ||
         !addEstimatedBytes(total, eventBuffers, sizeof(Event)))
+        return false;
+    // Parameters: a resolver, a resolved value and maxFrames doubles each.
+    std::size_t parameterFrames = 0;
+    if (!addEstimatedBytes(total, shape.parameters, sizeof(ParameterResolver) + sizeof(ParameterValue)) ||
+        !addEstimatedBytes(parameterFrames, shape.parameters, maxFrames) ||
+        !addEstimatedBytes(total, parameterFrames, sizeof(double)))
         return false;
     // Per node: processor pointer, first input/output base and count, port base and node block.
     // The execution order is the retained plan, which prepare() counts separately.
@@ -328,6 +338,9 @@ void GraphExecutor::reset() noexcept {
     eventMergeSources_.clear();
     mergeCursor_.clear();
     eventCapacity_ = 0;
+    resolvers_.clear();
+    parameterValues_.clear();
+    parameterStorage_.clear();
     order_.clear();
     routePosition_.clear();
     routeCount_.clear();
@@ -407,6 +420,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
             }
         }
         shape.ports += descriptor.portCount;
+        shape.parameters += descriptor.parameterCount;
         const bool typed = audioInputs > 1 || audioOutputs > 1 || others > 0;
         if (typed && !processors[n]->usesProcessPorts())
             return others > 0 ? GraphError::RuntimeUnsupportedPortType : GraphError::RuntimeUnsupportedPortCount;
@@ -446,7 +460,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         outputBase_.assign(nodeCount, 0);
         outputCount_.assign(nodeCount, 0);
         uint32_t portCursor = 0, inputCursor = 0, outputCursor = 0, controlInCursor = 0, controlOutCursor = 0;
-        uint32_t eventInCursor = 0, eventOutCursor = 0;
+        uint32_t eventInCursor = 0, eventOutCursor = 0, paramCursor = 0;
         uint32_t audioInViews = 0, audioOutViews = 0;
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
@@ -493,6 +507,9 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                                               port.input ? eventInCursor++ : eventOutCursor++, UINT32_MAX};
                 ++(port.input ? b.eventInCount : b.eventOutCount);
             }
+            b.paramBase = paramCursor;
+            b.paramCount = descriptor.parameterCount;
+            paramCursor += descriptor.parameterCount;
             b.typed = b.audioInCount > 1 || b.audioOutCount > 1 || b.modInCount || b.modOutCount ||
                       b.controlInCount || b.controlOutCount || b.eventInCount || b.eventOutCount;
             portCursor += descriptor.portCount;
@@ -520,6 +537,19 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
             eventOutTable_[k] = EventOutput{eventStorage_.data() + static_cast<std::size_t>(k) * eventCapacity_, eventCapacity_, 0};
         eventInTable_.assign(eventInCursor, EventInput{});
         eventInSource_.assign(eventInCursor, kEventNone);
+        // Parameters start at their defaults, untouched, unlinked.
+        resolvers_.resize(paramCursor);
+        parameterValues_.assign(paramCursor, ParameterValue{});
+        parameterStorage_.assign(static_cast<std::size_t>(paramCursor) * maxFrames, 0.0);
+        for (std::size_t n = 0; n < nodeCount; ++n) {
+            const ModuleDescriptor& descriptor = *nodes[n].module;
+            for (uint32_t k = 0; k < descriptor.parameterCount; ++k)
+                if (!resolvers_[blocks_[n].paramBase + k].configure(descriptor.parameters[k])) {
+                    reset(); return GraphError::InvalidModule;  // validated already; keep the executor safe on its own
+                }
+        }
+        // The audio thread is not running during prepare(): drop commands meant for the old graph.
+        for (ParameterCommand stale; parameterQueue_.pop(stale);) {}
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
             const NodeBlock& b = blocks_[n];
@@ -887,6 +917,7 @@ void GraphExecutor::mergeEvents(const EventMerge& merge) noexcept {
 
 bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
                                      uint32_t frames, const EventInput& events) noexcept {
+    applyParameterCommands();
     // Bind this call's host channels (or silence) into the prepared input table.
     const std::size_t slots = hostInputSlots_.size();
     for (std::size_t s = 0; s < slots; ++s)
@@ -908,11 +939,13 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
             }
         }
         bool ok;
+        if (b.paramCount) resolveParameters(b, frames);
+        const ParameterValue* parameters = b.paramCount ? parameterValues_.data() + b.paramBase : nullptr;
         if (!b.typed) {
             const AudioProcessBlock block{
                 {inputTable_.data() + inputBase_[node], inputCount_[node], frames},
                 {outputTable_.data() + outputBase_[node], outputCount_[node], frames},
-                frames, sampleRate_};
+                frames, sampleRate_, parameters, b.paramCount};
             ok = processors_[node]->process(block);
         } else {
             // Views carry this block's capacity: host input buffers may be shorter than maxFrames.
@@ -932,7 +965,8 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
                 inputTable_.data() + b.modIn, b.modInCount, outputTable_.data() + b.modOut, b.modOutCount,
                 controlInTable_.data() + b.controlIn, b.controlInCount,
                 controlOutTable_.data() + b.controlOut, b.controlOutCount,
-                eventInTable_.data() + b.eventIn, b.eventInCount, eventOutTable_.data() + b.eventOut, b.eventOutCount};
+                eventInTable_.data() + b.eventIn, b.eventInCount, eventOutTable_.data() + b.eventOut, b.eventOutCount,
+                parameters, b.paramCount};
             ok = processors_[node]->processPorts(block);
             // A processor's events must be in order and in range, or later nodes would misread them.
             for (uint32_t v = b.eventOut; v < b.eventOut + b.eventOutCount; ++v) {
@@ -954,6 +988,42 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
     float* const* result = outputTable_.data() + outputBase_[outputNode_];
     for (uint32_t c = 0; c < outputChannels_; ++c) std::copy_n(result[c], frames, output.channels[c]);
     return true;
+}
+
+bool GraphExecutor::queueParameter(uint32_t node, uint32_t parameter, double value) noexcept {
+    if (!ready_ || node >= blocks_.size() || parameter >= blocks_[node].paramCount || !std::isfinite(value))
+        return false;
+    return parameterQueue_.push(ParameterCommand{node, parameter, value, false});
+}
+
+bool GraphExecutor::queueClearTouch() noexcept {
+    return ready_ && parameterQueue_.push(ParameterCommand{0, 0, 0.0, true});
+}
+
+double GraphExecutor::parameterTarget(uint32_t node, uint32_t parameter) const noexcept {
+    if (node >= blocks_.size() || parameter >= blocks_[node].paramCount) return 0.0;
+    return resolvers_[blocks_[node].paramBase + parameter].target();
+}
+
+void GraphExecutor::applyParameterCommands() noexcept {
+    // Bounded by the queue capacity; indices were checked when queued, for this prepared graph.
+    for (ParameterCommand command; parameterQueue_.pop(command);) {
+        if (command.clearTouch) {
+            for (ParameterResolver& resolver : resolvers_) resolver.clearTouch();
+            continue;
+        }
+        if (command.node < blocks_.size() && command.parameter < blocks_[command.node].paramCount)
+            resolvers_[blocks_[command.node].paramBase + command.parameter].setBase(command.value);
+    }
+}
+
+void GraphExecutor::resolveParameters(const NodeBlock& b, uint32_t frames) noexcept {
+    // Automation lanes (F6.4) and modulation links (F6.3) are not connected yet: manual values only.
+    for (uint32_t k = 0; k < b.paramCount; ++k) {
+        const uint32_t p = b.paramBase + k;
+        parameterValues_[p] = resolvers_[p].resolve(frames, nullptr, nullptr,
+                                                    parameterStorage_.data() + static_cast<std::size_t>(p) * maxFrames_);
+    }
 }
 
 bool GraphExecutor::process(const float* inputLeft, const float* inputRight,

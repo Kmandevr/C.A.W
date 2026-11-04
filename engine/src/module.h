@@ -119,6 +119,11 @@ enum class ModuleValidation : uint8_t {
 };
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& descriptor) noexcept;
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept;
+// A resolved parameter for one block (F6): per-frame values, or one value for the whole block.
+struct ParameterValue {
+    const double* samples = nullptr;  // null: `value` holds for every frame
+    double value = 0.0;               // the block's first frame (what one-value-per-block readers see)
+};
 struct ConstChannelBufferView {
     const float* const* channels = nullptr;
     uint32_t channelCount = 0;
@@ -141,11 +146,15 @@ struct ChannelBufferView {
 };
 // Frames rule: `frames` is the number of frames to process in this call. Each view's `frames`
 // is its per-channel capacity and must be at least `frames`; a view with no channels needs none.
+// `parameters` lists the module's resolved parameters in descriptor order (parameterCount equals
+// the descriptor's parameterCount when a host resolves them; 0 when it does not).
 struct AudioProcessBlock {
     ConstChannelBufferView input;
     ChannelBufferView output;
     uint32_t frames = 0;
     double sampleRate = 48000.0;
+    const ParameterValue* parameters = nullptr;
+    uint32_t parameterCount = 0;
 };
 inline bool audioProcessBlockValid(const AudioProcessBlock& block) noexcept {
     if (block.frames == 0 || !block.input.valid() || !block.output.valid()) return false;
@@ -177,6 +186,8 @@ struct ProcessBlock {
     uint32_t eventInCount = 0;
     EventOutput* eventOut = nullptr;
     uint32_t eventOutCount = 0;
+    const ParameterValue* parameters = nullptr;  // as in AudioProcessBlock
+    uint32_t parameterCount = 0;
 };
 struct StereoProcessBlock {
     const float* inputLeft = nullptr;

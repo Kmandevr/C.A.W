@@ -197,14 +197,15 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     // block. Mirrors of the executor's private Port and NodeBlock layouts give their sizes; the
     // private lists' headers are counted like any std::vector header.
     struct PortBytes { PortType type; bool input, summing, host; uint32_t channels, table, sum; };
-    struct NodeBlockBytes { uint32_t fields[20]; bool typed; };
-    // The event storage, tables, sources, merges, merge sources and cursors have headers too
-    // (vector headers do not depend on the element type).
+    struct NodeBlockBytes { uint32_t fields[22]; bool typed; };
+    // The event storage, tables, sources, merges, merge sources and cursors, and the parameter
+    // resolvers, values and storage have headers too (vector headers do not depend on the
+    // element type). These modules have no parameters, so they add nothing else.
     constexpr std::size_t fixedHeaders =
         sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 4u +
         sizeof(std::vector<float*>) * 3u + sizeof(std::vector<const float*>) * 2u +
         sizeof(std::vector<uint32_t>) * 12u + sizeof(std::vector<ChannelBufferView>) * 2u +
-        sizeof(std::vector<Event>) * 4u + sizeof(std::vector<uint32_t>) * 3u;
+        sizeof(std::vector<Event>) * 4u + sizeof(std::vector<uint32_t>) * 3u + sizeof(std::vector<double>) * 3u;
     constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u + sizeof(NodeBlockBytes);
     constexpr std::size_t portBytes =
         4u * sizeof(PortBytes) + 2u * sizeof(ConstChannelBufferView) + 2u * sizeof(ChannelBufferView);

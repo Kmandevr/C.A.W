@@ -11,6 +11,8 @@
 
 #include "execution.h"
 #include "module.h"
+#include "params.h"
+#include "spsc.h"
 
 namespace caw {
 
@@ -115,6 +117,12 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 // block (NaN reads 0, beyond float range +/-FLT_MAX); plain audio and modulation connections pass
 // bits unchanged. Graph output is the output node's first
 // audio output. Values are never converted between port types.
+// Parameters (F6.2): every node's descriptor parameters get a ParameterResolver, configured at
+// prepare() to their defaults, with a per-frame buffer of maxFrames values each (counted in the
+// budget). Before a node runs, each of its parameters is resolved for the block and passed in
+// descriptor order (AudioProcessBlock/ProcessBlock::parameters). Values come from the
+// control thread through queueParameter() and queueClearTouch(), which process() applies at the
+// start of the next block, in queue order.
 // If a processor returns false the block fails: process() returns false, zeroes the host output
 // and records the failing node. process() rebinds host channels into the prepared input table,
 // so one executor must never be processed by two threads (e.g. playback and export).
@@ -163,6 +171,19 @@ public:
     // and leaves the previous routing in effect.
     bool setRouting(const GraphConnection* edges, uint32_t edgeCount, const uint32_t* order,
                     uint32_t orderCount) noexcept;
+    // Control thread, one producer, lock-free: set a parameter's manual value (a knob, a typed
+    // value or a mapped MIDI CC; F6.1 rules: clamped, smoothed, a touch while automated), applied
+    // at the start of the next process(). False if the executor is not ready, the node or
+    // parameter index is out of range, the value is not finite, or the queue is full
+    // (kParameterQueueCapacity commands); a false call has no effect.
+    bool queueParameter(uint32_t node, uint32_t parameter, double value) noexcept;
+    // The same queue: ends every touch (call when playback starts or restarts), so automation
+    // rules again.
+    bool queueClearTouch() noexcept;
+    static constexpr std::size_t kParameterQueueCapacity = 1024;
+    // The manual value a parameter is heading to (audio-thread state; read it from the control
+    // thread only while process() is not running, e.g. in tests or after stop).
+    double parameterTarget(uint32_t node, uint32_t parameter) const noexcept;
     // Thin stereo wrapper over the planar path. Null inputs are silence.
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
@@ -206,6 +227,7 @@ private:
         uint32_t eventIn, eventInCount, eventOut, eventOutCount;
         uint32_t sumBase, sumCount;                                 // its summing inputs in sumInputs_
         uint32_t mergeBase, mergeCount;                             // its merging event inputs in eventMerges_
+        uint32_t paramBase, paramCount;                             // its parameters in resolvers_
         bool typed;
     };
     std::vector<NodeBlock> blocks_;
@@ -238,6 +260,14 @@ private:
     std::vector<uint32_t> eventMergeSources_;     // source event outputs per merge, in connection order
     std::vector<uint32_t> mergeCursor_;           // merge scratch: one read position per source
     uint32_t eventCapacity_ = 0;
+    // Parameters: one resolver, resolved value and maxFrames-sample buffer each, node by node.
+    std::vector<ParameterResolver> resolvers_;
+    std::vector<ParameterValue> parameterValues_;
+    std::vector<double> parameterStorage_;
+    struct ParameterCommand { uint32_t node, parameter; double value; bool clearTouch; };
+    Spsc<ParameterCommand, kParameterQueueCapacity> parameterQueue_;
+    void applyParameterCommands() noexcept;
+    void resolveParameters(const NodeBlock& block, uint32_t frames) noexcept;
     std::vector<uint32_t> order_;
     // Dynamic routing scratch, preallocated by reserveRouting().
     std::vector<uint32_t> routePosition_, routeCount_, routeStaging_;

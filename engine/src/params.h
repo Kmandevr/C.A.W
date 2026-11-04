@@ -32,11 +32,6 @@ struct ModulationLink {
 inline constexpr uint32_t kMaxParameterLinks = 8;
 double applyModulation(ModulationOp op, double depth, double normalized, double modulation) noexcept;
 
-// A resolved parameter for one block: per-frame values, or one value for the whole block.
-struct ParameterValue {
-    const double* samples = nullptr;  // null: `value` holds for every frame
-    double value = 0.0;               // the block's first frame (what one-value-per-block readers see)
-};
 
 // One parameter's resolution, in this order for every frame:
 //   1. Base: the automation value when a lane is active and the parameter is not touched,

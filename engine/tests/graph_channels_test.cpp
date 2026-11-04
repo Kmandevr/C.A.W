@@ -1468,3 +1468,155 @@ TEST(graph_event_ports_process_without_allocating) {
     CHECK(ok);
     CHECK_EQ(operations, 0u);
 }
+
+namespace {
+// F6.2 parameters: a gain whose `gain` parameter scales its input, per frame when it varies.
+class ParamGain final : public ModuleProcessor {
+public:
+    explicit ParamGain(const ModuleDescriptor& d, bool typed = false) : d_(d), typed_(typed) {}
+    const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+    bool usesProcessPorts() const noexcept override { return typed_; }
+    bool process(const AudioProcessBlock& b) noexcept override {
+        if (b.parameterCount != 1) return false;
+        apply(b.input, b.output, b.frames, b.parameters[0]);
+        return true;
+    }
+    bool processPorts(const ProcessBlock& b) noexcept override {
+        if (b.parameterCount != 1 || b.audioInCount != 1 || b.audioOutCount != 1) return false;
+        apply(b.audioIn[0], b.audioOut[0], b.frames, b.parameters[0]);
+        return true;
+    }
+    uint32_t variedBlocks = 0;
+private:
+    void apply(const ConstChannelBufferView& in, const ChannelBufferView& out, uint32_t frames,
+               const ParameterValue& gain) noexcept {
+        if (gain.samples) ++variedBlocks;
+        for (uint32_t c = 0; c < out.channelCount; ++c)
+            for (uint32_t i = 0; i < frames; ++i)
+                out.channels[c][i] = in.channels[c][i] * static_cast<float>(gain.samples ? gain.samples[i] : gain.value);
+    }
+    const ModuleDescriptor& d_;
+    bool typed_;
+};
+
+struct ParamModules {
+    explicit ParamModules(uint32_t smoothing = 0) {
+        gain.id = "gain";
+        gain.defaultValue = 0.5;
+        gain.minimum = 0.0;
+        gain.maximum = 2.0;
+        gain.smoothingFrames = smoothing;
+    }
+    PortDescriptor ports[2] = {{"in", PortType::Audio, ChannelLayout::Stereo, true},
+                               {"out", PortType::Audio, ChannelLayout::Stereo, false}};
+    PortDescriptor typedPorts[3] = {{"in", PortType::Audio, ChannelLayout::Stereo, true},
+                                    {"lfo", PortType::Modulation, ChannelLayout::None, true},
+                                    {"out", PortType::Audio, ChannelLayout::Stereo, false}};
+    ParameterDescriptor gain;
+    ModuleDescriptor plain{"test.param.gain", 1, ports, 2, &gain, 1};
+    ModuleDescriptor typed{"test.param.typed", 1, typedPorts, 3, &gain, 1};
+};
+}  // namespace
+
+TEST(graph_parameters_start_at_their_defaults_on_both_process_paths) {
+    ParamModules m;
+    ParamGain plain(m.plain), typed(m.typed, true);
+    for (int k = 0; k < 2; ++k) {
+        GraphExecutor executor;
+        CHECK(executor.prepare({{"g", k ? &m.typed : &m.plain}}, {}, {k ? static_cast<ModuleProcessor*>(&typed) : &plain}, 0,
+                               16, 48000.0, kBudget) == GraphError::Ok);
+        Planar host(2, 16, 0.5f), out(2, 16);
+        CHECK(executor.process(host.constView(16), out.view(16), 16));
+        CHECK_EQ(out.data[0][3], 0.25f);
+        CHECK_EQ(out.data[1][15], 0.25f);
+    }
+}
+
+TEST(graph_parameters_queued_values_apply_at_the_next_block_and_smooth) {
+    ParamModules m(4);
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    Planar host(2, 8, 1.0f), out(2, 8);
+    CHECK(executor.queueParameter(0, 0, 1.5));
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    // 0.5 -> 1.5 over 4 frames, then held.
+    const float expected[] = {0.75f, 1.0f, 1.25f, 1.5f, 1.5f, 1.5f, 1.5f, 1.5f};
+    for (uint32_t i = 0; i < 8; ++i) CHECK_EQ(out.data[0][i], expected[i]);
+    CHECK_EQ(gain.variedBlocks, 1u);
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    CHECK_EQ(gain.variedBlocks, 1u);  // settled: one constant value again
+    CHECK_EQ(out.data[1][0], 1.5f);
+    CHECK_EQ(executor.parameterTarget(0, 0), 1.5);
+    // Queue order is application order; values are clamped to the range.
+    CHECK(executor.queueParameter(0, 0, 0.25));
+    CHECK(executor.queueParameter(0, 0, 9.0));
+    CHECK(executor.queueClearTouch());
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    CHECK_EQ(executor.parameterTarget(0, 0), 2.0);
+}
+
+TEST(graph_parameters_reject_bad_commands_and_a_full_queue) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(!executor.queueParameter(0, 0, 1.0));  // not prepared
+    CHECK(!executor.queueClearTouch());
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    CHECK(!executor.queueParameter(1, 0, 1.0));
+    CHECK(!executor.queueParameter(0, 1, 1.0));
+    CHECK(!executor.queueParameter(0, 0, std::numeric_limits<double>::quiet_NaN()));
+    CHECK(!executor.queueParameter(0, 0, std::numeric_limits<double>::infinity()));
+    for (std::size_t k = 0; k < GraphExecutor::kParameterQueueCapacity; ++k) CHECK(executor.queueParameter(0, 0, 1.0));
+    CHECK(!executor.queueParameter(0, 0, 2.0));  // full: refused, never blocks
+    Planar host(2, 8, 1.0f), out(2, 8);
+    CHECK(executor.process(host.constView(8), out.view(8), 8));  // drains every command
+    CHECK_EQ(out.data[0][0], 1.0f);
+    CHECK(executor.queueParameter(0, 0, 2.0));
+}
+
+TEST(graph_parameters_prepare_drops_commands_meant_for_the_previous_graph) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    CHECK(executor.queueParameter(0, 0, 2.0));
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    Planar host(2, 8, 1.0f), out(2, 8);
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    CHECK_EQ(out.data[0][0], 0.5f);  // the default, not the stale 2.0
+}
+
+TEST(graph_parameters_count_in_the_working_memory_budget) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    GraphResourceBudget fits = kBudget;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 1u << 16, 48000.0, fits) == GraphError::Ok);
+    // A budget that holds the audio buffers but not the 2^20 x 8-byte parameter buffer as well.
+    GraphResourceBudget tight = kBudget;
+    tight.maxWorkingBytes = (1u << 20) * 4u * sizeof(float) + (1u << 20) * sizeof(double) / 2u;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 1u << 20, 48000.0, tight) ==
+          GraphError::ResourceBudgetExceeded);
+}
+
+TEST(graph_parameters_resolve_and_apply_commands_without_allocating) {
+    ParamModules m(16);
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 64, 48000.0, kBudget) == GraphError::Ok);
+    Planar host(2, 64, 1.0f), out(2, 64);
+    bool ok = true;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (uint32_t frames : {64u, 17u, 1u, 64u}) {
+            ok = executor.queueParameter(0, 0, frames / 64.0) && ok;
+            ok = executor.queueClearTouch() && ok;
+            ok = executor.process(host.constView(frames), out.view(frames), frames) && ok;
+        }
+        operations = scope.count();
+    }
+    CHECK(ok);
+    CHECK_EQ(operations, 0u);
+}
