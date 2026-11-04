@@ -146,8 +146,9 @@ updated: 2026-11-04
 **[Fact, 2026-11-04, from `pattern_editor.dart` and `note_expression.dart`]** How it works today:
 - **Stretching:** both ends stretch, a selection by the same amount; the edge follows the finger with a ghost of the snapped length, a length number and a 150 ms spring on release; 48 dp end zones on touch; a second finger bypasses snapping (first roll PR, 2026-11-04).
 - **Drawing:** a ghost under the finger at touch-down, edge auto-scroll, and the last velocity kept (first roll PR).
-- **Pitch curves on the roll:** values snap to semitones but times don't snap. A segment's bend is an invisible vertical drag, unsnapped, with no handle.
-- **Volume and timbre curves:** edited in a 72 px box in the extras panel, with time snapping and no value snapping.
+- **Pitch curves on the roll:** values snap to semitones and times to the time grid along the note (second roll PR, 2026-11-04). A segment's bend is still an invisible vertical drag, unsnapped, with no handle.
+- **Volume and timbre curves:** edited in a 72 px box in the extras panel, snapping to the time grid and the value grid.
+- **Snapping:** the magnet with its sheet, the value grid setting (`RollLook.valueGrid`, default 1/8) and the Shift or second-finger bypass for every drag are built; velocity, chance and the lane curves snap to it. The arrangement's automation lanes don't snap yet (U3).
 - **The engine evaluates note curves** (`engine/src/pattern.h`, shape `u^(4^bend)`).
 
 **Owner's spec (2026-11-04):**
@@ -185,7 +186,7 @@ updated: 2026-11-04
   - A group drag plays the selection as a chord. Moving a note in time only doesn't retrigger it.
   - A tap that places a note plays it for a short time (about 250 ms).
   - "Hear notes" in ⋮ turns this off.
-  - **Engine dependency:** the C API has no note-on/off call (checked in `engine/include/caw.h`, 2026-11-04). Previews need one: a real-time-safe note on/off into a track's instrument through the engine's event queue. This is a GPT issue.
+  - **Engine dependency:** the C API has no note-on/off call (checked in `engine/include/caw.h`, 2026-11-04). Previews need one: a real-time-safe note on/off into a track's instrument through the engine's event queue. The engine also renders nothing while stopped (`Engine::process`), so previews need a stopped-mode path: GPT issue #103.
 - **Drawing notes (owner):** it works as today, which is nice to use on a phone: a tap places a note of the last length, and dragging sets its length. Quality-of-life tweaks (owner-confirmed):
   - a ghost note under your finger at touch-down, so you see where it lands before you lift
   - auto-scroll when a draw or drag reaches the edge of the view

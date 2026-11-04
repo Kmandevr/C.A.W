@@ -12,8 +12,7 @@ const _c = Area.code;
 const Map<Area, List<String>> standardToolbars = {
   Area.pattern: [
     'roll.tool.draw', 'roll.tool.select', 'roll.tool.curve', 'roll.tool.erase', //
-    'edit.undo', 'edit.redo', 'roll.grid.menu', 'roll.grid.snap', //
-    'roll.grid.triplets', 'roll.grid.adaptive', 'roll.view.switch',
+    'edit.undo', 'edit.redo', 'roll.grid.menu', 'roll.view.switch', //
   ],
   // Phone quick-action strips use the same editable, persistent toolbar data as the roll.
   Area.builder: ['transport.playstop', 'project.save', 'view.actions'],
@@ -174,7 +173,8 @@ const List<ActionDef> standardActions = [
   ActionDef('roll.grid.div64', 'Grid 1/64', _p, defaultKeys: ['Alt+7']),
   ActionDef('roll.grid.div128', 'Grid 1/128', _p, defaultKeys: ['Alt+8']),
   ActionDef('roll.grid.set', 'Set grid', _p, command: 'grid', takesArg: true, argHint: '1/16'),
-  ActionDef('roll.grid.menu', 'Grid size', _p, description: 'Pick the grid resolution'),
+  ActionDef('roll.grid.menu', 'Snap and grid', _p,
+      description: 'The magnet: tap for snap on / off; its menu holds the time grid, value grid, triplets and adaptive'),
   ActionDef('roll.grid.triplets', 'Triplets', _p, description: 'On / off', defaultKeys: ['Alt+0']),
   ActionDef('roll.grid.snap', 'Snap', _p, description: 'Magnet on / off (grid off)', defaultKeys: ['N']),
   ActionDef('roll.grid.adaptive', 'Adaptive grid', _p, description: 'Adaptive / fixed', defaultKeys: ['Alt+F']),

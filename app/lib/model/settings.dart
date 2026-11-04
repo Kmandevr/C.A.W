@@ -454,6 +454,19 @@ enum KeyLabels { none, octaves, all }
 /// What one finger dragged on empty grid does in the draw tool (owner's default: scroll).
 enum EmptyDrag { scroll, select, draw }
 
+/// The value grid that volume, timbre, velocity and chance snap to while snapping is on (owner, 2026-11-04).
+enum ValueGrid {
+  quarter(0.25, '1/4'),
+  eighth(0.125, '1/8'),
+  sixteenth(0.0625, '1/16'),
+  tenPercent(0.1, '10%'),
+  fivePercent(0.05, '5%');
+
+  const ValueGrid(this.step, this.label);
+  final double step;
+  final String label;
+}
+
 /// The piano roll's sizes, look and touch choices, each clamped to a range that stays usable.
 class RollLook {
   const RollLook({
@@ -465,6 +478,7 @@ class RollLook {
     this.grab = 12,
     this.emptyDrag = EmptyDrag.scroll,
     this.holdMs = 500,
+    this.valueGrid = ValueGrid.eighth,
   });
 
   final double rowHeight, velocityLane, chanceLane, gridStrength;
@@ -478,6 +492,8 @@ class RollLook {
   /// How long holding a note takes to open its extras.
   final int holdMs;
 
+  final ValueGrid valueGrid;
+
   RollLook copyWith({
     double? rowHeight,
     double? velocityLane,
@@ -487,6 +503,7 @@ class RollLook {
     double? grab,
     EmptyDrag? emptyDrag,
     int? holdMs,
+    ValueGrid? valueGrid,
   }) =>
       RollLook(
         rowHeight: (rowHeight ?? this.rowHeight).clamp(10, 40).toDouble(),
@@ -497,6 +514,7 @@ class RollLook {
         grab: (grab ?? this.grab).clamp(6, 40).toDouble(),
         emptyDrag: emptyDrag ?? this.emptyDrag,
         holdMs: (holdMs ?? this.holdMs).clamp(250, 1500),
+        valueGrid: valueGrid ?? this.valueGrid,
       );
 
   Map<String, dynamic> toJson() => {
@@ -508,6 +526,7 @@ class RollLook {
         'grab': grab,
         'empty_drag': emptyDrag.name,
         'hold_ms': holdMs,
+        'value_grid': valueGrid.name,
       };
 
   static RollLook fromJson(Map<String, dynamic> j) {
@@ -521,6 +540,7 @@ class RollLook {
       grab: n('grab'),
       emptyDrag: EmptyDrag.values.where((e) => e.name == j['empty_drag']).firstOrNull,
       holdMs: n('hold_ms')?.round(),
+      valueGrid: ValueGrid.values.where((e) => e.name == j['value_grid']).firstOrNull,
     );
   }
 }

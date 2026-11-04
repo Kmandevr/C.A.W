@@ -101,7 +101,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 **Current implementation (checked 2026-11-01):** the pattern editor is implemented in Builder. It includes a piano roll and drum grid over the same text-backed pattern model, Draw/Select/Curve/Erase tools, adaptive grid and snapping, velocity/chance lanes, note extras, per-note expression editors, live note preview, multi-selection and generator actions. See [App](app.md) for the current interaction details and [music workflow gaps](music-workflow-feature-gap-plan.md) for what remains.
 
 Implemented pattern editing includes:
-- Draw, select, erase and curve tools; undo/redo; adaptive/fixed grid, triplets and snap/free timing.
+- Draw, select, erase and curve tools; undo/redo; adaptive/fixed grid, triplets and snap/free timing, from one magnet button whose sheet also sets the value grid that lanes and curves snap to.
 - Note velocity, chance, ratchet and slide extras.
 - Per-note pitch bend, pressure/volume, timbre and vibrato; editable points and segment bends.
 - Velocity and chance lane curves.
