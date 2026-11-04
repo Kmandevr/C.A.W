@@ -22,7 +22,7 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 
 ## Next
 1. Engine (GPT): issue #94, then F7.3 part C, F7.4, F8 and F10 (#28).
-2. Claude (owner, 2026-11-04): plan the UI work (all of #7, #9, #15, #19, #20, #21, #23, #40 and an overall look-and-layout pass); don't build until the owner says so.
+2. Claude (owner, 2026-11-04): plan the UI work in `docs/ui-plan.md` (U0–U6); don't build until the owner approves it and answers its open questions.
 
 ## Read first
 - `docs/roadmap.md`

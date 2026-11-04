@@ -34,6 +34,7 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [Actions, keys and macros](actions.md): draft for review: every command as an action, customisable keys per area, macros, toolbars and the default keymap
 - [Synth](synth.md): implemented synth patch compiler, supported features, app behavior and verified gaps
 - [UI design](ui.md): current editor implementation, phone/desktop interaction design and performance constraints
+- [UI plan](ui-plan.md): the owner's UI overhaul (2026-11-04), today's findings from screenshots, the order of work and open questions; not built yet
 - [Core development plan](core-and-feature-plan.md): compatibility pointer to the permanent roadmap; not a separate plan
 - [Music workflow implementation gaps](music-workflow-feature-gap-plan.md): factual implemented/partial/missing status, without a competing feature sequence
 - [Lightweight creative audio systems](lightweight-creative-audio-systems.md): supporting technical designs for non-AI sound systems in the roadmap

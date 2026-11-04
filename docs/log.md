@@ -6,6 +6,7 @@ updated: 2026-11-04
 
 # Log
 
+- 2026-11-04: UI plan (owner: Claude does the UI, plan before building): findings from screenshots of the Linux build at phone and desktop size, and the order U0–U6 in [UI plan](ui-plan.md).
 - 2026-11-04: Foundation F7.3 part B, the Engine grows past 64 layers within its memory budget (off-thread grow, bit-identical playing layers, a named refusal past `maxLayers()`); the parser's 64-layer cap is gone, and the C API names the audition's scope by id. Merged unfinished (owner): exports can drop layers above about 340, and export memory isn't budgeted yet (#94).
 - 2026-11-04: Foundation F7.3 part A, the Engine's slot capacity is a runtime value (slots by pointer, capacity-sized mix graph, out-of-line layer order), still 64 layers with unchanged sound; the plan for growth (B) and the C API audition index (C) is in [decisions](decisions.md).
 - 2026-11-04: Foundation F7.2, the 64-bar arrangement limit is gone (owner decision): songs run to the 32-bit step count in the engine and the app, out-of-range positions are refused with a named error instead of clamped, clip expansion is checked against the project-state budget, and the arranger paints only the visible span.
