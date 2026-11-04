@@ -337,7 +337,8 @@ TEST(graph_executor_counts_channel_storage_in_working_memory_budget) {
     CHECK(!executor.ready());
 }
 
-TEST(graph_executor_rejects_non_audio_ports_until_typed_runtime_ports_exist) {
+TEST(graph_executor_rejects_typed_ports_on_processors_without_process_ports) {
+    // Decided at prepare time, never on the first block: a processor must opt in to processPorts().
     const PortDescriptor ports[] = {
         {"in", PortType::Audio, ChannelLayout::Stereo, true},
         {"out", PortType::Audio, ChannelLayout::Stereo, false},
@@ -348,6 +349,16 @@ TEST(graph_executor_rejects_non_audio_ports_until_typed_runtime_ports_exist) {
     GraphExecutor executor;
     CHECK(executor.prepare({{"c", &withControl}}, {}, {&gain}, 0, 32, 48000.0, kBudget) ==
           GraphError::RuntimeUnsupportedPortType);
+    const PortDescriptor twoInputs[] = {
+        {"in", PortType::Audio, ChannelLayout::Stereo, true},
+        {"side", PortType::Audio, ChannelLayout::Stereo, true},
+        {"out", PortType::Audio, ChannelLayout::Stereo, false},
+    };
+    const ModuleDescriptor sidechained{"test.channels.side", 1, twoInputs, 3, nullptr, 0};
+    ChannelGain legacy(sidechained);
+    CHECK(executor.prepare({{"s", &sidechained}}, {}, {&legacy}, 0, 32, 48000.0, kBudget) ==
+          GraphError::RuntimeUnsupportedPortCount);
+    CHECK(!executor.ready());
 }
 
 TEST(graph_executor_reprepare_and_reset_release_previous_channel_storage) {
@@ -917,4 +928,238 @@ TEST(graph_reserve_routing_keeps_plain_inputs_host_fed_without_the_opt_in) {
     CHECK(executor.process(host.constView(16), out.view(16), 16));
     CHECK_EQ(out.data[0][7], 0.25f);
     CHECK_EQ(out.data[1][7], 0.25f);
+}
+
+namespace {
+// F5.1 typed ports: processors that opt in to processPorts().
+class Typed : public ModuleProcessor {
+public:
+    explicit Typed(const ModuleDescriptor& d) : d_(d) {}
+    const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+    bool usesProcessPorts() const noexcept override { return true; }
+private:
+    const ModuleDescriptor& d_;
+};
+
+// Mono modulation source: signal(channel tag, frame + offset) scaled, or a fixed value when set.
+class ModSource final : public Typed {
+public:
+    ModSource(const ModuleDescriptor& d, uint32_t offset, float fixed = 0.0f, bool useFixed = false)
+        : Typed(d), offset_(offset), fixed_(fixed), useFixed_(useFixed) {}
+    bool processPorts(const ProcessBlock& b) noexcept override {
+        if (b.modulationOutCount != 1 || b.audioInCount || b.audioOutCount) return false;
+        for (uint32_t i = 0; i < b.frames; ++i) b.modulationOut[0][i] = useFixed_ ? fixed_ : signal(0, i + offset_);
+        return true;
+    }
+private:
+    uint32_t offset_;
+    float fixed_;
+    bool useFixed_;
+};
+
+// Audio in x modulation in -> audio out, plus a mono sidechain added at x10 and a control level.
+class Processor final : public Typed {
+public:
+    using Typed::Typed;
+    bool processPorts(const ProcessBlock& b) noexcept override {
+        if (b.audioInCount != 2 || b.audioOutCount != 1 || b.modulationInCount != 1 || b.controlInCount != 1)
+            return false;
+        const ConstChannelBufferView& in = b.audioIn[0];
+        const ConstChannelBufferView& side = b.audioIn[1];
+        const float level = *b.controlIn[0];
+        for (uint32_t c = 0; c < b.audioOut[0].channelCount; ++c)
+            for (uint32_t i = 0; i < b.frames; ++i)
+                b.audioOut[0].channels[c][i] =
+                    (in.channels[c][i] * b.modulationIn[0][i] + side.channels[0][i] * 10.0f) * level;
+        return true;
+    }
+};
+
+// Writes its control output once (the first block) and never again: the value must hold.
+class ControlSource final : public Typed {
+public:
+    ControlSource(const ModuleDescriptor& d, float value) : Typed(d), value_(value) {}
+    bool processPorts(const ProcessBlock& b) noexcept override {
+        if (b.controlOutCount != 1) return false;
+        if (!written_) *b.controlOut[0] = value_;
+        written_ = true;
+        return true;
+    }
+private:
+    float value_;
+    bool written_ = false;
+};
+
+struct TypedModules {
+    TypedModules()
+        : modPorts{{"lfo", PortType::Modulation, ChannelLayout::None, false}},
+          procPorts{{"in", PortType::Audio, ChannelLayout::Stereo, true},
+                    {"amount", PortType::Modulation, ChannelLayout::None, true, 0, true},
+                    {"side", PortType::Audio, ChannelLayout::Mono, true},
+                    {"level", PortType::Control, ChannelLayout::None, true, 0, false, 0.75f},
+                    {"out", PortType::Audio, ChannelLayout::Stereo, false}},
+          monoPorts{{"out", PortType::Audio, ChannelLayout::Mono, false}},
+          controlPorts{{"set", PortType::Control, ChannelLayout::None, false, 0, false, 0.5f}},
+          mod{"test.typed.lfo", 1, modPorts, 1, nullptr, 0},
+          proc{"test.typed.proc", 1, procPorts, 5, nullptr, 0},
+          mono{"test.typed.mono", 1, monoPorts, 1, nullptr, 0},
+          control{"test.typed.control", 1, controlPorts, 1, nullptr, 0} {}
+    PortDescriptor modPorts[1], procPorts[5], monoPorts[1], controlPorts[1];
+    ModuleDescriptor mod, proc, mono, control;
+};
+// Port indexes on `proc`.
+constexpr uint32_t kIn = 0, kAmount = 1, kSide = 2, kLevel = 3, kOut = 4;
+}  // namespace
+
+TEST(graph_typed_ports_unconnected_inputs_read_silence_or_their_default_never_the_host) {
+    // Only a node's first audio input reads the host. The sidechain and the modulation input read
+    // silence, the control input its default (0.75).
+    TypedModules m;
+    Processor proc(m.proc);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"p", &m.proc}}, {}, {&proc}, 0, 16, 48000.0, kBudget) == GraphError::Ok);
+    CHECK_EQ(executor.inputChannels(), 2u);
+    Planar host(2, 16, 0.5f), out(2, 16, 9.0f);
+    CHECK(executor.process(host.constView(16), out.view(16), 16));
+    CHECK_EQ(out.data[0][3], 0.0f);  // in (0.5) x amount (silence) + side (silence) x 10, all x 0.75
+    CHECK_EQ(out.data[1][15], 0.0f);
+}
+
+TEST(graph_typed_ports_carry_sidechain_modulation_and_control) {
+    TypedModules m;
+    ModSource lfoA(m.mod, 0), lfoB(m.mod, 300);
+    OffsetGenerator side(m.mono, 7);
+    ControlSource control(m.control, 0.25f);
+    Processor proc(m.proc);
+    // Nodes: 0 lfoA, 1 lfoB, 2 side, 3 control, 4 proc. Both LFOs sum on `amount`.
+    const std::vector<GraphNode> nodes{{"a", &m.mod}, {"b", &m.mod}, {"side", &m.mono}, {"ctl", &m.control}, {"p", &m.proc}};
+    const std::vector<GraphConnection> edges{{0, 0, 4, kAmount}, {1, 0, 4, kAmount}, {2, 0, 4, kSide}, {3, 0, 4, kLevel}};
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, edges, {&lfoA, &lfoB, &side, &control, &proc}, 4, 32, 48000.0, kBudget) ==
+          GraphError::Ok);
+    Planar host(2, 32), out(2, 32);
+    for (uint32_t c = 0; c < 2; ++c)
+        for (uint32_t i = 0; i < 32; ++i) host.data[c][i] = signal(c, i + 50);
+    for (int block = 0; block < 2; ++block) {  // the second block reads the held control value
+        CHECK(executor.process(host.constView(32), out.view(32), 32));
+        for (uint32_t c = 0; c < 2; ++c)
+            for (uint32_t i = 0; i < 32; ++i) {
+                float amount = 0.0f;
+                amount += signal(0, i);
+                amount += signal(0, i + 300);
+                const float expected = (signal(c, i + 50) * amount + signal(0, i + 7) * 10.0f) * 0.25f;
+                CHECK_EQ(out.data[c][i], expected);
+            }
+    }
+}
+
+TEST(graph_typed_control_output_starts_at_its_default) {
+    // A control source that has not written yet reads as its port default (0.5), not 0.
+    TypedModules m;
+    class Silent final : public Typed {
+    public:
+        using Typed::Typed;
+        bool processPorts(const ProcessBlock& b) noexcept override { return b.controlOutCount == 1; }
+    } control(m.control);
+    ModSource ones(m.mod, 0, 1.0f, true);
+    Processor proc(m.proc);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"ctl", &m.control}, {"one", &m.mod}, {"p", &m.proc}},
+                           {{0, 0, 2, kLevel}, {1, 0, 2, kAmount}}, {&control, &ones, &proc}, 2, 8, 48000.0, kBudget) ==
+          GraphError::Ok);
+    Planar host(2, 8, 2.0f), out(2, 8);
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    CHECK_EQ(out.data[0][0], 1.0f);  // 2 x 1 x 0.5
+}
+
+TEST(graph_typed_modulation_sum_saturates_like_audio) {
+    TypedModules m;
+    ModSource inf(m.mod, 0, std::numeric_limits<float>::infinity(), true);
+    ModSource nan(m.mod, 0, std::numeric_limits<float>::quiet_NaN(), true);
+    Processor proc(m.proc);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"inf", &m.mod}, {"nan", &m.mod}, {"p", &m.proc}},
+                           {{0, 0, 2, kAmount}, {1, 0, 2, kAmount}}, {&inf, &nan, &proc}, 2, 8, 48000.0, kBudget) ==
+          GraphError::Ok);
+    Planar host(2, 8, 1.0f), out(2, 8);
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    CHECK_EQ(out.data[0][0], std::numeric_limits<float>::max() * 0.75f);  // inf -> FLT_MAX, NaN -> 0
+}
+
+TEST(graph_typed_ports_validate_types_defaults_and_fan_in) {
+    TypedModules m;
+    ModSource lfo(m.mod, 0);
+    ControlSource a(m.control, 1.0f), b(m.control, 2.0f);
+    OffsetGenerator mono(m.mono, 0);
+    Processor proc(m.proc);
+    GraphExecutor executor;
+    // Modulation never feeds audio, and audio never feeds modulation: no implicit conversion.
+    CHECK(executor.prepare({{"l", &m.mod}, {"p", &m.proc}}, {{0, 0, 1, kSide}}, {&lfo, &proc}, 1, 8, 48000.0, kBudget) ==
+          GraphError::PortTypeMismatch);
+    CHECK(executor.prepare({{"m", &m.mono}, {"p", &m.proc}}, {{0, 0, 1, kAmount}}, {&mono, &proc}, 1, 8, 48000.0, kBudget) ==
+          GraphError::PortTypeMismatch);
+    // A control input takes one source.
+    CHECK(executor.prepare({{"a", &m.control}, {"b", &m.control}, {"p", &m.proc}}, {{0, 0, 2, kLevel}, {1, 0, 2, kLevel}},
+                           {&a, &b, &proc}, 2, 8, 48000.0, kBudget) == GraphError::InputAlreadyConnected);
+    // Event ports wait for F5.2, even on a processor that uses processPorts.
+    const PortDescriptor eventPorts[] = {{"notes", PortType::Event, ChannelLayout::None, true},
+                                         {"out", PortType::Audio, ChannelLayout::Stereo, false}};
+    const ModuleDescriptor withEvents{"test.typed.events", 1, eventPorts, 2, nullptr, 0};
+    Processor eventProc(withEvents);
+    CHECK(executor.prepare({{"e", &withEvents}}, {}, {&eventProc}, 0, 8, 48000.0, kBudget) ==
+          GraphError::RuntimeUnsupportedPortType);
+    // Descriptor rules: only control ports have defaults (finite); only audio and modulation inputs sum.
+    const PortDescriptor audioDefault[] = {{"out", PortType::Audio, ChannelLayout::Stereo, false, 0, false, 1.0f}};
+    const PortDescriptor nanDefault[] = {{"c", PortType::Control, ChannelLayout::None, true, 0, false,
+                                          std::numeric_limits<float>::quiet_NaN()}};
+    const PortDescriptor summingControl[] = {{"c", PortType::Control, ChannelLayout::None, true, 0, true}};
+    const PortDescriptor summingModOut[] = {{"m", PortType::Modulation, ChannelLayout::None, false, 0, true}};
+    CHECK(validateModuleDescriptor({"x", 1, audioDefault, 1, nullptr, 0}) == ModuleValidation::InvalidPortDefault);
+    CHECK(validateModuleDescriptor({"x", 1, nanDefault, 1, nullptr, 0}) == ModuleValidation::InvalidPortDefault);
+    CHECK(validateModuleDescriptor({"x", 1, summingControl, 1, nullptr, 0}) == ModuleValidation::InvalidSummingPort);
+    CHECK(validateModuleDescriptor({"x", 1, summingModOut, 1, nullptr, 0}) == ModuleValidation::InvalidSummingPort);
+    CHECK(validateModuleDescriptor(m.proc) == ModuleValidation::Ok);
+}
+
+TEST(graph_typed_ports_process_without_allocating) {
+    TypedModules m;
+    ModSource lfoA(m.mod, 0), lfoB(m.mod, 300);
+    OffsetGenerator side(m.mono, 7);
+    ControlSource control(m.control, 0.25f);
+    Processor proc(m.proc);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"a", &m.mod}, {"b", &m.mod}, {"side", &m.mono}, {"ctl", &m.control}, {"p", &m.proc}},
+                           {{0, 0, 4, kAmount}, {1, 0, 4, kAmount}, {2, 0, 4, kSide}, {3, 0, 4, kLevel}},
+                           {&lfoA, &lfoB, &side, &control, &proc}, 4, 64, 48000.0, kBudget) == GraphError::Ok);
+    Planar host(2, 64, 0.5f), out(2, 64);
+    bool ok = true;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (uint32_t frames : {64u, 17u, 1u, 64u}) ok = executor.process(host.constView(frames), out.view(frames), frames) && ok;
+        operations = scope.count();
+    }
+    CHECK(ok);
+    CHECK_EQ(operations, 0u);
+}
+
+TEST(graph_dynamic_routing_stays_audio_only_beside_typed_ports) {
+    // Routing never targets modulation or control inputs; they keep their unconnected values.
+    TypedModules m;
+    ModSource lfo(m.mod, 0);
+    OffsetGenerator mono(m.mono, 0);
+    Processor proc(m.proc);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"l", &m.mod}, {"m", &m.mono}, {"p", &m.proc}}, {}, {&lfo, &mono, &proc}, 2, 16, 48000.0,
+                           kBudget) == GraphError::Ok);
+    CHECK(executor.reserveRouting(2, kBudget, true) == GraphError::Ok);
+    const uint32_t order[] = {0, 1, 2};
+    const GraphConnection intoModulation[] = {{0, 0, 2, kAmount}};
+    const GraphConnection intoSidechain[] = {{1, 0, 2, kSide}};
+    CHECK(!executor.setRouting(intoModulation, 1, order, 3));
+    CHECK(executor.setRouting(intoSidechain, 1, order, 3));
+    Planar out(2, 16, 9.0f);
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
+    // in (routed: silence) x amount (silence) + side x 10, all x the 0.75 default
+    CHECK_EQ(out.data[0][5], signal(0, 5) * 10.0f * 0.75f);
 }

@@ -21,15 +21,23 @@ constexpr uint32_t channelCountForLayout(ChannelLayout layout, uint32_t discrete
 // Hard ceiling on channels per audio port, for every layout including Discrete. It bounds
 // pointer tables and buffer sizes; hosts may set a lower limit in their graph budget.
 inline constexpr uint32_t kMaxPortChannels = 64;
+// Port types (F5): Audio carries planar channels (layout and channelCount); Modulation carries one
+// float per frame (layout None); Control carries one float value per block (layout None), held
+// until its source writes again. Event ports are not executed yet (F5.2). Parameters are not
+// ports: F6 decides how ports bind to ParameterDescriptor values.
 struct PortDescriptor {
     std::string_view id;
     PortType type = PortType::Audio;
     ChannelLayout layout = ChannelLayout::None;
     bool input = true;
     uint32_t channelCount = 0;
-    // Audio inputs only: accepts any number of connections, summed by the host in connection
-    // order starting from +0.0f (a mix bus). A non-summing input takes at most one connection.
+    // Audio and modulation inputs only: accepts any number of connections, summed by the host in
+    // connection order starting from +0.0f (a mix bus, or modulators adding). A non-summing input
+    // takes at most one connection.
     bool summing = false;
+    // Control ports only: the value an unconnected input reads, and an output's value before its
+    // processor first writes one. Finite.
+    float defaultValue = 0.0f;
 };
 // Resolved channel count of a port: the layout's fixed count, or channelCount for Discrete.
 constexpr uint32_t portChannelCount(const PortDescriptor& port) noexcept {
@@ -67,7 +75,7 @@ enum class ModuleValidation : uint8_t {
     EmptyPortId, DuplicatePortId, InvalidPortType, InvalidPortLayout, EmptyParameterId,
     DuplicateParameterId, InvalidParameterRange, DefaultOutsideRange, MissingUiControlArray,
     EmptyUiControlId, InvalidUiControlKind, DuplicateUiControlId, UiControlMissingParameter,
-    InvalidUiControlRange, TooManyChannels, InvalidSummingPort
+    InvalidUiControlRange, TooManyChannels, InvalidSummingPort, InvalidPortDefault
 };
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& descriptor) noexcept;
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept;
@@ -105,6 +113,26 @@ inline bool audioProcessBlockValid(const AudioProcessBlock& block) noexcept {
     if (block.output.channelCount != 0 && block.output.frames < block.frames) return false;
     return true;
 }
+// Every port of a node, by type, each list in descriptor order (the k-th audio input is the k-th
+// input port of type Audio). Audio views follow the AudioProcessBlock frames rule. Modulation
+// buffers hold `frames` floats. A control input is read as *controlIn[k]; a control output is
+// written as *controlOut[k] and keeps that value until written again.
+struct ProcessBlock {
+    uint32_t frames = 0;
+    double sampleRate = 48000.0;
+    const ConstChannelBufferView* audioIn = nullptr;
+    uint32_t audioInCount = 0;
+    const ChannelBufferView* audioOut = nullptr;
+    uint32_t audioOutCount = 0;
+    const float* const* modulationIn = nullptr;
+    uint32_t modulationInCount = 0;
+    float* const* modulationOut = nullptr;
+    uint32_t modulationOutCount = 0;
+    const float* const* controlIn = nullptr;
+    uint32_t controlInCount = 0;
+    float* const* controlOut = nullptr;
+    uint32_t controlOutCount = 0;
+};
 struct StereoProcessBlock {
     const float* inputLeft = nullptr;
     const float* inputRight = nullptr;
@@ -120,10 +148,15 @@ struct StereoProcessBlock {
 // neither fails every call (false) instead of silently leaving its output untouched, so never call
 // the base stereo overload from an override. Overriding one overload hides the other in the
 // derived class; add `using ModuleProcessor::process;` if callers use the derived type.
+// A module with more than one audio input or output, or any control or modulation port, overrides
+// usesProcessPorts() to return true and implements processPorts(); hosts then call only that.
+// Hosts reject such a module at prepare time if it does not, never on its first block.
 class ModuleProcessor {
 public:
     virtual ~ModuleProcessor() = default;
     virtual const ModuleDescriptor& descriptor() const noexcept = 0;
+    virtual bool usesProcessPorts() const noexcept { return false; }
+    virtual bool processPorts(const ProcessBlock&) noexcept { return false; }
     virtual void process(const StereoProcessBlock&) noexcept { stereoImplemented_ = false; }
     virtual bool process(const AudioProcessBlock& block) noexcept {
         const uint32_t in = block.input.channelCount, out = block.output.channelCount;
