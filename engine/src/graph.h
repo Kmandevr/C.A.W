@@ -165,7 +165,8 @@ public:
     // routable too: it takes at most one route, reads that source's buffer directly (no copy,
     // bits unchanged) and is silence without one; the graph then reads no host input at all.
     // Modulation, control and event inputs keep their unconnected values (silence, default, the
-    // first event input the host events).
+    // first event input the host events). Refused (RoutingUnavailable) while modulation links are
+    // set, since routing could run a link's source late or not at all.
     GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget,
                               bool routePlainInputs = false);
     // prepare() with no connections plus reserveRouting(maxSourcesPerInput, budget, true) in one
@@ -299,6 +300,7 @@ private:
     std::vector<uint64_t> touchEpoch_;
     // Per parameter, kMaxParameterLinks signal pointers in link id order (null: no link there).
     std::vector<const float*> linkSignals_;
+    uint32_t linkCount_ = 0;  // links set; reserveRouting() refuses while any exist
     uint64_t clearEpoch_ = 0;
     void syncTouch(uint32_t p) noexcept;
     struct ParameterCommand { uint32_t node, parameter; double value; bool clearTouch; };

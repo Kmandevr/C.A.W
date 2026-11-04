@@ -345,6 +345,7 @@ void GraphExecutor::reset() noexcept {
     touchEpoch_.clear();
     clearEpoch_ = 0;
     linkSignals_.clear();
+    linkCount_ = 0;
     order_.clear();
     routePosition_.clear();
     routeCount_.clear();
@@ -722,7 +723,7 @@ GraphError GraphExecutor::prepareRouted(const std::vector<GraphNode>& nodes,
 
 GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget,
                                          bool routePlainInputs) {
-    if (!ready_ || staticConnections_ != 0) return GraphError::RoutingUnavailable;
+    if (!ready_ || staticConnections_ != 0 || linkCount_ != 0) return GraphError::RoutingUnavailable;
     if (maxSourcesPerInput == 0 || budget.maxWorkingBytes == 0) return GraphError::InvalidResourceBudget;
     const std::size_t nodeCount = processors_.size();
     std::size_t summing = 0, channels = 0;
@@ -1060,6 +1061,7 @@ GraphError GraphExecutor::setModulationLinks(const ParameterLink* links, uint32_
         }
         resolvers_[p].setLinks(group, n);
     }
+    linkCount_ = count;
     return GraphError::Ok;
 } catch (...) {
     return GraphError::OutOfMemory;  // control-thread scratch (O(nodes + parameters + links)); nothing changed

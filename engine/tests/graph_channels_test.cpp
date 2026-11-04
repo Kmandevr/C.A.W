@@ -1800,3 +1800,20 @@ TEST(graph_modulation_links_process_without_allocating) {
     CHECK(ok);
     CHECK_EQ(operations, 0u);
 }
+
+TEST(graph_reserve_routing_refuses_while_modulation_links_are_set) {
+    // Routing can reorder or skip nodes, so a live link could read a source that ran late or not
+    // at all: reserving routing must fail closed while links exist, and work again once cleared.
+    LinkGraph g;
+    ModSource lfo(g.t.mod, 0, 1.0f, true);
+    ParamGain gain(g.m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"lfo", &g.t.mod}, {"g", &g.m.plain}}, {}, {&lfo, &gain}, 1, 8, 48000.0, kBudget) ==
+          GraphError::Ok);
+    const ParameterLink link{1, 0, 0, 1, 0, ModulationOp::Add, 0.25};
+    CHECK(executor.setModulationLinks(&link, 1) == GraphError::Ok);
+    CHECK(executor.reserveRouting(1, kBudget) == GraphError::RoutingUnavailable);
+    CHECK_EQ(run(executor, 8, 0), 1.0f);  // the links still hold
+    CHECK(executor.setModulationLinks(nullptr, 0) == GraphError::Ok);
+    CHECK(executor.reserveRouting(1, kBudget) == GraphError::Ok);
+}
