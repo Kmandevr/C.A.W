@@ -61,7 +61,7 @@ The owner's requirement (2026-10-28): run as light as possible, down to low-end 
 2. **The VM's own dispatch:** about 20% (`vm.cpp`), plus 6% in the operators (`ops.h`). This is the interpreter's real work.
 3. **The per-chain setup in `prepareLane`:** about 7–9%. It works out `step`, `beat`, `bar`, `pos` and `t` for every sample of every layer.
 4. **Filter and envelope maths:** `detTan` 4–5%, `ad` 4–6%, `detExp` 2–3%. This is mostly modulated filter cutoffs. It's the sound itself, and it must stay bit-exact for determinism.
-5. **`slotTarget`:** 1.5%, growing with the square of the layer count (the slot capacity is a runtime value since F7.3 part A, which measured 1 layer −1.0%, 16 layers −0.14% and the graph −0.8% per callback). Every layer, every block, it scanned all 64 slots to see whether anything was soloed.
+5. **`slotTarget`:** 1.5%, growing with the square of the layer count (the slot capacity is a runtime value since F7.3, whose parts A and B measured 1 layer −1.1%, 16 layers −0.3% and the graph −0.9% per callback together; process startup grew by about 24M instructions once, in the static table build). Every layer, every block, it scanned all 64 slots to see whether anything was soloed.
 
 ### Fixes (all bit-identical: golden hashes unchanged)
 

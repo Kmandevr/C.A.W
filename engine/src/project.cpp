@@ -151,10 +151,6 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     if (const Json* layers = root.get("layers"); layers && layers->type == Json::Type::Array) {
         for (const Json& l : layers->arr) {
             if (l.type != Json::Type::Object) continue;
-            if (out.layers.size() >= static_cast<size_t>(kMaxLayers)) {
-                error = "a project holds at most 64 layers";
-                return false;
-            }
             LayerSpec spec;
             spec.id = l.string("id");
             spec.name = l.string("name");

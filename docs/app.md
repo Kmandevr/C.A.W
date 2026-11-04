@@ -51,7 +51,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
     - Curve mode edits velocity/chance lane curves and per-note expression curves (pitch bend, pressure/volume and timbre); point and segment-bend editing is implemented, with no cap on notes or curve points (F7.1, 2026-11-04). Pattern actions include Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
 - **Arranger** (`lib/ui/arranger_screen.dart`):
-  - the main workspace is a horizontal timeline with a bar ruler and one lane per track (no 64-bar limit since F7.2, 2026-11-04; the ruler and grid paint only the visible span); the former layer-card list has been replaced
+  - the main workspace is a horizontal timeline with a bar ruler and one lane per track (no 64-bar limit since F7.2, 2026-11-04; the ruler and grid paint only the visible span; the Builder's audition scope uses the engine's `CAW_SCOPE_AUDITION` id since F7.3); the former layer-card list has been replaced
   - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
   - track height can be set to 54, 76, 96 or 120 px from the timeline toolbar
   - clips are instances of reusable pattern sources; they can be selected, moved, resized, duplicated independently or as linked copies, deleted, and opened in the existing Builder piano roll

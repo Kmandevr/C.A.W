@@ -24,6 +24,9 @@ constexpr int kMaxVoices = 32;  // most notes a pattern layer plays at once (a m
 // Modules one track runs (its generator or voice, then effects); each is its own mix-graph node.
 // A longer chain is refused with a layer error, never truncated.
 constexpr int kMaxTrackModules = 32;
+// Layer slots a new Engine starts with. It grows past them (setProject) up to maxLayers(), which
+// its memory budget sets; this many are always available.
+constexpr int kInitialLayerCapacity = 64;
 
 struct Meters {
     float cpu = 0, peakL = 0, peakR = 0;
@@ -37,6 +40,11 @@ struct LayerMeter {
     bool overloaded = false, active = false;
 };
 
+// scope() ids beside project layer indices: the master output and the Builder's audition, whose slot moves when
+// the Engine grows (F7.3), so hosts address it by this id instead of a slot number.
+constexpr int kScopeMaster = -1;
+constexpr int kScopeAudition = -2;
+
 class Engine {
 public:
     // sampleRate must be 8,000-192,000 Hz. Throws std::runtime_error if the mix graph cannot be
@@ -49,10 +57,14 @@ public:
 
     double sampleRate() const { return sr_; }
     const EngineResourceBudget& resourceBudget() const noexcept { return resourceBudget_; }
-    // Layer slots the engine holds (fixed at kMaxLayers for now); the Builder's audition is the
-    // slot after them, auditionSlot() == layerCapacity().
-    int layerCapacity() const noexcept { return capacity_; }
-    int auditionSlot() const noexcept { return auditionSlot_; }
+    // Layer slots the engine holds: kInitialLayerCapacity at first, growing (never shrinking) when
+    // a project needs more. The Builder's audition is the slot after them, so auditionSlot() ==
+    // layerCapacity() and moves when the Engine grows (scope() takes it as the audition's index).
+    int layerCapacity() const noexcept { return ctlCapacity_.load(std::memory_order_relaxed); }
+    int auditionSlot() const noexcept { return layerCapacity(); }
+    // The most layer slots this Engine's graph-working budget allows (at least kInitialLayerCapacity):
+    // a project with more layers is refused by setProject.
+    int maxLayers() const noexcept { return maxLayers_; }
 
     // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
     std::string setProject(const ProjectSpec& p);  // result JSON: per-module ok/error and params
@@ -66,7 +78,7 @@ public:
     void clearOverload();
     Meters meters();
     bool layerMeter(int index, LayerMeter& out);
-    int scope(int index, float* out, int n);  // index -1 is the master output
+    int scope(int index, float* out, int n);  // a project layer index, kScopeMaster or kScopeAudition
     int64_t loopLength();                     // samples in the project loop
     // Mix-graph routing updates the graph refused; always 0 unless the routing derivation is wrong.
     uint32_t routingRejections() const noexcept { return routingRejections_.load(std::memory_order_relaxed); }
@@ -88,13 +100,16 @@ private:
     struct AutomationData;
     struct ExportPool;
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
+    struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
 
     void drainRetired();
     bool canRetire(size_t count) const noexcept;
     bool send(const Cmd& c);
     void applyCommands() noexcept;
-    void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
-                AutomationData* automation = nullptr, std::vector<int>* order = nullptr) noexcept;
+    void retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr,
+                AutomationData* automation = nullptr, std::vector<int>* order = nullptr,
+                SlotTable* table = nullptr) noexcept;
+    void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
     void planTrack(Slot& s, int& m) noexcept;
@@ -122,16 +137,24 @@ private:
 
     const double sr_;
     const EngineResourceBudget resourceBudget_;
-    const int capacity_;      // layer slots; the audition slot follows them
-    const int auditionSlot_;  // == capacity_
-    const int slotCount_;     // capacity_ + 1 (layers and the audition)
+    // Export buffers each slot may hold: fixed at construction from the budget (as the first export
+    // pool sized it at 64 layers), so every slot added by a grow gets the same.
+    const size_t exportPerSlot_;
+    int maxLayers_ = kInitialLayerCapacity;  // set once in the constructor
+    int pendingMax_ = 0;                     // pending_ entries; set once in the constructor
     std::unique_ptr<ExportPool> exportPool_;
-    std::unique_ptr<MixGraph> mixGraph_;  // built in the constructor; routed on the audio thread
 
     // ---- audio-thread state ----
-    // The slot table: slotCount_ individually allocated slots, each at a fixed address (and with a
-    // fixed index) for the life of the Engine.
-    std::unique_ptr<std::unique_ptr<Slot>[]> slots_;
+    // The current slot table (owned; a Grow command swaps in a larger one and retires this one).
+    // Slots are individually allocated and never move; a layer slot keeps its index for the life
+    // of the Engine, and the audition (always the last slot) is re-indexed by the swap.
+    std::unique_ptr<SlotTable> table_;
+    Slot** slots_ = nullptr;      // table_'s slots
+    MixGraph* mixGraph_ = nullptr;  // table_'s graph, routed on the audio thread
+    int* processOrder_ = nullptr;   // table_'s order list: slots in dependency order (exporters before readers)
+    int capacity_ = 0;      // layer slots; the audition slot follows them
+    int auditionSlot_ = 0;  // == capacity_
+    int slotCount_ = 0;     // capacity_ + 1 (layers and the audition)
     Slot& slotAt(int i) noexcept { return *slots_[i]; }
     const Slot& slotAt(int i) const noexcept { return *slots_[i]; }
     bool playing_ = false;
@@ -159,11 +182,12 @@ private:
     double loadAvg_ = 0;
     int overCount_ = 0, overCooldown_ = 0;
     bool overloadPending_ = false;
-    std::unique_ptr<int[]> processOrder_;  // slotCount_ entries: slots in dependency order (exporters before readers)
     int processCount_ = 0;
     int64_t chunkId_ = 0;
     bool routingDirty_ = true;  // re-derive graph routing before the next chunk
-    std::unique_ptr<Retired[]> pending_;  // retired chains waiting for room in the queue (owned, so a throwing constructor cannot leak it)
+    // Retirements waiting for room in the queue (pendingMax_ entries, enough for a Play at
+    // maxLayers(); owned, so a throwing constructor cannot leak it).
+    std::unique_ptr<Retired[]> pending_;
     int pendingCount_ = 0;
     double tmp_[kBlock];
 
@@ -218,7 +242,12 @@ private:
     std::set<std::string> touchedGlobals_;
     uint64_t playCount_ = 0;     // Play commands sent (control thread)
     uint32_t touchCounter_ = 0;  // knob moves (control thread); wraps, compared by difference
-    std::unique_ptr<bool[]> slotBusy_;  // slotCount_ entries
+    // Every slot ever made (the audio thread's tables point into it); it only grows.
+    std::vector<std::unique_ptr<Slot>> slotStore_;
+    SlotTable* ctlTable_ = nullptr;  // the newest table sent (alive until a newer one replaces it)
+    std::atomic<int> ctlCapacity_{0};  // ctlTable_'s layer capacity, for layerCapacity()
+    Slot& ctlSlot(int i) noexcept;
+    std::string grow(int capacity);  // a larger slot table, sent to the audio thread; "" or an error
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
 

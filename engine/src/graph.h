@@ -265,6 +265,9 @@ public:
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
     bool ready() const noexcept { return ready_; }
     uint32_t runCount() const noexcept { return runCount_; }  // nodes process() runs (audio-thread value)
+    // The working memory the prepared executor (and its reserved routing) was charged against the
+    // budget: the same estimate prepare() and reserveRouting() check. 0 when not prepared.
+    std::size_t workingBytes() const noexcept { return preparedBytes_ + routingBytes_; }
     uint32_t inputChannels() const noexcept { return hostInputChannels_; }
     uint32_t outputChannels() const noexcept { return outputChannels_; }
     // Failure reporting for the control thread (relaxed atomics; values, not synchronization).
@@ -378,6 +381,7 @@ private:
     bool routePlain_ = false;
     bool deferHostCheck_ = false;                 // set only inside prepareRouted()
     std::size_t preparedBytes_ = 0;
+    std::size_t routingBytes_ = 0;               // what reserveRouting() added to preparedBytes_
     uint32_t staticConnections_ = 0;
     uint32_t routingCapacity_ = 0;
     uint32_t runCount_ = 0;  // leading entries of order_ that process() runs

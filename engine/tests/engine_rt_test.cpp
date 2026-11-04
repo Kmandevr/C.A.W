@@ -66,6 +66,40 @@ TEST(engine_process_never_allocates_through_seams_and_code_swaps) {
     CHECK_EQ(e.routingRejections(), 0u);
 }
 
+TEST(engine_grow_never_allocates_or_frees_on_the_audio_thread) {
+    // Ten layers play; the project grows to 100 (a new slot table and mix graph, built on the
+    // control thread). Swapping them in, and retiring the old ones, must not allocate or free.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"bass", templateSource("bass.caw"), {}});
+    p.modules.push_back({"fold", templateSource("fold.caw"), {}});
+    for (int i = 0; i < 10; ++i) p.layers.push_back(layer("l" + std::to_string(i), {"bass", "fold"}));
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 50; ++k) e.process(l.data(), r.data(), 192);
+    for (int i = 10; i < 100; ++i) p.layers.push_back(layer("l" + std::to_string(i), {"bass"}));
+    e.setProject(p);
+    CHECK(e.layerCapacity() >= 100);
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 100; ++k) {
+            e.process(l.data(), r.data(), 192);
+            for (float v : l) peak = v > peak ? v : peak;
+        }
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+    LayerMeter lm;
+    CHECK(e.layerMeter(99, lm) && lm.active);
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
 TEST(parameter_resolver_never_allocates_on_the_audio_thread) {
     ParameterDescriptor p;
     p.id = "cutoff";

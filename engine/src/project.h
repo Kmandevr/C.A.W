@@ -11,8 +11,6 @@
 
 namespace caw {
 
-constexpr int kMaxLayers = 64;
-
 struct ModuleSpec {
     std::string id;
     std::string source;

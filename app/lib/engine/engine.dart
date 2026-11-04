@@ -254,8 +254,8 @@ class Engine {
   Engine._(this._b, this._handle);
 
   static const int sampleRate = 48000;
-  static const int auditionIndex = 64;
-  static const int masterIndex = -1;
+  static const int auditionIndex = -2;  // CAW_SCOPE_AUDITION: the audition's slot moves when the engine grows
+  static const int masterIndex = -1;    // CAW_SCOPE_MASTER
 
   final Bindings _b;
   final Pointer<Void> _handle;

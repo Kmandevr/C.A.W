@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 57aa9d9
+Commit: a7a18dc
 Branch: claude/caw-engine-foundation-skpirb (F7.3 part A on top of Main 83556f2; PR to Main)
 
 ## Goal
@@ -11,8 +11,8 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 - F7 owner choices (2026-11-04, `docs/decisions.md`): remove the app caps (F7.1); remove the 64-bar arrangement limit (F7.2); dynamic layers, re-preparing the mix graph off the audio thread (F7.3); safety bounds from the hardware budget, host-overridable within a ceiling, each with a clear message (F7.4).
 
 ## Done and verified
-- F1–F6 on Main; F7 caps audit #88, F7.1 #89, F7.2 #92 (no 64-bar limit, streamed exports).
-- F7.3 part A on the branch: runtime slot capacity (still 64), slots by pointer with `Slot::index`, capacity-sized MixGraph, out-of-line SetOrder list. caw_tests 267, caw_rt_tests 73, sanitizers clean, goldens unchanged, callgrind 1 layer -1.0%. Audio review: no findings.
+- F1–F6 on Main; F7 caps audit #88, F7.1 #89, F7.2 #92, F7.3 part A #93.
+- F7.3 part B merged to Main unfinished (owner, 2026-11-04); the audio review's must-fix problems are open in issue #94. The owner handed the remaining engine work to GPT on 2026-11-04.
 
 ## Open
 - Issue #78: swap-fade import buffers are renumbered (an older bug).
@@ -21,9 +21,8 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 - #90 arranger float32 drawing far into long songs; #91 the app save step reads the whole WAV for the picker (may need a new dependency: ask the owner).
 
 ## Next
-1. Open the part A PR, merge when green, update #28.
-2. F7.3 part B (plan in `docs/decisions.md`): `Cmd::Grow` swaps a bigger slot table and MixGraph built off-thread; budget from graphWorkingBytes with a clear error; per-slot export segments; size the retired queue and pending list from the largest capacity (replace the static_assert); lift the parser cap; growth and alloc-counter tests.
-3. Part C: the C API reports the audition index (the app hard-codes 64 in `app/lib/engine/engine.dart`); remove the app's layer caps.
+1. Engine (GPT): issue #94, then F7.3 part C, F7.4, F8 and F10 (#28).
+2. Claude (owner, 2026-11-04): plan the UI work in `docs/ui-plan.md` (U0–U6); don't build until the owner approves it and answers its open questions.
 
 ## Read first
 - `docs/roadmap.md`

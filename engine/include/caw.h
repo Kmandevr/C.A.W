@@ -114,7 +114,10 @@ CAW_API void caw_engine_stop(CawEngine* e);
 CAW_API void caw_engine_clear_overload(CawEngine* e);
 CAW_API void caw_engine_meters(CawEngine* e, CawMeters* out);
 CAW_API int32_t caw_engine_layer_meter(CawEngine* e, int32_t layer_index, CawLayerMeter* out);
-/* Latest n (<= 1024) output samples of a layer (by project index), the audition (64) or the master (-1). */
+/* Latest n (<= 1024) output samples of a layer (by project index), the audition (CAW_SCOPE_AUDITION) or the
+   master (CAW_SCOPE_MASTER). */
+#define CAW_SCOPE_MASTER (-1)
+#define CAW_SCOPE_AUDITION (-2)
 CAW_API int32_t caw_engine_scope(CawEngine* e, int32_t layer_index, float* out, int32_t n);
 /* For hosts that drive the audio themselves (plugin, tests). Real-time safe. */
 CAW_API void caw_engine_process(CawEngine* e, float* left, float* right, int32_t frames);

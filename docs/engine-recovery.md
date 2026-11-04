@@ -53,7 +53,7 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 
 ## Remaining fixed capacities and correctness risks
 
-- 64 layer slots (a runtime capacity since F7.3 part A; growth comes in part B); 32 voices; 6 VM call arguments; 1,024 VM registers; 64 KiB VM source; 8 MiB state per module; ratchets up to 8.
+- Layer slots grow within the memory budget (F7.3); 32 voices; 6 VM call arguments; 1,024 VM registers; 64 KiB VM source; 8 MiB state per module; ratchets up to 8.
 - MIDI file size remains 16 MiB; MIDI event count remains 65,536; MIDI 2.0 input queue is 1,024 and drops newest with a counter.
 - Command queue is bounded at 1,024; sender times out after about two seconds. Project updates propagate key failures, but standalone transport/control methods still ignore the result.
 - Retirement queue is 1,024 and pending retirement list is 256. Commands reserve worst-case retirement capacity before consumption; callback-side swaps/removals defer when capacity is exhausted rather than dropping pointers. Stress verification of sustained saturation remains.
