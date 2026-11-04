@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/project.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
@@ -50,6 +51,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(s.selectedModuleId, kick.generatorId);
     expect(find.text('Controls'), findsOneWidget);
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('the arranger shows a song millions of bars long without building every bar (F7.2)', (tester) async {
+    tester.view.physicalSize = const Size(412, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final s = AppState();
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject();
+    final pattern = s.project.modules.firstWhere((m) => s.isPattern(m.id));
+    s.project.layers.first.clips.add(ClipDoc(id: 'far', patternId: pattern.id,
+        startSteps: s.project.maxArrangementSteps - 16, lengthSteps: 16));  // the last bar the step count holds
+    s.ready = true;
+    s.starting = false;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ArrangerScreen(state: s))));
+    await tester.pump();
+    final timeline = find.descendant(of: find.byType(ArrangerScreen), matching: find.byType(Scrollable))
+        .evaluate().map((e) => (e.widget as Scrollable)).where((w) => w.axisDirection == AxisDirection.right);
+    expect(timeline, isNotEmpty);
+    final controller = timeline.first.controller!;
+    controller.jumpTo(controller.position.maxScrollExtent);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    s.dispose();
+  }, skip: skip, timeout: const Timeout(Duration(seconds: 60)));
+
+  testWidgets('project settings show a meter the file brought, such as 12/4', (tester) async {
+    tester.view.physicalSize = const Size(412, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final s = AppState();
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject()..beatsPerBar = 12;
+    s.ready = true;
+    s.starting = false;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ArrangerScreen(state: s))));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('12/4'), findsOneWidget);
     s.dispose();
   }, skip: skip);
 }

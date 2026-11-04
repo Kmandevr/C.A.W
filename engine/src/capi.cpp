@@ -168,17 +168,8 @@ int32_t caw_render(const char* project_json, const CawRenderOptions* o, const ch
     opts.frames = o->frames;
     if (o->target) opts.target = o->target;
     if (o->param) opts.param = o->param;
-    RenderResult r;
-    if (!renderExport(p, opts, r, progress, cancel)) {
-        copyError(r.error, error, error_len);
-        return 1;
-    }
-    WavSpec spec;
-    spec.sampleRate = r.sampleRate;
-    spec.channels = r.channels;
-    spec.float32 = opts.kind == ExportKind::Wavetable || o->float32 != 0;
-    spec.loop = r.loop;
-    if (!writeFile(out_path, encodeWav(spec, r.samples.data(), r.frames), err)) {
+    // Streams loop and free exports to the file, so a long song needs no more memory than a short one (F7.2).
+    if (!renderExportToWav(p, opts, out_path, o->float32 != 0, err, progress, cancel)) {
         copyError(err, error, error_len);
         return 1;
     }

@@ -240,7 +240,28 @@ class ProjectDoc {
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
-  int get maxArrangementSteps => 64 * stepsPerBar;
+  /// A song position is the engine's 32-bit step count, so a song holds whole bars up to 2^31 - 1 steps (F7.2).
+  int get maxLoopBars => 2147483647 ~/ max(4, stepsPerBar);
+  int get maxArrangementSteps => maxLoopBars * max(4, stepsPerBar);
+
+  /// Where the song ends: the loop, the last clip end or the last project automation point.
+  int get arrangementEndSteps {
+    final clipsEnd = layers.fold<int>(loopSteps, (end, layer) =>
+        layer.clips.fold<int>(end, (value, clip) => max(value, clip.startSteps + clip.lengthSteps)));
+    return automation.fold<int>(clipsEnd, (end, lane) =>
+        lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
+  }
+
+  /// The loop the engine plays: whole bars reaching [arrangementEndSteps], as [toEngineJson] sends it.
+  int get engineLoopSteps => min(maxLoopBars, max(loopBars, (arrangementEndSteps / stepsPerBar).ceil())) * stepsPerBar;
+
+  /// How far automation editors reach: the song, every track automation point, and at least 64 bars to place
+  /// new points in, so editing never moves a point.
+  int get timelineSteps {
+    final trackEnd = layers.fold<double>(0, (end, layer) => layer.automation.fold<double>(end, (e, lane) =>
+        lane.points.fold<double>(e, (v, point) => max(v, point.step))));
+    return min(maxArrangementSteps, max(max(64 * stepsPerBar, arrangementEndSteps), trackEnd.ceil()));
+  }
   double get loopSeconds => loopSteps * 15.0 / bpm;
 
   /// The key as the engine's numbers: root 0..11 from C, scale 0 = major or 1 = minor (scale.* order).
@@ -265,12 +286,7 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
-    final layerArrangementEnd = layers.fold<int>(loopSteps, (end, layer) =>
-        max(end, layer.clips.fold<int>(0, (value, clip) => max(value, clip.startSteps + clip.lengthSteps))));
-    final automationEnd = automation.fold<int>(0, (end, lane) =>
-        lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
-    final arrangementEnd = max(layerArrangementEnd, automationEnd);
-    final engineLoopBars = min(64, max(loopBars, (arrangementEnd / stepsPerBar).ceil()));
+    final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
     final result = jsonEncode({
         'caw_project': 1,
         'name': name,
@@ -341,7 +357,7 @@ class ProjectDoc {
       id: j['id'] as String,
       name: (j['name'] as String?) ?? 'Untitled',
       bpm: (j['bpm'] as num?)?.toDouble() ?? 140,
-      beatsPerBar: (j['beats_per_bar'] as num?)?.toInt() ?? 4,
+      beatsPerBar: ((j['beats_per_bar'] as num?)?.toInt() ?? 4).clamp(1, 16),  // the engine's meter range
       loopBars: (j['loop_bars'] as num?)?.toInt() ?? 4,
       key: (j['key'] as String?) ?? 'A minor',
       seed: (j['seed'] as num?)?.toInt() ?? 0,
@@ -414,7 +430,8 @@ class ProjectDoc {
         })
         ..sort((a, b) => a.step.compareTo(b.step));
     }
-    // Keep persisted track automation inside the same bounds enforced by the native parser.
+    // Keep persisted positions inside what the engine's 32-bit step count can hold; nothing valid moves.
+    project.loopBars = project.loopBars.clamp(1, project.maxLoopBars).toInt();
     for (final layer in project.layers) {
       for (final clip in layer.clips) {
         clip.startSteps = clip.startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();

@@ -1,6 +1,10 @@
 // Export tests: exact loop lengths, export matching playback, one-shots, wavetables and the WAV encoding.
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -32,6 +36,18 @@ ProjectSpec groove() {
     b.volume = 0.3;
     p.layers = {a, b};
     return p;
+}
+
+std::string testTempDir() {
+    const auto dir = std::filesystem::temp_directory_path() / ("caw_export_test_" + std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(dir);
+    return dir.string();
+}
+
+std::vector<uint8_t> readBytes(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 uint32_t le32(const std::vector<uint8_t>& b, size_t at) {
@@ -136,6 +152,63 @@ TEST(export_refuses_broken_modules) {
     RenderResult r;
     CHECK(!renderExport(p, ExportOptions{}, r));
     CHECK(r.error.find("module 'byte'") != std::string::npos);
+}
+
+TEST(loop_export_longer_than_a_wav_file_holds_is_refused_before_rendering) {
+    // F7.2 lets a song run to the 32-bit step count; a 4-GiB WAV header can't describe two loops of it.
+    ProjectSpec p = groove();
+    p.loopBars = maxLoopBars(p.beatsPerBar);
+    ExportOptions o;
+    RenderResult r;
+    CHECK(!renderExport(p, o, r));
+    CHECK(r.error.find("longer than a WAV file holds") != std::string::npos);
+    CHECK(r.samples.empty());
+}
+
+TEST(streamed_wav_exports_match_the_in_memory_encoding_byte_for_byte) {
+    // Loop and free exports stream to the file in chunks, so memory doesn't grow with the song (F7.2).
+    const std::string dir = testTempDir();
+    for (const ExportKind kind : {ExportKind::Loop, ExportKind::Free, ExportKind::OneShot}) {
+        for (const bool float32 : {false, true}) {
+            ExportOptions o;
+            o.kind = kind;
+            o.seconds = 1.3;
+            o.target = "k";
+            RenderResult r;
+            CHECK(renderExport(groove(), o, r));
+            WavSpec spec;
+            spec.sampleRate = r.sampleRate;
+            spec.channels = r.channels;
+            spec.float32 = float32;
+            spec.loop = r.loop;
+            const std::vector<uint8_t> expected = encodeWav(spec, r.samples.data(), r.frames);
+            const std::string path = dir + "/stream.wav";
+            std::string error;
+            CHECK(renderExportToWav(groove(), o, path, float32, error));
+            CHECK(error.empty());
+            CHECK(readBytes(path) == expected);
+        }
+    }
+    // A cancelled stream leaves no partial file behind.
+    int32_t progress = 0, cancel = 1;
+    std::string error;
+    const std::string cancelled = dir + "/cancelled.wav";
+    CHECK(!renderExportToWav(groove(), ExportOptions{}, cancelled, false, error, &progress, &cancel));
+    CHECK(error == "cancelled");
+    CHECK(readBytes(cancelled).empty());
+    // A cancelled export over an existing file keeps the old file, and nothing half-written is left beside it.
+    const std::string kept = dir + "/kept.wav";
+    CHECK(writeFile(kept, {1, 2, 3}, error));
+    CHECK(!renderExportToWav(groove(), ExportOptions{}, kept, false, error, &progress, &cancel));
+    CHECK(readBytes(kept) == std::vector<uint8_t>({1, 2, 3}));
+    CHECK(readBytes(kept + ".part").empty());
+    // A song longer than a WAV file holds is refused before any file is opened.
+    ProjectSpec huge = groove();
+    huge.loopBars = maxLoopBars(huge.beatsPerBar);
+    const std::string hugePath = dir + "/huge.wav";
+    CHECK(!renderExportToWav(huge, ExportOptions{}, hugePath, false, error));
+    CHECK(error.find("longer than a WAV file holds") != std::string::npos);
+    CHECK(readBytes(hugePath).empty());
 }
 
 TEST(wav_encoding) {

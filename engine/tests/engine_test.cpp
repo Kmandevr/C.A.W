@@ -1,6 +1,7 @@
 // Mixer tests: block-size independence, per-layer loop lengths, hot swap, broken code, mute/solo, overload, stop.
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -249,15 +250,6 @@ TEST(project_parser_reads_folder_and_automation_metadata) {
     CHECK_EQ(p.layers[1].automation.size(), size_t{1});
     CHECK_EQ(p.layers[1].automation[0].target, std::string("pan"));
     CHECK_NEAR(p.layers[1].automation[0].points[1].value, 1.0, 1e-9);
-    const std::string bounded = R"({"caw_project":1,"beats_per_bar":3,"layers":[
-      {"id":"g","folder":true,"automation":[{"target":"volume","points":[{"step":5000,"value":0.5}]}]},
-      {"id":"t","parent":"g","clips":[{"id":"c","pattern":"p","start_steps":5000,"length_steps":20}]}
-    ]})";
-    ProjectSpec boundedProject;
-    CHECK(parseProject(bounded, boundedProject, error));
-    CHECK_EQ(boundedProject.layers[1].clips[0].startSteps, 767);
-    CHECK_EQ(boundedProject.layers[1].clips[0].lengthSteps, 1);
-    CHECK_NEAR(boundedProject.layers[0].automation[0].points[0].step, 768, 1e-9);
     const std::string cycle = R"({"caw_project":1,"layers":[
       {"id":"a","folder":true,"parent":"b"},{"id":"b","folder":true,"parent":"a"}
     ]})";
@@ -694,17 +686,125 @@ TEST(master_gain_updates_without_recompiling_and_ramps_smoothly) {
     CHECK(restored.back() > 0.34f);
 }
 
-TEST(project_parser_clamps_clips_to_the_meter_aware_song_limit) {
-    const std::string json = R"({"caw_project":1,"beats_per_bar":3,"loop_bars":64,"layers":[
-      {"id":"t","clips":[{"id":"c","pattern":"p","start_steps":760,"length_steps":64,"source_offset_steps":900}]}
-    ]})";
+TEST(project_parser_keeps_arrangements_past_64_bars) {
+    // F7.2 (owner, 2026-11-04): nothing is moved or shortened; the old 64-bar song limit is gone.
+    const std::string json = R"({"caw_project":1,"beats_per_bar":3,"loop_bars":1000,"layers":[
+      {"id":"t","length_steps":200000,
+       "clips":[{"id":"c","pattern":"p","start_steps":100000,"length_steps":50000,"source_offset_steps":900}],
+       "automation":[{"target":"volume","points":[{"step":250000,"value":0.5}]}]}
+    ],"automation":[{"target_type":"global","target":"swing","points":[{"step":300000,"value":1}]}],
+    "audition":{"chain":["m"],"length_steps":400000}})";
     ProjectSpec p;
     std::string error;
     CHECK(parseProject(json, p, error));
-    CHECK_EQ(p.layers[0].clips.size(), size_t{1});
-    CHECK_EQ(p.layers[0].clips[0].startSteps, 760);
-    CHECK_EQ(p.layers[0].clips[0].lengthSteps, 8);
-    CHECK_EQ(p.layers[0].clips[0].sourceOffsetSteps, 768);
+    CHECK_EQ(p.layers[0].lengthSteps, 200000);
+    CHECK_EQ(p.layers[0].clips[0].startSteps, 100000);
+    CHECK_EQ(p.layers[0].clips[0].lengthSteps, 50000);
+    CHECK_EQ(p.layers[0].clips[0].sourceOffsetSteps, 900);
+    CHECK_NEAR(p.layers[0].automation[0].points[0].step, 250000, 1e-9);
+    CHECK_NEAR(p.automation[0].points[0].step, 300000, 1e-9);
+    CHECK_EQ(p.auditionSteps, 400000);
+    CHECK_EQ(p.loopBars, 25000);  // project automation lengthens the loop to reach its last point (300000 / 12)
+}
+
+TEST(project_parser_refuses_arrangement_values_it_cannot_represent) {
+    // The step position is a 32-bit int, so a song holds whole bars up to 2^31 - 1 steps.
+    const int maxBars3 = 2147483647 / 12;
+    const int maxSteps3 = maxBars3 * 12;
+    CHECK_EQ(maxLoopBars(3), maxBars3);
+    CHECK_EQ(maxArrangementSteps(3), maxSteps3);
+    const auto refused = [](const std::string& body, const std::string& message) {
+        ProjectSpec p;
+        std::string error;
+        const bool ok = parseProject(R"({"caw_project":1,"beats_per_bar":3,)" + body + "}", p, error);
+        CHECK(!ok);
+        CHECK(error.find(message) != std::string::npos);
+        if (ok || error.find(message) == std::string::npos) std::printf("    got: %s\n", error.c_str());
+    };
+    refused(R"("loop_bars":0)", "loop_bars must be a whole number from 1 to");
+    refused(R"("loop_bars":)" + std::to_string(maxBars3 + 1), "loop_bars must be a whole number from 1 to");
+    refused(R"("loop_bars":2.5)", "loop_bars must be a whole number from 1 to");
+    refused(R"("layers":[{"id":"t","length_steps":-1}])", "layer 't': length_steps must be");
+    refused(R"("layers":[{"id":"t","clips":[{"id":"c","pattern":"p","start_steps":-1}]}])",
+        "clip 'c' of layer 't': start_steps must be");
+    refused(R"("layers":[{"id":"t","clips":[{"id":"c","pattern":"p","length_steps":0}]}])",
+        "clip 'c' of layer 't': length_steps must be");
+    refused(R"("layers":[{"id":"t","clips":[{"id":"c","pattern":"p","start_steps":)" + std::to_string(maxSteps3 - 10) +
+        R"(,"length_steps":11}]}])", "clip 'c' of layer 't' ends after step");
+    refused(R"("layers":[{"id":"t","clips":[{"id":"c","pattern":"p","source_offset_steps":-3}]}])",
+        "clip 'c' of layer 't': source_offset_steps must be");
+    refused(R"("layers":[{"id":"t","automation":[{"target":"pan","points":[{"step":-1,"value":0}]}]}])",
+        "layer 't': automation point steps must be");
+    refused(R"("automation":[{"target_type":"global","target":"g","points":[{"step":)" + std::to_string(maxSteps3 + 1) +
+        R"(,"value":0}]}])", "automation point steps must be");
+    refused(R"("audition":{"chain":["m"],"length_steps":-5})", "audition length_steps must be");
+
+    // The largest values are accepted, and the loop reaches the last automation point without overflowing.
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,"beats_per_bar":3,"layers":[{"id":"t","clips":[{"id":"c","pattern":"p","start_steps":)" +
+        std::to_string(maxSteps3 - 10) + R"(,"length_steps":10}]}],"automation":[{"target_type":"global","target":"g","points":[{"step":)" +
+        std::to_string(maxSteps3) + R"(,"value":0}]}]})", p, error));
+    CHECK_EQ(p.loopBars, maxBars3);
+    CHECK_EQ(p.loopSteps(), maxSteps3);
+}
+
+TEST(arrangement_plays_clips_past_bar_64) {
+    ProjectSpec p;
+    p.bpm = 400;  // a step is 0.0375 s
+    p.loopBars = 80;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * 0.5", {}});
+    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"late", "hit", 70 * 16, 4, 0, false});  // bar 71
+    p.layers.push_back(std::move(layer));
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 336000 + 400);  // 1120 steps * 0.0375 s * 8000 Hz
+    CHECK_NEAR(out[330000], 0.0, 1e-7);
+    CHECK(out[336000 + 300] > 0.1f);
+}
+
+TEST(arrangement_expansion_is_refused_above_the_project_state_budget) {
+    // A looping clip of a one-step pattern over most of the int range would expand to billions of notes.
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 2;
+    Engine e(8000, makeEngineResourceBudget(hardware));
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate", {}});
+    p.modules.push_back({"tick", "---\nkind: pattern\nlength: 1\n---\n0 C4 1 1\n", {}});
+    p.modules.push_back({"rest", "---\nkind: pattern\nlength: 1\n---\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.clips.push_back({"huge", "tick", 0, 2000000000, 0, true});
+    p.layers.push_back(layer);
+    const std::string result = e.setProject(p);
+    CHECK(result.find("\"ok\":false") != std::string::npos);
+    CHECK(result.find("arrangement") != std::string::npos);
+    CHECK(result.find("project-state budget") != std::string::npos);
+
+    // The check leaves room for building: growing vectors and the sort's buffer take about three times the result.
+    const uint64_t perRepeat = sizeof(PatternNote) + 2 * sizeof(PatternEvent);
+    p.layers[0].clips = {{"half", "tick", 0, static_cast<int>(e.resourceBudget().projectStateBytes / 2 / perRepeat), 0, true}};
+    const std::string half = e.setProject(p);
+    CHECK(half.find("\"ok\":false") != std::string::npos);
+    CHECK(half.find("arrangement") != std::string::npos);
+    p.layers[0].clips = {{"small", "tick", 0, static_cast<int>(e.resourceBudget().projectStateBytes / 8 / perRepeat), 0, true}};
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+
+    // A looping clip of an empty pattern expands to nothing, and compiling it doesn't walk every repeat.
+    p.layers[0].clips = {{"silent", "rest", 0, 2000000000, 0, true}};
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
 }
 
 TEST(project_parser_preserves_long_module_chains) {

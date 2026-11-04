@@ -280,22 +280,23 @@ The app, the CLI and exports share one format:
 - An arrangement layer can instead contain \`clips\`. Each clip references a reusable pattern source and has \`start_steps\`, \`length_steps\`, \`source_offset_steps\` and \`loop\`. Clip instances may overlap; all of their notes use the track's one generator/effect chain and voice pool.
 - The control thread compiles clips into a sorted absolute-time event stream when the project changes. The audio callback does no pattern parsing or timeline allocation: it splits its current block at note boundaries and renders the events at their sample positions. The scheduler follows project transport and loop boundaries; it does not depend on Flutter timers.
 - Folder layers may set `folder: true`, `bus: true|false` and `parent`. A parent must be an existing folder; cycles and invalid parents are rejected. Bus folders sum their descendants' stereo output once, then apply the folder's volume and pan before routing to an ancestor bus or master. Organization-only folders do not process audio.
-- A layer's `automation` array supports `volume` and `pan` lanes, each with up to 128 ordered `{step, value}` points. The audio callback linearly interpolates these points against absolute song position; no UI timer or per-block parsing is involved. Volume values are 0–1; pan values are -1–1.
+- A layer's `automation` array supports `volume` and `pan` lanes, each with any number of ordered `{step, value}` points. The audio callback linearly interpolates these points against absolute song position; no UI timer or per-block parsing is involved. Volume values are 0–1; pan values are -1–1.
 - If a clip references a missing or broken pattern, that clip contributes no notes; legacy broken patterns keep their last good version playing.
 - `voices` is how many voices each pattern layer may use for new notes, 1–8 (default 8; the app's light mode sends 4). Voices already sounding finish when it drops.
 - `swap` is when changed code is heard while playing: `now` (default), `beat` or `bar`.
 - `audition` is the Builder's preview, with an optional pattern. With `audition_only`, only that chain is heard.
 - Values outside their range are clamped:
   - BPM 20–400
-  - 1–64 bars
   - 64 layers
+- Song positions are refused with a message naming the field, never moved or shortened (F7.2): `loop_bars`, layer `length_steps`, clip `start_steps`/`length_steps`/`source_offset_steps`, automation point steps and the audition length must be whole numbers (points may be fractional) that fit the 32-bit step count, so a song holds whole bars up to 2^31 − 1 steps (`maxLoopBars`/`maxArrangementSteps` in `engine/src/project.h`). Project automation lengthens the loop to reach its last point.
+- Clips are expanded off the audio thread. A layer whose clips would expand past the project-state budget left (an upper bound, checked before expanding) is not installed, with a warning. Building takes about three times the result, so that peak must fit the budget left after the project so far and the layer's own chain.
 - Fields the app adds for itself, such as colours, are ignored.
 
 ## Exports
 
 | Kind | What it renders |
 | --- | --- |
-| Loop | One exact project loop. The engine renders two loops and keeps the second, so the file starts with the seam crossfades it has when it repeats. Includes a `smpl` loop chunk over the whole file. Bit-identical to the second loop of live playback |
+| Loop | One exact project loop (refused before rendering when it is longer than a WAV file holds, about 3.1 hours of stereo float at 48 kHz). The engine renders two loops and keeps the second, so the file starts with the seam crossfades it has when it repeats. Includes a `smpl` loop chunk over the whole file. Bit-identical to the second loop of live playback |
 | Free | Any length from 0.1 to 600 seconds, from the start |
 | One-shot | One pass of one layer (its own or its pattern's length, or the project loop if it follows it), at most 30 s. The end is trimmed to 5 ms after the last sound above −80 dB |
 | Wavetable | 1–256 frames of 2048 samples from one module, sweeping one param from its min to its max. In a frame, `t` runs 0–2047, `phase` 0–1 and `sr` is 2048, so `sine(1)` is one cycle. Each frame's DC is removed, and the table is normalized to peak 1. Written as 32-bit float mono |
@@ -343,7 +344,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 261 tests and `engine/build/caw_rt_tests` 73 more (CTest runs both):
+`engine/build/caw_tests` runs 266 tests and `engine/build/caw_rt_tests` 73 more (CTest runs both):
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.

@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across eight shared-state workspaces, with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-02
+updated: 2026-11-04
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -52,7 +52,7 @@ The owner's goal (2026-10-28) is a capable, lightweight music-production workspa
 
 ## Arrangement workspace
 
-The Arranger is the main composition view. It is a horizontal song timeline with one row per track, a bar ruler, reusable MIDI clips, and a separate mixer panel. It is not a session grid or clip launcher.
+The Arranger is the main composition view. It is a horizontal song timeline (any length, since F7.2) with one row per track, a bar ruler, reusable MIDI clips, and a separate mixer panel. It is not a session grid or clip launcher.
 
 - A track owns its generator, effects, volume, pan, mute/solo and eventual routing. Clips reference pattern sources; they do not own instruments.
 - A clip instance has a timeline start, visible length, source offset and loop setting. Moving a clip does not rewrite its source. Independent duplication clones the pattern source; linked duplication shares it.

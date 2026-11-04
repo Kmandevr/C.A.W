@@ -13,9 +13,7 @@ import 'track_cards_screen.dart';
 
 
 double endPosition(AppState state, ProjectDoc project, int loopLength) {
-  final end = project.layers.fold<int>(project.loopSteps, (v, layer) =>
-    layer.clips.fold<int>(v, (e, clip) => math.max(e, clip.startSteps + clip.lengthSteps)));
-  return end * state.meters.position / loopLength;
+  return project.engineLoopSteps * state.meters.position / loopLength;
 }
 
 class ArrangerScreen extends StatefulWidget {
@@ -30,6 +28,14 @@ class ArrangerScreen extends StatefulWidget {
 class _ArrangerScreenState extends State<ArrangerScreen> {
   bool mixer = false, settings = false, cardsView = false;
   double zoom = 18.0, _trackHeight = 76.0;
+  // The timeline can be millions of bars long (F7.2), so the ruler and grid paint only what this shows.
+  final _hScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _hScroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,8 +53,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final stepW = zoom * (Neon.compact(context) ? 0.85 : 1.0);
     final trackHeight = _trackHeight;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
-    final end = p.layers.fold<int>(p.loopSteps, (v, l) =>
-      l.clips.fold<int>(v, (e, c) => math.max(e, c.startSteps + c.lengthSteps)));
+    final end = p.engineLoopSteps;
     final width = math.max(560.0, end * stepW);
     final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
     final visible = s.visibleLayers;
@@ -131,17 +136,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                   _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
                     depth: s.folderDepth(layer), patterns: patterns, trackHeight: trackHeight),
               ])),
-              Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal,
+              Expanded(child: SingleChildScrollView(controller: _hScroll, scrollDirection: Axis.horizontal,
                 child: SizedBox(width: width, child: Stack(children: [
                   Column(children: [
-                    SizedBox(height: 30, child: Row(children: [
-                      for (var b = 0; b < (end / p.stepsPerBar).ceil(); b++)
-                        SizedBox(width: p.stepsPerBar * stepW,
-                          child: Align(alignment: Alignment.centerLeft,
-                            child: Text('${b + 1}', style: Neon.code(size: 10, color: Neon.dim)))),
-                    ])),
+                    SizedBox(height: 30, width: width,
+                      child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll))),
                     for (final layer in visible)
-                      _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
+                      _TimelineLane(state: s, layer: layer, width: width, stepW: stepW, scroll: _hScroll,
                         trackHeight: trackHeight, selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
                   ]),
                   Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
@@ -257,9 +258,10 @@ class _TimelineHeader extends StatelessWidget {
 
 class _TimelineLane extends StatelessWidget {
   const _TimelineLane({required this.state, required this.layer, required this.width,
-    required this.stepW, required this.trackHeight, required this.selectedIds, this.onOpen});
+    required this.stepW, required this.scroll, required this.trackHeight, required this.selectedIds, this.onOpen});
   final AppState state;
   final LayerDoc layer;
+  final ScrollController scroll;
   final double width, stepW, trackHeight;
   final Set<String> selectedIds;
   final VoidCallback? onOpen;
@@ -269,7 +271,7 @@ class _TimelineLane extends StatelessWidget {
     final height = trackHeight + layer.automation.length * 34.0;
     return SizedBox(width: width, height: height,
     child: Stack(children: [
-      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar)),
+      CustomPaint(size: Size(width, height), painter: _ArrangementGrid(stepW, state.project.stepsPerBar, scroll)),
       Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
         // A plain horizontal drag belongs to the enclosing scroll view. Long-press
         // drag creates a time selection without stealing normal timeline navigation.
@@ -299,21 +301,52 @@ class _TimelineLane extends StatelessWidget {
   }
 }
 
+/// The part of a timeline [size] wide that [scroll] shows, in pixels (all of it, up to 4096 px, before layout).
+(double, double) visibleSpan(ScrollController scroll, Size size) {
+  if (!scroll.hasClients) return (0, math.min(size.width, 4096));
+  final position = scroll.position;
+  final from = position.pixels.clamp(0.0, size.width).toDouble();
+  return (from, (position.pixels + position.viewportDimension).clamp(from, size.width).toDouble());
+}
+
 class _ArrangementGrid extends CustomPainter {
-  _ArrangementGrid(this.stepW, this.barSteps);
+  _ArrangementGrid(this.stepW, this.barSteps, this.scroll) : super(repaint: scroll);
   final double stepW;
   final int barSteps;
+  final ScrollController scroll;
   @override
   void paint(Canvas canvas, Size size) {
     final minor = Paint()..color = Neon.line.withValues(alpha: .55)..strokeWidth = .6;
     final major = Paint()..color = Neon.dim.withValues(alpha: .35)..strokeWidth = 1;
-    for (double x = 0; x <= size.width; x += stepW) {
-      final n = (x / stepW).round();
+    final (from, to) = visibleSpan(scroll, size);
+    for (var n = (from / stepW).floor(); n * stepW <= to; n++) {
+      final x = n * stepW;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
     }
   }
   @override
-  bool shouldRepaint(covariant _ArrangementGrid old) => old.stepW != stepW || old.barSteps != barSteps;
+  bool shouldRepaint(covariant _ArrangementGrid old) =>
+      old.stepW != stepW || old.barSteps != barSteps || old.scroll != scroll;
+}
+
+class _BarRuler extends CustomPainter {
+  _BarRuler(this.stepW, this.barSteps, this.scroll) : super(repaint: scroll);
+  final double stepW;
+  final int barSteps;
+  final ScrollController scroll;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final barW = barSteps * stepW;
+    final (from, to) = visibleSpan(scroll, size);
+    for (var b = (from / barW).floor(); b * barW <= to; b++) {
+      final label = TextPainter(text: TextSpan(text: '${b + 1}', style: Neon.code(size: 10, color: Neon.dim)),
+        textDirection: TextDirection.ltr, maxLines: 1)..layout(maxWidth: math.max(1.0, barW - 2));
+      label.paint(canvas, Offset(b * barW, (size.height - label.height) / 2));
+      label.dispose();
+    }
+  }
+  @override
+  bool shouldRepaint(covariant _BarRuler old) => old.stepW != stepW || old.barSteps != barSteps || old.scroll != scroll;
 }
 
 class _PlayheadPainter extends CustomPainter {
@@ -352,7 +385,8 @@ class _TimelineClipState extends State<_TimelineClip> {
   @override
   Widget build(BuildContext context) {
     final c = widget.clip;
-    final length = (c.lengthSteps + (resizing ? (resizeDx / widget.stepW).round() : 0)).clamp(1, 4096 - c.startSteps).toInt();
+    final length = (c.lengthSteps + (resizing ? (resizeDx / widget.stepW).round() : 0))
+        .clamp(1, widget.state.project.maxArrangementSteps - c.startSteps).toInt();
     final name = widget.state.project.module(c.patternId)?.name ?? 'Missing pattern';
     return Transform.translate(offset: Offset(dragging && !sourceDragging ? dx : 0, 0),
       child: Transform.scale(scaleX: resizing ? length / c.lengthSteps : 1.0,
@@ -449,7 +483,7 @@ class _AutomationLaneView extends StatelessWidget {
   Widget build(BuildContext context) => Stack(children: [
     GestureDetector(behavior: HitTestBehavior.opaque,
       onTapUp: (d) {
-        final step = (d.localPosition.dx / stepW).clamp(0.0, 4096.0).toDouble();
+        final step = (d.localPosition.dx / stepW).clamp(0.0, state.project.maxArrangementSteps.toDouble()).toDouble();
         final value = (lane.target == 'volume' ? (1 - d.localPosition.dy / 32).clamp(0.0, 1.0)
             : (1 - d.localPosition.dy / 16).clamp(-1.0, 1.0)).toDouble();
         state.addAutomationPoint(layer, lane, step, value);
@@ -627,7 +661,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
             'Time',
             DropdownButton<int>(
               value: p.beatsPerBar,
-              items: [for (var b = 2; b <= 7; b++) DropdownMenuItem(value: b, child: Text('$b/4'))],
+              items: [for (final b in {2, 3, 4, 5, 6, 7, p.beatsPerBar}.toList()..sort()) DropdownMenuItem(value: b, child: Text('$b/4'))],
               onChanged: (v) => s.editProject((p) => p.beatsPerBar = v!),
             ),
           ),
