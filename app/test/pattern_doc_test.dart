@@ -434,6 +434,21 @@ void main() {
       expect(body('1.2 C3 2.6\n').quantize({1}, Steps(1, 2)).notes.single.len, Steps(5, 2));
     });
 
+    test('stretch: both ends, a group by the same amount, a minimum, never before 0', () {
+      final d = body('2 C3 1\n4 E3 3\n');
+      final r = d.stretch({1, 2}, Steps(1, 2));
+      expect([for (final n in r.notes) n.len], [Steps(3, 2), Steps(7, 2)]);
+      final l = d.stretch({1, 2}, Steps(-1), start: true);
+      expect([for (final n in l.notes) (n.at, n.len)], [(Steps.one, Steps(2)), (Steps(3), Steps(4))]);
+      // The start moves right only until the note is [min] long, and its end stays.
+      final s = d.stretch({2}, Steps(5), start: true, min: Steps(1, 4)).byId(2)!;
+      expect((s.at, s.end), (Steps(27, 4), Steps(7)));
+      expect(d.stretch({1}, Steps(-9), start: true).byId(1)!.at, Steps.zero);
+      expect(d.stretch({1}, Steps(-9), min: Steps(1, 4)).byId(1)!.len, Steps(1, 4));
+      // A note already shorter than the minimum keeps its length.
+      expect(body('0 C3 1/8\n').stretch({1}, Steps.zero, min: Steps(1, 4)).notes.single.len, Steps(1, 8));
+    });
+
     test('copyAfter, duplicate, copy and paste', () {
       final d = body('0 C3 2\n2 E3 1 // e\n');
       final r = d.copyAfter({1, 2});

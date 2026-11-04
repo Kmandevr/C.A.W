@@ -17,7 +17,7 @@ The app reference [App](app.md) is the authoritative inventory of implemented sc
 
 Implemented UI/workflow foundations include:
 - Builder for code-defined generators, effects, libraries, patterns and synth patches, with generated controls and code editing.
-- Piano roll and drum grid, including note-expression editing, lane curves, pattern generators, multi-selection and MIDI pattern file import/export.
+- Piano roll and drum grid, including note stretching from either end, note-expression editing, lane curves, pattern generators, multi-selection and MIDI pattern file import/export.
 - Arrangement timeline (no 64-bar limit since F7.2; the engine takes more than 64 layers since F7.3, the add buttons still stop at 64) with reusable MIDI clips, clip editing, nested folders and stereo folder buses.
 - Mixer controls for tracks and master output, plus a read-only Engine Lab scope/spectrum and diagnostics.
 - Track/folder volume-pan automation.
