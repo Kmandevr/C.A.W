@@ -45,6 +45,9 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - the grid adapts to zoom, down to the resolution; rows in the project's key are lit; velocity lane underneath; layer colour, brighter when louder
     - keys: WASD move the selection, Ctrl+WASD the cursor, Ctrl+Shift+WASD jump to the next note; Q inserts at the cursor, E copies the selection after itself; Shift+A/D length, Shift+W/S invert; +/- velocity; P, R, L cycle chance, ratchet, slide
     - one finger edits, two fingers zoom and scroll; edits reach the text and the engine after 150 ms (one write per pause, light on slow phones); saving keeps comments
+    - stretching: drag a note's end to change its length, or its start to move the start and keep the end; a selection stretches by the same amount. The edge follows the finger, a faint ghost shows the snapped length with the length as a number (`1/4`, `3/8`), and on release the edge springs onto the ghost (150 ms, none when motion is reduced). Each end's touch zone reaches 24 dp each side of the edge for a finger (the grab setting for a mouse); a narrow note keeps a middle for moving, and on a selected note the zones reach outside it
+    - snap bypass: Shift, or a second finger resting on the roll during a note drag, frees the drag from the grid until it lifts
+    - drawing: a finger down on empty grid shows where its note lands before it lifts; a drag held near the grid's edge scrolls the view; a new note takes the last length and the last velocity set (velocity lane, extras or keys)
     - holding a note (or I, or the ⋮ menu) opens its extras: velocity, chance, ratchet 1–8 and slide, as one undo step
     - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
     - triplets (Alt+0) make every grid size 2/3 as long

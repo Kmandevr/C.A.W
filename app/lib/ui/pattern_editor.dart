@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -21,10 +22,17 @@ import '../model/project.dart';
 import '../model/settings.dart';
 import 'key_router.dart';
 import 'note_expression.dart';
+import 'motion.dart';
 import 'theme.dart';
 import 'glass.dart';
 
 enum PatternTool { draw, select, curve, erase }
+
+/// A note length as a fraction of a whole note (a step is a 16th): `1/4`, `3/8`, `1`, `5/4`, or `1/12` in triplets.
+String noteLengthLabel(Steps len) {
+  final whole = len / Steps(16);
+  return whole.denominator == 1 ? '${whole.numerator}' : '${whole.numerator}/${whole.denominator}';
+}
 
 /// Grid resolutions as fractions of a whole note (1 = a bar of 4/4), from 1 down to 1/128.
 const _resolutions = [1, 2, 4, 8, 16, 32, 64, 128];
@@ -43,7 +51,7 @@ class PatternEditor extends StatefulWidget {
   State<PatternEditor> createState() => _PatternEditorState();
 }
 
-class _PatternEditorState extends State<PatternEditor> {
+class _PatternEditorState extends State<PatternEditor> with TickerProviderStateMixin {
   final FocusNode _focus = FocusNode(debugLabel: 'pattern editor');
   PatternDoc? _doc;
   String? _error;
@@ -65,7 +73,37 @@ class _PatternEditorState extends State<PatternEditor> {
   Timer? _sendTimer;
   // Drag state.
   int? _dragNote;
-  bool _resizing = false;
+  int _edge = 0; // the note end a drag stretches: 1 the end, -1 the start, 0 none (it moves)
+  // While a stretch is dragged the edge follows the finger: [_lag] px past the snapped edge, which a faint ghost shows.
+  // On release the edge springs back onto it.
+  double _lag = 0;
+  Set<int> _lagIds = const {};
+  late final AnimationController _spring = AnimationController(vsync: this)..addListener(_springTick);
+  double _lagFrom = 0;
+  int _lagEdge = 1;
+
+  void _springTick() {
+    setState(() {
+      final t = Motion.settleCurve(_lagFrom.abs(), MotionLevel.full).transform(_spring.value);
+      _lag = _lagFrom * (1 - t);
+      if (_spring.isCompleted) {
+        _lag = 0;
+        _lagIds = const {};
+      }
+    });
+  }
+  // Snap bypass: a second finger resting on the roll during a note drag frees it from the grid until it lifts.
+  int? _editPointer;
+  bool _bypass = false;
+  bool _touch = false; // the drag is a finger's, so the note ends get finger-sized zones
+  // Edge auto-scroll while a drag sits near the grid's edge.
+  late final Ticker _scroller = createTicker(_scrollTick);
+  Duration _scrolledAt = Duration.zero;
+  Offset? _lastP;
+  double _gridW = 0, _maxScrollX = 0, _maxScrollY = 0;
+  // A finger down on empty grid with the Draw tool: where its note would land, shown before it lifts.
+  ({Steps at, double pitch, Steps len})? _ghost;
+  double _lastVel = 1; // a new note takes the last velocity set
   Offset? _dragStart, _rectEnd;
   Steps _dragMovedT = Steps.zero;
   double _dragMovedP = 0;
@@ -146,6 +184,8 @@ class _PatternEditorState extends State<PatternEditor> {
   @override
   void dispose() {
     _hold?.cancel();
+    _spring.dispose();
+    _scroller.dispose();
     s.settings.removeListener(_settingsChanged);
     _router?.unregister(Area.pattern, _focus);
     _flush();
@@ -264,6 +304,15 @@ class _PatternEditorState extends State<PatternEditor> {
     setState(() => _doc = next);
     _scheduleSend();
   }
+
+  /// Remembers the selection's velocity for the next drawn note.
+  void _keepVel() {
+    final n = _sel.isEmpty ? null : _doc?.byId(_sel.first);
+    if (n != null) _lastVel = n.vel;
+  }
+
+  /// Moves and stretches snap to the grid unless snapping is off, Shift is held or a second finger rests on the roll.
+  bool get _free => !_snap || _bypass || HardwareKeyboard.instance.isShiftPressed;
 
   Steps _snapTime(double steps, Steps level) {
     final t = Steps.fromDouble(math.max(0, steps), maxDenominator: 384);
@@ -395,16 +444,21 @@ class _PatternEditorState extends State<PatternEditor> {
         _apply(d.legato(_sel));
       case 'roll.vel.up':
         _apply(d.addVelocity(_sel, 0.1 * count));
+        _keepVel();
       case 'roll.vel.down':
         _apply(d.addVelocity(_sel, -0.1 * count));
+        _keepVel();
       case 'roll.vel.upFine':
         _apply(d.addVelocity(_sel, 0.01 * count));
+        _keepVel();
       case 'roll.vel.downFine':
         _apply(d.addVelocity(_sel, -0.01 * count));
+        _keepVel();
       case 'roll.vel.set':
         final v = double.tryParse(arg ?? '');
         if (v == null) return true;
         _apply(d.setVelocity(_sel, v > 1 ? v / 100 : v));
+        _keepVel();
       case 'roll.prob.cycle':
         times((x) => x.cycleProb(_sel));
       case 'roll.ratchet.cycle':
@@ -903,6 +957,9 @@ class _PatternEditorState extends State<PatternEditor> {
     _pointers[e.pointer] = e.localPosition;
     if (_pointers.length == 1) {
       final p = e.localPosition - _origin;
+      _editPointer = e.pointer;
+      _touch = e.kind == PointerDeviceKind.touch;
+      _lastP = p;
       if (_tool == PatternTool.curve) {
         // Curve tool: the lanes edit their curve; on the grid a tap picks notes and a drag scrolls.
         final bendOn = p.dy < _gridH ? _bendNoteAt(p) : null;
@@ -914,17 +971,23 @@ class _PatternEditorState extends State<PatternEditor> {
           _pending = p;
           _panning = false;
         }
-      } else if (p.dy >= _gridH || _noteAt(p) != null || _tool == PatternTool.select) {
+      } else if (p.dy >= _gridH || _noteAt(p) != null || _edgeAt(p) != null || _tool == PatternTool.select) {
         _down(p);
       } else {
         _pending = p;
         _panning = false;
+        if (_tool == PatternTool.draw) _showGhost(p);
       }
+    } else if (_pointers.length == 2 && _dragNote != null && _dragStart != null && _lane == 0) {
+      // A second finger during a note drag frees it from the grid while it rests.
+      _bypass = true;
+      _move(_lastP!);
     } else if (_pointers.length == 2) {
       _cancelEdit();
       _curveEnd(cancel: true);
       _bendEnd(cancel: true);
       _pending = null;
+      _clearGhost();
       final ps = _pointers.values.toList();
       _pinchSpan = (ps[0].dx - ps[1].dx).abs();
       _pinchFocal = (ps[0] + ps[1]) / 2;
@@ -935,6 +998,11 @@ class _PatternEditorState extends State<PatternEditor> {
   void _pointerMove(PointerMoveEvent e) {
     if (!_pointers.containsKey(e.pointer)) return;
     _pointers[e.pointer] = e.localPosition;
+    if (_bypass) {
+      // Only the finger that started the drag moves it; the resting one just holds the bypass.
+      if (e.pointer == _editPointer) _dragTo(e.localPosition - _origin);
+      return;
+    }
     if (_pointers.length >= 2) {
       final ps = _pointers.values.take(2).toList();
       final focal = (ps[0] + ps[1]) / 2, span = (ps[0].dx - ps[1].dx).abs();
@@ -950,11 +1018,12 @@ class _PatternEditorState extends State<PatternEditor> {
     final p = e.localPosition - _origin, pending = _pending;
     if (pending != null) {
       if (!_panning && (p - pending).distance > kTouchSlop) {
+        _clearGhost();
         // A drag from empty grid does what the settings say: scroll, select, or the tool's own drag.
         if (_look.emptyDrag != EmptyDrag.scroll && _tool != PatternTool.curve) {
           _pending = null;
           _down(pending, rect: _look.emptyDrag == EmptyDrag.select);
-          _move(p);
+          _dragTo(p);
           return;
         }
         _panning = true;
@@ -969,11 +1038,74 @@ class _PatternEditorState extends State<PatternEditor> {
     }
     if (_bNote != null) return _bendMove(p);
     if (_cLane != 0) return _curveMove(p);
+    _dragTo(p);
+  }
+
+  /// A one-finger drag moved to [p]: the edit follows, and near the grid's edge the view starts scrolling.
+  void _dragTo(Offset p) {
+    _lastP = p;
     _move(p);
+    if (_dragStart != null && _lane == 0 && _edgeSpeed(p) != Offset.zero && !_scroller.isActive) {
+      _scrolledAt = Duration.zero;
+      _scroller.start();
+    }
+  }
+
+  /// How fast the view scrolls (px a second) with the finger at [p]: faster the closer it is to an edge.
+  Offset _edgeSpeed(Offset p) {
+    const zone = 28.0, top = 600.0;
+    double axis(double v, double size) {
+      if (size <= 2 * zone) return 0;
+      if (v < zone) return -top * (1 - math.max(0.0, v) / zone);
+      if (v > size - zone) return top * (1 - math.max(0.0, size - v) / zone);
+      return 0;
+    }
+
+    return Offset(axis(p.dx, _gridW), axis(p.dy, _gridH));
+  }
+
+  void _scrollTick(Duration now) {
+    final p = _lastP;
+    final v = p == null || _dragStart == null ? Offset.zero : _edgeSpeed(p);
+    if (v == Offset.zero) {
+      _scroller.stop();
+      return;
+    }
+    final dt = (now - _scrolledAt).inMicroseconds / 1e6;
+    _scrolledAt = now;
+    if (dt <= 0 || dt > 0.1) return; // the first frame, or a stall: no jump
+    final nx = (_scrollX + v.dx * dt).clamp(0.0, _maxScrollX), ny = (_scrollY + v.dy * dt).clamp(0.0, _maxScrollY);
+    final moved = Offset(nx - _scrollX, ny - _scrollY);
+    if (moved == Offset.zero) return;
+    // The drag's start is in screen space: it moves with the content, so the edit grows by what scrolled.
+    _dragStart = _dragStart! - moved;
+    setState(() {
+      _scrollX = nx;
+      _scrollY = ny;
+    });
+    _move(p!);
   }
 
   void _pointerUp(PointerEvent e, {required bool cancel}) {
     if (_pointers.remove(e.pointer) == null) return;
+    if (_bypass) {
+      if (e.pointer != _editPointer) {
+        // The resting finger lifted: back on the grid where the dragging finger is.
+        if (_pointers.length == 1) {
+          _bypass = false;
+          _move(_lastP!);
+        }
+        return;
+      }
+      // The dragging finger lifted first: the edit ends, and the resting one scrolls until it lifts.
+      _bypass = false;
+      cancel ? _cancelEdit() : _up();
+      if (_pointers.isNotEmpty) {
+        _pending = _pointers.values.first - _origin;
+        _panning = true;
+      }
+      return;
+    }
     if (_pointers.length == 1) {
       // Back to one finger after a pinch: it keeps scrolling until it lifts.
       _pending = _pointers.values.first - _origin;
@@ -981,6 +1113,7 @@ class _PatternEditorState extends State<PatternEditor> {
       return;
     }
     if (_pointers.isNotEmpty) return;
+    _clearGhost();
     final pending = _pending;
     _pending = null;
     if (pending != null) {
@@ -999,10 +1132,21 @@ class _PatternEditorState extends State<PatternEditor> {
     cancel ? _cancelEdit() : _up();
   }
 
+  void _showGhost(Offset p) {
+    final len = _lastLen ?? _tapLevel;
+    setState(() => _ghost = (at: _snapTime(_stepAt(p.dx), _tapLevel), pitch: _pitchAt(p.dy).clamp(0, 127), len: len));
+  }
+
+  void _clearGhost() {
+    if (_ghost != null) setState(() => _ghost = null);
+  }
+
   /// Drops a one-finger edit in progress, restoring the notes as they were before it.
   void _cancelEdit() {
     _hold?.cancel();
     _hold = null;
+    _scroller.stop();
+    _bypass = false;
     final base = _dragBase;
     if (base == null) return;
     setState(() {
@@ -1011,6 +1155,9 @@ class _PatternEditorState extends State<PatternEditor> {
       _dragBase = null;
       _dragNote = null;
       _rectEnd = null;
+      _edge = 0;
+      _lag = 0;
+      _lagIds = const {};
     });
   }
 
@@ -1035,6 +1182,33 @@ class _PatternEditorState extends State<PatternEditor> {
     return null;
   }
 
+  /// How far a note end's touch zone reaches each side of the edge: 24 dp for a finger (a 48 dp zone), the grab
+  /// setting for a mouse.
+  double get _reach => _touch ? math.max(24.0, _look.grab) : _look.grab;
+
+  /// The part of [n] that [x] (px on the grid) grabs: its start (-1), its end (1) or its body (0), or null outside
+  /// every zone. The body keeps a middle at least a reach wide, so a narrow note's end zones reach outside it.
+  int? _partAt(PatternNote n, double x) {
+    final l = _noteX(n), w = n.len.toDouble() * _pxPerStep, reach = _reach;
+    final half = math.max(w / 2 - math.min(reach, w / 4), reach / 2), d = x - (l + w / 2);
+    if (d.abs() <= half) return 0;
+    if (d.abs() <= half + 2 * reach) return d.sign.toInt();
+    return null;
+  }
+
+  /// An end zone of a selected note that reaches outside it, under [p]; null for the Erase tool.
+  ({int id, int edge})? _edgeAt(Offset p) {
+    final d = _doc;
+    if (d == null || _tool == PatternTool.erase) return null;
+    final pitch = _pitchAt(p.dy);
+    for (final n in d.notes.reversed) {
+      if (!_sel.contains(n.id) || n.pitch.round() != pitch) continue;
+      final part = _partAt(n, p.dx);
+      if (part != null && part != 0) return (id: n.id, edge: part);
+    }
+    return null;
+  }
+
   void _down(Offset p, {bool rect = false}) {
     _focus.requestFocus();
     final d = _doc;
@@ -1044,13 +1218,22 @@ class _PatternEditorState extends State<PatternEditor> {
     _dragMovedT = Steps.zero;
     _dragMovedP = 0;
     _lane = 0;
+    _edge = 0;
+    _spring.stop();
+    _lag = 0;
+    _lagIds = const {};
     _rectSelect = rect || _tool == PatternTool.select;
     if (p.dy >= _gridH) {
       _lane = _velLane && p.dy < _gridH + _velH ? 1 : 2;
       _laneEdit(p);
       return;
     }
-    final hit = _noteAt(p);
+    var hit = _noteAt(p);
+    var edge = hit == null ? 0 : (_partAt(d.byId(hit)!, p.dx) ?? 0);
+    if (hit == null && !_rectSelect) {
+      final e = _edgeAt(p);
+      if (e != null) (hit, edge) = (e.id, e.edge);
+    }
     _cursorPitch = _pitchAt(p.dy).clamp(0, 127);
     _cursorAt = _snapTime(_stepAt(p.dx), _tapLevel);
     _tapCandidate = null;
@@ -1070,14 +1253,13 @@ class _PatternEditorState extends State<PatternEditor> {
       return;
     }
     if (hit != null) {
-      final n = d.byId(hit)!;
       _dragNote = hit;
       _tapCandidate = hit;
-      // Keep an existing multi-selection intact when dragging any member. Only a single note can resize;
-      // a group drag always moves the complete selection without changing note lengths.
-      final dragSelection = _sel.contains(hit) ? _sel : <int>{hit};
-      if (!_sel.contains(hit)) setState(() => _sel = dragSelection);
-      _resizing = dragSelection.length == 1 && (n.end.toDouble() - _stepAt(p.dx)) * _pxPerStep < _look.grab;
+      // Keep an existing multi-selection intact when dragging any member: the whole selection moves, or stretches
+      // by the same amount from an end zone.
+      final id = hit;
+      if (!_sel.contains(id)) setState(() => _sel = {id});
+      _edge = edge;
       _holdAt = p;
       _hold = Timer(Duration(milliseconds: _look.holdMs), () {
         _up();
@@ -1087,12 +1269,13 @@ class _PatternEditorState extends State<PatternEditor> {
     }
     _dragNote = null;
     if (_tool == PatternTool.draw && !_rectSelect) {
-      final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _tapLevel);
+      final r = d.insert(_cursorAt, _cursorPitch, _lastLen ?? _tapLevel, vel: _lastVel);
       if (r.id != null) {
         _apply(r.doc, select: {r.id!});
         _dragNote = r.id;
-        _resizing = true;
+        _edge = 1;
         _dragBase = r.doc;
+        Motion.tick();
       }
     } else {
       setState(() {
@@ -1129,17 +1312,29 @@ class _PatternEditorState extends State<PatternEditor> {
       }
       return;
     }
-    // Moves and resizes snap to the resolution; holding Shift frees a length from the grid.
-    final free = HardwareKeyboard.instance.isShiftPressed || !_snap;
+    final free = _free;
     final dSteps = (p.dx - start.dx) / _pxPerStep;
-    final dt = free ? Steps.fromDouble(dSteps, maxDenominator: 384) : _resSteps.times((dSteps / _resSteps.toDouble()).round());
-    if (_resizing) {
-      final n = base.byId(_dragNote!);
-      if (n == null) return;
-      final len = Steps.max(free ? Steps(1, 32) : _resSteps, n.len + dt);
-      _lastLen = len;
-      setState(() => _doc = base.setNoteLength(_sel.isEmpty ? {_dragNote!} : _sel, len));
+    if (_edge != 0) {
+      final b = base.byId(_dragNote!);
+      if (b == null) return;
+      // The dragged note's end lands on a grid line (or anywhere when free); the rest of the selection stretches
+      // by the same amount.
+      final from = _edge > 0 ? b.end : b.at, to = from.toDouble() + dSteps;
+      final dt = (free ? Steps.fromDouble(to, maxDenominator: 384) : _resSteps.times((to / _resSteps.toDouble()).round())) - from;
+      final ids = _sel.isEmpty ? {_dragNote!} : _sel;
+      final next = base.stretch(ids, dt, start: _edge < 0, min: free ? null : _resSteps);
+      final n = next.byId(_dragNote!)!;
+      final moved = ((_edge > 0 ? n.end : n.at) - from).toDouble() * _pxPerStep;
+      if (!free && n.len != _doc?.byId(_dragNote!)?.len) Motion.tick();
+      _lastLen = n.len;
+      setState(() {
+        _doc = next;
+        _lagIds = ids;
+        _lagEdge = _edge;
+        _lag = p.dx - start.dx - moved;
+      });
     } else {
+      final dt = free ? Steps.fromDouble(dSteps, maxDenominator: 384) : _resSteps.times((dSteps / _resSteps.toDouble()).round());
       final dp = -((p.dy - start.dy) / _rowH).roundToDouble();
       if (dt == _dragMovedT && dp == _dragMovedP) return;
       _dragMovedT = dt;
@@ -1151,6 +1346,20 @@ class _PatternEditorState extends State<PatternEditor> {
   void _up() {
     _hold?.cancel();
     _hold = null;
+    _scroller.stop();
+    _edge = 0;
+    if (_lag != 0) {
+      // The stretched edge springs onto its snapped place.
+      final d = Motion.move(const Duration(milliseconds: 150), Motion.of(context));
+      if (d == Duration.zero) {
+        _lag = 0;
+        _lagIds = const {};
+      } else {
+        _lagFrom = _lag;
+        _spring.duration = d;
+        _spring.forward(from: 0);
+      }
+    }
     // A tap on an existing note that moved nothing arms the double tap; a note just drawn doesn't.
     _tapNote = _tapCandidate != null && identical(_dragBase, _doc) ? _tapCandidate : null;
     _tapAt = DateTime.now();
@@ -1182,6 +1391,7 @@ class _PatternEditorState extends State<PatternEditor> {
     };
     if (hit.any(_sel.contains)) hit = hit.where(_sel.contains).toSet();
     if (hit.isEmpty) return;
+    if (_lane == 1) _lastVel = v;
     setState(() => _doc = _lane == 1 ? d.setVelocity(hit, v) : d.setProb(hit, (v * 20).round() / 20));
   }
 
@@ -1209,7 +1419,7 @@ class _PatternEditorState extends State<PatternEditor> {
             Text(sel.length == 1 ? 'Note at ${n.at}, length ${n.len}' : '${sel.length} notes',
                 style: const TextStyle(color: Neon.text)),
             Text('Velocity ${(n.vel * 100).round()}%'),
-            Slider(value: n.vel, onChanged: (v) => change((d) => d.setVelocity(sel, v))),
+            Slider(value: n.vel, onChanged: (v) => change((d) => d.setVelocity(sel, _lastVel = v))),
             Text('Chance ${(n.prob * 100).round()}%'),
             Slider(value: n.prob, divisions: 20, onChanged: (v) => change((d) => d.setProb(sel, v))),
             const Text('Ratchet'),
@@ -1416,8 +1626,11 @@ class _PatternEditorState extends State<PatternEditor> {
           child: LayoutBuilder(builder: (context, box) {
             final w = box.maxWidth - _keyW, h = box.maxHeight - _lanesH - _rulerH;
             _gridH = h;
-            _scrollX = _scrollX.clamp(0, math.max(0.0, length * _pxPerStep + 200 - w));
-            _scrollY = _scrollY.clamp(0, math.max(0.0, 128 * _rowH - h));
+            _gridW = w;
+            _maxScrollX = math.max(0.0, length * _pxPerStep + 200 - w);
+            _maxScrollY = math.max(0.0, 128 * _rowH - h);
+            _scrollX = _scrollX.clamp(0, _maxScrollX);
+            _scrollY = _scrollY.clamp(0, _maxScrollY);
             final grid = _grid ? _gridRows(d) : null;
             // The roll claims every touch on it, so a scrolling page around it (the Builder on a phone) never takes
             // its drags; the pointers are then read raw below.
@@ -1474,6 +1687,11 @@ class _PatternEditorState extends State<PatternEditor> {
                       secPerStep: 15 / s.project.bpm,
                       editBend: _tool == PatternTool.curve && _sel.length == 1 ? _sel.first : null,
                       keyLabels: _look.keyLabels,
+                      lag: _lag,
+                      lagIds: _lagIds,
+                      lagEdge: _lagEdge,
+                      lengthOf: _edge != 0 ? _dragNote : null,
+                      ghost: _ghost,
                     ),
                   ),
                 ),
@@ -1830,7 +2048,18 @@ class _RollPainter extends CustomPainter {
     required this.curves,
     required this.secPerStep,
     required this.editBend,
+    this.lag = 0,
+    this.lagIds = const {},
+    this.lagEdge = 1,
+    this.lengthOf,
+    this.ghost,
   });
+  // A stretch in progress: the notes' edge (end 1, start -1) is drawn [lag] px past its snapped place.
+  final double lag;
+  final Set<int> lagIds;
+  final int lagEdge;
+  final int? lengthOf; // the note whose length shows as a number (a stretch or a draw in progress)
+  final ({Steps at, double pitch, Steps len})? ghost; // where a tap would draw
   final Map<int, LaneCurve>? curves;
   final double secPerStep; // seconds per 16th at the project tempo, for drawing vibrato
   final int? editBend; // the note whose pitch points show (the Curve tool's selected note)
@@ -1905,7 +2134,19 @@ class _RollPainter extends CustomPainter {
       // A bent note can sound far from its row: keep it on screen while any of its curve is.
       final reach = bent ? (e.bend.fold(0.0, (m, p) => math.max(m, p.v.abs())) + e.vibDepth + 1) * rowH : 0.0;
       if (y - reach > h || y + rowH + reach < 0) continue;
-      final r = RRect.fromRectAndRadius(Rect.fromLTWH(x, y + 1, nw, rowH - 2), const Radius.circular(3));
+      var box = Rect.fromLTWH(x, y + 1, nw, rowH - 2);
+      if (lag != 0 && lagIds.contains(n.id)) {
+        // The snapped length as a faint ghost; the note itself follows the finger.
+        canvas.drawRRect(RRect.fromRectAndRadius(box, const Radius.circular(3)),
+            Paint()
+              ..color = Neon.text.withValues(alpha: 0.5)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1);
+        box = lagEdge > 0
+            ? Rect.fromLTRB(box.left, box.top, math.max(box.left + 3, box.right + lag), box.bottom)
+            : Rect.fromLTRB(math.min(box.right - 3, box.left + lag), box.top, box.right, box.bottom);
+      }
+      final r = RRect.fromRectAndRadius(box, const Radius.circular(3));
       final fill = color.withValues(alpha: 0.35 + 0.65 * n.vel);
       if (bent) {
         // The note's pitch over time, MIDI Sketch style: its row stays faint, the bent line carries it.
@@ -1943,6 +2184,34 @@ class _RollPainter extends CustomPainter {
       if (n.prob < 1 || n.ratchet > 1 || n.slide) {
         canvas.drawCircle(Offset(x + 4, y + rowH / 2), 2, Paint()..color = Neon.bg);
       }
+    }
+    final g = ghost;
+    if (g != null) {
+      final r = RRect.fromRectAndRadius(
+          Rect.fromLTWH(g.at.toDouble() * pxPerStep - scrollX, (127 - g.pitch) * rowH - scrollY + 1,
+              math.max(3.0, g.len.toDouble() * pxPerStep - 1), rowH - 2),
+          const Radius.circular(3));
+      canvas.drawRRect(r, Paint()..color = color.withValues(alpha: 0.25));
+      canvas.drawRRect(r, Paint()
+        ..color = color.withValues(alpha: 0.7)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1);
+    }
+    final lenNote = lengthOf == null ? null : doc.byId(lengthOf!);
+    if (lenNote != null) {
+      // The length while it is dragged, above the note's end.
+      final label = TextPainter(
+        text: TextSpan(
+            text: noteLengthLabel(lenNote.len),
+            style: TextStyle(color: Neon.text, fontSize: 11, fontWeight: FontWeight.w600)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final end = lenNote.end.toDouble() * pxPerStep - scrollX + (lagIds.contains(lenNote.id) && lagEdge > 0 ? lag : 0);
+      final top = (127 - lenNote.pitch.round()) * rowH - scrollY - label.height - 4;
+      final at = Offset((end - label.width / 2).clamp(0.0, math.max(0.0, w - label.width)), math.max(0.0, top));
+      canvas.drawRRect(RRect.fromRectAndRadius((at - const Offset(4, 1)) & Size(label.width + 8, label.height + 2),
+          const Radius.circular(4)), Paint()..color = Neon.bg.withValues(alpha: 0.85));
+      label.paint(canvas, at);
     }
     // The keyboard cursor.
     if (focused) {
@@ -2054,6 +2323,11 @@ class _RollPainter extends CustomPainter {
       o.curves != curves ||
       o.secPerStep != secPerStep ||
       o.editBend != editBend ||
+      o.lag != lag ||
+      o.lagIds != lagIds ||
+      o.lagEdge != lagEdge ||
+      o.lengthOf != lengthOf ||
+      o.ghost != ghost ||
       o.color != color;
 }
 

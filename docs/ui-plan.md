@@ -144,7 +144,8 @@ updated: 2026-11-04
 ### Piano roll
 
 **[Fact, 2026-11-04, from `pattern_editor.dart` and `note_expression.dart`]** How it works today:
-- **Stretching:** only a note's right end stretches, only for a single note, and the end jumps grid line to grid line.
+- **Stretching:** both ends stretch, a selection by the same amount; the edge follows the finger with a ghost of the snapped length, a length number and a 150 ms spring on release; 48 dp end zones on touch; a second finger bypasses snapping (first roll PR, 2026-11-04).
+- **Drawing:** a ghost under the finger at touch-down, edge auto-scroll, and the last velocity kept (first roll PR).
 - **Pitch curves on the roll:** values snap to semitones but times don't snap. A segment's bend is an invisible vertical drag, unsnapped, with no handle.
 - **Volume and timbre curves:** edited in a 72 px box in the extras panel, with time snapping and no value snapping.
 - **The engine evaluates note curves** (`engine/src/pattern.h`, shape `u^(4^bend)`).

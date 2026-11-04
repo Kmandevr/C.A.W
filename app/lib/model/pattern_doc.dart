@@ -1020,6 +1020,19 @@ class PatternDoc {
   PatternDoc setNoteLength(Set<int> sel, Steps len) =>
       _map(sel, (n) => n.copyWith(len: len.clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
 
+  /// Stretches every note in [sel] by the same [d] at one end: the end, or with [start] the start, which moves while
+  /// the end stays. A note keeps at least [min] (never less than [kMinNoteLength]; one already shorter keeps its
+  /// length) and a start never goes before 0.
+  PatternDoc stretch(Set<int> sel, Steps d, {bool start = false, Steps? min}) {
+    final lo = Steps.max(kMinNoteLength, min ?? kMinNoteLength);
+    return _map(sel, (n) {
+      final keep = Steps.min(lo, n.len);
+      if (!start) return n.copyWith(len: (n.len + d).clamp(keep, Steps(kPatternMaxSteps)));
+      final at = (n.at + d).clamp(Steps.zero, n.end - keep);
+      return n.copyWith(at: at, len: n.end - at);
+    });
+  }
+
   /// The selection as a clip, starts relative to its earliest note.
   PatternClip copy(Set<int> sel) {
     final s = _selected(sel);

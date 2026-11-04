@@ -139,7 +139,7 @@ Note values and extras:
 
 | Action | Default keys |
 | --- | --- |
-| Velocity up / down 10% (Shift: 1%) | = / - |
+| Velocity up / down 10% (Shift: 1%); the next drawn note takes it | = / - |
 | Probability: cycle 100, 75, 50, 25% | P |
 | Ratchet: cycle 1, 2, 3, 4 | R |
 | Slide on / off | L |

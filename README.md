@@ -1,7 +1,7 @@
 <!-- covers: [engine/, app/, examples/, docs/, scripts/, .github/] -->
 # C.A.W — Code Auditioning Workspace
 
-An experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine and CLI are also built/tested on Linux and Windows CI targets. The app currently provides eight workspaces for code-based sound creation, pattern editing, arrangement (songs of any length; the 64-bar limit went in Foundation F7.2, and the engine takes more than 64 layers within its memory budget since F7.3), mixing, inspection, automation, file management and export. Audio runs locally; WAV and MIDI exports support handoff to other music tools.
+An experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine and CLI are also built/tested on Linux and Windows CI targets. The app currently provides eight workspaces for code-based sound creation, pattern editing (a piano roll whose notes stretch from either end), arrangement (songs of any length; the 64-bar limit went in Foundation F7.2, and the engine takes more than 64 layers within its memory budget since F7.3), mixing, inspection, automation, file management and export. Audio runs locally; WAV and MIDI exports support handoff to other music tools.
 
 Project automation supports song-time lanes for module parameters and shared globals, with any number of lanes and points; track volume and pan keep their existing lanes.
 
