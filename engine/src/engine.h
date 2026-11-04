@@ -19,8 +19,6 @@
 
 namespace caw {
 
-constexpr int kSlots = kMaxLayers + 1;  // the last slot is the Builder's audition
-constexpr int kAuditionSlot = kMaxLayers;
 constexpr int kScopeSize = 1024;
 constexpr int kMaxVoices = 32;  // most notes a pattern layer plays at once (a module asks for 1..32 with voices:)
 // Modules one track runs (its generator or voice, then effects); each is its own mix-graph node.
@@ -51,6 +49,10 @@ public:
 
     double sampleRate() const { return sr_; }
     const EngineResourceBudget& resourceBudget() const noexcept { return resourceBudget_; }
+    // Layer slots the engine holds (fixed at kMaxLayers for now); the Builder's audition is the
+    // slot after them, auditionSlot() == layerCapacity().
+    int layerCapacity() const noexcept { return capacity_; }
+    int auditionSlot() const noexcept { return auditionSlot_; }
 
     // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
     std::string setProject(const ProjectSpec& p);  // result JSON: per-module ok/error and params
@@ -92,7 +94,7 @@ private:
     bool send(const Cmd& c);
     void applyCommands() noexcept;
     void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
-                AutomationData* automation = nullptr) noexcept;
+                AutomationData* automation = nullptr, std::vector<int>* order = nullptr) noexcept;
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
     void planTrack(Slot& s, int& m) noexcept;
@@ -120,11 +122,18 @@ private:
 
     const double sr_;
     const EngineResourceBudget resourceBudget_;
+    const int capacity_;      // layer slots; the audition slot follows them
+    const int auditionSlot_;  // == capacity_
+    const int slotCount_;     // capacity_ + 1 (layers and the audition)
     std::unique_ptr<ExportPool> exportPool_;
     std::unique_ptr<MixGraph> mixGraph_;  // built in the constructor; routed on the audio thread
 
     // ---- audio-thread state ----
-    std::unique_ptr<Slot[]> slots_;
+    // The slot table: slotCount_ individually allocated slots, each at a fixed address (and with a
+    // fixed index) for the life of the Engine.
+    std::unique_ptr<std::unique_ptr<Slot>[]> slots_;
+    Slot& slotAt(int i) noexcept { return *slots_[i]; }
+    const Slot& slotAt(int i) const noexcept { return *slots_[i]; }
     bool playing_ = false;
     int stopFade_ = 0;  // samples left in the stop fade, 0 when not stopping
     int64_t g_ = 0;     // position in the project loop
@@ -150,7 +159,7 @@ private:
     double loadAvg_ = 0;
     int overCount_ = 0, overCooldown_ = 0;
     bool overloadPending_ = false;
-    int processOrder_[kSlots] = {};  // slots in dependency order (exporters before readers)
+    std::unique_ptr<int[]> processOrder_;  // slotCount_ entries: slots in dependency order (exporters before readers)
     int processCount_ = 0;
     int64_t chunkId_ = 0;
     bool routingDirty_ = true;  // re-derive graph routing before the next chunk
@@ -209,7 +218,7 @@ private:
     std::set<std::string> touchedGlobals_;
     uint64_t playCount_ = 0;     // Play commands sent (control thread)
     uint32_t touchCounter_ = 0;  // knob moves (control thread); wraps, compared by difference
-    bool slotBusy_[kSlots] = {};
+    std::unique_ptr<bool[]> slotBusy_;  // slotCount_ entries
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
 

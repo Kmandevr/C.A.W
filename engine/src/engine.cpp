@@ -35,6 +35,7 @@ struct Engine::ExportPool {
 
 // Per-layer audio and meter state. Fields above `vol` belong to the audio thread.
 struct Engine::Slot {
+    int index = -1;  // this slot's place in the slot table (set once at construction)
     bool active = false;
     bool removing = false;
     bool fresh = true;       // the chain has not played yet since it was installed or play started
@@ -172,8 +173,7 @@ struct Engine::Chain {
 struct Engine::Cmd {
     enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
-    int orderList[kSlots] = {};
-    int orderCount = 0;
+    std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     int slot = 0;
     Chain* chain = nullptr;
     int steps = 0, order = 0, parentSlot = -1;
@@ -193,6 +193,7 @@ struct Engine::Retired {
     int freedSlot = -1;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     AutomationData* automation = nullptr;
+    std::vector<int>* order = nullptr;
 };
 
 namespace {
@@ -367,7 +368,7 @@ void storeMax(std::atomic<float>& a, float v) {
 
 }  // namespace
 
-// The engine's mix graph: node i runs slot i (a track or a folder bus) and node kSlots is the master
+// The engine's mix graph: node i runs slot i (a track or a folder bus) and node `slots` is the master
 // stage. Every node has a summing stereo input; routing (child -> folder bus, root -> master) and the
 // execution order are set on the audio thread from the slots' state (Engine::updateRouting).
 struct Engine::MixGraph {
@@ -437,13 +438,15 @@ struct Engine::MixGraph {
 
     // Node layout: K module nodes per slot, then a track node and a bus node per slot, then master.
     static constexpr uint32_t moduleNode(int slot, int index) { return static_cast<uint32_t>(slot * K + index); }
-    static constexpr uint32_t trackNode(int slot) { return static_cast<uint32_t>(kSlots * K + slot); }
-    static constexpr uint32_t busNode(int slot) { return static_cast<uint32_t>(kSlots * K + kSlots + slot); }
-    static constexpr uint32_t kMasterNode = static_cast<uint32_t>(kSlots * (K + 2));
-    static constexpr int kNodes = kSlots * (K + 2) + 1;
-    static constexpr int kMaster = kSlots;  // the master in slot-level routing scratch
-    static constexpr int kMaxEdges = kSlots * (K + 1);
-    // The mixer graph is fixed engine structure (kNodes nodes of kBlock frames, about 2 MB), not
+    // The layout depends on the slot count (layer capacity + the audition), fixed at construction.
+    const int slots;   // slot count
+    const int master;  // the master in slot-level routing scratch (== slots)
+    uint32_t trackNode(int slot) const noexcept { return static_cast<uint32_t>(slots * K + slot); }
+    uint32_t busNode(int slot) const noexcept { return static_cast<uint32_t>(slots * K + slots + slot); }
+    uint32_t masterNode() const noexcept { return static_cast<uint32_t>(slots * (K + 2)); }
+    int nodeCount() const noexcept { return slots * (K + 2) + 1; }
+    int maxEdges() const noexcept { return slots * (K + 1); }
+    // The mixer graph is fixed engine structure (nodeCount() nodes of kBlock frames, about 2 MB at 64 layers), not
     // project content, so it gets its own budget floor rather than competing with project graphs.
     static constexpr std::size_t kMinBudgetBytes = 8u * 1024u * 1024u;
 
@@ -461,19 +464,28 @@ struct Engine::MixGraph {
     std::vector<std::unique_ptr<ModuleProcessor>> nodes;
     GraphExecutor executor;
 
-    // Routing scratch, audio thread only; slot-level arrays use kMaster for the master.
-    int target[kSlots] = {};          // routed destination slot (or kMaster), or -1
-    bool routable[kSlots] = {};       // runs this chunk: active, and a bus or a track with a chain
-    int modules[kSlots] = {};         // module nodes a routed track runs
-    int pending[kSlots + 1] = {};     // routed children not yet ordered
-    bool deferred[kSlots + 1] = {};
-    bool emitted[kSlots + 1] = {};
-    int slotOrder[kSlots] = {};
-    uint32_t position[kSlots + 1] = {};
-    uint32_t order[kNodes] = {};
-    GraphConnection edges[kMaxEdges] = {};
+    // Routing scratch, audio thread only; slot-level arrays use `master` for the master. Sized in
+    // the constructor and never resized on the audio thread.
+    std::vector<int> target;          // [slots] routed destination slot (or master), or -1
+    std::vector<uint8_t> routable;    // [slots] runs this chunk: active, and a bus or a track with a chain
+    std::vector<int> modules;         // [slots] module nodes a routed track runs
+    std::vector<int> pending;         // [slots + 1] routed children not yet ordered
+    std::vector<uint8_t> deferred;    // [slots + 1]
+    std::vector<uint8_t> emitted;     // [slots + 1]
+    std::vector<int> slotOrder;       // [slots]
+    std::vector<uint32_t> position;   // [slots + 1]
+    std::vector<uint32_t> order;      // [nodeCount()]
+    std::vector<GraphConnection> edges;  // [maxEdges()]
 
-    MixGraph(Engine& e, double sampleRate, const EngineResourceBudget& engineBudget) {
+    // capacity: layer slots; the graph also routes the audition slot after them.
+    MixGraph(Engine& e, int capacity, double sampleRate, const EngineResourceBudget& engineBudget)
+        : slots(capacity + 1), master(capacity + 1),
+          target(static_cast<size_t>(slots), 0), routable(static_cast<size_t>(slots), 0),
+          modules(static_cast<size_t>(slots), 0), pending(static_cast<size_t>(slots) + 1, 0),
+          deferred(static_cast<size_t>(slots) + 1, 0), emitted(static_cast<size_t>(slots) + 1, 0),
+          slotOrder(static_cast<size_t>(slots), 0), position(static_cast<size_t>(slots) + 1, 0),
+          order(static_cast<size_t>(nodeCount()), 0), edges(static_cast<size_t>(maxEdges()), GraphConnection{}) {
+        const int kNodes = nodeCount();
         ids.reserve(kNodes);
         nodes.reserve(kNodes);
         std::vector<GraphNode> graphNodes;
@@ -486,18 +498,19 @@ struct Engine::MixGraph {
             graphNodes.push_back({ids.back(), d});
             processors.push_back(nodes.back().get());
         };
-        for (int s = 0; s < kSlots; ++s)
+        for (int s = 0; s < slots; ++s)
             for (int i = 0; i < K; ++i)
                 add("slot" + std::to_string(s) + ".m" + std::to_string(i),
                     std::make_unique<ModuleNode>(e, s, i, moduleDescriptor), &moduleDescriptor);
-        for (int s = 0; s < kSlots; ++s)
+        for (int s = 0; s < slots; ++s)
             add("slot" + std::to_string(s) + ".track", std::make_unique<TrackNode>(e, s, trackDescriptor), &trackDescriptor);
-        for (int s = 0; s < kSlots; ++s)
+        for (int s = 0; s < slots; ++s)
             add("slot" + std::to_string(s) + ".bus", std::make_unique<BusNode>(e, s, busDescriptor), &busDescriptor);
         add("master", std::make_unique<MasterNode>(e, masterDescriptor), &masterDescriptor);
         GraphResourceBudget budget = makeGraphResourceBudget(engineBudget);
         budget.maxWorkingBytes = std::max(budget.maxWorkingBytes, kMinBudgetBytes);
-        if (executor.prepareRouted(graphNodes, processors, kMasterNode, kBlock, sampleRate, budget, kSlots) != GraphError::Ok)
+        if (executor.prepareRouted(graphNodes, processors, masterNode(), kBlock, sampleRate, budget,
+                                   static_cast<uint32_t>(slots)) != GraphError::Ok)
             throw std::runtime_error("mix graph could not be prepared");
     }
 };
@@ -510,16 +523,24 @@ Engine::Engine(double sampleRate)
 Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     : sr_(sampleRate),
       resourceBudget_(resourceBudget),
-      slots_(new Slot[kSlots]),
+      capacity_(kMaxLayers),
+      auditionSlot_(capacity_),
+      slotCount_(capacity_ + 1),
+      slots_(new std::unique_ptr<Slot>[static_cast<size_t>(slotCount_)]),
+      processOrder_(new int[static_cast<size_t>(slotCount_)]()),
       pending_(new Retired[kPendingMax]),
       cmds_(new Spsc<Cmd, 1024>()),
       retired_(new Spsc<Retired, 1024>()),
       masterScope_(new std::atomic<float>[kScopeSize]) {
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
-    for (int s = 0; s < kSlots; ++s)
-        for (int i = 0; i < kScopeSize; ++i) slots_[s].scope[i].store(0);
+    for (int s = 0; s < slotCount_; ++s) {
+        slots_[s] = std::make_unique<Slot>();
+        slots_[s]->index = s;
+        for (int i = 0; i < kScopeSize; ++i) slots_[s]->scope[i].store(0);
+    }
+    slotBusy_.reset(new bool[static_cast<size_t>(slotCount_)]());
     ctlSr_ = sampleRate;
-    mixGraph_.reset(new MixGraph(*this, sampleRate, resourceBudget_));
+    mixGraph_.reset(new MixGraph(*this, capacity_, sampleRate, resourceBudget_));
     warmTables();  // the built-in wavetables are built here, never on the audio thread
     updateTiming();
     ctlLoopLen_ = loopLen_;
@@ -533,24 +554,27 @@ Engine::~Engine() {
         if (c.type == Cmd::Install) delete c.chain;
         delete c.pattern;
         delete c.automation;
+        delete c.orderList;
     }
     Retired r;
     while (retired_->pop(r)) {
         delete r.chain;
         delete r.pattern;
         delete r.automation;
+        delete r.order;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
         delete pending_[i].pattern;
         delete pending_[i].automation;
+        delete pending_[i].order;
     }
-    for (int s = 0; s < kSlots; ++s) {
-        delete slots_[s].cur;
-        delete slots_[s].old;
-        delete slots_[s].pending;
-        delete slots_[s].pattern;
-        delete slots_[s].automation;
+    for (int s = 0; s < slotCount_; ++s) {
+        delete slotAt(s).cur;
+        delete slotAt(s).old;
+        delete slotAt(s).pending;
+        delete slotAt(s).pattern;
+        delete slotAt(s).automation;
     }
 }
 
@@ -562,6 +586,7 @@ void Engine::drainRetired() {
         delete r.chain;
         delete r.pattern;
         delete r.automation;
+        delete r.order;
         if (r.freedSlot >= 0) slotBusy_[r.freedSlot] = false;
     }
 }
@@ -577,6 +602,7 @@ bool Engine::send(const Cmd& c) {
             if (c.type == Cmd::Install) delete c.chain;  // audio stalled; drop rather than hang the app
             delete c.pattern;
             delete c.automation;
+            delete c.orderList;
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -585,7 +611,7 @@ bool Engine::send(const Cmd& c) {
 }
 
 int Engine::freeSlot() {
-    for (int s = 0; s < kMaxLayers; ++s)
+    for (int s = 0; s < capacity_; ++s)
         if (!slotBusy_[s]) {
             slotBusy_[s] = true;
             return s;
@@ -735,7 +761,7 @@ void Engine::writeParams(Chain& c) {
 }
 
 void Engine::writeMix(int slot, double vol, double pan, bool mute, bool solo) {
-    Slot& s = slots_[slot];
+    Slot& s = slotAt(slot);
     s.vol.store(doubleToBits(vol), std::memory_order_relaxed);
     s.pan.store(doubleToBits(pan), std::memory_order_relaxed);
     s.mute.store(mute, std::memory_order_relaxed);
@@ -906,7 +932,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
                                    " after the pattern's length and never play" + (late == 1 ? "s" : ""));
     }
     uint64_t projectStateBytes = 0;
-    std::vector<std::vector<int>> readsFrom(kSlots);
+    std::vector<std::vector<int>> readsFrom(static_cast<size_t>(slotCount_));
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}, nullptr, {}, {}, {}};
         uint64_t layerStateDoubles = 0;
@@ -1044,8 +1070,8 @@ std::string Engine::setProject(const ProjectSpec& p) {
             continue;
         }
         if (pl.ls.slot < 0) {
-            pl.ls.slot = isAudition ? kAuditionSlot : freeSlot();
-            if (isAudition) slotBusy_[kAuditionSlot] = true;
+            pl.ls.slot = isAudition ? auditionSlot_ : freeSlot();
+            if (isAudition) slotBusy_[auditionSlot_] = true;
             if (pl.ls.slot < 0) {
                 allOk = false;
                 warnings[w.id].push_back("no free engine layer slot; layer was not installed because previous removals are still fading");
@@ -1069,11 +1095,13 @@ std::string Engine::setProject(const ProjectSpec& p) {
     std::map<std::string, const LayerSpec*> specByLayer;
     for (const LayerSpec& layer : p.layers) specByLayer[layer.id] = &layer;
     for (const Planned& pl : plan) slotByLayer[pl.w.id] = pl.ls.slot;
+    // Parent walks are bounded by the layer count (a chain has fewer ancestors), so they also end on a cycle.
+    const int maxDepth = static_cast<int>(p.layers.size());
     for (Planned& pl : plan) {
         // Recompute routing from the new project, not the previous snapshot.
         pl.ls.parentSlot = -1;
         std::string parent = pl.w.parentId;
-        for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+        for (int depth = 0; !parent.empty() && depth < maxDepth; ++depth) {
             auto spec = specByLayer.find(parent);
             if (spec == specByLayer.end()) break;
             auto bus = slotByLayer.find(parent);
@@ -1086,7 +1114,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         if (pl.ls.parentSlot >= 0) readsFrom[pl.ls.parentSlot].push_back(pl.ls.slot);
         // Soloing a folder solos its descendants; soloing a child keeps every ancestor bus open.
         std::string ancestor = pl.w.parentId;
-        for (int depth = 0; !ancestor.empty() && depth < kMaxLayers; ++depth) {
+        for (int depth = 0; !ancestor.empty() && depth < maxDepth; ++depth) {
             auto spec = specByLayer.find(ancestor);
             if (spec == specByLayer.end()) break;
             if (spec->second->solo) pl.w.solo = true;
@@ -1097,7 +1125,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             for (const LayerSpec& candidate : p.layers) {
                 if (!candidate.solo) continue;
                 std::string parent = candidate.parentId;
-                for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+                for (int depth = 0; !parent.empty() && depth < maxDepth; ++depth) {
                     if (parent == pl.w.id) { pl.w.solo = true; break; }
                     auto spec = specByLayer.find(parent);
                     if (spec == specByLayer.end()) break;
@@ -1109,10 +1137,10 @@ std::string Engine::setProject(const ProjectSpec& p) {
 
     // Reserve a stable pointer table from the graph-working budget. Individual buffers are
     // allocated only when a project needs them; their addresses never move during Engine life.
-    std::vector<size_t> requiredExportsPerSlot(static_cast<size_t>(kSlots), 0);
+    std::vector<size_t> requiredExportsPerSlot(static_cast<size_t>(slotCount_), 0);
     size_t maxExportsPerSlot = 0;
     for (const Planned& pl : plan) {
-        if (pl.ls.slot < 0 || pl.ls.slot >= kSlots || pl.ids.empty()) continue;
+        if (pl.ls.slot < 0 || pl.ls.slot >= slotCount_ || pl.ids.empty()) continue;
         size_t count = 0;
         for (const std::string& id : pl.ids) {
             auto module = modules_.find(id);
@@ -1126,7 +1154,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         constexpr uint64_t bytesPerBuffer = static_cast<uint64_t>(kBlock) * sizeof(double);
         constexpr uint64_t bytesPerPointer = sizeof(std::array<double, kBlock>*);
         constexpr uint64_t bytesPerOwner = sizeof(std::unique_ptr<std::array<double, kBlock>>);
-        const uint64_t bytesPerAllSlots = static_cast<uint64_t>(kSlots) * (bytesPerBuffer + bytesPerPointer + bytesPerOwner);
+        const uint64_t bytesPerAllSlots = static_cast<uint64_t>(slotCount_) * (bytesPerBuffer + bytesPerPointer + bytesPerOwner);
         const size_t budgetCapacity = bytesPerAllSlots == 0 ? 0 :
             static_cast<size_t>(resourceBudget_.graphWorkingBytes / bytesPerAllSlots);
         if (!exportPool_) {
@@ -1135,11 +1163,11 @@ std::string Engine::setProject(const ProjectSpec& p) {
             try {
                 auto pool = std::make_unique<ExportPool>();
                 pool->capacityPerSlot = budgetCapacity;
-                pool->pointers.resize(budgetCapacity * static_cast<size_t>(kSlots), nullptr);
-                pool->buffers.reserve(budgetCapacity * static_cast<size_t>(kSlots));
-                for (int slot = 0; slot < kSlots; ++slot) {
-                    slots_[slot].exportBuf = pool->pointers.data() + static_cast<size_t>(slot) * budgetCapacity;
-                    slots_[slot].exportCapacity = budgetCapacity;
+                pool->pointers.resize(budgetCapacity * static_cast<size_t>(slotCount_), nullptr);
+                pool->buffers.reserve(budgetCapacity * static_cast<size_t>(slotCount_));
+                for (int slot = 0; slot < slotCount_; ++slot) {
+                    slotAt(slot).exportBuf = pool->pointers.data() + static_cast<size_t>(slot) * budgetCapacity;
+                    slotAt(slot).exportCapacity = budgetCapacity;
                 }
                 exportPool_ = std::move(pool);
             } catch (const std::bad_alloc&) {
@@ -1149,15 +1177,15 @@ std::string Engine::setProject(const ProjectSpec& p) {
             return R"({"ok":false,"error":"project requires more exports per layer than the hardware-derived stable export pool supports"})";
         }
         try {
-            for (int slot = 0; slot < kSlots; ++slot) {
+            for (int slot = 0; slot < slotCount_; ++slot) {
                 const size_t required = requiredExportsPerSlot[static_cast<size_t>(slot)];
                 for (size_t index = 0; index < required; ++index) {
-                    if (slots_[slot].exportBuf[index]) continue;
+                    if (slotAt(slot).exportBuf[index]) continue;
                     auto buffer = std::make_unique<std::array<double, kBlock>>();
                     buffer->fill(0.0);
                     auto* stable = buffer.get();
                     exportPool_->buffers.push_back(std::move(buffer));
-                    slots_[slot].exportBuf[index] = stable;
+                    slotAt(slot).exportBuf[index] = stable;
                 }
             }
         } catch (const std::bad_alloc&) {
@@ -1178,7 +1206,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
         for (size_t k = 0; k < pl.ids.size(); ++k) {
             const ModuleState& m = modules_.at(pl.ids[k]);
             for (const ExportDef& e : m.program->exports) {
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, slots_[pl.ls.slot].exportBuf[buf]->data()});
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, slotAt(pl.ls.slot).exportBuf[buf]->data()});
                 ++buf;
             }
         }
@@ -1381,7 +1409,9 @@ std::string Engine::setProject(const ProjectSpec& p) {
     {
         Cmd oc;
         oc.type = Cmd::SetOrder;
-        std::vector<bool> placed(kSlots, false);
+        auto orderList = std::make_unique<std::vector<int>>();
+        orderList->reserve(static_cast<size_t>(slotCount_));
+        std::vector<bool> placed(static_cast<size_t>(slotCount_), false);
         bool progress = true;
         while (progress) {
             progress = false;
@@ -1393,13 +1423,13 @@ std::string Engine::setProject(const ProjectSpec& p) {
                         ready = false;
                 if (!ready) continue;
                 placed[slot] = true;
-                oc.orderList[oc.orderCount++] = slot;
+                orderList->push_back(slot);
                 progress = true;
             }
         }
         for (int slot : projectOrder) {
             if (placed[slot]) continue;
-            oc.orderList[oc.orderCount++] = slot;
+            orderList->push_back(slot);
             // Cycles are kept playable with the existing bounded one-block feedback behavior. Surface that
             // behavior in the owning module's diagnostics instead of silently accepting a delayed connection.
             for (const Planned& pl : plan) {
@@ -1411,6 +1441,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 break;
             }
         }
+        oc.orderList = orderList.release();  // send() frees it if the queue rejects the command
         if (!send(oc)) {
             allOk = false;
             warnings["project"].push_back("audio command queue rejected project layer ordering");
@@ -1568,7 +1599,7 @@ bool Engine::layerMeter(int index, LayerMeter& out) {
     if (index < 0 || index >= static_cast<int>(order_.size())) return false;
     auto it = layers_.find(order_[index]);
     if (it == layers_.end() || it->second.slot < 0) return true;
-    Slot& s = slots_[it->second.slot];
+    Slot& s = slotAt(it->second.slot);
     out.active = true;
     out.peak = s.peak.exchange(0, std::memory_order_relaxed);
     out.progress = s.progress.load(std::memory_order_relaxed);
@@ -1583,8 +1614,8 @@ int Engine::scope(int index, float* out, int n) {
     int pos = masterScopePos_.load(std::memory_order_acquire);
     if (index >= 0) {
         int slot = -1;
-        if (index == kAuditionSlot) {
-            slot = kAuditionSlot;
+        if (index == auditionSlot_) {
+            slot = auditionSlot_;
         } else if (index < static_cast<int>(order_.size())) {
             auto it = layers_.find(order_[index]);
             if (it != layers_.end()) slot = it->second.slot;
@@ -1593,8 +1624,8 @@ int Engine::scope(int index, float* out, int n) {
             std::fill_n(out, n, 0.0f);
             return n;
         }
-        ring = slots_[slot].scope;
-        pos = slots_[slot].scopePos.load(std::memory_order_acquire);
+        ring = slotAt(slot).scope;
+        pos = slotAt(slot).scopePos.load(std::memory_order_acquire);
     }
     for (int i = 0; i < n; ++i) out[i] = ring[(pos - n + i + kScopeSize) % kScopeSize].load(std::memory_order_relaxed);
     return n;
@@ -1618,9 +1649,9 @@ bool Engine::canRetire(size_t count) const noexcept {
 }
 
 void Engine::retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern,
-                    AutomationData* automation) noexcept {
-    if (!c && freedSlot < 0 && !pattern && !automation) return;
-    Retired r{c, freedSlot, pattern, automation};
+                    AutomationData* automation, std::vector<int>* order) noexcept {
+    if (!c && freedSlot < 0 && !pattern && !automation && !order) return;
+    Retired r{c, freedSlot, pattern, automation, order};
     if (pendingCount_ == 0 && retired_->push(r)) return;
     if (pendingCount_ < kPendingMax) pending_[pendingCount_++] = r;
     // All callers reserve queue capacity before changing ownership. This is a
@@ -1694,16 +1725,20 @@ void Engine::applyCommands() noexcept {
             case Cmd::Install: retirementNeed = 2; break;
             case Cmd::SetAutomation:
             case Cmd::SetPattern:
-            case Cmd::Remove: retirementNeed = 1; break;
+            case Cmd::Remove:
+            case Cmd::SetOrder: retirementNeed = 1; break;
             case Cmd::ConfigureBus: retirementNeed = c.flag ? 4 : 3; break;
-            case Cmd::Play: retirementNeed = static_cast<size_t>(2 * kSlots); break;
+            // Every slot may retire its current and old chain. The retired queue (1024) and the
+            // pending overflow (kPendingMax) are fixed sizes that fit 2 * 65 slots; F7.3 part B,
+            // which grows the slot count, must size them from the maximum capacity.
+            case Cmd::Play: retirementNeed = static_cast<size_t>(2 * slotCount_); break;
             default: break;
         }
         if (!canRetire(retirementNeed) || !cmds_->pop(c)) break;
         routingDirty_ = true;  // any command may change slots, buses or order
         switch (c.type) {
             case Cmd::Install: {
-                Slot& s = slots_[c.slot];
+                Slot& s = slotAt(c.slot);
                 s.exportCount = std::max(s.exportCount, c.chain ? c.chain->exportCount : size_t{0});
                 s.steps = c.steps;
                 s.order = c.order;
@@ -1738,16 +1773,16 @@ void Engine::applyCommands() noexcept {
                 break;
             }
             case Cmd::SetSteps:
-                slots_[c.slot].steps = c.steps;
+                slotAt(c.slot).steps = c.steps;
                 break;
             case Cmd::SetRouting: {
-                Slot& s = slots_[c.slot];
+                Slot& s = slotAt(c.slot);
                 s.parentSlot = c.parentSlot;
                 s.bus = false;
                 break;
             }
             case Cmd::SetAutomation: {
-                Slot& s = slots_[c.slot];
+                Slot& s = slotAt(c.slot);
                 retire(nullptr, -1, nullptr, s.automation);
                 s.automation = c.automation;
                 if (c.flag && s.bus) {
@@ -1758,7 +1793,7 @@ void Engine::applyCommands() noexcept {
                 break;
             }
             case Cmd::ConfigureBus: {
-                Slot& s = slots_[c.slot];
+                Slot& s = slotAt(c.slot);
                 retire(s.cur, -1, s.pattern);
                 retire(s.old, -1);
                 retire(s.pending, -1);
@@ -1778,7 +1813,7 @@ void Engine::applyCommands() noexcept {
                 break;
             }
             case Cmd::SetPattern: {
-                Slot& s = slots_[c.slot];
+                Slot& s = slotAt(c.slot);
                 // A sounding note finishes as the old pattern had it; the edit is heard from its next start.
                 if (s.cur && s.cur->voiced) {
                     const Pattern* old = s.pattern ? s.pattern->get() : nullptr;
@@ -1800,7 +1835,7 @@ void Engine::applyCommands() noexcept {
                 break;
             }
             case Cmd::Remove: {
-                Slot& s = slots_[c.slot];
+                Slot& s = slotAt(c.slot);
                 s.removing = true;
                 retire(nullptr, -1, nullptr, s.automation);
                 s.automation = nullptr;
@@ -1809,9 +1844,9 @@ void Engine::applyCommands() noexcept {
             case Cmd::Transport:
                 // A tempo change moves every note in time: let held notes go so none is left hanging.
                 if (c.bpm != bpm_)
-                    for (int i = 0; i < kSlots; ++i) {
-                        if (slots_[i].cur && slots_[i].cur->voiced) releaseVoices(slots_[i].cur->voices, slots_[i].cur->voiceCount);
-                        if (slots_[i].old && slots_[i].old->voiced) releaseVoices(slots_[i].old->voices, slots_[i].old->voiceCount);
+                    for (int i = 0; i < slotCount_; ++i) {
+                        if (slotAt(i).cur && slotAt(i).cur->voiced) releaseVoices(slotAt(i).cur->voices, slotAt(i).cur->voiceCount);
+                        if (slotAt(i).old && slotAt(i).old->voiced) releaseVoices(slotAt(i).old->voices, slotAt(i).old->voiceCount);
                     }
                 bpm_ = c.bpm;
                 beatsPerBar_ = c.beatsPerBar;
@@ -1843,8 +1878,8 @@ void Engine::applyCommands() noexcept {
                 epoch_ = 0;
                 dcL_[0] = dcL_[1] = dcR_[0] = dcR_[1] = 0;
                 limEnv_ = 0;
-                for (int i = 0; i < kSlots; ++i) {
-                    Slot& s = slots_[i];
+                for (int i = 0; i < slotCount_; ++i) {
+                    Slot& s = slotAt(i);
                     if (!s.active) continue;
                     retire(s.old, -1);
                     s.old = nullptr;
@@ -1877,13 +1912,17 @@ void Engine::applyCommands() noexcept {
                 auditionOnly_ = c.flag;
                 break;
             case Cmd::SetOrder:
-                std::copy_n(c.orderList, c.orderCount, processOrder_);
-                processCount_ = c.orderCount;
+                processCount_ = 0;
+                if (c.orderList) {
+                    processCount_ = std::min(static_cast<int>(c.orderList->size()), slotCount_);
+                    std::copy_n(c.orderList->data(), processCount_, processOrder_.get());
+                }
+                retire(nullptr, -1, nullptr, nullptr, c.orderList);  // freed on the control thread
                 break;
             case Cmd::ClearOverload:
-                for (int i = 0; i < kSlots; ++i) {
-                    slots_[i].overloaded = false;
-                    slots_[i].overloadFlag.store(false, std::memory_order_relaxed);
+                for (int i = 0; i < slotCount_; ++i) {
+                    slotAt(i).overloaded = false;
+                    slotAt(i).overloadFlag.store(false, std::memory_order_relaxed);
                 }
                 overloadedFlag_.store(0, std::memory_order_relaxed);
                 break;
@@ -1893,9 +1932,8 @@ void Engine::applyCommands() noexcept {
 
 double Engine::slotTarget(const Slot& s) const noexcept {
     if (s.removing || s.overloaded) return 0.0;
-    const int idx = static_cast<int>(&s - slots_.get());
-    if (auditionOnly_) return idx == kAuditionSlot ? bitsToDouble(s.vol.load(std::memory_order_relaxed)) : 0.0;
-    if (idx == kAuditionSlot) return 0.0;
+    if (auditionOnly_) return s.index == auditionSlot_ ? bitsToDouble(s.vol.load(std::memory_order_relaxed)) : 0.0;
+    if (s.index == auditionSlot_) return 0.0;
     if (s.mute.load(std::memory_order_relaxed)) return 0.0;
     if (anySolo_ && !s.solo.load(std::memory_order_relaxed)) return 0.0;
     return s.automation && !s.automation->volume.empty() ? 1.0 : bitsToDouble(s.vol.load(std::memory_order_relaxed));
@@ -1903,8 +1941,8 @@ double Engine::slotTarget(const Slot& s) const noexcept {
 
 void Engine::updateSolo() noexcept {
     bool any = false;
-    for (int i = 0; i < kMaxLayers && !any; ++i)
-        any = slots_[i].active && !slots_[i].removing && slots_[i].solo.load(std::memory_order_relaxed);
+    for (int i = 0; i < capacity_ && !any; ++i)
+        any = slotAt(i).active && !slotAt(i).removing && slotAt(i).solo.load(std::memory_order_relaxed);
     anySolo_ = any;
 }
 
@@ -2369,8 +2407,8 @@ void Engine::planTrack(Slot& s, int& m) noexcept {
 // next loop boundary or code swap of any playing track.
 int Engine::planChunk(int maxFrames) noexcept {
     int m = maxFrames;
-    for (int i = 0; i < kSlots; ++i) {
-        Slot& s = slots_[i];
+    for (int i = 0; i < slotCount_; ++i) {
+        Slot& s = slotAt(i);
         if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
         if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
         s.target = slotTarget(s);
@@ -2398,8 +2436,8 @@ int Engine::planChunk(int maxFrames) noexcept {
 }
 
 int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
-    for (int i = 0; i < kSlots; ++i) {
-        Slot& slot = slots_[i];
+    for (int i = 0; i < slotCount_; ++i) {
+        Slot& slot = slotAt(i);
         if (slot.exportBuf && slot.exportCount > 0 &&
             (!slot.active || !slot.cur || (slotTarget(slot) == 0.0 && slot.gain == 0.0))) {
             for (size_t b = 0; b < slot.exportCount; ++b)
@@ -2435,9 +2473,9 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
 // accumulation order. Idle slots are left out of the order, so they cost nothing.
 void Engine::updateRouting() noexcept {
     MixGraph& g = *mixGraph_;
-    const int master = MixGraph::kMaster;
-    for (int i = 0; i < kSlots; ++i) {
-        const Slot& s = slots_[i];
+    const int master = g.master;
+    for (int i = 0; i < slotCount_; ++i) {
+        const Slot& s = slotAt(i);
         int to = -1, modules = 0;
         bool routable = s.active && (s.bus || s.cur);
         if (routable && !s.bus) {
@@ -2451,8 +2489,8 @@ void Engine::updateRouting() noexcept {
             }
         }
         if (routable) {
-            if (s.parentSlot >= 0 && s.parentSlot < kMaxLayers && s.parentSlot != i) {
-                const Slot& parent = slots_[s.parentSlot];
+            if (s.parentSlot >= 0 && s.parentSlot < capacity_ && s.parentSlot != i) {
+                const Slot& parent = slotAt(s.parentSlot);
                 to = parent.active && parent.bus ? s.parentSlot : -1;
             } else {
                 to = master;
@@ -2462,8 +2500,8 @@ void Engine::updateRouting() noexcept {
         g.modules[i] = modules;
         g.target[i] = to;
     }
-    for (int n = 0; n <= kSlots; ++n) { g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false; }
-    for (int i = 0; i < kSlots; ++i)
+    for (int n = 0; n <= slotCount_; ++n) { g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false; }
+    for (int i = 0; i < slotCount_; ++i)
         if (g.target[i] >= 0 && g.target[i] != master) ++g.pending[g.target[i]];
     int count = 0;
     auto emit = [&](int x) noexcept {
@@ -2479,30 +2517,30 @@ void Engine::updateRouting() noexcept {
         }
     };
     auto visit = [&](int x) noexcept {
-        if (x < 0 || x >= kSlots || !g.routable[x] || g.emitted[x] || g.deferred[x]) return;
+        if (x < 0 || x >= slotCount_ || !g.routable[x] || g.emitted[x] || g.deferred[x]) return;
         if (g.pending[x] > 0) { g.deferred[x] = true; return; }
         emit(x);
     };
     for (int k = 0; k < processCount_; ++k) visit(processOrder_[k]);
-    for (int k = 0; k < kSlots; ++k) visit(k);
+    for (int k = 0; k < slotCount_; ++k) visit(k);
     // A routing cycle is never sent by the control thread; if one appears, keep everything ordered
     // and drop the edges that would point backwards.
-    for (int k = 0; k < kSlots; ++k)
+    for (int k = 0; k < slotCount_; ++k)
         if (g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.slotOrder[count++] = k; }
-    for (int n = 0; n <= kSlots; ++n) g.position[n] = UINT32_MAX;  // not run this chunk
+    for (int n = 0; n <= slotCount_; ++n) g.position[n] = UINT32_MAX;  // not run this chunk
     for (int k = 0; k < count; ++k) g.position[g.slotOrder[k]] = static_cast<uint32_t>(k);
     g.position[master] = static_cast<uint32_t>(count);
     uint32_t nodeCount = 0, edgeCount = 0;
     for (int k = 0; k < count; ++k) {
         const int x = g.slotOrder[k];
-        uint32_t out = MixGraph::busNode(x);
-        if (!slots_[x].bus) {
+        uint32_t out = g.busNode(x);
+        if (!slotAt(x).bus) {
             const int n = g.modules[x];
             for (int i = 0; i < n; ++i) {
                 g.order[nodeCount++] = MixGraph::moduleNode(x, i);
                 if (i > 0) g.edges[edgeCount++] = GraphConnection{MixGraph::moduleNode(x, i - 1), 1, MixGraph::moduleNode(x, i), 0};
             }
-            out = MixGraph::trackNode(x);
+            out = g.trackNode(x);
             g.order[nodeCount++] = out;
             g.edges[edgeCount++] = GraphConnection{MixGraph::moduleNode(x, n - 1), 1, out, 0};
         } else {
@@ -2510,12 +2548,12 @@ void Engine::updateRouting() noexcept {
         }
         const int to = g.target[x];
         if (to < 0 || g.position[x] >= g.position[to]) continue;
-        g.edges[edgeCount++] = GraphConnection{out, 1, to == master ? MixGraph::kMasterNode : MixGraph::busNode(to), 0};
+        g.edges[edgeCount++] = GraphConnection{out, 1, to == master ? g.masterNode() : g.busNode(to), 0};
     }
-    g.order[nodeCount++] = MixGraph::kMasterNode;
+    g.order[nodeCount++] = g.masterNode();
     // Valid by construction. A rejection would keep the previous routing (safe: stale nodes output
     // zeros) but must never pass unnoticed: it is counted and asserts in debug builds.
-    if (!g.executor.setRouting(g.edges, edgeCount, g.order, nodeCount)) {
+    if (!g.executor.setRouting(g.edges.data(), edgeCount, g.order.data(), nodeCount)) {
         routingRejections_.fetch_add(1, std::memory_order_relaxed);
         assert(!"mix graph rejected a derived route");
     }
@@ -2524,7 +2562,7 @@ void Engine::updateRouting() noexcept {
 // Module `index` of a playing track, on every lane that runs this chunk. Lanes arrive and leave
 // as float (graph edges are 32-bit, owner 2026-11-03); a module past a lane's chain passes it on.
 void Engine::runModuleNode(int slot, int index, const float* const* in, float* const* out, int m) noexcept {
-    Slot& s = slots_[slot];
+    Slot& s = slotAt(slot);
     if (s.mode != Slot::Mode::Play) return;  // the track node outputs silence and reads no lane
     const size_t idx = static_cast<size_t>(index);
     const int64_t gg = g_;
@@ -2550,7 +2588,7 @@ void Engine::runModuleNode(int slot, int index, const float* const* in, float* c
 
 // A playing track's output: the seam and swap crossfades of its lanes, then gain and pan.
 void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept {
-    Slot& s = slots_[slot];
+    Slot& s = slotAt(slot);
     if (s.mode != Slot::Mode::Play) {
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
@@ -2632,7 +2670,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
 
 // A folder bus: its children arrive summed in float on the graph's summing input.
 void Engine::runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
-    Slot& s = slots_[slot];
+    Slot& s = slotAt(slot);
     if (s.mode != Slot::Mode::Bus) {
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
@@ -2722,14 +2760,14 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
 
 void Engine::pickOverloadVictim() noexcept {
     int best = -1;
-    for (int i = 0; i < kSlots; ++i) {
-        const Slot& s = slots_[i];
+    for (int i = 0; i < slotCount_; ++i) {
+        const Slot& s = slotAt(i);
         if (!s.active || s.overloaded || slotTarget(s) == 0.0) continue;
-        if (best < 0 || s.order > slots_[best].order) best = i;
+        if (best < 0 || s.order > slotAt(best).order) best = i;
     }
     if (best >= 0) {
-        slots_[best].overloaded = true;
-        slots_[best].overloadFlag.store(true, std::memory_order_relaxed);
+        slotAt(best).overloaded = true;
+        slotAt(best).overloadFlag.store(true, std::memory_order_relaxed);
         overloadedFlag_.fetch_add(1, std::memory_order_relaxed);
     }
 }

@@ -254,10 +254,12 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         out.loopBars = std::max(out.loopBars, static_cast<int>((automationEndStep + stepsPerBar - 1) / stepsPerBar));
 
     // Reject malformed parent references and cycles before the audio thread sees routing indices.
+    // A chain has fewer ancestors than there are layers, so the walk is bounded by the layer count.
+    const int maxDepth = static_cast<int>(out.layers.size());
     for (const LayerSpec& layer : out.layers) {
         std::string parent = layer.parentId;
         std::vector<std::string> seen{layer.id};
-        for (int depth = 0; !parent.empty() && depth < kMaxLayers; ++depth) {
+        for (int depth = 0; !parent.empty() && depth < maxDepth; ++depth) {
             if (std::find(seen.begin(), seen.end(), parent) != seen.end()) {
                 error = "folder hierarchy contains a cycle";
                 return false;
