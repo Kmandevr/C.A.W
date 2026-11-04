@@ -295,10 +295,10 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
 2. **U1, the docking shell.** Five PRs, in the order an architect review recommended (2026-11-04):
    1. **The layout model** (`lib/ui/dock/layout.dart`, built): splits and tab groups, dock, remove, reveal, activate and weights, presets per form factor, and damage-tolerant JSON.
       - Panel ids are strings, so a renamed panel drops out of a saved layout instead of breaking it.
-   2. **The dock view** (`lib/ui/dock/dock_view.dart`), not yet wired in:
-      - dividers with 48 dp grab zones and minimum sizes
-      - tabs, a long-press drag onto five drop zones, and maximise
-      - each panel body keeps a `GlobalObjectKey(panelId)`, so a moved panel keeps its state
+   2. **The dock view** (`lib/ui/dock/dock_view.dart`, built, not yet wired in):
+      - dividers with 48 dp grab zones (36 compact) that stop at the 12% minimum
+      - glass tab strips, a long-press drag onto five drop zones (the middle half joins the group, near an edge splits there) with a preview of where it lands, and maximise
+      - each panel body keeps a `GlobalObjectKey(panelId)` and its own `RepaintBoundary`, so a moved or maximised panel keeps its state; hidden tabs stay mounted with tickers off
       - goldens at the three sizes
    3. **The shell switch:**
       - a `DockController.reveal(panel)` replaces the tab-switching callbacks
