@@ -472,9 +472,11 @@ class _LanePainter extends CustomPainter {
     final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(6));
     canvas.drawRRect(r, Paint()..color = Neon.bg.withValues(alpha: 0.6));
     final stepW = size.width / cycle;
+    // Bars narrower than 2 px are not drawn one by one: a very long pattern would mean millions of them.
+    final barsVisible = bar * stepW >= 2;
     // Bar lines.
     final grid = Paint()..color = Neon.line;
-    for (var s = bar; s < cycle; s += bar) {
+    for (var s = bar; barsVisible && s < cycle; s += bar) {
       canvas.drawLine(Offset(s * stepW, 2), Offset(s * stepW, size.height - 2), grid);
     }
     final ns = notes;
@@ -484,8 +486,9 @@ class _LanePainter extends CustomPainter {
       final edge = Paint()
         ..color = color.withValues(alpha: 0.7)
         ..style = PaintingStyle.stroke;
-      for (var s = 0; s < cycle; s += bar) {
-        final w = ((s + bar > cycle ? cycle - s : bar) * stepW) - 3;
+      final block = barsVisible ? bar : cycle;  // one block for the whole cycle when bars are too thin
+      for (var s = 0; s < cycle; s += block) {
+        final w = ((s + block > cycle ? cycle - s : block) * stepW) - 3;
         final rect = RRect.fromRectAndRadius(Rect.fromLTWH(s * stepW + 1.5, 6, w, size.height - 12), const Radius.circular(4));
         canvas.drawRRect(rect, fill);
         canvas.drawRRect(rect, edge);

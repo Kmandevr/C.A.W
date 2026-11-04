@@ -161,7 +161,7 @@ A pattern can be imported from, and exported to, MIDI files for use in Reaper an
   - The pattern is the whole bars of the file's first time signature (4/4 without one).
   - A pitch bend sounding at a note's start becomes a microtonal pitch, assuming ±2 semitones.
   - A note that overlaps the next one by at most 1/8 step becomes a `slide`, so ordinary legato playing comes in as slides. `--no-slides` turns that off.
-  - Limits: 16 MB, 65536 events, 4096 notes and 4096 steps. Format 2, SMPTE-timed and malformed files give an error.
+  - Limits: 16 MB and 65536 events; notes and steps are bounded only by the signed 32-bit step representation (a caller may pass a lower note allowance). Format 2, SMPTE-timed and malformed files give an error.
 - **Export:** `caw midi export PATTERN.caw -o OUT.mid|OUT.midi2 [--bpm B] [--beats N] [--clip]`, or `caw_pattern_export(source, bpm, beats_per_bar, CAW_MIDI_SMF|CAW_MIDI_CLIP, path, error, len)`.
   - Both formats use 960 ticks per quarter and carry the tempo, the meter and the pattern's name.
   - Ratchets are written as their repeats, every note is written whatever its `prob`, and a slide is a legato overlap of 1/16 step. Notes are cut at the pattern's length, as in playback.

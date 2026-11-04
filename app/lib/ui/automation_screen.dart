@@ -59,7 +59,7 @@ class _ProjectAutomation extends StatelessWidget {
         IconButton(tooltip: 'Redo automation', onPressed: state.canRedoAutomation ? state.redoAutomation : null, icon: const Icon(Icons.redo, size: 18)),
         PopupMenuButton<String>(
           tooltip: 'Add parameter or global lane',
-          enabled: options.isNotEmpty && state.project.automation.length < 256,
+          enabled: options.isNotEmpty,
           onSelected: (value) {
             final parts = value.split('|');
             if (parts.first == 'global' && parts.length == 2) {
@@ -101,7 +101,7 @@ class _ProjectAutomationLane extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(child: Text(label, style: Neon.code(size: 11, color: Neon.blue))),
-          IconButton(tooltip: 'Add midpoint point', onPressed: lane.points.length >= 128 ? null : () =>
+          IconButton(tooltip: 'Add midpoint point', onPressed: () =>
             state.addProjectAutomationPoint(lane, state.project.maxArrangementSteps / 2,
               lane.points.isEmpty ? 0 : lane.points.last.value),
             icon: const Icon(Icons.add_circle_outline, size: 18)),
@@ -223,7 +223,7 @@ class _AutomationLane extends StatelessWidget {
         Row(children: [
           Expanded(child: Text(volume ? 'VOLUME' : 'PAN', style: Neon.code(size: 12, color: color))),
           IconButton(tooltip: 'Remove lane', onPressed: () => state.removeAutomationLane(layer, lane), icon: const Icon(Icons.close, size: 18)),
-          IconButton(tooltip: 'Add midpoint point', onPressed: lane.points.length >= 128 ? null : () =>
+          IconButton(tooltip: 'Add midpoint point', onPressed: () =>
               state.addAutomationPoint(layer, lane, (maxStep / 2).roundToDouble(), volume ? layer.volume : layer.pan),
             icon: const Icon(Icons.add_circle_outline, size: 18)),
         ]),
@@ -355,7 +355,7 @@ class _CurveEditorState extends State<_CurveEditor> {
   }
 
   void _addAt(TapUpDetails details, Size size) {
-    if (size.width <= 0 || size.height <= 0 || widget.lane.points.length >= 128) return;
+    if (size.width <= 0 || size.height <= 0) return;
     widget.state.addAutomationPoint(widget.layer, widget.lane,
       _stepAt(details.localPosition, size), _valueAt(details.localPosition, size));
   }

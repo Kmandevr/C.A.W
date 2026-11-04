@@ -173,9 +173,9 @@ void main() {
       expect(err('$head  0 H1 1\n'), "line 4, col 5: expected a note such as C3, F#2 or 48, found 'H1'");
       expect(err('${head}0 C3,Q3 1\n'), "line 4, col 6: expected a note such as C3, F#2 or 48, found 'Q3'");
       expect(err('${head}0 200 1\n'), 'line 4, col 3: notes must be 0 to 127');
-      expect(err('$head-1 A1 1\n'), 'line 4, col 1: the start (in steps) must be 0 to 4096');
+      expect(err('$head-1 A1 1\n'), 'line 4, col 1: the start (in steps) must be 0 to 2.14748e+09');
       expect(err('${head}x A1 1\n'), "line 4, col 1: expected the start (in steps), found 'x'");
-      expect(err('${head}0 A1 0\n'), 'line 4, col 6: the length (in steps) must be 0.001 to 4096');
+      expect(err('${head}0 A1 0\n'), 'line 4, col 6: the length (in steps) must be 0.001 to 2.14748e+09');
       expect(err('${head}0 A1 1 2\n'), 'line 4, col 8: velocity must be 0 to 1');
       expect(
           err('${head}0 A1 1 1 wobble\n'), "line 4, col 10: unknown extra 'wobble' (try prob 0.5, ratchet 3, slide, bend, vib, press or timbre)");
@@ -186,9 +186,29 @@ void main() {
       expect((r.ok, r.line, r.col), (false, 4, 8));
     });
 
-    test('caps the note count', () {
+    test('holds as many notes, steps and curve points as the engine (F7, owner 2026-11-04)', () {
       final lines = List.generate(2049, (i) => '$i C3,E3 1').join('\n');
-      expect(err('$head$lines\n'), 'line 2052, col 1: a pattern holds at most 4096 notes');
+      final many = PatternDoc.parse('$head$lines\n');
+      expect(many.ok, isTrue);
+      expect(many.doc!.notes.length, 4098);
+      final late = PatternDoc.parse('${head}100000 C3 8\n');
+      expect(late.ok, isTrue);
+      expect(late.doc!.lengthSteps(4), greaterThan(100000));
+      final points = List.generate(20, (i) => '${i / 20}:${i % 3}').join(' ');
+      final curve = PatternDoc.parse('${head}0 C3 4 bend $points\n');
+      expect(curve.ok, isTrue, reason: curve.error);
+      expect(curve.doc!.notes.single.expr.bend.length, 20);
+      expect(PatternDoc.parse('${head}0 C3 1\n').doc!.setLength(bars: 300).lengthSteps(4), 300 * 16);
+    });
+
+    test('step arithmetic stays exact or close near the step limit, never wraps', () {
+      final a = Steps.tryParse('2147483646.12347')!, b = Steps.tryParse('0.33331')!;
+      expect((a + b).toDouble(), closeTo(2147483646.45678, 1e-4));
+      expect((a - b).toDouble(), closeTo(2147483645.79016, 1e-4));
+      expect(a > b, isTrue);
+      expect(a.compareTo(a + b), -1);
+      expect(Steps(kPatternMaxSteps).times(3).toDouble(), 3.0 * kPatternMaxSteps);
+      expect(err('---\nkind: pattern\nlength: 2147483648\n---\n'), contains('length must be 1 to 2.14748e+09'));
     });
   });
 
@@ -427,7 +447,7 @@ void main() {
       final p = d.paste(clip, Steps(13, 3));
       expect(p.ids.map((id) => p.doc.byId(id)!.at), [Steps(13, 3), Steps(19, 3)]);
       expect(d.duplicate({2}, Steps(8)).doc.notes.last.at, Steps(10));
-      expect(d.paste(clip, Steps(4096)).ids.length, 1);
+      expect(d.paste(clip, Steps(4096)).ids.length, 2);  // nothing past step 4096 is dropped
       expect(d.copy({}).isEmpty, isTrue);
     });
 

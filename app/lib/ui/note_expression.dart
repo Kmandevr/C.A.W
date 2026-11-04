@@ -115,7 +115,7 @@ class _NoteCurveEditorState extends State<NoteCurveEditor> {
     final pts = [...widget.points];
     final i = pts.indexWhere((p) => p.t > q.t);
     pts.insert(i < 0 ? pts.length : i, q);
-    return pts.take(NoteExpression.maxPoints).toList();
+    return pts;
   }
 
   @override

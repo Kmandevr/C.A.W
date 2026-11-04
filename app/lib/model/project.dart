@@ -94,7 +94,7 @@ class AutomationLaneDoc {
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
-class ProjectAutomationLaneDoc { ProjectAutomationLaneDoc({required this.targetType, required this.target, this.moduleId, List<AutomationPointDoc>? points}) : points = points ?? []; String targetType; String target; String? moduleId; List<AutomationPointDoc> points; Map<String, dynamic> toJson() => {'target_type': targetType, 'target': target, if (moduleId != null) 'module': moduleId, 'points': [for (final p in points) p.toJson()]}; static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(targetType: j['target_type'] as String? ?? 'global', target: j['target'] as String? ?? '', moduleId: j['module'] as String?, points: ((j['points'] as List?) ?? const []).take(128).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList()); }
+class ProjectAutomationLaneDoc { ProjectAutomationLaneDoc({required this.targetType, required this.target, this.moduleId, List<AutomationPointDoc>? points}) : points = points ?? []; String targetType; String target; String? moduleId; List<AutomationPointDoc> points; Map<String, dynamic> toJson() => {'target_type': targetType, 'target': target, if (moduleId != null) 'module': moduleId, 'points': [for (final p in points) p.toJson()]}; static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(targetType: j['target_type'] as String? ?? 'global', target: j['target'] as String? ?? '', moduleId: j['module'] as String?, points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList()); }
 
 class LayerDoc {
   LayerDoc({
@@ -348,7 +348,7 @@ class ProjectDoc {
       master: (j['master'] as num?)?.toDouble() ?? 0.7,
       seamCrossfade: j['seam_crossfade'] != false,
       globals: ((j['globals'] as Map?) ?? {}).map((k, v) => MapEntry(k as String, (v as num).toDouble())),
-      automation: ((j['automation'] as List?) ?? const []).take(256).map((lane) => ProjectAutomationLaneDoc.fromJson(lane as Map<String, dynamic>)).toList(),
+      automation: ((j['automation'] as List?) ?? const []).map((lane) => ProjectAutomationLaneDoc.fromJson(lane as Map<String, dynamic>)).toList(),
       modules: ((j['modules'] as List?) ?? const [])
           .map((m) => ModuleDoc.fromJson(m as Map<String, dynamic>)).toList(),
       libraryFolders: ((j['library_folders'] as List?) ?? const []).whereType<String>().take(512).toList(),
@@ -405,9 +405,9 @@ class ProjectDoc {
     project.automation = project.automation.where((lane) =>
       lane.target.isNotEmpty && (lane.targetType == 'global' ||
         (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true)))
-      .take(256).toList();
+      .toList();
     for (final lane in project.automation) {
-      lane.points = lane.points.take(128).toList()
+      lane.points = lane.points.toList()
         ..forEach((point) {
           point.step = point.step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
           point.value = point.value.clamp(-1000000.0, 1000000.0).toDouble();
@@ -422,7 +422,7 @@ class ProjectDoc {
         clip.sourceOffsetSteps = clip.sourceOffsetSteps.clamp(0, project.maxArrangementSteps).toInt();
       }
       for (final lane in layer.automation) {
-        lane.points = lane.points.take(128).toList()
+        lane.points = lane.points.toList()
           ..forEach((point) {
             point.step = point.step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
             point.value = point.value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
