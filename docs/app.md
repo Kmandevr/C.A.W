@@ -176,5 +176,5 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - golden (screenshot) tests, which compare a screen with a PNG in `test/goldens/`:
   - `test/golden_util.dart` loads real fonts (the bundled JetBrains Mono, and the Roboto and Material icons from the Flutter SDK), so layouts measure as they do on a phone. It pumps screens at the plan's sizes: phone 390×844, landscape 844×390, desktop 1280×800.
   - After an intended visual change, run `flutter test --update-goldens` and review the new PNGs.
-  - CI renders them on Ubuntu, like the local Linux SDK.
+  - CI renders them on Ubuntu with the pinned Flutter (`app.yml`). After a Flutter upgrade, re-run `flutter test --update-goldens` and check the new PNGs.
 - integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.

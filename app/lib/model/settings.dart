@@ -326,8 +326,13 @@ class Settings extends ChangeNotifier {
     await save();
   }
 
-  /// Writes through a temporary file so a crash mid-save never leaves half a file.
-  Future<void> save() async {
+  /// The save in progress; each save waits for the one before it, so two never share the temporary file.
+  Future<void> _saving = Future.value();
+
+  /// Writes through a temporary file so a crash mid-save never leaves half a file. Saves run one after another.
+  Future<void> save() => _saving = _saving.catchError((_) {}).then((_) => _write());
+
+  Future<void> _write() async {
     final f = _file;
     if (f == null) return;
     await f.parent.create(recursive: true);

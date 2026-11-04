@@ -98,6 +98,13 @@ void main() {
     });
   });
 
+  test('NaN settles like no distance; infinity like the longest move', () {
+    expect(Motion.settle(double.nan), const Duration(milliseconds: 80));
+    expect(Motion.settle(double.infinity), const Duration(milliseconds: 240));
+    expect(Motion.overshoot(double.nan), 0);
+    expect(Motion.overshoot(double.infinity), 0);
+  });
+
   group('snap', () {
     test('rounds to the grid, and a zero grid leaves the value alone', () {
       expect(Snap.to(13, 8), 16);
@@ -159,7 +166,18 @@ void main() {
       expect(s.reactiveGlow, 1.0);
     });
 
-    test('adjust shows a change without saving it', () async {
+    test('saves that overlap never fail and leave the last state on disk', () async {
+      final s = await Settings.open(base: dir);
+      final saves = <Future<void>>[];
+      for (var i = 0; i <= 20; i++) {
+        s.adjust((x) => x.reactiveGlow = i / 20);
+        saves.add(s.save());
+      }
+      await Future.wait(saves);
+      expect((await Settings.open(base: dir)).reactiveGlow, 1.0);
+    });
+
+        test('adjust shows a change without saving it', () async {
       final s = await Settings.open(base: dir);
       s.adjust((x) => x.reactiveGlow = 0.1);
       expect(s.reactiveGlow, 0.1);

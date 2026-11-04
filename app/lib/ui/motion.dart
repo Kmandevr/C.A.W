@@ -46,14 +46,14 @@ class Motion {
   /// How long a settle takes for [distancePx]: longer moves go faster, growing logarithmically (owner).
   /// 80 ms + 40 ms per doubling of (1 + d/8), between 80 and 240 ms: about 120 ms for 8 px, 210 ms for 64 px.
   static Duration settle(double distancePx) {
-    final d = distancePx.abs();
+    final d = distancePx.isNaN ? 0.0 : distancePx.abs();
     final ms = (80 + 40 * math.log(1 + d / 8) / math.ln2).clamp(80.0, 240.0);
     return Duration(microseconds: (ms * 1000).round());
   }
 
   /// The overshoot as a fraction of the distance: at most 2 px, or 4% of the distance if that is smaller.
   static double overshoot(double distancePx) {
-    final d = distancePx.abs();
+    final d = distancePx.isNaN ? 0.0 : distancePx.abs();
     return d <= 0 ? 0 : math.min(2 / d, 0.04);
   }
 
