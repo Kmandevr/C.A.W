@@ -241,7 +241,7 @@ public:
     static constexpr int64_t kMaxTransportSample = int64_t{1} << 53;
     // Control thread, only while process() is not running: replace every MIDI CC mapping. CCs
     // come from the host events given to process(); each mapped parameter scans them once per
-    // block (bounded by maxEventsPerPort). prepare() clears the mappings. On an error nothing
+    // block (decoded once per block, at most maxEventsPerPort). prepare() clears the mappings. On an error nothing
     // changes. Errors: NodeIndexOutOfRange, PortIndexOutOfRange (parameter), InvalidCcMapping (a
     // group, channel or controller out of range, or a second mapping on one parameter),
     // InvalidOutputNode (not prepared), OutOfMemory (its control-thread scratch).
@@ -353,7 +353,12 @@ private:
     // Per parameter: its CC key (group << 11 | channel << 7 | controller), or kNoCc.
     static constexpr uint32_t kNoCc = 0xFFFFFFFFu;
     std::vector<uint32_t> ccKey_;
-    EventInput hostEvents_{};  // this block's host events (audio thread)
+    // This block's host Control Changes, decoded once (eventCapacity_ entries when there are
+    // parameters), so each mapped parameter scans only CCs.
+    struct CcHit { uint32_t key, frame; double value; };
+    std::vector<CcHit> ccHits_;
+    uint32_t ccHitCount_ = 0;
+    bool ccMapped_ = false;
     int64_t transportSample_ = 0;
     double samplesPerStep_ = 1.0;
     bool playing_ = false;

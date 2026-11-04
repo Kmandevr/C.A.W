@@ -42,11 +42,23 @@ bool estimateGraphWorkingBytes(std::size_t nodeCount, std::size_t connectionCoun
     return true;
 }
 
-// Same layouts as GraphExecutor's private Port, NodeBlock and SumInput, for the byte estimate.
+namespace {
+// The mapping key of a host event, or false when it is not a Control Change.
+bool ccOf(const Event& event, uint32_t& key, double& value) noexcept {
+    UmpControlChange cc;
+    if (event.kind != EventKind::Midi || !decodeControlChange(event.data, cc)) return false;
+    key = static_cast<uint32_t>(cc.group) << 11 | static_cast<uint32_t>(cc.channel) << 7 | cc.controller;
+    value = cc.value;
+    return true;
+}
+}  // namespace
+
+// Same layouts as GraphExecutor's private Port, NodeBlock, SumInput, EventMerge and CcHit, for the byte estimate.
 struct GraphExecutorSumInputBytes { uint32_t sourceBase, sourceCount, tableBase, channels; };
 struct GraphExecutorPortBytes { PortType type; bool input, summing, host; uint32_t channels, table, sum; };
 struct GraphExecutorNodeBlockBytes { uint32_t fields[22]; bool typed; };
 struct GraphExecutorEventMergeBytes { uint32_t sourceBase, sourceCount, input; std::size_t storage; };
+struct GraphExecutorCcHitBytes { uint32_t key, frame; double value; };
 
 struct ExecutorShape {
     std::size_t nodes = 0;
@@ -83,6 +95,7 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         !addEstimatedBytes(total, 1, sizeof(std::vector<EventOutput>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<EventInput>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorEventMergeBytes>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorCcHitBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterResolver>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterValue>)) ||
         !addEstimatedBytes(total, 6, sizeof(std::vector<double>)) ||
@@ -112,6 +125,7 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
                                                         sizeof(const AutomationPoint*) + sizeof(uint32_t) +
                                                         sizeof(uint32_t)) ||  // lane slot, then CC key
         (shape.parameters && !addEstimatedBytes(total, maxFrames, sizeof(double))) ||  // the lane scratch
+        (shape.parameters && !addEstimatedBytes(total, shape.eventCapacity, sizeof(GraphExecutorCcHitBytes))) ||  // CC hits
         !addEstimatedBytes(parameterFrames, shape.parameters, maxFrames) ||
         !addEstimatedBytes(total, parameterFrames, sizeof(double)))
         return false;
@@ -353,7 +367,9 @@ void GraphExecutor::reset() noexcept {
     lanePoints_.clear();
     laneCount_.clear();
     ccKey_.clear();
-    hostEvents_ = EventInput{};
+    ccHits_.clear();
+    ccHitCount_ = 0;
+    ccMapped_ = false;
     automationScratch_.clear();
     transportSample_ = 0;
     samplesPerStep_ = 1.0;
@@ -566,6 +582,9 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         lanePoints_.assign(paramCursor, nullptr);
         laneCount_.assign(paramCursor, 0);
         ccKey_.assign(paramCursor, kNoCc);
+        ccHits_.assign(paramCursor ? eventCapacity_ : 0u, CcHit{});
+        ccHitCount_ = 0;
+        ccMapped_ = false;
         automationScratch_.assign(paramCursor ? maxFrames : 0u, 0.0);
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
@@ -944,7 +963,16 @@ void GraphExecutor::mergeEvents(const EventMerge& merge) noexcept {
 bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
                                      uint32_t frames, const EventInput& events) noexcept {
     applyParameterCommands();
-    hostEvents_ = events;
+    // Decode the host CCs once; mapped parameters read only these (cleared each block).
+    ccHitCount_ = 0;
+    if (ccMapped_)
+        for (uint32_t e = 0; e < events.count && ccHitCount_ < ccHits_.size(); ++e) {
+            CcHit& hit = ccHits_[ccHitCount_];
+            if (ccOf(events.events[e], hit.key, hit.value)) {
+                hit.frame = events.events[e].frame;
+                ++ccHitCount_;
+            }
+        }
     // Positions stay where doubles are exact (and int64 cannot overflow); a song that would run
     // past that stops its lanes instead.
     if (transportSample_ > kMaxTransportSample - static_cast<int64_t>(frames)) playing_ = false;
@@ -1091,17 +1119,6 @@ GraphError GraphExecutor::setModulationLinks(const ParameterLink* links, uint32_
     return GraphError::OutOfMemory;  // control-thread scratch (O(nodes + parameters + links)); nothing changed
 }
 
-namespace {
-// The mapping key of a host event, or false when it is not a Control Change.
-bool ccOf(const Event& event, uint32_t& key, double& value) noexcept {
-    UmpControlChange cc;
-    if (event.kind != EventKind::Midi || !decodeControlChange(event.data, cc)) return false;
-    key = static_cast<uint32_t>(cc.group) << 11 | static_cast<uint32_t>(cc.channel) << 7 | cc.controller;
-    value = cc.value;
-    return true;
-}
-}  // namespace
-
 ParameterValue GraphExecutor::resolveWithCc(uint32_t p, uint32_t frames, const double* automation,
                                             const float* const* signals, double* out) noexcept {
     // Resolve in segments split at each matching CC, so it takes effect at its own frame. Without
@@ -1118,13 +1135,12 @@ ParameterValue GraphExecutor::resolveWithCc(uint32_t p, uint32_t frames, const d
         if (!v.samples) std::fill(out + start, out + end, v.value);
         start = end;
     };
-    for (uint32_t e = 0; e < hostEvents_.count; ++e) {
-        uint32_t eventKey = 0;
-        double value = 0.0;
-        if (!ccOf(hostEvents_.events[e], eventKey, value) || eventKey != key) continue;
+    for (uint32_t h = 0; h < ccHitCount_; ++h) {
+        const CcHit& hit = ccHits_[h];
+        if (hit.key != key) continue;
         matched = true;
-        segment(hostEvents_.events[e].frame);
-        resolver.setBase(denormalizeParameter(resolver.descriptor(), value));
+        segment(hit.frame);
+        resolver.setBase(denormalizeParameter(resolver.descriptor(), hit.value));
     }
     if (!matched) return resolver.resolve(frames, automation, signals, out);
     segment(frames);
@@ -1145,6 +1161,7 @@ GraphError GraphExecutor::setCcMappings(const ParameterCcMapping* mappings, uint
         key = static_cast<uint32_t>(m.group) << 11 | static_cast<uint32_t>(m.channel) << 7 | m.controller;
     }
     std::copy(keys.begin(), keys.end(), ccKey_.begin());
+    ccMapped_ = count != 0;
     return GraphError::Ok;
 } catch (...) {
     return GraphError::OutOfMemory;
@@ -1247,7 +1264,7 @@ void GraphExecutor::resolveParameters(const NodeBlock& b, uint32_t frames) noexc
         }
         const float* const* signals = linkSignals_.data() + static_cast<std::size_t>(p) * kMaxParameterLinks;
         double* out = parameterStorage_.data() + static_cast<std::size_t>(p) * maxFrames_;
-        parameterValues_[p] = ccKey_[p] != kNoCc && hostEvents_.count
+        parameterValues_[p] = ccHitCount_ && ccKey_[p] != kNoCc
             ? resolveWithCc(p, frames, automation, signals, out)
             : resolvers_[p].resolve(frames, automation, signals, out);
     }
