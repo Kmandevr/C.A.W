@@ -327,7 +327,7 @@ Prefer composing existing primitives and registering modules over modifying core
 
 ### No arbitrary architectural limits
 
-**[Fact, 2026-11-04]** The current state of every limit is the caps audit in [engine status](engine-build-status.md); the app's own caps on automation and patterns went in F7.1, and the 64-bar song limit in F7.2.
+**[Fact, 2026-11-04]** The current state of every limit is the caps audit in [engine status](engine-build-status.md); the app's own caps on automation and patterns went in F7.1, and the 64-bar song limit in F7.2; F7.3 part A made the slot capacity a runtime value ahead of removing the 64-layer limit.
 
 Do not impose arbitrary fixed caps on tracks, buses, channels, routing connections, graph depth, module count, parameters, modulation links, automation lanes, events, voices, or project size merely for implementation convenience. Do not silently truncate or drop user content at an arbitrary threshold.
 

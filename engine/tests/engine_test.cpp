@@ -66,6 +66,33 @@ TEST(audition_only_uses_the_dedicated_audition_slot) {
     CHECK_NEAR(left[200], static_cast<float>(0.8 * 0.5 * std::cos(kPi / 4.0)), 1e-5);
 }
 
+TEST(audition_slot_follows_the_last_layer_slot_and_both_play) {
+    Engine e(48000);
+    CHECK_EQ(e.layerCapacity(), kMaxLayers);
+    CHECK_EQ(e.auditionSlot(), e.layerCapacity());
+    std::vector<std::pair<std::string, std::string>> mods;
+    for (int i = 0; i < kMaxLayers; ++i)
+        mods.push_back({"m" + std::to_string(i), std::string(kFloat) + (i == kMaxLayers - 1 ? "0.25" : "0")});
+    ProjectSpec p = project(mods);
+    p.modules.push_back({"tone", std::string(kFloat) + "0.5", {}});
+    p.auditionChain = {"tone"};
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    auto left = run(e, 2048);
+    LayerMeter lm;
+    CHECK(e.layerMeter(kMaxLayers - 1, lm) && lm.active);
+    // Only layer 63 sounds; the audition slot is silent outside audition-only mode.
+    CHECK_NEAR(left[2000], static_cast<float>(0.25 * std::cos(kPi / 4.0)), 1e-5);
+    p.auditionOnly = true;
+    e.setProject(p);
+    left = run(e, 24000);
+    CHECK_NEAR(left[23999], static_cast<float>(0.8 * 0.5 * std::cos(kPi / 4.0)), 1e-5);
+    float scope[64];  // the audition's own scope (before pan)
+    CHECK_EQ(e.scope(e.auditionSlot(), scope, 64), 64);
+    CHECK_NEAR(scope[63], 0.4f, 1e-4);
+}
+
 TEST(folder_bus_routes_children_and_applies_group_gain) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}});
     LayerSpec folder;

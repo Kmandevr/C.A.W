@@ -6,6 +6,7 @@ updated: 2026-11-04
 
 # Log
 
+- 2026-11-04: Foundation F7.3 part A, the Engine's slot capacity is a runtime value (slots by pointer, capacity-sized mix graph, out-of-line layer order), still 64 layers with unchanged sound; the plan for growth (B) and the C API audition index (C) is in [decisions](decisions.md).
 - 2026-11-04: Foundation F7.2, the 64-bar arrangement limit is gone (owner decision): songs run to the 32-bit step count in the engine and the app, out-of-range positions are refused with a named error instead of clamped, clip expansion is checked against the project-state budget, and the arranger paints only the visible span.
 - 2026-11-04: Foundation F7.1, app caps removed (owner decision): project loading no longer drops automation points past 128 or lanes past 256, and patterns no longer stop at 4,096 notes/steps or 16 curve points; paste, split and bulk edits no longer drop notes. Generate steps refuse more than 2^20 notes whole.
 - 2026-11-04: Foundation F7 caps audit: every remaining fixed limit in the engine and app, by kind, in [engine status](engine-build-status.md). The old engine caps on exports, imports, parameters, modules, clips, lanes, points and pattern size are gone, but the app still silently drops automation points past 128 and lanes past 256 on load, and caps patterns at 4,096 notes/steps and 16 curve points.
