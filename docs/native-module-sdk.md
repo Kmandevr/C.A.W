@@ -33,7 +33,7 @@ Creation, destruction, state serialization, graph compilation and asset loading 
 
 - Stable IDs identify modules; display names are not identifiers.
 - Parameter IDs and port IDs are stable within a module major version.
-- Parameters arrive as one value per block: the block's first resolved value (owner, 2026-11-04). Internal modules get them from the graph executor as `AudioProcessBlock`/`ProcessBlock::parameters` (per-frame when a value varies, F6.2); the C ABI does not change for that.
+- Parameters arrive as one value per block: the block's first resolved value (owner, 2026-11-04). Internal modules get them from the graph executor as `AudioProcessBlock`/`ProcessBlock::parameters` (per-frame when a value varies or is modulated, F6.2/F6.3); the C ABI does not change for that.
 - State size is capped by the host and declared maximum; the host rejects oversized state.
 - Hosts must pin module version and preserve project snapshots or report missing/incompatible dependencies.
 - Optional features may be omitted from a build, but a missing dependency must be reported explicitly rather than silently substituted.
