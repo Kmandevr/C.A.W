@@ -208,7 +208,7 @@ Building the core turned up some clashes in this draft. They're resolved for now
 The piano roll's default toolbar (owner, 2026-10-28; the magnet folded in 2026-11-04) holds:
 - the tools: Draw, Select, Curve and Erase
 - undo and redo
-- the snap magnet with its time grid (`roll.grid.menu`): a tap turns snapping on or off; its ▾ opens a sheet with the time grid, triplets, adaptive and the value grid. Snap, triplets and adaptive are still actions with keys (N, Alt+0, Alt+F) and can be added as their own buttons
+- the snap magnet with its time grid (`roll.grid.menu`): a tap turns snapping on or off; its ▾ opens a sheet with the time grid, triplets, adaptive and the value grid. Snap, triplets and adaptive are still actions with keys (N, Alt+0, Alt+F) and can be added as their own buttons. A saved toolbar from before, with the grid menu followed by snap, drops those three buttons when it loads
 - the notes/text view switch
 
 You can add your own actions and macros, reorder or remove them, and restore the defaults. The Curve tool also shapes the velocity and chance lanes ([app](app.md)).

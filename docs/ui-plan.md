@@ -146,7 +146,7 @@ updated: 2026-11-04
 **[Fact, 2026-11-04, from `pattern_editor.dart` and `note_expression.dart`]** How it works today:
 - **Stretching:** both ends stretch, a selection by the same amount; the edge follows the finger with a ghost of the snapped length, a length number and a 150 ms spring on release; 48 dp end zones on touch; a second finger bypasses snapping (first roll PR, 2026-11-04).
 - **Drawing:** a ghost under the finger at touch-down, edge auto-scroll, and the last velocity kept (first roll PR).
-- **Pitch curves on the roll:** values snap to semitones and times to the time grid along the note (second roll PR, 2026-11-04). A segment's bend is still an invisible vertical drag, unsnapped, with no handle.
+- **Pitch curves on the roll:** values snap to semitones and times to the time grid along the note, counted from the note's start (second roll PR, 2026-11-04); on a note no longer than one grid step, times move freely. A segment's bend is still an invisible vertical drag, unsnapped, with no handle.
 - **Volume and timbre curves:** edited in a 72 px box in the extras panel, snapping to the time grid and the value grid.
 - **Snapping:** the magnet with its sheet, the value grid setting (`RollLook.valueGrid`, default 1/8) and the Shift or second-finger bypass for every drag are built; velocity, chance and the lane curves snap to it. The arrangement's automation lanes don't snap yet (U3).
 - **The engine evaluates note curves** (`engine/src/pattern.h`, shape `u^(4^bend)`).

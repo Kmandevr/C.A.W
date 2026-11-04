@@ -861,9 +861,10 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         return;
       }
     }
-    final u = _snapU(((p.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0), n);
+    // The segment test uses where the finger is; only a new point lands on the grid.
+    final raw = ((p.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0), u = _snapU(raw, n);
     for (var i = 0; i + 1 < pts.length; i++) {
-      if (u > pts[i].t && u < pts[i + 1].t) {
+      if (raw > pts[i].t && raw < pts[i + 1].t) {
         _bSeg = i;
         _bK0 = pts[i].k;
         _bAddOnTap = true;
@@ -917,7 +918,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _hold = null;
     if (!cancel && _bAddOnTap && start != null && _doc != null) {
       final n = _doc!.byId(id)!;
-      final u = ((start.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0);
+      final u = _snapU(((start.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0), n);
       _setBend(id, _insertPoint(n.expr.bend, NotePoint(u, _bendValue(start.dy, n))));
     }
     _bNote = _bPoint = _bSeg = null;
@@ -1495,7 +1496,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
             Text('Velocity ${(n.vel * 100).round()}%'),
             Slider(value: n.vel, onChanged: (v) => change((d) => d.setVelocity(sel, _lastVel = v))),
             Text('Chance ${(n.prob * 100).round()}%'),
-            Slider(value: n.prob, divisions: 20, onChanged: (v) => change((d) => d.setProb(sel, v))),
+            // Chance steps by the value grid while snapping is on, like the chance lane.
+            Slider(
+                value: n.prob,
+                divisions: _snap ? (1 / _look.valueGrid.step).round() : null,
+                onChanged: (v) => change((d) => d.setProb(sel, v))),
             const Text('Ratchet'),
             Wrap(spacing: 6, children: [
               for (var r = 1; r <= 8; r++)

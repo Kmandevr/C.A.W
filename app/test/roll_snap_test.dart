@@ -114,6 +114,14 @@ void main() {
     final b = notes(m).single.expr.bend;
     expect(b.last.t, closeTo(0.75, 1e-9), reason: m.source);
     expect(b.last.v, 3, reason: m.source);
+    // A tap on the curve's segment adds a point there, on the grid too: along a 4-step note the 1/16 grid is
+    // quarters, so 0.36 of the way lands on 0.25.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+    await tester.tapAt(Offset(44 + 0.36 * 111, 140 - 0.36 / 0.75 * 48));
+    await settle(tester);
+    final after = notes(m).single.expr.bend;
+    expect(after, hasLength(3), reason: m.source);
+    expect(after[1].t, closeTo(0.25, 1e-9), reason: m.source);
     s.dispose();
   }, skip: skip);
 
