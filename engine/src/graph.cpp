@@ -581,6 +581,7 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
         if (routePosition_[edge.destinationNode] == UINT32_MAX ||
             routePosition_[edge.sourceNode] >= routePosition_[edge.destinationNode]) return false;
         if (!summing) {
+            // Per node is per port: prepare() allows one audio input port per node.
             uint32_t& direct = directStaging_[edge.destinationNode];
             if (direct != UINT32_MAX) return false;  // a plain input takes one route
             direct = edge.sourceNode;

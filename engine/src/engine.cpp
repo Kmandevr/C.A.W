@@ -1114,16 +1114,17 @@ std::string Engine::setProject(const ProjectSpec& p) {
     // Pass 2: where each exported value lives. The first layer (in project order) playing a module provides it.
     struct Source {
         int slot;
+        size_t module;  // its index in that layer's chain
         const double* buf;
     };
     std::map<std::string, Source> sources;
     for (const Planned& pl : plan) {
         if (pl.w.id[0] == '\x01') continue;
         size_t buf = 0;
-        for (const std::string& id : pl.ids) {
-            const ModuleState& m = modules_.at(id);
+        for (size_t k = 0; k < pl.ids.size(); ++k) {
+            const ModuleState& m = modules_.at(pl.ids[k]);
             for (const ExportDef& e : m.program->exports) {
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, slots_[pl.ls.slot].exportBuf[buf]->data()});
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, slots_[pl.ls.slot].exportBuf[buf]->data()});
                 ++buf;
             }
         }
@@ -1133,17 +1134,24 @@ std::string Engine::setProject(const ProjectSpec& p) {
     std::vector<int> projectOrder;
     for (Planned& pl : plan) {
         std::vector<const double*> wiring;
-        for (const std::string& id : pl.ids)
+        for (size_t k = 0; k < pl.ids.size(); ++k) {
+            const std::string& id = pl.ids[k];
             for (const std::string& imp : modules_.at(id).program->imports) {
                 auto src = sources.find(imp);
                 if (src == sources.end()) {
                     wiring.push_back(nullptr);
                     warnings[id].push_back("nothing exports '" + imp + "' (it reads 0)");
+                } else if (src->second.slot == pl.ls.slot && src->second.module >= k) {
+                    // Each module is a graph node, run in chain order: a later module (or this one)
+                    // has not run yet this chunk, so the value would lag by however chunks split.
+                    wiring.push_back(nullptr);
+                    warnings[id].push_back("'" + imp + "' comes from a later module in this layer's chain (it reads 0)");
                 } else {
                     wiring.push_back(src->second.buf);
                     if (src->second.slot != pl.ls.slot) readsFrom[pl.ls.slot].push_back(src->second.slot);
                 }
             }
+        }
         LayerState& ls = pl.ls;
         const Want& w = pl.w;
         ls.arrangementSig = pl.arrangementSig;

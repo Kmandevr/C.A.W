@@ -896,6 +896,32 @@ TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
     CHECK(std::any_of(out.begin(), out.end(), [](float sample) { return std::abs(sample) > 1e-5f; }));
 }
 
+// Within one layer a module reads exports only from modules before it in the chain: those have
+// run this chunk on every lane. A later (or its own) module is refused, so no import's delay
+// depends on how chunks happen to be split.
+TEST(module_reads_exports_only_from_earlier_modules_of_its_own_chain) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"gen", "---\nmode: float\n---\nexport let level = 0.25\n0.5", {}, "gen"});
+    p.modules.push_back({"early", "---\nkind: effect\nmode: float\n---\nin + late.boost", {}, "early"});
+    p.modules.push_back({"late", "---\nkind: effect\nmode: float\n---\nexport let boost = 1\nin + gen.level", {}, "late"});
+    LayerSpec l;
+    l.id = "t";
+    l.chain = {"gen", "early", "late"};
+    l.volume = 1.0;
+    p.layers = {l};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    const std::string result = e.setProject(p);
+    CHECK(result.find("'late.boost' comes from a later module in this layer's chain (it reads 0)") != std::string::npos);
+    CHECK(result.find("'gen.level'") == std::string::npos);  // an earlier module's export is fine, no warning
+    e.play();
+    const std::vector<float> out = run(e, 4800);
+    CHECK_NEAR(out[4799], 0.75 * std::cos(kPi / 4.0), 1e-6);  // 0.5 + 0 + 0.25
+}
+
 TEST(engine_routes_more_than_16_module_exports) {
     std::string source = "---\nmode: float\n---\n";
     for (int i = 0; i < 20; ++i)
