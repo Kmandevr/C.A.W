@@ -6,6 +6,12 @@ updated: 2026-11-04
 
 # Decisions
 
+## 2026-11-04: UI direction, the arrangement is home
+
+- **Owner:** the arrangement is the home screen, where about 90% of a song is built, and looks like a standard DAW. Empty, nestable tracks hold **several instruments** and effects in a chosen order. Automation lanes drop down under a track, each with a parameter dropdown. MIDI clips are made in the arrangement as in Reaper, and the piano roll opens docked below. The code workspace works like Unity's, with a searchable tree of project assets and user-picked device folders. The mixer is the fine-control screen, like Reaper's. Panels dock and move like Unity's **on the phone too**, with drag and drop onto the arrangement. Motion is light and snapping smooth. Clips and track headers glow with their track's level, and this can be switched off. Track colours plus one accent. A track without clips is silent.
+- **Why:** the owner wants one place to build a song that feels like a real DAW and good to use. The plan, today's findings and the open questions are in [UI plan](ui-plan.md).
+- **Consequences:** several instruments per track and silent empty tracks change the engine and project model. The engine part goes to GPT as an issue, and the UI waits for it where it must.
+
 ## 2026-11-04: F7 resource budgets (owner, after the caps audit)
 
 - **The app keeps everything the engine keeps.** The app-only caps go (automation points past 128 and project lanes past 256 dropped on load, patterns at 4,096 notes/steps and 16 curve points, notes dropped on paste); any bound that stays is a clear error, never a silent drop. The owner allowed app/ changes for this.
