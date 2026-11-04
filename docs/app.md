@@ -143,7 +143,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - Edits are dock (into a group, or split off on any edge), remove, reveal and activate. Split shares keep a 12% minimum, after every edit and load; ids are checked and deduplicated on any tree.
     - Presets: Arrange, Mix and Code, for phone portrait, phone landscape and desktop.
     - The JSON form drops unknown or repeated panels and damaged parts.
-    - The view (`lib/ui/dock/dock_view.dart`) draws it: draggable dividers, glass tab strips, a long-press drag of a tab onto one of five drop zones, and maximise. A panel keeps its state when it moves or is maximised, and hidden tabs keep theirs with tickers off. No screen uses it yet.
+    - The view (`lib/ui/dock/dock_view.dart`) draws it: draggable dividers (a narrow grab zone, so scrolls near a panel's edge still reach the panel), glass tab strips, a long-press drag of a tab onto one of five drop zones, and maximise. A panel keeps its state when it moves or is maximised, and hidden tabs keep theirs with tickers off. No screen uses it yet.
   - **Performance profiles:** Full Experience (full glow), Balanced (55% glow), Lightweight (no glow, 4 voices per pattern layer) and Minimal (Lightweight plus hidden scope panels). All profiles keep meter polling at 30 Hz; Minimal does not slow down editing or meters.
     - Existing `light_mode` settings migrate to Lightweight/ Balanced; the legacy key is still written for older builds.
     - Automatic overload response selects Lightweight once, unless disabled.

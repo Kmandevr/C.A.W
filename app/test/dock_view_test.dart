@@ -46,7 +46,7 @@ class _ProbeState extends State<_Probe> {
         behavior: HitTestBehavior.opaque,
         onTap: () => setState(() => taps++),
         child: Center(
-          child: Text('${dockPanelTitle(widget.id)} $taps ${TickerMode.of(context) ? 'live' : 'paused'}',
+          child: Text('${dockPanelTitle(widget.id)} $taps ${TickerMode.valuesOf(context).enabled ? 'live' : 'paused'}',
               style: TextStyle(color: Neon.text)),
         ),
       );
@@ -117,6 +117,59 @@ void main() {
     await tester.drag(divider, const Offset(2000, 0));
     await tester.pumpAndSettle();
     expect((last!.root as SplitNode).weights[1], closeTo(DockLayout.minWeight, 1e-6));
+  });
+
+  testWidgets('a divider follows the pointer however the moves are batched, and comes back with it', (tester) async {
+    DockLayout? last;
+    await _pump(tester, _two(), onLayout: (l) => last = l);
+    final start = tester.getCenter(find.byKey(const ValueKey('dock-divider-row-0')));
+    final g = await tester.startGesture(start);
+    // Several moves before the host rebuilds (as with a mouse on desktop).
+    await g.moveBy(const Offset(30, 0));
+    await g.moveBy(const Offset(30, 0));
+    await g.moveBy(const Offset(30, 0));
+    await tester.pump();
+    // The whole move counts: a drag starts from where the finger went down.
+    const room = 800 - 2 * DockView.gap;
+    expect((last!.root as SplitNode).weights[0], closeTo(0.5 + 90 / room, 0.01));
+    // Far past the minimum and back: the divider tracks the pointer, not the lost movement.
+    await g.moveBy(const Offset(1000, 0));
+    await tester.pump();
+    await g.moveTo(start);
+    await tester.pump();
+    expect((last!.root as SplitNode).weights[0], closeTo(0.5, 0.03));
+    await g.up();
+  });
+
+  testWidgets('the divider\'s grab zone leaves scrolls a little way from the edge to the panel', (tester) async {
+    await _pump(tester, _two());
+    final zone = tester.getSize(find.byKey(const ValueKey('dock-divider-row-0')));
+    expect(zone.width, lessThanOrEqualTo(DockView.gap + 2 * DockView.grabReach));
+  });
+
+  testWidgets('a group\'s active tab dropped on its own group\'s edge splits the group', (tester) async {
+    DockLayout? last;
+    await _pump(tester, _two(), onLayout: (l) => last = l);
+    final tab = tester.getCenter(find.byKey(const ValueKey('dock-tab-mixer')));
+    final g = await tester.startGesture(tab);
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await g.moveTo(const Offset(790, 300));
+    await tester.pump();
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(last, isNotNull);
+    expect(last!.panels.toSet(), {Panels.arrangement, Panels.mixer, Panels.files});
+    expect((last!.root as SplitNode).children, hasLength(3));
+  });
+
+  testWidgets('a short split still gives every group room for its tab strip', (tester) async {
+    final l = DockLayout(SplitNode(DockAxis.column, [
+      TabsNode([Panels.arrangement]),
+      TabsNode([Panels.mixer]),
+    ], [0.88, 0.12]));
+    await _pump(tester, l, size: const Size(600, 260));
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(find.text('Mixer 0 live').hitTestable()).height, greaterThan(0));
   });
 
   testWidgets('a long-pressed tab dropped near another group\'s edge splits it there', (tester) async {
