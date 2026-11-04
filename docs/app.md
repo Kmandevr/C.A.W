@@ -130,6 +130,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - **Motion and feel** (`lib/ui/motion.dart`):
     - **Motion:** Full, Reduced (fades only) or Off. The Minimal profile turns it off, and the system's reduce-motion setting caps it at Reduced.
     - **Haptic ticks:** on by default.
+    - **Glass** (`lib/ui/glass.dart`): on by default. Floating surfaces get a real frosted blur and docked panels a translucent tint with a soft highlight and no blur. The Lightweight and Minimal profiles turn it off. No screen uses the glass surfaces yet.
     - **Music-reactive glow:** a 0–100% slider, 35% by default.
     - The slider shows a change while it is dragged and saves when the drag ends.
     - The motion rules (distance-aware settle times, a small overshoot, snapping maths) are in place, but no screen animates with them yet. The [UI plan](ui-plan.md) adds that step by step.
@@ -182,7 +183,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - the pattern model (`lib/model/pattern_doc.dart`): exact step fractions, parsing with the engine's errors, comment-keeping write-back and every note edit
 - the actions core (`lib/actions/`): keymap files, conflicts, macros with their recursion guard, counts, `:` commands, `.` repeat and recording
 - settings, theme files and the startup choices
-- the motion rules and the motion, haptics and glow settings (`test/motion_test.dart`)
+- the motion rules and the motion, haptics and glow settings (`test/motion_test.dart`), and the Glass setting and surfaces (`test/glass_test.dart`)
 - golden (screenshot) tests, which compare a screen with a PNG in `test/goldens/`:
   - `test/golden_util.dart` loads real fonts (the bundled JetBrains Mono, and the Roboto and Material icons from the Flutter SDK), so layouts measure as they do on a phone. It pumps screens at the plan's sizes: phone 390×844, landscape 844×390, desktop 1280×800.
   - After an intended visual change, run `flutter test --update-goldens` and review the new PNGs.

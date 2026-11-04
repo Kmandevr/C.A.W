@@ -20,6 +20,7 @@ updated: 2026-11-04
   - **Motion:** smooth, with a tiny overshoot, and distance-aware (logarithmic: longer moves go faster).
   - **Haptics:** on by default, and can be switched off.
   - **Motion setting:** Full, Reduced or Off.
+  - **Glass (owner, 2026-11-04):** a glassy look. Real frosted blur only on floating surfaces (toolbars, menus, sheets, drag previews, the transport), because blur is costly on a phone when many panels redraw. Docked panels get a cheap glass look with no blur: a translucent tint, a soft top highlight and a thin bright edge. A Glass switch in Settings, on by default; the Lightweight and Minimal profiles turn it off.
   - **Detail:** [UI plan](ui-plan.md#piano-roll).
 - **Arrangement (owner, 2026-11-04):**
   - **Layout:** the same context-aware toolbar row as the roll, with Select, Draw, Split and Erase. Compact track headers that widen to show volume, pan and the chain.

@@ -6,6 +6,7 @@ updated: 2026-11-04
 
 # Log
 
+- 2026-11-04: Glass (owner): `lib/ui/glass.dart` with frosted blur on floating surfaces only and a no-blur glass look for docked panels, a Glass switch in Settings (on by default; Lightweight and Minimal turn it off), and a golden. Dock layout review fixes: the active tab survives dropped ids, ids are the `Panels` constants, the 12% minimum holds after every edit. The engine-status note no longer covers settings and storage.
 - 2026-11-04: UI U1, first part: the docking layout model (`lib/ui/dock/layout.dart`: splits and tab groups by string panel id, dock, remove, reveal, weights, presets per form factor, damage-tolerant JSON). It isn't on screen yet. An architect review set U1's five-PR order.
 - 2026-11-04: UI U0, second part: design tokens (`lib/ui/tokens.dart`), eight track colours in every theme, and the shared context-aware toolbar row, tool and info buttons (`lib/ui/kit.dart`), with a toolbar golden. The golden shows that at phone width four tools plus ⋮ leave room for only about three context buttons.
 - 2026-11-04: UI U0, first part: motion rules (`lib/ui/motion.dart`: Full/Reduced/Off, distance-aware settle times, a small-overshoot curve, snapping maths, haptic ticks), Motion, Haptics and Glow settings, and golden tests with real fonts (`test/golden_util.dart`); the Settings page's Density buttons no longer squeeze its text on a phone.

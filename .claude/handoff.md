@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: a5bda39
+Commit: 2ce4b1b
 
-Branch: claude/caw-engine-foundation-skpirb (on Main a5bda39; U1 PR1, the docking layout model, in review)
+Branch: claude/caw-engine-foundation-skpirb (on Main 2ce4b1b; the Glass PR in review, the dock view in progress)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: docking panels (the phone too), a Unity-like code workspace, a Reaper-like mixer, a docked piano roll, and smooth, distance-aware motion. The whole spec, the open questions and the order of work (U0–U8) are in `docs/ui-plan.md`, and the owner's choices are in `docs/decisions.md`.
@@ -20,7 +20,7 @@ Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: do
 
 ## Next
 U1 has five PRs (architect review, 2026-11-04; detail in `docs/ui-plan.md`, U1):
-1. The layout model: in review.
+1. The layout model: merged (#99). Glass surfaces and setting (owner, 2026-11-04): in review.
 2. `lib/ui/dock/dock_view.dart`, not wired in.
 3. The shell switch: `DockController.reveal`, the focused panel's key area, hidden tabs under `TickerMode` that skip the tick, `dock_layouts` as raw JSON in Settings, and the panel's size used instead of the screen's.
 4. Open straight into the arrangement.

@@ -274,6 +274,7 @@ updated: 2026-11-04
   - On release, it settles onto the ghost with the distance-aware motion above.
   - Points and handles grow slightly under the finger.
 - **Haptics (owner):** on by default, and can be switched off. On Android a light tick plays when something snaps, a handle clicks into a detent, or a note is placed.
+- **Glass (owner):** real frosted blur on floating surfaces only (toolbars, menus, sheets, drag previews, the transport). Docked panels get a translucent tint, a soft top highlight and a thin bright edge, with no blur. A Settings switch, on by default; Lightweight and Minimal turn it off. Built: `lib/ui/glass.dart` (`GlassPanel`, `GlassOverlay`).
 - **Motion setting (owner):** Full, Reduced or Off.
   - Reduced keeps fades only, with no springs or movement.
   - The Minimal profile sets Off, and the system's reduce-motion setting sets Reduced.
@@ -286,7 +287,7 @@ updated: 2026-11-04
 
 Each step is one small PR to `Main`. It includes widget tests, screenshot (golden) tests at phone portrait, landscape and desktop, a code-reviewer pass and release-check. It updates [app](app.md) and [UI design](ui.md). Engine changes go to GPT as issues.
 
-1. **U0, foundations** (built: the motion rules, the Motion/Haptics/Glow settings, golden tests, design tokens, eight track colours, and the shared toolbar row, tool and info buttons):
+1. **U0, foundations** (built: the motion rules, the Motion/Haptics/Glow settings, the Glass setting and surfaces, golden tests, design tokens, eight track colours, and the shared toolbar row, tool and info buttons):
    - design tokens (spacing, type scale, one accent plus colours for meaning, track colours)
    - shared widgets
    - motion and snapping helpers
