@@ -12,6 +12,7 @@ updated: 2026-11-04
 - **The 64-bar arrangement limit is removed** in the engine and the app: length is bounded only by the step representation and the project JSON budget, and nothing is moved or shortened.
 - **Layers become dynamic:** the count is bounded by the memory budget, and the mix graph is re-prepared off the audio thread and swapped in when more slots are needed.
 - **Safety bounds come from the hardware budget:** module source, nesting, registers, per-module state, queues, workers and MIDI file limits get defaults derived from `EngineResourceBudget`/the hardware profile, overridable by the host within a safety ceiling, and every one fails with a clear message.
+- **F7.2 rules (Claude, within the owner's choice):** an out-of-range song position (loop bars, clip, layer length, automation point, audition) is refused with a message naming it, since clamping would move or shorten it; values past the 32-bit step count are pulled inside it only when the app loads a file, as the representation limit. Clip expansion counts toward the project-state budget and is checked before it is built. Automation editors reach the song's end, and at least 64 bars, so new points have room.
 - **Split:** F7.1 app caps; F7.2 the 64-bar limit; F7.3 dynamic layers; F7.4 safety bounds from the budget; the silent engine clamps (render lengths, unison, wavetable frames, splits, take-over) are reported or removed in the step that owns them.
 
 ## 2026-11-04: F6 parameter model: resolution order and owner choices

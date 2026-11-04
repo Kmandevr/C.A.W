@@ -258,10 +258,10 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             int64_t len;
             if (!only.pattern.empty()) {
                 // A pattern sets the layer's length.
-                p.loopBars = 64;
+                p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
                 len = loopFrames(p, sr, parsePattern(p.module(only.pattern)->source).pattern->steps(p.beatsPerBar));
             } else if (only.lengthSteps > 0) {
-                p.loopBars = 64;  // long enough that the project loop never cuts the layer short
+                p.loopBars = maxLoopBars(p.beatsPerBar);  // the project loop never cuts the layer short
                 len = loopFrames(p, sr, only.lengthSteps);
             } else {
                 len = loopFrames(p, sr, p.loopSteps());

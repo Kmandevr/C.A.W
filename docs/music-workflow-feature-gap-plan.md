@@ -22,6 +22,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 ### Arrangement
 
+- **[Implemented]** Songs of any length the 32-bit step count holds, with no 64-bar limit (F7.2, 2026-11-04).
 - **[Implemented]** Arrangement-first horizontal timeline, track lanes, reusable MIDI clip sources, linked and independent duplicates, move/resize/split, source-offset shift, time selection, multi-selection/reference notes, nested folders and optional stereo folder buses.
 - **[Implemented]** Track and folder-bus volume/pan automation is serialized and played by the native engine.
 - **[Implemented]** Project/timeline automation lanes target module parameters by module ID or named project globals; the app edits song-time points and the native VM evaluates them per sample. Track volume/pan lanes remain separate.

@@ -185,7 +185,7 @@ The audio thread consumes pattern events separately from the sound's code, so a 
 - **Two shapes:**
   - A **single-sound pattern** drives one layer.
   - A **kit pattern** has named rows (kick, snare, hats …), and each row is routed to a layer, so one pattern can drive a whole kit.
-- **Length:** 1 step to 64 bars, independent of the layer's length.
+- **Length:** 1 step up to the engine's 2^31 − 1 step limit, independent of the layer's length.
 - **Timing:** notes snap to 1/16 by default, can switch to 1/32 or triplets, or go anywhere with snap off. Swing comes from a global.
 - **Notes:** each note has a start, length, pitch and velocity, plus:
   - **probability**, repeatable by seed

@@ -1,7 +1,7 @@
 ---
 title: Task 1 UI implementation handoff
 summary: Current UI implementation pointer and verified outstanding workflow gaps; no stale branch or CI snapshot.
-updated: 2026-11-03
+updated: 2026-11-04
 covers: [app/]
 ---
 
@@ -18,7 +18,7 @@ The app reference [App](app.md) is the authoritative inventory of implemented sc
 Implemented UI/workflow foundations include:
 - Builder for code-defined generators, effects, libraries, patterns and synth patches, with generated controls and code editing.
 - Piano roll and drum grid, including note-expression editing, lane curves, pattern generators, multi-selection and MIDI pattern file import/export.
-- Arrangement timeline with reusable MIDI clips, clip editing, nested folders and stereo folder buses.
+- Arrangement timeline (no 64-bar limit since F7.2) with reusable MIDI clips, clip editing, nested folders and stereo folder buses.
 - Mixer controls for tracks and master output, plus a read-only Engine Lab scope/spectrum and diagnostics.
 - Track/folder volume-pan automation.
 - Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue.

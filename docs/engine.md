@@ -280,15 +280,16 @@ The app, the CLI and exports share one format:
 - An arrangement layer can instead contain \`clips\`. Each clip references a reusable pattern source and has \`start_steps\`, \`length_steps\`, \`source_offset_steps\` and \`loop\`. Clip instances may overlap; all of their notes use the track's one generator/effect chain and voice pool.
 - The control thread compiles clips into a sorted absolute-time event stream when the project changes. The audio callback does no pattern parsing or timeline allocation: it splits its current block at note boundaries and renders the events at their sample positions. The scheduler follows project transport and loop boundaries; it does not depend on Flutter timers.
 - Folder layers may set `folder: true`, `bus: true|false` and `parent`. A parent must be an existing folder; cycles and invalid parents are rejected. Bus folders sum their descendants' stereo output once, then apply the folder's volume and pan before routing to an ancestor bus or master. Organization-only folders do not process audio.
-- A layer's `automation` array supports `volume` and `pan` lanes, each with up to 128 ordered `{step, value}` points. The audio callback linearly interpolates these points against absolute song position; no UI timer or per-block parsing is involved. Volume values are 0–1; pan values are -1–1.
+- A layer's `automation` array supports `volume` and `pan` lanes, each with any number of ordered `{step, value}` points. The audio callback linearly interpolates these points against absolute song position; no UI timer or per-block parsing is involved. Volume values are 0–1; pan values are -1–1.
 - If a clip references a missing or broken pattern, that clip contributes no notes; legacy broken patterns keep their last good version playing.
 - `voices` is how many voices each pattern layer may use for new notes, 1–8 (default 8; the app's light mode sends 4). Voices already sounding finish when it drops.
 - `swap` is when changed code is heard while playing: `now` (default), `beat` or `bar`.
 - `audition` is the Builder's preview, with an optional pattern. With `audition_only`, only that chain is heard.
 - Values outside their range are clamped:
   - BPM 20–400
-  - 1–64 bars
   - 64 layers
+- Song positions are refused with a message naming the field, never moved or shortened (F7.2): `loop_bars`, layer `length_steps`, clip `start_steps`/`length_steps`/`source_offset_steps`, automation point steps and the audition length must be whole numbers (points may be fractional) that fit the 32-bit step count, so a song holds whole bars up to 2^31 − 1 steps (`maxLoopBars`/`maxArrangementSteps` in `engine/src/project.h`). Project automation lengthens the loop to reach its last point.
+- Clips are expanded off the audio thread. A layer whose clips would expand past the project-state budget left (an upper bound, checked before expanding) is not installed, with a warning.
 - Fields the app adds for itself, such as colours, are ignored.
 
 ## Exports

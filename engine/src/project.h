@@ -52,6 +52,11 @@ struct LayerSpec {
     bool mute = false, solo = false;
 };
 
+// A song position is a 32-bit step count, so a song holds whole bars up to 2^31 - 1 steps (F7.2: no other
+// length limit). beatsPerBar is 1..16, so a bar is 4..64 steps.
+constexpr int maxLoopBars(int beatsPerBar) noexcept { return 2147483647 / (beatsPerBar * 4); }
+constexpr int maxArrangementSteps(int beatsPerBar) noexcept { return maxLoopBars(beatsPerBar) * beatsPerBar * 4; }
+
 struct ProjectSpec {
     std::string name;
     double bpm = 120.0;

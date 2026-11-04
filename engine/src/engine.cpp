@@ -214,6 +214,23 @@ constexpr double kC4 = 261.6255653005986;
 
 double mtof(double note) { return 440.0 * detPow(2.0, (note - 69.0) / 12.0); }
 
+ // An upper bound on the bytes compileArrangement builds, so a huge looping clip is refused before it is expanded.
+double arrangementBytes(const std::vector<ClipSpec>& clips,
+    const std::map<std::string, std::shared_ptr<const Pattern>>& sources, int beatsPerBar) {
+    double total = 0;
+    for (const ClipSpec& clip : clips) {
+        const auto found = sources.find(clip.pattern);
+        if (found == sources.end() || !found->second || found->second->notes.empty()) continue;
+        const Pattern& src = *found->second;
+        const double sourceLength = std::max(1, src.steps(beatsPerBar));
+        const double passes = clip.loop ? 2.0 + std::floor(clip.lengthSteps / sourceLength) : 1.0;
+        double ratchets = 0;
+        for (const PatternNote& note : src.notes) ratchets += std::max(1, static_cast<int>(note.ratchet));
+        total += passes * (static_cast<double>(src.notes.size()) * sizeof(PatternNote) + 2.0 * ratchets * sizeof(PatternEvent));
+    }
+    return total;
+}
+
  // Compile clip instances off the audio thread into one immutable, absolute-time event stream.
 std::shared_ptr<const Pattern> compileArrangement(
     const std::vector<ClipSpec>& clips,
@@ -227,6 +244,7 @@ std::shared_ptr<const Pattern> compileArrangement(
         const auto found = sources.find(clip.pattern);
         if (found == sources.end() || !found->second) continue;
         const Pattern& src = *found->second;
+        if (src.notes.empty()) continue;  // nothing to place, however often the clip repeats it
         const int sourceLength = std::max(1, src.steps(beatsPerBar));
         double sourcePos = static_cast<double>(clip.sourceOffsetSteps);
         int consumed = 0;
@@ -937,17 +955,32 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 if (source != modules_.end()) pl.arrangementSig += source->second.source;
                 pl.arrangementSig += "\x1e";
             }
-            auto previous = layers_.find(w.id);
-            if (previous != layers_.end() && previous->second.arrangementSig == pl.arrangementSig &&
-                previous->second.pattern) {
-                pl.pattern = previous->second.pattern;
+            // The expanded clips are project state: refuse them, before building them, past the budget left.
+            const double expanded = arrangementBytes(w.clips, sources, p.beatsPerBar);
+            const double left = static_cast<double>(resourceBudget_.projectStateBytes - std::min(projectStateBytes,
+                resourceBudget_.projectStateBytes));
+            if (expanded > left) {
+                warnings[pl.ids.front()].push_back("layer not installed: its arrangement clips expand to about " +
+                    std::to_string(static_cast<uint64_t>(std::min(expanded, 1.8e19))) +
+                    " bytes of notes, over this Engine's project-state budget of " +
+                    std::to_string(resourceBudget_.projectStateBytes) + " bytes");
+                allOk = false;
+                pl.ids.clear();
+                pl.sig.clear();
             } else {
-                pl.pattern = compileArrangement(w.clips, sources, p.beatsPerBar, p.loopSteps());
+                auto previous = layers_.find(w.id);
+                if (previous != layers_.end() && previous->second.arrangementSig == pl.arrangementSig &&
+                    previous->second.pattern) {
+                    pl.pattern = previous->second.pattern;
+                } else {
+                    pl.pattern = compileArrangement(w.clips, sources, p.beatsPerBar, p.loopSteps());
+                }
+                pl.w.steps = 0;  // arrangement follows the project transport, not an individual clip loop
+                layerStateDoubles += static_cast<uint64_t>(std::ceil(expanded / sizeof(double)));
+                const Program& gen = *modules_.at(pl.ids.front()).program;
+                layerStateDoubles += static_cast<uint64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) *
+                    static_cast<uint64_t>(std::max(0, gen.stateSize));
             }
-            pl.w.steps = 0;  // arrangement follows the project transport, not an individual clip loop
-            const Program& gen = *modules_.at(pl.ids.front()).program;
-            layerStateDoubles += static_cast<uint64_t>(std::clamp(gen.voices, 2, kMaxVoices) - 1) *
-                static_cast<uint64_t>(std::max(0, gen.stateSize));
         } else if (!w.pattern.empty() && !pl.ids.empty()) {
             auto it = modules_.find(w.pattern);
             if (it != modules_.end() && it->second.pattern) {

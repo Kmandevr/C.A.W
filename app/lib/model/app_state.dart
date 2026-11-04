@@ -892,9 +892,7 @@ class AppState extends ChangeNotifier {
     if (target != 'volume' && target != 'pan') return;
     if (layer.automation.any((a) => a.target == target)) return;
     _pushAutomationUndo();
-    final end = project.layers.fold<int>(project.loopSteps, (v, item) =>
-      item.clips.fold<int>(v, (e, clip) => e > clip.startSteps + clip.lengthSteps ? e : clip.startSteps + clip.lengthSteps))
-        .clamp(1, project.maxArrangementSteps).toInt();
+    final end = project.arrangementEndSteps.clamp(1, project.maxArrangementSteps).toInt();
     editLayer(layer, (l) => l.automation.add(AutomationLaneDoc(target: target,
       points: [AutomationPointDoc(step: 0, value: target == 'volume' ? l.volume : l.pan),
         AutomationPointDoc(step: end.toDouble(), value: target == 'volume' ? l.volume : l.pan)])));
@@ -1024,7 +1022,7 @@ class AppState extends ChangeNotifier {
       final sorted = [...lane.points]..sort((a, b) => a.step.compareTo(b.step));
       final position = sorted.indexOf(p);
       final lower = position > 0 ? sorted[position - 1].step + 0.01 : 0.0;
-      final upper = position >= 0 && position < sorted.length - 1 ? sorted[position + 1].step - 0.01 : 4096.0;
+      final upper = position >= 0 && position < sorted.length - 1 ? sorted[position + 1].step - 0.01 : project.maxArrangementSteps.toDouble();
       p.step = step.clamp(lower, math.min(upper, project.maxArrangementSteps.toDouble())).toDouble();
       p.value = value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
       // Clamp to neighboring points instead of reordering during a drag; the dragged handle stays stable.

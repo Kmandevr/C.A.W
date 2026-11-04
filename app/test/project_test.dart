@@ -141,20 +141,44 @@ void main() {
     expect(a['audition_only'], true);
   });
 
-  test('imported clips are normalized to the meter-aware song limit', () {
+  test('songs keep clips, automation and loop length past 64 bars (F7.2, owner 2026-11-04)', () {
     final raw = sample().toJson();
     raw['beats_per_bar'] = 3;
+    raw['loop_bars'] = 1000;
     final layers = raw['layers'] as List;
     (layers[0] as Map)['clips'] = [
-      {'id': 'late', 'pattern': 'pat', 'start_steps': 760,
-       'length_steps': 64, 'source_offset_steps': 900},
+      {'id': 'late', 'pattern': 'pat', 'start_steps': 100000,
+       'length_steps': 50000, 'source_offset_steps': 900},
+    ];
+    raw['automation'] = [
+      {'target_type': 'global', 'target': 'swing', 'points': [{'step': 300000, 'value': 1}]},
     ];
     final imported = ProjectDoc.fromJson(raw);
     final clip = imported.layers[0].clips.single;
-    expect(imported.maxArrangementSteps, 768);
-    expect(clip.startSteps, 760);
-    expect(clip.lengthSteps, 8);
-    expect(clip.sourceOffsetSteps, 768);
+    expect([clip.startSteps, clip.lengthSteps, clip.sourceOffsetSteps], [100000, 50000, 900]);
+    expect(imported.loopBars, 1000);
+    expect(imported.arrangementEndSteps, 300000);
+    expect(imported.timelineSteps, 300000);
+    final engine = jsonDecode(imported.toEngineJson()) as Map<String, dynamic>;
+    expect(engine['loop_bars'], 25000);  // reaches the last automation point (300000 / 12)
+  });
+
+  test('positions past the 32-bit step count are brought inside it on load', () {
+    final raw = sample().toJson();
+    raw['beats_per_bar'] = 3;
+    raw['loop_bars'] = 1 << 40;
+    (raw['layers'] as List)[0]['clips'] = [
+      {'id': 'far', 'pattern': 'pat', 'start_steps': 1 << 40, 'length_steps': 64},
+    ];
+    final imported = ProjectDoc.fromJson(raw);
+    expect(imported.maxLoopBars, 2147483647 ~/ 12);
+    expect(imported.maxArrangementSteps, 2147483640);
+    expect(imported.loopBars, imported.maxLoopBars);
+    final clip = imported.layers[0].clips.single;
+    expect(clip.startSteps, 2147483639);
+    expect(clip.startSteps + clip.lengthSteps, imported.maxArrangementSteps);
+    final engine = jsonDecode(imported.toEngineJson()) as Map<String, dynamic>;
+    expect(engine['loop_bars'], imported.maxLoopBars);
   });
 
   test('imported library metadata rejects unsafe paths and bounds tags', () {
@@ -184,7 +208,8 @@ void main() {
   test('loop seconds and length choices follow the meter', () {
     final p = ProjectDoc(id: 'x', name: 'x', bpm: 120, beatsPerBar: 3, loopBars: 2);
     expect(p.loopSteps, 24);
-    expect(p.maxArrangementSteps, 768);
+    expect(p.maxArrangementSteps, 2147483640);
+    expect(p.timelineSteps, 768);  // automation editors show at least 64 bars
     expect(p.loopSeconds, closeTo(3.0, 1e-9));
     final c = lengthChoices(12);
     expect(c.first.$1, 0);

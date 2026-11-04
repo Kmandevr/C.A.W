@@ -102,14 +102,14 @@ class _ProjectAutomationLane extends StatelessWidget {
         Row(children: [
           Expanded(child: Text(label, style: Neon.code(size: 11, color: Neon.blue))),
           IconButton(tooltip: 'Add midpoint point', onPressed: () =>
-            state.addProjectAutomationPoint(lane, state.project.maxArrangementSteps / 2,
+            state.addProjectAutomationPoint(lane, state.project.timelineSteps / 2,
               lane.points.isEmpty ? 0 : lane.points.last.value),
             icon: const Icon(Icons.add_circle_outline, size: 18)),
           IconButton(tooltip: 'Remove lane', onPressed: () => state.removeProjectAutomationLane(lane),
             icon: const Icon(Icons.close, size: 18)),
         ]),
         SizedBox(height: 52, width: double.infinity, child: CustomPaint(
-          painter: _ProjectCurvePainter(lane.points, state.project.maxArrangementSteps.toDouble(),
+          painter: _ProjectCurvePainter(lane.points, state.project.timelineSteps.toDouble(),
             minimum, maximum))),
         for (var i = 0; i < lane.points.length; i++)
           _ProjectAutomationPoint(state: state, lane: lane, index: i,
@@ -130,7 +130,7 @@ class _ProjectAutomationPoint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final point = lane.points[index];
-    final maxStep = state.project.maxArrangementSteps.toDouble();
+    final maxStep = state.project.timelineSteps.toDouble();
     return Row(children: [
       SizedBox(width: 24, child: Text('P${index + 1}', style: Neon.code(size: 9, color: Neon.dim))),
       Expanded(child: Slider(value: point.step.clamp(0.0, maxStep).toDouble(), min: 0, max: maxStep,
@@ -217,7 +217,7 @@ class _AutomationLane extends StatelessWidget {
   Widget build(BuildContext context) {
     final volume = lane.target == 'volume';
     final color = volume ? Neon.green : Neon.blue;
-    final maxStep = state.project.maxArrangementSteps.toDouble();
+    final maxStep = state.project.timelineSteps.toDouble();
     return Padding(padding: const EdgeInsets.only(top: 12), child: Column(
       crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [

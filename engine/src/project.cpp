@@ -1,4 +1,4 @@
-// Reads the project JSON into a ProjectSpec, clamping every value to a safe range.
+// Reads the project JSON into a ProjectSpec: values clamp to a safe range, song positions out of range are refused.
 #include "project.h"
 
 #include <algorithm>
@@ -17,6 +17,15 @@ double clampd(double v, double lo, double hi) {
 }
 
 int clampi(double v, int lo, int hi) { return static_cast<int>(std::floor(clampd(v, lo, hi))); }
+
+// A whole number in lo..hi, or false: song positions are refused with a message, never moved or shortened.
+bool wholeIn(double v, int lo, int hi, int& out) {
+    if (!std::isfinite(v) || v != std::floor(v) || v < lo || v > hi) return false;
+    out = static_cast<int>(v);
+    return true;
+}
+
+std::string range(int lo, int hi) { return std::to_string(lo) + " to " + std::to_string(hi); }
 
 std::vector<std::string> idList(const Json* arr) {
     std::vector<std::string> out;
@@ -58,8 +67,25 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     out.bpm = clampd(root.number("bpm", 120), 20, 400);
     out.beatsPerBar = clampi(root.number("beats_per_bar", 4), 1, 16);
     out.voices = clampi(root.number("voices", 32), 1, 32);  // a cap: each generator plays its own voices: count
-    out.loopBars = clampi(root.number("loop_bars", 4), 1, 64);
-    const int maxArrangementSteps = 64 * out.beatsPerBar * 4;
+    const int maxBars = maxLoopBars(out.beatsPerBar);
+    const int maxSteps = maxArrangementSteps(out.beatsPerBar);
+    if (!wholeIn(root.number("loop_bars", 4), 1, maxBars, out.loopBars)) {
+        error = "loop_bars must be a whole number from " + range(1, maxBars) + " at " +
+            std::to_string(out.beatsPerBar) + " beats per bar";
+        return false;
+    }
+    const auto pointStepsOk = [&](const Json* points, std::string& message, const std::string& owner) {
+        if (!points || points->type != Json::Type::Array) return true;
+        for (const Json& point : points->arr) {
+            if (point.type != Json::Type::Object) continue;
+            const double step = point.number("step", 0);
+            if (!(step >= 0 && step <= maxSteps)) {
+                message = owner + "automation point steps must be from " + range(0, maxSteps);
+                return false;
+            }
+        }
+        return true;
+    };
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
     out.master = clampd(root.number("master", 0.7), 0, 1);
     out.seamCrossfade = root.boolean("seam_crossfade", true);
@@ -134,7 +160,11 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             spec.name = l.string("name");
             if (spec.id.empty()) continue;
             spec.chain = idList(l.get("chain"));
-            spec.lengthSteps = clampi(l.number("length_steps", 0), 0, maxArrangementSteps);
+            const std::string layerName = "layer '" + spec.id + "'";
+            if (!wholeIn(l.number("length_steps", 0), 0, maxSteps, spec.lengthSteps)) {
+                error = layerName + ": length_steps must be a whole number from " + range(0, maxSteps);
+                return false;
+            }
             spec.pattern = l.string("pattern");
             spec.parentId = l.string("parent");
             spec.folder = l.boolean("folder", false);
@@ -145,9 +175,24 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     ClipSpec clip;
                     clip.id = c.string("id");
                     clip.pattern = c.string("pattern");
-                    clip.startSteps = clampi(c.number("start_steps", 0), 0, maxArrangementSteps - 1);
-                    clip.lengthSteps = clampi(c.number("length_steps", 64), 1, maxArrangementSteps - clip.startSteps);
-                    clip.sourceOffsetSteps = clampi(c.number("source_offset_steps", 0), 0, maxArrangementSteps);
+                    const std::string clipName = "clip '" + clip.id + "' of " + layerName;
+                    if (!wholeIn(c.number("start_steps", 0), 0, maxSteps - 1, clip.startSteps)) {
+                        error = clipName + ": start_steps must be a whole number from " + range(0, maxSteps - 1);
+                        return false;
+                    }
+                    if (!wholeIn(c.number("length_steps", 64), 1, maxSteps, clip.lengthSteps)) {
+                        error = clipName + ": length_steps must be a whole number from " + range(1, maxSteps);
+                        return false;
+                    }
+                    if (clip.lengthSteps > maxSteps - clip.startSteps) {
+                        error = clipName + " ends after step " + std::to_string(maxSteps) + ", the longest song at " +
+                            std::to_string(out.beatsPerBar) + " beats per bar";
+                        return false;
+                    }
+                    if (!wholeIn(c.number("source_offset_steps", 0), 0, maxSteps, clip.sourceOffsetSteps)) {
+                        error = clipName + ": source_offset_steps must be a whole number from " + range(0, maxSteps);
+                        return false;
+                    }
                     clip.loop = c.boolean("loop", true);
                     if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));
                 }
@@ -157,10 +202,11 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     if (laneJson.type != Json::Type::Object) continue;
                     AutomationLaneSpec lane; lane.target = laneJson.string("target");
                     if (lane.target != "volume" && lane.target != "pan") continue;
+                    if (!pointStepsOk(laneJson.get("points"), error, layerName + ": ")) return false;
                     if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                         for (const Json& point : points->arr) {
                             if (point.type != Json::Type::Object) continue;
-                            lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
+                            lane.points.push_back({point.number("step", 0),
                                 clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1, 1)});
                         }
                     }
@@ -184,10 +230,11 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             lane.moduleId = laneJson.string("module");
             if ((lane.targetType != "param" && lane.targetType != "global") || lane.target.empty() ||
                 (lane.targetType == "param" && lane.moduleId.empty())) continue;
+            if (!pointStepsOk(laneJson.get("points"), error, "")) return false;
             if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                 for (const Json& point : points->arr) {
                     if (point.type != Json::Type::Object) continue;
-                    lane.points.push_back({clampd(point.number("step", 0), 0, maxArrangementSteps),
+                    lane.points.push_back({point.number("step", 0),
                                            clampd(point.number("value", 0), -1000000, 1000000)});
                 }
             }
@@ -197,13 +244,14 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         }
     }
 
-    int automationEndStep = 0;
+    // Project automation lengthens the loop to reach its last point (points are at most maxSteps, whole bars).
+    int64_t automationEndStep = 0;
     for (const auto& lane : out.automation)
         for (const auto& point : lane.points)
-            automationEndStep = std::max(automationEndStep, static_cast<int>(std::ceil(point.step)));
-    const int stepsPerBar = out.beatsPerBar * 4;
-    if (automationEndStep > 0 && stepsPerBar > 0)
-        out.loopBars = std::min(64, std::max(out.loopBars, (automationEndStep + stepsPerBar - 1) / stepsPerBar));
+            automationEndStep = std::max<int64_t>(automationEndStep, static_cast<int64_t>(std::ceil(point.step)));
+    const int64_t stepsPerBar = out.beatsPerBar * 4;
+    if (automationEndStep > 0)
+        out.loopBars = std::max(out.loopBars, static_cast<int>((automationEndStep + stepsPerBar - 1) / stepsPerBar));
 
     // Reject malformed parent references and cycles before the audio thread sees routing indices.
     for (const LayerSpec& layer : out.layers) {
@@ -229,7 +277,10 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             if (v.type == Json::Type::Number && std::isfinite(v.num)) out.globals[k] = v.num;
     if (const Json* a = root.get("audition"); a && a->type == Json::Type::Object) {
         out.auditionChain = idList(a->get("chain"));
-        out.auditionSteps = clampi(a->number("length_steps", 0), 0, 64 * 16 * 16);
+        if (!wholeIn(a->number("length_steps", 0), 0, maxSteps, out.auditionSteps)) {
+            error = "audition length_steps must be a whole number from " + range(0, maxSteps);
+            return false;
+        }
         out.auditionPattern = a->string("pattern");
     }
     out.auditionOnly = root.boolean("audition_only", false) && !out.auditionChain.empty();
