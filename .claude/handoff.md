@@ -1,7 +1,7 @@
 # Handoff
 
-Commit: df4f719
-Branch: claude/caw-engine-foundation-skpirb (F6.2 on top of Main c1801c6; PR to Main)
+Commit: 4b125cb
+Branch: claude/caw-engine-foundation-skpirb (F6.3 on top of Main 8e181a2; PR to Main)
 
 ## Goal
 Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8, plus F10 (seeded randomness); F9 is deferred to Release 1, since no project compatibility is needed yet.
@@ -10,9 +10,9 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 - Ask the owner before SDK ABI changes, new dependencies, or app/ changes.
 
 ## Done and verified
-- On Main: F3 (#72), F4 (#74, #75, #77, #79), F5 (#80, #81) and F6.1 (#82, `ParameterResolver` in `engine/src/params.*`).
-- F6.2 is on the branch (`744468b`, review fixes `df4f719`). The executor resolves node parameters into `AudioProcessBlock`/`ProcessBlock::parameters`; `queueParameter`/`queueClearTouch` (SPSC, 256 commands) carry changes; `setInitialParameter` handles rebuilds.
-  - Tests: caw_tests 252/252, caw_rt_tests 59/59, sanitizers clean. Callgrind: playback +0.03–0.05%, graph +0.5%.
+- On Main: F3 (#72), F4 (#74, #75, #77, #79), F5 (#80, #81), F6.1 (#82, `ParameterResolver`) and F6.2 (#83: the executor passes resolved parameters; `queueParameter`/`queueClearTouch`/`setInitialParameter`).
+- F6.3 is on the branch: `GraphExecutor::setModulationLinks()`, which applies links in id order. Links and routing exclude each other either way round.
+  - Tests: caw_tests 252/252, caw_rt_tests 64/64, sanitizers clean. Callgrind within noise.
 
 ## Open
 - Issue #78: swap-fade import buffers are renumbered (an older bug).
@@ -20,8 +20,8 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 - Open for F6.4: `smoothingFrames` counts frames, not time (not scaled by sample rate).
 
 ## Next
-1. Merge the F6.2 PR when CI is green, and update #28.
-2. F6.3: modulation links from modulation outputs to node parameters (link id order; test that permuting node or link order gives the same output). Then F6.4 automation lanes, F6.5 MIDI CC, F6.6 Engine .caw params (golden hashes unchanged).
+1. Merge the F6.3 PR when CI is green, and update #28.
+2. F6.4: automation lanes as a resolver source; values must match the Engine's `automationValue` sample for sample, including seeks. Decide whether `smoothingFrames` scales with sample rate. Then F6.5 MIDI CC and F6.6 Engine .caw params (golden hashes unchanged). The Engine's graph uses routing, so links there need routing-aware ordering (F6.6).
 
 ## Read first
 - `docs/roadmap.md`
