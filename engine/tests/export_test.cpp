@@ -196,6 +196,12 @@ TEST(streamed_wav_exports_match_the_in_memory_encoding_byte_for_byte) {
     CHECK(!renderExportToWav(groove(), ExportOptions{}, cancelled, false, error, &progress, &cancel));
     CHECK(error == "cancelled");
     CHECK(readBytes(cancelled).empty());
+    // A cancelled export over an existing file keeps the old file, and nothing half-written is left beside it.
+    const std::string kept = dir + "/kept.wav";
+    CHECK(writeFile(kept, {1, 2, 3}, error));
+    CHECK(!renderExportToWav(groove(), ExportOptions{}, kept, false, error, &progress, &cancel));
+    CHECK(readBytes(kept) == std::vector<uint8_t>({1, 2, 3}));
+    CHECK(readBytes(kept + ".part").empty());
     // A song longer than a WAV file holds is refused before any file is opened.
     ProjectSpec huge = groove();
     huge.loopBars = maxLoopBars(huge.beatsPerBar);

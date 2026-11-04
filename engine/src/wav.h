@@ -20,7 +20,8 @@ std::vector<uint8_t> encodeWav(const WavSpec& spec, const float* interleaved, in
 bool writeFile(const std::string& path, const std::vector<uint8_t>& bytes, std::string& error);
 
 // Writes the same bytes as encodeWav to a file, a chunk at a time, so memory doesn't grow with the length.
-// The frame count is fixed when the file opens; a writer dropped before finish() removes its partial file.
+// The frame count is fixed when the file opens. It writes `path.part` and renames it over `path` in finish(), so a
+// cancelled or failed export leaves an existing file untouched and never shows a half-written one.
 class WavFileWriter {
 public:
     WavFileWriter() = default;
@@ -34,7 +35,7 @@ public:
 
 private:
     std::FILE* file_ = nullptr;
-    std::string path_;
+    std::string path_, part_;
     WavSpec spec_;
     int64_t frames_ = 0, written_ = 0;
     bool failed_ = false;

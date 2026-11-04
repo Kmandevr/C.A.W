@@ -104,12 +104,13 @@ WavFileWriter::~WavFileWriter() { abandon(); }
 
 bool WavFileWriter::open(const std::string& path, const WavSpec& spec, int64_t frames, std::string& error) {
     abandon();
-    file_ = std::fopen(path.c_str(), "wb");
+    path_ = path;
+    part_ = path + ".part";
+    file_ = std::fopen(part_.c_str(), "wb");
     if (!file_) {
-        error = "can't open " + path + " for writing";
+        error = "can't open " + part_ + " for writing";
         return false;
     }
-    path_ = path;
     spec_ = spec;
     frames_ = frames;
     written_ = 0;
@@ -145,7 +146,13 @@ bool WavFileWriter::finish(std::string& error) {
     file_ = nullptr;
     if (failed_ || !closed || !complete) {
         error = complete ? "couldn't write all of " + path_ : "the render ended before the WAV was complete";
-        std::remove(path_.c_str());
+        std::remove(part_.c_str());
+        return false;
+    }
+    std::remove(path_.c_str());  // rename doesn't replace an existing file on Windows
+    if (std::rename(part_.c_str(), path_.c_str()) != 0) {
+        error = "couldn't move " + part_ + " to " + path_;
+        std::remove(part_.c_str());
         return false;
     }
     return true;
@@ -155,7 +162,7 @@ void WavFileWriter::abandon() {
     if (!file_) return;
     std::fclose(file_);
     file_ = nullptr;
-    std::remove(path_.c_str());
+    std::remove(part_.c_str());
 }
 
 bool writeFile(const std::string& path, const std::vector<uint8_t>& bytes, std::string& error) {
