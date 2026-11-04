@@ -1620,3 +1620,40 @@ TEST(graph_parameters_resolve_and_apply_commands_without_allocating) {
     CHECK(ok);
     CHECK_EQ(operations, 0u);
 }
+
+TEST(graph_parameters_initial_values_survive_a_re_prepare_without_a_ramp_or_a_touch) {
+    // A rebuild restores the user's values directly: no ramp from the default, and not a touch
+    // (which would block automation until playback restarts).
+    ParamModules m(4);
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    CHECK(executor.setInitialParameter(0, 0, 1.5));
+    CHECK(!executor.setInitialParameter(0, 1, 1.5));
+    CHECK(!executor.setInitialParameter(0, 0, std::numeric_limits<double>::quiet_NaN()));
+    CHECK(!executor.parameterTouched(0, 0));
+    Planar host(2, 8, 1.0f), out(2, 8);
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    CHECK_EQ(out.data[0][0], 1.5f);
+    CHECK_EQ(gain.variedBlocks, 0u);
+}
+
+TEST(graph_parameters_clear_touch_keeps_queue_order) {
+    // A set after a clear touches again; a clear after a set ends that touch.
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}, {"h", &m.plain}}, {{0, 1, 1, 0}}, {&gain, &gain}, 1, 8, 48000.0, kBudget) ==
+          GraphError::Ok);
+    Planar host(2, 8, 1.0f), out(2, 8);
+    CHECK(executor.queueParameter(0, 0, 1.0));
+    CHECK(executor.queueParameter(1, 0, 1.0));
+    CHECK(executor.queueClearTouch());
+    CHECK(executor.queueParameter(1, 0, 1.25));
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    CHECK(!executor.parameterTouched(0, 0));
+    CHECK(executor.parameterTouched(1, 0));
+    for (int k = 0; k < 3; ++k) CHECK(executor.queueClearTouch());
+    CHECK(executor.process(host.constView(8), out.view(8), 8));
+    CHECK(!executor.parameterTouched(1, 0));
+}

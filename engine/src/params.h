@@ -55,6 +55,8 @@ public:
     // unknown op or a depth outside -1..1.
     bool setLinks(const ModulationLink* links, uint32_t count) noexcept;
     void setBase(double plain) noexcept;
+    // A restored value (a rebuilt graph, a loaded project): jumps there, no ramp, not a touch.
+    void setInitial(double plain) noexcept;
     void clearTouch() noexcept { touched_ = false; }
     bool touched() const noexcept { return touched_; }
     // automation: `frames` plain values, or null for no active lane. modulation: null, or one

@@ -84,7 +84,7 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorEventMergeBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterResolver>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterValue>)) ||
-        !addEstimatedBytes(total, 1, sizeof(std::vector<double>)) ||
+        !addEstimatedBytes(total, 2, sizeof(std::vector<double>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorPortBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorNodeBlockBytes>)) ||
         !addEstimatedBytes(total, 2, sizeof(std::vector<ChannelBufferView>)) ||
@@ -106,7 +106,7 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         return false;
     // Parameters: a resolver, a resolved value and maxFrames doubles each.
     std::size_t parameterFrames = 0;
-    if (!addEstimatedBytes(total, shape.parameters, sizeof(ParameterResolver) + sizeof(ParameterValue)) ||
+    if (!addEstimatedBytes(total, shape.parameters, sizeof(ParameterResolver) + sizeof(ParameterValue) + sizeof(uint64_t)) ||
         !addEstimatedBytes(parameterFrames, shape.parameters, maxFrames) ||
         !addEstimatedBytes(total, parameterFrames, sizeof(double)))
         return false;
@@ -341,6 +341,8 @@ void GraphExecutor::reset() noexcept {
     resolvers_.clear();
     parameterValues_.clear();
     parameterStorage_.clear();
+    touchEpoch_.clear();
+    clearEpoch_ = 0;
     order_.clear();
     routePosition_.clear();
     routeCount_.clear();
@@ -541,6 +543,8 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         resolvers_.resize(paramCursor);
         parameterValues_.assign(paramCursor, ParameterValue{});
         parameterStorage_.assign(static_cast<std::size_t>(paramCursor) * maxFrames, 0.0);
+        touchEpoch_.assign(paramCursor, 0);
+        clearEpoch_ = 0;
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
             for (uint32_t k = 0; k < descriptor.parameterCount; ++k)
@@ -1000,6 +1004,25 @@ bool GraphExecutor::queueClearTouch() noexcept {
     return ready_ && parameterQueue_.push(ParameterCommand{0, 0, 0.0, true});
 }
 
+bool GraphExecutor::setInitialParameter(uint32_t node, uint32_t parameter, double value) noexcept {
+    if (!ready_ || node >= blocks_.size() || parameter >= blocks_[node].paramCount || !std::isfinite(value))
+        return false;
+    resolvers_[blocks_[node].paramBase + parameter].setInitial(value);
+    return true;
+}
+
+bool GraphExecutor::parameterTouched(uint32_t node, uint32_t parameter) const noexcept {
+    if (node >= blocks_.size() || parameter >= blocks_[node].paramCount) return false;
+    const uint32_t p = blocks_[node].paramBase + parameter;
+    return touchEpoch_[p] == clearEpoch_ && resolvers_[p].touched();
+}
+
+void GraphExecutor::syncTouch(uint32_t p) noexcept {
+    if (touchEpoch_[p] == clearEpoch_) return;
+    resolvers_[p].clearTouch();
+    touchEpoch_[p] = clearEpoch_;
+}
+
 double GraphExecutor::parameterTarget(uint32_t node, uint32_t parameter) const noexcept {
     if (node >= blocks_.size() || parameter >= blocks_[node].paramCount) return 0.0;
     return resolvers_[blocks_[node].paramBase + parameter].target();
@@ -1009,11 +1032,14 @@ void GraphExecutor::applyParameterCommands() noexcept {
     // Bounded by the queue capacity; indices were checked when queued, for this prepared graph.
     for (ParameterCommand command; parameterQueue_.pop(command);) {
         if (command.clearTouch) {
-            for (ParameterResolver& resolver : resolvers_) resolver.clearTouch();
+            ++clearEpoch_;  // O(1); resolvers catch up lazily (syncTouch)
             continue;
         }
-        if (command.node < blocks_.size() && command.parameter < blocks_[command.node].paramCount)
-            resolvers_[blocks_[command.node].paramBase + command.parameter].setBase(command.value);
+        if (command.node < blocks_.size() && command.parameter < blocks_[command.node].paramCount) {
+            const uint32_t p = blocks_[command.node].paramBase + command.parameter;
+            syncTouch(p);  // a clear queued before this set must not undo it
+            resolvers_[p].setBase(command.value);
+        }
     }
 }
 
@@ -1021,6 +1047,7 @@ void GraphExecutor::resolveParameters(const NodeBlock& b, uint32_t frames) noexc
     // Automation lanes (F6.4) and modulation links (F6.3) are not connected yet: manual values only.
     for (uint32_t k = 0; k < b.paramCount; ++k) {
         const uint32_t p = b.paramBase + k;
+        syncTouch(p);
         parameterValues_[p] = resolvers_[p].resolve(frames, nullptr, nullptr,
                                                     parameterStorage_.data() + static_cast<std::size_t>(p) * maxFrames_);
     }

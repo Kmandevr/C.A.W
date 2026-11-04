@@ -122,7 +122,7 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 // budget). Before a node runs, each of its parameters is resolved for the block and passed in
 // descriptor order (AudioProcessBlock/ProcessBlock::parameters). Values come from the
 // control thread through queueParameter() and queueClearTouch(), which process() applies at the
-// start of the next block, in queue order.
+// start of the next accepted block, in queue order. prepare() must never overlap process().
 // If a processor returns false the block fails: process() returns false, zeroes the host output
 // and records the failing node. process() rebinds host channels into the prepared input table,
 // so one executor must never be processed by two threads (e.g. playback and export).
@@ -180,10 +180,19 @@ public:
     // The same queue: ends every touch (call when playback starts or restarts), so automation
     // rules again.
     bool queueClearTouch() noexcept;
-    static constexpr std::size_t kParameterQueueCapacity = 1024;
+    // Control thread, only while process() is not running (after prepare(), before the audio
+    // thread starts or resumes, like prepare() itself): restore a parameter's value directly, with
+    // no ramp and no touch. A rebuild calls it for every value it keeps, as prepare() starts each
+    // parameter at its default. False for an out-of-range index or a non-finite value.
+    bool setInitialParameter(uint32_t node, uint32_t parameter, double value) noexcept;
+    // Queue capacity. A full queue refuses the command (false) and the parameter keeps its older
+    // value, so the caller resends the latest value later; the queue drains at the start of the
+    // next accepted process() call (one that reaches the graph).
+    static constexpr std::size_t kParameterQueueCapacity = 256;
     // The manual value a parameter is heading to (audio-thread state; read it from the control
     // thread only while process() is not running, e.g. in tests or after stop).
     double parameterTarget(uint32_t node, uint32_t parameter) const noexcept;
+    bool parameterTouched(uint32_t node, uint32_t parameter) const noexcept;
     // Thin stereo wrapper over the planar path. Null inputs are silence.
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
@@ -264,6 +273,11 @@ private:
     std::vector<ParameterResolver> resolvers_;
     std::vector<ParameterValue> parameterValues_;
     std::vector<double> parameterStorage_;
+    // queueClearTouch() is O(1): it starts a new epoch, and each resolver drops its touch the
+    // next time it is set or resolved in a newer epoch than it last saw.
+    std::vector<uint64_t> touchEpoch_;
+    uint64_t clearEpoch_ = 0;
+    void syncTouch(uint32_t p) noexcept;
     struct ParameterCommand { uint32_t node, parameter; double value; bool clearTouch; };
     Spsc<ParameterCommand, kParameterQueueCapacity> parameterQueue_;
     void applyParameterCommands() noexcept;

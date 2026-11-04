@@ -97,6 +97,12 @@ void ParameterResolver::setBase(double plain) noexcept {
     increment_ = (value - current_) / static_cast<double>(rampLeft_);
 }
 
+void ParameterResolver::setInitial(double plain) noexcept {
+    current_ = target_ = clampToRange(parameter_, plain);
+    rampLeft_ = 0;
+    increment_ = 0.0;
+}
+
 double ParameterResolver::frameValue(double base, const float* const* modulation, uint32_t frame) const noexcept {
     // A link without a signal (disconnected, bypassed) is skipped; with none carrying one, the
     // base is only constrained, so it passes bit for bit.
