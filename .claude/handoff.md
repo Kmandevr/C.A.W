@@ -1,5 +1,7 @@
 # Handoff
 
+Commit: a1cbb1f
+
 Branch: claude/caw-engine-foundation-skpirb (on Main eddfd1c; U0 part one in review as a PR to Main)
 
 ## Goal
