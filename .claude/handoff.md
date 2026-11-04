@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: 2ce4b1b
+Commit: 041c2ec
 
 Branch: claude/caw-engine-foundation-skpirb (on Main 2ce4b1b; PR #100: glass, the dock view and the shell switch, in review)
 
@@ -21,8 +21,8 @@ Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: do
 ## Next
 U1 has five PRs (architect review, 2026-11-04; detail in `docs/ui-plan.md`, U1):
 1. The layout model: merged (#99). Glass surfaces and setting (owner, 2026-11-04): in review.
-2. The dock view (`lib/ui/dock/dock_view.dart`): in review in #100.
-3. The shell switch (`lib/ui/dock/dock_controller.dart`, `lib/ui/shell.dart`): in review in #100. Left for later: hidden tabs still rebuild on the 30 Hz tick; the phone quick-actions strip overlays the lower panel.
+2. The dock view (`app/lib/ui/dock/dock_view.dart`): in review in #100.
+3. The shell switch (`app/lib/ui/dock/dock_controller.dart`, `app/lib/ui/shell.dart`): in review in #100. Left for later: hidden tabs still rebuild on the 30 Hz tick; the phone quick-actions strip overlays the lower panel.
 4. Open straight into the arrangement.
 5. The transport bar: undo/redo and tap tempo (#19).
 

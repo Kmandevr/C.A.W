@@ -39,6 +39,9 @@ class DockController extends ChangeNotifier {
   void set(DockLayout next) {
     if (identical(next, layout)) return;
     _layouts[form] = next;
+    // Settings gets the change at once, so a controller made before this one is disposed (the shell remounts on a
+    // theme change) reads it; only the write to disk waits.
+    settings.dockLayouts = {...settings.dockLayouts, form.name: next.toJson()};
     notifyListeners();
     _saveSoon();
   }
@@ -64,11 +67,10 @@ class DockController extends ChangeNotifier {
     _saveTimer = Timer(saveDelay, flush);
   }
 
-  /// Writes the layouts to Settings now.
+  /// Writes the settings (with the layouts) to disk now.
   Future<void> flush() {
     _saveTimer?.cancel();
     _saveTimer = null;
-    settings.dockLayouts = {for (final e in _layouts.entries) e.key.name: e.value.toJson()};
     return settings.save();
   }
 

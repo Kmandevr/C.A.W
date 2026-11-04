@@ -52,6 +52,16 @@ void main() {
       }
     });
 
+    test('a new controller on the same settings sees a change not yet written to disk (the theme remount)', () {
+      final s = Settings();
+      final old = DockController(s)..form = FormFactor.desktop;
+      old.reveal(Panels.mixer);
+      final fresh = DockController(s)..form = FormFactor.desktop;
+      expect(fresh.layout.toJson(), old.layout.toJson());
+      old.dispose();
+      fresh.dispose();
+    });
+
     test('the key panel is the one touched last while it is on screen, else the first on screen', () {
       final c = DockController(Settings())..form = FormFactor.desktop;
       expect(c.keyPanel, Panels.arrangement);

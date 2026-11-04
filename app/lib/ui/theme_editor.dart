@@ -76,6 +76,14 @@ class SettingsPage extends StatelessWidget {
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.touch_app, color: Neon.yellow),
+              title: const Text('Quick actions bar'),
+              subtitle: const Text('A floating row of shortcut buttons at the bottom of a phone screen'),
+              value: settings.quickActions,
+              onChanged: (v) => settings.update((s) => s.quickActions = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
               secondary: Icon(Icons.blur_on, color: Neon.blue),
               title: const Text('Glass'),
               subtitle: Text(

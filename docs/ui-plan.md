@@ -41,7 +41,7 @@ updated: 2026-11-04
 
 **[Fact, 2026-11-04]** These findings come from the Linux debug build under Xvfb with the "First loop" template, at 390×844 (phone portrait) and 1280×800 (desktop).
 
-1. **The quick-action strip covers content.** It floats over the bottom of every phone screen.
+1. **The quick-action strip covers content.** It floats over the bottom of every phone screen. Until it becomes a per-panel toolbar it is off by default, behind a Settings switch (owner, 2026-11-04).
 2. **The inline piano roll is about 200 px tall on a phone,** under the track card, the pattern header and the description.
 3. **The timeline hides sound that plays.** A layer with no clips plays its module all song long (`project.dart` sends its pattern directly), but its row says "Add MIDI clip with +". That is four of five template tracks.
 4. **The transport has only play, BPM and CPU.** There is no stop, no position, no loop toggle, and no undo or redo.

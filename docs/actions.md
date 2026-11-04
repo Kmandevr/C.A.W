@@ -45,7 +45,7 @@ macro "Run of four"
   roll.notes.up
 ```
 
-- **Phone without a keyboard:** the Quick Actions strip is available in Sounds, Tracks and Export. The tune control lets you add actions or macros, remove them, reorder them and restore defaults. The piano roll keeps its own dedicated toolbar. Buttons dispatch through the action registry; they do not simulate key presses. Vim remains a physical-keyboard feature.
+- **Phone without a keyboard:** the Quick Actions strip is available in Sounds, Tracks and Export when Settings → Motion and feel → Quick actions bar is on; it is off by default (owner, 2026-11-04: not very useful yet). The tune control lets you add actions or macros, remove them, reorder them and restore defaults. The piano roll keeps its own dedicated toolbar. Buttons dispatch through the action registry; they do not simulate key presses. Vim remains a physical-keyboard feature.
 
 ## Vim-style control
 

@@ -6,6 +6,7 @@ updated: 2026-11-04
 
 # Log
 
+- 2026-11-04: The phone quick-actions bar is off by default (owner), with a Settings switch. Dock layout changes reach Settings at once, so a theme change right after a layout change keeps it.
 - 2026-11-04: UI U1, third part: the shell switch. The eight workspaces are docking panels on every screen shape, with one saved layout per shape (`DockController`, Settings `dock_layouts`), a layout button with presets and every panel, the keyboard area from the panel touched last, panel-sized screens and a Builder that scrolls in a short panel. The bottom bar, More sheet and side rail are gone.
 - 2026-11-04: UI U1, second part: the dock view (`lib/ui/dock/dock_view.dart`, not yet on screen): dividers with wide grab zones that stop at the 12% minimum, glass tab strips, a long-press tab drag onto five drop zones with a landing preview, maximise, panels that keep their state when moved, and goldens at phone, landscape and desktop sizes.
 - 2026-11-04: Glass (owner): `lib/ui/glass.dart` with frosted blur on floating surfaces only and a no-blur glass look for docked panels, a Glass switch in Settings (on by default; Lightweight and Minimal turn it off), and a golden. Dock layout review fixes: the active tab survives dropped ids, ids are the `Panels` constants, the 12% minimum holds after every edit. The engine-status note no longer covers settings and storage.
