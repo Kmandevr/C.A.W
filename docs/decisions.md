@@ -19,6 +19,7 @@ updated: 2026-11-04
   3. Otherwise: normalize, apply the links in ascending link id (never graph or UI order), clamp to 0..1, denormalize, clamp and step.
 
   Links are `ModulationOp` Add, Multiply, Min, Max or Replace, each blended from the current value toward its target by depth (−1..1), at most 8 per parameter. A NaN or inf sample from a connected source reads 0. Exponential curves use `detLog`/`detExp` and their endpoints are exact. A block with nothing varying is one constant, which keeps stereo playback cheap.
+- **F6.2 executor rules (after the audio review).** prepare() starts every parameter at its default, so a rebuild restores kept values with `setInitialParameter` (no ramp, no touch), never through the queue. The command queue (256) refuses when full rather than blocking, so the sender resends the latest value. A touch reset is one epoch step, whatever the graph size. `smoothingFrames` counts frames at the graph's rate; scaling it by sample rate is open for F6.4.
 - **Split:**
   - F6.1: resolver and descriptor fields (curve, step, smoothing, unit).
   - F6.2: values to processors through the executor.

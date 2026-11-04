@@ -197,14 +197,15 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     // block. Mirrors of the executor's private Port and NodeBlock layouts give their sizes; the
     // private lists' headers are counted like any std::vector header.
     struct PortBytes { PortType type; bool input, summing, host; uint32_t channels, table, sum; };
-    struct NodeBlockBytes { uint32_t fields[20]; bool typed; };
-    // The event storage, tables, sources, merges, merge sources and cursors have headers too
-    // (vector headers do not depend on the element type).
+    struct NodeBlockBytes { uint32_t fields[22]; bool typed; };
+    // The event storage, tables, sources, merges, merge sources and cursors, and the parameter
+    // resolvers, values and storage have headers too (vector headers do not depend on the
+    // element type). These modules have no parameters, so they add nothing else.
     constexpr std::size_t fixedHeaders =
         sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 4u +
         sizeof(std::vector<float*>) * 3u + sizeof(std::vector<const float*>) * 2u +
         sizeof(std::vector<uint32_t>) * 12u + sizeof(std::vector<ChannelBufferView>) * 2u +
-        sizeof(std::vector<Event>) * 4u + sizeof(std::vector<uint32_t>) * 3u;
+        sizeof(std::vector<Event>) * 4u + sizeof(std::vector<uint32_t>) * 3u + sizeof(std::vector<double>) * 4u;
     constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u + sizeof(NodeBlockBytes);
     constexpr std::size_t portBytes =
         4u * sizeof(PortBytes) + 2u * sizeof(ConstChannelBufferView) + 2u * sizeof(ChannelBufferView);
@@ -225,6 +226,27 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     CHECK(executor.prepare(nodes, edges, processors, 1, 64, 48000, budget) ==
           GraphError::ResourceBudgetExceeded);
     CHECK(!executor.ready());
+    // One parameter on the second node adds exactly a resolver, a resolved value, a touch epoch
+    // and 64 doubles.
+    const ParameterDescriptor gainParameter{"gain", 0.5, 0.0, 1.0, true};
+    const ModuleDescriptor withParameter{effect.id, 1, effect.ports, effect.portCount, &gainParameter, 1};
+    const std::vector<GraphNode> parameterNodes{{"input", &effect}, {"gain", &withParameter}};
+    class ParameterGain final : public ModuleProcessor {
+    public:
+        explicit ParameterGain(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        bool process(const AudioProcessBlock&) noexcept override { return true; }
+    private:
+        const ModuleDescriptor& d_;
+    } parameterGain(withParameter);
+    const std::vector<ModuleProcessor*> parameterProcessors{&pass, &parameterGain};
+    constexpr std::size_t parameterBytes =
+        sizeof(ParameterResolver) + sizeof(ParameterValue) + sizeof(uint64_t) + 64u * sizeof(double);  // + its touch epoch
+    const GraphResourceBudget withRoom{2, 1, executorBytes + retainedPlanBytes + parameterBytes};
+    const GraphResourceBudget oneShort{2, 1, executorBytes + retainedPlanBytes + parameterBytes - 1u};
+    CHECK(executor.prepare(parameterNodes, edges, parameterProcessors, 1, 64, 48000, withRoom) == GraphError::Ok);
+    CHECK(executor.prepare(parameterNodes, edges, parameterProcessors, 1, 64, 48000, oneShort) ==
+          GraphError::ResourceBudgetExceeded);
 }
 
 TEST(graph_executor_accepts_block_sizes_above_legacy_fixed_cap) {
