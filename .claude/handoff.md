@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: (F6.4 review fixes)
+Commit: b9330f3
 Branch: claude/caw-engine-foundation-skpirb (F6.4 on top of Main 203f8b8; PR to Main)
 
 ## Goal
