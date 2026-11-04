@@ -44,7 +44,8 @@ bool estimateGraphWorkingBytes(std::size_t nodeCount, std::size_t connectionCoun
 // Same layouts as GraphExecutor's private Port, NodeBlock and SumInput, for the byte estimate.
 struct GraphExecutorSumInputBytes { uint32_t sourceBase, sourceCount, tableBase, channels; };
 struct GraphExecutorPortBytes { PortType type; bool input, summing, host; uint32_t channels, table, sum; };
-struct GraphExecutorNodeBlockBytes { uint32_t fields[14]; bool typed; };
+struct GraphExecutorNodeBlockBytes { uint32_t fields[20]; bool typed; };
+struct GraphExecutorEventMergeBytes { uint32_t sourceBase, sourceCount, input; std::size_t storage; };
 
 struct ExecutorShape {
     std::size_t nodes = 0;
@@ -58,6 +59,10 @@ struct ExecutorShape {
     std::size_t ports = 0;           // every port of every node
     std::size_t audioInputPorts = 0, audioOutputPorts = 0;  // one prepared view each
     std::size_t controlInputs = 0, controlOutputs = 0;      // one value and one pointer each
+    std::size_t eventInputs = 0, eventOutputs = 0;          // one table entry each (inputs: and a source)
+    std::size_t eventMergeInputs = 0;                       // summing event inputs: a buffer and a merge each
+    std::size_t eventMergeSources = 0;                      // connections into summing event inputs
+    std::size_t eventCapacity = 0;                          // events per buffer
 };
 
 bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames,
@@ -65,12 +70,17 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
     std::size_t total = 0;
     // Fixed vector headers: processors, channel, control, zero and sum storage, five pointer
     // tables, host-input slots, per-node metadata arrays, sum sources, the port, node-block,
-    // view and sum-input lists and the execution order.
+    // view and sum-input lists, the execution order, and the event storage, tables, sources,
+    // merges, merge sources and merge cursors.
     if (!addEstimatedBytes(total, 1, sizeof(std::vector<ModuleProcessor*>)) ||
         !addEstimatedBytes(total, 4, sizeof(std::vector<float>)) ||
         !addEstimatedBytes(total, 3, sizeof(std::vector<float*>)) ||
         !addEstimatedBytes(total, 2, sizeof(std::vector<const float*>)) ||
-        !addEstimatedBytes(total, 9, sizeof(std::vector<uint32_t>)) ||
+        !addEstimatedBytes(total, 12, sizeof(std::vector<uint32_t>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<Event>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<EventOutput>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<EventInput>)) ||
+        !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorEventMergeBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorPortBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorNodeBlockBytes>)) ||
         !addEstimatedBytes(total, 2, sizeof(std::vector<ChannelBufferView>)) ||
@@ -80,6 +90,15 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         !addEstimatedBytes(total, shape.audioInputPorts, sizeof(ConstChannelBufferView)) ||
         !addEstimatedBytes(total, shape.audioOutputPorts, sizeof(ChannelBufferView)) ||
         !addEstimatedBytes(total, shape.controlInputs + shape.controlOutputs, sizeof(float) + sizeof(float*)))
+        return false;
+    // Event tables, merges with their sources and cursors, and every event buffer.
+    std::size_t eventBuffers = 0;
+    if (!addEstimatedBytes(total, shape.eventOutputs, sizeof(EventOutput)) ||
+        !addEstimatedBytes(total, shape.eventInputs, sizeof(EventInput) + sizeof(uint32_t)) ||
+        !addEstimatedBytes(total, shape.eventMergeInputs, sizeof(GraphExecutorEventMergeBytes)) ||
+        !addEstimatedBytes(total, shape.eventMergeSources, 2u * sizeof(uint32_t)) ||
+        !addEstimatedBytes(eventBuffers, shape.eventOutputs + shape.eventMergeInputs, shape.eventCapacity) ||
+        !addEstimatedBytes(total, eventBuffers, sizeof(Event)))
         return false;
     // Per node: processor pointer, first input/output base and count, port base and node block.
     // The execution order is the retained plan, which prepare() counts separately.
@@ -301,6 +320,14 @@ void GraphExecutor::reset() noexcept {
     sumSources_.clear();
     sumTable_.clear();
     sumStorage_.clear();
+    eventStorage_.clear();
+    eventOutTable_.clear();
+    eventInTable_.clear();
+    eventInSource_.clear();
+    eventMerges_.clear();
+    eventMergeSources_.clear();
+    mergeCursor_.clear();
+    eventCapacity_ = 0;
     order_.clear();
     routePosition_.clear();
     routeCount_.clear();
@@ -318,6 +345,7 @@ void GraphExecutor::reset() noexcept {
     sampleRate_ = 48000.0;
     failedNode_.store(UINT32_MAX, std::memory_order_relaxed);
     failures_.store(0, std::memory_order_relaxed);
+    eventsDropped_.store(0, std::memory_order_relaxed);
 }
 
 GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
@@ -339,7 +367,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
     CompiledGraph compiled = compileGraph(nodes, connections, budget);
     if (!compiled) return compiled.error;
 
-    // Descriptors are validated now. Count every port by type; event ports wait for F5.2.
+    // Descriptors are validated now. Count every port by type.
     const std::size_t nodeCount = nodes.size();
     ExecutorShape shape;
     shape.nodes = nodeCount;
@@ -352,7 +380,11 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
             const PortDescriptor& port = descriptor.ports[p];
             const uint32_t channels = port.type == PortType::Audio ? portChannelCount(port) : 1u;
             switch (port.type) {
-                case PortType::Event: return GraphError::RuntimeUnsupportedPortType;
+                case PortType::Event:
+                    ++others;
+                    ++(port.input ? shape.eventInputs : shape.eventOutputs);
+                    if (port.input && port.summing) ++shape.eventMergeInputs;
+                    break;
                 case PortType::Control:
                     ++others;
                     ++(port.input ? shape.controlInputs : shape.controlOutputs);
@@ -378,6 +410,14 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         const bool typed = audioInputs > 1 || audioOutputs > 1 || others > 0;
         if (typed && !processors[n]->usesProcessPorts())
             return others > 0 ? GraphError::RuntimeUnsupportedPortType : GraphError::RuntimeUnsupportedPortCount;
+    }
+    if (shape.eventInputs + shape.eventOutputs != 0) {
+        if (budget.maxEventsPerPort == 0) return GraphError::InvalidResourceBudget;
+        shape.eventCapacity = budget.maxEventsPerPort;
+        for (const GraphConnection& edge : connections) {  // compileGraph checked every index
+            const PortDescriptor& to = nodes[edge.destinationNode].module->ports[edge.destinationPort];
+            if (to.type == PortType::Event && to.summing) ++shape.eventMergeSources;
+        }
     }
 
     std::size_t executorBytes = 0, retainedPlanBytes = 0;
@@ -406,6 +446,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         outputBase_.assign(nodeCount, 0);
         outputCount_.assign(nodeCount, 0);
         uint32_t portCursor = 0, inputCursor = 0, outputCursor = 0, controlInCursor = 0, controlOutCursor = 0;
+        uint32_t eventInCursor = 0, eventOutCursor = 0;
         uint32_t audioInViews = 0, audioOutViews = 0;
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
@@ -443,8 +484,17 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                                               port.input ? controlInCursor++ : controlOutCursor++, UINT32_MAX};
                 ++(port.input ? b.controlInCount : b.controlOutCount);
             }
+            b.eventIn = eventInCursor;
+            b.eventOut = eventOutCursor;
+            for (uint32_t p = 0; p < descriptor.portCount; ++p) {
+                const PortDescriptor& port = descriptor.ports[p];
+                if (port.type != PortType::Event) continue;
+                ports_[portCursor + p] = Port{PortType::Event, port.input, port.summing, false, 1,
+                                              port.input ? eventInCursor++ : eventOutCursor++, UINT32_MAX};
+                ++(port.input ? b.eventInCount : b.eventOutCount);
+            }
             b.typed = b.audioInCount > 1 || b.audioOutCount > 1 || b.modInCount || b.modOutCount ||
-                      b.controlInCount || b.controlOutCount;
+                      b.controlInCount || b.controlOutCount || b.eventInCount || b.eventOutCount;
             portCursor += descriptor.portCount;
         }
         if (outputCount_[outputNode] == 0) { reset(); return GraphError::InvalidOutputNode; }
@@ -462,6 +512,14 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         controlInTable_.resize(controlInCursor);
         audioInViews_.resize(audioInViews);
         audioOutViews_.resize(audioOutViews);
+        // Event buffers: outputs first, then one per summing event input (bound to merges below).
+        eventCapacity_ = static_cast<uint32_t>(shape.eventCapacity);
+        eventStorage_.resize((shape.eventOutputs + shape.eventMergeInputs) * shape.eventCapacity);
+        eventOutTable_.resize(eventOutCursor);
+        for (uint32_t k = 0; k < eventOutCursor; ++k)
+            eventOutTable_[k] = EventOutput{eventStorage_.data() + static_cast<std::size_t>(k) * eventCapacity_, eventCapacity_, 0};
+        eventInTable_.assign(eventInCursor, EventInput{});
+        eventInSource_.assign(eventInCursor, kEventNone);
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
             const NodeBlock& b = blocks_[n];
@@ -496,6 +554,10 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                 reset(); return GraphError::ChannelLayoutMismatch;
             }
             if (to.summing) { ++to.sum; continue; }
+            if (to.type == PortType::Event) {
+                eventInSource_[to.table] = from.table;
+                continue;
+            }
             if (to.type == PortType::Control) {
                 controlInTable_[to.table] = controlOutTable_[from.table];
                 continue;
@@ -504,7 +566,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         }
         uint32_t sumChannels = 0, sumCount = 0, sourceTotal = 0;
         for (const Port& port : ports_) {
-            if (port.sum == UINT32_MAX || port.sum == 0) continue;
+            if (port.sum == UINT32_MAX || port.sum == 0 || port.type == PortType::Event) continue;
             sumChannels += port.channels;
             sourceTotal += port.sum;
             ++sumCount;
@@ -513,16 +575,28 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         sumSources_.assign(sourceTotal, 0);
         sumStorage_.assign(static_cast<std::size_t>(sumChannels) * maxFrames, 0.0f);
         sumTable_.resize(sumChannels);
-        uint32_t tableCursor = 0, sourceCursor = 0;
+        eventMerges_.reserve(shape.eventMergeInputs);
+        eventMergeSources_.assign(shape.eventMergeSources, 0);
+        mergeCursor_.assign(shape.eventMergeSources, 0);
+        uint32_t tableCursor = 0, sourceCursor = 0, mergeSourceCursor = 0;
         for (std::size_t n = 0; n < nodeCount; ++n) {
             NodeBlock& b = blocks_[n];
             b.sumBase = static_cast<uint32_t>(sumInputs_.size());
+            b.mergeBase = static_cast<uint32_t>(eventMerges_.size());
             const uint32_t portEnd = n + 1 < nodeCount ? nodePortBase_[n + 1] : static_cast<uint32_t>(ports_.size());
             for (uint32_t g = nodePortBase_[n]; g < portEnd; ++g) {
                 Port& port = ports_[g];
                 if (port.sum == UINT32_MAX) continue;
                 if (port.sum == 0) { port.sum = UINT32_MAX; continue; }  // unconnected: host or silence
                 const uint32_t sources = port.sum;
+                if (port.type == PortType::Event) {
+                    port.sum = static_cast<uint32_t>(eventMerges_.size());
+                    const std::size_t storage = (static_cast<std::size_t>(eventOutCursor) + port.sum) * eventCapacity_;
+                    eventMerges_.push_back(EventMerge{mergeSourceCursor, 0, port.table, storage});
+                    mergeSourceCursor += sources;
+                    eventInSource_[port.table] = kEventMerged;
+                    continue;
+                }
                 port.sum = static_cast<uint32_t>(sumInputs_.size());
                 sumInputs_.push_back(SumInput{sourceCursor, 0, tableCursor, port.channels});  // sourceCount fills below
                 sourceCursor += sources;
@@ -532,11 +606,18 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                 }
             }
             b.sumCount = static_cast<uint32_t>(sumInputs_.size()) - b.sumBase;
+            b.mergeCount = static_cast<uint32_t>(eventMerges_.size()) - b.mergeBase;
         }
-        // Connection order within each summing input is the summation order.
+        // Connection order within each summing input is the summation (or merge tie) order.
         for (const GraphConnection& edge : connections) {
             const Port& to = ports_[nodePortBase_[edge.destinationNode] + edge.destinationPort];
             if (!to.summing || to.sum == UINT32_MAX) continue;
+            if (to.type == PortType::Event) {
+                EventMerge& merge = eventMerges_[to.sum];
+                eventMergeSources_[merge.sourceBase + merge.sourceCount++] =
+                    ports_[nodePortBase_[edge.sourceNode] + edge.sourcePort].table;
+                continue;
+            }
             SumInput& sum = sumInputs_[to.sum];
             sumSources_[sum.sourceBase + sum.sourceCount++] = nodePortBase_[edge.sourceNode] + edge.sourcePort;
         }
@@ -561,6 +642,10 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                     ports_[g].host = true;
             for (uint32_t c = 0; c < inputCount_[n]; ++c) hostInputSlots_.push_back(inputBase_[n] + c);
         }
+        // A node's first event input, when unconnected, reads the host events; others read none.
+        for (std::size_t n = 0; n < nodeCount; ++n)
+            if (blocks_[n].eventInCount && eventInSource_[blocks_[n].eventIn] == kEventNone)
+                eventInSource_[blocks_[n].eventIn] = kEventHost;
         // Everything still unbound (host slots until process() binds them, unconnected
         // sidechains and modulation inputs) reads silence.
         for (const float*& entry : inputTable_)
@@ -739,14 +824,69 @@ bool GraphExecutor::process(const ConstChannelBufferView& input, const ChannelBu
                             uint32_t frames) noexcept {
     if (!ready_ || frames == 0 || frames > maxFrames_) return false;
     if (output.channelCount != outputChannels_ || !output.valid() || output.frames < frames) return false;
-    if (hostInputChannels_ == 0) return processValidated(ConstChannelBufferView{}, output, frames);
+    if (hostInputChannels_ == 0) return processValidated(ConstChannelBufferView{}, output, frames, EventInput{});
     if (input.channelCount != 0 &&
         (input.channelCount != hostInputChannels_ || !input.valid() || input.frames < frames)) return false;
-    return processValidated(input, output, frames);
+    return processValidated(input, output, frames, EventInput{});
+}
+
+namespace {
+// The EventInput/EventOutput order rule: frames non-decreasing, each below `frames`.
+bool eventsOrdered(const Event* events, uint32_t count, uint32_t frames) noexcept {
+    uint32_t previous = 0;
+    for (uint32_t e = 0; e < count; ++e) {
+        if (events[e].frame >= frames || events[e].frame < previous) return false;
+        previous = events[e].frame;
+    }
+    return true;
+}
+}  // namespace
+
+bool GraphExecutor::process(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                            uint32_t frames, const EventInput& events) noexcept {
+    if (!ready_ || frames == 0 || frames > maxFrames_) return false;
+    // Bounded like every event list, checked before any event is read.
+    if (events.count != 0 && (events.count > eventCapacity_ || !events.events ||
+                              !eventsOrdered(events.events, events.count, frames))) return false;
+    if (output.channelCount != outputChannels_ || !output.valid() || output.frames < frames) return false;
+    if (hostInputChannels_ == 0) return processValidated(ConstChannelBufferView{}, output, frames, events);
+    if (input.channelCount != 0 &&
+        (input.channelCount != hostInputChannels_ || !input.valid() || input.frames < frames)) return false;
+    return processValidated(input, output, frames, events);
+}
+
+void GraphExecutor::mergeEvents(const EventMerge& merge) noexcept {
+    // Stable k-way merge of sorted sources: the earliest frame first, ties in connection order.
+    // Cost O(events kept x sources), as each kept event rescans the sources; at most
+    // maxEventsPerPort x fan-in per merge. Once the buffer is full the rest are counted, not copied.
+    Event* out = eventStorage_.data() + merge.storage;
+    const uint32_t* sources = eventMergeSources_.data() + merge.sourceBase;
+    uint32_t* cursor = mergeCursor_.data() + merge.sourceBase;
+    std::fill_n(cursor, merge.sourceCount, 0u);
+    uint32_t count = 0;
+    for (;;) {
+        uint32_t best = UINT32_MAX, bestFrame = 0;
+        for (uint32_t s = 0; s < merge.sourceCount; ++s) {
+            const EventOutput& source = eventOutTable_[sources[s]];
+            if (cursor[s] < source.count && (best == UINT32_MAX || source.events[cursor[s]].frame < bestFrame)) {
+                best = s;
+                bestFrame = source.events[cursor[s]].frame;
+            }
+        }
+        if (best == UINT32_MAX) break;
+        if (count == eventCapacity_) {
+            uint64_t dropped = 0;
+            for (uint32_t s = 0; s < merge.sourceCount; ++s) dropped += eventOutTable_[sources[s]].count - cursor[s];
+            eventsDropped_.fetch_add(dropped, std::memory_order_relaxed);
+            break;
+        }
+        out[count++] = eventOutTable_[sources[best]].events[cursor[best]++];
+    }
+    eventInTable_[merge.input] = EventInput{out, count};
 }
 
 bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
-                                     uint32_t frames) noexcept {
+                                     uint32_t frames, const EventInput& events) noexcept {
     // Bind this call's host channels (or silence) into the prepared input table.
     const std::size_t slots = hostInputSlots_.size();
     for (std::size_t s = 0; s < slots; ++s)
@@ -778,12 +918,31 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
             // Views carry this block's capacity: host input buffers may be shorter than maxFrames.
             for (uint32_t v = 0; v < b.audioInCount; ++v) audioInViews_[b.audioIn + v].frames = frames;
             for (uint32_t v = 0; v < b.audioOutCount; ++v) audioOutViews_[b.audioOut + v].frames = frames;
+            // Event inputs read this block's source lists (sources ran earlier and were checked).
+            for (uint32_t v = b.eventIn; v < b.eventIn + b.eventInCount; ++v) {
+                const uint32_t source = eventInSource_[v];
+                if (source == kEventHost) eventInTable_[v] = events;
+                else if (source < eventOutTable_.size())
+                    eventInTable_[v] = EventInput{eventOutTable_[source].events, eventOutTable_[source].count};
+            }
+            for (uint32_t m = b.mergeBase; m < b.mergeBase + b.mergeCount; ++m) mergeEvents(eventMerges_[m]);
+            for (uint32_t v = b.eventOut; v < b.eventOut + b.eventOutCount; ++v) eventOutTable_[v].count = 0;
             const ProcessBlock block{frames, sampleRate_,
                 audioInViews_.data() + b.audioIn, b.audioInCount, audioOutViews_.data() + b.audioOut, b.audioOutCount,
                 inputTable_.data() + b.modIn, b.modInCount, outputTable_.data() + b.modOut, b.modOutCount,
                 controlInTable_.data() + b.controlIn, b.controlInCount,
-                controlOutTable_.data() + b.controlOut, b.controlOutCount};
+                controlOutTable_.data() + b.controlOut, b.controlOutCount,
+                eventInTable_.data() + b.eventIn, b.eventInCount, eventOutTable_.data() + b.eventOut, b.eventOutCount};
             ok = processors_[node]->processPorts(block);
+            // A processor's events must be in order and in range, or later nodes would misread them.
+            for (uint32_t v = b.eventOut; v < b.eventOut + b.eventOutCount; ++v) {
+                EventOutput& out = eventOutTable_[v];
+                if (out.count > eventCapacity_ || out.events != eventStorage_.data() + static_cast<std::size_t>(v) * eventCapacity_ ||
+                    out.capacity != eventCapacity_ || !eventsOrdered(out.events, out.count, frames)) {
+                    out = EventOutput{eventStorage_.data() + static_cast<std::size_t>(v) * eventCapacity_, eventCapacity_, 0};
+                    ok = false;
+                }
+            }
             // Control values are held across blocks, so a NaN or inf must not latch: same rule as routing.
             for (uint32_t v = 0; v < b.controlOutCount; ++v) {
                 float& value = *controlOutTable_[b.controlOut + v];
@@ -808,7 +967,7 @@ bool GraphExecutor::process(const float* inputLeft, const float* inputRight,
     const ConstChannelBufferView in = hasHostInput && hostInputChannels_ == 2
         ? ConstChannelBufferView{inputs, 2, frames} : ConstChannelBufferView{};
     // The wrapper has checked everything the generic entry point would.
-    return processValidated(in, ChannelBufferView{outputs, 2, frames}, frames);
+    return processValidated(in, ChannelBufferView{outputs, 2, frames}, frames, EventInput{});
 }
 
 GraphError PreparedGraph::prepare(const std::vector<GraphNode>& nodes,

@@ -37,6 +37,9 @@ struct GraphResourceBudget {
     std::size_t maxWorkingBytes = 0;
     // Host limit on channels per audio port (1..kMaxPortChannels); larger ports fail with TooManyChannels.
     uint32_t maxChannelsPerPort = kMaxPortChannels;
+    // Events each event output, and each merging (summing) event input, holds per block. Required
+    // (nonzero) for a graph with event ports; its storage counts in maxWorkingBytes.
+    uint32_t maxEventsPerPort = 1024;
 };
 
 // Converts the Engine's hardware-derived graph working-set share to the graph compiler/executor budget.
@@ -92,18 +95,23 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 // the working-memory budget. process() performs no allocation, locking, I/O or graph traversal and
 // is suitable for a bounded audio callback.
 //
-// Ports (F5.1): a node may have any number of audio, modulation and control ports; event ports
-// are rejected (RuntimeUnsupportedPortType) until F5.2. A node with at most one audio input and
-// one audio output and no other ports is called through process(const AudioProcessBlock&); any
+// Ports (F5): a node may have any number of audio, modulation, control and event ports. A node
+// with at most one audio input and one audio output and no other ports is called through
+// process(const AudioProcessBlock&); any
 // other node through processPorts(const ProcessBlock&), and prepare() rejects it unless its
 // processor's usesProcessPorts() is true. Audio views' capacity is the block's frame count.
 // A summing input (audio or modulation, PortDescriptor::summing) takes any number of
 // connections: before the node runs, the executor sums them into a prepared buffer per channel,
 // in connection order, starting from +0.0f, in float, saturating at +/-FLT_MAX with NaN as 0
-// (route_math.h). Any other input takes at most one connection.
+// (route_math.h). A summing event input instead merges its sources' events by frame, ties in
+// connection order, into a buffer of maxEventsPerPort events; events past that are dropped and
+// counted (eventsDropped()). Any other input takes at most one connection; a plain event input
+// reads its source's events directly.
 // Unconnected inputs: a node's first audio input reads the host input (so all of those must have
 // the same channel count); any other audio input (a sidechain) and every modulation input reads
-// silence; a control input reads its port's defaultValue. Control outputs saturate after each
+// silence; a control input reads its port's defaultValue. A node's first event input reads the
+// host events passed to process(), any other event input none. Each event output is emptied
+// before its node runs and checked after it (EventOutput rules). Control outputs saturate after each
 // block (NaN reads 0, beyond float range +/-FLT_MAX); plain audio and modulation connections pass
 // bits unchanged. Graph output is the output node's first
 // audio output. Values are never converted between port types.
@@ -125,13 +133,19 @@ public:
     // outputChannels(). Counts are never adapted, truncated or padded.
     bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
                  uint32_t frames) noexcept;
+    // The same, with host events for the graph's unconnected first event inputs. They must follow
+    // the EventInput rules for this block (frames non-decreasing, each below `frames`) and hold at
+    // most maxEventsPerPort events, else false. A graph without event inputs ignores them.
+    bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
+                 uint32_t frames, const EventInput& events) noexcept;
     // Dynamic routing (control thread, audio ports only): for a graph prepared without
     // connections, give every summing audio input room for maxSourcesPerInput routed sources,
     // counted against the budget. Summing inputs then never read the host input; with no routes
     // they are silence. With routePlainInputs, every plain (non-summing) audio input becomes
     // routable too: it takes at most one route, reads that source's buffer directly (no copy,
     // bits unchanged) and is silence without one; the graph then reads no host input at all.
-    // Modulation and control inputs keep their unconnected values (silence, default).
+    // Modulation, control and event inputs keep their unconnected values (silence, default, the
+    // first event input the host events).
     GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget,
                               bool routePlainInputs = false);
     // prepare() with no connections plus reserveRouting(maxSourcesPerInput, budget, true) in one
@@ -159,22 +173,27 @@ public:
     // Failure reporting for the control thread (relaxed atomics; values, not synchronization).
     uint32_t lastFailedNode() const noexcept { return failedNode_.load(std::memory_order_relaxed); }
     uint64_t failureCount() const noexcept { return failures_.load(std::memory_order_relaxed); }
+    // Events dropped because a merging event input was full, since prepare().
+    uint64_t eventsDropped() const noexcept { return eventsDropped_.load(std::memory_order_relaxed); }
 
 private:
     void fail(uint32_t node, const ChannelBufferView& output, uint32_t frames) noexcept;
     // Runs the graph; the caller has checked ready_, frames and both host views.
     bool processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
-                          uint32_t frames) noexcept;
+                          uint32_t frames, const EventInput& events) noexcept;
+    struct EventMerge { uint32_t sourceBase, sourceCount, input; std::size_t storage; };
+    void mergeEvents(const EventMerge& merge) noexcept;
 
     std::vector<ModuleProcessor*> processors_;
     // Every port, at nodePortBase_[node] + its descriptor index. `table` indexes inputTable_ or
-    // outputTable_ (audio, modulation), controlInTable_ or controlOutTable_ (control).
+    // outputTable_ (audio, modulation), controlInTable_ or controlOutTable_ (control),
+    // eventInTable_ or eventOutTable_ (event).
     struct Port {
         PortType type;
         bool input, summing, host;  // host: this input's channels are bound to the host input
         uint32_t channels;          // audio: channel count; modulation and control: 1
         uint32_t table;
-        uint32_t sum;               // summing inputs: index into sumInputs_, or UINT32_MAX
+        uint32_t sum;               // summing inputs: index into sumInputs_ (events: eventMerges_), or UINT32_MAX
     };
     std::vector<Port> ports_;
     std::vector<uint32_t> nodePortBase_;
@@ -184,7 +203,9 @@ private:
         uint32_t audioIn, audioInCount, audioOut, audioOutCount;    // into the view arrays
         uint32_t modIn, modInCount, modOut, modOutCount;            // into inputTable_/outputTable_
         uint32_t controlIn, controlInCount, controlOut, controlOutCount;
+        uint32_t eventIn, eventInCount, eventOut, eventOutCount;
         uint32_t sumBase, sumCount;                                 // its summing inputs in sumInputs_
+        uint32_t mergeBase, mergeCount;                             // its merging event inputs in eventMerges_
         bool typed;
     };
     std::vector<NodeBlock> blocks_;
@@ -206,6 +227,17 @@ private:
     std::vector<uint32_t> sumSources_;            // source output ports (global index) per summing input, in order
     std::vector<float*> sumTable_;                // summed channel buffers, per summing input
     std::vector<float> sumStorage_;
+    // Events: every output's buffer, then every merging input's, eventCapacity_ events each.
+    std::vector<Event> eventStorage_;
+    std::vector<EventOutput> eventOutTable_;
+    std::vector<EventInput> eventInTable_;        // refreshed before each node runs
+    // Per event input: its source event output, or one of the k* markers below.
+    static constexpr uint32_t kEventNone = UINT32_MAX, kEventHost = UINT32_MAX - 1, kEventMerged = UINT32_MAX - 2;
+    std::vector<uint32_t> eventInSource_;
+    std::vector<EventMerge> eventMerges_;
+    std::vector<uint32_t> eventMergeSources_;     // source event outputs per merge, in connection order
+    std::vector<uint32_t> mergeCursor_;           // merge scratch: one read position per source
+    uint32_t eventCapacity_ = 0;
     std::vector<uint32_t> order_;
     // Dynamic routing scratch, preallocated by reserveRouting().
     std::vector<uint32_t> routePosition_, routeCount_, routeStaging_;
@@ -224,6 +256,7 @@ private:
     bool ready_ = false;
     std::atomic<uint32_t> failedNode_{UINT32_MAX};
     std::atomic<uint64_t> failures_{0};
+    std::atomic<uint64_t> eventsDropped_{0};
 };
 
 // Owns every processor referenced by its prepared executor. Build and destroy on a

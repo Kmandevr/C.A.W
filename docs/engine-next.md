@@ -63,7 +63,7 @@ Keep connection types distinct:
 - **Modulation:** time-varying signals driving parameters.
 - **Events:** note-on/off, gate, trigger, transport and timestamped events.
 
-**[Fact, 2026-11-04]** Audio (including several inputs for sidechains), modulation and control ports execute in the graph since Foundation F5.1 ([decisions](decisions.md)); event ports are F5.2.
+**[Fact, 2026-11-04]** Audio (including several inputs for sidechains), modulation, control (Foundation F5.1) and event (F5.2) ports execute in the graph ([decisions](decisions.md)).
 
 Modules declare ports, parameters, supported layouts, state, cost hints and serialization version. Validate graphs off the audio thread.
 
