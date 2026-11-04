@@ -1,7 +1,7 @@
 # Handoff
 
-Commit: b9330f3
-Branch: claude/caw-engine-foundation-skpirb (F6.4 on top of Main 203f8b8; PR to Main)
+Commit: HEADSHA
+Branch: claude/caw-engine-foundation-skpirb (F6.5 on top of Main 772797e; PR to Main)
 
 ## Goal
 Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8, plus F10 (seeded randomness); F9 is deferred to Release 1, since no project compatibility is needed yet.
@@ -11,18 +11,19 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 
 ## Done and verified
 - On Main: F3 (#72), F4 (#74, #75, #77, #79), F5 (#80, #81), F6.1 (#82, `ParameterResolver`) and F6.2 (#83: the executor passes resolved parameters; `queueParameter`/`queueClearTouch`/`setInitialParameter`).
-- F6.3 on Main (#84): `setModulationLinks()`.
-- F6.4 on the branch: `setAutomationLanes()`/`setTransport()`, shared `automationLaneValue()` with the Engine; stop holds the last played value; positions limited to 2^53; the host splits blocks at loop points.
-  - Tests: caw_tests 254/254, caw_rt_tests 68/68, sanitizers clean. Callgrind within noise. Audio review fixed.
+- F6.3 (#84) and F6.4 (#85, automation lanes) on Main.
+- F6.5 on the branch: `setCcMappings()` maps MIDI 1.0/2.0 UMP CCs in host events onto parameters at the event frame (decoded once per block). Also fixed: the MIDI 2.0 decoder's CC index byte, and graphs without event ports refusing host events.
+  - Tests: caw_tests 256/256, caw_rt_tests 73/73, sanitizers clean. Callgrind within noise. Audio review fixed.
 
 ## Open
 - Issue #78: swap-fade import buffers are renumbered (an older bug).
 - F10 seeds for native plugins need an SDK ABI change, so the owner must approve it.
 - Open for F6.6: `smoothingFrames` counts frames, not time (not scaled by sample rate).
+- Open (owner): MIDI 1.0 CC centre (v/127) vs MIDI 2.0 upscaling.
 
 ## Next
-1. Merge the F6.4 PR when CI is green, and update #28.
-2. F6.5 MIDI CC and F6.6 Engine .caw params (golden hashes unchanged). The Engine's graph uses routing, so links there need routing-aware ordering (F6.6).
+1. Merge the F6.5 PR when CI is green, and update #28.
+2. F6.6 Engine .caw params (golden hashes unchanged). The Engine's graph uses routing, so links there need routing-aware ordering (F6.6).
 
 ## Read first
 - `docs/roadmap.md`
