@@ -44,7 +44,7 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
             if (p.summing && !p.input) return ModuleValidation::InvalidSummingPort;
         } else if (p.layout != ChannelLayout::None || p.channelCount != 0) {
             return ModuleValidation::InvalidPortLayout;
-        } else if (p.summing && !(p.type == PortType::Modulation && p.input)) {
+        } else if (p.summing && !((p.type == PortType::Modulation || p.type == PortType::Event) && p.input)) {
             return ModuleValidation::InvalidSummingPort;
         }
         if (p.type == PortType::Control ? !std::isfinite(p.defaultValue) : p.defaultValue != 0.0f)

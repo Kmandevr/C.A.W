@@ -23,17 +23,18 @@ constexpr uint32_t channelCountForLayout(ChannelLayout layout, uint32_t discrete
 inline constexpr uint32_t kMaxPortChannels = 64;
 // Port types (F5): Audio carries planar channels (layout and channelCount); Modulation carries one
 // float per frame (layout None); Control carries one float value per block (layout None), held
-// until its source writes again. Event ports are not executed yet (F5.2). Parameters are not
-// ports: F6 decides how ports bind to ParameterDescriptor values.
+// until its source writes again; Event carries a list of timed Events per block (layout None).
+// Parameters are not ports: F6 decides how ports bind to ParameterDescriptor values.
 struct PortDescriptor {
     std::string_view id;
     PortType type = PortType::Audio;
     ChannelLayout layout = ChannelLayout::None;
     bool input = true;
     uint32_t channelCount = 0;
-    // Audio and modulation inputs only: accepts any number of connections, summed by the host in
-    // connection order starting from +0.0f (a mix bus, or modulators adding). A non-summing input
-    // takes at most one connection.
+    // Audio, modulation and event inputs only: accepts any number of connections. Audio and
+    // modulation are summed by the host in connection order starting from +0.0f (a mix bus, or
+    // modulators adding); events are merged by frame, ties in connection order. A non-summing
+    // input takes at most one connection.
     bool summing = false;
     // Control ports only: the value an unconnected input reads, and an output's value before its
     // processor first writes one. Finite.
@@ -43,6 +44,36 @@ struct PortDescriptor {
 constexpr uint32_t portChannelCount(const PortDescriptor& port) noexcept {
     return channelCountForLayout(port.layout, port.channelCount);
 }
+// One timed event (F5.2; owner decision 2026-11-04). `frame` is the offset in the block. `data`
+// holds the raw MIDI 2.0 UMP words of the message (unused words 0), so MIDI 1.0 and 2.0 convert
+// at the edges without loss. `noteId` is a host-assigned stable id of the note an event belongs
+// to (0 = none): it tells two overlapping notes of the same pitch apart, which UMP alone cannot.
+// `flags` is reserved and 0. The executor never interprets kind, flags, noteId or data.
+enum class EventKind : uint16_t {
+    Note,  // note on/off and per-note messages: noteId names the note
+    Midi   // any other UMP message (controllers, channel pressure, pitch bend, system)
+};
+struct Event {
+    uint32_t frame = 0;
+    EventKind kind = EventKind::Midi;
+    uint16_t flags = 0;
+    uint32_t noteId = 0;
+    uint32_t data[4] = {0, 0, 0, 0};
+};
+static_assert(sizeof(Event) == 28, "Event is a fixed 28-byte record");
+// An event input: `count` events, frames non-decreasing and below the block's frame count.
+struct EventInput {
+    const Event* events = nullptr;
+    uint32_t count = 0;
+};
+// An event output: the processor writes up to `capacity` events and sets `count` (the host sets
+// it to 0 before each call). They must be in non-decreasing frame order, each frame below the
+// block's frame count; otherwise, or with count > capacity, the block fails.
+struct EventOutput {
+    Event* events = nullptr;
+    uint32_t capacity = 0;
+    uint32_t count = 0;
+};
 struct ParameterDescriptor {
     std::string_view id;
     double defaultValue = 0.0;
@@ -116,7 +147,8 @@ inline bool audioProcessBlockValid(const AudioProcessBlock& block) noexcept {
 // Every port of a node, by type, each list in descriptor order (the k-th audio input is the k-th
 // input port of type Audio). Audio views follow the AudioProcessBlock frames rule. Modulation
 // buffers hold `frames` floats. A control input is read as *controlIn[k]; a control output is
-// written as *controlOut[k] and keeps that value until written again.
+// written as *controlOut[k] and keeps that value until written again. Event inputs and outputs
+// follow the EventInput and EventOutput rules.
 struct ProcessBlock {
     uint32_t frames = 0;
     double sampleRate = 48000.0;
@@ -132,6 +164,10 @@ struct ProcessBlock {
     uint32_t controlInCount = 0;
     float* const* controlOut = nullptr;
     uint32_t controlOutCount = 0;
+    const EventInput* eventIn = nullptr;
+    uint32_t eventInCount = 0;
+    EventOutput* eventOut = nullptr;
+    uint32_t eventOutCount = 0;
 };
 struct StereoProcessBlock {
     const float* inputLeft = nullptr;
@@ -148,7 +184,7 @@ struct StereoProcessBlock {
 // neither fails every call (false) instead of silently leaving its output untouched, so never call
 // the base stereo overload from an override. Overriding one overload hides the other in the
 // derived class; add `using ModuleProcessor::process;` if callers use the derived type.
-// A module with more than one audio input or output, or any control or modulation port, overrides
+// A module with more than one audio input or output, or any control, modulation or event port, overrides
 // usesProcessPorts() to return true and implements processPorts(); hosts then call only that.
 // Hosts reject such a module at prepare time if it does not, never on its first block.
 class ModuleProcessor {

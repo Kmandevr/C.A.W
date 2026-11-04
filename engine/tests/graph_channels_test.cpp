@@ -1102,12 +1102,12 @@ TEST(graph_typed_ports_validate_types_defaults_and_fan_in) {
     // A control input takes one source.
     CHECK(executor.prepare({{"a", &m.control}, {"b", &m.control}, {"p", &m.proc}}, {{0, 0, 2, kLevel}, {1, 0, 2, kLevel}},
                            {&a, &b, &proc}, 2, 8, 48000.0, kBudget) == GraphError::InputAlreadyConnected);
-    // Event ports wait for F5.2, even on a processor that uses processPorts.
+    // Event ports, like every typed port, need a processor that uses processPorts.
     const PortDescriptor eventPorts[] = {{"notes", PortType::Event, ChannelLayout::None, true},
                                          {"out", PortType::Audio, ChannelLayout::Stereo, false}};
     const ModuleDescriptor withEvents{"test.typed.events", 1, eventPorts, 2, nullptr, 0};
-    Processor eventProc(withEvents);
-    CHECK(executor.prepare({{"e", &withEvents}}, {}, {&eventProc}, 0, 8, 48000.0, kBudget) ==
+    Generator plainEventProc(withEvents);
+    CHECK(executor.prepare({{"e", &withEvents}}, {}, {&plainEventProc}, 0, 8, 48000.0, kBudget) ==
           GraphError::RuntimeUnsupportedPortType);
     // Descriptor rules: only control ports have defaults (finite); only audio and modulation inputs sum.
     const PortDescriptor audioDefault[] = {{"out", PortType::Audio, ChannelLayout::Stereo, false, 0, false, 1.0f}};
@@ -1200,4 +1200,261 @@ TEST(graph_typed_control_values_saturate_like_routing) {
         CHECK(executor.process(host.constView(8), out.view(8), 8));
         CHECK_EQ(out.data[0][0], k == 0 ? 0.0f : -std::numeric_limits<float>::max());
     }
+}
+
+namespace {
+// F5.2 event ports.
+Event note(uint32_t frame, uint32_t noteId) noexcept {
+    Event e;
+    e.frame = frame;
+    e.kind = EventKind::Note;
+    e.noteId = noteId;
+    e.data[0] = 0x40903C00u;  // MIDI 2.0 note on, group 0, channel 0, key 60
+    e.data[1] = 0xFFFF0000u;
+    return e;
+}
+
+// Writes a fixed list of events each block (only the first block when `once`).
+class EventSource final : public Typed {
+public:
+    EventSource(const ModuleDescriptor& d, std::initializer_list<Event> events, bool once = false)
+        : Typed(d), once_(once) {
+        for (const Event& e : events) events_[count_++] = e;
+    }
+    bool processPorts(const ProcessBlock& b) noexcept override {
+        if (b.eventOutCount != 1) return false;
+        EventOutput& out = b.eventOut[0];
+        if (out.count != 0) return false;  // the host empties outputs before each call
+        const uint32_t n = once_ && blocks_ > 0 ? 0 : count_;
+        for (uint32_t k = 0; k < n && k < out.capacity; ++k) out.events[k] = events_[k];
+        out.count = overrun_ ? out.capacity + 1 : n;
+        ++blocks_;
+        return true;
+    }
+    bool overrun_ = false;
+private:
+    Event events_[16];
+    uint32_t count_ = 0, blocks_ = 0;
+    bool once_;
+};
+
+// Records what each of its event inputs received in the last block, and writes a click per
+// event of input 0 into its mono audio output at the event's frame (noteId as the value).
+class EventSink final : public Typed {
+public:
+    using Typed::Typed;
+    bool processPorts(const ProcessBlock& b) noexcept override {
+        if (b.audioOutCount != 1 || b.eventInCount == 0 || b.eventInCount > 2) return false;
+        for (uint32_t i = 0; i < b.frames; ++i) b.audioOut[0].channels[0][i] = 0.0f;
+        for (uint32_t v = 0; v < b.eventInCount; ++v) {
+            counts[v] = b.eventIn[v].count;
+            for (uint32_t k = 0; k < b.eventIn[v].count && k < 16; ++k) received[v][k] = b.eventIn[v].events[k];
+        }
+        for (uint32_t k = 0; k < b.eventIn[0].count; ++k)
+            b.audioOut[0].channels[0][b.eventIn[0].events[k].frame] += static_cast<float>(b.eventIn[0].events[k].noteId);
+        return true;
+    }
+    Event received[2][16];
+    uint32_t counts[2] = {0, 0};
+};
+
+struct EventModules {
+    EventModules()
+        : sourcePorts{{"out", PortType::Event, ChannelLayout::None, false}},
+          sinkPorts{{"notes", PortType::Event, ChannelLayout::None, true, 0, true},
+                    {"aux", PortType::Event, ChannelLayout::None, true},
+                    {"out", PortType::Audio, ChannelLayout::Mono, false}},
+          source{"test.events.source", 1, sourcePorts, 1, nullptr, 0},
+          sink{"test.events.sink", 1, sinkPorts, 3, nullptr, 0} {}
+    PortDescriptor sourcePorts[1], sinkPorts[3];
+    ModuleDescriptor source, sink;
+};
+constexpr uint32_t kNotes = 0, kAux = 1;
+
+bool sameEvent(const Event& a, const Event& b) noexcept {
+    return a.frame == b.frame && a.kind == b.kind && a.flags == b.flags && a.noteId == b.noteId &&
+           std::equal(a.data, a.data + 4, b.data);
+}
+}  // namespace
+
+TEST(graph_event_ports_pass_events_unchanged_and_feed_the_first_input_from_the_host) {
+    EventModules m;
+    Event midi;  // a non-note message keeps every field
+    midi.frame = 3;
+    midi.flags = 0;
+    midi.data[0] = 0x40B00700u;
+    midi.data[1] = 0x12345678u;
+    EventSource source(m.source, {note(1, 7), midi});
+    EventSink sink(m.sink);
+    GraphExecutor executor;
+    // The source feeds `aux`; `notes`, the first event input, is unconnected and reads the host.
+    CHECK(executor.prepare({{"src", &m.source}, {"sink", &m.sink}}, {{0, 0, 1, kAux}}, {&source, &sink}, 1, 16, 48000.0,
+                           kBudget) == GraphError::Ok);
+    const Event host[] = {note(0, 2), note(0, 3), note(9, 4)};
+    float buffer[16];
+    float* channels[] = {buffer};
+    CHECK(executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 16}, 16, EventInput{host, 3}));
+    CHECK_EQ(sink.counts[0], 3u);
+    for (uint32_t k = 0; k < 3; ++k) CHECK(sameEvent(sink.received[0][k], host[k]));
+    CHECK_EQ(sink.counts[1], 2u);
+    CHECK(sameEvent(sink.received[1][0], note(1, 7)));
+    CHECK(sameEvent(sink.received[1][1], midi));
+    CHECK_EQ(buffer[0], 5.0f);  // notes 2 and 3 at frame 0
+    CHECK_EQ(buffer[9], 4.0f);
+    CHECK_EQ(buffer[1], 0.0f);
+    // Without host events (either process overload) the first input reads none.
+    CHECK(executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 16}, 16));
+    CHECK_EQ(sink.counts[0], 0u);
+    CHECK_EQ(sink.counts[1], 2u);
+}
+
+TEST(graph_event_merge_orders_by_frame_with_ties_in_connection_order) {
+    EventModules m;
+    EventSource a(m.source, {note(0, 1), note(2, 2), note(2, 3), note(5, 4)});
+    EventSource b(m.source, {note(1, 10), note(2, 11), note(7, 12)});
+    EventSink sink(m.sink);
+    GraphExecutor executor;
+    // Connection order is b, then a: at frame 2 b's event comes first.
+    CHECK(executor.prepare({{"a", &m.source}, {"b", &m.source}, {"sink", &m.sink}}, {{1, 0, 2, kNotes}, {0, 0, 2, kNotes}},
+                           {&a, &b, &sink}, 2, 16, 48000.0, kBudget) == GraphError::Ok);
+    float buffer[16];
+    float* channels[] = {buffer};
+    CHECK(executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 16}, 16));
+    const uint32_t expected[] = {1, 10, 11, 2, 3, 4, 12};
+    CHECK_EQ(sink.counts[0], 7u);
+    for (uint32_t k = 0; k < 7; ++k) CHECK_EQ(sink.received[0][k].noteId, expected[k]);
+    CHECK_EQ(sink.counts[1], 0u);  // an unconnected second event input reads none, never the host
+    CHECK_EQ(executor.eventsDropped(), 0u);
+}
+
+TEST(graph_event_merge_keeps_the_earliest_events_and_counts_the_rest) {
+    EventModules m;
+    EventSource a(m.source, {note(0, 1), note(4, 2), note(6, 3)});
+    EventSource b(m.source, {note(1, 10), note(5, 11), note(8, 12)});
+    EventSink sink(m.sink);
+    GraphResourceBudget budget = kBudget;
+    budget.maxEventsPerPort = 4;
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"a", &m.source}, {"b", &m.source}, {"sink", &m.sink}}, {{0, 0, 2, kNotes}, {1, 0, 2, kNotes}},
+                           {&a, &b, &sink}, 2, 16, 48000.0, budget) == GraphError::Ok);
+    float buffer[16];
+    float* channels[] = {buffer};
+    for (int block = 1; block <= 2; ++block) {
+        CHECK(executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 16}, 16));
+        const uint32_t expected[] = {1, 10, 2, 11};
+        CHECK_EQ(sink.counts[0], 4u);
+        for (uint32_t k = 0; k < 4; ++k) CHECK_EQ(sink.received[0][k].noteId, expected[k]);
+        CHECK_EQ(executor.eventsDropped(), 2u * static_cast<uint64_t>(block));
+    }
+}
+
+TEST(graph_event_outputs_are_emptied_each_block) {
+    EventModules m;
+    EventSource once(m.source, {note(2, 9)}, true);
+    EventSink sink(m.sink);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"src", &m.source}, {"sink", &m.sink}}, {{0, 0, 1, kNotes}}, {&once, &sink}, 1, 8, 48000.0,
+                           kBudget) == GraphError::Ok);
+    float buffer[8];
+    float* channels[] = {buffer};
+    CHECK(executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8));
+    CHECK_EQ(sink.counts[0], 1u);
+    CHECK(executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8));
+    CHECK_EQ(sink.counts[0], 0u);
+    CHECK_EQ(buffer[2], 0.0f);
+}
+
+TEST(graph_event_outputs_out_of_order_out_of_range_or_over_capacity_fail_the_block) {
+    EventModules m;
+    float buffer[8];
+    float* channels[] = {buffer};
+    for (int k = 0; k < 3; ++k) {
+        EventSource unsorted(m.source, {note(3, 1), note(2, 2)});
+        EventSource late(m.source, {note(8, 1)});  // frame 8 of an 8-frame block
+        EventSource over(m.source, {note(0, 1)});
+        over.overrun_ = true;
+        EventSource* source = k == 0 ? &unsorted : k == 1 ? &late : &over;
+        EventSink sink(m.sink);
+        GraphExecutor executor;
+        CHECK(executor.prepare({{"src", &m.source}, {"sink", &m.sink}}, {{0, 0, 1, kNotes}}, {source, &sink}, 1, 8,
+                               48000.0, kBudget) == GraphError::Ok);
+        std::fill_n(buffer, 8, 9.0f);
+        CHECK(!executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8));
+        CHECK_EQ(executor.lastFailedNode(), 0u);
+        CHECK_EQ(buffer[0], 0.0f);  // the failed block is silent
+    }
+}
+
+TEST(graph_event_host_events_must_be_ordered_and_in_range) {
+    EventModules m;
+    EventSink sink(m.sink);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"sink", &m.sink}}, {}, {&sink}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    float buffer[8];
+    float* channels[] = {buffer};
+    const Event unsorted[] = {note(4, 1), note(3, 2)};
+    const Event late[] = {note(6, 1)};
+    CHECK(!executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8, EventInput{unsorted, 2}));
+    CHECK(!executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 6}, 6, EventInput{late, 1}));
+    CHECK(!executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8, EventInput{nullptr, 1}));
+    CHECK(executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8, EventInput{late, 1}));
+    CHECK_EQ(sink.counts[0], 1u);
+}
+
+TEST(graph_event_ports_validate_types_fan_in_and_budget) {
+    EventModules m;
+    EventSource a(m.source, {}), b(m.source, {});
+    EventSink sink(m.sink);
+    GraphExecutor executor;
+    // A plain event input takes one source; the merging one takes many, but never the same twice.
+    CHECK(executor.prepare({{"a", &m.source}, {"b", &m.source}, {"sink", &m.sink}}, {{0, 0, 2, kAux}, {1, 0, 2, kAux}},
+                           {&a, &b, &sink}, 2, 8, 48000.0, kBudget) == GraphError::InputAlreadyConnected);
+    CHECK(executor.prepare({{"a", &m.source}, {"sink", &m.sink}}, {{0, 0, 1, kNotes}, {0, 0, 1, kNotes}}, {&a, &sink}, 1, 8,
+                           48000.0, kBudget) == GraphError::DuplicateConnection);
+    // Events never feed audio.
+    const PortDescriptor audioIn[] = {{"in", PortType::Audio, ChannelLayout::Mono, true},
+                                      {"out", PortType::Audio, ChannelLayout::Mono, false}};
+    const ModuleDescriptor effect{"test.events.effect", 1, audioIn, 2, nullptr, 0};
+    ChannelGain gain(effect);
+    CHECK(executor.prepare({{"a", &m.source}, {"g", &effect}}, {{0, 0, 1, 0}}, {&a, &gain}, 1, 8, 48000.0, kBudget) ==
+          GraphError::PortTypeMismatch);
+    // A graph with event ports needs room for events.
+    GraphResourceBudget none = kBudget;
+    none.maxEventsPerPort = 0;
+    CHECK(executor.prepare({{"sink", &m.sink}}, {}, {&sink}, 0, 8, 48000.0, none) == GraphError::InvalidResourceBudget);
+    // Event buffers count in the working-memory budget.
+    GraphResourceBudget huge = kBudget;
+    huge.maxEventsPerPort = 4u * 1024u * 1024u;
+    CHECK(executor.prepare({{"sink", &m.sink}}, {}, {&sink}, 0, 8, 48000.0, huge) == GraphError::ResourceBudgetExceeded);
+    // Descriptor rules: event inputs may merge; event outputs never sum.
+    const PortDescriptor summingOut[] = {{"e", PortType::Event, ChannelLayout::None, false, 0, true}};
+    const PortDescriptor eventLayout[] = {{"e", PortType::Event, ChannelLayout::Mono, true}};
+    CHECK(validateModuleDescriptor({"x", 1, summingOut, 1, nullptr, 0}) == ModuleValidation::InvalidSummingPort);
+    CHECK(validateModuleDescriptor({"x", 1, eventLayout, 1, nullptr, 0}) == ModuleValidation::InvalidPortLayout);
+    CHECK(validateModuleDescriptor(m.sink) == ModuleValidation::Ok);
+}
+
+TEST(graph_event_ports_process_without_allocating) {
+    EventModules m;
+    EventSource a(m.source, {note(0, 1), note(4, 2), note(6, 3)});
+    EventSource b(m.source, {note(1, 10), note(5, 11)});
+    EventSink sink(m.sink);
+    GraphResourceBudget budget = kBudget;
+    budget.maxEventsPerPort = 4;  // drops events too
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"a", &m.source}, {"b", &m.source}, {"sink", &m.sink}}, {{0, 0, 2, kNotes}, {1, 0, 2, kAux}},
+                           {&a, &b, &sink}, 2, 64, 48000.0, budget) == GraphError::Ok);
+    float buffer[64];
+    float* channels[] = {buffer};
+    const Event host[] = {note(0, 5)};
+    bool ok = true;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (uint32_t frames : {64u, 17u, 8u, 64u})
+            ok = executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, frames}, frames, EventInput{host, 1}) && ok;
+        operations = scope.count();
+    }
+    CHECK(ok);
+    CHECK_EQ(operations, 0u);
 }
