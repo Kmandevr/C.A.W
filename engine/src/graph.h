@@ -92,17 +92,24 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 // the working-memory budget. process() performs no allocation, locking, I/O or graph traversal and
 // is suitable for a bounded audio callback.
 //
-// Each node has at most one audio input and one audio output port, of any layout; control,
-// modulation and event ports are rejected until the typed runtime ports exist (roadmap F5).
-// A summing input (PortDescriptor::summing) takes any number of connections: before the node
-// runs, the executor sums them into a prepared buffer per channel, in connection order,
-// starting from +0.0f, in float, saturating at +/-FLT_MAX with NaN as 0 (route_math.h). Any other input
-// takes at most one connection.
-// Unconnected audio inputs read the host input, so they must all have the same channel count.
-// Processors are called only through process(const AudioProcessBlock&); both views' capacity is
-// the block's frame count. If one returns false the block fails: process() returns false, zeroes
-// the host output and records the failing node. process() rebinds host channels into the prepared
-// input table, so one executor must never be processed by two threads (e.g. playback and export).
+// Ports (F5.1): a node may have any number of audio, modulation and control ports; event ports
+// are rejected (RuntimeUnsupportedPortType) until F5.2. A node with at most one audio input and
+// one audio output and no other ports is called through process(const AudioProcessBlock&); any
+// other node through processPorts(const ProcessBlock&), and prepare() rejects it unless its
+// processor's usesProcessPorts() is true. Audio views' capacity is the block's frame count.
+// A summing input (audio or modulation, PortDescriptor::summing) takes any number of
+// connections: before the node runs, the executor sums them into a prepared buffer per channel,
+// in connection order, starting from +0.0f, in float, saturating at +/-FLT_MAX with NaN as 0
+// (route_math.h). Any other input takes at most one connection.
+// Unconnected inputs: a node's first audio input reads the host input (so all of those must have
+// the same channel count); any other audio input (a sidechain) and every modulation input reads
+// silence; a control input reads its port's defaultValue. Control outputs saturate after each
+// block (NaN reads 0, beyond float range +/-FLT_MAX); plain audio and modulation connections pass
+// bits unchanged. Graph output is the output node's first
+// audio output. Values are never converted between port types.
+// If a processor returns false the block fails: process() returns false, zeroes the host output
+// and records the failing node. process() rebinds host channels into the prepared input table,
+// so one executor must never be processed by two threads (e.g. playback and export).
 class GraphExecutor {
 public:
     GraphError prepare(const std::vector<GraphNode>& nodes,
@@ -118,12 +125,13 @@ public:
     // outputChannels(). Counts are never adapted, truncated or padded.
     bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
                  uint32_t frames) noexcept;
-    // Dynamic routing (control thread): for a graph prepared without connections, give every
-    // summing input room for maxSourcesPerInput routed sources, counted against the budget. Summing
-    // inputs then never read the host input; with no routes they are silence. With
-    // routePlainInputs, every plain (non-summing) input becomes routable too: it takes at most one
-    // route, reads that source's buffer directly (no copy, bits unchanged) and is silence without
-    // one; the graph then reads no host input at all.
+    // Dynamic routing (control thread, audio ports only): for a graph prepared without
+    // connections, give every summing audio input room for maxSourcesPerInput routed sources,
+    // counted against the budget. Summing inputs then never read the host input; with no routes
+    // they are silence. With routePlainInputs, every plain (non-summing) audio input becomes
+    // routable too: it takes at most one route, reads that source's buffer directly (no copy,
+    // bits unchanged) and is silence without one; the graph then reads no host input at all.
+    // Modulation and control inputs keep their unconnected values (silence, default).
     GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget,
                               bool routePlainInputs = false);
     // prepare() with no connections plus reserveRouting(maxSourcesPerInput, budget, true) in one
@@ -159,23 +167,49 @@ private:
                           uint32_t frames) noexcept;
 
     std::vector<ModuleProcessor*> processors_;
-    std::vector<float> channelStorage_;           // every node output channel, planar, maxFrames each
-    std::vector<float*> outputTable_;             // per-node output channel pointers, concatenated
-    std::vector<const float*> inputTable_;        // per-node input channel pointers, concatenated
+    // Every port, at nodePortBase_[node] + its descriptor index. `table` indexes inputTable_ or
+    // outputTable_ (audio, modulation), controlInTable_ or controlOutTable_ (control).
+    struct Port {
+        PortType type;
+        bool input, summing, host;  // host: this input's channels are bound to the host input
+        uint32_t channels;          // audio: channel count; modulation and control: 1
+        uint32_t table;
+        uint32_t sum;               // summing inputs: index into sumInputs_, or UINT32_MAX
+    };
+    std::vector<Port> ports_;
+    std::vector<uint32_t> nodePortBase_;
+    // Per node: where its ports' entries start in each table (each node's are contiguous, audio
+    // before modulation), and whether it is called through processPorts.
+    struct NodeBlock {
+        uint32_t audioIn, audioInCount, audioOut, audioOutCount;    // into the view arrays
+        uint32_t modIn, modInCount, modOut, modOutCount;            // into inputTable_/outputTable_
+        uint32_t controlIn, controlInCount, controlOut, controlOutCount;
+        uint32_t sumBase, sumCount;                                 // its summing inputs in sumInputs_
+        bool typed;
+    };
+    std::vector<NodeBlock> blocks_;
+    std::vector<ConstChannelBufferView> audioInViews_;
+    std::vector<ChannelBufferView> audioOutViews_;
+    std::vector<float> channelStorage_;           // every audio and modulation output channel, maxFrames each
+    std::vector<float*> outputTable_;             // output channel pointers, concatenated per node
+    std::vector<const float*> inputTable_;        // input channel pointers, concatenated per node
+    std::vector<float> controlStorage_;           // control output values, then control input defaults
+    std::vector<float*> controlOutTable_;
+    std::vector<const float*> controlInTable_;
     std::vector<uint32_t> hostInputSlots_;        // inputTable_ entries fed by the host input
+    // Per node: its first audio input and output (table base and channel count; 0 = none).
     std::vector<uint32_t> inputBase_, inputCount_, outputBase_, outputCount_;
     std::vector<float> zero_;
-    // Fan-in: one entry per summing input that has connections.
-    struct SumInput { uint32_t sourceBase, sourceCount, tableBase; };
+    // Fan-in: one entry per summing input that has connections (all of them once routing is reserved).
+    struct SumInput { uint32_t sourceBase, sourceCount, tableBase, channels; };
     std::vector<SumInput> sumInputs_;
-    std::vector<uint32_t> sumIndex_;              // per node: index into sumInputs_, or UINT32_MAX
-    std::vector<uint32_t> sumSources_;            // source nodes per summing input, connection order
+    std::vector<uint32_t> sumSources_;            // source output ports (global index) per summing input, in order
     std::vector<float*> sumTable_;                // summed channel buffers, per summing input
     std::vector<float> sumStorage_;
     std::vector<uint32_t> order_;
     // Dynamic routing scratch, preallocated by reserveRouting().
     std::vector<uint32_t> routePosition_, routeCount_, routeStaging_;
-    std::vector<uint32_t> directStaging_;         // per node: the plain-input route's source, or UINT32_MAX
+    std::vector<uint32_t> directStaging_;         // per port: a plain input's routed source port, or UINT32_MAX
     bool routePlain_ = false;
     bool deferHostCheck_ = false;                 // set only inside prepareRouted()
     std::size_t preparedBytes_ = 0;

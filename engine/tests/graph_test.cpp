@@ -192,16 +192,21 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     GainProcessor gain;
     const std::vector<ModuleProcessor*> processors{&pass, &gain};
     // Planar executor storage for two stereo in/out nodes at 64 frames: fixed vector headers,
-    // per-node metadata, four output channels, both pointer tables, the host-input slot bound
-    // (every input channel) and the shared zero block.
-    // The private sum-input list's header is counted like any std::vector header.
+    // per-node metadata, four ports with one prepared audio view each, four output channels,
+    // both pointer tables, the host-input slot bound (every input channel) and the shared zero
+    // block. Mirrors of the executor's private Port and NodeBlock layouts give their sizes; the
+    // private lists' headers are counted like any std::vector header.
+    struct PortBytes { PortType type; bool input, summing, host; uint32_t channels, table, sum; };
+    struct NodeBlockBytes { uint32_t fields[14]; bool typed; };
     constexpr std::size_t fixedHeaders =
-        sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 3u +
-        sizeof(std::vector<float*>) * 2u + sizeof(std::vector<const float*>) +
-        sizeof(std::vector<uint32_t>) * 9u;
-    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u;
+        sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 4u +
+        sizeof(std::vector<float*>) * 3u + sizeof(std::vector<const float*>) * 2u +
+        sizeof(std::vector<uint32_t>) * 12u + sizeof(std::vector<ChannelBufferView>) * 2u;
+    constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u + sizeof(NodeBlockBytes);
+    constexpr std::size_t portBytes =
+        4u * sizeof(PortBytes) + 2u * sizeof(ConstChannelBufferView) + 2u * sizeof(ChannelBufferView);
     constexpr std::size_t executorBytes =
-        fixedHeaders + 2u * perNodeMetadata + 4u * 64u * sizeof(float) +
+        fixedHeaders + 2u * perNodeMetadata + portBytes + 4u * 64u * sizeof(float) +
         4u * sizeof(float*) + 4u * sizeof(const float*) + 4u * sizeof(uint32_t) + 64u * sizeof(float) +
         1u * sizeof(uint32_t);  // sum-source bound: one per connection
     constexpr std::size_t retainedPlanBytes = 2u * sizeof(uint32_t);

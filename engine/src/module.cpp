@@ -44,9 +44,11 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
             if (p.summing && !p.input) return ModuleValidation::InvalidSummingPort;
         } else if (p.layout != ChannelLayout::None || p.channelCount != 0) {
             return ModuleValidation::InvalidPortLayout;
-        } else if (p.summing) {
+        } else if (p.summing && !(p.type == PortType::Modulation && p.input)) {
             return ModuleValidation::InvalidSummingPort;
         }
+        if (p.type == PortType::Control ? !std::isfinite(p.defaultValue) : p.defaultValue != 0.0f)
+            return ModuleValidation::InvalidPortDefault;
         for (uint32_t j = 0; j < i; ++j)
             if (d.ports[j].id == p.id) return ModuleValidation::DuplicatePortId;
     }
@@ -105,7 +107,7 @@ bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b
         const PortDescriptor& x = a.ports[i];
         const PortDescriptor& y = b.ports[i];
         if (x.id != y.id || x.type != y.type || x.layout != y.layout || x.input != y.input || x.channelCount != y.channelCount ||
-            x.summing != y.summing)
+            x.summing != y.summing || !(x.defaultValue == y.defaultValue))
             return false;
     }
     for (uint32_t i = 0; i < a.parameterCount; ++i) {

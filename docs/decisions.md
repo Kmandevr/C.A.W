@@ -6,6 +6,13 @@ updated: 2026-11-04
 
 # Decisions
 
+## 2026-11-04: F5.1 typed ports in the graph executor
+
+- **Port semantics (after an architect review).** Modulation is one float per frame and may sum like a mix bus; control is one value per block, takes one source, reads its port default when unconnected and holds its last value, saturated after each block like routing (NaN reads 0) so a bad value never latches. Only a node's first audio input reads the host input; other audio inputs (sidechains) and modulation read silence when unconnected. No type is ever converted implicitly: a follower or converter is its own node.
+- **Typed nodes are checked at prepare.** A processor with more than one audio port or any other port opts in with `usesProcessPorts()`; otherwise `prepare()` fails, so a correct-looking graph never fails on its first block. One-in/one-out audio nodes keep the old call (callgrind: playback +0.05–0.09%).
+- **Parameters are not ports.** F6 decides how a port binds to a parameter (base value plus modulation); F5 does not settle it.
+- **Open for the owner: the F5.2 event format.** Recommended (architect): a C.A.W event with a stable note id and per-note data, carrying MIDI 1.0/2.0 losslessly as raw UMP and converting at the edges, rather than raw UMP alone, which cannot tell two overlapping notes of the same pitch apart.
+
 ## 2026-11-04: F4.4, every track module is a graph node
 
 - **Done now, with float edges (owner).** Asked whether to split tracks into module nodes now or with parallel effects (2.3), the owner chose now, with 32-bit float edges between modules (the F4.2 rule). Each module's output rounds to float, so 9 template and 8 mixer golden hashes were re-recorded. **[Fact, 2026-11-04]** The old engine with only that rounding added renders the new hashes bit for bit, including new effect-chain, seam, pattern and code-swap cases; 24-bit renders differ from before by at most 1 LSB.
