@@ -1,10 +1,10 @@
 # Handoff
 
-Commit: 0f46ef7
-Branch: claude/caw-engine-foundation-skpirb (F4.4 on top of Main 94522a5; PR to Main next)
+Commit: b19c500
+Branch: claude/caw-engine-foundation-skpirb (F5.1 on top of Main 011d495; audio review, then PR to Main)
 
 ## Goal
-Owner (2026-11-03): finish the roadmap Foundation stage (#28): F4 → F5 → F6 → F7 → F8, plus F10 (seeded randomness); F9 is deferred to Release 1, since no project compatibility is needed yet.
+Owner (2026-11-03): finish the roadmap Foundation stage (#28): F5 → F6 → F7 → F8, plus F10 (seeded randomness); F9 is deferred to Release 1, since no project compatibility is needed yet.
 - One small PR per step, targeting `Main`. Claude merges when CI is green, and updates the #28 progress comment (id 6609966082).
 - Rules:
   - No allocation, locks or I/O in the callback.
@@ -16,22 +16,23 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F4 → F5 → F6 
 - Ask the owner before SDK ABI changes, new dependencies, or app/ changes.
 
 ## Done and verified
-- On Main: F3 (#72), F4.1 (#74), F4.2 (#75), F4.3 (#77).
-- F4.4 is on the branch (`d593f3f`, `f6ed0f4`, `0f46ef7`): every track module is a graph node, connected by 3-lane float edges, with `planChunk` and `prepareRouted`.
-  - Tests: caw_tests 240/240, caw_rt_tests 33/33.
-  - The new hashes equal the old engine plus float rounding of each module's output (checked in a scratch worktree).
-  - The audio review is addressed: forward same-layer imports are refused. Issue #78 is filed for the older swap-fade export renumbering.
+- On Main: F3 (#72), F4.1–F4.4 (#74, #75, #77, #79). F4 is complete.
+- F5.1 is on the branch (`1ac3a64`, docs `b19c500`): typed audio, modulation and control ports per node, with per-port executor tables, `processPorts`/`usesProcessPorts` checked at prepare, and only the first audio input fed by the host.
+  - Tests: caw_tests 240/240, caw_rt_tests 40/40, sanitizers clean.
+  - Callgrind: playback +0.05–0.09%, graph bench +0.8%.
 
 ## Open
+- The F5.1 audio review is in progress.
+- F5.2 event format: owner decision needed. The architect recommends a C.A.W event with a note id, carrying raw UMP; see `docs/decisions.md` (2026-11-04).
 - Issue #78: the swap-fade import buffers are renumbered (an older bug).
 - F10 seeds for native plugins need an SDK ABI change, so the owner must approve it.
 
 ## Next
-1. Open the F4.4 PR to Main and merge when CI is green.
-2. Then F5: typed control, modulation, event and MIDI ports in the executor.
+1. Address the review, run release-check, open the F5.1 PR to Main, and merge when CI is green.
+2. Ask the owner about the event format, then F5.2 (event ports).
 
 ## Read first
 - `docs/roadmap.md`
 - `docs/decisions.md`
+- `engine/src/module.h`
 - `engine/src/graph.h`
-- `engine/src/engine.cpp` (MixGraph, planChunk, runModuleNode)
