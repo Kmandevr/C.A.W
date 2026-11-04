@@ -1817,3 +1817,104 @@ TEST(graph_reserve_routing_refuses_while_modulation_links_are_set) {
     CHECK(executor.setModulationLinks(nullptr, 0) == GraphError::Ok);
     CHECK(executor.reserveRouting(1, kBudget) == GraphError::Ok);
 }
+
+namespace {
+// F6.4 automation lanes: a ramp 0 -> 2 over steps 0..4, a jump at step 6 (two points), then 0.25.
+const AutomationPoint kLane[] = {{0.0, 0.0}, {4.0, 2.0}, {6.0, 2.0}, {6.0, 0.25}};
+// What the Engine computes for frame i of a block starting at `start`: lane value, then constrained.
+double engineValue(const ParameterDescriptor& p, int64_t start, uint32_t i, double samplesPerStep) {
+    const double at = static_cast<double>(start + i) / samplesPerStep;
+    return constrainParameter(p, automationLaneValue(kLane, 4, at, kLane[0].value));
+}
+}  // namespace
+
+TEST(graph_automation_lanes_match_the_engine_sample_for_sample_across_blocks_and_seeks) {
+    ParamModules m;
+    m.gain.step = 0.125;  // quantized, like a .caw param with a step
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 16, 48000.0, kBudget) == GraphError::Ok);
+    const ParameterLane lane{0, 0, kLane, 4};
+    CHECK(executor.setAutomationLanes(&lane, 1) == GraphError::Ok);
+    const double samplesPerStep = 5.5;
+    CHECK(executor.setTransport(3, samplesPerStep, true));
+    int64_t start = 3;
+    Planar host(2, 16, 1.0f), out(2, 16);
+    for (int block = 0; block < 4; ++block) {
+        if (block == 2) {  // a seek
+            CHECK(executor.setTransport(30, samplesPerStep, true));
+            start = 30;
+        }
+        const uint32_t frames = block == 1 ? 7 : 16;
+        CHECK(executor.process(host.constView(frames), out.view(frames), frames));
+        for (uint32_t i = 0; i < frames; ++i)
+            CHECK_EQ(out.data[0][i], static_cast<float>(engineValue(m.gain, start, i, samplesPerStep)));
+        start += frames;
+    }
+}
+
+TEST(graph_automation_lanes_apply_only_while_playing_and_yield_to_a_touch) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    const ParameterLane lane{0, 0, kLane + 3, 1};  // a flat 0.25
+    CHECK(executor.setAutomationLanes(&lane, 1) == GraphError::Ok);
+    CHECK_EQ(run(executor, 8, 0), 0.5f);  // stopped: the manual default
+    CHECK(executor.setTransport(0, 10.0, true));
+    CHECK_EQ(run(executor, 8, 0), 0.25f);
+    CHECK(executor.queueParameter(0, 0, 1.5));  // a touch wins while the lane plays on
+    CHECK_EQ(run(executor, 8, 0), 1.5f);
+    CHECK(executor.queueClearTouch());  // playback restart: the lane again
+    CHECK_EQ(run(executor, 8, 0), 0.25f);
+    CHECK(!executor.setTransport(0, 0.0, true));  // a bad tempo stops lanes
+    CHECK_EQ(run(executor, 8, 0), 0.25f);  // stopping holds what played, no jump
+    CHECK_EQ(executor.parameterTarget(0, 0), 0.25);
+    CHECK(executor.setAutomationLanes(nullptr, 0) == GraphError::Ok);
+    CHECK(executor.setTransport(0, 10.0, true));
+    CHECK(executor.queueParameter(0, 0, 1.5));
+    CHECK_EQ(run(executor, 8, 0), 1.5f);  // no lane: the manual value
+}
+
+TEST(graph_automation_lanes_reject_bad_lanes_and_keep_the_previous_ones) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.setAutomationLanes(nullptr, 0) != GraphError::Ok);  // not prepared
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    const ParameterLane good{0, 0, kLane + 3, 1};
+    CHECK(executor.setAutomationLanes(&good, 1) == GraphError::Ok);
+    const AutomationPoint unsorted[] = {{2.0, 0.1}, {1.0, 0.2}};
+    const AutomationPoint nan[] = {{0.0, std::numeric_limits<double>::quiet_NaN()}};
+    const ParameterLane badNode{1, 0, kLane, 4}, badParameter{0, 1, kLane, 4}, empty{0, 0, kLane, 0},
+        noPoints{0, 0, nullptr, 2}, backwards{0, 0, unsorted, 2}, notFinite{0, 0, nan, 1};
+    const ParameterLane twice[] = {{0, 0, kLane, 4}, {0, 0, kLane, 4}};
+    CHECK(executor.setAutomationLanes(&badNode, 1) == GraphError::NodeIndexOutOfRange);
+    CHECK(executor.setAutomationLanes(&badParameter, 1) == GraphError::PortIndexOutOfRange);
+    for (const ParameterLane* bad : {&empty, &noPoints, &backwards, &notFinite})
+        CHECK(executor.setAutomationLanes(bad, 1) == GraphError::InvalidAutomationLane);
+    CHECK(executor.setAutomationLanes(twice, 2) == GraphError::InvalidAutomationLane);
+    CHECK(executor.setAutomationLanes(nullptr, 1) == GraphError::InvalidAutomationLane);
+    CHECK(executor.setTransport(0, 10.0, true));
+    CHECK_EQ(run(executor, 8, 0), 0.25f);  // the good lane still holds
+}
+
+TEST(graph_automation_lanes_resolve_without_allocating) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 64, 48000.0, kBudget) == GraphError::Ok);
+    const ParameterLane lane{0, 0, kLane, 4};
+    CHECK(executor.setAutomationLanes(&lane, 1) == GraphError::Ok);
+    Planar host(2, 64, 1.0f), out(2, 64);
+    bool ok = true;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        ok = executor.setTransport(0, 12.0, true);
+        for (uint32_t frames : {64u, 17u, 1u, 64u}) ok = executor.process(host.constView(frames), out.view(frames), frames) && ok;
+        operations = scope.count();
+    }
+    CHECK(ok);
+    CHECK_EQ(operations, 0u);
+}

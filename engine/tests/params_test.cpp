@@ -250,3 +250,27 @@ TEST(parameter_resolver_skips_links_without_a_signal) {
     r.resolve(2, nullptr, one, out);
     CHECK_EQ(out[0], 20.0);
 }
+
+TEST(parameter_resolver_holds_the_last_automated_value_when_the_lane_stops) {
+    ParameterResolver r;
+    ParameterDescriptor p = linear();
+    p.smoothingFrames = 4;
+    CHECK(r.configure(p));
+    double out[4];
+    const double lane[4] = {0.1, 0.2, 0.3, 0.4};
+    r.resolve(4, lane, nullptr, out);
+    CHECK_EQ(r.target(), 0.4);
+    const ParameterValue v = r.resolve(4, nullptr, nullptr, out);  // stopped: no jump, no ramp
+    CHECK(v.samples == nullptr);
+    CHECK_EQ(v.value, 0.4);
+}
+
+TEST(automation_lane_value_interpolates_holds_and_jumps) {
+    const AutomationPoint points[] = {{1.0, 0.0}, {3.0, 1.0}, {3.0, 5.0}, {4.0, 6.0}};
+    CHECK_EQ(automationLaneValue(points, 0, 2.0, 9.0), 9.0);  // empty: the fallback
+    CHECK_EQ(automationLaneValue(points, 4, 0.0, 9.0), 0.0);  // before the first point
+    CHECK_EQ(automationLaneValue(points, 4, 2.0, 9.0), 0.5);
+    CHECK_EQ(automationLaneValue(points, 4, 3.0, 9.0), 5.0);  // a jump takes the later value
+    CHECK_EQ(automationLaneValue(points, 4, 3.5, 9.0), 5.5);
+    CHECK_EQ(automationLaneValue(points, 4, 10.0, 9.0), 6.0);  // after the last
+}

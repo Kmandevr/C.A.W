@@ -321,18 +321,7 @@ double automationValue(int count, const double* steps, const double* values, dou
 }
 
 double automationValue(const std::vector<AutomationPointSpec>& points, double at, double fallback) noexcept {
-    if (points.empty()) return fallback;
-    if (at <= points.front().step) return points.front().value;
-    size_t lo = 0, hi = points.size() - 1;
-    while (lo + 1 < hi) {
-        const size_t mid = (lo + hi) / 2;
-        if (points[mid].step <= at) lo = mid; else hi = mid;
-    }
-    if (at >= points.back().step) return points.back().value;
-    const double span = points[hi].step - points[lo].step;
-    if (span <= 0.0) return points[hi].value;
-    const double t = (at - points[lo].step) / span;
-    return points[lo].value + (points[hi].value - points[lo].value) * t;
+    return automationLaneValue(points.data(), points.size(), at, fallback);  // the one lane rule (params.h)
 }
 
 

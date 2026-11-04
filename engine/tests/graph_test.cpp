@@ -205,7 +205,7 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
         sizeof(std::vector<ModuleProcessor*>) + sizeof(std::vector<float>) * 4u +
         sizeof(std::vector<float*>) * 3u + sizeof(std::vector<const float*>) * 2u +
         sizeof(std::vector<uint32_t>) * 12u + sizeof(std::vector<ChannelBufferView>) * 2u +
-        sizeof(std::vector<Event>) * 4u + sizeof(std::vector<uint32_t>) * 3u + sizeof(std::vector<double>) * 5u;
+        sizeof(std::vector<Event>) * 4u + sizeof(std::vector<uint32_t>) * 3u + sizeof(std::vector<double>) * 8u;
     constexpr std::size_t perNodeMetadata = sizeof(ModuleProcessor*) + sizeof(uint32_t) * 5u + sizeof(NodeBlockBytes);
     constexpr std::size_t portBytes =
         4u * sizeof(PortBytes) + 2u * sizeof(ConstChannelBufferView) + 2u * sizeof(ChannelBufferView);
@@ -227,7 +227,7 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
           GraphError::ResourceBudgetExceeded);
     CHECK(!executor.ready());
     // One parameter on the second node adds exactly a resolver, a resolved value, a touch epoch,
-    // its link-signal table and 64 doubles.
+    // its link-signal table, a lane slot and 64 doubles, plus the graph's one block of lane scratch.
     const ParameterDescriptor gainParameter{"gain", 0.5, 0.0, 1.0, true};
     const ModuleDescriptor withParameter{effect.id, 1, effect.ports, effect.portCount, &gainParameter, 1};
     const std::vector<GraphNode> parameterNodes{{"input", &effect}, {"gain", &withParameter}};
@@ -242,7 +242,8 @@ TEST(graph_executor_enforces_combined_compile_and_runtime_peak_budget) {
     const std::vector<ModuleProcessor*> parameterProcessors{&pass, &parameterGain};
     constexpr std::size_t parameterBytes =
         sizeof(ParameterResolver) + sizeof(ParameterValue) + sizeof(uint64_t) + kMaxParameterLinks * sizeof(const float*) +
-        64u * sizeof(double);  // + its touch epoch and link-signal table
+        sizeof(const AutomationPoint*) + sizeof(uint32_t) + 64u * sizeof(double) +
+        64u * sizeof(double);  // + its touch epoch, link-signal table and lane slot, and the shared lane scratch
     const GraphResourceBudget withRoom{2, 1, executorBytes + retainedPlanBytes + parameterBytes};
     const GraphResourceBudget oneShort{2, 1, executorBytes + retainedPlanBytes + parameterBytes - 1u};
     CHECK(executor.prepare(parameterNodes, edges, parameterProcessors, 1, 64, 48000, withRoom) == GraphError::Ok);
