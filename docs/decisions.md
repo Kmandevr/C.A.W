@@ -6,6 +6,33 @@ updated: 2026-11-04
 
 # Decisions
 
+## 2026-11-04: UI direction, the arrangement is home
+
+- **Owner:** the arrangement is the home screen, where about 90% of a song is built, and looks like a standard DAW. Empty, nestable tracks hold **several instruments** and effects in a chosen order. Automation lanes drop down under a track, each with a parameter dropdown. MIDI clips are made in the arrangement as in Reaper, and the piano roll opens docked below. The code workspace works like Unity's, with a searchable tree of project assets and user-picked device folders. The mixer is the fine-control screen, like Reaper's. Panels dock and move like Unity's **on the phone too**, with drag and drop onto the arrangement. Motion is light and snapping smooth. Clips and track headers glow with their track's level, and this can be switched off. Track colours plus one accent. A track without clips is silent.
+- **Piano roll (owner, 2026-11-04):**
+  - **Snapping:** one snap switch (with a hold-to-bypass) for notes and every curve. A value grid alongside the time grid.
+  - **Stretching notes:** both ends stretch, and a group stretches together. The end follows the finger, and a ghost shows the snapped length.
+  - **Curves on a stretched note:** a toggle chooses whether they stretch with the note or keep their timing.
+  - **What snaps:** every curve kind, including automation.
+  - **Handles:** bend handles with detents, plus optional per-point Bezier handles. Bezier needs engine and format work.
+  - **Freehand:** freehand strokes simplified to grid points.
+  - **Toolbar:** one context-aware row: tools, the snap magnet with its grids, a middle part that changes with the selection or curve tool, and ⋮. Undo and redo are in the transport bar.
+  - **Motion:** smooth, with a tiny overshoot, and distance-aware (logarithmic: longer moves go faster).
+  - **Haptics:** on by default, and can be switched off.
+  - **Motion setting:** Full, Reduced or Off.
+  - **Detail:** [UI plan](ui-plan.md#piano-roll).
+- **Arrangement (owner, 2026-11-04):**
+  - **Layout:** the same context-aware toolbar row as the roll, with Select, Draw, Split and Erase. Compact track headers that widen to show volume, pan and the chain.
+  - **Nesting:** by dragging onto a track, or Group. Any track can be a parent and still play, which needs engine work.
+  - **Clips:** Draw makes clips (tap = the last length). The right edge repeats by default, and a handle switches it to extend. Split cuts under the finger.
+  - **Selecting:** box, time range and tap on a header.
+  - **Ruler:** playhead, loop region, markers, follow.
+  - **Zoom and drag:** pinch both ways. Drag and drop adds instruments, effects (always to the track's chain), patterns and new tracks.
+  - **Glow:** subtle and adjustable.
+  - **Detail:** [UI plan](ui-plan.md#arrangement-home).
+- **Why:** the owner wants one place to build a song that feels like a real DAW and good to use. The plan, today's findings and the open questions are in [UI plan](ui-plan.md).
+- **Consequences:** several instruments per track and silent empty tracks change the engine and project model. The engine part goes to GPT as an issue, and the UI waits for it where it must.
+
 ## 2026-11-04: F7 resource budgets (owner, after the caps audit)
 
 - **The app keeps everything the engine keeps.** The app-only caps go (automation points past 128 and project lanes past 256 dropped on load, patterns at 4,096 notes/steps and 16 curve points, notes dropped on paste); any bound that stays is a clear error, never a silent drop. The owner allowed app/ changes for this.
