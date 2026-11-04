@@ -130,7 +130,10 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - **Motion and feel** (`lib/ui/motion.dart`):
     - **Motion:** Full, Reduced (fades only) or Off. The Minimal profile turns it off, and the system's reduce-motion setting caps it at Reduced.
     - **Haptic ticks:** on by default.
-    - **Glass** (`lib/ui/glass.dart`): on by default. Floating surfaces get a real frosted blur and docked panels a translucent tint with a soft highlight and no blur. The Lightweight and Minimal profiles turn it off. No screen uses the glass surfaces yet.
+    - **Glass** (`lib/ui/glass.dart`): on by default; the Lightweight and Minimal profiles turn it off, and glass off brings back the solid look.
+      - A soft ambient background (faint glows of the accent colours) sits behind every screen, and the docked panels, cards, track headers and transport are see-through over it, with no blur.
+      - Bottom sheets slide up as frosted glass (a real blur); dialogs and menus are translucent with a bright edge.
+      - Sliders, level bars, switches, filled and segmented buttons, M/S toggles and clips have a light see-through fill and a solid outline.
     - **Music-reactive glow:** a 0–100% slider, 35% by default.
     - The slider shows a change while it is dragged and saves when the drag ends.
     - The motion rules (distance-aware settle times, a small overshoot, snapping maths) are in place, but no screen animates with them yet. The [UI plan](ui-plan.md) adds that step by step.

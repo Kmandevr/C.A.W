@@ -4,6 +4,7 @@ import '../actions/actions.dart';
 import '../actions/keymap.dart';
 import '../actions/macro.dart';
 import 'theme.dart';
+import 'glass.dart';
 
 /// A touch-first strip of direct actions. It deliberately does not synthesize keyboard chords.
 class TouchQuickActions extends StatelessWidget {
@@ -73,7 +74,7 @@ class TouchQuickActions extends StatelessWidget {
   }
 
   Future<void> _edit(BuildContext context) async {
-    await showModalBottomSheet<void>(
+    await showGlassSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,
@@ -128,7 +129,7 @@ class _QuickActionEditorState extends State<_QuickActionEditor> {
       for (final name in widget.keymap.macros.names) ActionRef.macro(name),
     ].where((ref) => !_items.contains(ref)).toList();
 
-    final picked = await showModalBottomSheet<ActionRef>(
+    final picked = await showGlassSheet<ActionRef>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,

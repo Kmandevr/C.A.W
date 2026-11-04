@@ -2,6 +2,7 @@
 // Material icons, Android's UI font) so layouts measure like on a phone, and pumps a widget at the plan's sizes.
 import 'dart:io';
 
+import 'package:caw/ui/glass.dart';
 import 'package:caw/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -41,12 +42,23 @@ Future<void> _load() async {
   await (FontLoader('MaterialIcons')..addFont(file('MaterialIcons-Regular.otf'))).load();
 }
 
+/// The whole screen with the glass backdrop behind it; goldens of see-through screens capture this.
+final goldenKey = GlobalKey(debugLabel: 'golden');
+
+/// Finds [goldenKey]'s boundary, for `matchesGoldenFile`.
+Finder get goldenScreen => find.byKey(goldenKey);
+
 /// Pumps [child] in the app's theme at [size], with animations settled.
 Future<void> pumpGolden(WidgetTester tester, Widget child, Size size) async {
   await loadAppFonts(tester);
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(MaterialApp(debugShowCheckedModeBanner: false, theme: Neon.theme(), home: child));
+  await tester.pumpWidget(MaterialApp(
+    debugShowCheckedModeBanner: false,
+    theme: Neon.theme(),
+    builder: (context, c) => RepaintBoundary(key: goldenKey, child: GlassBackdrop(child: c ?? const SizedBox.shrink())),
+    home: child,
+  ));
   await tester.pumpAndSettle();
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'tokens.dart';
+import 'glass.dart';
 
 /// One toolbar row (owner, 2026-11-04): fixed [leading] (tools, snap), a [middle] part that changes with what you
 /// are doing, and fixed [trailing] (the ⋮ menu). When [contextKey] changes, the middle slides and fades to the new
@@ -133,7 +134,7 @@ class InfoButton extends StatelessWidget {
   Widget build(BuildContext context) => IconButton(
         tooltip: 'About $title',
         icon: const Icon(Icons.info_outline, size: 18, color: Neon.dim),
-        onPressed: () => showModalBottomSheet<void>(
+        onPressed: () => showGlassSheet<void>(
           context: context,
           backgroundColor: Neon.panelHi,
           showDragHandle: true,

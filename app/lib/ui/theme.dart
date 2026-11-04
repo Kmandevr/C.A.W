@@ -3,6 +3,8 @@ import 'dart:ui' show ColorSpace;
 
 import 'package:flutter/material.dart';
 
+import 'glass.dart';
+
 /// One look: a colour for each slot, plus whether active things glow. Saved as a readable theme file.
 class CawTheme {
   const CawTheme({required this.name, required this.colors, this.glow = true});
@@ -204,8 +206,11 @@ class Neon {
   static bool compact(BuildContext context) => Theme.of(context).visualDensity == VisualDensity.compact;
 
   /// Material theme for [look] (the active theme by default). Compact density shrinks paddings and tap targets.
-  static ThemeData theme({CawTheme? look, bool compact = false}) {
+  /// With [glass] (the Glass setting, by default): see-through fills with solid outlines on sliders, buttons and
+  /// switches, a transparent scaffold over the [GlassBackdrop], and translucent dialogs, menus and sheets.
+  static ThemeData theme({CawTheme? look, bool compact = false, bool? glass}) {
     final t = look ?? active;
+    final g = glass ?? Glass.active;
     final bg = t['bg'], panel = t['panel'], panelHi = t['panelHi'], line = t['line'], text = t['text'];
     final green = t['green'], pink = t['pink'], blue = t['blue'];
     final scheme = ColorScheme.dark(
@@ -224,14 +229,71 @@ class Neon {
       visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
       materialTapTargetSize: compact ? MaterialTapTargetSize.shrinkWrap : MaterialTapTargetSize.padded,
       listTileTheme: ListTileThemeData(dense: compact),
-      scaffoldBackgroundColor: bg,
+      scaffoldBackgroundColor: g ? Colors.transparent : bg,
       canvasColor: bg,
       dividerColor: line,
-      sliderTheme: SliderThemeData(
-        trackHeight: 3,
-        inactiveTrackColor: line,
-        overlayShape: RoundSliderOverlayShape(overlayRadius: compact ? 12 : 16),
-      ),
+      sliderTheme: g
+          ? SliderThemeData(
+              trackHeight: 7,
+              inactiveTrackColor: line,
+              trackShape: const GlassSliderTrackShape(),
+              thumbShape: const GlassSliderThumbShape(),
+              overlayShape: RoundSliderOverlayShape(overlayRadius: compact ? 12 : 16),
+            )
+          : SliderThemeData(
+              trackHeight: 3,
+              inactiveTrackColor: line,
+              overlayShape: RoundSliderOverlayShape(overlayRadius: compact ? 12 : 16),
+            ),
+      filledButtonTheme: g
+          ? FilledButtonThemeData(
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.resolveWith((s) =>
+                    s.contains(WidgetState.disabled) ? line.withValues(alpha: 0.12) : green.withValues(alpha: 0.18)),
+                foregroundColor:
+                    WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? t['dim'] : green),
+                side: WidgetStateProperty.resolveWith(
+                    (s) => BorderSide(color: s.contains(WidgetState.disabled) ? line : green, width: 1.5)),
+              ),
+            )
+          : null,
+      segmentedButtonTheme: g
+          ? SegmentedButtonThemeData(
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.resolveWith(
+                    (s) => s.contains(WidgetState.selected) ? pink.withValues(alpha: 0.2) : Colors.transparent),
+                foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? pink : text),
+                side: WidgetStateProperty.all(BorderSide(color: pink.withValues(alpha: 0.7), width: 1.2)),
+              ),
+            )
+          : null,
+      switchTheme: g
+          ? SwitchThemeData(
+              thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? green : t['dim']),
+              trackColor: WidgetStateProperty.resolveWith((s) =>
+                  s.contains(WidgetState.selected) ? green.withValues(alpha: 0.25) : line.withValues(alpha: 0.2)),
+              trackOutlineColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? green : line),
+            )
+          : null,
+      dialogTheme: g
+          ? DialogThemeData(
+              backgroundColor: panelHi.withValues(alpha: 0.9),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+              ),
+            )
+          : null,
+      popupMenuTheme: g
+          ? PopupMenuThemeData(
+              color: panelHi.withValues(alpha: 0.92),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+              ),
+            )
+          : null,
+      bottomSheetTheme: g ? BottomSheetThemeData(backgroundColor: panelHi.withValues(alpha: 0.92)) : null,
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         border: OutlineInputBorder(borderSide: BorderSide(color: line)),

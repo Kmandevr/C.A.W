@@ -9,6 +9,7 @@ import 'builder_screen.dart' show kindColor, kindIcon;
 import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
+import 'glass.dart';
 
 class TrackCardsScreen extends StatelessWidget {
   const TrackCardsScreen({super.key, required this.state, required this.onOpenModule});
@@ -111,7 +112,7 @@ class _ProjectStrip extends StatelessWidget {
 
 Future<void> showProjectSheet(BuildContext context, AppState s) {
   final opened = s.project;
-  return showModalBottomSheet<void>(
+  return showGlassSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,
@@ -555,7 +556,7 @@ class _AddTrackCard extends StatelessWidget {
       for (final t in state.templates)
         if (const {'generator', 'synth'}.contains(headerValue(t.source, 'kind') ?? 'generator')) t,
     ];
-    final pick = await showModalBottomSheet<Object>(
+    final pick = await showGlassSheet<Object>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,
@@ -626,7 +627,7 @@ class _AddTrackCard extends StatelessWidget {
 
 /// Everything about one track in one panel: sound (with its sliders), notes, effects and mix.
 Future<void> showTrackSheet(BuildContext context, AppState s, LayerDoc layer, ValueChanged<String> onOpenModule) =>
-    showModalBottomSheet<void>(
+    showGlassSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,

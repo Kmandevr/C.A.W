@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: 041c2ec
+Commit: 808e826
 
-Branch: claude/caw-engine-foundation-skpirb (on Main 2ce4b1b; PR #100: glass, the dock view and the shell switch, in review)
+Branch: claude/caw-engine-foundation-skpirb (on Main 808e826; the glass-everywhere PR in review)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: docking panels (the phone too), a Unity-like code workspace, a Reaper-like mixer, a docked piano roll, and smooth, distance-aware motion. The whole spec, the open questions and the order of work (U0–U8) are in `docs/ui-plan.md`, and the owner's choices are in `docs/decisions.md`.
@@ -21,8 +21,8 @@ Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: do
 ## Next
 U1 has five PRs (architect review, 2026-11-04; detail in `docs/ui-plan.md`, U1):
 1. The layout model: merged (#99). Glass surfaces and setting (owner, 2026-11-04): in review.
-2. The dock view (`app/lib/ui/dock/dock_view.dart`): in review in #100.
-3. The shell switch (`app/lib/ui/dock/dock_controller.dart`, `app/lib/ui/shell.dart`): in review in #100. Left for later: hidden tabs still rebuild on the 30 Hz tick; the phone quick-actions strip overlays the lower panel.
+2. The dock view (`app/lib/ui/dock/dock_view.dart`): merged (#100).
+3. The shell switch (`app/lib/ui/dock/dock_controller.dart`, `app/lib/ui/shell.dart`): merged (#100). Glass everywhere (owner): in review. Left for later: hidden tabs still rebuild on the 30 Hz tick; the phone quick-actions strip overlays the lower panel.
 4. Open straight into the arrangement.
 5. The transport bar: undo/redo and tap tempo (#19).
 

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'model/app_state.dart';
 import 'model/settings.dart';
+import 'ui/glass.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
 
@@ -31,8 +32,10 @@ class CawApp extends StatelessWidget {
           debugShowCheckedModeBanner: false,
           themeAnimationDuration: Duration.zero, // theme edits repaint once, with no animation frames
           theme: Neon.theme(look: state.settings.activeTheme, compact: state.settings.compact),
-          // A new key after a theme change rebuilds every screen, so colours fixed at build time repaint too.
-          home: Shell(key: ValueKey(state.settings.lookRevision), state: state),
+          // The glass backdrop sits behind every route (glass off: the plain background).
+          builder: (context, child) => GlassBackdrop(child: child ?? const SizedBox.shrink()),
+          // A new key after a theme or glass change rebuilds every screen, so colours fixed at build time repaint too.
+          home: Shell(key: ValueKey((state.settings.lookRevision, state.settings.glass)), state: state),
         ),
       );
 }

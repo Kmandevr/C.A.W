@@ -9,6 +9,7 @@ import '../model/settings.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
+import 'glass.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.settings, this.engineProfile, this.executionPlan});
@@ -629,7 +630,7 @@ List<Widget> _editorSettings(BuildContext context, Settings settings) {
       subtitle: Text(e.keyRow.map((k) => k.trim()).join('  '),
           maxLines: 1, overflow: TextOverflow.ellipsis, style: Neon.code(size: 12, color: Neon.dim)),
       trailing: const Icon(Icons.chevron_right),
-      onTap: () => showModalBottomSheet<void>(
+      onTap: () => showGlassSheet<void>(
         context: context,
         backgroundColor: Neon.panel,
         isScrollControlled: true,

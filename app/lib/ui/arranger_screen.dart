@@ -10,6 +10,7 @@ import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
 import 'track_cards_screen.dart';
+import 'glass.dart';
 
 
 double endPosition(AppState state, ProjectDoc project, int loopLength) {
@@ -174,8 +175,19 @@ class _TimelineHeader extends StatelessWidget {
     final color = Neon.layer(layer.color);
     final gens = state.project.modules.where((m) => state.isGenerator(m.id)).toList();
     return Container(height: trackHeight + layer.automation.length * 34.0, padding: EdgeInsets.fromLTRB(7 + depth * 13, 5, 4, 4),
-      decoration: const BoxDecoration(color: Neon.panel,
-        border: Border(bottom: BorderSide(color: Neon.line), right: BorderSide(color: Neon.line))),
+      // Glass: a see-through header tinted with its track's colour, with a soft highlight along the top.
+      decoration: Glass.active
+          ? BoxDecoration(
+              gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+                Color.lerp(Neon.panel, color, 0.14)!.withValues(alpha: 0.78),
+                Color.lerp(Neon.panel, color, 0.05)!.withValues(alpha: 0.62),
+              ]),
+              border: Border(
+                bottom: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
+                right: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
+              ))
+          : const BoxDecoration(color: Neon.panel,
+              border: Border(bottom: BorderSide(color: Neon.line), right: BorderSide(color: Neon.line))),
       child: Column(children: [
         Row(children: [
           if (layer.isFolder)
@@ -391,7 +403,7 @@ class _TimelineClipState extends State<_TimelineClip> {
     return Transform.translate(offset: Offset(dragging && !sourceDragging ? dx : 0, 0),
       child: Transform.scale(scaleX: resizing ? length / c.lengthSteps : 1.0,
         alignment: Alignment.centerLeft,
-        child: Material(color: widget.color.withValues(alpha: widget.selected ? .42 : .23),
+        child: Material(color: Glass.active ? Colors.transparent : widget.color.withValues(alpha: widget.selected ? .42 : .23),
           borderRadius: BorderRadius.circular(5),
           child: Stack(children: [
         Positioned.fill(child: GestureDetector(
@@ -422,9 +434,17 @@ class _TimelineClipState extends State<_TimelineClip> {
             setState(() { dragging = false; sourceDragging = false; dx = 0; });
           },
           child: Container(
+            // Glass: a faint fill that is lighter at the top, and a solid outline in the track's colour.
             decoration: BoxDecoration(borderRadius: BorderRadius.circular(5),
-              border: Border.all(color: widget.selected ? widget.color : widget.color.withValues(alpha: .7),
-                width: widget.selected ? 1.7 : 1)),
+              gradient: Glass.active
+                  ? LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+                      widget.color.withValues(alpha: widget.selected ? .40 : .26),
+                      widget.color.withValues(alpha: widget.selected ? .24 : .12),
+                    ])
+                  : null,
+              border: Border.all(
+                color: Glass.active || widget.selected ? widget.color : widget.color.withValues(alpha: .7),
+                width: widget.selected ? 1.8 : (Glass.active ? 1.3 : 1))),
             padding: const EdgeInsets.fromLTRB(7, 4, 13, 3),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [

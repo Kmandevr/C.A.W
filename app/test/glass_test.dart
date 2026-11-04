@@ -108,6 +108,6 @@ void main() {
       ),
       goldenSizes['phone']!,
     );
-    await expectLater(find.byType(Scaffold), matchesGoldenFile('goldens/glass_phone.png'));
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/glass_phone.png'));
   });
 }

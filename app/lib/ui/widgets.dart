@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../engine/engine.dart';
 import '../model/app_state.dart';
 import 'theme.dart';
+import 'glass.dart';
 
 class NeonPanel extends StatelessWidget {
   const NeonPanel({super.key, required this.child, this.color, this.padding = const EdgeInsets.all(12)});
@@ -20,11 +21,15 @@ class NeonPanel extends StatelessWidget {
           boxShadow: color == null ? null : Neon.glow(color!, strength: 0.25),
         ),
         // A Material surface (not a coloured box) so list tiles and ink splashes inside draw correctly.
+        // Glass: see-through, faintly tinted with the card's colour, with a solid outline.
         child: Material(
-          color: Neon.panel,
+          color: Glass.active
+              ? Color.lerp(Neon.panel, color ?? Neon.panel, 0.06)!.withValues(alpha: 0.55)
+              : Neon.panel,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
-            side: BorderSide(color: color?.withValues(alpha: 0.7) ?? Neon.line),
+            side: BorderSide(
+                color: Glass.active ? (color ?? Colors.white.withValues(alpha: 0.12)) : (color?.withValues(alpha: 0.7) ?? Neon.line)),
           ),
           child: Padding(padding: padding, child: child),
         ),
@@ -93,7 +98,8 @@ class _ScopePainter extends CustomPainter {
   bool shouldRepaint(covariant _ScopePainter old) => true;
 }
 
-/// A horizontal bar for a 0..1 value, drawn in neon.
+/// A horizontal bar for a 0..1 value, drawn in neon. With glass on: a faint fill and a solid outline, for the
+/// track and the value alike, a little taller so the outline reads.
 class Bar extends StatelessWidget {
   const Bar({super.key, required this.value, required this.color, this.height = 4});
   final double value;
@@ -101,7 +107,33 @@ class Bar extends StatelessWidget {
   final double height;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
+  Widget build(BuildContext context) => Glass.active ? _glass() : _plain();
+
+  Widget _glass() {
+    final h = height < 7 ? 7.0 : height;
+    final r = BorderRadius.circular(h);
+    return LayoutBuilder(
+      builder: (context, c) => Container(
+        height: h,
+        decoration: BoxDecoration(
+          color: Neon.line.withValues(alpha: 0.18),
+          borderRadius: r,
+          border: Border.all(color: Neon.line),
+        ),
+        alignment: Alignment.centerLeft,
+        child: Container(
+          width: c.maxWidth * value.clamp(0.0, 1.0),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.35),
+            borderRadius: r,
+            border: value > 0 ? Border.all(color: color, width: 1.3) : null,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _plain() => LayoutBuilder(
         builder: (context, c) => Container(
           height: height,
           decoration: BoxDecoration(color: Neon.line, borderRadius: BorderRadius.circular(height)),
@@ -169,14 +201,18 @@ class ToggleChip extends StatelessWidget {
             width: 48,
             height: 48,
             alignment: Alignment.center,
+            // Glass: on is a faint fill with a solid outline (not a solid block); off is outlined only.
             decoration: BoxDecoration(
-              color: on ? color : Colors.transparent,
+              color: on ? (Glass.active ? color.withValues(alpha: 0.22) : color) : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: on ? color : Neon.line),
+              border: Border.all(color: on ? color : Neon.line, width: on && Glass.active ? 1.6 : 1),
               boxShadow: on ? Neon.glow(color) : null,
             ),
             child: Text(label,
-                style: TextStyle(fontWeight: FontWeight.w700, color: on ? Neon.bg : Neon.dim, fontSize: 15)),
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: on ? (Glass.active ? color : Neon.bg) : Neon.dim,
+                    fontSize: 15)),
           ),
         ),
       );

@@ -101,7 +101,7 @@ void main() {
       final s = await startState(tester);
       await pumpGolden(tester, Shell(state: s), size.value);
       expect(tester.takeException(), isNull);
-      await expectLater(find.byType(Shell), matchesGoldenFile('goldens/shell_${size.key}.png'));
+      await expectLater(goldenScreen, matchesGoldenFile('goldens/shell_${size.key}.png'));
       final dock = DockController.of(tester.element(find.byType(Scaffold).first));
       for (final id in Panels.all) {
         dock.reveal(id);
@@ -112,4 +112,14 @@ void main() {
       s.dispose();
     }, skip: skip);
   }
+
+  testWidgets('the Mix preset on a desktop: mixer strips, meters and toggles', (tester) async {
+    final s = await startState(tester);
+    await pumpGolden(tester, Shell(state: s), goldenSizes['desktop']!);
+    DockController.of(tester.element(find.byType(Scaffold).first)).usePreset(DockPreset.mix);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/shell_desktop_mix.png'));
+    s.dispose();
+  }, skip: skip);
 }

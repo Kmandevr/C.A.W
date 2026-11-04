@@ -14,6 +14,7 @@ import 'param_control.dart';
 import 'pattern_editor.dart';
 import 'theme.dart';
 import 'widgets.dart';
+import 'glass.dart';
 
 /// Generators and synths are green, effects pink, libraries blue and patterns yellow.
 Color kindColor(String kind) =>
@@ -398,7 +399,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
 
   /// New: a blank module of each kind first (an empty file with a faint hint), then the templates.
   Future<void> _newModule() async {
-    final pick = await showModalBottomSheet<Object>(
+    final pick = await showGlassSheet<Object>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,

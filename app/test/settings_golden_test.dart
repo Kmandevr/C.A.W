@@ -8,6 +8,6 @@ import 'golden_util.dart';
 void main() {
   testWidgets('settings page, phone', (tester) async {
     await pumpGolden(tester, SettingsPage(settings: Settings()), goldenSizes['phone']!);
-    await expectLater(find.byType(SettingsPage), matchesGoldenFile('goldens/settings_phone.png'));
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/settings_phone.png'));
   });
 }
