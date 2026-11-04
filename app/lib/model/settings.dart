@@ -161,6 +161,7 @@ class Settings extends ChangeNotifier {
     Motion.setting = motion;
     Motion.haptics = haptics;
     Glass.enabled = glass;
+    Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
   }
 
@@ -173,6 +174,14 @@ class Settings extends ChangeNotifier {
   /// The docking layouts by screen shape (`phonePortrait`, `phoneLandscape`, `desktop`), kept as raw JSON: the dock
   /// reads them and falls back to a preset when one is missing or damaged.
   Map<String, Object?> dockLayouts = {};
+
+  /// The gap between tracks in the arrangement, in logical pixels (owner, 2026-11-04: tracks shouldn't sit on top
+  /// of each other with no room).
+  double trackGap = 6;
+  static const maxTrackGap = 24.0;
+
+  /// Frosted blur on floating surfaces while glass is on; off keeps the glass look with no blur (much cheaper).
+  bool glassBlur = true;
 
   /// The phone's floating quick-actions bar (owner, 2026-11-04: not very useful yet, so off by default).
   bool quickActions = false;
@@ -246,6 +255,8 @@ class Settings extends ChangeNotifier {
         'haptics': haptics,
         'glass': glass,
         'quick_actions': quickActions,
+        'track_gap': trackGap,
+        'glass_blur': glassBlur,
         'dock_layouts': dockLayouts,
         'reactive_glow': reactiveGlow,
         'export_profiles': [for (final profile in exportProfiles) profile.toJson()],
@@ -274,6 +285,9 @@ class Settings extends ChangeNotifier {
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
     if (j['glass'] is bool) glass = j['glass'] as bool;
     if (j['quick_actions'] is bool) quickActions = j['quick_actions'] as bool;
+    final gap = j['track_gap'];
+    if (gap is num && gap.isFinite) trackGap = gap.toDouble().clamp(0.0, maxTrackGap);
+    if (j['glass_blur'] is bool) glassBlur = j['glass_blur'] as bool;
     final dock = j['dock_layouts'];
     if (dock is Map) dockLayouts = {for (final e in dock.entries) if (e.key is String) e.key as String: e.value};
     final glow = j['reactive_glow'];

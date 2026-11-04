@@ -21,6 +21,7 @@ import 'startup_screen.dart';
 import 'theme.dart';
 import 'theme_editor.dart';
 import 'widgets.dart';
+import 'glass.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [
@@ -160,7 +161,7 @@ class _ShellState extends State<Shell> {
 }
 
 /// The layout menu: the presets, and every panel (tap to show it).
-Future<void> showLayoutMenu(BuildContext context, DockController dock) => showModalBottomSheet<void>(
+Future<void> showLayoutMenu(BuildContext context, DockController dock) => showGlassSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,
@@ -226,7 +227,13 @@ class _TransportBar extends StatelessWidget {
     final playing = state.meters.playing;
     return Container(
       padding: EdgeInsets.fromLTRB(10, Neon.compact(context) ? 3 : 6, 10, Neon.compact(context) ? 3 : 6),
-      decoration: const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
+      // Glass: see-through over the backdrop, with a thin bright edge underneath.
+      decoration: Glass.active
+          ? BoxDecoration(
+              color: Neon.panel.withValues(alpha: 0.6),
+              border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+            )
+          : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
       child: Row(children: [
         const CrowLogo(size: 30),
         const SizedBox(width: 8),
@@ -291,7 +298,7 @@ class _TransportBar extends StatelessWidget {
 Future<void> showProjectMenu(BuildContext context, AppState s) async {
   final projects = await s.listProjects();
   if (!context.mounted) return;
-  await showModalBottomSheet<void>(
+  await showGlassSheet<void>(
     context: context,
     backgroundColor: Neon.panel,
     isScrollControlled: true,
@@ -352,7 +359,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
             onTap: () async {
               final nav = Navigator.of(context);
               nav.pop();
-              await nav.push(MaterialPageRoute<void>(builder: (_) => SettingsPage(settings: s.settings)));
+              await nav.push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: SettingsPage(settings: s.settings))));
               s.settings.commitLook();
             },
           ),

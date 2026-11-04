@@ -22,6 +22,7 @@ import '../model/settings.dart';
 import 'key_router.dart';
 import 'note_expression.dart';
 import 'theme.dart';
+import 'glass.dart';
 
 enum PatternTool { draw, select, curve, erase }
 
@@ -1189,7 +1190,7 @@ class _PatternEditorState extends State<PatternEditor> {
     final base = _doc;
     if (base == null || _sel.isEmpty) return;
     final sel = Set<int>.of(_sel);
-    await showModalBottomSheet<void>(
+    await showGlassSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,
@@ -1350,7 +1351,7 @@ class _PatternEditorState extends State<PatternEditor> {
         switch (v) {
           case 'toolbar':
             if (router != null) {
-              showModalBottomSheet<void>(
+              showGlassSheet<void>(
                 context: context,
                 backgroundColor: Neon.panel,
                 isScrollControlled: true,
@@ -1380,8 +1381,10 @@ class _PatternEditorState extends State<PatternEditor> {
           Navigator.of(context).pop();
         } else {
           Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => Scaffold(
-                  body: SafeArea(child: PatternEditor(state: s, module: widget.module, fullScreen: true, router: _router)))));
+              builder: (_) => GlassPage(
+                  child: Scaffold(
+                      body: SafeArea(
+                          child: PatternEditor(state: s, module: widget.module, fullScreen: true, router: _router))))));
         }
       },
     );
@@ -1685,7 +1688,7 @@ class _ToolbarEditorState extends State<_ToolbarEditor> {
         if ((d.area == Area.pattern || d.area == Area.global) && !d.internal && !d.takesArg) ActionRef.action(d.id),
       for (final m in _k.macros.names) ActionRef.macro(m),
     ].where((r) => !_items.contains(r)).toList();
-    final picked = await showModalBottomSheet<ActionRef>(
+    final picked = await showGlassSheet<ActionRef>(
       context: context,
       backgroundColor: Neon.panel,
       isScrollControlled: true,

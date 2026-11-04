@@ -883,6 +883,14 @@ class AppState extends ChangeNotifier {
     editLayer(folder, (l) => l.busEnabled = enabled);
   }
 
+  /// Sets the visual spacer under [layer] (0 removes it). The engine never sees it, so nothing is re-sent.
+  void setSpaceBelow(LayerDoc layer, double px) {
+    final v = px.isFinite ? px.clamp(0.0, LayerDoc.maxSpaceBelow).toDouble() : 0.0;
+    if (v == layer.spaceBelow) return;
+    layer.spaceBelow = v;
+    _changed(engine: false);
+  }
+
   void setFolderCollapsed(LayerDoc folder, bool collapsed) {
     if (!folder.isFolder) return;
     editLayer(folder, (l) => l.collapsed = collapsed);

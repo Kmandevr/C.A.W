@@ -7,7 +7,7 @@ updated: 2026-11-01
 
 # Actions, keys and macros
 
-**[Fact, checked 2026-11-01]** The action registry, keymap parser/serializer, per-area key routing, macros, Vim core, configurable piano-roll toolbar and phone Quick Actions strips are implemented. The app stores its keymap in a private app file named keys.txt. The action list searches actions, shows their current keys and runs them; it does **not** currently edit key bindings. Keymap files can describe toolbar and long-press menu entries, but there is no in-app general keymap/menu editor. The owner can still revise defaults and open points below. See [decisions](decisions.md) and [App](app.md).
+**[Fact, checked 2026-11-01]** The action registry, keymap parser/serializer, per-area key routing, macros, Vim core, configurable piano-roll toolbar and phone Quick Actions strips are implemented (their customise sheets open as glass sheets while Glass is on). The app stores its keymap in a private app file named keys.txt. The action list searches actions, shows their current keys and runs them; it does **not** currently edit key bindings. Keymap files can describe toolbar and long-press menu entries, but there is no in-app general keymap/menu editor. The owner can still revise defaults and open points below. See [decisions](decisions.md) and [App](app.md).
 
 ## How it works
 

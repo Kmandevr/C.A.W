@@ -66,6 +66,8 @@ The application shell shows eight workspaces as docking panels: Builder (Code), 
 
 **Docking (all shapes):** each screen shape (phone portrait, phone landscape, desktop) keeps its own saved layout. The Arrange preset puts the arrangement in one group and the other panels as tabs in a second. Tap a tab to show it. Long-press a tab and drag it onto another group to join it or split it, drag a divider to resize, and maximise a panel to fill the view. The layout button in the transport offers the Arrange, Mix and Code presets and shows any panel. Each screen lays out for its panel's size. ([UI plan](ui-plan.md), U1.)
 
+**Glass (on by default):** a soft ambient background behind see-through panels, cards, track headers and the transport; bottom sheets slide up as frosted glass; sliders, level bars, switches, buttons, M/S toggles and clips have a light fill and a solid outline ([App](app.md), Look).
+
 **Phone (portrait):** transport at the top, the arrangement above, and the other panels as tabs below it. Inside the arrangement, the track headers sit beside a horizontally scrolling song timeline, with the Arranger's compact mixer panel below the timeline.
 
 **Phone (landscape):** the arrangement and the other panels side by side. Track headers stay aligned with their lanes while the song timeline scrolls horizontally.
@@ -152,4 +154,4 @@ Audio recording, MIDI recording, audio clips, clip-following automation and modu
 
 ## Performance profiles
 
-Settings provides Full Experience, Balanced, Lightweight and Minimal. Profiles reduce decorative effects before useful responsiveness: meter polling stays at 30 Hz in every mode. Lightweight/Minimal use the existing reduced voice budget; Minimal hides scope panels and turns motion off (Lightweight and Minimal also turn Glass off; the Motion, Haptics and Glow settings and the shared motion rules are in `lib/ui/motion.dart`; see [UI plan](ui-plan.md), "Feel"). See [Performance](performance.md#ui-performance-profiles) for the exact behavior and remaining device measurements.
+Settings provides Full Experience, Balanced, Lightweight and Minimal. Profiles reduce decorative effects before useful responsiveness: meter polling stays at 30 Hz in every mode. Lightweight/Minimal use the existing reduced voice budget; Minimal hides scope panels and turns motion off (Lightweight turns glass blur off and Minimal turns Glass off, which brings back solid panels and controls; the Motion, Haptics and Glow settings and the shared motion rules are in `lib/ui/motion.dart`; see [UI plan](ui-plan.md), "Feel"). See [Performance](performance.md#ui-performance-profiles) for the exact behavior and remaining device measurements.

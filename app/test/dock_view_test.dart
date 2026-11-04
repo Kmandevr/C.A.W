@@ -224,7 +224,7 @@ void main() {
           Scaffold(body: DockView(layout: l, onChanged: (_) {}, panelBuilder: (_, id) => _Probe(id))),
           goldenSizes[name]!,
         );
-        await expectLater(find.byType(DockView), matchesGoldenFile('goldens/dock_$name.png'));
+        await expectLater(goldenScreen, matchesGoldenFile('goldens/dock_$name.png'));
       });
     }
   });

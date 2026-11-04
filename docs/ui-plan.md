@@ -274,7 +274,7 @@ updated: 2026-11-04
   - On release, it settles onto the ghost with the distance-aware motion above.
   - Points and handles grow slightly under the finger.
 - **Haptics (owner):** on by default, and can be switched off. On Android a light tick plays when something snaps, a handle clicks into a detent, or a note is placed.
-- **Glass (owner):** real frosted blur on floating surfaces only (toolbars, menus, sheets, drag previews, the transport). Docked panels get a translucent tint, a soft top highlight and a thin bright edge, with no blur. A Settings switch, on by default; Lightweight and Minimal turn it off. Built: `lib/ui/glass.dart` (`GlassPanel`, `GlassOverlay`).
+- **Glass (owner):** real frosted blur on floating surfaces only (toolbars, menus, sheets, drag previews, the transport). Docked panels get a translucent tint, a soft top highlight and a thin bright edge, with no blur. A Settings switch, on by default; Minimal turns it off. A Frosted blur switch (on by default) turns only the blur off, and Lightweight runs glass without blur; unblurred overlays get a denser tint with a top highlight, so they still read as glass. Also (owner): a soft ambient background behind the see-through panels, glass track headers and clips, sheets that slide up as frosted glass, and sliders, bars, switches, buttons and toggles with a light fill and a solid outline. Built: `lib/ui/glass.dart` (`GlassPanel`, `GlassOverlay`, `GlassBackdrop`, `showGlassSheet`, the slider shapes) and the glass variant of `Neon.theme`.
 - **Motion setting (owner):** Full, Reduced or Off.
   - Reduced keeps fades only, with no springs or movement.
   - The Minimal profile sets Off, and the system's reduce-motion setting sets Reduced.

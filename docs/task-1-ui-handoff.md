@@ -24,7 +24,7 @@ Implemented UI/workflow foundations include:
 - Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue.
 - Files workspace for project/module import/export, project-local organization, tags, saved searches and project restore points.
 - Plugin Builder for validating and packaging native .caw source modules.
-- Motion rules and the Motion, Haptics and Glow settings (`lib/ui/motion.dart`), the Glass setting and surfaces (`lib/ui/glass.dart`), and golden tests with real fonts (`test/golden_util.dart`). No screen animates with them yet.
+- Motion rules and the Motion, Haptics and Glow settings (`lib/ui/motion.dart`), the Glass setting and the glass look across the app (`lib/ui/glass.dart`: ambient background, see-through panels and tracks, frosted sheets, outlined controls), and golden tests with real fonts (`test/golden_util.dart`). No screen animates with them yet.
 - The docking layout model (`lib/ui/dock/layout.dart`). It isn't on screen yet; U1's next PRs draw it and switch the shell to it.
 
 The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), with steps U0–U8.

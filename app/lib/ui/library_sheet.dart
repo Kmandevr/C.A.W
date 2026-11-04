@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../engine/engine.dart';
 import 'theme.dart';
+import 'glass.dart';
 
 /// Opens the library: every function with its docs and example, searchable, each one a tap away from the code.
 Future<void> showLibrarySheet(
@@ -11,7 +12,7 @@ Future<void> showLibrarySheet(
   String query = '',
   required void Function(String text) onInsert,
 }) {
-  return showModalBottomSheet<void>(
+  return showGlassSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Neon.panel,

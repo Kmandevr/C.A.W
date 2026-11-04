@@ -13,6 +13,18 @@ ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'s
     ]);
 
 void main() {
+  test('a spacer under a track is saved with the project, never sent to the engine, and clamped', () {
+    final p = sample();
+    p.layers.first.spaceBelow = 40;
+    final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(back.layers.first.spaceBelow, 40);
+    expect(back.layers.last.spaceBelow, 0);
+    expect(jsonEncode(p.toEngineJson()), isNot(contains('space_below')));
+    expect(LayerDoc.fromJson({'id': 'x', 'space_below': 'big'}).spaceBelow, 0);
+    expect(LayerDoc.fromJson({'id': 'x', 'space_below': 9999}).spaceBelow, LayerDoc.maxSpaceBelow);
+    expect(LayerDoc.fromJson({'id': 'x', 'space_below': -5}).spaceBelow, 0);
+  });
+
   test('project file round-trips', () {
     final p = sample();
     // Keep this round-trip focused on the current clip format. The legacy pointer
