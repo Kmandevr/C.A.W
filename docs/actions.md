@@ -82,7 +82,7 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
-| Go to Sounds / Tracks / Export | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built) |
+| Show the Code / Arrange / Export panel | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built; the panel is revealed in the dock) |
 | Go to Mixer / Engine Lab / Automation | Ctrl+4 / Ctrl+5 / Ctrl+6 |
 | Go to Files / Plugin Builder | Ctrl+7 / Ctrl+8 |
 | New, open, duplicate, rename, delete project | — / Ctrl+O / — / F2 in the project menu / — |

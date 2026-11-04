@@ -170,6 +170,10 @@ class Settings extends ChangeNotifier {
   /// Haptic ticks on snaps, detents and placed notes; on by default (owner).
   bool haptics = true;
 
+  /// The docking layouts by screen shape (`phonePortrait`, `phoneLandscape`, `desktop`), kept as raw JSON: the dock
+  /// reads them and falls back to a preset when one is missing or damaged.
+  Map<String, Object?> dockLayouts = {};
+
   /// Glass surfaces (owner, 2026-11-04): frosted blur on floating things, a glass look on panels; on by default.
   bool glass = true;
 
@@ -238,6 +242,7 @@ class Settings extends ChangeNotifier {
         'motion': motion.name,
         'haptics': haptics,
         'glass': glass,
+        'dock_layouts': dockLayouts,
         'reactive_glow': reactiveGlow,
         'export_profiles': [for (final profile in exportProfiles) profile.toJson()],
         'export_history': [for (final entry in exportHistory) entry.toJson()],
@@ -264,6 +269,8 @@ class Settings extends ChangeNotifier {
     motion = pick(MotionLevel.values, j['motion'], motion);
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
     if (j['glass'] is bool) glass = j['glass'] as bool;
+    final dock = j['dock_layouts'];
+    if (dock is Map) dockLayouts = {for (final e in dock.entries) if (e.key is String) e.key as String: e.value};
     final glow = j['reactive_glow'];
     if (glow is num && glow.isFinite) reactiveGlow = glow.toDouble().clamp(0.0, 1.0);
     exportProfiles = ((j['export_profiles'] is List ? j['export_profiles'] as List : const []))

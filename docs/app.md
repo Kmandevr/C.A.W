@@ -102,7 +102,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - guided creation from blank generators/effects or existing generator/effect templates; advanced workflow can select, clone, validate and package project modules
   - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source; cloning preserves the original and creates an independent project module
   - CLAP/VST3 binary targets, host sandboxing and per-plugin CPU/memory tests are not available until a native plugin SDK/host backend is integrated
-- **Layout:** phones get a bottom navigation bar. Screens at least 900 px wide get a side rail; phones use a four-item bottom bar (Builder, Arranger, Mixer, More); More opens Engine Lab, Automation, Exporter, Files and Plugin Builder. Desktop uses a navigation rail for all eight destinations. All workspaces share the same AppState. Global shortcuts navigate all workspaces: Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
+- **Layout:** the eight workspaces are docking panels (`lib/ui/shell.dart`, `lib/ui/dock/`), on phones too. Each screen shape (phone portrait, phone landscape, desktop at 900 px wide or more) keeps its own layout in Settings, saved shortly after a change. The Arrange preset shows the arrangement in one group and the other panels as tabs in a second: stacked in portrait, side by side otherwise. The transport's layout button offers the Arrange, Mix and Code presets and shows any panel. The keyboard area follows the panel touched last. All workspaces share the same AppState. Global shortcuts show a workspace's panel: Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
 - **Library and pattern modules** make no sound of their own: layers, the Exporter and Solo preview don't use them as generators.
 
@@ -138,12 +138,12 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - `lib/ui/tokens.dart`: spacing, radii, type sizes, touch targets (48 dp, or 36 dp compact) and colours by role (accent, selection, warning, danger, automation, track).
     - `lib/ui/kit.dart`: the context-aware toolbar row (fixed tools, a middle part that slides and fades when its context changes, ⋮), tool buttons and the ⓘ info button.
     - The existing screens don't use them yet.
-  - **Docking layout model** (`lib/ui/dock/layout.dart`, not yet on screen):
+  - **Docking layout model** (`lib/ui/dock/layout.dart`):
     - The model is a tree of splits and tab groups holding panels by string id.
     - Edits are dock (into a group, or split off on any edge), remove, reveal and activate. Split shares keep a 12% minimum, after every edit and load; ids are checked and deduplicated on any tree.
     - Presets: Arrange, Mix and Code, for phone portrait, phone landscape and desktop.
     - The JSON form drops unknown or repeated panels and damaged parts.
-    - The view (`lib/ui/dock/dock_view.dart`) draws it: draggable dividers (a narrow grab zone, so scrolls near a panel's edge still reach the panel), glass tab strips, a long-press drag of a tab onto one of five drop zones, and maximise. A panel keeps its state when it moves or is maximised, and hidden tabs keep theirs with tickers off. No screen uses it yet.
+    - The view (`lib/ui/dock/dock_view.dart`) draws it in the shell: draggable dividers (a narrow grab zone, so scrolls near a panel's edge still reach the panel), glass tab strips, a long-press drag of a tab onto one of five drop zones, and maximise. A panel keeps its state when it moves or is maximised, and hidden tabs keep theirs with tickers off. Each panel's size stands in for the screen's, so a screen lays out for its panel.
   - **Performance profiles:** Full Experience (full glow), Balanced (55% glow), Lightweight (no glow, 4 voices per pattern layer) and Minimal (Lightweight plus hidden scope panels). All profiles keep meter polling at 30 Hz; Minimal does not slow down editing or meters.
     - Existing `light_mode` settings migrate to Lightweight/ Balanced; the legacy key is still written for older builds.
     - Automatic overload response selects Lightweight once, unless disabled.
@@ -184,7 +184,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - the pattern model (`lib/model/pattern_doc.dart`): exact step fractions, parsing with the engine's errors, comment-keeping write-back and every note edit
 - the actions core (`lib/actions/`): keymap files, conflicts, macros with their recursion guard, counts, `:` commands, `.` repeat and recording
 - settings, theme files and the startup choices
-- the motion rules and the motion, haptics and glow settings (`test/motion_test.dart`), the Glass setting and surfaces (`test/glass_test.dart`), and the docking model and view (`test/dock_layout_test.dart`, `test/dock_view_test.dart`)
+- the motion rules and the motion, haptics and glow settings (`test/motion_test.dart`), the Glass setting and surfaces (`test/glass_test.dart`), and the docking model, view and shell (`test/dock_layout_test.dart`, `test/dock_view_test.dart`, `test/dock_shell_test.dart`: every panel at the three sizes without overflow, with goldens)
 - golden (screenshot) tests, which compare a screen with a PNG in `test/goldens/`:
   - `test/golden_util.dart` loads real fonts (the bundled JetBrains Mono, and the Roboto and Material icons from the Flutter SDK), so layouts measure as they do on a phone. It pumps screens at the plan's sizes: phone 390×844, landscape 844×390, desktop 1280×800.
   - After an intended visual change, run `flutter test --update-goldens` and review the new PNGs.

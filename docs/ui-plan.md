@@ -300,12 +300,13 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
       - glass tab strips, a long-press drag onto five drop zones (the middle half joins the group, near an edge splits there) with a preview of where it lands, and maximise
       - each panel body keeps a `GlobalObjectKey(panelId)` and its own `RepaintBoundary`, so a moved or maximised panel keeps its state; hidden tabs stay mounted with tickers off
       - goldens at the three sizes
-   3. **The shell switch:**
-      - a `DockController.reveal(panel)` replaces the tab-switching callbacks
+   3. **The shell switch** (built):
+      - `DockController` (`lib/ui/dock/dock_controller.dart`) keeps a layout per screen shape; `DockController.of(context).reveal(panel)` shows a panel. The screens' open-the-Builder callbacks and the view shortcuts call it.
       - the last-touched panel sets the key area
-      - hidden tabs stay mounted under `TickerMode(enabled: false)` and don't rebuild on the 30 Hz tick
-      - Settings keeps `dock_layouts` as raw JSON, so a damaged layout falls back on its own
-      - screens read their panel's size, not the screen's
+      - hidden tabs stay mounted with their tickers off. **Not yet:** they still rebuild on the 30 Hz tick, as the old IndexedStack did; a `PanelVisible` check is left for later.
+      - Settings keeps `dock_layouts` as raw JSON, so a damaged layout falls back to its preset on its own
+      - screens read their panel's size, not the screen's (the piano roll's finger-size taps still follow the device's screen). The Builder's narrow layouts scroll, so a short panel doesn't overflow.
+      - the layout button in the transport: presets and every panel
    4. **Open straight into the arrangement:** the startup screen goes, and New, Template and Open move to the project menu.
    5. **The transport bar:** undo and redo, and tap tempo (#19).
 3. **U2, arrangement:**

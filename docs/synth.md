@@ -13,7 +13,7 @@ This note describes the synth functionality that exists in the repository. It is
 
 **[Fact, checked 2026-11-01]** The engine accepts modules with header kind: synth. The patch compiler translates the patch into ordinary generator code plus effect modules, which use the existing voice, pattern, hot-swap, export and deterministic-render paths. The Init synth template is included, and engine tests cover parsing, validation and generated output.
 
-A synth patch is a code-editable module. In the current app, it is handled through the normal Builder workflow: generated parameters appear in the Controls panel and the patch source remains editable in the code editor. There is no separate Vital/Serum-style synth screen or dedicated on-screen keyboard in the current UI.
+A synth patch is a code-editable module. In the current app, it is handled through the normal Builder workflow (the Code panel; in a narrow panel its controls and code scroll as one list): generated parameters appear in the Controls panel and the patch source remains editable in the code editor. There is no separate Vital/Serum-style synth screen or dedicated on-screen keyboard in the current UI.
 
 ## Supported patch features
 

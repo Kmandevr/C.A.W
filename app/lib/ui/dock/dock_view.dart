@@ -59,7 +59,15 @@ class _DockViewState extends State<DockView> {
     enabled: shown,
     child: KeyedSubtree(
       key: GlobalObjectKey(id),
-      child: RepaintBoundary(child: Builder(builder: (c) => widget.panelBuilder(c, id))),
+      // The panel's own size stands in for the screen's, so a screen lays out for the space it has.
+          child: RepaintBoundary(
+            child: LayoutBuilder(
+              builder: (c, box) => MediaQuery(
+                data: MediaQuery.of(c).copyWith(size: box.biggest),
+                child: Builder(builder: (c) => widget.panelBuilder(c, id)),
+              ),
+            ),
+          ),
     ),
   );
 

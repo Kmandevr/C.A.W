@@ -205,7 +205,12 @@ class _PatternEditorState extends State<PatternEditor> {
   }
 
   Steps get _lineLevel => _levelFor(10);
-  Steps get _tapLevel => _levelFor(MediaQuery.of(context).size.shortestSide < 600 ? 48 : 24);
+  // Finger-sized taps on a phone: the device's screen decides, not the panel's size (a docked panel is smaller).
+  Steps get _tapLevel {
+    final view = View.of(context);
+    final screen = view.physicalSize / view.devicePixelRatio;
+    return _levelFor(screen.shortestSide < 600 ? 48 : 24);
+  }
 
   void _apply(PatternDoc next, {Set<int>? select}) {
     final d = _doc;
