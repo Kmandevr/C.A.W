@@ -436,6 +436,39 @@ TEST(effects_process_their_layer_only) {
     CHECK_NEAR(out[999], 0.9 * std::cos(kPi / 4.0), 1e-6);
 }
 
+TEST(each_module_of_a_track_runs_as_its_own_graph_node) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.3"}});
+    p.modules.push_back({"fx", "---\nkind: effect\n---\nin * 2", {}});
+    p.modules.push_back({"fx2", "---\nkind: effect\n---\nin * 0.5", {}});
+    p.layers[0].chain = {"a", "fx", "fx2", "fx"};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    std::vector<float> out = run(e, 1000);
+    CHECK_NEAR(out[999], 0.6 * std::cos(kPi / 4.0), 1e-6);
+    CHECK_EQ(e.mixGraphNodesRun(), 6u);  // four module nodes, the track node and master; idle slots never run
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
+TEST(track_chain_longer_than_its_module_nodes_is_refused_with_an_error) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}});
+    p.modules.push_back({"fx", "---\nkind: effect\n---\nin", {}});
+    for (int i = 1; i < kMaxTrackModules; ++i) p.layers[0].chain.push_back("fx");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("a track runs at most") == std::string::npos);
+    e.play();
+    std::vector<float> out = run(e, 500);
+    CHECK_NEAR(out[499], 0.25 * std::cos(kPi / 4.0), 1e-6);  // exactly the limit still plays
+    p.layers[0].chain.push_back("fx");
+    const std::string result = e.setProject(p);
+    CHECK(result.find("layer not installed: its chain has 33 modules and a track runs at most 32") != std::string::npos);
+    out = run(e, 4800);
+    CHECK_EQ(out[4799], 0.0f);  // refused, never played cut short
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
 TEST(params_reach_the_audio) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "param level = 0.2\nlevel"}});
     p.modules[0].params["level"] = 0.4;

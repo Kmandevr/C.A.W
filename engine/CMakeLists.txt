@@ -136,7 +136,8 @@ if(CAW_TOOLS)
     PROPERTIES PROCESSORS 1)
   # Real-time contract tests in their own binary: it replaces global operator new/delete to count
   # allocations, which would turn off AddressSanitizer's new/delete mismatch checks in caw_tests.
-  add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/alloc_counter.cpp)
+  add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
+                              tests/alloc_counter.cpp)
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_compile_definitions(caw_rt_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_rt_tests PRIVATE caw_core)

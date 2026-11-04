@@ -283,6 +283,8 @@ void GraphExecutor::reset() noexcept {
     routePosition_.clear();
     routeCount_.clear();
     routeStaging_.clear();
+    directStaging_.clear();
+    routePlain_ = false;
     preparedBytes_ = 0;
     staticConnections_ = 0;
     routingCapacity_ = 0;
@@ -437,7 +439,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         std::size_t hostSlots = 0;
         for (std::size_t n = 0; n < nodeCount; ++n) {
             if (inputCount_[n] == 0 || inputTable_[inputBase_[n]] != nullptr) continue;
-            if (hostSlots != 0 && inputCount_[n] != hostChannels) {
+            if (!deferHostCheck_ && hostSlots != 0 && inputCount_[n] != hostChannels) {
                 reset(); return GraphError::RuntimeHostInputMismatch;
             }
             hostChannels = inputCount_[n];
@@ -472,7 +474,20 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
     }
 }
 
-GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget) {
+GraphError GraphExecutor::prepareRouted(const std::vector<GraphNode>& nodes,
+                                        const std::vector<ModuleProcessor*>& processors, uint32_t outputNode,
+                                        uint32_t maxFrames, double sampleRate, const GraphResourceBudget& budget,
+                                        uint32_t maxSourcesPerInput) {
+    deferHostCheck_ = true;
+    GraphError error = prepare(nodes, {}, processors, outputNode, maxFrames, sampleRate, budget);
+    deferHostCheck_ = false;
+    if (error == GraphError::Ok) error = reserveRouting(maxSourcesPerInput, budget, true);
+    if (error != GraphError::Ok) reset();
+    return error;
+}
+
+GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget,
+                                         bool routePlainInputs) {
     if (!ready_ || staticConnections_ != 0) return GraphError::RoutingUnavailable;
     if (maxSourcesPerInput == 0 || budget.maxWorkingBytes == 0) return GraphError::InvalidResourceBudget;
     const std::size_t nodeCount = processors_.size();
@@ -488,7 +503,8 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
     if (!addEstimatedBytes(slots, summing, maxSourcesPerInput) ||
         !addEstimatedBytes(extra, slots, 2u * sizeof(uint32_t)) ||
         !addEstimatedBytes(extra, summing, sizeof(uint32_t)) ||
-        !addEstimatedBytes(extra, nodeCount, sizeof(uint32_t))) return GraphError::SizeOverflow;
+        !addEstimatedBytes(extra, nodeCount, sizeof(uint32_t)) ||
+        (routePlainInputs && !addEstimatedBytes(extra, nodeCount, sizeof(uint32_t)))) return GraphError::SizeOverflow;
     if (preparedBytes_ > budget.maxWorkingBytes || extra > budget.maxWorkingBytes - preparedBytes_)
         return GraphError::ResourceBudgetExceeded;
     try {
@@ -498,6 +514,7 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
         routeStaging_.assign(slots, 0);
         routeCount_.assign(summing, 0);
         routePosition_.assign(nodeCount, 0);
+        if (routePlainInputs) directStaging_.assign(nodeCount, UINT32_MAX);
         sumStorage_.assign(channels * maxFrames_, 0.0f);
         sumTable_.resize(channels);
         uint32_t tableCursor = 0;
@@ -517,17 +534,18 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
         reset();
         return GraphError::OutOfMemory;
     }
-    // Summing inputs are routed now, never host-fed: drop their host slots in place.
-    std::size_t kept = 0;
+    // Routed inputs never read the host: drop their host slots in place. Host slots and input
+    // bases both ascend with the node index, so one forward walk finds each slot's node (O(N)).
+    std::size_t kept = 0, owner = 0;
     for (std::size_t s = 0; s < hostInputSlots_.size(); ++s) {
         const uint32_t slot = hostInputSlots_[s];
-        bool summingSlot = false;
-        for (std::size_t n = 0; n < nodeCount && !summingSlot; ++n)
-            summingSlot = sumIndex_[n] != UINT32_MAX && slot >= inputBase_[n] && slot < inputBase_[n] + inputCount_[n];
-        if (!summingSlot) hostInputSlots_[kept++] = slot;
+        while (owner < nodeCount && (inputCount_[owner] == 0 || inputBase_[owner] + inputCount_[owner] <= slot)) ++owner;
+        const bool routed = routePlainInputs || (owner < nodeCount && sumIndex_[owner] != UINT32_MAX);
+        if (!routed) hostInputSlots_[kept++] = slot;  // routed plain slots already read silence
     }
     hostInputSlots_.resize(kept);
     if (kept == 0) hostInputChannels_ = 0;
+    routePlain_ = routePlainInputs;
     routingCapacity_ = maxSourcesPerInput;
     return GraphError::Ok;
 }
@@ -545,20 +563,29 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
     }
     if (routePosition_[outputNode_] == UINT32_MAX) return false;
     std::fill(routeCount_.begin(), routeCount_.end(), 0u);
+    if (routePlain_) std::fill(directStaging_.begin(), directStaging_.end(), UINT32_MAX);
     for (uint32_t e = 0; e < edgeCount; ++e) {
         const GraphConnection& edge = edges[e];
         if (edge.sourceNode >= nodeCount || edge.destinationNode >= nodeCount) return false;
         const uint32_t index = sumIndex_[edge.destinationNode];
-        if (index == UINT32_MAX || outputCount_[edge.sourceNode] != inputCount_[edge.destinationNode]) return false;
+        if (outputCount_[edge.sourceNode] == 0 || outputCount_[edge.sourceNode] != inputCount_[edge.destinationNode])
+            return false;
         const ModuleDescriptor& from = processors_[edge.sourceNode]->descriptor();
         const ModuleDescriptor& to = processors_[edge.destinationNode]->descriptor();
         if (edge.sourcePort >= from.portCount || from.ports[edge.sourcePort].input ||
             from.ports[edge.sourcePort].type != PortType::Audio) return false;
-        if (edge.destinationPort >= to.portCount || !to.ports[edge.destinationPort].input ||
-            !to.ports[edge.destinationPort].summing) return false;
+        if (edge.destinationPort >= to.portCount || !to.ports[edge.destinationPort].input) return false;
+        const bool summing = to.ports[edge.destinationPort].summing;
+        if (summing ? index == UINT32_MAX : !routePlain_) return false;
         // Both ends must run, the source first (an unlisted node's position is UINT32_MAX).
         if (routePosition_[edge.destinationNode] == UINT32_MAX ||
             routePosition_[edge.sourceNode] >= routePosition_[edge.destinationNode]) return false;
+        if (!summing) {
+            uint32_t& direct = directStaging_[edge.destinationNode];
+            if (direct != UINT32_MAX) return false;  // a plain input takes one route
+            direct = edge.sourceNode;
+            continue;
+        }
         uint32_t& count = routeCount_[index];
         if (count >= routingCapacity_) return false;
         const uint32_t base = sumInputs_[index].sourceBase;
@@ -569,6 +596,14 @@ bool GraphExecutor::setRouting(const GraphConnection* edges, uint32_t edgeCount,
     // Valid: commit in one step. Swapping vectors never allocates.
     sumSources_.swap(routeStaging_);
     for (std::size_t k = 0; k < sumInputs_.size(); ++k) sumInputs_[k].sourceCount = routeCount_[k];
+    if (routePlain_)
+        for (std::size_t n = 0; n < nodeCount; ++n) {
+            if (inputCount_[n] == 0 || sumIndex_[n] != UINT32_MAX) continue;
+            const uint32_t source = directStaging_[n];
+            for (uint32_t c = 0; c < inputCount_[n]; ++c)
+                inputTable_[inputBase_[n] + c] =
+                    source == UINT32_MAX ? zero_.data() : outputTable_[outputBase_[source] + c];
+        }
     std::copy_n(order, orderCount, order_.begin());
     runCount_ = orderCount;
     return true;

@@ -22,6 +22,9 @@ constexpr int kSlots = kMaxLayers + 1;  // the last slot is the Builder's auditi
 constexpr int kAuditionSlot = kMaxLayers;
 constexpr int kScopeSize = 1024;
 constexpr int kMaxVoices = 32;  // most notes a pattern layer plays at once (a module asks for 1..32 with voices:)
+// Modules one track runs (its generator or voice, then effects); each is its own mix-graph node.
+// A longer chain is refused with a layer error, never truncated.
+constexpr int kMaxTrackModules = 32;
 
 struct Meters {
     float cpu = 0, peakL = 0, peakR = 0;
@@ -64,6 +67,8 @@ public:
     int64_t loopLength();                     // samples in the project loop
     // Mix-graph routing updates the graph refused; always 0 unless the routing derivation is wrong.
     uint32_t routingRejections() const noexcept { return routingRejections_.load(std::memory_order_relaxed); }
+    // Tests only, between process() calls: graph nodes the last chunk ran.
+    uint32_t mixGraphNodesRun() const noexcept;
     // Tests only: skip the master DC blocker and limiter so layer output can be checked exactly.
     void setMasterBypass(bool on) { bypass_.store(on, std::memory_order_relaxed); }
 
@@ -87,16 +92,21 @@ private:
     void applyCommands() noexcept;
     void retire(Chain* c, int freedSlot, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr) noexcept;
-    void processChunk(float* l, float* r, int m) noexcept;
-    // Graph nodes (audio thread): one per slot, plus the master stage.
-    void runSlotNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
+    int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
+    int planChunk(int maxFrames) noexcept;
+    void planTrack(Slot& s, int& m) noexcept;
+    // Graph nodes (audio thread): each module of a track, the track's crossfades and mix, a
+    // folder bus, and the master stage.
+    void runModuleNode(int slot, int index, const float* const* in, float* const* out, int m) noexcept;
+    void runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept;
+    void runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
-    void processSlot(Slot& s, int m, double target) noexcept;
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
-    void runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, int len, double* out, Slot* exportTo, int offset,
-                  const Pattern* pat, int64_t repeat) noexcept;
+    void prepareLane(Chain& c, int lane, int64_t n0, int len) noexcept;
+    const double* runModule(Chain& c, int lane, bool shadow, size_t idx, int64_t n0, int64_t globalStart, int len,
+                            const double* input, Slot* exportTo, const Pattern* pat, int64_t repeat) noexcept;
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
                    int offset, const BlockCtx& base) noexcept;
     void noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept;
@@ -141,7 +151,7 @@ private:
     bool routingDirty_ = true;  // re-derive graph routing before the next chunk
     std::unique_ptr<Retired[]> pending_;  // retired chains waiting for room in the queue (owned, so a throwing constructor cannot leak it)
     int pendingCount_ = 0;
-    double tmp_[kBlock], tmp2_[kBlock];
+    double tmp_[kBlock];
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
