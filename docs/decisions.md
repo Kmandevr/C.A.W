@@ -14,11 +14,11 @@ updated: 2026-11-04
   - A mapped MIDI CC sets the base like a knob, jumping straight to the controller's value. Soft takeover can come later.
   - Native SDK modules keep one value per block, the block's first frame, so the ABI does not change. Built-in and .caw modules get per-frame values when a parameter varies.
 - **Resolution order (after an architect review).** Each frame resolves in this order:
-  1. Base: automation, unless touched; otherwise the manual or MIDI value, smoothed linearly over `smoothingFrames`.
-  2. With no modulation links, the base is only clamped and stepped, so plain values pass bit for bit, as on the Engine's automation path.
+  1. Base: automation, unless touched; otherwise the manual or MIDI value, smoothed linearly over `smoothingFrames` (at most 2^20) from the value last resolved, so touching during automation starts from what was playing.
+  2. A link without a signal (disconnected, bypassed) is skipped. With no link carrying a signal, the base is only clamped and stepped, so plain values pass bit for bit, as on the Engine's automation path.
   3. Otherwise: normalize, apply the links in ascending link id (never graph or UI order), clamp to 0..1, denormalize, clamp and step.
 
-  Links are `ModulationOp` Add, Multiply, Min, Max or Replace, each blended from the current value toward its target by depth (−1..1), at most 8 per parameter. NaN or inf modulation reads 0. Exponential curves use `detLog`/`detExp` and their endpoints are exact. A block with nothing varying is one constant, which keeps stereo playback cheap.
+  Links are `ModulationOp` Add, Multiply, Min, Max or Replace, each blended from the current value toward its target by depth (−1..1), at most 8 per parameter. A NaN or inf sample from a connected source reads 0. Exponential curves use `detLog`/`detExp` and their endpoints are exact. A block with nothing varying is one constant, which keeps stereo playback cheap.
 - **Split:**
   - F6.1: resolver and descriptor fields (curve, step, smoothing, unit).
   - F6.2: values to processors through the executor.

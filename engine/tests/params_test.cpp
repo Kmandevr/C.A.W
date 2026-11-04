@@ -206,7 +206,46 @@ TEST(parameter_descriptor_validates_step_and_curve) {
     b.smoothingFrames = 64;
     CHECK(!moduleDescriptorsMatch({"x", 1, nullptr, 0, &a, 1}, {"x", 1, nullptr, 0, &b, 1}));
     b = cutoff();
-    b.unit = "kHz";
-    CHECK(!moduleDescriptorsMatch({"x", 1, nullptr, 0, &a, 1}, {"x", 1, nullptr, 0, &b, 1}));
+    b.unit = "kHz";  // display text only: not part of the match
+    CHECK(moduleDescriptorsMatch({"x", 1, nullptr, 0, &a, 1}, {"x", 1, nullptr, 0, &b, 1}));
+    b = cutoff();
+    b.smoothingFrames = kMaxParameterSmoothingFrames + 1;
+    CHECK(validateModuleDescriptor({"x", 1, nullptr, 0, &b, 1}) == ModuleValidation::InvalidParameterSmoothing);
     CHECK(moduleDescriptorsMatch({"x", 1, nullptr, 0, &a, 1}, {"x", 1, nullptr, 0, &a, 1}));
+}
+
+TEST(parameter_resolver_touch_during_automation_ramps_from_the_value_that_was_playing) {
+    ParameterDescriptor p = linear(0.0);
+    p.smoothingFrames = 2;
+    ParameterResolver r;
+    CHECK(r.configure(p));
+    const double lane[] = {0.6, 0.8};
+    double out[2];
+    r.resolve(2, lane, nullptr, out);
+    CHECK_EQ(out[1], 0.8);
+    r.setBase(1.0);  // a touch: ramp from 0.8 (what was sounding), not from the old manual 0.0
+    r.resolve(2, lane, nullptr, out);
+    CHECK_EQ(out[0], 0.8 + (1.0 - 0.8) / 2.0);
+    CHECK_EQ(out[1], 1.0);
+}
+
+TEST(parameter_resolver_skips_links_without_a_signal) {
+    // A disconnected or bypassed source leaves the value alone, whatever the op, and without any
+    // links carrying a signal the value passes bit for bit (no curve round trip).
+    ParameterResolver r;
+    CHECK(r.configure(cutoff()));
+    r.setBase(1234.5678);
+    const ModulationLink links[] = {{1, ModulationOp::Multiply, 1.0}, {2, ModulationOp::Replace, 1.0}};
+    CHECK(r.setLinks(links, 2));
+    double out[2];
+    ParameterValue v = r.resolve(2, nullptr, nullptr, out);
+    CHECK(v.samples == nullptr);
+    CHECK_EQ(v.value, 1234.5678);
+    const float* none[] = {nullptr, nullptr};
+    CHECK_EQ(r.resolve(2, nullptr, none, out).value, 1234.5678);
+    // Only the connected link (Replace toward 0 = the minimum) acts.
+    const float zero[] = {0.0f, 0.0f};
+    const float* one[] = {nullptr, zero};
+    r.resolve(2, nullptr, one, out);
+    CHECK_EQ(out[0], 20.0);
 }

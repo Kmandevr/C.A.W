@@ -61,6 +61,7 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
         if (!std::isfinite(p.defaultValue) || p.defaultValue < p.minimum || p.defaultValue > p.maximum)
             return ModuleValidation::DefaultOutsideRange;
         if (!std::isfinite(p.step) || p.step < 0.0) return ModuleValidation::InvalidParameterStep;
+        if (p.smoothingFrames > kMaxParameterSmoothingFrames) return ModuleValidation::InvalidParameterSmoothing;
         switch (p.curve) {
             case ParameterCurve::Linear: break;
             case ParameterCurve::Exponential:
@@ -123,7 +124,7 @@ bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b
         const ParameterDescriptor& y = b.parameters[i];
         if (x.id != y.id || x.defaultValue != y.defaultValue || x.minimum != y.minimum ||
             x.maximum != y.maximum || x.automatable != y.automatable || x.curve != y.curve ||
-            x.step != y.step || x.smoothingFrames != y.smoothingFrames || x.unit != y.unit)
+            x.step != y.step || x.smoothingFrames != y.smoothingFrames)
             return false;
     }
     for (uint32_t i = 0; i < a.uiControlCount; ++i) {

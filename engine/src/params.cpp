@@ -98,12 +98,14 @@ void ParameterResolver::setBase(double plain) noexcept {
 }
 
 double ParameterResolver::frameValue(double base, const float* const* modulation, uint32_t frame) const noexcept {
-    if (linkCount_ == 0) return constrainParameter(parameter_, base);
+    // A link without a signal (disconnected, bypassed) is skipped; with none carrying one, the
+    // base is only constrained, so it passes bit for bit.
+    bool any = false;
+    for (uint32_t k = 0; k < linkCount_ && !any; ++k) any = modulation && modulation[k];
+    if (!any) return constrainParameter(parameter_, base);
     double n = normalizeParameter(parameter_, base);
-    for (uint32_t k = 0; k < linkCount_; ++k) {
-        const double m = modulation && modulation[k] ? sanitize(modulation[k][frame]) : 0.0;
-        n = applyModulation(links_[k].op, links_[k].depth, n, m);
-    }
+    for (uint32_t k = 0; k < linkCount_; ++k)
+        if (modulation[k]) n = applyModulation(links_[k].op, links_[k].depth, n, sanitize(modulation[k][frame]));
     return constrainParameter(parameter_, denormalizeParameter(parameter_, n));
 }
 
@@ -116,10 +118,12 @@ ParameterValue ParameterResolver::resolve(uint32_t frames, const double* automat
         return ParameterValue{nullptr, frameValue(current_, nullptr, 0)};
     if (frames == 0 || !out) return ParameterValue{nullptr, frameValue(current_, nullptr, 0)};
     for (uint32_t i = 0; i < frames; ++i) {
-        if (rampLeft_ != 0) {
+        if (automated) {
+            current_ = clampToRange(parameter_, automation[i]);  // a touch ramps from what was playing
+        } else if (rampLeft_ != 0) {
             current_ = --rampLeft_ == 0 ? target_ : current_ + increment_;  // lands exactly on the target
         }
-        out[i] = frameValue(automated ? automation[i] : current_, modulation, i);
+        out[i] = frameValue(current_, modulation, i);
     }
     return ParameterValue{out, out[0]};
 }

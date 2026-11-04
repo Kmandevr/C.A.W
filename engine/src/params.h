@@ -41,12 +41,17 @@ struct ParameterValue {
 // One parameter's resolution, in this order for every frame:
 //   1. Base: the automation value when a lane is active and the parameter is not touched,
 //      otherwise the manual value (setBase: a knob, a typed value or a mapped MIDI CC), smoothed
-//      linearly over smoothingFrames. A manual change made while automation exists is a touch:
-//      it wins until clearTouch(), which the host calls when playback (re)starts.
-//   2. With no links the base is only constrained, so plain values pass bit for bit.
+//      linearly over smoothingFrames from the value last resolved. A manual change made while
+//      automation exists is a touch: it wins until clearTouch(), which the host calls when
+//      playback (re)starts.
+//   2. Links without a signal are skipped. With none carrying one the base is only constrained,
+//      so plain values pass bit for bit. NaN reads as the minimum (the Engine's automation path
+//      never produces NaN).
 //   3. Otherwise: normalize, apply each link in id order, clamp to 0..1, denormalize, constrain.
-// configure() and setLinks() run on a control thread. setBase(), clearTouch() and resolve() are
-// real-time safe (no allocation, bounded by frames x links) but single-threaded with each other.
+// Threading: nothing here is synchronized. configure() and setLinks() must reach the audio thread
+// through a program swap or a queue, and setBase()/clearTouch() must run on the thread that calls
+// resolve(); setBase(), clearTouch() and resolve() are real-time safe (no allocation, bounded by
+// frames x links). The descriptor's string views (id, unit) must outlive the resolver.
 class ParameterResolver {
 public:
     // Resets to the default, untouched, no links. False for an invalid descriptor.
@@ -57,9 +62,11 @@ public:
     void setBase(double plain) noexcept;
     void clearTouch() noexcept { touched_ = false; }
     bool touched() const noexcept { return touched_; }
-    // automation: `frames` plain values, or null for no active lane. modulation: one signal per
-    // link in id order (setLinks order), each null (reads 0) or `frames` floats. out: room for
-    // `frames` values, used only when the block varies.
+    // automation: `frames` plain values, or null for no active lane. modulation: null, or one
+    // signal per link in id order (linkCount() entries), each null (the link is skipped) or
+    // `frames` floats. out: room for `frames` values, and required (non-null, frames > 0) whenever
+    // a lane, a signal or a ramp is present; without it the block resolves as constant. The result
+    // points into `out`, so each parameter needs its own buffer for as long as its values are read.
     ParameterValue resolve(uint32_t frames, const double* automation, const float* const* modulation,
                            double* out) noexcept;
     const ParameterDescriptor& descriptor() const noexcept { return parameter_; }
