@@ -1,24 +1,44 @@
-// Glass surfaces (owner, 2026-11-04): real frosted blur only on floating things, a cheap glass look on docked panels.
+// Glass surfaces (owner, 2026-11-04): an ambient background, see-through panels, frosted (or unblurred) floating things.
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import 'motion.dart';
 import 'theme.dart';
 import 'tokens.dart';
 
-/// The Glass setting. Settings sets [enabled], like `Motion`; the Lightweight and Minimal profiles turn it off.
+/// The Glass settings. Settings sets [enabled] and [blurEnabled], like `Motion`. The Lightweight profile keeps the
+/// glass look without blur; Minimal turns glass off.
 class Glass {
   Glass._();
 
-  /// The user's switch; on by default.
+  /// The user's Glass switch; on by default.
   static bool enabled = true;
 
-  /// True when glass is drawn: the switch is on and the performance profile is Full or Balanced.
-  static bool get active => enabled && Neon.performanceMode < 2;
+  /// The user's Frosted blur switch; on by default.
+  static bool blurEnabled = true;
+
+  /// True when glass is drawn: the switch is on and the profile isn't Minimal.
+  static bool get active => enabled && Neon.performanceMode < 3;
+
+  /// True when floating surfaces blur what is behind them: glass is on, the blur switch is on, and the profile is
+  /// Full or Balanced. Otherwise they keep the glass look with a denser tint and no blur, which costs far less.
+  static bool get blur => active && blurEnabled && Neon.performanceMode < 2;
 
   /// The frosted blur behind floating surfaces, in logical pixels.
   static const double blurSigma = 18;
+}
+
+/// A pushed page (Settings, the theme editor, the full-screen roll) on its own glass background, so the page below
+/// doesn't show through while it slides in. Glass off: the plain background.
+class GlassPage extends StatelessWidget {
+  const GlassPage({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => GlassBackdrop(child: child);
 }
 
 /// A docked panel's surface. With glass on: a translucent tint, a soft highlight along the top and a thin
@@ -62,8 +82,9 @@ class GlassPanel extends StatelessWidget {
   }
 }
 
-/// A floating surface (toolbar, menu, sheet, drag preview, transport). With glass on: a real frosted blur of what
-/// is behind it under a see-through tint. With glass off: the solid raised panel colour.
+/// A floating surface (toolbar, menu, sheet, drag preview, transport). With glass on: a frosted blur of what is
+/// behind it under a see-through tint, or with blur off a denser tint, a top highlight and a bright edge. With
+/// glass off: the solid raised panel colour.
 class GlassOverlay extends StatelessWidget {
   const GlassOverlay({super.key, required this.child, this.radius = Radii.l, this.padding = EdgeInsets.zero});
 
@@ -87,19 +108,21 @@ class GlassOverlay extends StatelessWidget {
         ),
       );
     }
+    final body = DecoratedBox(
+      decoration: Glass.blur
+          ? BoxDecoration(
+              borderRadius: r,
+              color: Neon.panelHi.withValues(alpha: 0.55),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            )
+          : _unblurred(r, Border.all(color: Colors.white.withValues(alpha: 0.16))),
+      child: Padding(padding: padding, child: child),
+    );
     return ClipRRect(
       borderRadius: r,
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: Glass.blurSigma, sigmaY: Glass.blurSigma),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: r,
-            color: Neon.panelHi.withValues(alpha: 0.55),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-          ),
-          child: Padding(padding: padding, child: child),
-        ),
-      ),
+      child: Glass.blur
+          ? BackdropFilter(filter: ui.ImageFilter.blur(sigmaX: Glass.blurSigma, sigmaY: Glass.blurSigma), child: body)
+          : body,
     );
   }
 }
@@ -159,7 +182,7 @@ class _BackdropPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_BackdropPainter old) => old.bg != bg || old.glows != glows;
+  bool shouldRepaint(_BackdropPainter old) => old.bg != bg || !listEquals(old.glows, glows);
 }
 
 /// A bottom sheet that slides up as frosted glass (a plain sheet with glass off). Takes the same arguments as the
@@ -176,37 +199,70 @@ Future<T?> showGlassSheet<T>({
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,
-    showDragHandle: showDragHandle,
+    // With glass the sheet draws its own handle, inside the frost.
+    showDragHandle: glass ? false : showDragHandle,
     constraints: constraints,
     backgroundColor: glass ? Colors.transparent : (backgroundColor ?? Neon.panel),
     elevation: glass ? 0 : null,
     sheetAnimationStyle: Motion.of(context) == MotionLevel.full ? null : AnimationStyle.noAnimation,
-    builder: glass ? (c) => _GlassSheet(child: builder(c)) : builder,
+    builder: glass ? (c) => _GlassSheet(handle: showDragHandle, child: builder(c)) : builder,
   );
 }
 
+/// Glass without blur: a denser tint that is lighter at the top, so it still reads as glass over what is behind.
+BoxDecoration _unblurred(BorderRadius r, Border border) => BoxDecoration(
+      borderRadius: r,
+      border: border,
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color.lerp(Neon.panelHi, Colors.white, 0.06)!.withValues(alpha: 0.94),
+          Neon.panelHi.withValues(alpha: 0.9),
+        ],
+        stops: const [0, 0.4],
+      ),
+    );
+
 class _GlassSheet extends StatelessWidget {
-  const _GlassSheet({required this.child});
+  const _GlassSheet({required this.child, this.handle = false});
 
   final Widget child;
+  final bool handle;
 
   static const _radius = BorderRadius.vertical(top: Radius.circular(Radii.l + 6));
 
   @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: _radius,
-    child: BackdropFilter(
-      filter: ui.ImageFilter.blur(sigmaX: Glass.blurSigma, sigmaY: Glass.blurSigma),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: _radius,
-          color: Neon.panelHi.withValues(alpha: 0.62),
-          border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.16))),
-        ),
-        child: Material(type: MaterialType.transparency, child: child),
+  Widget build(BuildContext context) {
+    final edge = Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.16)));
+    final body = DecoratedBox(
+      decoration: Glass.blur
+          ? BoxDecoration(borderRadius: _radius, color: Neon.panelHi.withValues(alpha: 0.62), border: edge)
+          : _unblurred(_radius, edge),
+      child: Material(
+        type: MaterialType.transparency,
+        child: handle
+            ? Column(mainAxisSize: MainAxisSize.min, children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Container(
+                    width: 32,
+                    height: 4,
+                    decoration: BoxDecoration(color: Neon.dim, borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                Flexible(child: child),
+              ])
+            : child,
       ),
-    ),
-  );
+    );
+    return ClipRRect(
+      borderRadius: _radius,
+      child: Glass.blur
+          ? BackdropFilter(filter: ui.ImageFilter.blur(sigmaX: Glass.blurSigma, sigmaY: Glass.blurSigma), child: body)
+          : body,
+    );
+  }
 }
 
 /// A slider track with a see-through fill and a solid outline: the whole track outlined in the inactive colour,
@@ -237,8 +293,13 @@ class GlassSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
     if (rect.isEmpty) return;
     final canvas = context.canvas;
     final r = Radius.circular(rect.height / 2);
-    final on = sliderTheme.activeTrackColor ?? Neon.green;
-    final off = sliderTheme.inactiveTrackColor ?? Neon.line;
+    // A disabled slider fades to the theme's disabled colours, as the stock track does.
+    final on = ColorTween(begin: sliderTheme.disabledActiveTrackColor, end: sliderTheme.activeTrackColor ?? Neon.green)
+            .evaluate(enableAnimation) ??
+        Neon.green;
+    final off = ColorTween(begin: sliderTheme.disabledInactiveTrackColor, end: sliderTheme.inactiveTrackColor ?? Neon.line)
+            .evaluate(enableAnimation) ??
+        Neon.line;
     final whole = RRect.fromRectAndRadius(rect, r);
     final ltr = textDirection == TextDirection.ltr;
     final x = thumbCenter.dx.clamp(rect.left, rect.right);
@@ -253,18 +314,19 @@ class GlassSliderTrackShape extends SliderTrackShape with BaseSliderTrackShape {
       whole,
       stroke
         ..color = off
-        ..strokeWidth = 1,
+        ..strokeWidth = 0.8,
     );
     canvas.drawRRect(
       value,
       stroke
         ..color = on
-        ..strokeWidth = 1.5,
+        ..strokeWidth = 1.1,
     );
   }
 }
 
-/// A slider thumb as a see-through disc with a solid ring.
+/// A slider thumb with a solid ring. Its inside looks see-through but is opaque (the colour mixed into the panel
+/// colour it always sits on), so the track never shows through the knob.
 class GlassSliderThumbShape extends SliderComponentShape {
   const GlassSliderThumbShape({this.radius = 9});
 
@@ -288,17 +350,20 @@ class GlassSliderThumbShape extends SliderComponentShape {
     required double textScaleFactor,
     required Size sizeWithOverflow,
   }) {
-    final c = sliderTheme.thumbColor ?? Neon.green;
+    final c = ColorTween(begin: sliderTheme.disabledThumbColor, end: sliderTheme.thumbColor ?? Neon.green)
+            .evaluate(enableAnimation) ??
+        Neon.green;
     final canvas = context.canvas;
     // The ring grows a little while the thumb is held.
     final r = radius * (1 + 0.15 * activationAnimation.value);
-    canvas.drawCircle(center, r, Paint()..color = Color.lerp(Neon.bg, c, 0.3)!.withValues(alpha: 0.85));
+    final panel = Color.from(alpha: 1, red: Neon.panel.r, green: Neon.panel.g, blue: Neon.panel.b);
+    canvas.drawCircle(center, r, Paint()..color = Color.lerp(panel, c.withValues(alpha: 1), 0.28)!);
     canvas.drawCircle(
       center,
       r,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
+        ..strokeWidth = 1.6
         ..color = c,
     );
   }

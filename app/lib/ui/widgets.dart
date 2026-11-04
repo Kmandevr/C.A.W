@@ -18,7 +18,8 @@ class NeonPanel extends StatelessWidget {
   Widget build(BuildContext context) => DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          boxShadow: color == null ? null : Neon.glow(color!, strength: 0.25),
+          // No glow under a see-through card: it would show through and make the card look solid.
+          boxShadow: color == null || Glass.active ? null : Neon.glow(color!, strength: 0.25),
         ),
         // A Material surface (not a coloured box) so list tiles and ink splashes inside draw correctly.
         // Glass: see-through, faintly tinted with the card's colour, with a solid outline.
@@ -118,7 +119,7 @@ class Bar extends StatelessWidget {
         decoration: BoxDecoration(
           color: Neon.line.withValues(alpha: 0.18),
           borderRadius: r,
-          border: Border.all(color: Neon.line),
+          border: Border.all(color: Neon.line, width: 0.8),
         ),
         alignment: Alignment.centerLeft,
         child: Container(
@@ -126,7 +127,7 @@ class Bar extends StatelessWidget {
           decoration: BoxDecoration(
             color: color.withValues(alpha: 0.35),
             borderRadius: r,
-            border: value > 0 ? Border.all(color: color, width: 1.3) : null,
+            border: value > 0 ? Border.all(color: color, width: 0.9) : null,
           ),
         ),
       ),
@@ -205,8 +206,8 @@ class ToggleChip extends StatelessWidget {
             decoration: BoxDecoration(
               color: on ? (Glass.active ? color.withValues(alpha: 0.22) : color) : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: on ? color : Neon.line, width: on && Glass.active ? 1.6 : 1),
-              boxShadow: on ? Neon.glow(color) : null,
+              border: Border.all(color: on ? color : Neon.line, width: on && Glass.active ? 1.2 : 1),
+              boxShadow: on && !Glass.active ? Neon.glow(color) : null,
             ),
             child: Text(label,
                 style: TextStyle(

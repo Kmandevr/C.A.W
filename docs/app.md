@@ -53,7 +53,8 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - the main workspace is a horizontal timeline with a bar ruler and one lane per track (no 64-bar limit since F7.2, 2026-11-04; the ruler and grid paint only the visible span; the Builder's audition scope uses the engine's `CAW_SCOPE_AUDITION` id since F7.3); the former layer-card list has been replaced
   - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
-  - track height can be set to 54, 76, 96 or 120 px from the timeline toolbar
+  - track height can be set to 54, 76, 96 or 120 px from the timeline toolbar, and the same menu sets the gap between tracks (none, 3, 6, 12 or 20 px; 6 by default, saved in Settings)
+  - a track's menu adds or removes a spacer below it: an empty row that only separates tracks on screen. Drag its bottom grip to resize it (8–160 px), or tap × to remove it. It is saved with the project (`space_below`) and never sent to the engine
   - clips are instances of reusable pattern sources; they can be selected, moved, resized, duplicated independently or as linked copies, deleted, and opened in the existing Builder piano roll
   - the separate Mixer panel edits the same track volume and pan values as the engine; it does not maintain duplicate mix state
   - project settings and global controls are available from the settings button rather than permanently occupying the timeline
@@ -130,10 +131,11 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - **Motion and feel** (`lib/ui/motion.dart`):
     - **Motion:** Full, Reduced (fades only) or Off. The Minimal profile turns it off, and the system's reduce-motion setting caps it at Reduced.
     - **Haptic ticks:** on by default.
-    - **Glass** (`lib/ui/glass.dart`): on by default; the Lightweight and Minimal profiles turn it off, and glass off brings back the solid look.
+    - **Glass** (`lib/ui/glass.dart`): on by default; glass off, or the Minimal profile, brings back the solid look. **Frosted blur** (on by default) blurs behind sheets and overlays; off, or the Lightweight profile, keeps the glass look with a denser tint and no blur, which costs far less.
       - A soft ambient background (faint glows of the accent colours) sits behind every screen, and the docked panels, cards, track headers and transport are see-through over it, with no blur.
       - Bottom sheets slide up as frosted glass (a real blur); dialogs and menus are translucent with a bright edge.
-      - Sliders, level bars, switches, filled and segmented buttons, M/S toggles and clips have a light see-through fill and a solid outline.
+      - Sliders, level bars, switches, filled and segmented buttons, M/S toggles and clips have a light see-through fill and a thin solid outline. Slider knobs are opaque (their colour mixed into the panel), so the track doesn't show through them.
+      - Pushed pages (Settings, the theme editor, the full-screen roll) have their own glass background, so the page below doesn't show through while they slide in.
     - **Music-reactive glow:** a 0–100% slider, 35% by default.
     - The slider shows a change while it is dragged and saves when the drag ends.
     - The motion rules (distance-aware settle times, a small overshoot, snapping maths) are in place, but no screen animates with them yet. The [UI plan](ui-plan.md) adds that step by step.

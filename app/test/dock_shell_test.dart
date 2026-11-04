@@ -113,6 +113,24 @@ void main() {
     }, skip: skip);
   }
 
+  testWidgets('arrangement: the track gap and a spacer keep headers level with their lanes; the grip resizes it',
+      (tester) async {
+    final s = await startState(tester);
+    s.settings.trackGap = 12;
+    final first = s.project.layers.first, second = s.project.layers[1];
+    s.setSpaceBelow(first, 30);
+    await pumpGolden(tester, Shell(state: s), goldenSizes['desktop']!);
+    // The second track's header and its lane start at the same height: below the first, its spacer and the gap.
+    final header = tester.getTopLeft(find.text(second.name).first);
+    final firstHeader = tester.getTopLeft(find.text(first.name).first);
+    expect(header.dy - firstHeader.dy, closeTo(76 + 30 + 12, 1));
+    await tester.drag(find.byKey(ValueKey('spacer-grip-${first.id}')), const Offset(0, 40));
+    await tester.pumpAndSettle();
+    expect(first.spaceBelow, greaterThan(50));
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/shell_desktop_spacer.png'));
+    s.dispose();
+  }, skip: skip);
+
   testWidgets('the Mix preset on a desktop: mixer strips, meters and toggles', (tester) async {
     final s = await startState(tester);
     await pumpGolden(tester, Shell(state: s), goldenSizes['desktop']!);

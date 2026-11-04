@@ -30,7 +30,7 @@ class SettingsPage extends StatelessWidget {
               subtitle: Text(settings.themeName, style: TextStyle(color: Neon.dim)),
               trailing: const Icon(Icons.chevron_right),
               onTap: () =>
-                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ThemeEditor(settings: settings))),
+                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => GlassPage(child: ThemeEditor(settings: settings)))),
             ),
             ListTile(
               leading: Icon(Icons.density_medium, color: Neon.blue),
@@ -88,12 +88,24 @@ class SettingsPage extends StatelessWidget {
               secondary: Icon(Icons.blur_on, color: Neon.blue),
               title: const Text('Glass'),
               subtitle: Text(
-                  Neon.performanceMode >= 2
-                      ? 'Off while the Lightweight or Minimal profile is on'
-                      : 'Frosted toolbars, menus and sheets; see-through panels',
+                  Neon.performanceMode >= 3
+                      ? 'Off while the Minimal profile is on'
+                      : 'See-through panels, tracks and controls over a soft background',
                   style: TextStyle(color: Neon.dim)),
               value: settings.glass,
               onChanged: (v) => settings.update((s) => s.glass = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.blur_linear, color: Neon.violet),
+              title: const Text('Frosted blur'),
+              subtitle: Text(
+                  Neon.performanceMode >= 2
+                      ? 'Off while the Lightweight or Minimal profile is on'
+                      : 'Blur behind sheets and menus; off keeps the glass look and costs far less',
+                  style: TextStyle(color: Neon.dim)),
+              value: settings.glassBlur,
+              onChanged: settings.glass ? (v) => settings.update((s) => s.glassBlur = v) : null,
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,

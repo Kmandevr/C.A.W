@@ -6,6 +6,7 @@ updated: 2026-11-04
 
 # Log
 
+- 2026-11-04: Glass without blur (owner): a Frosted blur switch, unblurred overlays that still read as glass, and Lightweight keeps glass unblurred. Thinner outlines, opaque slider knobs, pushed pages on their own glass background, the shell remounts when glass or blur actually changes, disabled sliders fade. The arrangement gets a track gap (Settings `track_gap`) and spacer rows under tracks (`space_below`, app-only).
 - 2026-11-04: Glass everywhere (owner): an ambient background, see-through panels, cards, track headers and transport, frosted sliding sheets (`showGlassSheet` for every bottom sheet), translucent dialogs and menus, and see-through sliders, bars, switches, buttons, toggles and clips with solid outlines. Goldens now capture the background (`goldenScreen`), with a new Mix-preset golden.
 - 2026-11-04: The phone quick-actions bar is off by default (owner), with a Settings switch. Dock layout changes reach Settings at once, so a theme change right after a layout change keeps it.
 - 2026-11-04: UI U1, third part: the shell switch. The eight workspaces are docking panels on every screen shape, with one saved layout per shape (`DockController`, Settings `dock_layouts`), a layout button with presets and every panel, the keyboard area from the panel touched last, panel-sized screens and a Builder that scrolls in a short panel. The bottom bar, More sheet and side rail are gone.

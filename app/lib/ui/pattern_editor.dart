@@ -1381,8 +1381,10 @@ class _PatternEditorState extends State<PatternEditor> {
           Navigator.of(context).pop();
         } else {
           Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => Scaffold(
-                  body: SafeArea(child: PatternEditor(state: s, module: widget.module, fullScreen: true, router: _router)))));
+              builder: (_) => GlassPage(
+                  child: Scaffold(
+                      body: SafeArea(
+                          child: PatternEditor(state: s, module: widget.module, fullScreen: true, router: _router))))));
         }
       },
     );

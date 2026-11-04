@@ -53,6 +53,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     }
     final stepW = zoom * (Neon.compact(context) ? 0.85 : 1.0);
     final trackHeight = _trackHeight;
+    // The gap between tracks (Settings, chosen from the track height menu), so tracks don't sit on each other.
+    final gap = s.settings.trackGap;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
     final end = p.engineLoopSteps;
     final width = math.max(560.0, end * stepW);
@@ -76,16 +78,23 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
               icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
             IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()),
               icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
-            PopupMenuButton<double>(
+            PopupMenuButton<String>(
               tooltip: 'Track height',
-              initialValue: _trackHeight,
-              onSelected: (value) => setState(() => _trackHeight = value),
+              onSelected: (v) {
+                final px = double.parse(v.substring(2));
+                if (v.startsWith('h:')) {
+                  setState(() => _trackHeight = px);
+                } else {
+                  s.settings.update((x) => x.trackGap = px).then((_) { if (mounted) setState(() {}); });
+                }
+              },
               icon: Icon(Icons.height, color: _trackHeight == 76 ? Neon.dim : Neon.blue),
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 54, child: Text('Compact · 54 px')),
-                PopupMenuItem(value: 76, child: Text('Standard · 76 px')),
-                PopupMenuItem(value: 96, child: Text('Tall · 96 px')),
-                PopupMenuItem(value: 120, child: Text('Extra tall · 120 px')),
+              itemBuilder: (_) => [
+                for (final (px, name) in const [(54.0, 'Compact'), (76.0, 'Standard'), (96.0, 'Tall'), (120.0, 'Extra tall')])
+                  CheckedPopupMenuItem(value: 'h:$px', checked: _trackHeight == px, child: Text('$name · ${px.round()} px')),
+                const PopupMenuDivider(),
+                for (final (px, name) in const [(0.0, 'No gap'), (3.0, 'Small gap'), (6.0, 'Gap'), (12.0, 'Wide gap'), (20.0, 'Extra wide gap')])
+                  CheckedPopupMenuItem(value: 'g:$px', checked: gap == px, child: Text(px == 0 ? name : '$name · ${px.round()} px')),
               ],
             ),
             DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
@@ -133,18 +142,25 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                   padding: EdgeInsets.only(left: 10, top: 8),
                   child: Align(alignment: Alignment.centerLeft,
                     child: Text('TRACKS', style: TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
-                for (final layer in visible)
+                for (final layer in visible) ...[
                   _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
                     depth: s.folderDepth(layer), patterns: patterns, trackHeight: trackHeight),
+                  if (layer.spaceBelow > 0) _SpacerHeader(state: s, layer: layer),
+                  SizedBox(height: gap),
+                ],
               ])),
               Expanded(child: SingleChildScrollView(controller: _hScroll, scrollDirection: Axis.horizontal,
                 child: SizedBox(width: width, child: Stack(children: [
                   Column(children: [
                     SizedBox(height: 30, width: width,
                       child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll))),
-                    for (final layer in visible)
+                    for (final layer in visible) ...[
                       _TimelineLane(state: s, layer: layer, width: width, stepW: stepW, scroll: _hScroll,
                         trackHeight: trackHeight, selectedIds: s.selectedClipIds, onOpen: widget.onOpenPattern),
+                      // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
+                      if (layer.spaceBelow > 0) SizedBox(height: layer.spaceBelow),
+                      SizedBox(height: gap),
+                    ],
                   ]),
                   Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
                     valueListenable: s.tick,
@@ -159,6 +175,43 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
           ]))),
       if (mixer) _ArrangementMixer(state: s),
     ]);
+  }
+}
+
+/// A spacer under a track (owner, 2026-11-04): an empty row that only separates tracks on screen. Drag its bottom
+/// edge to change its height; × removes it. The engine never sees it.
+class _SpacerHeader extends StatelessWidget {
+  const _SpacerHeader({required this.state, required this.layer});
+  final AppState state;
+  final LayerDoc layer;
+
+  /// A new spacer's height.
+  static const initial = 24.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final h = layer.spaceBelow;
+    return SizedBox(
+      height: h,
+      child: Stack(children: [
+        Center(child: Container(height: 1, margin: const EdgeInsets.symmetric(horizontal: 12),
+          color: Neon.line.withValues(alpha: 0.6))),
+        if (h >= 20) Positioned(right: 0, top: 0, bottom: 0, child: IconButton(
+          tooltip: 'Remove spacer', iconSize: 14, padding: EdgeInsets.zero, visualDensity: VisualDensity.compact,
+          icon: const Icon(Icons.close, color: Neon.dim),
+          onPressed: () => state.setSpaceBelow(layer, 0))),
+        Positioned(left: 0, right: 40, bottom: 0, height: h < 16 ? h : 16, child: Semantics(
+          label: 'Resize spacer',
+          child: MouseRegion(cursor: SystemMouseCursors.resizeRow, child: GestureDetector(
+            key: ValueKey('spacer-grip-${layer.id}'),
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragUpdate: (d) => state.setSpaceBelow(layer, (layer.spaceBelow + d.delta.dy).clamp(8.0, LayerDoc.maxSpaceBelow)),
+            child: Center(child: Container(width: 28, height: 3,
+              decoration: BoxDecoration(color: Neon.dim.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(2)))),
+          )),
+        )),
+      ]),
+    );
   }
 }
 
@@ -203,6 +256,7 @@ class _TimelineHeader extends StatelessWidget {
               if (v == 'up' && index > 0) state.moveLayer(index, index - 1);
               if (v == 'down' && index < state.project.layers.length - 1) state.moveLayer(index, index + 2);
               if (v == 'delete') state.removeLayer(layer);
+              if (v == 'spacer') state.setSpaceBelow(layer, layer.spaceBelow > 0 ? 0 : _SpacerHeader.initial);
               if (v.startsWith('clip:')) state.addClip(layer, v.substring(5));
               if (v == 'unparent') state.moveLayerIntoFolder(layer, null);
               if (v.startsWith('parent:')) state.moveLayerIntoFolder(layer, v.substring(7));
@@ -228,6 +282,7 @@ class _TimelineHeader extends StatelessWidget {
                 for (final pattern in patterns)
                   PopupMenuItem(value: 'clip:${pattern.id}', child: Text('Add clip · ${pattern.name}')),
               ],
+              PopupMenuItem(value: 'spacer', child: Text(layer.spaceBelow > 0 ? 'Remove spacer below' : 'Add spacer below')),
               const PopupMenuItem(value: 'delete', child: Text('Delete')),
             ]),
         ]),
@@ -444,7 +499,7 @@ class _TimelineClipState extends State<_TimelineClip> {
                   : null,
               border: Border.all(
                 color: Glass.active || widget.selected ? widget.color : widget.color.withValues(alpha: .7),
-                width: widget.selected ? 1.8 : (Glass.active ? 1.3 : 1))),
+                width: widget.selected ? 1.6 : 1)),
             padding: const EdgeInsets.fromLTRB(7, 4, 13, 3),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [

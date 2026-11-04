@@ -34,8 +34,8 @@ class CawApp extends StatelessWidget {
           theme: Neon.theme(look: state.settings.activeTheme, compact: state.settings.compact),
           // The glass backdrop sits behind every route (glass off: the plain background).
           builder: (context, child) => GlassBackdrop(child: child ?? const SizedBox.shrink()),
-          // A new key after a theme or glass change rebuilds every screen, so colours fixed at build time repaint too.
-          home: Shell(key: ValueKey((state.settings.lookRevision, state.settings.glass)), state: state),
+          // A new key after a theme or glass change (including a profile that turns glass or blur off) rebuilds every screen, so colours fixed at build time repaint too.
+          home: Shell(key: ValueKey((state.settings.lookRevision, Glass.active, Glass.blur)), state: state),
         ),
       );
 }

@@ -115,7 +115,11 @@ class LayerDoc {
     this.isFolder = false,
     this.busEnabled = true,
     this.collapsed = false,
+    this.spaceBelow = 0,
   }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [];
+
+  /// The tallest visual spacer under a track, in logical pixels.
+  static const maxSpaceBelow = 160.0;
 
   /// How many track colours the themes define (`layer1`..`layer8`); [color] indexes them, wrapping.
   static const trackColors = 8;
@@ -134,6 +138,10 @@ class LayerDoc {
   String? parentId;
   bool isFolder, busEnabled, collapsed;
 
+  /// A spacer drawn under the track in the arrangement, in logical pixels (0: none). It only separates tracks on
+  /// screen: it is saved with the project but never sent to the engine.
+  double spaceBelow;
+
   List<String> get chain => [?generatorId, ...effectIds];
 
   Map<String, dynamic> toJson() => {
@@ -151,6 +159,7 @@ class LayerDoc {
         'clips': [for (final c in clips) c.toJson()],
         'automation': [for (final a in automation) a.toJson()],
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
+        if (spaceBelow > 0) 'space_below': spaceBelow,
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j) => LayerDoc(
@@ -169,6 +178,10 @@ class LayerDoc {
         automation: ((j['automation'] as List?) ?? const []).map((a) => AutomationLaneDoc.fromJson(a as Map<String, dynamic>)).toList(),
         parentId: j['parent'] as String?, isFolder: j['folder'] == true,
         busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
+        spaceBelow: switch (j['space_below']) {
+          final num v when v.isFinite => v.toDouble().clamp(0.0, maxSpaceBelow),
+          _ => 0,
+        },
       );
 }
 
