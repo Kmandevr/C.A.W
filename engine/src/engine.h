@@ -130,6 +130,7 @@ private:
     int64_t g_ = 0;     // position in the project loop
     int64_t epoch_ = 0; // project loops completed since play
     uint64_t touchEpoch_ = 0;  // the play count of the last Play handled (audio thread); ends touches
+    uint32_t touchPlayStamp_ = 0;  // the last knob move's stamp before that Play (audio thread)
     double bpm_ = 120.0;
     int beatsPerBar_ = 4;
     int loopSteps_ = 64;
@@ -206,7 +207,8 @@ private:
     // Knob moves since the last Play (control thread), so a rebuilt chain keeps their touches.
     std::set<std::pair<std::string, std::string>> touchedParams_;  // (module id, param)
     std::set<std::string> touchedGlobals_;
-    uint64_t playCount_ = 0;  // play() calls (control thread)
+    uint64_t playCount_ = 0;     // Play commands sent (control thread)
+    uint32_t touchCounter_ = 0;  // knob moves (control thread); wraps, compared by difference
     bool slotBusy_[kSlots] = {};
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;

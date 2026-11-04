@@ -1159,3 +1159,16 @@ TEST(engine_param_touch_overrides_automation_until_playback_restarts) {
     e.play();  // playback restarts: the lane rules again
     CHECK_NEAR(run(e, 512).back() / lane025, 1.0, 1e-4);
 }
+
+TEST(engine_param_moved_right_after_play_is_a_touch) {
+    // The knob moves before the audio thread has handled the Play command: still a touch.
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const double lane = run(e, 512).back();
+    CHECK(lane > 0.05);
+    e.play();
+    e.setParam("tone", "g", 0.8);
+    CHECK_NEAR(run(e, 512).back() / lane, 3.0, 1e-4);
+}

@@ -135,7 +135,7 @@ struct Engine::Chain {
         ParameterResolver resolver;
         bool active = false;          // false: the descriptor did not validate; the VM reads the held value
         uint64_t heldBits = 0;        // the held value last seen (audio thread after publication)
-        uint32_t seenSerial = 0;      // the touch serial last seen (audio thread)
+        uint32_t seenSerial = 0;      // the touch stamp last seen (audio thread)
         bool passThrough = false;     // no lane and the held value resolves to itself: skip the resolver
         const ProjectAutomationLaneSpec* lane = nullptr;
     };
@@ -143,7 +143,7 @@ struct Engine::Chain {
     std::vector<const double*> paramValuePtrs;
     std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> automation;
     std::vector<std::vector<ParamSlot>> paramSlots;  // [module][param]
-    // [module][param]: bumped by the control thread for each knob move (release), read by the audio thread.
+    // [module][param]: the stamp of the last knob move (control thread, release), read by the audio thread.
     std::vector<std::unique_ptr<std::atomic<uint32_t>[]>> touchSerials;
     std::array<double, kBlock> laneScratch{};
     uint64_t touchEpoch = 0;  // the play count this chain's touches belong to
@@ -184,7 +184,8 @@ struct Engine::Cmd {
     bool seamXf = true, flag = false;
     int swapMode = 0;
     int voices = kMaxVoices;
-    uint64_t playCount = 0;  // Play: the control thread's play count, which ends touches
+    uint64_t playCount = 0;    // Play: the control thread's play count, which ends touches
+    uint32_t touchStamp = 0;   // Play: the last touch stamp before it (later stamps are touches after it)
 };
 
 struct Engine::Retired {
@@ -1437,13 +1438,15 @@ void Engine::setParam(const std::string& moduleId, const std::string& name, doub
 }
 
 void Engine::markTouched(Chain& c, const std::vector<std::string>* ids, const std::string& name) {
-    // After writeParams stored the held values, so the audio thread reads the new value with the serial.
+    // After writeParams stored the held values, so the audio thread reads the new value with the stamp.
+    // One engine-wide stamp per knob move, so a Play can tell moves made before it from later ones.
+    ++touchCounter_;
     for (size_t i = 0; i < c.main.size(); ++i) {
         if (ids && std::find(ids->begin(), ids->end(), c.moduleIds[i]) == ids->end()) continue;
         const Program& p = c.main[i]->program();
         for (size_t k = 0; k < p.params.size(); ++k)
             if (p.params[k].name == name && p.params[k].global == (ids == nullptr))
-                c.touchSerials[i][k].fetch_add(1, std::memory_order_release);
+                c.touchSerials[i][k].store(touchCounter_, std::memory_order_release);
     }
 }
 
@@ -1481,12 +1484,14 @@ void Engine::setMaster(double volume) {
 void Engine::play() {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
-    touchedParams_.clear();  // a (re)start ends every touch; chains do the same at their next chunk
-    touchedGlobals_.clear();
     Cmd c;
     c.type = Cmd::Play;
-    c.playCount = ++playCount_;
-    send(c);
+    c.playCount = playCount_ + 1;
+    c.touchStamp = touchCounter_;
+    if (!send(c)) return;  // nothing changed on the audio side, so keep the control side as it was
+    playCount_ = c.playCount;
+    touchedParams_.clear();  // a (re)start ends every touch; chains do the same at their next chunk
+    touchedGlobals_.clear();
 }
 
 void Engine::stop() {
@@ -1797,6 +1802,7 @@ void Engine::applyCommands() noexcept {
             case Cmd::Play:
                 playing_ = true;
                 touchEpoch_ = c.playCount;  // chains from before this Play drop their touches at their next chunk
+                touchPlayStamp_ = c.touchStamp;
                 stopFade_ = 0;
                 g_ = 0;
                 epoch_ = 0;
@@ -1904,11 +1910,13 @@ void Engine::prepareLane(Chain& c, int lane, int64_t n0, int len) noexcept {
 void Engine::resolveParams(Chain& c, const Instance& inst, size_t idx, int64_t globalStart, int len) noexcept {
     if (c.touchEpoch != touchEpoch_) {
         // Playback (re)started: touches end, and knob moves made before it (while stopped) are
-        // taken as plain values, so the lanes rule again.
+        // taken as plain values, so the lanes rule again. A move stamped after the Play stays
+        // unseen, so it becomes a touch below.
         for (size_t m = 0; m < c.paramSlots.size(); ++m)
             for (size_t k = 0; k < c.paramSlots[m].size(); ++k) {
                 c.paramSlots[m][k].resolver.clearTouch();
-                c.paramSlots[m][k].seenSerial = c.touchSerials[m][k].load(std::memory_order_acquire);
+                const uint32_t stamp = c.touchSerials[m][k].load(std::memory_order_acquire);
+                if (static_cast<int32_t>(stamp - touchPlayStamp_) <= 0) c.paramSlots[m][k].seenSerial = stamp;
             }
         c.touchEpoch = touchEpoch_;
     }
