@@ -13,6 +13,7 @@ graphify-out/
 .serena/cache/
 .serena/logs/
 .serena/memories/
+.cache/
 build/
 build-*/
 .gradle/
