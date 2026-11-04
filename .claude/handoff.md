@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: HEADSHA
+Commit: aa867c8
 Branch: claude/caw-engine-foundation-skpirb (F6.6 on top of Main 477510c; PR to Main)
 
 ## Goal
