@@ -74,24 +74,63 @@ updated: 2026-11-04
 
 ### Arrangement (home)
 
-- **Track headers:** name, colour, mute, solo, record-arm (later), the automation button, and a meter. They are drag handles for reordering and nesting.
-  - Add a track with "+" or by double-tapping below the last track.
-  - A folder collapses, and can act as a bus as today.
-- **Making MIDI clips:**
-  - Drag on empty track space with the Draw tool (a long-press, then drag, on touch) to make a clip as long as the drag.
-  - Tapping a clip selects it; double-tapping, or the clip's piano-roll button, opens it in the docked Piano roll.
-  - Clips move, resize and duplicate as today (linked or independent).
-- **Drag and drop onto the arrangement:**
-  - Drop an instrument or pattern from Files/Code onto a track: an instrument goes into that track's chain, and a pattern becomes a clip.
-  - Drop on empty space below the tracks to create a new track.
+**Owner's spec (2026-11-04).** The motion, ghost, snapping and haptics rules in Feel apply to everything here.
+
+- **Toolbar:** one context-aware row, the same pattern as the piano roll.
+  - **Fixed, left to right:**
+    - the tools: Select, Draw (makes clips), Split, Erase
+    - the snap magnet with its grid: Bar, Beat, 1/8, 1/16 and triplets. Tap toggles snapping, and holding Shift (PC) or a second finger (touch) bypasses it.
+    - the ⋮ menu: zoom to fit, track heights, view, customise
+  - **Middle part:**
+    - **Nothing selected:** + Track and + Folder.
+    - **Clips selected:** Duplicate, Linked duplicate, Split, Colour, Delete.
+    - **A track selected:** + Instrument, + Effect, Duplicate, Colour, Delete.
+- **Track headers:**
+  - **Compact by default:** a colour strip, the name, M and S, the automation ▾ button and a meter.
+  - **Wider:** drag the header column's edge wider, as in Reaper's track panel, to reveal volume and pan, the instrument name and the effect count.
+  - Drag a header's bottom edge to set that track's height.
+- **Nesting:**
+  - Drag a header onto another track. It highlights, and the dragged track goes inside. Drag a child out to the left to take it out. An indent line shows the depth.
+  - Or select several tracks and press Group to put them in a new folder.
+  - **Any track can be a parent (owner):** a track with children still plays its own instrument and clips, as in Reaper. Today a folder is a bus with no sound of its own, so this needs engine work (GPT).
+- **Clips:**
+  - **Making one:** with the Draw tool, drag across a track to make a clip that long, snapped, with the ghost. A tap makes a clip the length of the last clip you made (1 bar at first). The new clip is selected, and the docked piano roll shows it.
+  - **Editing:**
+    - Tap selects, and dragging moves it, using the ghost and the settle motion.
+    - A long-press opens the clip menu, and a double-tap opens it in the piano roll.
+    - The left edge trims the start.
+  - **Dragging the right edge** past the content repeats the pattern, with a faint line where each repeat starts. A corner handle, or the clip menu, switches the clip to extend instead, which adds empty space.
+  - **Colour:** a clip takes its track's colour unless you give it its own.
+- **Split tool:**
+  - A tap on a clip splits it at the snapped point, with a ghost line showing where.
+  - With several clips selected, all of them split there.
+  - Dragging along a clip splits it at both ends of the drag.
+- **Selecting:**
+  - With the Select tool, dragging on empty space draws a box that selects the clips and automation points inside it.
+  - A long-press then drag selects a time range across tracks, for split, copy, loop or export.
+  - Tapping a header selects the track and shows it in the Inspector. Shift, or a second finger, adds to the selection.
+- **Ruler:**
+  - A tap moves the playhead there, with a glide.
+  - Dragging along the ruler sets the loop region, and the loop button turns it on or off.
+  - Named markers (Intro, Drop) can be added, jumped to and dragged.
+  - While playing, the view follows the playhead, and a toggle turns that off.
+- **Zoom and scroll:**
+  - On touch, pinch horizontally to zoom time and vertically to change track heights. A one-finger drag on empty space scrolls.
+  - On PC, Ctrl+wheel zooms time and Alt+wheel changes track heights.
+  - Zoom glides. Zoom to fit is in ⋮.
+- **Drag and drop:**
+  - An instrument dropped on a track goes into its chain.
+  - An effect dropped on a track or one of its clips goes to the end of that track's chain.
+  - A pattern or MIDI file dropped on a track becomes a clip at the snapped drop point.
+  - Anything dropped on the empty space below the tracks makes a new track with it.
 - **Automation lanes:**
-  - The track's automation button drops lanes down under the track.
-  - Each lane has a parameter dropdown listing volume, pan and every instrument or effect parameter in the chain. Several lanes can be open.
-  - One tap collapses them all.
-  - Points are edited in the lane, with the existing curves and undo.
-- **Reactive colour:** each clip and its header glow with their own track's level while playing, read from the meters the app already polls at 30 Hz.
-  - Settings switch it off.
-  - The Minimal profile turns it off.
+  - The track's automation ▾ button drops lanes down under the track. Each lane has a parameter dropdown listing volume, pan and every instrument or effect parameter in the chain. Several lanes can be open, and one tap collapses them all.
+  - Lane points snap to the time and value grids (see Piano roll) and use the same handles: bend with detents, or Bezier once the engine supports it.
+  - The Draw tool and freehand drawing work in lanes too.
+- **Reactive glow:**
+  - It is subtle and adjustable: a settings slider runs from off to strong.
+  - Clips and headers brighten softly with their own track's level, and peaks flash briefly on hits like kicks.
+  - It reads the meters the app already polls at 30 Hz. The Minimal profile turns it off.
 - **Empty tracks are silent.** Loading a project or a template turns each clip-less looping layer into one clip across the song.
 
 ### Track chain (instruments and effects)

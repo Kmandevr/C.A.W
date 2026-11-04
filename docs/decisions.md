@@ -21,6 +21,15 @@ updated: 2026-11-04
   - **Haptics:** on by default, and can be switched off.
   - **Motion setting:** Full, Reduced or Off.
   - **Detail:** [UI plan](ui-plan.md#piano-roll).
+- **Arrangement (owner, 2026-11-04):**
+  - **Layout:** the same context-aware toolbar row as the roll, with Select, Draw, Split and Erase. Compact track headers that widen to show volume, pan and the chain.
+  - **Nesting:** by dragging onto a track, or Group. Any track can be a parent and still play, which needs engine work.
+  - **Clips:** Draw makes clips (tap = the last length). The right edge repeats by default, and a handle switches it to extend. Split cuts under the finger.
+  - **Selecting:** box, time range and tap on a header.
+  - **Ruler:** playhead, loop region, markers, follow.
+  - **Zoom and drag:** pinch both ways. Drag and drop adds instruments, effects (always to the track's chain), patterns and new tracks.
+  - **Glow:** subtle and adjustable.
+  - **Detail:** [UI plan](ui-plan.md#arrangement-home).
 - **Why:** the owner wants one place to build a song that feels like a real DAW and good to use. The plan, today's findings and the open questions are in [UI plan](ui-plan.md).
 - **Consequences:** several instruments per track and silent empty tracks change the engine and project model. The engine part goes to GPT as an issue, and the UI waits for it where it must.
 
