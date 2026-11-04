@@ -434,7 +434,9 @@ class _PatternEditorState extends State<PatternEditor> {
       case 'roll.view.fit':
         setState(() {
           _scrollX = 0;
-          _pxPerStep = math.max(4, (context.size?.width ?? 400) - _keyW) / math.max(1, d.lengthSteps(s.project.beatsPerBar));
+          // Clamped like zoom, so a very long pattern scrolls instead of drawing millions of grid lines.
+          _pxPerStep = (math.max(4.0, (context.size?.width ?? 400) - _keyW) / math.max(1, d.lengthSteps(s.project.beatsPerBar)))
+              .clamp(4.0, 200.0).toDouble();
         });
       case 'roll.view.velocityLane':
         setState(() => _velLane = !_velLane);
@@ -1902,10 +1904,14 @@ class _RollPainter extends CustomPainter {
         canvas.drawRRect(r, Paint()..color = fill.withValues(alpha: 0.18));
         final path = Path();
         final lenSec = n.len.toDouble() * secPerStep;
-        for (var px = 0.0; px <= nw; px += 2) {
+        // Sampled only where the note is on screen, so a very long note costs no more than the width.
+        final from = math.max(0.0, -x), to = math.min(nw, w - x);
+        var first = true;
+        for (var px = (from / 2).floor() * 2.0; px <= to; px += 2) {
           final u = px / nw;
           final py = y + rowH / 2 - e.pitchAt(u, u * lenSec) * rowH;
-          px == 0 ? path.moveTo(x + px, py) : path.lineTo(x + px, py);
+          first ? path.moveTo(x + px, py) : path.lineTo(x + px, py);
+          first = false;
         }
         canvas.drawPath(path, Paint()
           ..color = fill

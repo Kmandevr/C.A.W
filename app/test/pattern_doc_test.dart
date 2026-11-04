@@ -173,9 +173,9 @@ void main() {
       expect(err('$head  0 H1 1\n'), "line 4, col 5: expected a note such as C3, F#2 or 48, found 'H1'");
       expect(err('${head}0 C3,Q3 1\n'), "line 4, col 6: expected a note such as C3, F#2 or 48, found 'Q3'");
       expect(err('${head}0 200 1\n'), 'line 4, col 3: notes must be 0 to 127');
-      expect(err('$head-1 A1 1\n'), 'line 4, col 1: the start (in steps) must be 0 to 2147483647');
+      expect(err('$head-1 A1 1\n'), 'line 4, col 1: the start (in steps) must be 0 to 2.14748e+09');
       expect(err('${head}x A1 1\n'), "line 4, col 1: expected the start (in steps), found 'x'");
-      expect(err('${head}0 A1 0\n'), 'line 4, col 6: the length (in steps) must be 0.001 to 2147483647');
+      expect(err('${head}0 A1 0\n'), 'line 4, col 6: the length (in steps) must be 0.001 to 2.14748e+09');
       expect(err('${head}0 A1 1 2\n'), 'line 4, col 8: velocity must be 0 to 1');
       expect(
           err('${head}0 A1 1 1 wobble\n'), "line 4, col 10: unknown extra 'wobble' (try prob 0.5, ratchet 3, slide, bend, vib, press or timbre)");
@@ -198,7 +198,17 @@ void main() {
       final curve = PatternDoc.parse('${head}0 C3 4 bend $points\n');
       expect(curve.ok, isTrue, reason: curve.error);
       expect(curve.doc!.notes.single.expr.bend.length, 20);
-      expect(err('---\nkind: pattern\nlength: 2147483648\n---\n'), contains('length must be 1 to 2147483647'));
+      expect(PatternDoc.parse('${head}0 C3 1\n').doc!.setLength(bars: 300).lengthSteps(4), 300 * 16);
+    });
+
+    test('step arithmetic stays exact or close near the step limit, never wraps', () {
+      final a = Steps.tryParse('2147483646.12347')!, b = Steps.tryParse('0.33331')!;
+      expect((a + b).toDouble(), closeTo(2147483646.45678, 1e-4));
+      expect((a - b).toDouble(), closeTo(2147483645.79016, 1e-4));
+      expect(a > b, isTrue);
+      expect(a.compareTo(a + b), -1);
+      expect(Steps(kPatternMaxSteps).times(3).toDouble(), 3.0 * kPatternMaxSteps);
+      expect(err('---\nkind: pattern\nlength: 2147483648\n---\n'), contains('length must be 1 to 2.14748e+09'));
     });
   });
 

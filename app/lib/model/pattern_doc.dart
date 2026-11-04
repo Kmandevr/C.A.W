@@ -20,6 +20,8 @@ import 'dart:math' as math;
 // or a pattern's length. There is no note-count or curve-point cap (F7, owner 2026-11-04).
 const int kPatternMaxSteps = 2147483647;
 const int kPatternMaxBars = 2147483647 ~/ 64;
+// The same bounds as the engine prints them (`%g`), so range errors read the same in both.
+const String kPatternMaxStepsText = '2.14748e+09', kPatternMaxBarsText = '3.35544e+07';
 // One generate step (random notes, arpeggiate) refuses to make more notes than this rather than freezing the app.
 const int kPatternMaxGenerated = 1 << 20;
 const int kPatternMaxRatchet = 8;
@@ -95,14 +97,37 @@ class Steps implements Comparable<Steps> {
   double toDouble() => numerator / denominator;
   bool get isInteger => denominator == 1;
 
-  Steps operator +(Steps o) =>
-      Steps(numerator * o.denominator + o.numerator * denominator, denominator * o.denominator);
-  Steps operator -(Steps o) =>
-      Steps(numerator * o.denominator - o.numerator * denominator, denominator * o.denominator);
-  Steps operator *(Steps o) => Steps(numerator * o.numerator, denominator * o.denominator);
-  Steps operator /(Steps o) => Steps(numerator * o.denominator, denominator * o.numerator);
+  // Cross products of values below 2^31 fit a 64-bit int; larger ones (steps near the 2^31 limit with fine
+  // fractions) go through BigInt, and a result too big for an int becomes the nearest fraction with a denominator
+  // up to 2^20, so nothing ever wraps around.
+  static const _small = 1 << 31;
+  static bool _fits(int a, int b, int c, int d) => a.abs() < _small && b.abs() < _small && c.abs() < _small && d.abs() < _small;
+  static Steps _big(BigInt n, BigInt d) {
+    final g = n.gcd(d);
+    if (g > BigInt.one) {
+      n = n ~/ g;
+      d = d ~/ g;
+    }
+    if (n.isValidInt && d.isValidInt) return Steps(n.toInt(), d.toInt());
+    return Steps.fromDouble(n / d);
+  }
+
+  Steps operator +(Steps o) => _fits(numerator, denominator, o.numerator, o.denominator)
+      ? Steps(numerator * o.denominator + o.numerator * denominator, denominator * o.denominator)
+      : _big(BigInt.from(numerator) * BigInt.from(o.denominator) + BigInt.from(o.numerator) * BigInt.from(denominator),
+          BigInt.from(denominator) * BigInt.from(o.denominator));
+  Steps operator -(Steps o) => this + -o;
+  Steps operator *(Steps o) => _fits(numerator, denominator, o.numerator, o.denominator)
+      ? Steps(numerator * o.numerator, denominator * o.denominator)
+      : _big(BigInt.from(numerator) * BigInt.from(o.numerator), BigInt.from(denominator) * BigInt.from(o.denominator));
+  Steps operator /(Steps o) {
+    if (o.numerator == 0) throw ArgumentError.value(o, 'o', 'must not be 0');
+    return _fits(numerator, denominator, o.numerator, o.denominator)
+        ? Steps(numerator * o.denominator, denominator * o.numerator)
+        : _big(BigInt.from(numerator) * BigInt.from(o.denominator), BigInt.from(denominator) * BigInt.from(o.numerator));
+  }
   Steps operator -() => Steps._(-numerator, denominator);
-  Steps times(int k) => Steps(numerator * k, denominator);
+  Steps times(int k) => this * Steps(k);
 
   bool operator <(Steps o) => compareTo(o) < 0;
   bool operator <=(Steps o) => compareTo(o) <= 0;
@@ -110,7 +135,9 @@ class Steps implements Comparable<Steps> {
   bool operator >=(Steps o) => compareTo(o) >= 0;
 
   @override
-  int compareTo(Steps o) => (numerator * o.denominator).compareTo(o.numerator * denominator);
+  int compareTo(Steps o) => _fits(numerator, denominator, o.numerator, o.denominator)
+      ? (numerator * o.denominator).compareTo(o.numerator * denominator)
+      : (BigInt.from(numerator) * BigInt.from(o.denominator)).compareTo(BigInt.from(o.numerator) * BigInt.from(denominator));
 
   @override
   bool operator ==(Object other) => other is Steps && other.numerator == numerator && other.denominator == denominator;
@@ -615,9 +642,9 @@ class PatternDoc {
       if (w.length < 3) {
         throw _PatternError(lineNo, w[0].col, 'a note line is: at  note  length  [velocity]  [extras]');
       }
-      final at = _needSteps(w[0], lineNo, 'the start (in steps)', 0, '0 to $kPatternMaxSteps');
+      final at = _needSteps(w[0], lineNo, 'the start (in steps)', 0, '0 to $kPatternMaxStepsText');
       final chord = _pitches(w[1], lineNo);
-      final len = _needSteps(w[2], lineNo, 'the length (in steps)', 1e-3, '0.001 to $kPatternMaxSteps');
+      final len = _needSteps(w[2], lineNo, 'the length (in steps)', 1e-3, '0.001 to $kPatternMaxStepsText');
       var vel = 1.0, prob = 1.0, ratchet = 1, slide = false;
       var expr = NoteExpression.none;
       var k = 3;
@@ -722,7 +749,7 @@ class PatternDoc {
     }
     final n = _needNumber(
         w[0], lineNo, 'length', 1, (bars ? kPatternMaxBars : kPatternMaxSteps).toDouble(),
-        bars ? '1 to $kPatternMaxBars' : '1 to $kPatternMaxSteps');
+        bars ? '1 to $kPatternMaxBarsText' : '1 to $kPatternMaxStepsText');
     if (n != n.floorToDouble()) throw _PatternError(lineNo, col, 'length must be a whole number');
     return bars ? (0, n.toInt()) : (n.toInt(), 0);
   }
@@ -793,7 +820,7 @@ class PatternDoc {
   PatternDoc setLength({int? steps, int? bars}) {
     if (steps != null && bars != null) throw ArgumentError('give steps or bars, not both');
     if (steps != null && (steps < 1 || steps > kPatternMaxSteps)) throw RangeError.range(steps, 1, kPatternMaxSteps);
-    if (bars != null && (bars < 1 || bars > 256)) throw RangeError.range(bars, 1, 256);
+    if (bars != null && (bars < 1 || bars > kPatternMaxBars)) throw RangeError.range(bars, 1, kPatternMaxBars);
     final value = steps != null ? '$steps' : (bars != null ? (bars == 1 ? '1 bar' : '$bars bars') : null);
     return _setHeader('length', value, const ['caw', 'kind', 'name', 'summary']);
   }
