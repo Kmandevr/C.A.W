@@ -1657,3 +1657,146 @@ TEST(graph_parameters_clear_touch_keeps_queue_order) {
     CHECK(executor.process(host.constView(8), out.view(8), 8));
     CHECK(!executor.parameterTouched(1, 0));
 }
+
+namespace {
+// F6.3 modulation links: modulation sources (TypedModules::mod, one output) into ParamGain's gain.
+struct LinkGraph {
+    TypedModules t;
+    ParamModules m;
+};
+float run(GraphExecutor& executor, uint32_t frames, uint32_t frame) {
+    Planar host(2, frames, 1.0f), out(2, frames);
+    if (!executor.process(host.constView(frames), out.view(frames), frames)) return -1.0f;
+    return out.data[0][frame];
+}
+}  // namespace
+
+TEST(graph_modulation_links_drive_a_parameter_per_frame_like_the_resolver) {
+    LinkGraph g;
+    ModSource lfo(g.t.mod, 0);
+    ParamGain gain(g.m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"lfo", &g.t.mod}, {"g", &g.m.plain}}, {}, {&lfo, &gain}, 1, 32, 48000.0, kBudget) ==
+          GraphError::Ok);
+    const ParameterLink link{7, 0, 0, 1, 0, ModulationOp::Add, 0.25};
+    CHECK(executor.setModulationLinks(&link, 1) == GraphError::Ok);
+    Planar host(2, 32, 1.0f), out(2, 32);
+    CHECK(executor.process(host.constView(32), out.view(32), 32));
+    // The same parameter through a standalone resolver gives the same per-frame values.
+    ParameterResolver reference;
+    CHECK(reference.configure(g.m.gain));
+    const ModulationLink same{7, ModulationOp::Add, 0.25};
+    CHECK(reference.setLinks(&same, 1));
+    float signalBuffer[32];
+    for (uint32_t i = 0; i < 32; ++i) signalBuffer[i] = signal(0, i);
+    const float* signals[] = {signalBuffer};
+    double expected[32];
+    reference.resolve(32, nullptr, signals, expected);
+    for (uint32_t i = 0; i < 32; ++i) CHECK_EQ(out.data[0][i], static_cast<float>(expected[i]));
+    CHECK(gain.variedBlocks == 1u);
+    // No links: back to the plain manual value.
+    CHECK(executor.setModulationLinks(nullptr, 0) == GraphError::Ok);
+    CHECK_EQ(run(executor, 32, 5), 0.5f);
+}
+
+TEST(graph_modulation_links_give_the_same_output_whatever_the_list_or_node_order) {
+    // Add 0.5 (id 1) then Replace by 0.5 (id 2): the order matters, so only id order may decide it.
+    LinkGraph g;
+    ModSource a(g.t.mod, 0, 0.5f, true), b(g.t.mod, 0, 1.0f, true);
+    ParamGain gain(g.m.plain);
+    float results[4];
+    for (int k = 0; k < 4; ++k) {
+        const bool swapNodes = k & 1, swapList = k & 2;
+        // Nodes: two sources (in either order) then the gain.
+        const uint32_t na = swapNodes ? 1 : 0, nb = swapNodes ? 0 : 1;
+        std::vector<GraphNode> nodes(3);
+        std::vector<ModuleProcessor*> processors(3);
+        nodes[na] = {"a", &g.t.mod};
+        nodes[nb] = {"b", &g.t.mod};
+        nodes[2] = {"g", &g.m.plain};
+        processors[na] = &a;
+        processors[nb] = &b;
+        processors[2] = &gain;
+        GraphExecutor executor;
+        CHECK(executor.prepare(nodes, {}, processors, 2, 8, 48000.0, kBudget) == GraphError::Ok);
+        const ParameterLink add{1, na, 0, 2, 0, ModulationOp::Add, 0.5};
+        const ParameterLink replace{2, nb, 0, 2, 0, ModulationOp::Replace, 0.5};
+        const ParameterLink list[] = {swapList ? replace : add, swapList ? add : replace};
+        CHECK(executor.setModulationLinks(list, 2) == GraphError::Ok);
+        results[k] = run(executor, 8, 3);
+    }
+    // gain 0.5 of 0..2 -> n 0.25; + 0.5 * 0.5 -> 0.5; Replace by 0.5 toward 1 -> 0.75; x 2 = 1.5.
+    CHECK_EQ(results[0], 1.5f);
+    for (int k = 1; k < 4; ++k) CHECK_EQ(results[k], results[0]);
+}
+
+TEST(graph_modulation_links_reject_bad_links_and_keep_the_previous_ones) {
+    LinkGraph g;
+    ModSource lfo(g.t.mod, 0, 1.0f, true);
+    OffsetGenerator mono(g.t.mono, 0);
+    ParamGain gain(g.m.plain);
+    ParamGain after(g.m.plain);
+    GraphExecutor executor;
+    // Nodes: 0 lfo, 1 gain, 2 mono generator, 3 a second gain fed by the first.
+    CHECK(executor.prepare({{"lfo", &g.t.mod}, {"g", &g.m.plain}, {"mono", &g.t.mono}, {"h", &g.m.plain}}, {{1, 1, 3, 0}},
+                           {&lfo, &gain, &mono, &after}, 3, 8, 48000.0, kBudget) == GraphError::Ok);
+    const ParameterLink good{1, 0, 0, 3, 0, ModulationOp::Replace, 1.0};
+    CHECK(executor.setModulationLinks(&good, 1) == GraphError::Ok);
+    CHECK_EQ(run(executor, 8, 0), 0.5f * 2.0f);  // first gain 0.5; second replaced to the top (2.0)
+    const ParameterLink outOfRange{1, 9, 0, 3, 0, ModulationOp::Add, 0.1};
+    const ParameterLink badPort{1, 0, 5, 3, 0, ModulationOp::Add, 0.1};
+    const ParameterLink badParameter{1, 0, 0, 3, 1, ModulationOp::Add, 0.1};
+    const ParameterLink audioSource{1, 2, 0, 3, 0, ModulationOp::Add, 0.1};
+    const ParameterLink backwards{1, 3, 0, 1, 0, ModulationOp::Add, 0.1};  // node 3 has no modulation output either
+    const ParameterLink deep{1, 0, 0, 3, 0, ModulationOp::Add, 2.0};
+    const ParameterLink twice[] = {{4, 0, 0, 3, 0, ModulationOp::Add, 0.1}, {4, 0, 0, 3, 0, ModulationOp::Max, 0.1}};
+    CHECK(executor.setModulationLinks(&outOfRange, 1) == GraphError::NodeIndexOutOfRange);
+    CHECK(executor.setModulationLinks(&badPort, 1) == GraphError::PortIndexOutOfRange);
+    CHECK(executor.setModulationLinks(&badParameter, 1) == GraphError::PortIndexOutOfRange);
+    CHECK(executor.setModulationLinks(&audioSource, 1) == GraphError::PortTypeMismatch);
+    CHECK(executor.setModulationLinks(&deep, 1) == GraphError::InvalidParameterLink);
+    CHECK(executor.setModulationLinks(twice, 2) == GraphError::InvalidParameterLink);
+    CHECK(executor.setModulationLinks(nullptr, 1) == GraphError::InvalidParameterLink);
+    ParameterLink many[kMaxParameterLinks + 1];
+    for (uint32_t k = 0; k <= kMaxParameterLinks; ++k) many[k] = {k, 0, 0, 3, 0, ModulationOp::Add, 0.0};
+    CHECK(executor.setModulationLinks(many, kMaxParameterLinks + 1) == GraphError::InvalidParameterLink);
+    CHECK(executor.setModulationLinks(&backwards, 1) == GraphError::PortTypeMismatch);
+    CHECK_EQ(run(executor, 8, 0), 0.5f * 2.0f);  // the good link still holds
+    // A source that runs after its destination: build the order with the gain first.
+    GraphExecutor late;
+    CHECK(late.prepare({{"g", &g.m.plain}, {"lfo", &g.t.mod}}, {}, {&gain, &lfo}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    const ParameterLink fromLater{1, 1, 0, 0, 0, ModulationOp::Add, 0.1};
+    CHECK(late.setModulationLinks(&fromLater, 1) == GraphError::Cycle);
+    // Not with dynamic routing, whose order can change.
+    GraphExecutor routed;
+    CHECK(routed.prepare({{"lfo", &g.t.mod}, {"g", &g.m.plain}}, {}, {&lfo, &gain}, 1, 8, 48000.0, kBudget) == GraphError::Ok);
+    CHECK(routed.reserveRouting(1, kBudget) == GraphError::Ok);
+    const ParameterLink link{1, 0, 0, 1, 0, ModulationOp::Add, 0.1};
+    CHECK(routed.setModulationLinks(&link, 1) == GraphError::RoutingUnavailable);
+    GraphExecutor unprepared;
+    CHECK(unprepared.setModulationLinks(&link, 1) != GraphError::Ok);
+}
+
+TEST(graph_modulation_links_process_without_allocating) {
+    LinkGraph g;
+    ModSource a(g.t.mod, 0), b(g.t.mod, 100);
+    ParamGain gain(g.m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"a", &g.t.mod}, {"b", &g.t.mod}, {"g", &g.m.plain}}, {}, {&a, &b, &gain}, 2, 64, 48000.0,
+                           kBudget) == GraphError::Ok);
+    const ParameterLink links[] = {{1, 0, 0, 2, 0, ModulationOp::Add, 0.3}, {2, 1, 0, 2, 0, ModulationOp::Multiply, 0.5}};
+    CHECK(executor.setModulationLinks(links, 2) == GraphError::Ok);
+    Planar host(2, 64, 1.0f), out(2, 64);
+    bool ok = true;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (uint32_t frames : {64u, 17u, 1u, 64u}) {
+            ok = executor.queueParameter(2, 0, 0.75) && ok;
+            ok = executor.process(host.constView(frames), out.view(frames), frames) && ok;
+        }
+        operations = scope.count();
+    }
+    CHECK(ok);
+    CHECK_EQ(operations, 0u);
+}

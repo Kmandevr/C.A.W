@@ -84,7 +84,7 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorEventMergeBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterResolver>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterValue>)) ||
-        !addEstimatedBytes(total, 2, sizeof(std::vector<double>)) ||
+        !addEstimatedBytes(total, 3, sizeof(std::vector<double>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorPortBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorNodeBlockBytes>)) ||
         !addEstimatedBytes(total, 2, sizeof(std::vector<ChannelBufferView>)) ||
@@ -106,7 +106,8 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         return false;
     // Parameters: a resolver, a resolved value and maxFrames doubles each.
     std::size_t parameterFrames = 0;
-    if (!addEstimatedBytes(total, shape.parameters, sizeof(ParameterResolver) + sizeof(ParameterValue) + sizeof(uint64_t)) ||
+    if (!addEstimatedBytes(total, shape.parameters, sizeof(ParameterResolver) + sizeof(ParameterValue) + sizeof(uint64_t) +
+                                                        kMaxParameterLinks * sizeof(const float*)) ||
         !addEstimatedBytes(parameterFrames, shape.parameters, maxFrames) ||
         !addEstimatedBytes(total, parameterFrames, sizeof(double)))
         return false;
@@ -343,6 +344,7 @@ void GraphExecutor::reset() noexcept {
     parameterStorage_.clear();
     touchEpoch_.clear();
     clearEpoch_ = 0;
+    linkSignals_.clear();
     order_.clear();
     routePosition_.clear();
     routeCount_.clear();
@@ -545,6 +547,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         parameterStorage_.assign(static_cast<std::size_t>(paramCursor) * maxFrames, 0.0);
         touchEpoch_.assign(paramCursor, 0);
         clearEpoch_ = 0;
+        linkSignals_.assign(static_cast<std::size_t>(paramCursor) * kMaxParameterLinks, nullptr);
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
             for (uint32_t k = 0; k < descriptor.parameterCount; ++k)
@@ -1004,6 +1007,64 @@ bool GraphExecutor::queueClearTouch() noexcept {
     return ready_ && parameterQueue_.push(ParameterCommand{0, 0, 0.0, true});
 }
 
+GraphError GraphExecutor::setModulationLinks(const ParameterLink* links, uint32_t count) try {
+    if (!ready_) return GraphError::InvalidOutputNode;
+    if (routingCapacity_ != 0) return GraphError::RoutingUnavailable;
+    if (count && !links) return GraphError::InvalidParameterLink;
+    // Validate everything first (no allocation: counts per parameter fit in the fixed table).
+    std::vector<uint32_t> position(blocks_.size(), UINT32_MAX);
+    for (uint32_t k = 0; k < order_.size(); ++k) position[order_[k]] = k;
+    std::vector<uint32_t> perParameter(resolvers_.size(), 0);
+    for (uint32_t k = 0; k < count; ++k) {
+        const ParameterLink& link = links[k];
+        if (link.sourceNode >= blocks_.size() || link.destinationNode >= blocks_.size()) return GraphError::NodeIndexOutOfRange;
+        if (link.sourcePort >= processors_[link.sourceNode]->descriptor().portCount ||
+            link.parameter >= blocks_[link.destinationNode].paramCount) return GraphError::PortIndexOutOfRange;
+        const Port& from = ports_[nodePortBase_[link.sourceNode] + link.sourcePort];
+        if (from.input || from.type != PortType::Modulation) return GraphError::PortTypeMismatch;
+        if (position[link.sourceNode] >= position[link.destinationNode]) return GraphError::Cycle;
+        if (++perParameter[blocks_[link.destinationNode].paramBase + link.parameter] > kMaxParameterLinks)
+            return GraphError::InvalidParameterLink;
+    }
+    // Per parameter: its links sorted by id, checked by the resolver's rules (ids, ops, depths).
+    std::vector<std::pair<uint32_t, uint32_t>> byParameter;  // (parameter, link index)
+    byParameter.reserve(count);
+    for (uint32_t k = 0; k < count; ++k)
+        byParameter.emplace_back(blocks_[links[k].destinationNode].paramBase + links[k].parameter, k);
+    std::sort(byParameter.begin(), byParameter.end(), [&](const auto& a, const auto& b) {
+        return a.first != b.first ? a.first < b.first : links[a.second].id < links[b.second].id;
+    });
+    ParameterResolver probe;  // dry run, so an invalid list changes nothing
+    for (std::size_t s = 0; s < byParameter.size();) {
+        const uint32_t p = byParameter[s].first;
+        ModulationLink group[kMaxParameterLinks];
+        uint32_t n = 0;
+        for (; s < byParameter.size() && byParameter[s].first == p; ++s) {
+            const ParameterLink& link = links[byParameter[s].second];
+            group[n++] = ModulationLink{link.id, link.op, link.depth};
+        }
+        if (!probe.setLinks(group, n)) return GraphError::InvalidParameterLink;
+    }
+    // Commit: every parameter's links (none for those not listed) and their signal pointers.
+    std::fill(linkSignals_.begin(), linkSignals_.end(), nullptr);
+    for (std::size_t p = 0; p < resolvers_.size(); ++p) resolvers_[p].setLinks(nullptr, 0);
+    for (std::size_t s = 0; s < byParameter.size();) {
+        const uint32_t p = byParameter[s].first;
+        ModulationLink group[kMaxParameterLinks];
+        uint32_t n = 0;
+        for (; s < byParameter.size() && byParameter[s].first == p; ++s, ++n) {
+            const ParameterLink& link = links[byParameter[s].second];
+            group[n] = ModulationLink{link.id, link.op, link.depth};
+            linkSignals_[static_cast<std::size_t>(p) * kMaxParameterLinks + n] =
+                outputTable_[ports_[nodePortBase_[link.sourceNode] + link.sourcePort].table];
+        }
+        resolvers_[p].setLinks(group, n);
+    }
+    return GraphError::Ok;
+} catch (...) {
+    return GraphError::OutOfMemory;  // control-thread scratch (O(nodes + parameters + links)); nothing changed
+}
+
 bool GraphExecutor::setInitialParameter(uint32_t node, uint32_t parameter, double value) noexcept {
     if (!ready_ || node >= blocks_.size() || parameter >= blocks_[node].paramCount || !std::isfinite(value))
         return false;
@@ -1044,11 +1105,11 @@ void GraphExecutor::applyParameterCommands() noexcept {
 }
 
 void GraphExecutor::resolveParameters(const NodeBlock& b, uint32_t frames) noexcept {
-    // Automation lanes (F6.4) and modulation links (F6.3) are not connected yet: manual values only.
+    // Modulation signals are this block's source outputs (sources ran earlier). Automation lanes: F6.4.
     for (uint32_t k = 0; k < b.paramCount; ++k) {
         const uint32_t p = b.paramBase + k;
         syncTouch(p);
-        parameterValues_[p] = resolvers_[p].resolve(frames, nullptr, nullptr,
+        parameterValues_[p] = resolvers_[p].resolve(frames, nullptr, linkSignals_.data() + static_cast<std::size_t>(p) * kMaxParameterLinks,
                                                     parameterStorage_.data() + static_cast<std::size_t>(p) * maxFrames_);
     }
 }
