@@ -289,7 +289,7 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
    - design tokens (spacing, type scale, one accent plus colours for meaning, track colours)
    - shared widgets
    - motion and snapping helpers
-   - golden-test setup
+   - golden-test setup: the tests load the bundled JetBrains Mono, so screenshots are stable
 2. **U1, the docking shell:**
    - the layout tree, panels, tabs and split dividers, on the phone too
    - saved layouts and presets
@@ -309,6 +309,5 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
 
 ## Open questions for the owner
 
-- **Font for goldens:** stable screenshot tests need a bundled font. JetBrains Mono (SIL OFL 1.1) is the proposal, but it is a new dependency, so it needs your approval.
 - **Several instruments per track:** is "each instrument adds its output to the audio above it" the rule you want? It goes to GPT as an engine issue.
 - **Docking:** build it in-house (proposed), or try a package?
