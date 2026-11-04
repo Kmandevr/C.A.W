@@ -22,6 +22,10 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F4 → F5 → F6 
   - The new hashes equal the old engine plus float rounding of each module's output (checked in a scratch worktree).
   - The audio review is addressed: forward same-layer imports are refused. Issue #78 is filed for the older swap-fade export renumbering.
 
+## Open
+- Issue #78: the swap-fade import buffers are renumbered (an older bug).
+- F10 seeds for native plugins need an SDK ABI change, so the owner must approve it.
+
 ## Next
 1. Open the F4.4 PR to Main and merge when CI is green.
 2. Then F5: typed control, modulation, event and MIDI ports in the executor.
