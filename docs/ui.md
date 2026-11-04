@@ -16,14 +16,12 @@ The owner's goal (2026-10-28) is a capable, lightweight music-production workspa
 - **Look:** neon but calm. The colours stay, glow is used sparingly, and transitions are short and simple.
 - **New files and startup** (owner, 2026-10-28):
   - **New modules:** a new sound, effect, pattern or library starts as an empty file. A faint hint (not part of the file) shows an example header and first line until you start typing. Templates stay one choice away in the same New menu.
-  - **Startup:** on launch, a small screen offers to continue the last project, start a new blank project, or start from a template project (such as today's "First loop"). It replaces opening the last project directly and the first-run demo project.
+  - **Startup (current; the owner replaced this choice on 2026-11-04 with opening straight into the arrangement, see [UI plan](ui-plan.md)):** on launch, a small screen offers to continue the last project, start a new blank project, or start from a template project (such as today's "First loop"). It replaces opening the last project directly and the first-run demo project.
   - With no header, an empty file is a byte-mode generator. That is how the language already works ([engine](engine.md#module-files-caw)).
 - **Look details** (owner, 2026-10-28):
   - **Calm neon** stays: near-black, thin neon lines, and glow only on what's active (playhead, selected notes, meters).
   - **Themes:** custom themes, with an in-app theme editor and live preview. It saves a readable theme file you can export, share or let an agent edit. Calm neon is the default, with a couple of starter themes.
-  - **Fonts:** the system font for the UI, plus one bundled monospace font for code and numbers, so they look the same on phone and PC. The proposal is JetBrains Mono:
-    - **[Fact]** licence: SIL Open Font License 1.1; the licence file and copyright must ship with the font. Seen in mirrors of its licence ([JetBrains Mono licence](https://maxibestof.one/fonts/coding/jetbrains-mono-LICENSE.txt)), 2026-10-28. Check the official repo before adding it and recording it in [decisions](decisions.md).
-    - Size: about 550 KB for Regular and Bold ([decisions](decisions.md)).
+  - **Fonts:** the system font for the UI, plus the bundled JetBrains Mono 2.304 (SIL OFL 1.1, about 550 KB, licence shown in the app) for code and numbers, so they look the same on phone and PC ([app](app.md)).
   - **Density:** a setting to switch between comfortable (48 dp targets, the default on phones) and compact (more bars and layers on screen).
   - **Keyboard feedback:**
     - **Mode badge:** a small tag next to the BPM shows the Vim mode (NORMAL green, INSERT yellow, VISUAL pink), with a red dot while a macro records.
