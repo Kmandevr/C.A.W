@@ -139,6 +139,20 @@ updated: 2026-11-04
   - On release, the stroke is simplified to a few clean points on the grid, which the handles then refine.
   - With snap off, the points stay where you drew them, still simplified.
 - **Animation:** snapping, ghosts, handles and detents use the motion rules in Feel. Points and handles grow slightly under the finger, and detents give a light haptic tick on Android.
+- **Toolbar (owner: one context-aware row):**
+  - **Fixed, left to right:**
+    - the four tools: Draw, Select, Curve, Erase
+    - the snap magnet with the time grid: tap toggles snapping. Its ▾ menu holds the time grid, the value grid, triplets and adaptive.
+    - the ⋮ menu: generators, quantize, lanes, view, customise
+  - **Middle part:** it changes with what you're doing and slides and fades between states (160 ms).
+    - **Nothing selected:** the velocity-lane toggle and zoom to fit.
+    - **Notes selected:** Copy, Paste, Duplicate, Delete (#21).
+    - **Curve tool:** the curve target (Pitch, Volume, Timbre, Velocity, Chance), the handle type (bend or Bezier), the stretch-or-keep toggle for curves, and freehand.
+  - **Moved elsewhere:**
+    - Undo and redo live in the transport bar.
+    - Full screen and the roll/drum switch live in the panel's header.
+  - **Customising (#9):** the existing toolbar editor still chooses which actions fill the fixed and idle slots, and the contextual groups stay.
+  - **Desktop:** the same row, with every group shown inline because there is room.
 - **Existing issues folded in:**
   - **#7:** a one-finger drag on empty grid scrolls, and drawing is deliberate.
   - **#21:** with a selection, Copy and Paste buttons appear, and dragging any selected note moves the group.
@@ -168,13 +182,19 @@ updated: 2026-11-04
 
 ### Feel
 
-- **Motion:**
-  - Short ease-out animations (about 120–200 ms) for panels, lanes, sheets and selection.
-  - Nothing animates while audio-critical work runs.
-  - The Minimal profile and the system's reduce-motion setting turn animations off.
+- **Motion feel (owner, 2026-11-04):** smooth, with a tiny overshoot, and distance-aware. The farther something travels, the faster it moves, so a long move doesn't take proportionally longer (logarithmic).
+  - **[Proposal] Duration:** `d = clamp(80 + 40·log2(1 + distance_px / 8), 80, 240)` ms. That is about 120 ms for 8 px, about 210 ms for 64 px, and 240 ms at most.
+  - **Overshoot:** at most 2 px, or 4% of the distance, whichever is smaller. Then it settles.
+  - **Fixed durations:** small feedback (press, a handle growing) takes 80 ms, standard changes (toolbar parts, selection, lanes opening) take 160 ms, and panels and sheets take 240 ms. Entering eases out, and leaving eases in.
 - **Smooth snapping:**
-  - While dragging, the item follows your finger. On release, a short spring settles it onto the grid line, with a light haptic tick on Android.
-  - Snap targets highlight while you approach them.
+  - While dragging, the item follows your finger exactly. A ghost shows where it will land, and the target grid line lights up as you get near it.
+  - On release, it settles onto the ghost with the distance-aware motion above.
+  - Points and handles grow slightly under the finger.
+- **Haptics (owner):** on by default, and can be switched off. On Android a light tick plays when something snaps, a handle clicks into a detent, or a note is placed.
+- **Motion setting (owner):** Full, Reduced or Off.
+  - Reduced keeps fades only, with no springs or movement.
+  - The Minimal profile sets Off, and the system's reduce-motion setting sets Reduced.
+- **Cost:** animations run only while something moves, and an idle screen draws no frames.
 - **Steady frame rate:** the existing rules hold. Dense views are drawn with painters and repaint only what changes ([UI design](ui.md#light-on-cpu-and-ram)).
 
 ## Order of work

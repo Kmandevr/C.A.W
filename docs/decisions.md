@@ -16,6 +16,10 @@ updated: 2026-11-04
   - **What snaps:** every curve kind, including automation.
   - **Handles:** bend handles with detents, plus optional per-point Bezier handles. Bezier needs engine and format work.
   - **Freehand:** freehand strokes simplified to grid points.
+  - **Toolbar:** one context-aware row: tools, the snap magnet with its grids, a middle part that changes with the selection or curve tool, and ⋮. Undo and redo are in the transport bar.
+  - **Motion:** smooth, with a tiny overshoot, and distance-aware (logarithmic: longer moves go faster).
+  - **Haptics:** on by default, and can be switched off.
+  - **Motion setting:** Full, Reduced or Off.
   - **Detail:** [UI plan](ui-plan.md#piano-roll).
 - **Why:** the owner wants one place to build a song that feels like a real DAW and good to use. The plan, today's findings and the open questions are in [UI plan](ui-plan.md).
 - **Consequences:** several instruments per track and silent empty tracks change the engine and project model. The engine part goes to GPT as an issue, and the UI waits for it where it must.
