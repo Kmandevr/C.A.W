@@ -1,7 +1,7 @@
 # Handoff
 
-Commit: 66cb6bf
-Branch: claude/caw-engine-foundation-skpirb (F7.1 on top of Main 6c73567; PR to Main)
+Commit: e1dec92
+Branch: claude/caw-engine-foundation-skpirb (F7.2 on top of Main c00bb20; PR to Main)
 
 ## Goal
 Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8, plus F10 (seeded randomness); F9 is deferred to Release 1, since no project compatibility is needed yet.
@@ -11,17 +11,18 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 - F7 owner choices (2026-11-04, `docs/decisions.md`): remove the app caps (F7.1); remove the 64-bar arrangement limit (F7.2); dynamic layers, re-preparing the mix graph off the audio thread (F7.3); safety bounds from the hardware budget, host-overridable within a ceiling, each with a clear message (F7.4).
 
 ## Done and verified
-- F1–F6 are on Main (F6.6 #87; F7 caps audit #88).
-- F7.1 on the branch: the app keeps every automation lane, point and pattern note; `Steps` arithmetic is exact near 2^31 (BigInt). `flutter analyze` clean, `flutter test` 162 pass, docs-test --strict PASS; code-reviewer: no defects.
+- F1–F6 are on Main; F7 caps audit #88; F7.1 app caps #89.
+- F7.2 on the branch: no 64-bar song limit. Out-of-range positions are refused with named errors, clip expansion is budgeted (3x peak), loop/free exports stream to the WAV (`renderExportToWav`, `.part` then rename), and the arranger paints only the visible span. Three audio-review and two code-review rounds are fixed. caw_tests 266, caw_rt_tests 73, sanitizers clean, app 184 (CAW_LIB). Callgrind is within noise.
 
 ## Open
 - Issue #78: swap-fade import buffers are renumbered (an older bug).
 - F10 seeds for native plugins need an SDK ABI change, so the owner must approve it.
 - Open: `smoothingFrames` counts frames, not time. Open (owner): MIDI 1.0 CC centre (v/127) vs MIDI 2.0 upscaling.
+- #90 arranger float32 drawing far into long songs; #91 the app save step reads the whole WAV for the picker (may need a new dependency: ask the owner).
 
 ## Next
-1. Open the F7.1 PR, merge when green, update #28.
-2. F7.2: remove the 64-bar limit in `engine/src/project.cpp` and the app (`maxArrangementSteps` clamps in project.dart and app_state.dart, the arranger's 4096 drag bounds, the clip-normalize test in `app/test/project_test.dart`). Then F7.3, F7.4, F8, F10.
+1. Open the F7.2 PR, merge when green, update #28.
+2. F7.3: dynamic layers (re-prepare the mix graph off the audio thread). Then F7.4, F8, F10.
 
 ## Read first
 - `docs/roadmap.md`
