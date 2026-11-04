@@ -139,7 +139,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - The existing screens don't use them yet.
   - **Docking layout model** (`lib/ui/dock/layout.dart`, not yet on screen):
     - The model is a tree of splits and tab groups holding panels by string id.
-    - Edits are dock (into a group, or split off on any edge), remove, reveal and activate. Split shares keep a 12% minimum.
+    - Edits are dock (into a group, or split off on any edge), remove, reveal and activate. Split shares keep a 12% minimum, after every edit and load; ids are checked and deduplicated on any tree.
     - Presets: Arrange, Mix and Code, for phone portrait, phone landscape and desktop.
     - The JSON form drops unknown or repeated panels and damaged parts.
   - **Performance profiles:** Full Experience (full glow), Balanced (55% glow), Lightweight (no glow, 4 voices per pattern layer) and Minimal (Lightweight plus hidden scope panels). All profiles keep meter polling at 30 Hz; Minimal does not slow down editing or meters.

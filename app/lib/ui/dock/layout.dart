@@ -1,5 +1,5 @@
 // Docking layout model: a tree of splits and tab groups holding panels, its edits, presets per form factor and a
-// damage-tolerant JSON form. Pure Dart: the widgets that draw it are in dock_view.dart.
+// damage-tolerant JSON form. Pure Dart, with no widgets.
 import 'dart:math' as math;
 
 /// Panel ids. They are strings, not enum indexes, so a renamed or split panel (Builder becomes Code and Inspector in
@@ -19,6 +19,12 @@ class Panels {
   static const all = [arrangement, builder, mixer, automation, exporter, files, engineLab, pluginBuilder];
 
   static bool known(String id) => all.contains(id);
+
+  /// The constant for [id] (so keys that compare by identity match after a load), or null for an unknown id.
+  static String? canonical(String id) {
+    final i = all.indexOf(id);
+    return i < 0 ? null : all[i];
+  }
 }
 
 /// Side by side ([row]) or stacked ([column]).
@@ -67,13 +73,15 @@ class SplitNode extends DockNode {
 }
 
 /// A docking layout. Every edit returns a new layout; an edit that would break an invariant (each panel at most once,
-/// at least one panel) returns the same layout.
+/// at least one panel) returns the same layout. The constructor enforces them on any tree: unknown and repeated ids
+/// are dropped, ids become the [Panels] constants, and every split share is at least [minWeight].
 class DockLayout {
-  DockLayout(DockNode root) : root = _tidy(root) ?? TabsNode(const [Panels.arrangement]);
+  DockLayout(DockNode root)
+      : root = _tidy(_clean(root, <String>{})) ?? TabsNode(const [Panels.arrangement]);
 
   final DockNode root;
 
-  /// The smallest share a split child can be given by [setWeights].
+  /// The smallest share of a split child.
   static const minWeight = 0.12;
 
   /// Every panel in the layout, in tree order.
@@ -178,11 +186,13 @@ class DockLayout {
     if (tabs is List) {
       final ids = <String>[];
       for (final p in tabs) {
-        if (p is String && Panels.known(p) && seen.add(p)) ids.add(p);
+        if (p is String && Panels.known(p) && seen.add(p)) ids.add(Panels.canonical(p)!);
       }
       if (ids.isEmpty) return null;
+      // The active index is into the saved list; find the same panel among those kept.
       final a = j['active'];
-      return TabsNode(ids, a is int ? a : 0);
+      final activeId = a is int && a >= 0 && a < tabs.length ? tabs[a] : null;
+      return TabsNode(ids, activeId is String ? math.max(0, ids.indexOf(activeId)) : 0);
     }
     final axis = DockAxis.values.where((a) => a.name == j['split']).firstOrNull;
     final kids = j['children'];
@@ -201,6 +211,19 @@ class DockLayout {
   }
 
   // ---------- tree helpers ----------
+
+  /// [n] with unknown and repeated ids dropped and the rest replaced by their [Panels] constants.
+  static DockNode _clean(DockNode n, Set<String> seen) => switch (n) {
+        TabsNode t => () {
+            final ids = [
+              for (final p in t.panels)
+                if (Panels.known(p) && seen.add(p)) Panels.canonical(p)!,
+            ];
+            final kept = ids.indexOf(t.panels.isEmpty ? '' : t.activePanel);
+            return TabsNode(ids, kept < 0 ? 0 : kept);
+          }(),
+        SplitNode s => SplitNode(s.axis, [for (final c in s.children) _clean(c, seen)], s.weights),
+      };
 
   static Iterable<String> _panelsOf(DockNode n) sync* {
     switch (n) {
@@ -302,7 +325,8 @@ class DockLayout {
     return SplitNode(s.axis, kids, s.weights);
   }
 
-  /// Collapses one-child splits and merges a split's same-axis child splits into it; null for an empty tree.
+  /// Collapses one-child splits, merges a split's same-axis child splits into it and lifts shares below
+  /// [minWeight]; null for an empty tree.
   static DockNode? _tidy(DockNode n) {
     switch (n) {
       case TabsNode t:
@@ -324,7 +348,7 @@ class DockLayout {
         }
         if (kids.isEmpty) return null;
         if (kids.length == 1) return kids.first;
-        return SplitNode(s.axis, kids, w);
+        return SplitNode(s.axis, kids, _clampWeights(w));
     }
   }
 

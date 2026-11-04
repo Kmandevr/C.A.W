@@ -140,6 +140,30 @@ void main() {
       expect(identical(base.setWeights(const [], [1.0]), base), isTrue);
     });
 
+    test('docking many panels onto one edge keeps every share at the minimum or more', () {
+      var l = DockLayout.preset(FormFactor.desktop);
+      for (final p in [Panels.mixer, Panels.files, Panels.exporter, Panels.automation]) {
+        l = l.dock(p, target: Panels.arrangement, edge: DockEdge.right);
+      }
+      expectValid(l);
+      final row = l.root as SplitNode;
+      expect(row.children, hasLength(6));
+      for (final w in row.weights) {
+        expect(w, greaterThanOrEqualTo(DockLayout.minWeight - 1e-9));
+      }
+    });
+
+    test('a hand-built tree loses repeated and unknown ids', () {
+      final l = DockLayout(SplitNode(DockAxis.row, [
+        TabsNode([Panels.arrangement, 'gone', Panels.mixer], 2),
+        TabsNode([Panels.mixer]),
+      ]));
+      expectValid(l);
+      expect(l.root, isA<TabsNode>());
+      expect((l.root as TabsNode).panels, [Panels.arrangement, Panels.mixer]);
+      expect((l.root as TabsNode).activePanel, Panels.mixer);
+    });
+
     test('long sequences of random edits always leave a valid layout', () {
       var l = DockLayout.preset(FormFactor.desktop);
       var seed = 7;
@@ -184,6 +208,16 @@ void main() {
       expectValid(l);
       expect(l.panels, [Panels.arrangement, Panels.mixer, Panels.files]);
       expect((l.root as SplitNode).children, hasLength(2));
+    });
+
+    test('the active tab is the same panel after dropped ids, and ids are the Panels constants', () {
+      final l = DockLayout.fromJson(jsonDecode('{"tabs": ["old", "mixer", "files"], "active": 1}'))!;
+      expect((l.root as TabsNode).activePanel, Panels.mixer);
+      for (final p in l.panels) {
+        expect(identical(p, Panels.all.firstWhere((q) => q == p)), isTrue, reason: p);
+      }
+      final built = DockLayout(TabsNode([String.fromCharCodes('files'.codeUnits)]));
+      expect(identical(built.panels.single, Panels.files), isTrue);
     });
 
     test('damage gives null so the caller uses a preset', () {
