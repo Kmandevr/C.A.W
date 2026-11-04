@@ -1,7 +1,7 @@
 # Handoff
 
-Commit: e1dec92
-Branch: claude/caw-engine-foundation-skpirb (F7.2 on top of Main c00bb20; PR to Main)
+Commit: 57aa9d9
+Branch: claude/caw-engine-foundation-skpirb (F7.3 part A on top of Main 83556f2; PR to Main)
 
 ## Goal
 Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8, plus F10 (seeded randomness); F9 is deferred to Release 1, since no project compatibility is needed yet.
@@ -11,8 +11,8 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 - F7 owner choices (2026-11-04, `docs/decisions.md`): remove the app caps (F7.1); remove the 64-bar arrangement limit (F7.2); dynamic layers, re-preparing the mix graph off the audio thread (F7.3); safety bounds from the hardware budget, host-overridable within a ceiling, each with a clear message (F7.4).
 
 ## Done and verified
-- F1–F6 are on Main; F7 caps audit #88; F7.1 app caps #89.
-- F7.2 on the branch: no 64-bar song limit. Out-of-range positions are refused with named errors, clip expansion is budgeted (3x peak), loop/free exports stream to the WAV (`renderExportToWav`, `.part` then rename), and the arranger paints only the visible span. Three audio-review and two code-review rounds are fixed. caw_tests 266, caw_rt_tests 73, sanitizers clean, app 184 (CAW_LIB). Callgrind is within noise.
+- F1–F6 on Main; F7 caps audit #88, F7.1 #89, F7.2 #92 (no 64-bar limit, streamed exports).
+- F7.3 part A on the branch: runtime slot capacity (still 64), slots by pointer with `Slot::index`, capacity-sized MixGraph, out-of-line SetOrder list. caw_tests 267, caw_rt_tests 73, sanitizers clean, goldens unchanged, callgrind 1 layer -1.0%. Audio review: no findings.
 
 ## Open
 - Issue #78: swap-fade import buffers are renumbered (an older bug).
@@ -21,8 +21,9 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 - #90 arranger float32 drawing far into long songs; #91 the app save step reads the whole WAV for the picker (may need a new dependency: ask the owner).
 
 ## Next
-1. Open the F7.2 PR, merge when green, update #28.
-2. F7.3: dynamic layers (re-prepare the mix graph off the audio thread). Then F7.4, F8, F10.
+1. Open the part A PR, merge when green, update #28.
+2. F7.3 part B (plan in `docs/decisions.md`): `Cmd::Grow` swaps a bigger slot table and MixGraph built off-thread; budget from graphWorkingBytes with a clear error; per-slot export segments; size the retired queue and pending list from the largest capacity (replace the static_assert); lift the parser cap; growth and alloc-counter tests.
+3. Part C: the C API reports the audition index (the app hard-codes 64 in `app/lib/engine/engine.dart`); remove the app's layer caps.
 
 ## Read first
 - `docs/roadmap.md`
