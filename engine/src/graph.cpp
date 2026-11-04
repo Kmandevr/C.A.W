@@ -45,7 +45,7 @@ bool estimateGraphWorkingBytes(std::size_t nodeCount, std::size_t connectionCoun
 struct GraphExecutorSumInputBytes { uint32_t sourceBase, sourceCount, tableBase, channels; };
 struct GraphExecutorPortBytes { PortType type; bool input, summing, host; uint32_t channels, table, sum; };
 struct GraphExecutorNodeBlockBytes { uint32_t fields[20]; bool typed; };
-struct GraphExecutorEventMergeBytes { uint32_t sourceBase, sourceCount, input, storage; };
+struct GraphExecutorEventMergeBytes { uint32_t sourceBase, sourceCount, input; std::size_t storage; };
 
 struct ExecutorShape {
     std::size_t nodes = 0;
@@ -591,7 +591,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
                 const uint32_t sources = port.sum;
                 if (port.type == PortType::Event) {
                     port.sum = static_cast<uint32_t>(eventMerges_.size());
-                    const uint32_t storage = (eventOutCursor + port.sum) * eventCapacity_;
+                    const std::size_t storage = (static_cast<std::size_t>(eventOutCursor) + port.sum) * eventCapacity_;
                     eventMerges_.push_back(EventMerge{mergeSourceCursor, 0, port.table, storage});
                     mergeSourceCursor += sources;
                     eventInSource_[port.table] = kEventMerged;
@@ -844,8 +844,10 @@ bool eventsOrdered(const Event* events, uint32_t count, uint32_t frames) noexcep
 
 bool GraphExecutor::process(const ConstChannelBufferView& input, const ChannelBufferView& output,
                             uint32_t frames, const EventInput& events) noexcept {
-    if (events.count != 0 && (!events.events || !eventsOrdered(events.events, events.count, frames))) return false;
     if (!ready_ || frames == 0 || frames > maxFrames_) return false;
+    // Bounded like every event list, checked before any event is read.
+    if (events.count != 0 && (events.count > eventCapacity_ || !events.events ||
+                              !eventsOrdered(events.events, events.count, frames))) return false;
     if (output.channelCount != outputChannels_ || !output.valid() || output.frames < frames) return false;
     if (hostInputChannels_ == 0) return processValidated(ConstChannelBufferView{}, output, frames, events);
     if (input.channelCount != 0 &&
@@ -855,7 +857,8 @@ bool GraphExecutor::process(const ConstChannelBufferView& input, const ChannelBu
 
 void GraphExecutor::mergeEvents(const EventMerge& merge) noexcept {
     // Stable k-way merge of sorted sources: the earliest frame first, ties in connection order.
-    // Bounded by the sources' event counts; once the buffer is full the rest are counted, not copied.
+    // Cost O(events kept x sources), as each kept event rescans the sources; at most
+    // maxEventsPerPort x fan-in per merge. Once the buffer is full the rest are counted, not copied.
     Event* out = eventStorage_.data() + merge.storage;
     const uint32_t* sources = eventMergeSources_.data() + merge.sourceBase;
     uint32_t* cursor = mergeCursor_.data() + merge.sourceBase;

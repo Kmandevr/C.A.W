@@ -1399,6 +1399,16 @@ TEST(graph_event_host_events_must_be_ordered_and_in_range) {
     CHECK(!executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8, EventInput{nullptr, 1}));
     CHECK(executor.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8, EventInput{late, 1}));
     CHECK_EQ(sink.counts[0], 1u);
+    // Host lists are bounded like every other event list: more than maxEventsPerPort is refused
+    // before any of them is read (a bad count must not become a long walk on the audio thread).
+    GraphResourceBudget small = kBudget;
+    small.maxEventsPerPort = 2;
+    GraphExecutor bounded;
+    CHECK(bounded.prepare({{"sink", &m.sink}}, {}, {&sink}, 0, 8, 48000.0, small) == GraphError::Ok);
+    const Event three[] = {note(0, 1), note(1, 2), note(2, 3)};
+    CHECK(!bounded.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8, EventInput{three, 3}));
+    CHECK(bounded.process(ConstChannelBufferView{}, ChannelBufferView{channels, 1, 8}, 8, EventInput{three, 2}));
+    CHECK_EQ(sink.counts[0], 2u);
 }
 
 TEST(graph_event_ports_validate_types_fan_in_and_budget) {

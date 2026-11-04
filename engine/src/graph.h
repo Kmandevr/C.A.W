@@ -134,7 +134,8 @@ public:
     bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
                  uint32_t frames) noexcept;
     // The same, with host events for the graph's unconnected first event inputs. They must follow
-    // the EventInput rules for this block (frames non-decreasing, each below `frames`), else false.
+    // the EventInput rules for this block (frames non-decreasing, each below `frames`) and hold at
+    // most maxEventsPerPort events, else false. A graph without event inputs ignores them.
     bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
                  uint32_t frames, const EventInput& events) noexcept;
     // Dynamic routing (control thread, audio ports only): for a graph prepared without
@@ -180,7 +181,7 @@ private:
     // Runs the graph; the caller has checked ready_, frames and both host views.
     bool processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
                           uint32_t frames, const EventInput& events) noexcept;
-    struct EventMerge { uint32_t sourceBase, sourceCount, input, storage; };
+    struct EventMerge { uint32_t sourceBase, sourceCount, input; std::size_t storage; };
     void mergeEvents(const EventMerge& merge) noexcept;
 
     std::vector<ModuleProcessor*> processors_;
