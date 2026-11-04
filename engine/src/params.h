@@ -1,6 +1,7 @@
 // Parameter resolution (F6): one rule for manual values, automation, modulation and MIDI-mapped values.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "module.h"
@@ -14,6 +15,30 @@ double denormalizeParameter(const ParameterDescriptor& parameter, double normali
 // Clamp to the range, then (step > 0) snap to minimum + k * step and clamp again. NaN reads as
 // the minimum.
 double constrainParameter(const ParameterDescriptor& parameter, double plain) noexcept;
+
+// An automation lane's value at `at` (in steps): the first point's value before it, the last
+// point's after it, linear between neighbours, and the later point's value at a jump (two points
+// at one step). `fallback` for an empty lane. Points need `step` and `value` and must be sorted by
+// step. The Engine's automation and the graph's lanes share this, so they match bit for bit.
+template <class Point>
+double automationLaneValue(const Point* points, std::size_t count, double at, double fallback) noexcept {
+    if (count == 0) return fallback;
+    if (at <= points[0].step) return points[0].value;
+    std::size_t lo = 0, hi = count - 1;
+    while (lo + 1 < hi) {
+        const std::size_t mid = (lo + hi) / 2;
+        if (points[mid].step <= at) lo = mid; else hi = mid;
+    }
+    if (at >= points[count - 1].step) return points[count - 1].value;
+    const double span = points[hi].step - points[lo].step;
+    if (span <= 0.0) return points[hi].value;
+    const double t = (at - points[lo].step) / span;
+    return points[lo].value + (points[hi].value - points[lo].value) * t;
+}
+struct AutomationPoint {
+    double step = 0.0;   // song position in steps
+    double value = 0.0;  // plain parameter value (constrained like any base)
+};
 
 // How a modulation link changes the normalized value n, given its source value m (one float per
 // frame from a modulation output; NaN and inf read 0) and depth d (a fraction of the range,
@@ -68,7 +93,8 @@ public:
                            double* out) noexcept;
     const ParameterDescriptor& descriptor() const noexcept { return parameter_; }
     uint32_t linkCount() const noexcept { return linkCount_; }
-    double target() const noexcept { return target_; }  // the manual value, after smoothing ends
+    // The value held once smoothing ends: the manual value, or the last automated one.
+    double target() const noexcept { return target_; }
 
 private:
     double frameValue(double base, const float* const* modulation, uint32_t frame) const noexcept;

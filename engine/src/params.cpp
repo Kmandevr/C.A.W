@@ -125,7 +125,9 @@ ParameterValue ParameterResolver::resolve(uint32_t frames, const double* automat
     if (frames == 0 || !out) return ParameterValue{nullptr, frameValue(current_, nullptr, 0)};
     for (uint32_t i = 0; i < frames; ++i) {
         if (automated) {
-            current_ = clampToRange(parameter_, automation[i]);  // a touch ramps from what was playing
+            // Holds what played when the lane stops; a touch ramps from it.
+            current_ = target_ = clampToRange(parameter_, automation[i]);
+            rampLeft_ = 0;
         } else if (rampLeft_ != 0) {
             current_ = --rampLeft_ == 0 ? target_ : current_ + increment_;  // lands exactly on the target
         }

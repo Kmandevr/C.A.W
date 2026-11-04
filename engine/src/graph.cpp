@@ -84,7 +84,7 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorEventMergeBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterResolver>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<ParameterValue>)) ||
-        !addEstimatedBytes(total, 3, sizeof(std::vector<double>)) ||
+        !addEstimatedBytes(total, 6, sizeof(std::vector<double>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorPortBytes>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<GraphExecutorNodeBlockBytes>)) ||
         !addEstimatedBytes(total, 2, sizeof(std::vector<ChannelBufferView>)) ||
@@ -107,7 +107,9 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
     // Parameters: a resolver, a resolved value and maxFrames doubles each.
     std::size_t parameterFrames = 0;
     if (!addEstimatedBytes(total, shape.parameters, sizeof(ParameterResolver) + sizeof(ParameterValue) + sizeof(uint64_t) +
-                                                        kMaxParameterLinks * sizeof(const float*)) ||
+                                                        kMaxParameterLinks * sizeof(const float*) +
+                                                        sizeof(const AutomationPoint*) + sizeof(uint32_t)) ||
+        (shape.parameters && !addEstimatedBytes(total, maxFrames, sizeof(double))) ||  // the lane scratch
         !addEstimatedBytes(parameterFrames, shape.parameters, maxFrames) ||
         !addEstimatedBytes(total, parameterFrames, sizeof(double)))
         return false;
@@ -346,6 +348,12 @@ void GraphExecutor::reset() noexcept {
     clearEpoch_ = 0;
     linkSignals_.clear();
     linkCount_ = 0;
+    lanePoints_.clear();
+    laneCount_.clear();
+    automationScratch_.clear();
+    transportSample_ = 0;
+    samplesPerStep_ = 1.0;
+    playing_ = false;
     order_.clear();
     routePosition_.clear();
     routeCount_.clear();
@@ -549,6 +557,9 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         touchEpoch_.assign(paramCursor, 0);
         clearEpoch_ = 0;
         linkSignals_.assign(static_cast<std::size_t>(paramCursor) * kMaxParameterLinks, nullptr);
+        lanePoints_.assign(paramCursor, nullptr);
+        laneCount_.assign(paramCursor, 0);
+        automationScratch_.assign(paramCursor ? maxFrames : 0u, 0.0);
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
             for (uint32_t k = 0; k < descriptor.parameterCount; ++k)
@@ -926,6 +937,11 @@ void GraphExecutor::mergeEvents(const EventMerge& merge) noexcept {
 bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
                                      uint32_t frames, const EventInput& events) noexcept {
     applyParameterCommands();
+    // Positions stay where doubles are exact (and int64 cannot overflow); a song that would run
+    // past that stops its lanes instead.
+    if (transportSample_ > kMaxTransportSample - static_cast<int64_t>(frames)) playing_ = false;
+    blockStart_ = transportSample_;
+    if (playing_) transportSample_ += frames;
     // Bind this call's host channels (or silence) into the prepared input table.
     const std::size_t slots = hostInputSlots_.size();
     for (std::size_t s = 0; s < slots; ++s)
@@ -1067,6 +1083,48 @@ GraphError GraphExecutor::setModulationLinks(const ParameterLink* links, uint32_
     return GraphError::OutOfMemory;  // control-thread scratch (O(nodes + parameters + links)); nothing changed
 }
 
+GraphError GraphExecutor::setAutomationLanes(const ParameterLane* lanes, uint32_t count) try {
+    if (!ready_) return GraphError::InvalidOutputNode;
+    if (count && !lanes) return GraphError::InvalidAutomationLane;
+    std::vector<uint8_t> seen(resolvers_.size(), 0);
+    for (uint32_t k = 0; k < count; ++k) {
+        const ParameterLane& lane = lanes[k];
+        if (lane.node >= blocks_.size()) return GraphError::NodeIndexOutOfRange;
+        if (lane.parameter >= blocks_[lane.node].paramCount) return GraphError::PortIndexOutOfRange;
+        if (!lane.points || lane.pointCount == 0) return GraphError::InvalidAutomationLane;
+        for (uint32_t i = 0; i < lane.pointCount; ++i) {
+            const AutomationPoint& point = lane.points[i];
+            if (!std::isfinite(point.step) || !std::isfinite(point.value) || (i && point.step < lane.points[i - 1].step))
+                return GraphError::InvalidAutomationLane;
+        }
+        uint8_t& once = seen[blocks_[lane.node].paramBase + lane.parameter];
+        if (once) return GraphError::InvalidAutomationLane;
+        once = 1;
+    }
+    std::fill(lanePoints_.begin(), lanePoints_.end(), nullptr);
+    std::fill(laneCount_.begin(), laneCount_.end(), 0u);
+    for (uint32_t k = 0; k < count; ++k) {
+        const uint32_t p = blocks_[lanes[k].node].paramBase + lanes[k].parameter;
+        lanePoints_[p] = lanes[k].points;
+        laneCount_[p] = lanes[k].pointCount;
+    }
+    return GraphError::Ok;
+} catch (...) {
+    return GraphError::OutOfMemory;  // control-thread scratch; nothing changed
+}
+
+bool GraphExecutor::setTransport(int64_t sample, double samplesPerStep, bool playing) noexcept {
+    if (sample <= -kMaxTransportSample || sample >= kMaxTransportSample || !std::isfinite(samplesPerStep) ||
+        !(samplesPerStep > 0.0)) {
+        playing_ = false;
+        return false;
+    }
+    transportSample_ = sample;
+    samplesPerStep_ = samplesPerStep;
+    playing_ = playing;
+    return true;
+}
+
 bool GraphExecutor::setInitialParameter(uint32_t node, uint32_t parameter, double value) noexcept {
     if (!ready_ || node >= blocks_.size() || parameter >= blocks_[node].paramCount || !std::isfinite(value))
         return false;
@@ -1107,11 +1165,20 @@ void GraphExecutor::applyParameterCommands() noexcept {
 }
 
 void GraphExecutor::resolveParameters(const NodeBlock& b, uint32_t frames) noexcept {
-    // Modulation signals are this block's source outputs (sources ran earlier). Automation lanes: F6.4.
+    // Modulation signals are this block's source outputs (sources ran earlier). The lane scratch is
+    // shared: the resolver reads it only inside resolve().
     for (uint32_t k = 0; k < b.paramCount; ++k) {
         const uint32_t p = b.paramBase + k;
         syncTouch(p);
-        parameterValues_[p] = resolvers_[p].resolve(frames, nullptr, linkSignals_.data() + static_cast<std::size_t>(p) * kMaxParameterLinks,
+        const double* automation = nullptr;
+        if (playing_ && laneCount_[p]) {
+            // The Engine's expression, so values match it bit for bit (F6.6).
+            for (uint32_t i = 0; i < frames; ++i)
+                automationScratch_[i] = automationLaneValue(lanePoints_[p], laneCount_[p],
+                    static_cast<double>(blockStart_ + i) / samplesPerStep_, lanePoints_[p][0].value);
+            automation = automationScratch_.data();
+        }
+        parameterValues_[p] = resolvers_[p].resolve(frames, automation, linkSignals_.data() + static_cast<std::size_t>(p) * kMaxParameterLinks,
                                                     parameterStorage_.data() + static_cast<std::size_t>(p) * maxFrames_);
     }
 }

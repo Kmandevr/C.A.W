@@ -77,7 +77,16 @@ enum class GraphError : uint8_t {
     RuntimeHostInputMismatch,
     DuplicateConnection,
     RoutingUnavailable,
-    InvalidParameterLink
+    InvalidParameterLink,
+    InvalidAutomationLane
+};
+
+// An automation lane (F6.4) for one node parameter. `points` are borrowed: they must stay valid
+// and unchanged while the lane is set. Sorted by step, finite, at least one point.
+struct ParameterLane {
+    uint32_t node = 0, parameter = 0;
+    const AutomationPoint* points = nullptr;
+    uint32_t pointCount = 0;
 };
 
 // A modulation link (F6.3): a node's modulation output drives another node's parameter.
@@ -202,6 +211,24 @@ public:
     // modulation output), Cycle (source does not run first), InvalidParameterLink, RoutingUnavailable,
     // InvalidOutputNode (not prepared), OutOfMemory (its control-thread scratch).
     GraphError setModulationLinks(const ParameterLink* links, uint32_t count);
+    // Control thread, only while process() is not running: replace every automation lane (at most
+    // one per parameter). While the transport plays, a lane is the parameter's base each frame
+    // unless the parameter is touched (F6.1 rules). On an error nothing changes. Errors:
+    // NodeIndexOutOfRange, PortIndexOutOfRange (parameter), InvalidAutomationLane (no or
+    // unsorted or non-finite points, or a second lane on one parameter), InvalidOutputNode.
+    GraphError setAutomationLanes(const ParameterLane* lanes, uint32_t count);
+    // Audio thread, before process(): the song position of the next block's first frame, in
+    // samples, the samples per step (> 0, finite) and whether the song plays. Frame i of a block
+    // reads its lane at (sample + i) / samplesPerStep, like the Engine. Each process() call that
+    // reaches the graph advances the position by its frame count. Not playing (the default):
+    // lanes are ignored. False (and not playing, position unchanged) for a bad samplesPerStep or
+    // |sample| >= kMaxTransportSample (2^53, where doubles stop being exact).
+    // The graph knows no loop: like Engine::process, the host splits blocks at a loop point and
+    // calls setTransport for the block after it (lanes are read at the absolute position).
+    // prepare() clears the lanes and stops the transport; lane points are borrowed and must stay
+    // alive and unchanged until the next setAutomationLanes() or prepare().
+    static constexpr int64_t kMaxTransportSample = int64_t{1} << 53;
+    bool setTransport(int64_t sample, double samplesPerStep, bool playing) noexcept;
     // Control thread, only while process() is not running (after prepare(), before the audio
     // thread starts or resumes, like prepare() itself): restore a parameter's value directly, with
     // no ramp and no touch. A rebuild calls it for every value it keeps, as prepare() starts each
@@ -301,6 +328,14 @@ private:
     // Per parameter, kMaxParameterLinks signal pointers in link id order (null: no link there).
     std::vector<const float*> linkSignals_;
     uint32_t linkCount_ = 0;  // links set; reserveRouting() refuses while any exist
+    // Per parameter: its lane's borrowed points (null: none) and count; one block of lane values.
+    std::vector<const AutomationPoint*> lanePoints_;
+    std::vector<uint32_t> laneCount_;
+    std::vector<double> automationScratch_;
+    int64_t transportSample_ = 0;
+    double samplesPerStep_ = 1.0;
+    bool playing_ = false;
+    int64_t blockStart_ = 0;  // this block's song position (audio thread)
     uint64_t clearEpoch_ = 0;
     void syncTouch(uint32_t p) noexcept;
     struct ParameterCommand { uint32_t node, parameter; double value; bool clearTouch; };
