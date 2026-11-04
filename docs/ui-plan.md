@@ -291,11 +291,22 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
    - shared widgets
    - motion and snapping helpers
    - golden-test setup: the tests load the bundled JetBrains Mono, so screenshots are stable
-2. **U1, the docking shell:**
-   - the layout tree, panels, tabs and split dividers, on the phone too
-   - saved layouts and presets
-   - the transport bar with undo/redo and tap tempo (#19)
-   - the arrangement as home
+2. **U1, the docking shell.** Five PRs, in the order an architect review recommended (2026-11-04):
+   1. **The layout model** (`lib/ui/dock/layout.dart`, built): splits and tab groups, dock, remove, reveal, activate and weights, presets per form factor, and damage-tolerant JSON.
+      - Panel ids are strings, so a renamed panel drops out of a saved layout instead of breaking it.
+   2. **The dock view** (`lib/ui/dock/dock_view.dart`), not yet wired in:
+      - dividers with 48 dp grab zones and minimum sizes
+      - tabs, a long-press drag onto five drop zones, and maximise
+      - each panel body keeps a `GlobalObjectKey(panelId)`, so a moved panel keeps its state
+      - goldens at the three sizes
+   3. **The shell switch:**
+      - a `DockController.reveal(panel)` replaces the tab-switching callbacks
+      - the last-touched panel sets the key area
+      - hidden tabs stay mounted under `TickerMode(enabled: false)` and don't rebuild on the 30 Hz tick
+      - Settings keeps `dock_layouts` as raw JSON, so a damaged layout falls back on its own
+      - screens read their panel's size, not the screen's
+   4. **Open straight into the arrangement:** the startup screen goes, and New, Template and Open move to the project menu.
+   5. **The transport bar:** undo and redo, and tap tempo (#19).
 3. **U2, arrangement:**
    - track headers, nesting, add and reorder
    - drawing MIDI clips
@@ -311,4 +322,4 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
 ## Open questions for the owner
 
 - **Several instruments per track:** is "each instrument adds its output to the audio above it" the rule you want? It goes to GPT as an engine issue.
-- **Docking:** build it in-house (proposed), or try a package?
+- **Docking:** Claude is building it in-house, which needs no new dependency (2026-11-04). Say so if you'd rather try a package instead; adding one needs your approval.
