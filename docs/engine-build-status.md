@@ -53,14 +53,13 @@ This is the implementation ledger for the unified modular engine. A documented c
 
 ## Known project-size and reliability risks under active refactor
 
-The current project and Engine path still contains fixed limits that must become explicit resource budgets or dynamic prepared storage:
+**[Fact, caps audit for F7, 2026-11-04, at `5f1c47b`]** The engine no longer has the old fixed caps on exports, imports, parameters, synth parameters, modules, clips, automation lanes or points, pattern notes, steps or note-curve points; project state is a budget (`EngineResourceBudget`), like graph working memory and export buffers. What remains, by kind:
 
-- 64 layers/slots; 9 modules per chain; 32 voices; 16 exports; 32 imports; 32 parameters; 64 synth parameters; 6 call arguments.
-- Project parsing/app models cap modules (256), clips per layer (512), automation lanes (256), automation points (128), pattern notes/steps (4,096), note-curve points (16) and arrangement length (64 bars).
-- State is capped at 8 MiB per module and 64 MiB per project. An over-budget layer can be left silent with a warning.
-- The project command queue has 1,024 entries; send retries for about two seconds and can drop an install/pattern command without returning failure. The retirement queue has 1,024 entries plus 256 pending records; overflow can leak. If no layer slot is free, project planning can skip a layer.
-- MIDI 2.0 input queue is 1,024 events and counts drop-newest overflow; the count is not yet surfaced to the app. Worker scheduling is bounded at 16 workers and 256 queued jobs.
-- Some VM/source/parser limits are necessary safety budgets, but must be configurable within host policy and fail clearly. No project content may be silently truncated or a track silently omitted.
+- **Silent data loss in the app (the worst):** the app still keeps only the first 128 points of every automation lane and the first 256 project lanes when it loads a project (`app/lib/model/project.dart`), so the next save loses what the engine keeps. Patterns still stop at 4,096 notes, 4,096 steps and 16 curve points (`pattern_doc.dart`): paste and bulk edits drop notes and `lengthSteps` clamps without a message, and an engine-valid MIDI import can fail to load. Layer/folder adds are only guarded by the buttons, so a 65th layer makes the engine refuse the whole project.
+- **Silent clamps in the engine:** the 64-bar arrangement (loop, clip start/length, layer length, automation point positions are clamped, not reported); bpm 20..400, beats per bar 1..16 and voices 1..32 in the parser; render one-shots cut at 30 s and free exports clamped to 0.1..600 s; `wt` unison clamped to 16 and wavetable frames to 256; note-timing splits per 64-sample block (16, later notes start together); hot-swap state take-over (2 MB, the rest restarts fresh).
+- **Fixed structure that should become dynamic or a budget:** 64 layers (`kMaxLayers`, fixed slot arrays and the mix graph sized from them), 32 voices, 32 modules per track, 8 modulation links per parameter, 64 dropdown choices, ratchet 8.
+- **Safety bounds to make configurable within host policy:** module source 64 KiB, nesting 128, registers 1,024, state 8 MiB per module, `fn` depth 32 and 4,096 calls; JSON 16 MiB and depth 64, project JSON 8 MiB, 4,096 dependencies; MIDI files 16 MiB and 65,536 events; queues (commands 1,024 with a 2 s retry that can drop a payload, retirement 1,024 plus 256 pending whose overflow leaks, MIDI 2.0 input 1,024 with an unsurfaced drop count, graph events 1,024 per port, parameter commands 256); 16 workers and 256 queued jobs; 64 channels per port.
+- **Real format limits (stay):** MIDI 7-bit fields and 0..15 channels, UMP group/channel/controller, the 2^53-sample transport, sample rates 8 kHz..192 kHz, uint16 register indexes, built-in arity 6.
 
 See [engine progress](engine-progress.md) for the complete source-level audit and exact next actions.
 
