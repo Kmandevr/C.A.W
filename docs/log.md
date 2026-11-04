@@ -6,6 +6,7 @@ updated: 2026-11-04
 
 # Log
 
+- 2026-11-04: UI U0, second part: design tokens (`lib/ui/tokens.dart`), eight track colours in every theme, and the shared context-aware toolbar row, tool and info buttons (`lib/ui/kit.dart`), with a toolbar golden. The golden shows that at phone width four tools plus ⋮ leave room for only about three context buttons.
 - 2026-11-04: UI U0, first part: motion rules (`lib/ui/motion.dart`: Full/Reduced/Off, distance-aware settle times, a small-overshoot curve, snapping maths, haptic ticks), Motion, Haptics and Glow settings, and golden tests with real fonts (`test/golden_util.dart`); the Settings page's Density buttons no longer squeeze its text on a phone.
 - 2026-11-04: UI direction (owner): the arrangement is home and DAW-like, with nested tracks holding several instruments, drop-down automation lanes, a docked piano roll, Unity-like docking (phone too) and code workspace, and a Reaper-like mixer; [UI plan](ui-plan.md) has the findings, design and order U0–U8.
 - 2026-11-04: Foundation F7.3 part B, the Engine grows past 64 layers within its memory budget (off-thread grow, bit-identical playing layers, a named refusal past `maxLayers()`); the parser's 64-layer cap is gone, and the C API names the audition's scope by id. Merged unfinished (owner): exports can drop layers above about 340, and export memory isn't budgeted yet (#94).

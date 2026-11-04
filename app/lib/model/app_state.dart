@@ -1086,7 +1086,7 @@ class AppState extends ChangeNotifier {
     project.layers.add(LayerDoc(
       id: newId('l'),
       name: gen?.name ?? 'Layer ${project.layers.length + 1}',
-      color: project.layers.length % 4,
+      color: project.layers.length % LayerDoc.trackColors,
       generatorId: gen?.id,
       lengthSteps: project.stepsPerBar,
     ));
@@ -1283,7 +1283,7 @@ class AppState extends ChangeNotifier {
   }
 
   void addFolder({String? parentId}) {
-    final folder = LayerDoc(id: newId('l'), name: 'Group', color: project.layers.length % 4,
+    final folder = LayerDoc(id: newId('l'), name: 'Group', color: project.layers.length % LayerDoc.trackColors,
         parentId: parentId, isFolder: true, busEnabled: true);
     project.layers.add(folder);
     selectedLayerId = folder.id;

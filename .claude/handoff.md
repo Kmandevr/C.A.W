@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: a1cbb1f
+Commit: c5cfa00
 
-Branch: claude/caw-engine-foundation-skpirb (on Main eddfd1c; U0 part one in review as a PR to Main)
+Branch: claude/caw-engine-foundation-skpirb (on Main eddfd1c; U0 (both parts) in review as PR #98)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: docking panels (the phone too), a Unity-like code workspace, a Reaper-like mixer, a docked piano roll, and smooth, distance-aware motion. The whole spec, the open questions and the order of work (U0–U8) are in `docs/ui-plan.md`, and the owner's choices are in `docs/decisions.md`.
@@ -12,15 +12,14 @@ Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: do
 
 ## Done and verified
 - The UI plan and specs are on Main: #96 and #97.
-- U0 part one (this PR):
+- U0 (PR #98): part two adds `app/lib/ui/tokens.dart`, eight track colours and `app/lib/ui/kit.dart` (the context toolbar, tool and info buttons). Part one:
   - `app/lib/ui/motion.dart`
   - the Motion, Haptics and Glow settings, with saves run one after another
   - golden tests with real fonts (`app/test/golden_util.dart`)
-  - Checks: `flutter analyze` is clean, and `flutter test` gives 183 passed, 19 skipped (without `CAW_LIB`).
+  - Checks: `flutter analyze` is clean, and `flutter test` gives 191 passed, 19 skipped (without `CAW_LIB`).
 
 ## Next
-1. U0 part two: design tokens (spacing, type, colour by role, track colours) and the shared widgets (section header, toolbar row, info button).
-2. U1: the docking shell (layout tree, panels, tabs, dividers, the phone too), the transport bar with undo/redo and tap tempo (#19), and opening straight into the arrangement.
+1. U1: the docking shell (layout tree, panels, tabs, dividers, the phone too), the transport bar with undo/redo and tap tempo (#19), and opening straight into the arrangement.
 
 ## Open (owner)
 - How several instruments on one track combine: is "each adds to the audio above it" the rule?
