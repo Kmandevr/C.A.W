@@ -6,6 +6,14 @@ updated: 2026-11-04
 
 # Decisions
 
+## 2026-11-04: F7 resource budgets (owner, after the caps audit)
+
+- **The app keeps everything the engine keeps.** The app-only caps go (automation points past 128 and project lanes past 256 dropped on load, patterns at 4,096 notes/steps and 16 curve points, notes dropped on paste); any bound that stays is a clear error, never a silent drop. The owner allowed app/ changes for this.
+- **The 64-bar arrangement limit is removed** in the engine and the app: length is bounded only by the step representation and the project JSON budget, and nothing is moved or shortened.
+- **Layers become dynamic:** the count is bounded by the memory budget, and the mix graph is re-prepared off the audio thread and swapped in when more slots are needed.
+- **Safety bounds come from the hardware budget:** module source, nesting, registers, per-module state, queues, workers and MIDI file limits get defaults derived from `EngineResourceBudget`/the hardware profile, overridable by the host within a safety ceiling, and every one fails with a clear message.
+- **Split:** F7.1 app caps; F7.2 the 64-bar limit; F7.3 dynamic layers; F7.4 safety bounds from the budget; the silent engine clamps (render lengths, unison, wavetable frames, splits, take-over) are reported or removed in the step that owns them.
+
 ## 2026-11-04: F6 parameter model: resolution order and owner choices
 
 - **Owner choices (2026-11-04):**
