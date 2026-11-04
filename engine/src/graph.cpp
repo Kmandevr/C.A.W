@@ -1,5 +1,6 @@
 // Typed graph validation and prepared planar N-channel execution. Build/prepare are control-thread operations.
 #include "graph.h"
+#include "midi2.h"
 #include "route_math.h"
 
 #include <algorithm>
@@ -77,7 +78,7 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
         !addEstimatedBytes(total, 4, sizeof(std::vector<float>)) ||
         !addEstimatedBytes(total, 3, sizeof(std::vector<float*>)) ||
         !addEstimatedBytes(total, 2, sizeof(std::vector<const float*>)) ||
-        !addEstimatedBytes(total, 12, sizeof(std::vector<uint32_t>)) ||
+        !addEstimatedBytes(total, 13, sizeof(std::vector<uint32_t>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<Event>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<EventOutput>)) ||
         !addEstimatedBytes(total, 1, sizeof(std::vector<EventInput>)) ||
@@ -108,7 +109,8 @@ bool estimateExecutorWorkingBytes(const ExecutorShape& shape, uint32_t maxFrames
     std::size_t parameterFrames = 0;
     if (!addEstimatedBytes(total, shape.parameters, sizeof(ParameterResolver) + sizeof(ParameterValue) + sizeof(uint64_t) +
                                                         kMaxParameterLinks * sizeof(const float*) +
-                                                        sizeof(const AutomationPoint*) + sizeof(uint32_t)) ||
+                                                        sizeof(const AutomationPoint*) + sizeof(uint32_t) +
+                                                        sizeof(uint32_t)) ||  // lane slot, then CC key
         (shape.parameters && !addEstimatedBytes(total, maxFrames, sizeof(double))) ||  // the lane scratch
         !addEstimatedBytes(parameterFrames, shape.parameters, maxFrames) ||
         !addEstimatedBytes(total, parameterFrames, sizeof(double)))
@@ -350,6 +352,8 @@ void GraphExecutor::reset() noexcept {
     linkCount_ = 0;
     lanePoints_.clear();
     laneCount_.clear();
+    ccKey_.clear();
+    hostEvents_ = EventInput{};
     automationScratch_.clear();
     transportSample_ = 0;
     samplesPerStep_ = 1.0;
@@ -438,9 +442,11 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         if (typed && !processors[n]->usesProcessPorts())
             return others > 0 ? GraphError::RuntimeUnsupportedPortType : GraphError::RuntimeUnsupportedPortCount;
     }
+    // Host events are bounded by the same capacity even without event ports (CC mappings read
+    // them); buffers are sized by port counts, so the capacity alone costs nothing.
+    shape.eventCapacity = budget.maxEventsPerPort;
     if (shape.eventInputs + shape.eventOutputs != 0) {
         if (budget.maxEventsPerPort == 0) return GraphError::InvalidResourceBudget;
-        shape.eventCapacity = budget.maxEventsPerPort;
         for (const GraphConnection& edge : connections) {  // compileGraph checked every index
             const PortDescriptor& to = nodes[edge.destinationNode].module->ports[edge.destinationPort];
             if (to.type == PortType::Event && to.summing) ++shape.eventMergeSources;
@@ -559,6 +565,7 @@ GraphError GraphExecutor::prepare(const std::vector<GraphNode>& nodes,
         linkSignals_.assign(static_cast<std::size_t>(paramCursor) * kMaxParameterLinks, nullptr);
         lanePoints_.assign(paramCursor, nullptr);
         laneCount_.assign(paramCursor, 0);
+        ccKey_.assign(paramCursor, kNoCc);
         automationScratch_.assign(paramCursor ? maxFrames : 0u, 0.0);
         for (std::size_t n = 0; n < nodeCount; ++n) {
             const ModuleDescriptor& descriptor = *nodes[n].module;
@@ -937,6 +944,7 @@ void GraphExecutor::mergeEvents(const EventMerge& merge) noexcept {
 bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
                                      uint32_t frames, const EventInput& events) noexcept {
     applyParameterCommands();
+    hostEvents_ = events;
     // Positions stay where doubles are exact (and int64 cannot overflow); a song that would run
     // past that stops its lanes instead.
     if (transportSample_ > kMaxTransportSample - static_cast<int64_t>(frames)) playing_ = false;
@@ -1083,6 +1091,65 @@ GraphError GraphExecutor::setModulationLinks(const ParameterLink* links, uint32_
     return GraphError::OutOfMemory;  // control-thread scratch (O(nodes + parameters + links)); nothing changed
 }
 
+namespace {
+// The mapping key of a host event, or false when it is not a Control Change.
+bool ccOf(const Event& event, uint32_t& key, double& value) noexcept {
+    UmpControlChange cc;
+    if (event.kind != EventKind::Midi || !decodeControlChange(event.data, cc)) return false;
+    key = static_cast<uint32_t>(cc.group) << 11 | static_cast<uint32_t>(cc.channel) << 7 | cc.controller;
+    value = cc.value;
+    return true;
+}
+}  // namespace
+
+ParameterValue GraphExecutor::resolveWithCc(uint32_t p, uint32_t frames, const double* automation,
+                                            const float* const* signals, double* out) noexcept {
+    // Resolve in segments split at each matching CC, so it takes effect at its own frame. Without
+    // a match this is the plain resolve (and keeps its constant fast path).
+    ParameterResolver& resolver = resolvers_[p];
+    const uint32_t key = ccKey_[p];
+    uint32_t start = 0;
+    bool matched = false;
+    const float* shifted[kMaxParameterLinks];
+    auto segment = [&](uint32_t end) noexcept {
+        if (end <= start) return;
+        for (uint32_t k = 0; k < kMaxParameterLinks; ++k) shifted[k] = signals[k] ? signals[k] + start : nullptr;
+        const ParameterValue v = resolver.resolve(end - start, automation ? automation + start : nullptr, shifted, out + start);
+        if (!v.samples) std::fill(out + start, out + end, v.value);
+        start = end;
+    };
+    for (uint32_t e = 0; e < hostEvents_.count; ++e) {
+        uint32_t eventKey = 0;
+        double value = 0.0;
+        if (!ccOf(hostEvents_.events[e], eventKey, value) || eventKey != key) continue;
+        matched = true;
+        segment(hostEvents_.events[e].frame);
+        resolver.setBase(denormalizeParameter(resolver.descriptor(), value));
+    }
+    if (!matched) return resolver.resolve(frames, automation, signals, out);
+    segment(frames);
+    return ParameterValue{out, out[0]};
+}
+
+GraphError GraphExecutor::setCcMappings(const ParameterCcMapping* mappings, uint32_t count) try {
+    if (!ready_) return GraphError::InvalidOutputNode;
+    if (count && !mappings) return GraphError::InvalidCcMapping;
+    std::vector<uint32_t> keys(resolvers_.size(), kNoCc);
+    for (uint32_t k = 0; k < count; ++k) {
+        const ParameterCcMapping& m = mappings[k];
+        if (m.node >= blocks_.size()) return GraphError::NodeIndexOutOfRange;
+        if (m.parameter >= blocks_[m.node].paramCount) return GraphError::PortIndexOutOfRange;
+        if (m.group >= 16 || m.channel >= 16 || m.controller >= 128) return GraphError::InvalidCcMapping;
+        uint32_t& key = keys[blocks_[m.node].paramBase + m.parameter];
+        if (key != kNoCc) return GraphError::InvalidCcMapping;
+        key = static_cast<uint32_t>(m.group) << 11 | static_cast<uint32_t>(m.channel) << 7 | m.controller;
+    }
+    std::copy(keys.begin(), keys.end(), ccKey_.begin());
+    return GraphError::Ok;
+} catch (...) {
+    return GraphError::OutOfMemory;
+}
+
 GraphError GraphExecutor::setAutomationLanes(const ParameterLane* lanes, uint32_t count) try {
     if (!ready_) return GraphError::InvalidOutputNode;
     if (count && !lanes) return GraphError::InvalidAutomationLane;
@@ -1178,8 +1245,11 @@ void GraphExecutor::resolveParameters(const NodeBlock& b, uint32_t frames) noexc
                     static_cast<double>(blockStart_ + i) / samplesPerStep_, lanePoints_[p][0].value);
             automation = automationScratch_.data();
         }
-        parameterValues_[p] = resolvers_[p].resolve(frames, automation, linkSignals_.data() + static_cast<std::size_t>(p) * kMaxParameterLinks,
-                                                    parameterStorage_.data() + static_cast<std::size_t>(p) * maxFrames_);
+        const float* const* signals = linkSignals_.data() + static_cast<std::size_t>(p) * kMaxParameterLinks;
+        double* out = parameterStorage_.data() + static_cast<std::size_t>(p) * maxFrames_;
+        parameterValues_[p] = ccKey_[p] != kNoCc && hostEvents_.count
+            ? resolveWithCc(p, frames, automation, signals, out)
+            : resolvers_[p].resolve(frames, automation, signals, out);
     }
 }
 

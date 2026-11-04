@@ -26,6 +26,17 @@ struct Midi2Event {
 // Returns false for other message types or unsupported statuses. No allocation.
 bool decodeMidi2ChannelVoice(uint32_t word0, uint32_t word1, Midi2Event& out) noexcept;
 
+// A Control Change from a UMP: MIDI 1.0 Channel Voice (type 0x2, 7-bit value) or MIDI 2.0 Channel
+// Voice (type 0x4, 32-bit value). value is normalized 0..1 (v / 127 or v / 0xFFFFFFFF). words
+// holds the UMP's words (at least two readable). False for anything that is not a Control Change.
+struct UmpControlChange {
+    uint8_t group = 0;
+    uint8_t channel = 0;
+    uint8_t controller = 0;
+    double value = 0.0;
+};
+bool decodeControlChange(const uint32_t* words, UmpControlChange& out) noexcept;
+
 class Midi2InputQueue {
 public:
     static constexpr uint32_t kCapacity = 1024;

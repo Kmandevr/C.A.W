@@ -6,6 +6,7 @@ updated: 2026-11-04
 
 # Log
 
+- 2026-11-04: Foundation F6.5, MIDI CC mappings: `GraphExecutor::setCcMappings()` maps MIDI 1.0/2.0 UMP Control Changes in the host events onto node parameters, setting the base at the event's frame like a knob. Fixed: the MIDI 2.0 decoder read a Control Change's index from the reserved byte (byte 4) instead of byte 3; a graph without event ports refused host events, contrary to its documentation.
 - 2026-11-04: Foundation F6.4, automation lanes: `GraphExecutor::setAutomationLanes()` and `setTransport()` play automation lanes into node parameters with the Engine's own lane function (`automationLaneValue`, shared, so values are bit-identical, seeks included); a touch overrides until playback restarts, and stopping holds the last played value.
 - 2026-11-04: Foundation F6.3, modulation links: `GraphExecutor::setModulationLinks()` connects nodes' modulation outputs to other nodes' parameters (validated as a whole, source before destination, at most 8 per parameter, applied in link-id order whatever the list or node order; not with dynamic routing).
 - 2026-11-04: Foundation F6.2, parameters in the graph: `GraphExecutor` gives every node parameter a resolver at prepare, resolves them each block and passes them to processors (`parameters` in both process blocks); `queueParameter`/`queueClearTouch` carry manual values and touch resets from the control thread through a lock-free queue drained at the next block, and `setInitialParameter` restores values after a rebuild without a ramp or a touch.

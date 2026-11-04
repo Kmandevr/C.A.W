@@ -78,7 +78,8 @@ enum class GraphError : uint8_t {
     DuplicateConnection,
     RoutingUnavailable,
     InvalidParameterLink,
-    InvalidAutomationLane
+    InvalidAutomationLane,
+    InvalidCcMapping
 };
 
 // An automation lane (F6.4) for one node parameter. `points` are borrowed: they must stay valid
@@ -87,6 +88,16 @@ struct ParameterLane {
     uint32_t node = 0, parameter = 0;
     const AutomationPoint* points = nullptr;
     uint32_t pointCount = 0;
+};
+
+// A MIDI CC mapping (F6.5): a Control Change on (group, channel, controller) in the host events
+// sets a node parameter's base like a knob, at the event's frame: the CC's 0..1 value spans the
+// parameter's range on its curve, then smooths and counts as a touch like any manual change.
+// MIDI 1.0 (7-bit) and MIDI 2.0 (32-bit) UMP Control Changes both apply. One CC per parameter;
+// one CC may drive several parameters.
+struct ParameterCcMapping {
+    uint32_t node = 0, parameter = 0;
+    uint8_t group = 0, channel = 0, controller = 0;  // < 16, < 16, < 128
 };
 
 // A modulation link (F6.3): a node's modulation output drives another node's parameter.
@@ -164,7 +175,7 @@ public:
                  uint32_t frames) noexcept;
     // The same, with host events for the graph's unconnected first event inputs. They must follow
     // the EventInput rules for this block (frames non-decreasing, each below `frames`) and hold at
-    // most maxEventsPerPort events, else false. A graph without event inputs ignores them.
+    // most maxEventsPerPort events, else false. Only event inputs and CC mappings read them.
     bool process(const ConstChannelBufferView& input, const ChannelBufferView& output,
                  uint32_t frames, const EventInput& events) noexcept;
     // Dynamic routing (control thread, audio ports only): for a graph prepared without
@@ -228,6 +239,13 @@ public:
     // prepare() clears the lanes and stops the transport; lane points are borrowed and must stay
     // alive and unchanged until the next setAutomationLanes() or prepare().
     static constexpr int64_t kMaxTransportSample = int64_t{1} << 53;
+    // Control thread, only while process() is not running: replace every MIDI CC mapping. CCs
+    // come from the host events given to process(); each mapped parameter scans them once per
+    // block (bounded by maxEventsPerPort). prepare() clears the mappings. On an error nothing
+    // changes. Errors: NodeIndexOutOfRange, PortIndexOutOfRange (parameter), InvalidCcMapping (a
+    // group, channel or controller out of range, or a second mapping on one parameter),
+    // InvalidOutputNode (not prepared), OutOfMemory (its control-thread scratch).
+    GraphError setCcMappings(const ParameterCcMapping* mappings, uint32_t count);
     bool setTransport(int64_t sample, double samplesPerStep, bool playing) noexcept;
     // Control thread, only while process() is not running (after prepare(), before the audio
     // thread starts or resumes, like prepare() itself): restore a parameter's value directly, with
@@ -332,6 +350,10 @@ private:
     std::vector<const AutomationPoint*> lanePoints_;
     std::vector<uint32_t> laneCount_;
     std::vector<double> automationScratch_;
+    // Per parameter: its CC key (group << 11 | channel << 7 | controller), or kNoCc.
+    static constexpr uint32_t kNoCc = 0xFFFFFFFFu;
+    std::vector<uint32_t> ccKey_;
+    EventInput hostEvents_{};  // this block's host events (audio thread)
     int64_t transportSample_ = 0;
     double samplesPerStep_ = 1.0;
     bool playing_ = false;
@@ -342,6 +364,8 @@ private:
     Spsc<ParameterCommand, kParameterQueueCapacity> parameterQueue_;
     void applyParameterCommands() noexcept;
     void resolveParameters(const NodeBlock& block, uint32_t frames) noexcept;
+    ParameterValue resolveWithCc(uint32_t p, uint32_t frames, const double* automation, const float* const* signals,
+                                 double* out) noexcept;
     std::vector<uint32_t> order_;
     // Dynamic routing scratch, preallocated by reserveRouting().
     std::vector<uint32_t> routePosition_, routeCount_, routeStaging_;

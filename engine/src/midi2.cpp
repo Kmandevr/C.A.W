@@ -39,8 +39,10 @@ bool decodeMidi2ChannelVoice(uint32_t w0, uint32_t w1, Midi2Event& out) noexcept
             event.value = static_cast<double>(w1) / 4294967295.0;
             break;
         case 0xB:
+            // Control Change: the index is byte 3 (byte 4 is reserved), unlike per-note messages.
             event.type = Midi2EventType::ControlChange;
-            event.index = index;
+            event.index = event.note;
+            event.note = 0;
             event.value = static_cast<double>(w1) / 4294967295.0;
             break;
         case 0xD:
@@ -56,6 +58,17 @@ bool decodeMidi2ChannelVoice(uint32_t w0, uint32_t w1, Midi2Event& out) noexcept
             return false;
     }
     out = event;
+    return true;
+}
+
+bool decodeControlChange(const uint32_t* words, UmpControlChange& out) noexcept {
+    const uint32_t w0 = words[0];
+    const uint32_t type = w0 >> 28;
+    if ((type != 0x2 && type != 0x4) || ((w0 >> 20) & 0x0F) != 0xB) return false;
+    out.group = static_cast<uint8_t>((w0 >> 24) & 0x0F);
+    out.channel = static_cast<uint8_t>((w0 >> 16) & 0x0F);
+    out.controller = static_cast<uint8_t>((w0 >> 8) & 0x7F);
+    out.value = type == 0x2 ? static_cast<double>(w0 & 0x7F) / 127.0 : static_cast<double>(words[1]) / 4294967295.0;
     return true;
 }
 
