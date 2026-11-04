@@ -78,4 +78,22 @@ void main() {
     expect(tester.takeException(), isNull);
     s.dispose();
   }, skip: skip, timeout: const Timeout(Duration(seconds: 60)));
+
+  testWidgets('project settings show a meter the file brought, such as 12/4', (tester) async {
+    tester.view.physicalSize = const Size(412, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final s = AppState();
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject()..beatsPerBar = 12;
+    s.ready = true;
+    s.starting = false;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ArrangerScreen(state: s))));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('12/4'), findsOneWidget);
+    s.dispose();
+  }, skip: skip);
 }

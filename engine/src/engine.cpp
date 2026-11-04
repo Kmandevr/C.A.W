@@ -961,7 +961,7 @@ std::string Engine::setProject(const ProjectSpec& p) {
             const double expanded = arrangementBytes(w.clips, sources, p.beatsPerBar);
             const double left = static_cast<double>(resourceBudget_.projectStateBytes) -
                 static_cast<double>(projectStateBytes) - static_cast<double>(layerStateDoubles) * sizeof(double);
-            if (3.0 * expanded > left) {
+            if (expanded > 0 && 3.0 * expanded > left) {
                 warnings[pl.ids.front()].push_back("layer not installed: its arrangement clips expand to about " +
                     std::to_string(static_cast<uint64_t>(std::min(expanded, 1.8e19))) +
                     " bytes of notes, over this Engine's project-state budget of " +

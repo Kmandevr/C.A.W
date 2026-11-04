@@ -296,7 +296,7 @@ The app, the CLI and exports share one format:
 
 | Kind | What it renders |
 | --- | --- |
-| Loop | One exact project loop (refused before rendering when it is longer than a WAV file holds, about 3.1 hours of stereo float at 48 kHz, or when it and its WAV copy exceed the device's memory budget). The engine renders two loops and keeps the second, so the file starts with the seam crossfades it has when it repeats. Includes a `smpl` loop chunk over the whole file. Bit-identical to the second loop of live playback |
+| Loop | One exact project loop (refused before rendering when it is longer than a WAV file holds, about 3.1 hours of stereo float at 48 kHz). The engine renders two loops and keeps the second, so the file starts with the seam crossfades it has when it repeats. Includes a `smpl` loop chunk over the whole file. Bit-identical to the second loop of live playback |
 | Free | Any length from 0.1 to 600 seconds, from the start |
 | One-shot | One pass of one layer (its own or its pattern's length, or the project loop if it follows it), at most 30 s. The end is trimmed to 5 ms after the last sound above −80 dB |
 | Wavetable | 1–256 frames of 2048 samples from one module, sweeping one param from its min to its max. In a frame, `t` runs 0–2047, `phase` 0–1 and `sr` is 2048, so `sine(1)` is one cycle. Each frame's DC is removed, and the table is normalized to peak 1. Written as 32-bit float mono |

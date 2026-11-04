@@ -661,7 +661,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
             'Time',
             DropdownButton<int>(
               value: p.beatsPerBar,
-              items: [for (var b = 2; b <= 7; b++) DropdownMenuItem(value: b, child: Text('$b/4'))],
+              items: [for (final b in {2, 3, 4, 5, 6, 7, p.beatsPerBar}.toList()..sort()) DropdownMenuItem(value: b, child: Text('$b/4'))],
               onChanged: (v) => s.editProject((p) => p.beatsPerBar = v!),
             ),
           ),

@@ -10,6 +10,7 @@
 #include "engine.h"
 #include "pattern.h"
 #include "vm.h"
+#include "wav.h"
 
 namespace caw {
 
@@ -75,51 +76,64 @@ bool checkModules(const ProjectSpec& p, std::string& err) {
     return true;
 }
 
-// Plays the project from the start and records `total` frames, keeping those from `keepFrom` on.
-bool record(const ProjectSpec& p, int sr, int64_t keepFrom, int64_t total, RenderResult& out, int32_t* progress,
-            int32_t* cancel, uint64_t memoryBytes) {
-    const int64_t keep = total - keepFrom;
-    // Songs run to the 32-bit step count (F7.2), so check the length before allocating anything.
-    if (keep > kMaxWavFrames) {
-        out.error = "the export is " + std::to_string(keep) + " frames, longer than a WAV file holds (" +
-            std::to_string(kMaxWavFrames) + " frames, " + std::to_string(kMaxWavFrames / sr / 60) + " minutes at " +
-            std::to_string(sr) + " Hz); export a shorter loop";
-        return false;
-    }
+// Refuses a render that a WAV file can't hold, before anything is allocated (songs run to the 32-bit step count).
+bool fitsWav(int64_t frames, int sr, std::string& error) {
+    if (frames <= kMaxWavFrames) return true;
+    error = "the export is " + std::to_string(frames) + " frames, longer than a WAV file holds (" +
+        std::to_string(kMaxWavFrames) + " frames, " + std::to_string(kMaxWavFrames / sr / 60) + " minutes at " +
+        std::to_string(sr) + " Hz); export a shorter loop";
+    return false;
+}
+
+// Plays the project from the start for `total` frames and hands those from `keepFrom` on to `sink`, interleaved,
+// a chunk at a time. A sink returning false stops the render.
+template <class Sink>
+bool recordTo(const ProjectSpec& p, int sr, int64_t keepFrom, int64_t total, Sink&& sink, std::string& error,
+              int32_t* progress, int32_t* cancel) {
     Engine eng(sr);
-    const uint64_t budget = memoryBytes ? memoryBytes : eng.resourceBudget().totalBytes;
-    const uint64_t needed = static_cast<uint64_t>(keep) * 2 * sizeof(float) * 2;  // the samples and their WAV copy
-    if (needed > budget) {
-        out.error = "the export needs about " + std::to_string(needed >> 20) + " MiB, over this device's memory budget of " +
-            std::to_string(budget >> 20) + " MiB; export a shorter loop or a lower sample rate";
-        return false;
-    }
     eng.setProject(p);
     eng.play();
-    out.samples.assign(static_cast<size_t>(keep) * 2, 0.0f);
-    out.channels = 2;
-    out.sampleRate = sr;
-    out.frames = keep;
     constexpr int kChunk = 512;
-    float l[kChunk], r[kChunk];
+    float l[kChunk], r[kChunk], lr[kChunk * 2];
     for (int64_t done = 0; done < total;) {
         if (cancelled(cancel)) {
-            out.error = "cancelled";
+            error = "cancelled";
             return false;
         }
         const int n = static_cast<int>(std::min<int64_t>(kChunk, total - done));
         eng.process(l, r, n);
+        int kept = 0;
         for (int i = 0; i < n; ++i) {
-            const int64_t f = done + i - keepFrom;
-            if (f < 0) continue;
-            out.samples[static_cast<size_t>(f) * 2] = l[i];
-            out.samples[static_cast<size_t>(f) * 2 + 1] = r[i];
+            if (done + i < keepFrom) continue;
+            lr[kept * 2] = l[i];
+            lr[kept * 2 + 1] = r[i];
+            ++kept;
+        }
+        if (kept > 0 && !sink(lr, kept)) {
+            if (error.empty()) error = "couldn't write the export";
+            return false;
         }
         done += n;
         if ((done & 0xFFFF) < kChunk) setProgress(progress, static_cast<double>(done) / total);
     }
     setProgress(progress, 1.0);
     return true;
+}
+
+// recordTo into memory.
+bool record(const ProjectSpec& p, int sr, int64_t keepFrom, int64_t total, RenderResult& out, int32_t* progress,
+            int32_t* cancel) {
+    const int64_t keep = total - keepFrom;
+    if (!fitsWav(keep, sr, out.error)) return false;
+    out.samples.clear();
+    out.samples.reserve(static_cast<size_t>(keep) * 2);
+    out.channels = 2;
+    out.sampleRate = sr;
+    out.frames = keep;
+    return recordTo(p, sr, keepFrom, total, [&](const float* lr, int n) {
+        out.samples.insert(out.samples.end(), lr, lr + static_cast<size_t>(n) * 2);
+        return true;
+    }, out.error, progress, cancel);
 }
 
 int64_t loopFrames(const ProjectSpec& p, int sr, int steps) {
@@ -231,32 +245,48 @@ bool renderWavetable(const ProjectSpec& p, const ExportOptions& o, RenderResult&
     return true;
 }
 
+// The checks and project every export starts from (not wavetables, which compile one module).
+bool prepareExport(const ProjectSpec& in, const ExportOptions& o, ProjectSpec& p, std::string& error) {
+    if (o.sampleRate < 8000 || o.sampleRate > 192000) {
+        error = "sample rate must be 8000 to 192000";
+        return false;
+    }
+    if (o.kind != ExportKind::Wavetable && !checkModules(in, error)) return false;
+    p = in;
+    p.auditionOnly = false;
+    p.auditionChain.clear();
+    return true;
+}
+
+// Loop and free exports: which frames of a render from the start they keep. A loop renders two loops and keeps
+// the second: it starts with the first loop's seam crossfades, exactly as a loop sounds when it repeats.
+void playedSpan(const ProjectSpec& p, const ExportOptions& o, int64_t& keepFrom, int64_t& total) {
+    const int sr = o.sampleRate;
+    if (o.kind == ExportKind::Loop) {
+        keepFrom = loopFrames(p, sr, p.loopSteps());
+        total = 2 * keepFrom;
+    } else {
+        keepFrom = 0;
+        total = static_cast<int64_t>(std::floor(std::clamp(o.seconds, 0.1, 600.0) * sr + 0.5));
+    }
+}
+
 }  // namespace
 
 bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& out, int32_t* progress,
                   int32_t* cancel) {
     out = RenderResult{};
-    if (o.sampleRate < 8000 || o.sampleRate > 192000) {
-        out.error = "sample rate must be 8000 to 192000";
-        return false;
-    }
+    ProjectSpec p;
+    if (!prepareExport(in, o, p, out.error)) return false;
     if (o.kind == ExportKind::Wavetable) return renderWavetable(in, o, out, progress, cancel);
-    if (!checkModules(in, out.error)) return false;
-    ProjectSpec p = in;
-    p.auditionOnly = false;
-    p.auditionChain.clear();
     const int sr = o.sampleRate;
     switch (o.kind) {
-        case ExportKind::Loop: {
-            // Render two loops and keep the second: it starts with the first loop's seam crossfades, exactly as a
-            // loop sounds when it repeats.
-            const int64_t len = loopFrames(p, sr, p.loopSteps());
-            out.loop = true;
-            return record(p, sr, len, 2 * len, out, progress, cancel, o.memoryBytes);
-        }
+        case ExportKind::Loop:
         case ExportKind::Free: {
-            const double secs = std::clamp(o.seconds, 0.1, 600.0);
-            return record(p, sr, 0, static_cast<int64_t>(std::floor(secs * sr + 0.5)), out, progress, cancel, o.memoryBytes);
+            int64_t keepFrom = 0, total = 0;
+            playedSpan(p, o, keepFrom, total);
+            out.loop = o.kind == ExportKind::Loop;
+            return record(p, sr, keepFrom, total, out, progress, cancel);
         }
         case ExportKind::OneShot: {
             const LayerSpec* layer = nullptr;
@@ -282,7 +312,7 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             }
             len = std::min<int64_t>(len, static_cast<int64_t>(30) * sr);
             p.layers = {only};
-            if (!record(p, sr, 0, len, out, progress, cancel, o.memoryBytes)) return false;
+            if (!record(p, sr, 0, len, out, progress, cancel)) return false;
             // Trim the silent end, keeping 5 ms after the last sound above -80 dB.
             int64_t last = -1;
             for (int64_t f = 0; f < out.frames; ++f)
@@ -298,6 +328,40 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             break;
     }
     return false;
+}
+
+bool renderExportToWav(const ProjectSpec& in, const ExportOptions& o, const std::string& path, bool float32,
+                       std::string& error, int32_t* progress, int32_t* cancel) {
+    error.clear();
+    WavSpec spec;
+    spec.sampleRate = o.sampleRate;
+    spec.channels = 2;
+    spec.float32 = float32 || o.kind == ExportKind::Wavetable;
+    if (o.kind == ExportKind::Loop || o.kind == ExportKind::Free) {
+        ProjectSpec p;
+        if (!prepareExport(in, o, p, error)) return false;
+        int64_t keepFrom = 0, total = 0;
+        playedSpan(p, o, keepFrom, total);
+        if (!fitsWav(total - keepFrom, o.sampleRate, error)) return false;
+        spec.loop = o.kind == ExportKind::Loop;
+        WavFileWriter wav;
+        if (!wav.open(path, spec, total - keepFrom, error)) return false;
+        if (!recordTo(p, o.sampleRate, keepFrom, total, [&](const float* lr, int n) { return wav.write(lr, n); },
+                      error, progress, cancel)) {
+            wav.abandon();
+            return false;
+        }
+        return wav.finish(error);
+    }
+    RenderResult r;
+    if (!renderExport(in, o, r, progress, cancel)) {
+        error = r.error;
+        return false;
+    }
+    spec.sampleRate = r.sampleRate;
+    spec.channels = r.channels;
+    spec.loop = r.loop;
+    return writeFile(path, encodeWav(spec, r.samples.data(), r.frames), error);
 }
 
 }  // namespace caw
