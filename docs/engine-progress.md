@@ -2,7 +2,7 @@
 title: Native engine refactor progress
 summary: Live milestone ledger and exact continuation point for the native engine refactor.
 covers: [engine/, app/]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Native engine refactor progress
@@ -35,7 +35,7 @@ updated: 2026-11-03
 ## Verified architecture and integration gaps
 
 - Existing foundations include the .caw compiler/VM, synth patch translation, layer/chain mixer, folder buses, module import/export wiring, project parameter/global automation, MIDI file import/export, MIDI 2.0 UMP decoding/queue, typed module descriptors, static module registry, graph compiler/executor/publication helper, dependency resolver, hardware policy and bounded background worker pool.
-- **Integration (updated 2026-11-03, F4.3):** `Engine::setProject` compiles programs and creates `Chain` instances. `Engine::process` runs each chunk through the Engine-owned mix graph (`GraphExecutor`), with a node per slot and a master node; slot nodes call `processSlot`/`runChain`. Chains are not yet split into graph nodes (F4.4). `GraphRuntime` and `ModuleRegistry` have no production references from Engine, VM, C API or Flutter.
+- **Integration (updated 2026-11-03, F4.3):** `Engine::setProject` compiles programs and creates `Chain` instances. `Engine::process` runs each chunk through the Engine-owned mix graph (`GraphExecutor`), with a node per track module (`runModuleNode` → `runModule`/`runVoices`), a track node, folder bus nodes and a master node; `planChunk` handles loop restarts and code swaps between chunks (F4.4). `GraphRuntime` and `ModuleRegistry` have no production references from Engine, VM, C API or Flutter.
 - The graph compiler now has no arbitrary fixed node/connection count cap. `GraphResourceBudget` requires a non-zero `maxWorkingBytes`; optional `maxNodes`/`maxConnections` ceilings default to unlimited. Compile and executor preparation estimate their internal working set before allocating; the estimate excludes caller-owned graph input and processor instances, and actual allocator failure remains a separate `OutOfMemory` result. Tests now cover both compiler and executor working-set rejection. Node references remain `uint32_t` (a representation boundary); the executor's former 8,192-frame cap is removed. This budget is not yet derived from hardware or passed by the active Engine.
 - **Graph runtime is still limited:** since Foundation F3 (PR #72) it runs planar N-channel audio of any layout (mono … 7.1, Discrete, up to 64 channels per port) with a prepared-buffer byte budget, but still one audio input and one audio output port per node, 8–192 kHz. Since F4.1 a summing input takes any number of connections (fan-in, summed in connection order); other inputs take one driver. No multiple outputs, custom channel mapping, control/modulation/event/MIDI runtime buffers, timestamped event scheduling, cross-domain conversion or delayed feedback edges.
 - `ModuleProcessor` has the generic borrowed planar `process(AudioProcessBlock)` with a stereo adapter (F2/F3), and the executor calls only that. Port descriptors identify audio/control/modulation/event types, but typed descriptors do not provide runtime buffers for those domains.

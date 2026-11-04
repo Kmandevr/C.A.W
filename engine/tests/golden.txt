@@ -1,12 +1,12 @@
 # Hash of each template's 1-bar loop render at 140 BPM, 48 kHz, seed 7 (FNV-1a over float bits).
 # Regenerate only for an intended sound change: caw_tests --update-golden
-acid-synth.caw 0caf2714c519d797
-bass.caw 107a5e51aa62eccf
+acid-synth.caw 212dc35557bca917
+bass.caw 6cc81a6251229037
 bitcrush.caw 1633d041fdbb671b
-bytebeat-loop.caw d2d46799c2e6ed03
-fold.caw 3d9c1c08faeef26f
-glitch-fx.caw 78959567a93d77e7
-hats.caw d5ecd4da3e03813f
-init-synth.caw cd9218b14680d667
-kick.caw e9bb15fdccbacafb
-wavetable-pad.caw 8b4032cbec26f803
+bytebeat-loop.caw 243433b24b2b449b
+fold.caw 31a471cc92bc58c7
+glitch-fx.caw ab7242ac6eec6d17
+hats.caw ba858f776c53f807
+init-synth.caw 997064a1c0a8962f
+kick.caw 6dc574499dc57507
+wavetable-pad.caw 4a8b2e1d562447d3

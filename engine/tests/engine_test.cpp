@@ -436,6 +436,39 @@ TEST(effects_process_their_layer_only) {
     CHECK_NEAR(out[999], 0.9 * std::cos(kPi / 4.0), 1e-6);
 }
 
+TEST(each_module_of_a_track_runs_as_its_own_graph_node) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.3"}});
+    p.modules.push_back({"fx", "---\nkind: effect\n---\nin * 2", {}});
+    p.modules.push_back({"fx2", "---\nkind: effect\n---\nin * 0.5", {}});
+    p.layers[0].chain = {"a", "fx", "fx2", "fx"};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    std::vector<float> out = run(e, 1000);
+    CHECK_NEAR(out[999], 0.6 * std::cos(kPi / 4.0), 1e-6);
+    CHECK_EQ(e.mixGraphNodesRun(), 6u);  // four module nodes, the track node and master; idle slots never run
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
+TEST(track_chain_longer_than_its_module_nodes_is_refused_with_an_error) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}});
+    p.modules.push_back({"fx", "---\nkind: effect\n---\nin", {}});
+    for (int i = 1; i < kMaxTrackModules; ++i) p.layers[0].chain.push_back("fx");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("a track runs at most") == std::string::npos);
+    e.play();
+    std::vector<float> out = run(e, 500);
+    CHECK_NEAR(out[499], 0.25 * std::cos(kPi / 4.0), 1e-6);  // exactly the limit still plays
+    p.layers[0].chain.push_back("fx");
+    const std::string result = e.setProject(p);
+    CHECK(result.find("layer not installed: its chain has 33 modules and a track runs at most 32") != std::string::npos);
+    out = run(e, 4800);
+    CHECK_EQ(out[4799], 0.0f);  // refused, never played cut short
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
 TEST(params_reach_the_audio) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "param level = 0.2\nlevel"}});
     p.modules[0].params["level"] = 0.4;
@@ -861,6 +894,32 @@ TEST(engine_prepares_dynamic_note_curve_capacity_before_playback) {
     e.play();
     const auto out = run(e, 2000);
     CHECK(std::any_of(out.begin(), out.end(), [](float sample) { return std::abs(sample) > 1e-5f; }));
+}
+
+// Within one layer a module reads exports only from modules before it in the chain: those have
+// run this chunk on every lane. A later (or its own) module is refused, so no import's delay
+// depends on how chunks happen to be split.
+TEST(module_reads_exports_only_from_earlier_modules_of_its_own_chain) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"gen", "---\nmode: float\n---\nexport let level = 0.25\n0.5", {}, "gen"});
+    p.modules.push_back({"early", "---\nkind: effect\nmode: float\n---\nin + late.boost", {}, "early"});
+    p.modules.push_back({"late", "---\nkind: effect\nmode: float\n---\nexport let boost = 1\nin + gen.level", {}, "late"});
+    LayerSpec l;
+    l.id = "t";
+    l.chain = {"gen", "early", "late"};
+    l.volume = 1.0;
+    p.layers = {l};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    const std::string result = e.setProject(p);
+    CHECK(result.find("'late.boost' comes from a later module in this layer's chain (it reads 0)") != std::string::npos);
+    CHECK(result.find("'gen.level'") == std::string::npos);  // an earlier module's export is fine, no warning
+    e.play();
+    const std::vector<float> out = run(e, 4800);
+    CHECK_NEAR(out[4799], 0.75 * std::cos(kPi / 4.0), 1e-6);  // 0.5 + 0 + 0.25
 }
 
 TEST(engine_routes_more_than_16_module_exports) {

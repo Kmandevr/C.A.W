@@ -2,7 +2,7 @@
 title: Engine integration contract
 summary: How CAW's shared native engine is consumed by projects, add-ons, the app, the library and external build targets.
 covers: [engine/, app/]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Engine integration contract
@@ -53,7 +53,7 @@ A module package needs:
 - dependency manifest and content hash;
 - test vectors or deterministic render fixtures where practical.
 
-The engine owns parameter values, state validation, graph preparation and processing. A prepared planar N-channel graph executor (with summing inputs for fan-in) now runs native processors in topological order without allocating or locking in `process`; the current runtime supports one audio input and one audio output port per node, of any channel layout (planar N-channel since F3); summing inputs take many connections (F4.1). Since F4.3 the Engine's live playback and offline render run through one such graph: a node per track slot plus a master node, re-routed on the audio thread. A separate graph runtime helper publishes prepared graphs at callback boundaries and defers old-graph reclamation to the control thread. A static module registry creates processors by stable ID and validates their descriptors; processors expose reset and versioned state hooks. These are native foundations, not yet the Engine/VM mixer path: project graph serialization, native/bytecode interoperation, full state migration and app-facing registration remain future integration work. A custom UI is only a view/controller over the public parameter/event interface. A module must remain usable with generated controls if its custom UI is unavailable. UI code never runs on the audio callback.
+The engine owns parameter values, state validation, graph preparation and processing. A prepared planar N-channel graph executor (with summing inputs for fan-in) now runs native processors in topological order without allocating or locking in `process`; the current runtime supports one audio input and one audio output port per node, of any channel layout (planar N-channel since F3); summing inputs take many connections (F4.1). Since F4.3/F4.4 the Engine's live playback and offline render run through one such graph (`GraphExecutor::prepareRouted`): a node per module of each track, a track node, folder bus nodes and a master node, re-routed on the audio thread. A separate graph runtime helper publishes prepared graphs at callback boundaries and defers old-graph reclamation to the control thread. A static module registry creates processors by stable ID and validates their descriptors; processors expose reset and versioned state hooks. These are native foundations, not yet the Engine/VM mixer path: project graph serialization, native/bytecode interoperation, full state migration and app-facing registration remain future integration work. A custom UI is only a view/controller over the public parameter/event interface. A module must remain usable with generated controls if its custom UI is unavailable. UI code never runs on the audio callback.
 
 Third-party native add-ons are executable code and therefore a separate trust boundary. Do not load them into the core process by default. Require explicit user installation/approval, signature/hash verification where available, declared permissions, compatibility checks and a crash-isolation strategy. Downloaded .caw source remains sandboxed with bounded CPU, memory, loops, source size and call depth.
 

@@ -821,3 +821,100 @@ TEST(graph_dynamic_routing_skips_nodes_left_out_of_the_order) {
     CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
     CHECK_EQ(idle.calls, 1);
 }
+
+TEST(graph_dynamic_routing_routes_plain_inputs_directly_when_reserved) {
+    // A plain input reads its one source's buffer as-is: -0.0f and +/-FLT_MAX keep their bits (no
+    // summing from +0.0f). Unrouted, it is silence even when host input is offered.
+    StereoRoutingModules m;
+    class Edges final : public ModuleProcessor {
+    public:
+        explicit Edges(const ModuleDescriptor& d) : d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        bool process(const AudioProcessBlock& b) noexcept override {
+            const float v[] = {-0.0f, std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), 0.375f};
+            for (uint32_t c = 0; c < b.output.channelCount; ++c)
+                for (uint32_t i = 0; i < b.frames; ++i) b.output.channels[c][i] = v[(i + c) % 4];
+            return true;
+        }
+    private: const ModuleDescriptor& d_;
+    } edges(m.source);
+    OffsetGenerator other(m.source, 40);
+    Copy plain(m.plain);
+    // Nodes: 0 edges, 1 other, 2 plain (the output node).
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"edges", &m.source}, {"other", &m.source}, {"plain", &m.plain}}, {}, {&edges, &other, &plain},
+                           2, 16, 48000.0, kBudget) == GraphError::Ok);
+    CHECK_EQ(executor.inputChannels(), 2u);  // the plain input is host-fed until routing is reserved
+    CHECK(executor.reserveRouting(1, kBudget, true) == GraphError::Ok);
+    CHECK_EQ(executor.inputChannels(), 0u);
+    const uint32_t order[] = {0, 1, 2};
+    const GraphConnection fromEdges[] = {{0, 0, 2, 0}};
+    const GraphConnection fromOther[] = {{1, 0, 2, 0}};
+    const GraphConnection twoIntoPlain[] = {{0, 0, 2, 0}, {1, 0, 2, 0}};
+    Planar host(2, 16, 0.5f);
+    Planar out(2, 16);
+    bool ok = true;
+    std::size_t operations = 0;
+    float routed[2][16] = {}, switched = 0, silent = 1;
+    {
+        cawtest::AllocationScope scope;
+        ok = executor.setRouting(fromEdges, 1, order, 3) && executor.process(host.constView(16), out.view(16), 16) && ok;
+        for (uint32_t c = 0; c < 2; ++c)
+            for (uint32_t i = 0; i < 16; ++i) routed[c][i] = out.data[c][i];
+        ok = !executor.setRouting(twoIntoPlain, 2, order, 3) && ok;  // rejected; the previous route stays
+        ok = executor.process(host.constView(16), out.view(16), 16) && ok;
+        ok = out.data[0][0] == routed[0][0] && std::signbit(out.data[0][0]) && ok;
+        ok = executor.setRouting(fromOther, 1, order, 3) && executor.process(host.constView(16), out.view(16), 16) && ok;
+        switched = out.data[0][3];
+        ok = executor.setRouting(nullptr, 0, order, 3) && executor.process(host.constView(16), out.view(16), 16) && ok;
+        silent = out.data[1][5];
+        operations = scope.count();
+    }
+    CHECK(ok);
+    CHECK_EQ(operations, 0u);
+    for (uint32_t c = 0; c < 2; ++c)
+        for (uint32_t i = 0; i < 16; ++i) {
+            const float v[] = {-0.0f, std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), 0.375f};
+            CHECK_EQ(routed[c][i], v[(i + c) % 4]);
+            CHECK_EQ(std::signbit(routed[c][i]), std::signbit(v[(i + c) % 4]));
+        }
+    CHECK_EQ(switched, signal(0, 43));
+    CHECK_EQ(silent, 0.0f);  // no route: silence, not the host's 0.5
+}
+
+TEST(graph_reserve_routing_keeps_plain_inputs_host_fed_without_the_opt_in) {
+    // Without routePlainInputs, plain inputs still read the host and summing inputs do not; checked
+    // across many nodes, some without inputs, so the host-slot walk must find every slot's node.
+    StereoRoutingModules m;
+    constexpr uint32_t pairs = 4096;
+    std::vector<std::string> ids;
+    ids.reserve(2 * pairs + 1);  // nodes keep pointers to these ids
+    std::vector<std::unique_ptr<ModuleProcessor>> owned;
+    std::vector<GraphNode> nodes;
+    std::vector<ModuleProcessor*> processors;
+    for (uint32_t i = 0; i < pairs; ++i) {
+        ids.push_back("g" + std::to_string(i));
+        owned.push_back(std::make_unique<OffsetGenerator>(m.source, i));
+        nodes.push_back({ids.back(), &m.source});
+        ids.push_back("p" + std::to_string(i));
+        owned.push_back(std::make_unique<Copy>(m.plain));
+        nodes.push_back({ids.back(), &m.plain});
+    }
+    ids.push_back("bus");
+    owned.push_back(std::make_unique<Copy>(m.bus));
+    nodes.push_back({ids.back(), &m.bus});
+    for (auto& p : owned) processors.push_back(p.get());
+    const uint32_t bus = 2 * pairs;
+    GraphExecutor executor;
+    CHECK(executor.prepare(nodes, {}, processors, bus, 16, 48000.0, kBudget) == GraphError::Ok);
+    CHECK(executor.reserveRouting(2, kBudget) == GraphError::Ok);
+    CHECK_EQ(executor.inputChannels(), 2u);
+    const uint32_t last = 2 * pairs - 1;  // the last plain node
+    const uint32_t order[] = {last, bus};
+    const GraphConnection edges[] = {{last, 1, bus, 0}};
+    CHECK(executor.setRouting(edges, 1, order, 2));
+    Planar host(2, 16, 0.25f), out(2, 16);
+    CHECK(executor.process(host.constView(16), out.view(16), 16));
+    CHECK_EQ(out.data[0][7], 0.25f);
+    CHECK_EQ(out.data[1][7], 0.25f);
+}

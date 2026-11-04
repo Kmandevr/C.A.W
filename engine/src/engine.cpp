@@ -66,6 +66,16 @@ struct Engine::Slot {
     std::array<double, kBlock>** exportBuf = nullptr;  // stable slice in Engine::ExportPool
     size_t exportCapacity = 0;
     size_t exportCount = 0;  // grows to the largest active chain export count; audio-thread owned
+
+    // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
+    // boundary and code swap of a playing track, so one plan covers the whole chunk.
+    enum class Mode : uint8_t { Idle, Bus, Silent, Play };
+    Mode mode = Mode::Idle;
+    double target = 0;          // mix target (0 while muted or soloed out)
+    int64_t n0 = 0, repeat = 0; // sample in the layer's loop, and the pattern repeat
+    const Pattern* pat = nullptr;
+    bool seam = false;          // the shadow lane finishes the previous pass this chunk
+    bool fade = false;          // the replaced chain plays on in the fade lane this chunk
 };
 
 // One sounding note of a pattern layer's generator.
@@ -113,7 +123,7 @@ struct Engine::Chain {
     double vtb[kBlock], vtime[kBlock], vphase[kBlock], vtrig[kBlock], vgate[kBlock], vnote[kBlock], vfreq[kBlock];
     double vvel[kBlock], vrel[kBlock], vout[kBlock], gen[kBlock];
     double vbend[kBlock], vpress[kBlock], vtimbre[kBlock];
-    double dtrig[kBlock], ones[kBlock], dnote[kBlock], dfreq[kBlock];
+    double ones[kBlock], dnote[kBlock], dfreq[kBlock];
     struct ParamAutomation {
         int moduleIndex = 0, paramIndex = 0;
         double minimum = 0.0, maximum = 1.0, step = 0.0;
@@ -136,8 +146,13 @@ struct Engine::Chain {
     std::vector<std::vector<const double*>> importPtrs;            // per module: one pointer per import
     uint32_t used = 0;
     double layerLen = 1;  // samples in this layer's loop, for pos and phase
-    double nb[kBlock], tb[kBlock], stepb[kBlock], beatb[kBlock], barb[kBlock], posb[kBlock], timeb[kBlock];
-    double srb[kBlock], rateb[kBlock], bpmb[kBlock], seedb[kBlock], zero[kBlock];
+    // Per lane (0 the main pass, 1 the shadow across a seam): the block's time variables, worked
+    // out once per chunk by the first module node and read by the rest, plus the lane's input.
+    struct Lane {
+        double nb[kBlock], stepb[kBlock], beatb[kBlock], barb[kBlock], posb[kBlock], timeb[kBlock];
+        double srb[kBlock], bpmb[kBlock], seedb[kBlock], dtrig[kBlock], in[kBlock];
+    } lanes[2];
+    double tb[kBlock], rateb[kBlock], zero[kBlock];
 };
 
 struct Engine::Cmd {
@@ -333,14 +348,48 @@ void storeMax(std::atomic<float>& a, float v) {
 // stage. Every node has a summing stereo input; routing (child -> folder bus, root -> master) and the
 // execution order are set on the audio thread from the slots' state (Engine::updateRouting).
 struct Engine::MixGraph {
-    class SlotNode final : public ModuleProcessor {
+    // Lanes on a track's module edges: 0 the current chain, 1 its shadow finishing the previous
+    // pass across a loop seam, 2 the replaced chain fading out after a code swap.
+    static constexpr uint32_t kLanes = 3;
+    static constexpr int K = kMaxTrackModules;
+
+    class ModuleNode final : public ModuleProcessor {
     public:
-        SlotNode(Engine& e, int slot, const ModuleDescriptor& d) : e_(e), slot_(slot), d_(d) {}
+        ModuleNode(Engine& e, int slot, int index, const ModuleDescriptor& d) : e_(e), slot_(slot), index_(index), d_(d) {}
         const ModuleDescriptor& descriptor() const noexcept override { return d_; }
         using ModuleProcessor::process;
         bool process(const AudioProcessBlock& b) noexcept override {
-            e_.runSlotNode(slot_, b.input.channels[0], b.input.channels[1], b.output.channels[0],
-                           b.output.channels[1], static_cast<int>(b.frames));
+            e_.runModuleNode(slot_, index_, b.input.channels, b.output.channels, static_cast<int>(b.frames));
+            return true;
+        }
+    private:
+        Engine& e_;
+        int slot_, index_;
+        const ModuleDescriptor& d_;
+    };
+    class TrackNode final : public ModuleProcessor {
+    public:
+        TrackNode(Engine& e, int slot, const ModuleDescriptor& d) : e_(e), slot_(slot), d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        using ModuleProcessor::process;
+        bool process(const AudioProcessBlock& b) noexcept override {
+            e_.runTrackNode(slot_, b.input.channels, b.output.channels[0], b.output.channels[1],
+                            static_cast<int>(b.frames));
+            return true;
+        }
+    private:
+        Engine& e_;
+        int slot_;
+        const ModuleDescriptor& d_;
+    };
+    class BusNode final : public ModuleProcessor {
+    public:
+        BusNode(Engine& e, int slot, const ModuleDescriptor& d) : e_(e), slot_(slot), d_(d) {}
+        const ModuleDescriptor& descriptor() const noexcept override { return d_; }
+        using ModuleProcessor::process;
+        bool process(const AudioProcessBlock& b) noexcept override {
+            e_.runBusNode(slot_, b.input.channels[0], b.input.channels[1], b.output.channels[0],
+                          b.output.channels[1], static_cast<int>(b.frames));
             return true;
         }
     private:
@@ -363,48 +412,74 @@ struct Engine::MixGraph {
         const ModuleDescriptor& d_;
     };
 
-    static constexpr int kMaster = kSlots;
-    static constexpr int kNodes = kSlots + 1;
-    // The mixer graph is fixed engine structure (kSlots + 1 nodes of kBlock frames), not project
-    // content, so it gets its own budget floor rather than competing with project graphs.
-    static constexpr std::size_t kMinBudgetBytes = 4u * 1024u * 1024u;
+    // Node layout: K module nodes per slot, then a track node and a bus node per slot, then master.
+    static constexpr uint32_t moduleNode(int slot, int index) { return static_cast<uint32_t>(slot * K + index); }
+    static constexpr uint32_t trackNode(int slot) { return static_cast<uint32_t>(kSlots * K + slot); }
+    static constexpr uint32_t busNode(int slot) { return static_cast<uint32_t>(kSlots * K + kSlots + slot); }
+    static constexpr uint32_t kMasterNode = static_cast<uint32_t>(kSlots * (K + 2));
+    static constexpr int kNodes = kSlots * (K + 2) + 1;
+    static constexpr int kMaster = kSlots;  // the master in slot-level routing scratch
+    static constexpr int kMaxEdges = kSlots * (K + 1);
+    // The mixer graph is fixed engine structure (kNodes nodes of kBlock frames, about 2 MB), not
+    // project content, so it gets its own budget floor rather than competing with project graphs.
+    static constexpr std::size_t kMinBudgetBytes = 8u * 1024u * 1024u;
 
     const PortDescriptor ports[2] = {{"in", PortType::Audio, ChannelLayout::Stereo, true, 0, true},
                                      {"out", PortType::Audio, ChannelLayout::Stereo, false}};
-    const ModuleDescriptor slotDescriptor{"caw.mixer.slot", 1, ports, 2, nullptr, 0};
+    const PortDescriptor lanePorts[2] = {{"in", PortType::Audio, ChannelLayout::Discrete, true, kLanes},
+                                         {"out", PortType::Audio, ChannelLayout::Discrete, false, kLanes}};
+    const PortDescriptor trackPorts[2] = {{"in", PortType::Audio, ChannelLayout::Discrete, true, kLanes},
+                                          {"out", PortType::Audio, ChannelLayout::Stereo, false}};
+    const ModuleDescriptor moduleDescriptor{"caw.track.module", 1, lanePorts, 2, nullptr, 0};
+    const ModuleDescriptor trackDescriptor{"caw.track.out", 1, trackPorts, 2, nullptr, 0};
+    const ModuleDescriptor busDescriptor{"caw.mixer.bus", 1, ports, 2, nullptr, 0};
     const ModuleDescriptor masterDescriptor{"caw.mixer.master", 1, ports, 2, nullptr, 0};
     std::vector<std::string> ids;
     std::vector<std::unique_ptr<ModuleProcessor>> nodes;
     GraphExecutor executor;
 
-    // Routing scratch, audio thread only.
-    int target[kSlots] = {};          // routed destination node, or -1
+    // Routing scratch, audio thread only; slot-level arrays use kMaster for the master.
+    int target[kSlots] = {};          // routed destination slot (or kMaster), or -1
     bool routable[kSlots] = {};       // runs this chunk: active, and a bus or a track with a chain
-    int pending[kNodes] = {};         // routed children not yet ordered
-    bool deferred[kNodes] = {};
-    bool emitted[kNodes] = {};
+    int modules[kSlots] = {};         // module nodes a routed track runs
+    int pending[kSlots + 1] = {};     // routed children not yet ordered
+    bool deferred[kSlots + 1] = {};
+    bool emitted[kSlots + 1] = {};
+    int slotOrder[kSlots] = {};
+    uint32_t position[kSlots + 1] = {};
     uint32_t order[kNodes] = {};
-    uint32_t position[kNodes] = {};
-    GraphConnection edges[kSlots] = {};
+    GraphConnection edges[kMaxEdges] = {};
 
     MixGraph(Engine& e, double sampleRate, const EngineResourceBudget& engineBudget) {
         ids.reserve(kNodes);
+        nodes.reserve(kNodes);
         std::vector<GraphNode> graphNodes;
         std::vector<ModuleProcessor*> processors;
-        for (int i = 0; i < kNodes; ++i) {
-            ids.push_back(i == kMaster ? std::string("master") : "slot" + std::to_string(i));
-            if (i == kMaster) nodes.push_back(std::make_unique<MasterNode>(e, masterDescriptor));
-            else nodes.push_back(std::make_unique<SlotNode>(e, i, slotDescriptor));
-            graphNodes.push_back({ids.back(), i == kMaster ? &masterDescriptor : &slotDescriptor});
+        graphNodes.reserve(kNodes);
+        processors.reserve(kNodes);
+        auto add = [&](std::string id, std::unique_ptr<ModuleProcessor> node, const ModuleDescriptor* d) {
+            ids.push_back(std::move(id));
+            nodes.push_back(std::move(node));
+            graphNodes.push_back({ids.back(), d});
             processors.push_back(nodes.back().get());
-        }
+        };
+        for (int s = 0; s < kSlots; ++s)
+            for (int i = 0; i < K; ++i)
+                add("slot" + std::to_string(s) + ".m" + std::to_string(i),
+                    std::make_unique<ModuleNode>(e, s, i, moduleDescriptor), &moduleDescriptor);
+        for (int s = 0; s < kSlots; ++s)
+            add("slot" + std::to_string(s) + ".track", std::make_unique<TrackNode>(e, s, trackDescriptor), &trackDescriptor);
+        for (int s = 0; s < kSlots; ++s)
+            add("slot" + std::to_string(s) + ".bus", std::make_unique<BusNode>(e, s, busDescriptor), &busDescriptor);
+        add("master", std::make_unique<MasterNode>(e, masterDescriptor), &masterDescriptor);
         GraphResourceBudget budget = makeGraphResourceBudget(engineBudget);
         budget.maxWorkingBytes = std::max(budget.maxWorkingBytes, kMinBudgetBytes);
-        if (executor.prepare(graphNodes, {}, processors, kMaster, kBlock, sampleRate, budget) != GraphError::Ok ||
-            executor.reserveRouting(kSlots, budget) != GraphError::Ok)
+        if (executor.prepareRouted(graphNodes, processors, kMasterNode, kBlock, sampleRate, budget, kSlots) != GraphError::Ok)
             throw std::runtime_error("mix graph could not be prepared");
     }
 };
+
+uint32_t Engine::mixGraphNodesRun() const noexcept { return mixGraph_->executor.runCount(); }
 
 Engine::Engine(double sampleRate)
     : Engine(sampleRate, makeEngineResourceBudget(detectHardwareProfile())) {}
@@ -886,6 +961,14 @@ std::string Engine::setProject(const ProjectSpec& p) {
             pl.ids.clear();
             pl.sig.clear();
         }
+        if (pl.ids.size() > static_cast<size_t>(kMaxTrackModules)) {
+            // Each module runs as its own mix-graph node, and a track has kMaxTrackModules of them.
+            warnings[pl.ids.front()].push_back("layer not installed: its chain has " + std::to_string(pl.ids.size()) +
+                " modules and a track runs at most " + std::to_string(kMaxTrackModules));
+            allOk = false;
+            pl.ids.clear();
+            pl.sig.clear();
+        }
         if (!pl.ids.empty()) projectStateBytes += layerStateBytes;
         auto it = layers_.find(w.id);
         if (it != layers_.end()) {
@@ -1031,16 +1114,17 @@ std::string Engine::setProject(const ProjectSpec& p) {
     // Pass 2: where each exported value lives. The first layer (in project order) playing a module provides it.
     struct Source {
         int slot;
+        size_t module;  // its index in that layer's chain
         const double* buf;
     };
     std::map<std::string, Source> sources;
     for (const Planned& pl : plan) {
         if (pl.w.id[0] == '\x01') continue;
         size_t buf = 0;
-        for (const std::string& id : pl.ids) {
-            const ModuleState& m = modules_.at(id);
+        for (size_t k = 0; k < pl.ids.size(); ++k) {
+            const ModuleState& m = modules_.at(pl.ids[k]);
             for (const ExportDef& e : m.program->exports) {
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, slots_[pl.ls.slot].exportBuf[buf]->data()});
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, slots_[pl.ls.slot].exportBuf[buf]->data()});
                 ++buf;
             }
         }
@@ -1050,17 +1134,24 @@ std::string Engine::setProject(const ProjectSpec& p) {
     std::vector<int> projectOrder;
     for (Planned& pl : plan) {
         std::vector<const double*> wiring;
-        for (const std::string& id : pl.ids)
+        for (size_t k = 0; k < pl.ids.size(); ++k) {
+            const std::string& id = pl.ids[k];
             for (const std::string& imp : modules_.at(id).program->imports) {
                 auto src = sources.find(imp);
                 if (src == sources.end()) {
                     wiring.push_back(nullptr);
                     warnings[id].push_back("nothing exports '" + imp + "' (it reads 0)");
+                } else if (src->second.slot == pl.ls.slot && src->second.module >= k) {
+                    // Each module is a graph node, run in chain order: a later module (or this one)
+                    // has not run yet this chunk, so the value would lag by however chunks split.
+                    wiring.push_back(nullptr);
+                    warnings[id].push_back("'" + imp + "' comes from a later module in this layer's chain (it reads 0)");
                 } else {
                     wiring.push_back(src->second.buf);
                     if (src->second.slot != pl.ls.slot) readsFrom[pl.ls.slot].push_back(src->second.slot);
                 }
             }
+        }
         LayerState& ls = pl.ls;
         const Want& w = pl.w;
         ls.arrangementSig = pl.arrangementSig;
@@ -1741,9 +1832,39 @@ int64_t Engine::loopStart(const Slot& s, int64_t k) const noexcept {
     return static_cast<int64_t>(std::floor(static_cast<double>(k) * (s.steps * stepLen_) + 0.5));
 }
 
-void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, int len, double* out, Slot* exportTo, int offset,
-                      const Pattern* pat, int64_t repeat) noexcept {
-    auto& insts = shadow ? c.shadow : c.main;
+// A lane's time variables for this chunk: worked out once, by the track's first module node.
+void Engine::prepareLane(Chain& c, int lane, int64_t n0, int len) noexcept {
+    Chain::Lane& L = c.lanes[lane];
+    const uint32_t u = c.used;
+    auto uses = [u](Var v) { return (u >> static_cast<int>(v)) & 1u; };
+    for (int i = 0; i < len; ++i) L.nb[i] = static_cast<double>(n0 + i);
+    if (uses(Var::Step) || uses(Var::Beat) || uses(Var::Bar)) {
+        for (int i = 0; i < len; ++i) {
+            const double st = std::floor(L.nb[i] / stepLen_);
+            L.stepb[i] = st;
+            L.beatb[i] = std::floor(st / 4.0);
+            L.barb[i] = std::floor(L.beatb[i] / beatsPerBar_);
+        }
+    }
+    if (uses(Var::Pos) || uses(Var::Phase)) {
+        // pos counts through this layer's loop; layers that follow the project count through the project loop.
+        for (int i = 0; i < len; ++i) L.posb[i] = L.nb[i] / c.layerLen;
+    }
+    if (uses(Var::Time))
+        for (int i = 0; i < len; ++i) L.timeb[i] = L.nb[i] / sr_;
+    std::fill_n(L.srb, len, sr_);
+    std::fill_n(L.bpmb, len, bpm_);
+    std::fill_n(L.seedb, len, static_cast<double>(seed_));
+    // Without a pattern, the note variables describe one note held through the layer's loop (C4, full velocity).
+    if (uses(Var::Trig))
+        for (int i = 0; i < len; ++i) L.dtrig[i] = L.nb[i] == 0.0 ? 1.0 : 0.0;
+}
+
+// Module idx of a chain over one chunk of a lane (prepared by prepareLane); returns its output.
+const double* Engine::runModule(Chain& c, int lane, bool shadow, size_t idx, int64_t n0, int64_t globalStart, int len,
+                                const double* input, Slot* exportTo, const Pattern* pat, int64_t repeat) noexcept {
+    Chain::Lane& L = c.lanes[lane];
+    auto& inst = (shadow ? c.shadow : c.main)[idx];
     BlockCtx ctx;
     ctx.n = len;
     ctx.sr = sr_;
@@ -1751,39 +1872,17 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
     ctx.seed = seed_;
     ctx.keyRoot = keyRoot_;
     ctx.keyScale = keyScale_;
-    const uint32_t u = c.used;
-    auto uses = [u](Var v) { return (u >> static_cast<int>(v)) & 1u; };
-    for (int i = 0; i < len; ++i) c.nb[i] = static_cast<double>(n0 + i);
-    if (uses(Var::Step) || uses(Var::Beat) || uses(Var::Bar)) {
-        for (int i = 0; i < len; ++i) {
-            const double st = std::floor(c.nb[i] / stepLen_);
-            c.stepb[i] = st;
-            c.beatb[i] = std::floor(st / 4.0);
-            c.barb[i] = std::floor(c.beatb[i] / beatsPerBar_);
-        }
-    }
-    if (uses(Var::Pos) || uses(Var::Phase)) {
-        // pos counts through this layer's loop; layers that follow the project count through the project loop.
-        for (int i = 0; i < len; ++i) c.posb[i] = c.nb[i] / c.layerLen;
-    }
-    if (uses(Var::Time))
-        for (int i = 0; i < len; ++i) c.timeb[i] = c.nb[i] / sr_;
-    std::fill_n(c.srb, len, sr_);
-    std::fill_n(c.bpmb, len, bpm_);
-    std::fill_n(c.seedb, len, static_cast<double>(seed_));
-    ctx.vars[static_cast<int>(Var::Sr)] = c.srb;
-    ctx.vars[static_cast<int>(Var::Bpm)] = c.bpmb;
-    ctx.vars[static_cast<int>(Var::Seed)] = c.seedb;
-    ctx.vars[static_cast<int>(Var::Step)] = c.stepb;
-    ctx.vars[static_cast<int>(Var::Beat)] = c.beatb;
-    ctx.vars[static_cast<int>(Var::Bar)] = c.barb;
-    ctx.vars[static_cast<int>(Var::Pos)] = c.posb;
-    ctx.vars[static_cast<int>(Var::Phase)] = c.posb;
-    ctx.vars[static_cast<int>(Var::Time)] = c.timeb;
-    // Without a pattern, the note variables describe one note held through the layer's loop (C4, full velocity).
-    if (uses(Var::Trig))
-        for (int i = 0; i < len; ++i) c.dtrig[i] = c.nb[i] == 0.0 ? 1.0 : 0.0;
-    ctx.vars[static_cast<int>(Var::Trig)] = uses(Var::Trig) ? c.dtrig : c.zero;
+    const bool trig = ((c.used >> static_cast<int>(Var::Trig)) & 1u) != 0;
+    ctx.vars[static_cast<int>(Var::Sr)] = L.srb;
+    ctx.vars[static_cast<int>(Var::Bpm)] = L.bpmb;
+    ctx.vars[static_cast<int>(Var::Seed)] = L.seedb;
+    ctx.vars[static_cast<int>(Var::Step)] = L.stepb;
+    ctx.vars[static_cast<int>(Var::Beat)] = L.beatb;
+    ctx.vars[static_cast<int>(Var::Bar)] = L.barb;
+    ctx.vars[static_cast<int>(Var::Pos)] = L.posb;
+    ctx.vars[static_cast<int>(Var::Phase)] = L.posb;
+    ctx.vars[static_cast<int>(Var::Time)] = L.timeb;
+    ctx.vars[static_cast<int>(Var::Trig)] = trig ? L.dtrig : c.zero;
     ctx.vars[static_cast<int>(Var::Gate)] = c.ones;
     ctx.vars[static_cast<int>(Var::Note)] = c.dnote;
     ctx.vars[static_cast<int>(Var::Freq)] = c.dfreq;
@@ -1792,51 +1891,46 @@ void Engine::runChain(Chain& c, bool shadow, int64_t n0, int64_t globalStart, in
     ctx.vars[static_cast<int>(Var::Bend)] = c.zero;
     ctx.vars[static_cast<int>(Var::Press)] = c.ones;
     ctx.vars[static_cast<int>(Var::Timbre)] = c.zero;
-    const double* input = c.zero;
-    ctx.importOffset = offset;
-    for (size_t idx = 0; idx < insts.size(); ++idx) {
-        auto& inst = insts[idx];
-        std::fill(c.paramValuePtrs.begin(), c.paramValuePtrs.end(), nullptr);
-        ctx.paramValues = c.paramValuePtrs.data();
-        ctx.paramValueCount = static_cast<uint32_t>(c.paramValuePtrs.size());
-        for (Chain::ParamAutomation& binding : c.paramAutomation) {
-            if (binding.moduleIndex != static_cast<int>(idx)) continue;
-            for (int sample = 0; sample < len; ++sample) {
-                const double at = static_cast<double>(globalStart + sample) / stepLen_;
-                double value = std::clamp(automationValue(binding.lane->points, at,
-                    binding.lane->points.front().value), binding.minimum, binding.maximum);
-                if (binding.step > 0.0)
-                    value = std::clamp(binding.minimum + std::round((value - binding.minimum) / binding.step) * binding.step,
-                        binding.minimum, binding.maximum);
-                c.paramSamples[static_cast<size_t>(binding.paramIndex)][static_cast<size_t>(sample)] = value;
-            }
-            c.paramValuePtrs[static_cast<size_t>(binding.paramIndex)] = c.paramSamples[static_cast<size_t>(binding.paramIndex)].data();
+    ctx.importOffset = 0;  // a chunk is one segment: exports and imports start at the chunk
+    std::fill(c.paramValuePtrs.begin(), c.paramValuePtrs.end(), nullptr);
+    ctx.paramValues = c.paramValuePtrs.data();
+    ctx.paramValueCount = static_cast<uint32_t>(c.paramValuePtrs.size());
+    for (Chain::ParamAutomation& binding : c.paramAutomation) {
+        if (binding.moduleIndex != static_cast<int>(idx)) continue;
+        for (int sample = 0; sample < len; ++sample) {
+            const double at = static_cast<double>(globalStart + sample) / stepLen_;
+            double value = std::clamp(automationValue(binding.lane->points, at,
+                binding.lane->points.front().value), binding.minimum, binding.maximum);
+            if (binding.step > 0.0)
+                value = std::clamp(binding.minimum + std::round((value - binding.minimum) / binding.step) * binding.step,
+                    binding.minimum, binding.maximum);
+            c.paramSamples[static_cast<size_t>(binding.paramIndex)][static_cast<size_t>(sample)] = value;
         }
-        if (idx == 0 && c.voiced) {
-            runVoices(c, pat, repeat, n0, len, c.gen, exportTo, offset, ctx);
-            input = c.gen;
-            continue;
-        }
-        ctx.imports = c.importPtrs[idx].empty() ? nullptr : c.importPtrs[idx].data();
-        const Program& p = inst->program();
-        if (p.mode == OutputMode::Byte) {
-            const double ratio = p.rate / sr_;
-            for (int i = 0; i < len; ++i) c.tb[i] = std::floor(c.nb[i] * ratio);
-            std::fill_n(c.rateb, len, p.rate);
-        } else {
-            std::copy_n(c.nb, len, c.tb);
-            std::fill_n(c.rateb, len, sr_);
-        }
-        ctx.vars[static_cast<int>(Var::T)] = c.tb;
-        ctx.vars[static_cast<int>(Var::Rate)] = c.rateb;
-        ctx.vars[static_cast<int>(Var::In)] = input;
-        input = inst->process(ctx);
-        if (exportTo && exportTo->exportBuf)
-            for (const auto& [reg, buf] : c.exportMap[idx])
-                if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
-                    std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf]->data() + offset);
+        c.paramValuePtrs[static_cast<size_t>(binding.paramIndex)] = c.paramSamples[static_cast<size_t>(binding.paramIndex)].data();
     }
-    std::copy_n(input, len, out);
+    if (idx == 0 && c.voiced) {
+        runVoices(c, pat, repeat, n0, len, c.gen, exportTo, 0, ctx);
+        return c.gen;
+    }
+    ctx.imports = c.importPtrs[idx].empty() ? nullptr : c.importPtrs[idx].data();
+    const Program& p = inst->program();
+    if (p.mode == OutputMode::Byte) {
+        const double ratio = p.rate / sr_;
+        for (int i = 0; i < len; ++i) c.tb[i] = std::floor(L.nb[i] * ratio);
+        std::fill_n(c.rateb, len, p.rate);
+    } else {
+        std::copy_n(L.nb, len, c.tb);
+        std::fill_n(c.rateb, len, sr_);
+    }
+    ctx.vars[static_cast<int>(Var::T)] = c.tb;
+    ctx.vars[static_cast<int>(Var::Rate)] = c.rateb;
+    ctx.vars[static_cast<int>(Var::In)] = input;
+    const double* y = inst->process(ctx);
+    if (exportTo && exportTo->exportBuf)
+        for (const auto& [reg, buf] : c.exportMap[idx])
+            if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
+                std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf]->data());
+    return y;
 }
 
 // A note taking a voice brings its own expression; its curves run over the note's (or ratchet repeat's) length.
@@ -2077,158 +2171,122 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
     }
 }
 
-void Engine::processSlot(Slot& s, int m, double target) noexcept {
+// A playing track at the start of a chunk: loop restarts and code swaps happen here, on their
+// exact sample, and the chunk is cut short at the next one so a whole chunk is one segment.
+void Engine::planTrack(Slot& s, int& m) noexcept {
     const bool free = s.steps <= 0;
     const double layerLen = free ? static_cast<double>(loopLen_) : s.steps * stepLen_;
-    const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
     const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
-    const int swapLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
-    const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-    if ((!s.automation || s.automation->pan.empty()) && pan != s.panCache) {
-        s.panCache = pan;
-        const double th = (pan + 1.0) * (kPi / 4.0);
-        s.gl = detCos(th);
-        s.gr = detSin(th);
+    const int64_t gg = g_;
+    int64_t k = 0, st = 0, nx = loopLen_;
+    if (!free) {
+        const double S = s.steps * stepLen_;
+        k = static_cast<int64_t>(std::floor(static_cast<double>(gg) / S));
+        while (loopStart(s, k + 1) <= gg) ++k;
+        while (k > 0 && loopStart(s, k) > gg) --k;
+        st = loopStart(s, k);
+        nx = std::min<int64_t>(loopStart(s, k + 1), loopLen_);
     }
-    float peak = 0;
-    int j = 0;
-    while (j < m) {
-        const int64_t gg = g_ + j;
-        int64_t k = 0, st = 0, nx = loopLen_;
-        if (!free) {
-            const double S = s.steps * stepLen_;
-            k = static_cast<int64_t>(std::floor(static_cast<double>(gg) / S));
-            while (loopStart(s, k + 1) <= gg) ++k;
-            while (k > 0 && loopStart(s, k) > gg) --k;
-            st = loopStart(s, k);
-            nx = std::min<int64_t>(loopStart(s, k + 1), loopLen_);
-        }
-        if (k != s.k || epoch_ != s.epoch) {
-            if (!s.fresh && s.cur && s.cur->voiced) {
-                // A pattern layer restarts its pattern: held notes ring out, voices and effects carry on.
-                releaseVoices(s.cur->voices, s.cur->voiceCount);
-                if (s.old && s.old->voiced) releaseVoices(s.old->voices, s.old->voiceCount);
-                else if (s.old)
-                    for (auto& inst : s.old->main) inst->reset();
-                s.seamLeft = 0;
-            } else if (!s.fresh) {
-                const bool cont = s.contiguous && s.expectG == gg;
-                if (seamXf_ && cont && !s.old && s.cur) {
-                    // The shadow takes over the old pass's state; main is reset just below.
-                    for (size_t i = 0; i < s.cur->main.size(); ++i) s.cur->shadow[i]->swapState(*s.cur->main[i]);
-                    s.shadowN = s.lastN + 1;
-                    s.seamLeft = seamLen;
-                } else {
-                    s.seamLeft = 0;
-                }
-                if (s.cur)
-                    for (auto& inst : s.cur->main) inst->reset();
-                if (s.old)
-                    for (auto& inst : s.old->main) inst->reset();
-            }
-            s.fresh = false;
-            s.k = k;
-            s.epoch = epoch_;
-        }
-        int len = static_cast<int>(std::min<int64_t>(m - j, nx - gg));
-        // New code waiting for the next beat or bar goes in on that exact sample.
-        if (s.pending) {
-            const double unit = (swapMode_ == 1 ? 4.0 : 4.0 * beatsPerBar_) * stepLen_;
-            int64_t kb = static_cast<int64_t>(std::floor(static_cast<double>(gg) / unit));
-            int64_t at = static_cast<int64_t>(std::floor(kb * unit + 0.5));
-            if (at < gg) at = static_cast<int64_t>(std::floor(++kb * unit + 0.5));
-            if (at == gg || swapMode_ == 0) {
-                if (canRetire(1)) {
-                    swapIn(s, s.pending);
-                    s.pending = nullptr;
-                }
+    if (k != s.k || epoch_ != s.epoch) {
+        if (!s.fresh && s.cur && s.cur->voiced) {
+            // A pattern layer restarts its pattern: held notes ring out, voices and effects carry on.
+            releaseVoices(s.cur->voices, s.cur->voiceCount);
+            if (s.old && s.old->voiced) releaseVoices(s.old->voices, s.old->voiceCount);
+            else if (s.old)
+                for (auto& inst : s.old->main) inst->reset();
+            s.seamLeft = 0;
+        } else if (!s.fresh) {
+            const bool cont = s.contiguous && s.expectG == gg;
+            if (seamXf_ && cont && !s.old && s.cur) {
+                // The shadow takes over the old pass's state; main is reset just below.
+                for (size_t i = 0; i < s.cur->main.size(); ++i) s.cur->shadow[i]->swapState(*s.cur->main[i]);
+                s.shadowN = s.lastN + 1;
+                s.seamLeft = seamLen;
             } else {
-                len = static_cast<int>(std::min<int64_t>(len, at - gg));
+                s.seamLeft = 0;
             }
+            if (s.cur)
+                for (auto& inst : s.cur->main) inst->reset();
+            if (s.old)
+                for (auto& inst : s.old->main) inst->reset();
         }
-        const int64_t n0 = gg - st;
-        double* y = tmp_;
-        s.cur->layerLen = layerLen;
-        const Pattern* pat = s.pattern ? s.pattern->get() : nullptr;
-        runChain(*s.cur, false, n0, gg, len, y, &s, j, pat, free ? epoch_ : k);
-        if (s.seamLeft > 0) {
-            const int sl = std::min(len, s.seamLeft);
-            double z[kBlock];
-            runChain(*s.cur, true, s.shadowN, gg, sl, z, nullptr, j, nullptr, k);
-            for (int i = 0; i < sl; ++i) {
-                const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
-                y[i] = z[i] * (1.0 - w) + y[i] * w;
-            }
-            s.shadowN += sl;
-            s.seamLeft -= sl;
-        }
-        if (s.old && s.swapLeft > 0) {
-            s.old->layerLen = layerLen;
-            runChain(*s.old, false, n0, gg, len, tmp2_, nullptr, j, nullptr, k);
-            const int sl = std::min(len, s.swapLeft);
-            for (int i = 0; i < len; ++i) {
-                double w = 1.0;
-                if (i < sl) w = static_cast<double>(swapLen - s.swapLeft + i + 1) / (swapLen + 1);
-                y[i] = tmp2_[i] * (1.0 - w) + y[i] * w;
-            }
-            s.swapLeft -= sl;
-        }
-        if (s.old && s.swapLeft <= 0 && canRetire(1)) {
-            retire(s.old, -1);
-            s.old = nullptr;
-        }
-        int sp = s.scopePos.load(std::memory_order_relaxed);
-        for (int i = 0; i < len; ++i) {
-            const double step = static_cast<double>(g_ + j + i) / stepLen_;
-            const bool volumeAutomated = s.automation && !s.automation->volume.empty();
-            const double desired = target > 0.0
-                ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
-            if (volumeAutomated) {
-                // The interpolated automation curve is already continuous; don't add lag on top.
-                s.gain = desired;
-            } else if (s.gain != desired) {
-                s.gain += (desired - s.gain) * gainCoef;
-                if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
-            }
-            const double v = finiteOr0(y[i]) * s.gain;
-            double gl = s.gl, gr = s.gr;
-            if (s.automation && !s.automation->pan.empty()) {
-                const double automatedPan = automationValue(s.automation->pan, step, pan);
-                const double th = (automatedPan + 1.0) * (kPi / 4.0);
-                gl = detCos(th); gr = detSin(th);
-            }
-            s.outL[j + i] = v * gl;
-            s.outR[j + i] = v * gr;
-            const float av = static_cast<float>(std::fabs(v));
-            if (av > peak) peak = av;
-            s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
-            sp = (sp + 1) % kScopeSize;
-        }
-        s.scopePos.store(sp, std::memory_order_release);
-        s.lastN = n0 + len - 1;
-        s.expectG = gg + len >= loopLen_ ? 0 : gg + len;
-        s.contiguous = true;
-        s.progress.store(static_cast<float>(static_cast<double>(n0 + len) / layerLen), std::memory_order_relaxed);
-        j += len;
+        s.fresh = false;
+        s.k = k;
+        s.epoch = epoch_;
     }
-    storeMax(s.peak, peak);
+    m = static_cast<int>(std::min<int64_t>(m, nx - gg));
+    // New code waiting for the next beat or bar goes in on that exact sample.
+    if (s.pending) {
+        const double unit = (swapMode_ == 1 ? 4.0 : 4.0 * beatsPerBar_) * stepLen_;
+        int64_t kb = static_cast<int64_t>(std::floor(static_cast<double>(gg) / unit));
+        int64_t at = static_cast<int64_t>(std::floor(kb * unit + 0.5));
+        if (at < gg) at = static_cast<int64_t>(std::floor(++kb * unit + 0.5));
+        if (at == gg || swapMode_ == 0) {
+            if (canRetire(1)) {
+                swapIn(s, s.pending);
+                s.pending = nullptr;
+                routingDirty_ = true;  // the fade lane may need more module nodes
+            }
+        } else {
+            m = static_cast<int>(std::min<int64_t>(m, at - gg));
+        }
+    }
+    s.n0 = gg - st;
+    s.repeat = free ? epoch_ : k;
+    s.cur->layerLen = layerLen;
+    if (s.old) s.old->layerLen = layerLen;
+    s.pat = s.pattern ? s.pattern->get() : nullptr;
+    s.seam = s.seamLeft > 0;
+    s.fade = s.old && s.swapLeft > 0;
 }
 
-void Engine::processChunk(float* l, float* r, int m) noexcept {
+// Decides what each slot does this chunk and returns the chunk's length: maxFrames, cut at the
+// next loop boundary or code swap of any playing track.
+int Engine::planChunk(int maxFrames) noexcept {
+    int m = maxFrames;
     for (int i = 0; i < kSlots; ++i) {
-        std::fill_n(slots_[i].outL, m, 0.0);
-        std::fill_n(slots_[i].outR, m, 0.0);
+        Slot& s = slots_[i];
+        if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
+        if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
+        s.target = slotTarget(s);
+        if (s.target == 0.0 && s.gain == 0.0) {
+            // Silent (muted, soloed out or removed, and faded out): nothing runs; swaps and removal finish.
+            s.mode = Slot::Mode::Silent;
+            s.contiguous = false;
+            if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; routingDirty_ = true; }
+            if (s.removing && canRetire(2)) {
+                retire(s.cur, -1, s.pattern);
+                s.pattern = nullptr;
+                retire(s.old, i);
+                s.cur = s.old = nullptr;
+                s.active = false;
+                s.removing = false;
+                s.mode = Slot::Mode::Idle;
+                routingDirty_ = true;
+            }
+            continue;
+        }
+        s.mode = Slot::Mode::Play;
+        planTrack(s, m);
+    }
+    return m;
+}
+
+int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
+    for (int i = 0; i < kSlots; ++i) {
         Slot& slot = slots_[i];
         if (slot.exportBuf && slot.exportCount > 0 &&
             (!slot.active || !slot.cur || (slotTarget(slot) == 0.0 && slot.gain == 0.0))) {
             for (size_t b = 0; b < slot.exportCount; ++b)
-                if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), m, 0.0);
+                if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), maxFrames, 0.0);
             if (!slot.active || (!slot.cur && !slot.pending)) slot.exportCount = 0;
         }
     }
+    const int m = planChunk(maxFrames);
     ++chunkId_;
-    // One graph runs the mix: slots in dependency order (exporters before readers), each folder bus
-    // after its children, then the master stage. Routing changes only between chunks.
+    // One graph runs the mix: each track's modules as a chain of nodes then its track node, in
+    // dependency order (exporters before readers), each folder bus after its children, then the
+    // master stage. Routing changes only between chunks.
     if (routingDirty_) {
         routingDirty_ = false;
         updateRouting();
@@ -2239,6 +2297,7 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
         std::fill_n(l, m, 0.0f);
         std::fill_n(r, m, 0.0f);
     }
+    return m;
 }
 
 // Routing as the old two-pass mixer did it, now as graph edges: a routable slot (active, and a bus or
@@ -2246,16 +2305,27 @@ void Engine::processChunk(float* l, float* r, int m) noexcept {
 // its parent is anything else (as the old mixer discarded it), and goes to master at the root. Order
 // is the old pass order (processOrder_, then the remaining slots by index) with each bus held back
 // until its routed children have run, so a track always reaches its bus in the same chunk (issue
-// #76). Edges follow that order, which is the old accumulation order. Idle slots are left out of
-// the order, so they cost nothing.
+// #76). A track runs as its module nodes (enough for its current chain and the one fading out),
+// chained lane by lane into its track node. Edges into buses follow that order, which is the old
+// accumulation order. Idle slots are left out of the order, so they cost nothing.
 void Engine::updateRouting() noexcept {
     MixGraph& g = *mixGraph_;
     const int master = MixGraph::kMaster;
     for (int i = 0; i < kSlots; ++i) {
         const Slot& s = slots_[i];
-        int to = -1;
-        g.routable[i] = s.active && (s.bus || s.cur);
-        if (g.routable[i]) {
+        int to = -1, modules = 0;
+        bool routable = s.active && (s.bus || s.cur);
+        if (routable && !s.bus) {
+            modules = static_cast<int>(s.cur->main.size());
+            if (s.old) modules = std::max(modules, static_cast<int>(s.old->main.size()));
+            if (modules < 1 || modules > MixGraph::K) {
+                // setProject refuses longer chains; one here is a bug, so it is counted, not played cut short.
+                routingRejections_.fetch_add(1, std::memory_order_relaxed);
+                assert(!"track chain does not fit its module nodes");
+                routable = false;
+            }
+        }
+        if (routable) {
             if (s.parentSlot >= 0 && s.parentSlot < kMaxLayers && s.parentSlot != i) {
                 const Slot& parent = slots_[s.parentSlot];
                 to = parent.active && parent.bus ? s.parentSlot : -1;
@@ -2263,16 +2333,18 @@ void Engine::updateRouting() noexcept {
                 to = master;
             }
         }
+        g.routable[i] = routable;
+        g.modules[i] = modules;
         g.target[i] = to;
     }
-    for (int n = 0; n < MixGraph::kNodes; ++n) { g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false; }
+    for (int n = 0; n <= kSlots; ++n) { g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false; }
     for (int i = 0; i < kSlots; ++i)
         if (g.target[i] >= 0 && g.target[i] != master) ++g.pending[g.target[i]];
-    uint32_t count = 0;
+    int count = 0;
     auto emit = [&](int x) noexcept {
         while (x >= 0) {
             g.emitted[x] = true;
-            g.order[count++] = static_cast<uint32_t>(x);
+            g.slotOrder[count++] = x;
             const int parent = g.target[x];
             x = -1;
             if (parent >= 0 && parent != master && --g.pending[parent] == 0 && g.deferred[parent]) {
@@ -2291,75 +2363,182 @@ void Engine::updateRouting() noexcept {
     // A routing cycle is never sent by the control thread; if one appears, keep everything ordered
     // and drop the edges that would point backwards.
     for (int k = 0; k < kSlots; ++k)
-        if (g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.order[count++] = static_cast<uint32_t>(k); }
-    g.order[count++] = static_cast<uint32_t>(master);
-    for (int n = 0; n < MixGraph::kNodes; ++n) g.position[n] = UINT32_MAX;  // not run this chunk
-    for (uint32_t k = 0; k < count; ++k) g.position[g.order[k]] = k;
-    uint32_t edgeCount = 0;
-    for (uint32_t k = 0; k + 1 < count; ++k) {
-        const int x = static_cast<int>(g.order[k]);
+        if (g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.slotOrder[count++] = k; }
+    for (int n = 0; n <= kSlots; ++n) g.position[n] = UINT32_MAX;  // not run this chunk
+    for (int k = 0; k < count; ++k) g.position[g.slotOrder[k]] = static_cast<uint32_t>(k);
+    g.position[master] = static_cast<uint32_t>(count);
+    uint32_t nodeCount = 0, edgeCount = 0;
+    for (int k = 0; k < count; ++k) {
+        const int x = g.slotOrder[k];
+        uint32_t out = MixGraph::busNode(x);
+        if (!slots_[x].bus) {
+            const int n = g.modules[x];
+            for (int i = 0; i < n; ++i) {
+                g.order[nodeCount++] = MixGraph::moduleNode(x, i);
+                if (i > 0) g.edges[edgeCount++] = GraphConnection{MixGraph::moduleNode(x, i - 1), 1, MixGraph::moduleNode(x, i), 0};
+            }
+            out = MixGraph::trackNode(x);
+            g.order[nodeCount++] = out;
+            g.edges[edgeCount++] = GraphConnection{MixGraph::moduleNode(x, n - 1), 1, out, 0};
+        } else {
+            g.order[nodeCount++] = out;
+        }
         const int to = g.target[x];
         if (to < 0 || g.position[x] >= g.position[to]) continue;
-        g.edges[edgeCount++] = GraphConnection{static_cast<uint32_t>(x), 1, static_cast<uint32_t>(to), 0};
+        g.edges[edgeCount++] = GraphConnection{out, 1, to == master ? MixGraph::kMasterNode : MixGraph::busNode(to), 0};
     }
+    g.order[nodeCount++] = MixGraph::kMasterNode;
     // Valid by construction. A rejection would keep the previous routing (safe: stale nodes output
     // zeros) but must never pass unnoticed: it is counted and asserts in debug builds.
-    if (!g.executor.setRouting(g.edges, edgeCount, g.order, count)) {
+    if (!g.executor.setRouting(g.edges, edgeCount, g.order, nodeCount)) {
         routingRejections_.fetch_add(1, std::memory_order_relaxed);
         assert(!"mix graph rejected a derived route");
     }
 }
 
-void Engine::runSlotNode(int i, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
-    Slot& s = slots_[i];
-    if (!s.active || (!s.bus && !s.cur)) {
+// Module `index` of a playing track, on every lane that runs this chunk. Lanes arrive and leave
+// as float (graph edges are 32-bit, owner 2026-11-03); a module past a lane's chain passes it on.
+void Engine::runModuleNode(int slot, int index, const float* const* in, float* const* out, int m) noexcept {
+    Slot& s = slots_[slot];
+    if (s.mode != Slot::Mode::Play) return;  // the track node outputs silence and reads no lane
+    const size_t idx = static_cast<size_t>(index);
+    const int64_t gg = g_;
+    auto lane = [&](Chain& c, int l, bool shadow, int len, int64_t n0, Slot* exportTo, const Pattern* pat,
+                    int64_t repeat, int channel) noexcept {
+        if (idx >= c.main.size()) {
+            std::copy_n(in[channel], len, out[channel]);
+            return;
+        }
+        if (idx == 0) prepareLane(c, l, n0, len);
+        const double* x = c.zero;
+        if (idx > 0) {
+            for (int i = 0; i < len; ++i) c.lanes[l].in[i] = static_cast<double>(in[channel][i]);
+            x = c.lanes[l].in;
+        }
+        const double* y = runModule(c, l, shadow, idx, n0, gg, len, x, exportTo, pat, repeat);
+        for (int i = 0; i < len; ++i) out[channel][i] = routeSample(y[i]);
+    };
+    lane(*s.cur, 0, false, m, s.n0, &s, s.pat, s.repeat, 0);
+    if (s.seam) lane(*s.cur, 1, true, std::min(m, s.seamLeft), s.shadowN, nullptr, nullptr, s.k, 1);
+    if (s.fade) lane(*s.old, 0, false, m, s.n0, nullptr, nullptr, s.k, 2);
+}
+
+// A playing track's output: the seam and swap crossfades of its lanes, then gain and pan.
+void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept {
+    Slot& s = slots_[slot];
+    if (s.mode != Slot::Mode::Play) {
+        std::fill_n(outL, m, 0.0f);
+        std::fill_n(outR, m, 0.0f);
+        return;
+    }
+    const double target = s.target;
+    const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
+    const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
+    const int swapLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+    const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
+    if ((!s.automation || s.automation->pan.empty()) && pan != s.panCache) {
+        s.panCache = pan;
+        const double th = (pan + 1.0) * (kPi / 4.0);
+        s.gl = detCos(th);
+        s.gr = detSin(th);
+    }
+    double* y = tmp_;
+    for (int i = 0; i < m; ++i) y[i] = static_cast<double>(in[0][i]);
+    if (s.seam) {
+        const int sl = std::min(m, s.seamLeft);
+        for (int i = 0; i < sl; ++i) {
+            const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
+            y[i] = static_cast<double>(in[1][i]) * (1.0 - w) + y[i] * w;
+        }
+        s.shadowN += sl;
+        s.seamLeft -= sl;
+    }
+    if (s.fade) {
+        const int sl = std::min(m, s.swapLeft);
+        for (int i = 0; i < m; ++i) {
+            double w = 1.0;
+            if (i < sl) w = static_cast<double>(swapLen - s.swapLeft + i + 1) / (swapLen + 1);
+            y[i] = static_cast<double>(in[2][i]) * (1.0 - w) + y[i] * w;
+        }
+        s.swapLeft -= sl;
+    }
+    if (s.old && s.swapLeft <= 0 && canRetire(1)) {
+        retire(s.old, -1);
+        s.old = nullptr;
+        routingDirty_ = true;  // the fade lane's extra module nodes stop running
+    }
+    float peak = 0;
+    int sp = s.scopePos.load(std::memory_order_relaxed);
+    for (int i = 0; i < m; ++i) {
+        const double step = static_cast<double>(g_ + i) / stepLen_;
+        const bool volumeAutomated = s.automation && !s.automation->volume.empty();
+        const double desired = target > 0.0
+            ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
+        if (volumeAutomated) {
+            // The interpolated automation curve is already continuous; don't add lag on top.
+            s.gain = desired;
+        } else if (s.gain != desired) {
+            s.gain += (desired - s.gain) * gainCoef;
+            if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
+        }
+        const double v = finiteOr0(y[i]) * s.gain;
+        double gl = s.gl, gr = s.gr;
+        if (s.automation && !s.automation->pan.empty()) {
+            const double automatedPan = automationValue(s.automation->pan, step, pan);
+            const double th = (automatedPan + 1.0) * (kPi / 4.0);
+            gl = detCos(th); gr = detSin(th);
+        }
+        // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
+        outL[i] = routeSample(v * gl);
+        outR[i] = routeSample(v * gr);
+        const float av = static_cast<float>(std::fabs(v));
+        if (av > peak) peak = av;
+        s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
+        sp = (sp + 1) % kScopeSize;
+    }
+    s.scopePos.store(sp, std::memory_order_release);
+    s.lastN = s.n0 + m - 1;
+    const int64_t next = g_ + m;
+    s.expectG = next >= loopLen_ ? 0 : next;
+    s.contiguous = true;
+    s.progress.store(static_cast<float>(static_cast<double>(s.n0 + m) / s.cur->layerLen), std::memory_order_relaxed);
+    storeMax(s.peak, peak);
+}
+
+// A folder bus: its children arrive summed in float on the graph's summing input.
+void Engine::runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
+    Slot& s = slots_[slot];
+    if (s.mode != Slot::Mode::Bus) {
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
         return;
     }
     const double target = slotTarget(s);
-    if (s.bus) {
-        // A folder bus: its children arrive summed in float on the graph's summing input.
-        for (int j = 0; j < m; ++j) {
-            s.outL[j] = inL[j];
-            s.outR[j] = inR[j];
-        }
-        const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
-        const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
-        for (int j = 0; j < m; ++j) {
-            const double step = static_cast<double>(g_ + j) / stepLen_;
-            const bool volumeAutomated = s.automation && !s.automation->volume.empty();
-            const double desired = target > 0.0
-                ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
-            if (volumeAutomated) {
-                s.gain = desired;
-            } else if (s.gain != desired) {
-                s.gain += (desired - s.gain) * gainCoef;
-                if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
-            }
-            const double automatedPan = s.automation && !s.automation->pan.empty()
-                ? automationValue(s.automation->pan, step, pan) : pan;
-            const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
-            const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
-            s.outL[j] *= s.gain * leftPan;
-            s.outR[j] *= s.gain * rightPan;
-        }
-        if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; routingDirty_ = true; }
-    } else if (target == 0.0 && s.gain == 0.0) {
-        s.contiguous = false;
-        if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; }
-        if (s.removing && canRetire(2)) {
-            retire(s.cur, -1, s.pattern);
-            s.pattern = nullptr;
-            retire(s.old, i);
-            s.cur = s.old = nullptr;
-            s.active = false;
-            s.removing = false;
-            routingDirty_ = true;
-        }
-    } else {
-        processSlot(s, m, target);
+    for (int j = 0; j < m; ++j) {
+        s.outL[j] = inL[j];
+        s.outR[j] = inR[j];
     }
+    const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
+    const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
+    for (int j = 0; j < m; ++j) {
+        const double step = static_cast<double>(g_ + j) / stepLen_;
+        const bool volumeAutomated = s.automation && !s.automation->volume.empty();
+        const double desired = target > 0.0
+            ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
+        if (volumeAutomated) {
+            s.gain = desired;
+        } else if (s.gain != desired) {
+            s.gain += (desired - s.gain) * gainCoef;
+            if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
+        }
+        const double automatedPan = s.automation && !s.automation->pan.empty()
+            ? automationValue(s.automation->pan, step, pan) : pan;
+        const double leftPan = automatedPan > 0.0 ? 1.0 - automatedPan : 1.0;
+        const double rightPan = automatedPan < 0.0 ? 1.0 + automatedPan : 1.0;
+        s.outL[j] *= s.gain * leftPan;
+        s.outR[j] *= s.gain * rightPan;
+    }
+    if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; routingDirty_ = true; }
     // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
     for (int j = 0; j < m; ++j) {
         outL[j] = routeSample(s.outL[j]);
@@ -2446,8 +2625,8 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             std::fill(right + i, right + frames, 0.0f);
             break;
         }
-        const int m = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, loopLen_ - g_}));
-        processChunk(left + i, right + i, m);
+        const int maxM = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, loopLen_ - g_}));
+        const int m = processChunk(left + i, right + i, maxM);
         g_ += m;
         if (g_ >= loopLen_) {
             g_ = 0;

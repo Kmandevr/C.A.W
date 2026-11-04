@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # C.A.W. roadmap
@@ -66,8 +66,8 @@ Comes first (owner, 2026-11-03), before the remaining Stage 0 and Stage 1 featur
 |---|---|---|---|---|---|
 | F1 | Typed module graph: validation, stable order, prepared executor, safe publication and retirement | Partial | engine | — | Built and tested; the Engine's mix graph runs playback and render (F4.3). The graph-runtime publication helper isn't used by the Engine yet |
 | F2 | N-channel processing contract: channel layouts (mono … 7.1, discrete), planar channel buffers, generic process block, stereo adapter | Partial | engine | — | On the #28 branch only (not on `Main`). Used by the F3 executor; frames rule, 64-channel port ceiling and loud fallback added in F3. The native C SDK is still left/right with no channel count (explicit layout mapping only; an ABI change needs the owner) |
-| F3 | Planar N-channel graph executor | Partial | engine | F1, F2 | Built and tested (1, 2, 4, 6, 8 and Discrete(3) channels, no allocation in `process()`) on the F3 pull request against the #28 branch; Engine CI and merge pending. Limited to one audio input and one audio output port per node; fan-in/mixing comes with F4 and other port types with F5 |
-| F4 | One graph runs everything: .caw layers, synth voices, effects, folder buses and master migrated into the graph | Partial | engine | F3 | F4.1 (fan-in), F4.2 (float routing; 10 golden hashes re-recorded once, owner-approved) and F4.3 (one mix graph runs playback and offline render, bit-identical, the old pass loop removed, idle slots skipped) are built. Still to do: F4.4, each track's chain (VM program, synth voices, effects) split into graph nodes |
+| F3 | Planar N-channel graph executor | Implemented | engine | F1, F2 | Built and tested (1, 2, 4, 6, 8 and Discrete(3) channels, no allocation in `process()`; PR #72). One audio input and one audio output port per node; other port types come with F5 |
+| F4 | One graph runs everything: .caw layers, synth voices, effects, folder buses and master migrated into the graph | Implemented | engine | F3 | F4.1 fan-in, F4.2 float routing, F4.3 one mix graph for playback and offline render, F4.4 every module of a track (its generator or voice pool, then each effect) as its own node, at most 32 per track with a clear error beyond. Golden hashes were re-recorded in F4.2 and F4.4 for the owner-approved float edges (at most 1 LSB of 24-bit) |
 | F5 | Typed control, modulation and event/MIDI ports in the runtime | Planned | engine | F3 | Only audio ports execute today |
 | F6 | One parameter model for manual values, automation, modulation and MIDI mappings | Partial | engine | F4, F5 | Parameter and global automation work on the current engine (PR #68); not unified in the graph |
 | F7 | Explicit resource budgets instead of fixed object caps | Partial | engine | — | Graph compile/prepare budgets exist on the #28 branch; the rest of the engine still uses fixed limits |
@@ -75,7 +75,7 @@ Comes first (owner, 2026-11-03), before the remaining Stage 0 and Stage 1 featur
 | F9 | Project format versions and migration of older projects | Later | app | — | Deferred by the owner (2026-11-03): the app hasn't shipped and there are no projects to keep, so no backwards compatibility is promised before Release 1 and the format stays at version 2. Today files carry a version and the file-manager import refuses newer ones; storage loads don't check it. The migration framework and its tests are built before Release 1 (R.7) |
 | F10 | Seeded randomness everywhere: a project seed, per-module seeds that follow it unless pinned, seeding switchable off per module or project, and native plugins given a seed and a deterministic random source | Planned | both | F6 | `.caw` randomness already uses the one project seed (`rand`, `randi`, `hash`, `noise`, note probability); no per-module seed or on/off switch exists, and the native SDK passes plugins no seed (needs an ABI change the owner approves). Owner, 2026-11-03 |
 
-**Exit gate:** live playback and offline render both run through the one graph; stereo projects render bit-identically through the graph and the old mixer (golden hashes re-recorded only once, in F4.2, owner-approved); N-channel buffers are tested with real processing beyond stereo; budgets fail with clear errors instead of silent truncation; Engine, App and Docs CI are green.
+**Exit gate:** live playback and offline render both run through the one graph; golden hashes change only where the owner-approved float graph edges round (F4.2, F4.4), each change cross-checked against the old engine with the same rounding; N-channel buffers are tested with real processing beyond stereo; budgets fail with clear errors instead of silent truncation; Engine, App and Docs CI are green.
 
 ### Stage 0 — Complete approved v2 commitments and the engine foundation
 

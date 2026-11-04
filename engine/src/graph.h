@@ -120,20 +120,32 @@ public:
                  uint32_t frames) noexcept;
     // Dynamic routing (control thread): for a graph prepared without connections, give every
     // summing input room for maxSourcesPerInput routed sources, counted against the budget. Summing
-    // inputs then never read the host input; with no routes they are silence.
-    GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget);
-    // Audio-thread safe once reserveRouting() succeeded: replaces every summing-input route and the
+    // inputs then never read the host input; with no routes they are silence. With
+    // routePlainInputs, every plain (non-summing) input becomes routable too: it takes at most one
+    // route, reads that source's buffer directly (no copy, bits unchanged) and is silence without
+    // one; the graph then reads no host input at all.
+    GraphError reserveRouting(uint32_t maxSourcesPerInput, const GraphResourceBudget& budget,
+                              bool routePlainInputs = false);
+    // prepare() with no connections plus reserveRouting(maxSourcesPerInput, budget, true) in one
+    // step: every input is routed and none reads the host, so unconnected inputs may differ in
+    // channel count (prepare() alone rejects that, as host input could not feed them all).
+    GraphError prepareRouted(const std::vector<GraphNode>& nodes, const std::vector<ModuleProcessor*>& processors,
+                             uint32_t outputNode, uint32_t maxFrames, double sampleRate,
+                             const GraphResourceBudget& budget, uint32_t maxSourcesPerInput);
+    // Audio-thread safe once reserveRouting() succeeded: replaces every dynamic route and the
     // execution order in one step. `order` lists the nodes to run, each at most once, and must
     // include the output node; nodes left out are not run at all. Every edge goes from a listed
-    // node's audio output to the summing input of a node later in `order`, with equal channel
-    // counts, no duplicates and at most the reserved number per input. Edge order is summation
-    // order. A rejected call returns false and leaves the previous routing in effect.
+    // node's audio output to the summing input (or, if reserved, the plain input) of a node later
+    // in `order`, with equal channel counts, no duplicates, at most the reserved number per summing
+    // input and one per plain input. Edge order is summation order. A rejected call returns false
+    // and leaves the previous routing in effect.
     bool setRouting(const GraphConnection* edges, uint32_t edgeCount, const uint32_t* order,
                     uint32_t orderCount) noexcept;
     // Thin stereo wrapper over the planar path. Null inputs are silence.
     bool process(const float* inputLeft, const float* inputRight,
                  float* outputLeft, float* outputRight, uint32_t frames) noexcept;
     bool ready() const noexcept { return ready_; }
+    uint32_t runCount() const noexcept { return runCount_; }  // nodes process() runs (audio-thread value)
     uint32_t inputChannels() const noexcept { return hostInputChannels_; }
     uint32_t outputChannels() const noexcept { return outputChannels_; }
     // Failure reporting for the control thread (relaxed atomics; values, not synchronization).
@@ -163,6 +175,9 @@ private:
     std::vector<uint32_t> order_;
     // Dynamic routing scratch, preallocated by reserveRouting().
     std::vector<uint32_t> routePosition_, routeCount_, routeStaging_;
+    std::vector<uint32_t> directStaging_;         // per node: the plain-input route's source, or UINT32_MAX
+    bool routePlain_ = false;
+    bool deferHostCheck_ = false;                 // set only inside prepareRouted()
     std::size_t preparedBytes_ = 0;
     uint32_t staticConnections_ = 0;
     uint32_t routingCapacity_ = 0;

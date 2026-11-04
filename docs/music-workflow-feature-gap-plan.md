@@ -2,7 +2,7 @@
 title: Music workflow implementation gaps
 summary: Factual snapshot of implemented and incomplete music-workflow capabilities; sequencing belongs to the permanent roadmap.
 covers: [app/lib/ui/, app/lib/model/, engine/]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Music workflow implementation gaps
@@ -41,7 +41,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 ### Modules and plugins
 
 - **[Implemented]** Code-defined generators/effects, parameter metadata, reusable functions and Plugin Builder for validating/packaging native .caw modules.
-- **[Partial]** Native module SDK and graph-processing foundations exist (planar N-channel executor with fan-in since Foundation F3/F4.1). Since F4.3 the mixer itself runs as one graph (a node per track plus master), but tracks' internal chains are not yet graph nodes (F4.4).
+- **[Partial]** Native module SDK and graph-processing foundations exist (planar N-channel executor with fan-in since Foundation F3/F4.1). Since F4.3/F4.4 the mixer itself runs as one graph: each module of a track is a node, then the track, folder buses and master.
 - **[Incomplete]** Dynamic native loading/isolation and external CLAP/VST3/AU hosting.
 
 ### Audio assets and sampling

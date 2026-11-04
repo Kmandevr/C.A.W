@@ -2,7 +2,7 @@
 title: Engine and language reference
 summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI and the tests.
 covers: [engine/, examples/]
-updated: 2026-11-02
+updated: 2026-11-04
 ---
 
 # Engine and language reference
@@ -65,6 +65,7 @@ Unknown header keys are ignored, so newer files still load. With no header, a fi
   - Layers run in dependency order, so a reader hears the same sample. When two modules read each other, one of them hears the other one block (64 samples) late.
   - An effect can read the export of the generator in front of it.
   - A name that nothing exports reads 0, and the project result lists it as a warning.
+  - Within one layer, a module reads only exports of modules before it in the chain; an import from a later module (or itself) reads 0, with a warning.
 - `fn name(a, b) = expression` defines a function.
   - Each call is expanded in place, so oscillators, envelopes and filters inside a function get their own state per call.
   - The body sees its arguments, built-ins, and names defined above the function.
@@ -342,7 +343,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 236 tests and `engine/build/caw_rt_tests` 30 more (CTest runs both):
+`engine/build/caw_tests` runs 239 tests and `engine/build/caw_rt_tests` 33 more (CTest runs both):
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.

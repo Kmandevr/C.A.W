@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-03
+updated: 2026-11-04
 covers: [engine/, app/]
 ---
 
@@ -22,7 +22,7 @@ C.A.W. is not a conventional DAW and doesn't have to work like one, but it must 
 
 **[Fact, checked 2026-11-01]** The Flutter app has eight workspaces and CI build artifacts for Android and Windows. Linux is used for app analysis/tests and has a local runner, but is not a shipped app artifact. The portable C++20 engine is built/tested by CI on Linux x64, Linux Arm64 and Windows x64, plus Linux sanitizers. iOS and macOS app builds are not currently in the app workflow.
 
-The current app and native implementation are documented in [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). The house synth, piano-roll expression editing, pattern generators, MIDI file import/export, native worker pool, adaptive workload planner and Engine Lab spectrum view have working implementations. Project-level module/global parameter automation is implemented (PR #68); WAV/SFZ multisample and stems export follow it in [roadmap](roadmap.md) Stage 0. USB/Bluetooth device I/O, audio import/editing, complete mixer routing and external binary plugin hosting are not implemented. GitHub sync and in-app AI features are not implemented or in the current product scope. Since 2026-11-03 one mix graph runs live playback and offline render: a node per track slot (its VM chain and effects) and a master node, routed on the audio thread (Foundation F4.3); splitting each track into source and effect nodes is F4.4.
+The current app and native implementation are documented in [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md). The house synth, piano-roll expression editing, pattern generators, MIDI file import/export, native worker pool, adaptive workload planner and Engine Lab spectrum view have working implementations. Project-level module/global parameter automation is implemented (PR #68); WAV/SFZ multisample and stems export follow it in [roadmap](roadmap.md) Stage 0. USB/Bluetooth device I/O, audio import/editing, complete mixer routing and external binary plugin hosting are not implemented. GitHub sync and in-app AI features are not implemented or in the current product scope. Since 2026-11-03 one mix graph runs live playback and offline render: a node per module of each track (its generator or voice pool, then each effect), a track node, folder bus nodes and a master node, routed on the audio thread (Foundation F4.3, F4.4).
 
 ## 1. Technology stack
 

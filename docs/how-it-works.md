@@ -2,7 +2,7 @@
 title: How it works
 summary: The path a sound takes from a .caw file to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
 covers: [engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/src/builtins.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # How it works
@@ -40,7 +40,7 @@ The modular foundation is real native C++ code, but it is not yet the active pla
 | Dependencies | `engine/src/dependency.*`, `engine/src/project.*` | Exact scope-aware resolution by stable ID, pinned version, optional hash and interface version. Project JSON parses and stores references; installed-library matching, project writing/round-tripping and repair UI are not complete. |
 | MIDI 2.0 input primitive | `engine/src/midi2.*` | Channel Voice UMP decoding and a bounded lock-free input queue. This is not live USB/Bluetooth device I/O or Engine voice routing. |
 
-**Important boundary:** since F4.3 live playback and offline render run through the Engine's mix graph, with one node per track slot (VM chain and effects) plus a master node. Chains are not yet split into separate source and effect nodes (F4.4). The graph compiler cap-removal and low-level budget slices passed CI at checkpoint 1269019; follow-up commit e815b495 adds direct compiler-budget rejection coverage and awaits CI. The prepared executor is planar N-channel since F3 (any layout, one audio input and one audio output port per node). Native-pool routing is implemented for project compilation, source checks and offline WAV renders; generation/analysis routing remains incomplete. Android live thermal/battery-saver and lifecycle pressure feeds are connected; other platform adapters remain incomplete. Do not describe graph hot-swap integration, universal native-module execution, dynamic add-on loading or app-side custom UI rendering as complete.
+**Important boundary:** since F4.3 live playback and offline render run through the Engine's mix graph, with a node per module of each track (generator or voice pool, then each effect), a track node, folder bus nodes and a master node (F4.4). The graph compiler cap-removal and low-level budget slices passed CI at checkpoint 1269019; follow-up commit e815b495 adds direct compiler-budget rejection coverage and awaits CI. The prepared executor is planar N-channel since F3 (any layout, one audio input and one audio output port per node). Native-pool routing is implemented for project compilation, source checks and offline WAV renders; generation/analysis routing remains incomplete. Android live thermal/battery-saver and lifecycle pressure feeds are connected; other platform adapters remain incomplete. Do not describe graph hot-swap integration, universal native-module execution, dynamic add-on loading or app-side custom UI rendering as complete.
 
 The synth and built-in language also gained concrete capabilities in this branch: `lfo.curve(...)` is a tempo-synced four-point LFO, and `wt(..., warp)` / synth `warp` settings add bounded phase distortion to wavetable oscillators. Their user-facing signatures and examples are generated into [the function library](library.md) and described in [synth](synth.md).
 

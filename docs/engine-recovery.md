@@ -2,7 +2,7 @@
 title: Native engine recovery
 summary: Short resume guide for continuing the native engine refactor without repeating completed work.
 covers: [engine/, app/]
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Native engine recovery
@@ -43,7 +43,7 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 
 ## Architecture facts that must not be rediscovered or contradicted
 
-- The active Engine still uses `Engine::setProject`, `processChunk`, `processSlot`, `runChain` and `runVoices`.
+- The active Engine uses `Engine::setProject`, `processChunk`/`planChunk`, the mix-graph node functions (`runModuleNode`, `runTrackNode`, `runBusNode`, `runMasterNode`), `runModule` and `runVoices`.
 - `GraphExecutor` and `ModuleRegistry` still have no production playback integration with Engine/VM.
 - GraphExecutor is planar N-channel (F3) but still has at most one audio input and one audio output port per node; summing inputs accept fan-in since F4.1 and can be re-routed on the audio thread (`setRouting`, F4.3). It does not yet implement multiple ports, typed control/modulation/event/MIDI routing, sidechains, sends/returns, feedback boundaries or nested graphs.
 - Do not create a second engine. Integrate existing VM Instances, voices, imports/exports, automation, folder buses, offline rendering and project migration into one prepared execution model. Keep the template and multi-track mixer golden hashes (`golden.txt`, `mix_golden_test.cpp`) unchanged while doing so.
