@@ -1924,3 +1924,125 @@ TEST(graph_automation_lanes_resolve_without_allocating) {
     CHECK(ok);
     CHECK_EQ(operations, 0u);
 }
+
+namespace {
+// F6.5: a host MIDI event holding one UMP.
+Event umpEvent(uint32_t frame, uint32_t w0, uint32_t w1 = 0) {
+    Event e;
+    e.frame = frame;
+    e.kind = EventKind::Midi;
+    e.data[0] = w0;
+    e.data[1] = w1;
+    return e;
+}
+std::vector<float> runEvents(GraphExecutor& executor, uint32_t frames, const Event* events, uint32_t count) {
+    Planar host(2, frames, 1.0f), out(2, frames);
+    if (!executor.process(host.constView(frames), out.view(frames), frames, EventInput{events, count})) return {};
+    return std::vector<float>(out.data[0].begin(), out.data[0].begin() + frames);
+}
+}  // namespace
+
+TEST(graph_cc_mappings_set_the_base_at_the_event_frame) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 16, 48000.0, kBudget) == GraphError::Ok);
+    const ParameterCcMapping mapping{0, 0, 0, 2, 74};  // group 0, channel 2, CC 74
+    CHECK(executor.setCcMappings(&mapping, 1) == GraphError::Ok);
+    const Event events[] = {
+        umpEvent(3, 0x20B24A7Fu),               // MIDI 1.0 CC 74 = 127: the maximum, 2.0
+        umpEvent(5, 0x20B34A00u),               // another channel: ignored
+        umpEvent(5, 0x20B2077Fu),               // another controller: ignored
+        umpEvent(8, 0x40B24A00u, 0x80000000u),  // MIDI 2.0 CC 74, about half: 1.0000000002
+        umpEvent(8, 0x20924A7Fu),               // a note-on: ignored
+    };
+    const std::vector<float> out = runEvents(executor, 12, events, 5);
+    CHECK_EQ(out.size(), 12u);
+    const float half = static_cast<float>(2.0 * (0x80000000u / 4294967295.0));
+    for (uint32_t i = 0; i < 12; ++i) CHECK_EQ(out[i], i < 3 ? 0.5f : i < 8 ? 2.0f : half);
+    CHECK_EQ(run(executor, 8, 7), half);  // the base stays after the block
+    CHECK(gain.variedBlocks == 1u);       // a block without CCs is one constant again
+}
+
+TEST(graph_cc_mappings_follow_the_curve_smooth_and_drive_several_parameters) {
+    ParamModules m(4);  // 4 frames of smoothing
+    ParamGain first(m.plain), second(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"a", &m.plain}, {"b", &m.plain}}, {{0, 1, 1, 0}}, {&first, &second}, 1, 16, 48000.0,
+                           kBudget) == GraphError::Ok);
+    const ParameterCcMapping both[] = {{0, 0, 1, 0, 7}, {1, 0, 1, 0, 7}};  // one CC, two parameters
+    CHECK(executor.setCcMappings(both, 2) == GraphError::Ok);
+    const Event cc[] = {umpEvent(2, 0x21B0077Fu)};  // group 1, channel 0, CC 7 = 127
+    const std::vector<float> out = runEvents(executor, 8, cc, 1);
+    CHECK_EQ(out.size(), 8u);
+    // Each gain ramps 0.5 -> 2.0 over 4 frames from frame 2; the output is their product.
+    const double g[8] = {0.5, 0.5, 0.875, 1.25, 1.625, 2.0, 2.0, 2.0};
+    for (uint32_t i = 0; i < 8; ++i) CHECK_EQ(out[i], static_cast<float>(g[i]) * static_cast<float>(g[i]));
+}
+
+TEST(graph_cc_mappings_are_a_touch_over_automation) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    const AutomationPoint flat[] = {{0.0, 0.25}};
+    const ParameterLane lane{0, 0, flat, 1};
+    const ParameterCcMapping mapping{0, 0, 0, 0, 1};
+    CHECK(executor.setAutomationLanes(&lane, 1) == GraphError::Ok);
+    CHECK(executor.setCcMappings(&mapping, 1) == GraphError::Ok);
+    CHECK(executor.setTransport(0, 10.0, true));
+    const Event cc[] = {umpEvent(4, 0x20B0017Fu)};
+    const std::vector<float> out = runEvents(executor, 8, cc, 1);
+    CHECK_EQ(out.size(), 8u);
+    CHECK_EQ(out[3], 0.25f);
+    CHECK_EQ(out[4], 2.0f);  // the CC wins from its frame on
+    CHECK_EQ(run(executor, 8, 0), 2.0f);
+    CHECK(executor.queueClearTouch());  // playback restart: the lane again
+    CHECK_EQ(run(executor, 8, 0), 0.25f);
+}
+
+TEST(graph_cc_mappings_reject_bad_mappings_and_keep_the_previous_ones) {
+    ParamModules m;
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    const ParameterCcMapping good{0, 0, 0, 0, 1};
+    CHECK(executor.setCcMappings(&good, 1) == GraphError::InvalidOutputNode);  // not prepared
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+    CHECK(executor.setCcMappings(&good, 1) == GraphError::Ok);
+    const ParameterCcMapping badNode{1, 0, 0, 0, 1}, badParameter{0, 1, 0, 0, 1}, badGroup{0, 0, 16, 0, 1},
+        badChannel{0, 0, 0, 16, 1}, badController{0, 0, 0, 0, 128};
+    const ParameterCcMapping twice[] = {{0, 0, 0, 0, 1}, {0, 0, 0, 0, 2}};
+    CHECK(executor.setCcMappings(&badNode, 1) == GraphError::NodeIndexOutOfRange);
+    CHECK(executor.setCcMappings(&badParameter, 1) == GraphError::PortIndexOutOfRange);
+    for (const ParameterCcMapping* bad : {&badGroup, &badChannel, &badController})
+        CHECK(executor.setCcMappings(bad, 1) == GraphError::InvalidCcMapping);
+    CHECK(executor.setCcMappings(twice, 2) == GraphError::InvalidCcMapping);
+    CHECK(executor.setCcMappings(nullptr, 1) == GraphError::InvalidCcMapping);
+    const Event cc[] = {umpEvent(0, 0x20B0017Fu)};
+    CHECK_EQ(runEvents(executor, 8, cc, 1).at(0), 2.0f);  // the good mapping still holds
+    CHECK(executor.setCcMappings(nullptr, 0) == GraphError::Ok);
+    const Event low[] = {umpEvent(0, 0x20B00100u)};
+    CHECK_EQ(runEvents(executor, 8, low, 1).at(0), 2.0f);  // unmapped: no change
+}
+
+TEST(graph_cc_mappings_resolve_without_allocating) {
+    ParamModules m(3);
+    ParamGain gain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 64, 48000.0, kBudget) == GraphError::Ok);
+    const ParameterCcMapping mapping{0, 0, 0, 0, 1};
+    CHECK(executor.setCcMappings(&mapping, 1) == GraphError::Ok);
+    const Event events[] = {umpEvent(0, 0x20B00110u), umpEvent(10, 0x20B00170u), umpEvent(10, 0x40B00100u, 7u),
+                            umpEvent(63, 0x20B0017Fu)};
+    Planar host(2, 64, 1.0f), out(2, 64);
+    bool ok = true;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (uint32_t block = 0; block < 4; ++block)
+            ok = executor.process(host.constView(64), out.view(64), 64, EventInput{events, 4}) && ok;
+        operations = scope.count();
+    }
+    CHECK(ok);
+    CHECK_EQ(operations, 0u);
+}

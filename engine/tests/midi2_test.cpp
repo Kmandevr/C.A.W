@@ -56,3 +56,38 @@ TEST(midi2_input_queue_preserves_order_and_bounds_overflow) {
     }
     CHECK(!queue.pop(output));
 }
+
+TEST(midi2_control_change_index_is_byte_three) {
+    // Microsoft's UMP primer: 40B00700 C9249249 is controller 7 on group 0, channel 0.
+    Midi2Event event;
+    CHECK(decodeMidi2ChannelVoice(0x40B00700u, 0xC9249249u, event));
+    CHECK(event.type == Midi2EventType::ControlChange);
+    CHECK_EQ(event.index, 7);
+    CHECK_NEAR(event.value, 0xC9249249u / 4294967295.0, 1e-15);
+}
+
+TEST(control_change_decodes_midi1_and_midi2_ump) {
+    UmpControlChange cc;
+    const uint32_t midi1[4] = {0x23B5077Fu, 0, 0, 0};  // MIDI 1.0 in UMP: group 3, channel 5, CC 7 = 127
+    CHECK(decodeControlChange(midi1, cc));
+    CHECK_EQ(cc.group, 3);
+    CHECK_EQ(cc.channel, 5);
+    CHECK_EQ(cc.controller, 7);
+    CHECK_EQ(cc.value, 1.0);
+    const uint32_t midi1Low[4] = {0x20B00140u, 0, 0, 0};  // CC 1 = 64
+    CHECK(decodeControlChange(midi1Low, cc));
+    CHECK_EQ(cc.controller, 1);
+    CHECK_EQ(cc.value, 64.0 / 127.0);
+    const uint32_t midi2[4] = {0x41BA4A00u, 0xFFFFFFFFu, 0, 0};  // group 1, channel 10, CC 74 = max
+    CHECK(decodeControlChange(midi2, cc));
+    CHECK_EQ(cc.group, 1);
+    CHECK_EQ(cc.channel, 10);
+    CHECK_EQ(cc.controller, 74);
+    CHECK_EQ(cc.value, 1.0);
+    const uint32_t noteOn[4] = {0x40903C00u, 0xFFFF0000u, 0, 0};
+    const uint32_t pitch[4] = {0x20E00000u, 0, 0, 0};
+    const uint32_t sysex[4] = {0x30B00700u, 0, 0, 0};
+    CHECK(!decodeControlChange(noteOn, cc));
+    CHECK(!decodeControlChange(pitch, cc));
+    CHECK(!decodeControlChange(sysex, cc));
+}
