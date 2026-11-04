@@ -7,6 +7,8 @@ updated: 2026-11-04
 
 # Music workflow implementation gaps
 
+The owner's UI redesign (2026-11-04) is in the [UI plan](ui-plan.md). Where this note and the UI plan disagree about the UI, the UI plan holds.
+
 This note records the current implementation gaps in C.A.W.'s music-production workflows. It is a factual companion to the permanent [roadmap](roadmap.md), not a separate plan or implementation sequence. The app and engine references remain authoritative for implementation details.
 
 ## Existing foundations

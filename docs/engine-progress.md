@@ -1,7 +1,7 @@
 ---
 title: Native engine refactor progress
 summary: Live milestone ledger and exact continuation point for the native engine refactor.
-covers: [engine/, app/]
+covers: [engine/, app/lib/engine/]
 updated: 2026-11-04
 ---
 

@@ -1,31 +1,34 @@
 # Handoff
 
-Commit: a7a18dc
-Branch: claude/caw-engine-foundation-skpirb (F7.3 part A on top of Main 83556f2; PR to Main)
+Commit: c5cfa00
+
+Branch: claude/caw-engine-foundation-skpirb (on Main eddfd1c; U0 (both parts) in review as PR #98)
 
 ## Goal
-Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8, plus F10 (seeded randomness); F9 is deferred to Release 1, since no project compatibility is needed yet.
-- One small PR per step, targeting `Main`. Claude merges when CI is green, and updates the #28 progress comment (id 6609966082).
-- Rules: no allocation, locks or I/O in the callback; exports bit-identical across platforms; stereo low-overhead (callgrind, `caw_bench 1|2 N` difference / 250); never weaken tests, and a bug fix starts with a failing test; audio-reviewer (engine) or code-reviewer (app) and release-check before each PR; each PR updates the roadmap row and `docs/engine-build-status.md`.
-- Ask the owner before SDK ABI changes or new dependencies. app/ changes are approved for F7.
-- F7 owner choices (2026-11-04, `docs/decisions.md`): remove the app caps (F7.1); remove the 64-bar arrangement limit (F7.2); dynamic layers, re-preparing the mix graph off the audio thread (F7.3); safety bounds from the hardware budget, host-overridable within a ceiling, each with a clear message (F7.4).
+Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: docking panels (the phone too), a Unity-like code workspace, a Reaper-like mixer, a docked piano roll, and smooth, distance-aware motion. The whole spec, the open questions and the order of work (U0–U8) are in `docs/ui-plan.md`, and the owner's choices are in `docs/decisions.md`.
+- Each step is one small PR to `Main` with widget and golden tests, a code-reviewer pass and release-check. Claude merges when CI is green.
+- Claude makes the small engine changes the UI needs, such as a note on/off C API for previews. The large ones wait for GPT: several instruments per track, parent tracks with their own sound, and Bezier curves.
+- GPT owns the rest of the engine (#94, F7.3 part C, F7.4, F8, F10; #28).
 
 ## Done and verified
-- F1–F6 on Main; F7 caps audit #88, F7.1 #89, F7.2 #92, F7.3 part A #93.
-- F7.3 part B merged to Main unfinished (owner, 2026-11-04); the audio review's must-fix problems are open in issue #94. The owner handed the remaining engine work to GPT on 2026-11-04.
-
-## Open
-- Issue #78: swap-fade import buffers are renumbered (an older bug).
-- F10 seeds for native plugins need an SDK ABI change, so the owner must approve it.
-- Open: `smoothingFrames` counts frames, not time. Open (owner): MIDI 1.0 CC centre (v/127) vs MIDI 2.0 upscaling.
-- #90 arranger float32 drawing far into long songs; #91 the app save step reads the whole WAV for the picker (may need a new dependency: ask the owner).
+- The UI plan and specs are on Main: #96 and #97.
+- U0 (PR #98): part two adds `app/lib/ui/tokens.dart`, eight track colours and `app/lib/ui/kit.dart` (the context toolbar, tool and info buttons). Part one:
+  - `app/lib/ui/motion.dart`
+  - the Motion, Haptics and Glow settings, with saves run one after another
+  - golden tests with real fonts (`app/test/golden_util.dart`)
+  - Checks: `flutter analyze` is clean, and `flutter test` gives 191 passed, 19 skipped (without `CAW_LIB`).
 
 ## Next
-1. Engine (GPT): issue #94, then F7.3 part C, F7.4, F8 and F10 (#28).
-2. Claude (owner, 2026-11-04): the UI plan is `docs/ui-plan.md` (U0–U8, the owner's direction recorded in `docs/decisions.md`); build starts when the owner approves it and answers its open questions (startup screen, font, multi-instrument rule, docking in-house).
+1. U1: the docking shell (layout tree, panels, tabs, dividers, the phone too), the transport bar with undo/redo and tap tempo (#19), and opening straight into the arrangement.
+
+## Open (owner)
+- How several instruments on one track combine: is "each adds to the audio above it" the rule?
+- Docking: build it in-house (proposed) or use a package?
+- The code-editor component for multi-cursor and folding: custom, or a package (which needs approval)?
 
 ## Read first
-- `docs/roadmap.md`
-- `docs/decisions.md`
-- `docs/engine-build-status.md`
-- `app/lib/model/project.dart`
+- `docs/ui-plan.md`
+- `docs/ui.md`
+- `docs/app.md`
+- `app/lib/ui/theme.dart`
+- `app/lib/ui/motion.dart`

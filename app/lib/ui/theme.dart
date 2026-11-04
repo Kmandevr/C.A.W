@@ -28,6 +28,10 @@ class CawTheme {
     'layer2': 'Layer colour 2',
     'layer3': 'Layer colour 3',
     'layer4': 'Layer colour 4',
+    'layer5': 'Track colour 5',
+    'layer6': 'Track colour 6',
+    'layer7': 'Track colour 7',
+    'layer8': 'Track colour 8',
   };
 
   /// The colour of [slot]; a slot the theme leaves out comes from Calm neon.
@@ -102,7 +106,7 @@ final calmNeon = CawTheme(
   colors: _palette(const [
     0xFF07070B, 0xFF101018, 0xFF181824, 0xFF2A2A3C, 0xFFE9E9F2, 0xFF8C8CA3, //
     0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, //
-    0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF,
+    0xFF39FF14, 0xFFFF2BD6, 0xFFFFE81F, 0xFF1FD8FF, 0xFFB46CFF, 0xFFFF8A1F, 0xFF2BFFB0, 0xFFFF4D5E,
   ]),
 );
 
@@ -115,7 +119,7 @@ final starterThemes = [
     colors: _palette(const [
       0xFF040406, 0xFF0B0B10, 0xFF12121A, 0xFF20202C, 0xFFC4C4D0, 0xFF6C6C80, //
       0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, //
-      0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6,
+      0xFF4CC38A, 0xFFC45BB2, 0xFFD6C25A, 0xFF4FA6C6, 0xFF9C83D6, 0xFFD68A4C, 0xFF4CC3A6, 0xFFC45B66,
     ]),
   ),
   CawTheme(
@@ -123,7 +127,7 @@ final starterThemes = [
     colors: _palette(const [
       0xFF0B0804, 0xFF15100A, 0xFF1E170E, 0xFF3A2C18, 0xFFFFD9A0, 0xFFA08060, //
       0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFFFC861, 0xFFB68AE0, //
-      0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFD9A066,
+      0xFFFFB000, 0xFFFF6A3D, 0xFFFFE08A, 0xFFD9A066, 0xFFB68AE0, 0xFFFF8A3D, 0xFFE0C060, 0xFFD96650,
     ]),
   ),
 ];
@@ -168,12 +172,16 @@ class Neon {
   static const Color blue = _ThemeColor('blue');
   static const Color violet = _ThemeColor('violet');
 
-  /// Layer colours, in order.
+  /// Track (layer) colours, in order: eight, so a song's tracks are told apart before colours repeat.
   static const List<Color> layers = [
     _ThemeColor('layer1'),
     _ThemeColor('layer2'),
     _ThemeColor('layer3'),
     _ThemeColor('layer4'),
+    _ThemeColor('layer5'),
+    _ThemeColor('layer6'),
+    _ThemeColor('layer7'),
+    _ThemeColor('layer8'),
   ];
   static Color layer(int i) => layers[i % layers.length];
 

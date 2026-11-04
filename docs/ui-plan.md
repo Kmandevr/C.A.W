@@ -194,6 +194,7 @@ updated: 2026-11-04
   - The rows of the project's key are shaded on the keyboard and the grid.
   - A "snap to scale" option keeps notes in the key while drawing and moving.
   - Other clips' notes, from the same track or chosen tracks, show faintly behind the notes you edit.
+- **Toolbar width on a phone:** **[Fact, 2026-11-04, `test/goldens/toolbar_phone.png`]** at 390 px, four tool buttons plus ⋮ take 240 px of 48 dp targets. That leaves about three buttons for the middle part, before the snap magnet is added. **[Proposal]** On a phone, the four tools fold into one "current tool" button that opens the four choices. On wider screens they stay side by side.
 - **Toolbar (owner: one context-aware row):**
   - **Fixed, left to right:**
     - the four tools: Draw, Select, Curve, Erase
@@ -285,7 +286,7 @@ updated: 2026-11-04
 
 Each step is one small PR to `Main`. It includes widget tests, screenshot (golden) tests at phone portrait, landscape and desktop, a code-reviewer pass and release-check. It updates [app](app.md) and [UI design](ui.md). Engine changes go to GPT as issues.
 
-1. **U0, foundations:**
+1. **U0, foundations** (built: the motion rules, the Motion/Haptics/Glow settings, golden tests, design tokens, eight track colours, and the shared toolbar row, tool and info buttons):
    - design tokens (spacing, type scale, one accent plus colours for meaning, track colours)
    - shared widgets
    - motion and snapping helpers

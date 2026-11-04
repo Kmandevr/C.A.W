@@ -1,10 +1,11 @@
-// App-wide settings (theme, density, live coding) saved as settings.json, plus custom theme files in themes/.
+// App-wide settings (theme, density, motion, live coding) saved as settings.json, plus custom theme files in themes/
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../ui/motion.dart';
 import '../ui/theme.dart';
 
 enum Density { comfortable, compact }
@@ -156,7 +157,19 @@ class Settings extends ChangeNotifier {
     Neon.performanceMode = performanceMode.index;
     Neon.light = lightMode;
     Neon.showScopes = performanceMode != PerformanceMode.minimal;
+    Motion.setting = motion;
+    Motion.haptics = haptics;
+    Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
   }
+
+  /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off. Minimal and the system setting lower it further.
+  MotionLevel motion = MotionLevel.full;
+
+  /// Haptic ticks on snaps, detents and placed notes; on by default (owner).
+  bool haptics = true;
+
+  /// How strongly clips and track headers glow with their track's level: 0 is off, 1 is strong; subtle by default.
+  double reactiveGlow = 0.35;
 
   /// Vim editing in the code editor (WASD moves; I types). Off by default.
   bool vimCode = false;
@@ -217,6 +230,9 @@ class Settings extends ChangeNotifier {
         'light_mode': lightMode, // retained for older builds that read settings.json
         'light_auto': lightAuto,
         'vim_code': vimCode,
+        'motion': motion.name,
+        'haptics': haptics,
+        'reactive_glow': reactiveGlow,
         'export_profiles': [for (final profile in exportProfiles) profile.toJson()],
         'export_history': [for (final entry in exportHistory) entry.toJson()],
         'roll': roll.toJson(),
@@ -239,6 +255,10 @@ class Settings extends ChangeNotifier {
     }
     lightAuto = (j['light_auto'] as bool?) ?? lightAuto;
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
+    motion = pick(MotionLevel.values, j['motion'], motion);
+    if (j['haptics'] is bool) haptics = j['haptics'] as bool;
+    final glow = j['reactive_glow'];
+    if (glow is num && glow.isFinite) reactiveGlow = glow.toDouble().clamp(0.0, 1.0);
     exportProfiles = ((j['export_profiles'] is List ? j['export_profiles'] as List : const []))
         .map(ExportProfile.fromJson).whereType<ExportProfile>().take(32).toList();
     exportHistory = ((j['export_history'] is List ? j['export_history'] as List : const []))
@@ -306,14 +326,27 @@ class Settings extends ChangeNotifier {
     await save();
   }
 
-  /// Writes through a temporary file so a crash mid-save never leaves half a file.
-  Future<void> save() async {
+  /// The save in progress; each save waits for the one before it, so two never share the temporary file.
+  Future<void> _saving = Future.value();
+
+  /// Writes through a temporary file so a crash mid-save never leaves half a file. Saves run one after another.
+  Future<void> save() => _saving = _saving.catchError((_) {}).then((_) => _write());
+
+  Future<void> _write() async {
     final f = _file;
     if (f == null) return;
     await f.parent.create(recursive: true);
     final tmp = File('${f.path}.tmp');
     await tmp.writeAsString(const JsonEncoder.withIndent(' ').convert(toJson()), flush: true);
     await tmp.rename(f.path);
+  }
+
+  /// Changes settings and shows them without saving, for continuous controls; [save] when the drag ends.
+  void adjust(void Function(Settings) change) {
+    change(this);
+    Neon.active = activeTheme;
+    _applyPerformanceMode();
+    notifyListeners();
   }
 
   /// Changes settings, shows them and saves them.

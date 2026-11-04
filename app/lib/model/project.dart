@@ -117,6 +117,9 @@ class LayerDoc {
     this.collapsed = false,
   }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [];
 
+  /// How many track colours the themes define (`layer1`..`layer8`); [color] indexes them, wrapping.
+  static const trackColors = 8;
+
   final String id;
   String name;
   int color;

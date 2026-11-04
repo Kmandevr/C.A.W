@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../engine/execution.dart';
 import '../model/settings.dart';
+import 'motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -35,14 +36,55 @@ class SettingsPage extends StatelessWidget {
               title: const Text('Density'),
               subtitle: Text(settings.compact ? 'Compact: more on screen' : 'Comfortable: 48 dp touch targets',
                   style: TextStyle(color: Neon.dim)),
-              trailing: SegmentedButton<Density>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: Density.comfortable, label: Text('Comfortable')),
-                  ButtonSegment(value: Density.compact, label: Text('Compact')),
-                ],
-                selected: {settings.density},
-                onSelectionChanged: (v) => settings.update((s) => s.density = v.first),
+            ),
+            SegmentedButton<Density>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: Density.comfortable, label: Text('Comfortable')),
+                ButtonSegment(value: Density.compact, label: Text('Compact')),
+              ],
+              selected: {settings.density},
+              onSelectionChanged: (v) => settings.update((s) => s.density = v.first),
+            ),
+            const Heading('Motion and feel'),
+            ListTile(
+              leading: Icon(Icons.animation, color: Neon.violet),
+              title: const Text('Motion'),
+              subtitle: Text(
+                  Motion.minimalProfile
+                      ? 'Off while the Minimal profile is on'
+                      : 'Smooth, distance-aware animations and snapping',
+                  style: TextStyle(color: Neon.dim)),
+            ),
+            SegmentedButton<MotionLevel>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: MotionLevel.full, label: Text('Full')),
+                ButtonSegment(value: MotionLevel.reduced, label: Text('Reduced')),
+                ButtonSegment(value: MotionLevel.off, label: Text('Off')),
+              ],
+              selected: {settings.motion},
+              onSelectionChanged: (v) => settings.update((s) => s.motion = v.first),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(Icons.vibration, color: Neon.blue),
+              title: const Text('Haptic ticks'),
+              subtitle: const Text('A light tick when something snaps or a note is placed (Android)'),
+              value: settings.haptics,
+              onChanged: (v) => settings.update((s) => s.haptics = v),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.graphic_eq, color: Neon.green),
+              title: Text(settings.reactiveGlow == 0
+                  ? 'Music-reactive glow: off'
+                  : 'Music-reactive glow: ${(settings.reactiveGlow * 100).round()}%'),
+              subtitle: Slider(
+                value: settings.reactiveGlow,
+                divisions: 20,
+                onChanged: (v) => settings.adjust((s) => s.reactiveGlow = v),
+                onChangeEnd: (_) => settings.save(),
               ),
             ),
             const Heading('Performance'),
