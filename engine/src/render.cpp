@@ -77,11 +77,25 @@ bool checkModules(const ProjectSpec& p, std::string& err) {
 
 // Plays the project from the start and records `total` frames, keeping those from `keepFrom` on.
 bool record(const ProjectSpec& p, int sr, int64_t keepFrom, int64_t total, RenderResult& out, int32_t* progress,
-            int32_t* cancel) {
+            int32_t* cancel, uint64_t memoryBytes) {
+    const int64_t keep = total - keepFrom;
+    // Songs run to the 32-bit step count (F7.2), so check the length before allocating anything.
+    if (keep > kMaxWavFrames) {
+        out.error = "the export is " + std::to_string(keep) + " frames, longer than a WAV file holds (" +
+            std::to_string(kMaxWavFrames) + " frames, " + std::to_string(kMaxWavFrames / sr / 60) + " minutes at " +
+            std::to_string(sr) + " Hz); export a shorter loop";
+        return false;
+    }
     Engine eng(sr);
+    const uint64_t budget = memoryBytes ? memoryBytes : eng.resourceBudget().totalBytes;
+    const uint64_t needed = static_cast<uint64_t>(keep) * 2 * sizeof(float) * 2;  // the samples and their WAV copy
+    if (needed > budget) {
+        out.error = "the export needs about " + std::to_string(needed >> 20) + " MiB, over this device's memory budget of " +
+            std::to_string(budget >> 20) + " MiB; export a shorter loop or a lower sample rate";
+        return false;
+    }
     eng.setProject(p);
     eng.play();
-    const int64_t keep = total - keepFrom;
     out.samples.assign(static_cast<size_t>(keep) * 2, 0.0f);
     out.channels = 2;
     out.sampleRate = sr;
@@ -238,11 +252,11 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             // loop sounds when it repeats.
             const int64_t len = loopFrames(p, sr, p.loopSteps());
             out.loop = true;
-            return record(p, sr, len, 2 * len, out, progress, cancel);
+            return record(p, sr, len, 2 * len, out, progress, cancel, o.memoryBytes);
         }
         case ExportKind::Free: {
             const double secs = std::clamp(o.seconds, 0.1, 600.0);
-            return record(p, sr, 0, static_cast<int64_t>(std::floor(secs * sr + 0.5)), out, progress, cancel);
+            return record(p, sr, 0, static_cast<int64_t>(std::floor(secs * sr + 0.5)), out, progress, cancel, o.memoryBytes);
         }
         case ExportKind::OneShot: {
             const LayerSpec* layer = nullptr;
@@ -268,7 +282,7 @@ bool renderExport(const ProjectSpec& in, const ExportOptions& o, RenderResult& o
             }
             len = std::min<int64_t>(len, static_cast<int64_t>(30) * sr);
             p.layers = {only};
-            if (!record(p, sr, 0, len, out, progress, cancel)) return false;
+            if (!record(p, sr, 0, len, out, progress, cancel, o.memoryBytes)) return false;
             // Trim the silent end, keeping 5 ms after the last sound above -80 dB.
             int64_t last = -1;
             for (int64_t f = 0; f < out.frames; ++f)

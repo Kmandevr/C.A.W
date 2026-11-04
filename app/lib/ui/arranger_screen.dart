@@ -13,9 +13,7 @@ import 'track_cards_screen.dart';
 
 
 double endPosition(AppState state, ProjectDoc project, int loopLength) {
-  final end = project.layers.fold<int>(project.loopSteps, (v, layer) =>
-    layer.clips.fold<int>(v, (e, clip) => math.max(e, clip.startSteps + clip.lengthSteps)));
-  return end * state.meters.position / loopLength;
+  return project.engineLoopSteps * state.meters.position / loopLength;
 }
 
 class ArrangerScreen extends StatefulWidget {
@@ -55,8 +53,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final stepW = zoom * (Neon.compact(context) ? 0.85 : 1.0);
     final trackHeight = _trackHeight;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
-    final end = p.layers.fold<int>(p.loopSteps, (v, l) =>
-      l.clips.fold<int>(v, (e, c) => math.max(e, c.startSteps + c.lengthSteps)));
+    final end = p.engineLoopSteps;
     final width = math.max(560.0, end * stepW);
     final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
     final visible = s.visibleLayers;

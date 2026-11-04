@@ -793,6 +793,15 @@ TEST(arrangement_expansion_is_refused_above_the_project_state_budget) {
     CHECK(result.find("arrangement") != std::string::npos);
     CHECK(result.find("project-state budget") != std::string::npos);
 
+    // The check leaves room for building: growing vectors and the sort's buffer take about three times the result.
+    const uint64_t perRepeat = sizeof(PatternNote) + 2 * sizeof(PatternEvent);
+    p.layers[0].clips = {{"half", "tick", 0, static_cast<int>(e.resourceBudget().projectStateBytes / 2 / perRepeat), 0, true}};
+    const std::string half = e.setProject(p);
+    CHECK(half.find("\"ok\":false") != std::string::npos);
+    CHECK(half.find("arrangement") != std::string::npos);
+    p.layers[0].clips = {{"small", "tick", 0, static_cast<int>(e.resourceBudget().projectStateBytes / 8 / perRepeat), 0, true}};
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+
     // A looping clip of an empty pattern expands to nothing, and compiling it doesn't walk every repeat.
     p.layers[0].clips = {{"silent", "rest", 0, 2000000000, 0, true}};
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);

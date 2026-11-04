@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -19,6 +20,14 @@
 #include "wav.h"
 
 namespace {
+
+// A whole-number argument, or -1 when it isn't one or doesn't fit an int (callers check the range).
+int wholeArg(const std::string& text) {
+    char* end = nullptr;
+    const long long v = std::strtoll(text.c_str(), &end, 10);
+    if (text.empty() || *end != '\0' || v < -1 || v > 2147483647) return -1;
+    return static_cast<int>(v);
+}
 
 const char* kUsage =
     "usage:\n"
@@ -149,8 +158,8 @@ int render(int argc, char** argv) {
         else if (a == "--rate") o.sampleRate = std::atoi(val("--rate").c_str());
         else if (a == "--float") floatOut = true;
         else if (a == "--bpm") bpm = std::atof(val("--bpm").c_str());
-        else if (a == "--bars") bars = std::atoi(val("--bars").c_str());
-        else if (a == "--steps") steps = std::atoi(val("--steps").c_str());
+        else if (a == "--bars") bars = wholeArg(val("--bars"));
+        else if (a == "--steps") steps = wholeArg(val("--steps"));
         else if (a == "--pattern") patternFile = val("--pattern");
         else {
             std::fprintf(stderr, "unknown option %s\n%s", a.c_str(), kUsage);
@@ -174,6 +183,14 @@ int render(int argc, char** argv) {
             return 1;
         }
     } else {
+        // The same song-length rule as a project file: whole bars up to the 32-bit step count (F7.2).
+        const caw::ProjectSpec defaults;
+        if (bars < 1 || bars > caw::maxLoopBars(defaults.beatsPerBar) || steps < 0 ||
+            steps > caw::maxArrangementSteps(defaults.beatsPerBar)) {
+            std::fprintf(stderr, "--bars must be 1 to %d and --steps 0 to %d\n", caw::maxLoopBars(defaults.beatsPerBar),
+                caw::maxArrangementSteps(defaults.beatsPerBar));
+            return 2;
+        }
         p = caw::singleModuleProject(text, bpm, bars);
         p.layers[0].lengthSteps = steps;
         if (!patternFile.empty()) {

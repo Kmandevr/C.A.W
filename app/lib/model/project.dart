@@ -252,8 +252,16 @@ class ProjectDoc {
         lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
   }
 
-  /// How far automation editors reach: the song, and at least 64 bars to place new points in.
-  int get timelineSteps => min(maxArrangementSteps, max(64 * stepsPerBar, arrangementEndSteps));
+  /// The loop the engine plays: whole bars reaching [arrangementEndSteps], as [toEngineJson] sends it.
+  int get engineLoopSteps => min(maxLoopBars, max(loopBars, (arrangementEndSteps / stepsPerBar).ceil())) * stepsPerBar;
+
+  /// How far automation editors reach: the song, every track automation point, and at least 64 bars to place
+  /// new points in, so editing never moves a point.
+  int get timelineSteps {
+    final trackEnd = layers.fold<double>(0, (end, layer) => layer.automation.fold<double>(end, (e, lane) =>
+        lane.points.fold<double>(e, (v, point) => max(v, point.step))));
+    return min(maxArrangementSteps, max(max(64 * stepsPerBar, arrangementEndSteps), trackEnd.ceil()));
+  }
   double get loopSeconds => loopSteps * 15.0 / bpm;
 
   /// The key as the engine's numbers: root 0..11 from C, scale 0 = major or 1 = minor (scale.* order).
@@ -278,7 +286,7 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
-    final engineLoopBars = min(maxLoopBars, max(loopBars, (arrangementEndSteps / stepsPerBar).ceil()));
+    final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
     final result = jsonEncode({
         'caw_project': 1,
         'name': name,
@@ -349,7 +357,7 @@ class ProjectDoc {
       id: j['id'] as String,
       name: (j['name'] as String?) ?? 'Untitled',
       bpm: (j['bpm'] as num?)?.toDouble() ?? 140,
-      beatsPerBar: (j['beats_per_bar'] as num?)?.toInt() ?? 4,
+      beatsPerBar: ((j['beats_per_bar'] as num?)?.toInt() ?? 4).clamp(1, 16),  // the engine's meter range
       loopBars: (j['loop_bars'] as num?)?.toInt() ?? 4,
       key: (j['key'] as String?) ?? 'A minor',
       seed: (j['seed'] as num?)?.toInt() ?? 0,

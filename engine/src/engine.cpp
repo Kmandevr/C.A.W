@@ -955,11 +955,13 @@ std::string Engine::setProject(const ProjectSpec& p) {
                 if (source != modules_.end()) pl.arrangementSig += source->second.source;
                 pl.arrangementSig += "\x1e";
             }
-            // The expanded clips are project state: refuse them, before building them, past the budget left.
+            // The expanded clips are project state: refuse them, before building them, past the budget left after
+            // the project so far and this layer's chain. Building takes about three times the result (vectors grow
+            // by doubling and the sort takes a buffer the size of the events), so that peak must fit too.
             const double expanded = arrangementBytes(w.clips, sources, p.beatsPerBar);
-            const double left = static_cast<double>(resourceBudget_.projectStateBytes - std::min(projectStateBytes,
-                resourceBudget_.projectStateBytes));
-            if (expanded > left) {
+            const double left = static_cast<double>(resourceBudget_.projectStateBytes) -
+                static_cast<double>(projectStateBytes) - static_cast<double>(layerStateDoubles) * sizeof(double);
+            if (3.0 * expanded > left) {
                 warnings[pl.ids.front()].push_back("layer not installed: its arrangement clips expand to about " +
                     std::to_string(static_cast<uint64_t>(std::min(expanded, 1.8e19))) +
                     " bytes of notes, over this Engine's project-state budget of " +

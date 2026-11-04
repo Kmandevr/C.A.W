@@ -18,7 +18,11 @@ struct ExportOptions {
     std::string target;    // OneShot: layer id. Wavetable: module id
     std::string param;     // Wavetable: the param swept across frames (empty = none)
     int frames = 64;       // Wavetable frame count
+    uint64_t memoryBytes = 0;  // the most the render and its WAV copy may hold; 0 = this device's engine budget
 };
+
+// The most frames a WAV file holds at the widest format (stereo 32-bit float), whose sizes are 32-bit.
+constexpr int64_t kMaxWavFrames = (0xFFFFFFFFll - 1024) / 8;
 
 struct RenderResult {
     std::vector<float> samples;  // interleaved

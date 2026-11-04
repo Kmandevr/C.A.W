@@ -138,6 +138,28 @@ TEST(export_refuses_broken_modules) {
     CHECK(r.error.find("module 'byte'") != std::string::npos);
 }
 
+TEST(loop_export_longer_than_a_wav_file_holds_is_refused_before_rendering) {
+    // F7.2 lets a song run to the 32-bit step count; a 4-GiB WAV header can't describe two loops of it.
+    ProjectSpec p = groove();
+    p.loopBars = maxLoopBars(p.beatsPerBar);
+    ExportOptions o;
+    RenderResult r;
+    CHECK(!renderExport(p, o, r));
+    CHECK(r.error.find("longer than a WAV file holds") != std::string::npos);
+    CHECK(r.samples.empty());
+}
+
+TEST(export_above_the_memory_budget_is_refused_before_rendering) {
+    ExportOptions o;  // a 4-bar loop at 48 kHz: 2 x 4 s x 48000 frames x 2 channels x 4 bytes, plus its WAV copy
+    o.memoryBytes = 1u << 20;
+    RenderResult r;
+    CHECK(!renderExport(groove(), o, r));
+    CHECK(r.error.find("memory budget") != std::string::npos);
+    CHECK(r.samples.empty());
+    o.memoryBytes = 64u << 20;
+    CHECK(renderExport(groove(), o, r));
+}
+
 TEST(wav_encoding) {
     const float x[6] = {0.0f, 1.0f, -1.0f, 0.5f, 2.0f, -0.25f};
     WavSpec s;

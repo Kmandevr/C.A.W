@@ -181,6 +181,27 @@ void main() {
     expect(engine['loop_bars'], imported.maxLoopBars);
   });
 
+  test('a meter the engine cannot play is brought into its 1..16 beats on load', () {
+    for (final beats in [0, -3, 1 << 30]) {
+      final raw = sample().toJson()..['beats_per_bar'] = beats;
+      final imported = ProjectDoc.fromJson(raw);
+      expect(imported.beatsPerBar, beats < 1 ? 1 : 16);
+      expect(jsonDecode(imported.toEngineJson())['loop_bars'], greaterThanOrEqualTo(1));
+    }
+  });
+
+  test('automation editors reach every track point and the playhead uses the engine loop', () {
+    final p = sample();  // 4/4, 4 bars
+    p.layers.first.automation.add(AutomationLaneDoc(target: 'pan',
+      points: [AutomationPointDoc(step: 0, value: 0), AutomationPointDoc(step: 500000, value: 1)]));
+    expect(p.timelineSteps, 500000);
+    expect(p.arrangementEndSteps, 64);  // track lanes don't lengthen the engine loop
+    p.layers.first.clips.add(ClipDoc(id: 'c', patternId: 'pat', startSteps: 70, lengthSteps: 3));
+    expect(p.arrangementEndSteps, 73);
+    expect(p.engineLoopSteps, 80);  // whole bars, as toEngineJson sends them
+    expect(jsonDecode(p.toEngineJson())['loop_bars'], 5);
+  });
+
   test('imported library metadata rejects unsafe paths and bounds tags', () {
     final raw = sample().toJson();
     final modules = raw['modules'] as List;

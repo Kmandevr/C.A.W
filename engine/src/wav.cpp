@@ -22,6 +22,7 @@ void tag(std::vector<uint8_t>& b, const char* t) { b.insert(b.end(), t, t + 4); 
 
 }  // namespace
 
+// frames is at most kMaxWavFrames (render.h): renderExport refuses longer renders, so the 32-bit sizes hold.
 std::vector<uint8_t> encodeWav(const WavSpec& spec, const float* x, int64_t frames) {
     const uint32_t bytesPer = spec.float32 ? 4 : 3;
     const uint32_t blockAlign = bytesPer * static_cast<uint32_t>(spec.channels);
