@@ -937,8 +937,11 @@ void GraphExecutor::mergeEvents(const EventMerge& merge) noexcept {
 bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const ChannelBufferView& output,
                                      uint32_t frames, const EventInput& events) noexcept {
     applyParameterCommands();
+    // Positions stay where doubles are exact (and int64 cannot overflow); a song that would run
+    // past that stops its lanes instead.
+    if (transportSample_ > kMaxTransportSample - static_cast<int64_t>(frames)) playing_ = false;
     blockStart_ = transportSample_;
-    transportSample_ += frames;
+    if (playing_) transportSample_ += frames;
     // Bind this call's host channels (or silence) into the prepared input table.
     const std::size_t slots = hostInputSlots_.size();
     for (std::size_t s = 0; s < slots; ++s)
@@ -1111,11 +1114,12 @@ GraphError GraphExecutor::setAutomationLanes(const ParameterLane* lanes, uint32_
 }
 
 bool GraphExecutor::setTransport(int64_t sample, double samplesPerStep, bool playing) noexcept {
-    transportSample_ = sample;
-    if (!std::isfinite(samplesPerStep) || !(samplesPerStep > 0.0)) {
+    if (sample <= -kMaxTransportSample || sample >= kMaxTransportSample || !std::isfinite(samplesPerStep) ||
+        !(samplesPerStep > 0.0)) {
         playing_ = false;
         return false;
     }
+    transportSample_ = sample;
     samplesPerStep_ = samplesPerStep;
     playing_ = playing;
     return true;

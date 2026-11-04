@@ -221,7 +221,13 @@ public:
     // samples, the samples per step (> 0, finite) and whether the song plays. Frame i of a block
     // reads its lane at (sample + i) / samplesPerStep, like the Engine. Each process() call that
     // reaches the graph advances the position by its frame count. Not playing (the default):
-    // lanes are ignored. False (and not playing) for a bad samplesPerStep.
+    // lanes are ignored. False (and not playing, position unchanged) for a bad samplesPerStep or
+    // |sample| >= kMaxTransportSample (2^53, where doubles stop being exact).
+    // The graph knows no loop: like Engine::process, the host splits blocks at a loop point and
+    // calls setTransport for the block after it (lanes are read at the absolute position).
+    // prepare() clears the lanes and stops the transport; lane points are borrowed and must stay
+    // alive and unchanged until the next setAutomationLanes() or prepare().
+    static constexpr int64_t kMaxTransportSample = int64_t{1} << 53;
     bool setTransport(int64_t sample, double samplesPerStep, bool playing) noexcept;
     // Control thread, only while process() is not running (after prepare(), before the audio
     // thread starts or resumes, like prepare() itself): restore a parameter's value directly, with

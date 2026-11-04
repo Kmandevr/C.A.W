@@ -1867,6 +1867,12 @@ TEST(graph_automation_lanes_apply_only_while_playing_and_yield_to_a_touch) {
     CHECK_EQ(run(executor, 8, 0), 1.5f);
     CHECK(executor.queueClearTouch());  // playback restart: the lane again
     CHECK_EQ(run(executor, 8, 0), 0.25f);
+    CHECK(!executor.setTransport(int64_t{1} << 53, 10.0, true));  // past exact doubles: refused
+    CHECK_EQ(run(executor, 8, 0), 0.25f);  // lanes off, the last played value held
+    CHECK(!executor.setTransport(-(int64_t{1} << 53), 10.0, true));
+    CHECK(executor.setTransport(GraphExecutor::kMaxTransportSample - 4, 10.0, true));
+    CHECK_EQ(run(executor, 8, 0), 0.25f);  // a block at the limit stops the lanes (no overflow)
+    CHECK(executor.setTransport(0, 10.0, true));
     CHECK(!executor.setTransport(0, 0.0, true));  // a bad tempo stops lanes
     CHECK_EQ(run(executor, 8, 0), 0.25f);  // stopping holds what played, no jump
     CHECK_EQ(executor.parameterTarget(0, 0), 0.25);
