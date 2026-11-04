@@ -126,14 +126,16 @@ struct Engine::Chain {
     double vbend[kBlock], vpress[kBlock], vtimbre[kBlock];
     double ones[kBlock], dnote[kBlock], dfreq[kBlock];
     // Each .caw param resolves through the shared parameter model (F6.6): its held value (set by
-    // writeParams) is the manual base, its automation lane (if any) the automated one, and a
-    // change of the held value while a lane exists is a touch until playback restarts. .caw
-    // params have no smoothing, so resolving a module more than once per chunk (lanes, shadow)
-    // gives the same values.
+    // writeParams) is the manual base and its automation lane (if any) the automated one. Only a
+    // knob move (setParam/setGlobal, which bump the param's touch serial) is a touch, until the
+    // next Play; any other held-value change (a project update) is a restore. .caw params have
+    // no smoothing, so resolving a module more than once per chunk (lanes, shadow) gives the
+    // same values.
     struct ParamSlot {
         ParameterResolver resolver;
         bool active = false;          // false: the descriptor did not validate; the VM reads the held value
         uint64_t heldBits = 0;        // the held value last seen (audio thread after publication)
+        uint32_t seenSerial = 0;      // the touch serial last seen (audio thread)
         bool passThrough = false;     // no lane and the held value resolves to itself: skip the resolver
         const ProjectAutomationLaneSpec* lane = nullptr;
     };
@@ -141,8 +143,10 @@ struct Engine::Chain {
     std::vector<const double*> paramValuePtrs;
     std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> automation;
     std::vector<std::vector<ParamSlot>> paramSlots;  // [module][param]
+    // [module][param]: bumped by the control thread for each knob move (release), read by the audio thread.
+    std::vector<std::unique_ptr<std::atomic<uint32_t>[]>> touchSerials;
     std::array<double, kBlock> laneScratch{};
-    uint64_t touchEpoch = 0;  // the Engine's play count this chain's touches belong to
+    uint64_t touchEpoch = 0;  // the play count this chain's touches belong to
     std::vector<std::string> moduleIds;
     // How each module takes over the running state of the chain it replaces, so unchanged calls play on.
     struct Migration {
@@ -180,6 +184,7 @@ struct Engine::Cmd {
     bool seamXf = true, flag = false;
     int swapMode = 0;
     int voices = kMaxVoices;
+    uint64_t playCount = 0;  // Play: the control thread's play count, which ends touches
 };
 
 struct Engine::Retired {
@@ -619,10 +624,13 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
     c->automation = automation;
     // Give every param a resolver and find its automation lane, on the control thread.
     c->paramSlots.resize(c->main.size());
+    c->touchSerials.resize(c->main.size());
+    c->touchEpoch = playCount_;  // its touches (below) already belong to the current playback
     for (size_t moduleIndex = 0; moduleIndex < c->main.size(); ++moduleIndex) {
         const Program& program = c->main[moduleIndex]->program();
         const std::string& moduleId = c->moduleIds[moduleIndex];
         c->paramSlots[moduleIndex].resize(program.params.size());
+        c->touchSerials[moduleIndex] = std::make_unique<std::atomic<uint32_t>[]>(program.params.size());
         for (size_t paramIndex = 0; paramIndex < program.params.size(); ++paramIndex) {
             const ParamDef& def = program.params[paramIndex];
             Chain::ParamSlot& slot = c->paramSlots[moduleIndex][paramIndex];
@@ -635,7 +643,13 @@ Engine::Chain* Engine::buildChain(const std::vector<std::string>& ids, const std
             slot.active = slot.resolver.configure(descriptor);
             const double held = c->main[moduleIndex]->param(static_cast<int>(paramIndex));
             slot.heldBits = std::bit_cast<uint64_t>(held);
-            if (slot.active) slot.resolver.setInitial(held);
+            if (slot.active) {
+                slot.resolver.setInitial(held);
+                // A touch made before this rebuild (since the last Play) carries over.
+                const bool touched = def.global ? touchedGlobals_.count(def.name) != 0
+                                                : touchedParams_.count({moduleId, def.name}) != 0;
+                if (touched) slot.resolver.setBase(held);
+            }
             const ProjectAutomationLaneSpec* selected = nullptr;
             for (const ProjectAutomationLaneSpec& lane : *automation) {
                 const bool matches = lane.targetType == "global"
@@ -1411,20 +1425,37 @@ void Engine::setParam(const std::string& moduleId, const std::string& name, doub
             modules_.at(e).params[name] = value;
             ids.push_back(e);
         }
+    for (const std::string& id : ids) touchedParams_.insert({id, name});
     for (auto& [id, ls] : layers_)
         if (ls.chain)
             for (const std::string& m : ls.chain->moduleIds)
                 if (std::find(ids.begin(), ids.end(), m) != ids.end()) {
                     writeParams(*ls.chain);
+                    markTouched(*ls.chain, &ids, name);
                     break;
                 }
+}
+
+void Engine::markTouched(Chain& c, const std::vector<std::string>* ids, const std::string& name) {
+    // After writeParams stored the held values, so the audio thread reads the new value with the serial.
+    for (size_t i = 0; i < c.main.size(); ++i) {
+        if (ids && std::find(ids->begin(), ids->end(), c.moduleIds[i]) == ids->end()) continue;
+        const Program& p = c.main[i]->program();
+        for (size_t k = 0; k < p.params.size(); ++k)
+            if (p.params[k].name == name && p.params[k].global == (ids == nullptr))
+                c.touchSerials[i][k].fetch_add(1, std::memory_order_release);
+    }
 }
 
 void Engine::setGlobal(const std::string& name, double value) {
     std::lock_guard<std::mutex> lock(ctl_);
     globals_[name] = value;
+    touchedGlobals_.insert(name);
     for (auto& [id, ls] : layers_)
-        if (ls.chain) writeParams(*ls.chain);
+        if (ls.chain) {
+            writeParams(*ls.chain);
+            markTouched(*ls.chain, nullptr, name);
+        }
 }
 
 void Engine::setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo) {
@@ -1450,8 +1481,11 @@ void Engine::setMaster(double volume) {
 void Engine::play() {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
+    touchedParams_.clear();  // a (re)start ends every touch; chains do the same at their next chunk
+    touchedGlobals_.clear();
     Cmd c;
     c.type = Cmd::Play;
+    c.playCount = ++playCount_;
     send(c);
 }
 
@@ -1762,7 +1796,7 @@ void Engine::applyCommands() noexcept {
                 break;
             case Cmd::Play:
                 playing_ = true;
-                ++touchEpoch_;  // chains drop their touches at their next chunk
+                touchEpoch_ = c.playCount;  // chains from before this Play drop their touches at their next chunk
                 stopFade_ = 0;
                 g_ = 0;
                 epoch_ = 0;
@@ -1868,20 +1902,32 @@ void Engine::prepareLane(Chain& c, int lane, int64_t n0, int len) noexcept {
 // Resolves module idx's params for one chunk into c.paramValuePtrs (null: the VM reads the held
 // value, which is then exactly the resolved one). Bounded by params x len; no allocation.
 void Engine::resolveParams(Chain& c, const Instance& inst, size_t idx, int64_t globalStart, int len) noexcept {
-    if (c.touchEpoch != touchEpoch_) {  // playback (re)started: touches end, lanes rule again
-        for (auto& module : c.paramSlots)
-            for (Chain::ParamSlot& slot : module) slot.resolver.clearTouch();
+    if (c.touchEpoch != touchEpoch_) {
+        // Playback (re)started: touches end, and knob moves made before it (while stopped) are
+        // taken as plain values, so the lanes rule again.
+        for (size_t m = 0; m < c.paramSlots.size(); ++m)
+            for (size_t k = 0; k < c.paramSlots[m].size(); ++k) {
+                c.paramSlots[m][k].resolver.clearTouch();
+                c.paramSlots[m][k].seenSerial = c.touchSerials[m][k].load(std::memory_order_acquire);
+            }
         c.touchEpoch = touchEpoch_;
     }
     std::vector<Chain::ParamSlot>& slots = c.paramSlots[idx];
     for (size_t k = 0; k < slots.size(); ++k) {
         Chain::ParamSlot& slot = slots[k];
         if (!slot.active) continue;
+        // The serial first: a knob move stores the held value before bumping it.
+        const uint32_t serial = c.touchSerials[idx][k].load(std::memory_order_acquire);
         const double held = inst.param(static_cast<int>(k));
         const uint64_t bits = std::bit_cast<uint64_t>(held);
-        if (bits != slot.heldBits) {  // a knob, typed value or global changed it: the manual base
+        if (serial != slot.seenSerial) {  // a knob move: the manual base, a touch over a lane
+            slot.seenSerial = serial;
             slot.heldBits = bits;
             slot.resolver.setBase(held);
+            slot.passThrough = false;
+        } else if (bits != slot.heldBits) {  // a restore (project update): the value, no touch
+            slot.heldBits = bits;
+            slot.resolver.setInitial(held);
             slot.passThrough = false;
         } else if (slot.passThrough) {
             continue;  // the common case: the VM reads the held value, which is the resolved one

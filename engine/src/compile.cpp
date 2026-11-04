@@ -612,6 +612,8 @@ private:
                 d.max = std::fmax(1.0, d.def * 2.0);
             }
         }
+        if (!std::isfinite(d.def) || !std::isfinite(d.min) || !std::isfinite(d.max) || !std::isfinite(d.step))
+            fail(at, "param numbers must be finite (a range or step this large has no meaning)");
         if (d.def < d.min || d.def > d.max) fail(at, "param default is outside its range");
         Op op{};
         op.code = OpCode::Param;
