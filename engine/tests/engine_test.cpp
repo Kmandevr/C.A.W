@@ -1,9 +1,12 @@
 // Mixer tests: block-size independence, per-layer loop lengths, hot swap, broken code, mute/solo, overload, stop.
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "detmath.h"
@@ -68,11 +71,11 @@ TEST(audition_only_uses_the_dedicated_audition_slot) {
 
 TEST(audition_slot_follows_the_last_layer_slot_and_both_play) {
     Engine e(48000);
-    CHECK_EQ(e.layerCapacity(), kMaxLayers);
+    CHECK_EQ(e.layerCapacity(), kInitialLayerCapacity);
     CHECK_EQ(e.auditionSlot(), e.layerCapacity());
     std::vector<std::pair<std::string, std::string>> mods;
-    for (int i = 0; i < kMaxLayers; ++i)
-        mods.push_back({"m" + std::to_string(i), std::string(kFloat) + (i == kMaxLayers - 1 ? "0.25" : "0")});
+    for (int i = 0; i < kInitialLayerCapacity; ++i)
+        mods.push_back({"m" + std::to_string(i), std::string(kFloat) + (i == kInitialLayerCapacity - 1 ? "0.25" : "0")});
     ProjectSpec p = project(mods);
     p.modules.push_back({"tone", std::string(kFloat) + "0.5", {}});
     p.auditionChain = {"tone"};
@@ -81,7 +84,7 @@ TEST(audition_slot_follows_the_last_layer_slot_and_both_play) {
     e.play();
     auto left = run(e, 2048);
     LayerMeter lm;
-    CHECK(e.layerMeter(kMaxLayers - 1, lm) && lm.active);
+    CHECK(e.layerMeter(kInitialLayerCapacity - 1, lm) && lm.active);
     // Only layer 63 sounds; the audition slot is silent outside audition-only mode.
     CHECK_NEAR(left[2000], static_cast<float>(0.25 * std::cos(kPi / 4.0)), 1e-5);
     p.auditionOnly = true;
@@ -89,7 +92,7 @@ TEST(audition_slot_follows_the_last_layer_slot_and_both_play) {
     left = run(e, 24000);
     CHECK_NEAR(left[23999], static_cast<float>(0.8 * 0.5 * std::cos(kPi / 4.0)), 1e-5);
     float scope[64];  // the audition's own scope (before pan)
-    CHECK_EQ(e.scope(e.auditionSlot(), scope, 64), 64);
+    CHECK_EQ(e.scope(kScopeAudition, scope, 64), 64);
     CHECK_NEAR(scope[63], 0.4f, 1e-4);
 }
 
@@ -430,7 +433,7 @@ TEST(stop_fades_to_silence_and_layers_can_be_removed) {
     run(e, 5000);
     e.meters();
     ProjectSpec many;
-    for (int i = 0; i < kMaxLayers; ++i) {
+    for (int i = 0; i < kInitialLayerCapacity; ++i) {
         many.modules.push_back({"m" + std::to_string(i), std::string(kFloat) + "0.001", {}});
         LayerSpec l;
         l.id = "x" + std::to_string(i);
@@ -440,7 +443,7 @@ TEST(stop_fades_to_silence_and_layers_can_be_removed) {
     e.setProject(many);
     run(e, 100);
     LayerMeter lm;
-    CHECK(e.layerMeter(kMaxLayers - 1, lm) && lm.active);
+    CHECK(e.layerMeter(kInitialLayerCapacity - 1, lm) && lm.active);
 }
 
 TEST(effects_process_their_layer_only) {
@@ -1298,4 +1301,281 @@ TEST(engine_param_moved_right_after_play_is_a_touch) {
     e.play();
     e.setParam("tone", "g", 0.8);
     CHECK_NEAR(run(e, 512).back() / lane, 3.0, 1e-4);
+}
+
+// ---- F7.3 part B: the Engine grows past 64 layers, bounded by the memory budget ----
+
+namespace {
+
+// n layers, each playing `module` (one shared module), named g0..g(n-1).
+ProjectSpec layersOf(int n, const std::string& source, double volume = 1.0) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"tone", source, {}});
+    for (int i = 0; i < n; ++i) {
+        LayerSpec l;
+        l.id = "g" + std::to_string(i);
+        l.name = l.id;
+        l.chain = {"tone"};
+        l.volume = volume;
+        p.layers.push_back(l);
+    }
+    return p;
+}
+
+}  // namespace
+
+TEST(engine_plays_more_than_64_layers_with_meters_and_folder_buses_above_slot_64) {
+    for (int n : {65, 200}) {
+        // A folder bus first (slot 0), then n tracks; tracks from project index 64 on route through
+        // the bus, so the bus sums children whose slots are 64 and above.
+        ProjectSpec p = layersOf(n, std::string(kFloat) + "0.0001");
+        LayerSpec folder;
+        folder.id = "bus";
+        folder.name = "Group";
+        folder.folder = true;
+        folder.busEnabled = true;
+        folder.volume = 0.5;
+        int children = 0;
+        for (int i = 64; i < n; ++i, ++children) p.layers[static_cast<size_t>(i)].parentId = "bus";
+        p.layers.insert(p.layers.begin(), folder);
+        Engine e(48000);
+        e.setMasterBypass(true);
+        const std::string result = e.setProject(p);
+        CHECK(result.find("\"ok\":true") != std::string::npos);
+        CHECK(e.layerCapacity() >= n + 1);
+        CHECK_EQ(e.auditionSlot(), e.layerCapacity());
+        e.play();
+        const auto left = run(e, 2048);
+        const double expected = 0.0001 * std::cos(kPi / 4.0) * ((n - children) + 0.5 * children);
+        CHECK_NEAR(left[2000], expected, 1e-6);
+        for (int i = 1; i <= n; ++i) {  // project index 0 is the bus
+            LayerMeter lm;
+            CHECK(e.layerMeter(i, lm));
+            CHECK(lm.active);
+            CHECK(lm.peak > 0.0f);
+            float scope[16];
+            CHECK_EQ(e.scope(i, scope, 16), 16);
+            CHECK_NEAR(scope[15], 0.0001f, 1e-7);
+        }
+        CHECK_EQ(e.routingRejections(), 0u);
+    }
+}
+
+TEST(engine_grows_during_playback_and_existing_layers_stay_bit_identical) {
+    // Ten audible layers; the grown project adds 90 muted ones. The first ten must sound exactly
+    // as they do in an Engine that never grows.
+    ProjectSpec small;
+    small.bpm = 120;
+    small.loopBars = 1;
+    small.master = 1.0;
+    for (int i = 0; i < 10; ++i) {
+        const std::string id = "s" + std::to_string(i);
+        small.modules.push_back({id, std::string(kFloat) + "sine(" + std::to_string(110 * (i + 1)) + ") * 0.05", {}});
+        LayerSpec l;
+        l.id = "l" + std::to_string(i);
+        l.chain = {id};
+        l.volume = 0.8;
+        l.pan = -0.5 + 0.1 * i;
+        small.layers.push_back(l);
+    }
+    ProjectSpec big = small;
+    big.modules.push_back({"loud", std::string(kFloat) + "sine(77) * 0.5", {}});
+    for (int i = 10; i < 100; ++i) {
+        LayerSpec l;
+        l.id = "l" + std::to_string(i);
+        l.chain = {"loud"};
+        l.mute = true;
+        big.layers.push_back(l);
+    }
+    Engine a(48000), b(48000);
+    CHECK(a.setProject(small).find("\"ok\":true") != std::string::npos);
+    CHECK(b.setProject(small).find("\"ok\":true") != std::string::npos);
+    a.play();
+    b.play();
+    std::vector<float> ra, rb;
+    const auto la = run(a, 4800, 64, &ra);
+    const auto lb = run(b, 4800, 64, &rb);
+    CHECK(la == lb);
+    CHECK_EQ(b.layerCapacity(), 64);
+    CHECK(a.setProject(small).find("\"ok\":true") != std::string::npos);
+    CHECK(b.setProject(big).find("\"ok\":true") != std::string::npos);
+    CHECK(b.layerCapacity() >= 100);
+    CHECK_EQ(a.layerCapacity(), 64);
+    const auto la2 = run(a, 9600, 64, &ra);
+    const auto lb2 = run(b, 9600, 64, &rb);
+    CHECK(la2.size() == lb2.size() && std::memcmp(la2.data(), lb2.data(), la2.size() * sizeof(float)) == 0);
+    CHECK(ra.size() == rb.size() && std::memcmp(ra.data(), rb.data(), ra.size() * sizeof(float)) == 0);
+    float peak = 0;
+    for (float v : lb2) peak = std::max(peak, std::fabs(v));
+    CHECK(peak > 0.05f);
+    // The grown layers really are there: unmuting one makes it heard.
+    big.layers[99].mute = false;
+    CHECK(b.setProject(big).find("\"ok\":true") != std::string::npos);
+    LayerMeter lm;
+    run(b, 4800);
+    CHECK(b.layerMeter(99, lm) && lm.active && lm.peak > 0.1f);
+    CHECK_EQ(b.routingRejections(), 0u);
+}
+
+TEST(engine_refuses_more_layers_than_the_memory_budget_allows) {
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 2;
+    Engine e(8000, makeEngineResourceBudget(hardware));
+    CHECK_EQ(e.maxLayers(), 64);  // the initial capacity is always available
+    e.setMasterBypass(true);
+    CHECK(e.setProject(layersOf(64, std::string(kFloat) + "0.001")).find("\"ok\":true") != std::string::npos);
+    const std::string refused = e.setProject(layersOf(65, std::string(kFloat) + "0.001"));
+    CHECK(refused.find("\"ok\":false") != std::string::npos);
+    CHECK(refused.find("project has 65 layers; this device's memory budget allows at most 64") != std::string::npos);
+    CHECK_EQ(e.layerCapacity(), 64);
+    // The refused project changed nothing: the 64 layers play on.
+    e.play();
+    const auto out = run(e, 800);
+    CHECK_NEAR(out[799], 64 * 0.001 * std::cos(kPi / 4.0), 1e-5);
+    // The 128 MiB fallback budget (memory unknown) allows more than 64.
+    Engine big(8000, makeEngineResourceBudget(HardwareProfile{}));
+    CHECK(big.maxLayers() > 64);
+}
+
+TEST(engine_play_with_more_than_640_layers_retires_every_chain_without_stalling) {
+    // Play retires up to two chains per slot (the one fading out after a swap and the one a
+    // pending swap replaces): 2 * 701 entries, more than the retired queue holds at once.
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 1024;
+    Engine e(48000, makeEngineResourceBudget(hardware));
+    CHECK(e.maxLayers() >= 700);
+    e.setMasterBypass(true);
+    std::vector<float> l(64), r(64);
+    // The audio thread is pumped with zero-frame callbacks: commands apply but time stands still,
+    // so no fade finishes on its own.
+    auto apply = [&](const ProjectSpec& p) {
+        std::atomic<bool> done{false};
+        std::string result;
+        std::thread control([&] {
+            result = e.setProject(p);
+            done.store(true);
+        });
+        while (!done.load()) e.process(l.data(), r.data(), 0);
+        control.join();
+        e.process(l.data(), r.data(), 0);
+        return result;
+    };
+    ProjectSpec p = layersOf(700, std::string(kFloat) + "0.00001");
+    CHECK(apply(p).find("\"ok\":true") != std::string::npos);
+    CHECK(e.layerCapacity() >= 700);
+    e.play();
+    for (int k = 0; k < 4; ++k) e.process(l.data(), r.data(), 64);
+    CHECK_NEAR(l[63], 700 * 0.00001 * std::cos(kPi / 4.0), 1e-5);
+    p.modules[0].source = std::string(kFloat) + "0.00002";  // swapped at once: every slot has a chain fading out
+    CHECK(apply(p).find("\"ok\":true") != std::string::npos);
+    p.swapMode = 2;
+    p.modules[0].source = std::string(kFloat) + "0.00003";  // waits for the next bar: every slot has a pending chain
+    CHECK(apply(p).find("\"ok\":true") != std::string::npos);
+    CHECK(e.meters().position > 0);
+    e.play();
+    e.process(l.data(), r.data(), 0);
+    CHECK_EQ(e.meters().position, 0);  // the Play was applied in the first callback: it did not wait for room
+    for (int k = 0; k < 20; ++k) {
+        e.process(l.data(), r.data(), 64);
+        e.meters();  // drains the retired queue, so the overflow moves across
+    }
+    CHECK_NEAR(l[63], 700 * 0.00003 * std::cos(kPi / 4.0), 1e-5);  // the pending code took over at Play
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
+TEST(engine_export_buffers_stay_valid_across_a_grow) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"src", "---\nmode: float\n---\nexport let level = 0.25\n0", {}, "src"});
+    p.modules.push_back({"reader", "---\nmode: float\n---\nsrc.level", {}, "reader"});
+    LayerSpec a;
+    a.id = "a";
+    a.chain = {"src"};
+    a.volume = 1.0;
+    LayerSpec b = a;
+    b.id = "b";
+    b.chain = {"reader"};
+    p.layers = {a, b};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    CHECK_NEAR(run(e, 960).back(), 0.25 * std::cos(kPi / 4.0), 1e-6);
+    // Grow to 100 layers: 96 muted fillers, then an exporter and a reader in slots above 64.
+    p.modules.push_back({"filler", std::string(kFloat) + "0.5", {}, "filler"});
+    p.modules.push_back({"hi", "---\nmode: float\n---\nexport let level = 0.125\n0", {}, "hi"});
+    p.modules.push_back({"hireader", "---\nmode: float\n---\nhi.level + src.level", {}, "hireader"});
+    for (int i = 0; i < 96; ++i) {
+        LayerSpec f = a;
+        f.id = "f" + std::to_string(i);
+        f.chain = {"filler"};
+        f.mute = true;
+        p.layers.push_back(f);
+    }
+    LayerSpec hi = a;
+    hi.id = "hi";
+    hi.chain = {"hi"};
+    LayerSpec hr = a;
+    hr.id = "hr";
+    hr.chain = {"hireader"};
+    p.layers.push_back(hr);  // slot 98 reads slot 99, so the order puts the exporter first
+    p.layers.push_back(hi);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    CHECK(e.layerCapacity() >= 100);
+    // The old reader still reads the old exporter's buffer, and the new pair works too.
+    CHECK_NEAR(run(e, 960).back(), (0.25 + 0.375) * std::cos(kPi / 4.0), 1e-6);
+    // Moving the reader's source keeps working after the grow (the wiring is rebuilt).
+    p.modules[1].source = "---\nmode: float\n---\nsrc.level + hi.level";
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    CHECK_NEAR(run(e, 4800).back(), (0.375 + 0.375) * std::cos(kPi / 4.0), 1e-6);
+}
+
+TEST(project_parser_accepts_1000_layers) {
+    std::string json = R"({"caw_project":1,"layers":[)";
+    for (int i = 0; i < 1000; ++i) json += (i ? ",{\"id\":\"l" : "{\"id\":\"l") + std::to_string(i) + "\"}";
+    json += "]}";
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(json, p, error));
+    CHECK_EQ(p.layers.size(), size_t{1000});
+}
+
+TEST(audition_scope_follows_the_audition_slot_across_a_grow) {
+    ProjectSpec p = layersOf(10, std::string(kFloat) + "0.001");
+    p.modules.push_back({"aud", std::string(kFloat) + "0.5", {}});
+    p.auditionChain = {"aud"};
+    p.auditionOnly = true;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    run(e, 4800);
+    float scope[64];
+    CHECK_EQ(e.auditionSlot(), 64);
+    CHECK_EQ(e.scope(kScopeAudition, scope, 64), 64);
+    CHECK_NEAR(scope[63], 0.4f, 1e-4);
+    // Grow while the audition plays: it keeps its sound, and its scope id moves to the new last slot.
+    ProjectSpec big = layersOf(150, std::string(kFloat) + "0.001");
+    big.modules.push_back(p.modules.back());
+    big.auditionChain = {"aud"};
+    big.auditionOnly = true;
+    CHECK(e.setProject(big).find("\"ok\":true") != std::string::npos);
+    CHECK(e.layerCapacity() >= 150);
+    CHECK_EQ(e.auditionSlot(), e.layerCapacity());
+    const auto left = run(e, 4800);
+    CHECK_NEAR(left.back(), static_cast<float>(0.8 * 0.5 * std::cos(kPi / 4.0)), 1e-5);
+    CHECK_EQ(e.scope(kScopeAudition, scope, 64), 64);
+    CHECK_NEAR(scope[63], 0.4f, 1e-4);
+    // Leaving audition-only mode: the layers are heard and the audition is silent.
+    big.auditionOnly = false;
+    CHECK(e.setProject(big).find("\"ok\":true") != std::string::npos);
+    CHECK_NEAR(run(e, 24000).back(), 150 * 0.001 * std::cos(kPi / 4.0), 1e-5);
+    // Project layer 64 is a layer like any other: its scope is the layer's, not the audition's.
+    CHECK_EQ(e.scope(64, scope, 64), 64);
+    CHECK(scope[63] > 0.0f && scope[63] < 0.01f);
 }

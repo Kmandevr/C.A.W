@@ -381,6 +381,7 @@ void GraphExecutor::reset() noexcept {
     directStaging_.clear();
     routePlain_ = false;
     preparedBytes_ = 0;
+    routingBytes_ = 0;
     staticConnections_ = 0;
     routingCapacity_ = 0;
     runCount_ = 0;
@@ -827,6 +828,7 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
     if (kept == 0) hostInputChannels_ = 0;
     routePlain_ = routePlainInputs;
     routingCapacity_ = maxSourcesPerInput;
+    routingBytes_ = extra;
     return GraphError::Ok;
 }
 
