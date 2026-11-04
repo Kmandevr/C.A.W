@@ -99,7 +99,8 @@ class Steps implements Comparable<Steps> {
 
   // Cross products of values below 2^31 fit a 64-bit int; larger ones (steps near the 2^31 limit with fine
   // fractions) go through BigInt, and a result too big for an int becomes the nearest fraction with a denominator
-  // up to 2^20, so nothing ever wraps around.
+  // up to 2^20, so nothing ever wraps around. That fallback is approximate: a quotient smaller than 2^-21 becomes
+  // exactly zero, so don't divide by the result of a division of huge values.
   static const _small = 1 << 31;
   static bool _fits(int a, int b, int c, int d) => a.abs() < _small && b.abs() < _small && c.abs() < _small && d.abs() < _small;
   static Steps _big(BigInt n, BigInt d) {
