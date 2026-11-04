@@ -104,15 +104,46 @@ updated: 2026-11-04
 
 ### Piano roll
 
-- **It opens docked below the arrangement,** following the selected clip, and can be resized or made full screen. It replaces the 200 px inline roll in the Builder.
-- **#7:** a one-finger drag on empty grid scrolls, and drawing is deliberate.
-- **#21:** with a selection, Copy and Paste buttons appear, and dragging any selected note moves the group.
-- **#15:** curve points snap to the grid, the handles can't be confused, and a curve never lengthens its note.
-- **#9:** check the existing look and size settings.
-- **Note stretching:**
-  - The resize handles at both ends get a touch zone of at least 48 dp. The zone reaches outside the note when the note is narrow.
-  - The new length shows while you drag.
-  - The end eases onto the grid (see Feel). Several selected notes stretch together.
+**[Fact, 2026-11-04, from `pattern_editor.dart` and `note_expression.dart`]** How it works today:
+- **Stretching:** only a note's right end stretches, only for a single note, and the end jumps grid line to grid line.
+- **Pitch curves on the roll:** values snap to semitones but times don't snap. A segment's bend is an invisible vertical drag, unsnapped, with no handle.
+- **Volume and timbre curves:** edited in a 72 px box in the extras panel, with time snapping and no value snapping.
+- **The engine evaluates note curves** (`engine/src/pattern.h`, shape `u^(4^bend)`).
+
+**Owner's spec (2026-11-04):**
+- **Placement:**
+  - It opens docked below the arrangement, following the selected clip, and can be resized or made full screen.
+  - It replaces the 200 px inline roll in the Builder.
+- **One snap switch:**
+  - A magnet button in the roll toolbar turns snapping on or off for notes and every curve.
+  - While it is on, holding Shift (PC) or resting a second finger (touch) bypasses it for that drag.
+- **Two grids:**
+  - **Time:** the existing resolution: adaptive, fixed or triplets.
+  - **Value:** a new value-grid setting beside it: 1/4, 1/8 (the default), 1/16, 10% or 5%. It applies to volume, timbre, velocity and chance.
+  - Pitch snaps to semitones, or to a chosen cents step.
+- **Stretching notes:**
+  - Drag the right end to change the length, or the left end to move the start and keep the end.
+  - With several notes selected, all of them stretch by the same amount.
+  - The end follows your finger exactly. A faint ghost shows the snapped length, and on release the note springs onto the ghost (about 150 ms).
+  - The new length shows as a number while you drag.
+  - Each end has a touch zone of at least 48 dp, reaching outside the note when the note is narrow.
+- **Curves on a stretched note:** a toolbar toggle (also saved as a setting) chooses what happens:
+  - **Stretch with the note:** points keep their relative place. This is today's behaviour.
+  - **Keep their timing:** points keep their absolute time. A longer note holds the last value, and a shorter one trims the curve.
+- **What snaps:** pitch, volume and timbre curves on notes, the velocity and chance lanes, and the arrangement's automation lanes. Points snap to the time grid × the value grid while snap is on.
+- **Handles (both kinds, selectable per point):**
+  - **Bend handle (default):** a visible handle in the middle of each segment. Dragging it bends the segment, and it clicks into detents: straight, then gentle, medium and strong ease-in or ease-out. With snap off it moves freely. It uses the existing `bend` field, so no format change.
+  - **Bezier:** a point can be switched to two Bezier handles that snap to grid intersections. The pattern file and the engine's curve evaluation don't support this yet, so it needs an engine issue (GPT) and a format change. No compatibility is needed before Release 1. The UI ships the bend handle first.
+- **Freehand drawing:**
+  - With the Curve tool, drag to draw a shape.
+  - On release, the stroke is simplified to a few clean points on the grid, which the handles then refine.
+  - With snap off, the points stay where you drew them, still simplified.
+- **Animation:** snapping, ghosts, handles and detents use the motion rules in Feel. Points and handles grow slightly under the finger, and detents give a light haptic tick on Android.
+- **Existing issues folded in:**
+  - **#7:** a one-finger drag on empty grid scrolls, and drawing is deliberate.
+  - **#21:** with a selection, Copy and Paste buttons appear, and dragging any selected note moves the group.
+  - **#15:** precise curve selection, handles that can't be confused with note resizing, and a curve that never lengthens its note.
+  - **#9:** check the existing look and size settings.
 
 ### Code workspace
 

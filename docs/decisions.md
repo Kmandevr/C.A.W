@@ -9,6 +9,14 @@ updated: 2026-11-04
 ## 2026-11-04: UI direction, the arrangement is home
 
 - **Owner:** the arrangement is the home screen, where about 90% of a song is built, and looks like a standard DAW. Empty, nestable tracks hold **several instruments** and effects in a chosen order. Automation lanes drop down under a track, each with a parameter dropdown. MIDI clips are made in the arrangement as in Reaper, and the piano roll opens docked below. The code workspace works like Unity's, with a searchable tree of project assets and user-picked device folders. The mixer is the fine-control screen, like Reaper's. Panels dock and move like Unity's **on the phone too**, with drag and drop onto the arrangement. Motion is light and snapping smooth. Clips and track headers glow with their track's level, and this can be switched off. Track colours plus one accent. A track without clips is silent.
+- **Piano roll (owner, 2026-11-04):**
+  - **Snapping:** one snap switch (with a hold-to-bypass) for notes and every curve. A value grid alongside the time grid.
+  - **Stretching notes:** both ends stretch, and a group stretches together. The end follows the finger, and a ghost shows the snapped length.
+  - **Curves on a stretched note:** a toggle chooses whether they stretch with the note or keep their timing.
+  - **What snaps:** every curve kind, including automation.
+  - **Handles:** bend handles with detents, plus optional per-point Bezier handles. Bezier needs engine and format work.
+  - **Freehand:** freehand strokes simplified to grid points.
+  - **Detail:** [UI plan](ui-plan.md#piano-roll).
 - **Why:** the owner wants one place to build a song that feels like a real DAW and good to use. The plan, today's findings and the open questions are in [UI plan](ui-plan.md).
 - **Consequences:** several instruments per track and silent empty tracks change the engine and project model. The engine part goes to GPT as an issue, and the UI waits for it where it must.
 
