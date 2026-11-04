@@ -1,4 +1,4 @@
-// Real-time checks on the whole Engine: the audio callback never allocates or frees, through seams and code swaps.
+// Real-time checks on the whole Engine and its parameter resolver: the audio path never allocates or frees.
 #include <cstring>
 #include <string>
 #include <vector>
@@ -6,6 +6,7 @@
 #include "alloc_counter.h"
 #include "capi_internal.h"
 #include "engine.h"
+#include "params.h"
 #include "test.h"
 
 using namespace caw;
@@ -63,4 +64,41 @@ TEST(engine_process_never_allocates_through_seams_and_code_swaps) {
     CHECK_EQ(operations, 0u);
     CHECK(peak > 0.01f);
     CHECK_EQ(e.routingRejections(), 0u);
+}
+
+TEST(parameter_resolver_never_allocates_on_the_audio_thread) {
+    ParameterDescriptor p;
+    p.id = "cutoff";
+    p.defaultValue = 1000.0;
+    p.minimum = 20.0;
+    p.maximum = 20000.0;
+    p.curve = ParameterCurve::Exponential;
+    p.step = 0.5;
+    p.smoothingFrames = 48;
+    ParameterResolver r;
+    CHECK(r.configure(p));
+    const ModulationLink links[] = {{1, ModulationOp::Add, 0.25}, {2, ModulationOp::Multiply, 0.5}};
+    CHECK(r.setLinks(links, 2));
+    float lfo[64], env[64];
+    double lane[64], out[64];
+    for (int i = 0; i < 64; ++i) {
+        lfo[i] = static_cast<float>(i) / 64.0f;
+        env[i] = 1.0f - lfo[i];
+        lane[i] = 100.0 + i;
+    }
+    const float* signals[] = {lfo, env};
+    double sum = 0.0;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        r.setBase(5000.0);
+        for (int block = 0; block < 4; ++block) {
+            sum += r.resolve(64, nullptr, signals, out).value;
+            sum += r.resolve(64, block % 2 ? lane : nullptr, nullptr, out).value;
+            r.clearTouch();
+        }
+        operations = scope.count();
+    }
+    CHECK(sum > 0.0);
+    CHECK_EQ(operations, 0u);
 }

@@ -6,6 +6,27 @@ updated: 2026-11-04
 
 # Decisions
 
+## 2026-11-04: F6 parameter model: resolution order and owner choices
+
+- **Owner choices (2026-11-04):**
+  - A manual change while automation exists is a *touch*: the manual value wins until playback restarts, then the lane rules again.
+  - Modulation depth is a fraction of the parameter's range on its curve (normalized 0..1), the same for every parameter.
+  - A mapped MIDI CC sets the base like a knob, jumping straight to the controller's value. Soft takeover can come later.
+  - Native SDK modules keep one value per block, the block's first frame, so the ABI does not change. Built-in and .caw modules get per-frame values when a parameter varies.
+- **Resolution order (after an architect review).** Each frame resolves in this order:
+  1. Base: automation, unless touched; otherwise the manual or MIDI value, smoothed linearly over `smoothingFrames`.
+  2. With no modulation links, the base is only clamped and stepped, so plain values pass bit for bit, as on the Engine's automation path.
+  3. Otherwise: normalize, apply the links in ascending link id (never graph or UI order), clamp to 0..1, denormalize, clamp and step.
+
+  Links are `ModulationOp` Add, Multiply, Min, Max or Replace, each blended from the current value toward its target by depth (−1..1), at most 8 per parameter. NaN or inf modulation reads 0. Exponential curves use `detLog`/`detExp` and their endpoints are exact. A block with nothing varying is one constant, which keeps stereo playback cheap.
+- **Split:**
+  - F6.1: resolver and descriptor fields (curve, step, smoothing, unit).
+  - F6.2: values to processors through the executor.
+  - F6.3: modulation links.
+  - F6.4: automation lanes.
+  - F6.5: MIDI CC mappings.
+  - F6.6: the Engine's .caw params and globals move onto the resolver, with golden hashes unchanged.
+
 ## 2026-11-04: F5.2 event ports in the graph executor
 
 - **Event format (owner).** A C.A.W event with a stable note id: `{frame, kind, flags, noteId, data[4]}` (28 bytes). `data` carries the raw MIDI 2.0 UMP words, so MIDI 1.0/2.0 convert at the edges without loss. Chosen over raw UMP alone, which cannot tell two overlapping notes of the same pitch apart. The executor never interprets kind, flags, note id or data.
