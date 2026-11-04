@@ -60,6 +60,21 @@ void main() {
     expect(engine['automation'][1]['target_type'], 'global');
   });
 
+  test('loading keeps every automation lane and point (F7, owner 2026-11-04)', () {
+    final p = sample();
+    for (var i = 0; i < 257; i++) {
+      p.automation.add(ProjectAutomationLaneDoc(targetType: 'global', target: 'g$i',
+        points: [AutomationPointDoc(step: 0, value: 0)]));
+    }
+    p.automation.first.points = [for (var i = 0; i < 129; i++) AutomationPointDoc(step: i * 0.5, value: i / 129)];
+    p.layers.first.automation.add(AutomationLaneDoc(target: 'volume',
+      points: [for (var i = 0; i < 129; i++) AutomationPointDoc(step: i * 0.5, value: 0.5)]));
+    final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(back.automation, hasLength(257));
+    expect(back.automation.first.points, hasLength(129));
+    expect(back.layers.first.automation.single.points, hasLength(129));
+  });
+
   test('projects without project automation remain valid', () {
     final legacy = sample().toJson()..remove('automation');
     final back = ProjectDoc.fromJson(legacy);

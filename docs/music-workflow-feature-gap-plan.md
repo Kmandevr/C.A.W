@@ -14,6 +14,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 ### Pattern editor and piano roll
 
 - **[Implemented]** Pattern files, piano-roll editor, draw/select/erase tools, adaptive grid, snapping/free timing, triplets, keyboard navigation, note preview, velocity lane, and per-note velocity, chance, ratchet and slide editing.
+- **[Implemented]** Patterns hold any number of notes and curve points in the app as in the engine (F7.1, 2026-11-04).
 - **[Implemented]** MIDI pattern import/export (.mid, .midi2) through the pattern editor. Imported MIDI tempo is not applied to project tempo.
 - **[Implemented]** Curve tool for velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
 - **[Implemented]** Pattern actions include Euclidean, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.

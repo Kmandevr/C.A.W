@@ -3,7 +3,7 @@
 
 An experimental, code-driven sound-design and music workspace. The current Flutter app ships Android and Windows builds; the portable C++20 engine and CLI are also built/tested on Linux and Windows CI targets. The app currently provides eight workspaces for code-based sound creation, pattern editing, arrangement, mixing, inspection, automation, file management and export. Audio runs locally; WAV and MIDI exports support handoff to other music tools.
 
-Project automation supports song-time lanes for module parameters and shared globals; track volume and pan keep their existing lanes.
+Project automation supports song-time lanes for module parameters and shared globals, with any number of lanes and points; track volume and pan keep their existing lanes.
 
 **Current status:** Android and Windows app builds are produced by CI. The app has eight workspaces, but not every planned capability is implemented. See [App](docs/app.md) for shipped behavior, [Engine status](docs/engine-build-status.md) for native implementation boundaries, the [engine blueprint](docs/engine-next.md) for the target engine design, and the [permanent roadmap](docs/roadmap.md) for planned work and sequencing: the engine graph Foundation stage first (in progress: one graph now runs playback and export, with every module of a track as its own node and typed sidechain, modulation, control and event/MIDI ports; one parameter model now resolves manual values, automation, modulation and MIDI CC mappings; resource budgets are next, starting from a caps audit, then the remaining items and live MIDI routing), then Stages 0–7, then the first release.
 

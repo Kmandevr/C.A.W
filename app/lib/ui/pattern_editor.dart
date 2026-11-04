@@ -791,7 +791,7 @@ class _PatternEditorState extends State<PatternEditor> {
     final out = [...pts];
     final i = out.indexWhere((x) => x.t > q.t);
     out.insert(i < 0 ? out.length : i, q);
-    return out.take(NoteExpression.maxPoints).toList();
+    return out;
   }
 
   void _bendMove(Offset p) {

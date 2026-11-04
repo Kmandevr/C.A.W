@@ -36,7 +36,7 @@ Implemented UI/workflow foundations include:
 - External CLAP/VST3 binary build/hosting and native module dynamic loading.
 - Additional polish only where tests or real-device use demonstrate a gap.
 
-The existing piano-roll curve tools and pattern generators are implemented; do not list them as missing.
+The existing piano-roll curve tools and pattern generators are implemented, with no note or curve-point cap since F7.1; do not list them as missing.
 
 ## Verification rule
 

@@ -112,6 +112,8 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 
 ### Pattern editor (piano roll and drum grid)
 
+Patterns have no note or curve-point cap (F7.1, 2026-11-04), so actions work on any size.
+
 Notes:
 
 | Action | Default keys |

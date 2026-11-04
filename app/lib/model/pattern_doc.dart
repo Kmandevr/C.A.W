@@ -16,8 +16,12 @@
 import 'dart:math' as math;
 
 /// The engine's limits (engine/src/pattern.h).
-const int kPatternMaxSteps = 4096;
-const int kPatternMaxNotes = 4096;
+// The engine's step representation (engine/src/pattern.cpp, an int): the only bound on a note's start, a length
+// or a pattern's length. There is no note-count or curve-point cap (F7, owner 2026-11-04).
+const int kPatternMaxSteps = 2147483647;
+const int kPatternMaxBars = 2147483647 ~/ 64;
+// One generate step (random notes, arpeggiate) refuses to make more notes than this rather than freezing the app.
+const int kPatternMaxGenerated = 1 << 20;
 const int kPatternMaxRatchet = 8;
 
 /// The shortest note an edit makes: 1/32 of a step (1/512 bar in 4/4).
@@ -243,7 +247,6 @@ class NoteExpression {
   final double vibDepth, vibRate, vibFade;
 
   static const none = NoteExpression();
-  static const maxPoints = 16;
   static const maxBend = 48.0;
 
   bool get isEmpty => bend.isEmpty && press.isEmpty && timbre.isEmpty && vibDepth == 0;
@@ -506,7 +509,6 @@ double _needNumber(_Word w, int line, String what, double lo, double hi, String 
       throw _PatternError(line, w[k].col, '${key.text} values must be ${formatNumber(lo)} to ${formatNumber(hi)}');
     }
     if (b < -1 || b > 1) throw _PatternError(line, w[k].col, 'a bend (after ~) must be -1 to 1');
-    if (pts.length >= NoteExpression.maxPoints) throw _PatternError(line, w[k].col, 'a curve has at most 16 points');
     pts.add(NotePoint(t, v, b));
     last = t;
     k++;
@@ -613,9 +615,9 @@ class PatternDoc {
       if (w.length < 3) {
         throw _PatternError(lineNo, w[0].col, 'a note line is: at  note  length  [velocity]  [extras]');
       }
-      final at = _needSteps(w[0], lineNo, 'the start (in steps)', 0, '0 to 4096');
+      final at = _needSteps(w[0], lineNo, 'the start (in steps)', 0, '0 to $kPatternMaxSteps');
       final chord = _pitches(w[1], lineNo);
-      final len = _needSteps(w[2], lineNo, 'the length (in steps)', 1e-3, '0.001 to 4096');
+      final len = _needSteps(w[2], lineNo, 'the length (in steps)', 1e-3, '0.001 to $kPatternMaxSteps');
       var vel = 1.0, prob = 1.0, ratchet = 1, slide = false;
       var expr = NoteExpression.none;
       var k = 3;
@@ -660,9 +662,6 @@ class PatternDoc {
       final comment = cut >= 0 ? _trim(raw.substring(cut + 2)) : null;
       final group = <PatternNote>[];
       for (final pitch in chord) {
-        if (notes.length >= kPatternMaxNotes) {
-          throw _PatternError(lineNo, w[0].col, 'a pattern holds at most 4096 notes');
-        }
         final n = PatternNote(
           id: id++,
           at: at,
@@ -722,7 +721,8 @@ class PatternDoc {
       throw _PatternError(lineNo, col, 'length is a number of steps (16) or bars (4 bars)');
     }
     final n = _needNumber(
-        w[0], lineNo, 'length', 1, bars ? 256 : kPatternMaxSteps.toDouble(), bars ? '1 to 256' : '1 to 4096');
+        w[0], lineNo, 'length', 1, (bars ? kPatternMaxBars : kPatternMaxSteps).toDouble(),
+        bars ? '1 to $kPatternMaxBars' : '1 to $kPatternMaxSteps');
     if (n != n.floorToDouble()) throw _PatternError(lineNo, col, 'length must be a whole number');
     return bars ? (0, n.toInt()) : (n.toInt(), 0);
   }
@@ -948,9 +948,8 @@ class PatternDoc {
 
   static double _round3(double v) => (v * 1000).round() / 1000;
 
-  /// Adds a note (start, pitch and length clamped to the engine's ranges); id null when the pattern is full.
+  /// Adds a note (start, pitch and length clamped to the engine's ranges).
   ({PatternDoc doc, int? id}) insert(Steps at, double pitch, Steps len, {double vel = 1}) {
-    if (notes.length >= kPatternMaxNotes) return (doc: this, id: null);
     final n = PatternNote(
       id: _nextId,
       at: at.clamp(Steps.zero, Steps(kPatternMaxSteps)),
@@ -968,7 +967,7 @@ class PatternDoc {
             if (!sel.contains(n.id)) n
         ]);
 
-  /// Moves the selection as a block; the deltas are clamped so every note stays at 0..4096 steps and pitch 0..127.
+  /// Moves the selection as a block; the deltas are clamped so every note stays in the engine's step range and pitch 0..127.
   PatternDoc move(Set<int> sel, Steps dTime, double dPitch) {
     final s = _selected(sel);
     if (s.isEmpty) return this;
@@ -985,7 +984,7 @@ class PatternDoc {
     return _map(sel, (n) => n.copyWith(at: n.at + dt, pitch: n.pitch + dp));
   }
 
-  /// Changes lengths by [dLen], each at least [kMinNoteLength] (1/32 step) and at most 4096.
+  /// Changes lengths by [dLen], each at least [kMinNoteLength] (1/32 step) and at most [kPatternMaxSteps].
   PatternDoc resize(Set<int> sel, Steps dLen) =>
       _map(sel, (n) => n.copyWith(len: (n.len + dLen).clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
 
@@ -1005,15 +1004,15 @@ class PatternDoc {
     );
   }
 
-  /// Adds a clip's notes starting at [at] and returns their ids. Notes past 4096 steps or past the note limit are
-  /// dropped. Copies carry no trailing comments.
+  /// Adds a clip's notes starting at [at] and returns their ids. Only notes outside the engine's step range (before 0
+  /// or past [kPatternMaxSteps]) are left out. Copies carry no trailing comments.
   ({PatternDoc doc, Set<int> ids}) paste(PatternClip clip, Steps at) {
     final out = [...notes];
     final ids = <int>{};
     var id = _nextId;
     for (final c in clip.notes) {
       final t = at + c.at;
-      if (t > Steps(kPatternMaxSteps) || t < Steps.zero || out.length >= kPatternMaxNotes) continue;
+      if (t > Steps(kPatternMaxSteps) || t < Steps.zero) continue;
       out.add(c.copyWith(id: id, at: t, trailingComment: null, line: null));
       ids.add(id++);
     }
@@ -1085,7 +1084,7 @@ class PatternDoc {
     final ids = <int>{};
     var id = _nextId;
     for (final n in notes) {
-      if (!sel.contains(n.id) || n.at >= time || n.end <= time || out.length + 1 >= kPatternMaxNotes) {
+      if (!sel.contains(n.id) || n.at >= time || n.end <= time) {
         out.add(n);
         continue;
       }
@@ -1277,7 +1276,8 @@ class PatternDoc {
 
   // ---------- generators (roll.gen.*) ----------
 
-  /// Adds notes, each clamped like [insert]; stops at the note limit. Returns the new notes' ids.
+  /// Adds notes, each clamped like [insert] (a note starting past the step range is left out). Returns the new
+  /// notes' ids.
   ({PatternDoc doc, Set<int> ids}) _addAll(Iterable<({Steps at, double pitch, Steps len, double vel})> add,
       {Set<int> remove = const {}}) {
     final out = [
@@ -1287,7 +1287,7 @@ class PatternDoc {
     final ids = <int>{};
     var id = _nextId;
     for (final a in add) {
-      if (out.length >= kPatternMaxNotes || a.at >= Steps(kPatternMaxSteps)) continue;
+      if (a.at >= Steps(kPatternMaxSteps)) continue;
       out.add(PatternNote(
         id: id,
         at: a.at.clamp(Steps.zero, Steps(kPatternMaxSteps)),
@@ -1323,7 +1323,8 @@ class PatternDoc {
         if (key == null || key.scale.contains((p - key.root) % 12)) p
     ];
     if (pitches.isEmpty || cell <= Steps.zero) return (doc: this, ids: <int>{});
-    final cells = (span / cell).floor().clamp(0, kPatternMaxNotes);
+    final cells = (span / cell).floor();
+    if (cells > kPatternMaxGenerated) return (doc: this, ids: <int>{});  // refused whole, never cut short
     return _addAll([
       for (var i = 0; i < cells; i++)
         if (r.nextDouble() < density)
@@ -1350,7 +1351,8 @@ class PatternDoc {
         _ => c,
       };
       final len = c.map((n) => n.len).reduce(Steps.max), start = c.first.at;
-      final count = math.max(1, (len / rate).ceil()).clamp(1, kPatternMaxNotes);
+      final count = math.max(1, (len / rate).ceil());
+      if (add.length + count > kPatternMaxGenerated) return (doc: this, ids: <int>{});  // refused whole
       for (var i = 0; i < count; i++) {
         final t = start + rate.times(i), n = run[i % run.length];
         add.add((at: t, pitch: n.pitch, len: Steps.min(rate, start + len - t), vel: n.vel));

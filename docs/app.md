@@ -49,7 +49,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - lanes: velocity (Alt+V, on) and chance with ratchet and slide marks (Alt+X); drag in a lane to set the notes starting there
     - triplets (Alt+0) make every grid size 2/3 as long
     - the ⋮ menu imports a MIDI file (.mid or MIDI 2.0 clip) in place of the notes (one undo step; its tempo isn't applied) and exports the pattern as `.mid` or `.midi2` at the project's tempo
-    - Curve mode edits velocity/chance lane curves and per-note expression curves (pitch bend, pressure/volume and timbre); point and segment-bend editing is implemented. Pattern actions include Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
+    - Curve mode edits velocity/chance lane curves and per-note expression curves (pitch bend, pressure/volume and timbre); point and segment-bend editing is implemented, with no cap on notes or curve points (F7.1, 2026-11-04). Pattern actions include Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - the main workspace is a horizontal timeline with a bar ruler and one lane per track; the former layer-card list has been replaced
   - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
@@ -58,7 +58,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - the separate Mixer panel edits the same track volume and pan values as the engine; it does not maintain duplicate mix state
   - project settings and global controls are available from the settings button rather than permanently occupying the timeline
   - folders can be nested, collapsed and moved; bus folders sum child stereo audio and apply group volume/pan, while organization-only folders simply group tracks
-  - track volume/pan lanes and project-level module-parameter/global lanes are serialized separately; project lanes have song-time point editing, curve previews and automation undo/redo, and the native VM evaluates parameter curves per sample
+  - track volume/pan lanes and project-level module-parameter/global lanes are serialized separately; project lanes (any number, with any number of points; F7.1, 2026-11-04) have song-time point editing, curve previews and automation undo/redo, and the native VM evaluates parameter curves per sample
   - empty-lane drags make time selections; selected clips can be split, snapped, moved, resized or source-offset shifted with Alt-drag
   - Shift-tap selects companion clips; their notes appear as references in the existing piano roll. Explicit multi-edit mode mirrors note edits to selected independent sources while preserving local note IDs; clips sharing a pattern source stay linked
   - the playhead overlay reads the 30 Hz meter tick independently, so the moving line repaints without rebuilding the clip grid or track layout

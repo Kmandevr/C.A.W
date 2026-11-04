@@ -944,7 +944,7 @@ class AppState extends ChangeNotifier {
   }
 
   void addProjectAutomationLane(String targetType, String target, [String? moduleId]) {
-    if (project.automation.length >= 256 || target.isEmpty) return;
+    if (target.isEmpty) return;
     if (targetType != 'global' && targetType != 'param') return;
     if (targetType == 'param' && (moduleId == null || moduleId.isEmpty)) return;
     if (project.automation.any((lane) => lane.targetType == targetType &&
@@ -982,7 +982,6 @@ class AppState extends ChangeNotifier {
   }
 
   void addProjectAutomationPoint(ProjectAutomationLaneDoc lane, double step, double value) {
-    if (lane.points.length >= 128) return;
     _pushAutomationUndo();
     final at = step.clamp(0.0, project.maxArrangementSteps.toDouble()).toDouble();
     if (lane.points.any((point) => (point.step - at).abs() < 0.01)) return;
@@ -1033,7 +1032,6 @@ class AppState extends ChangeNotifier {
   }
 
   void addAutomationPoint(LayerDoc layer, AutomationLaneDoc lane, double step, double value) {
-    if (lane.points.length >= 128) return;
     _pushAutomationUndo();
     final at = step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
     if (lane.points.any((p) => (p.step - at).abs() < 0.01)) return;
