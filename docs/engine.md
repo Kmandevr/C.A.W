@@ -287,7 +287,7 @@ The app, the CLI and exports share one format:
 - `audition` is the Builder's preview, with an optional pattern. With `audition_only`, only that chain is heard.
 - Values outside their range are clamped:
   - BPM 20–400
-  - 64 layers
+- Any number of layers: the Engine grows to fit, up to what its memory budget allows (`maxLayers()`), and refuses a project with more by name (F7.3).
 - Song positions are refused with a message naming the field, never moved or shortened (F7.2): `loop_bars`, layer `length_steps`, clip `start_steps`/`length_steps`/`source_offset_steps`, automation point steps and the audition length must be whole numbers (points may be fractional) that fit the 32-bit step count, so a song holds whole bars up to 2^31 − 1 steps (`maxLoopBars`/`maxArrangementSteps` in `engine/src/project.h`). Project automation lengthens the loop to reach its last point.
 - Clips are expanded off the audio thread. A layer whose clips would expand past the project-state budget left (an upper bound, checked before expanding) is not installed, with a warning. Building takes about three times the result, so that peak must fit the budget left after the project so far and the layer's own chain.
 - Fields the app adds for itself, such as colours, are ignored.
@@ -344,7 +344,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 267 tests and `engine/build/caw_rt_tests` 73 more (CTest runs both):
+`engine/build/caw_tests` runs 274 tests and `engine/build/caw_rt_tests` 74 more (CTest runs both):
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
