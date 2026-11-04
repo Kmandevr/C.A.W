@@ -22,13 +22,13 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F5 → F6 → F7 
   - Callgrind: playback +0.05–0.09%, graph bench +0.8%.
 
 ## Open
-- The F5.1 audio review is in progress.
+- The F5.1 audio review is done: no defects; both hardening items are fixed test-first (held control values saturate; reserveRouting after process unbinds stale host buffers). Tests: caw_rt_tests 42/42.
 - F5.2 event format: owner decision needed. The architect recommends a C.A.W event with a note id, carrying raw UMP; see `docs/decisions.md` (2026-11-04).
 - Issue #78: the swap-fade import buffers are renumbered (an older bug).
 - F10 seeds for native plugins need an SDK ABI change, so the owner must approve it.
 
 ## Next
-1. Address the review, run release-check, open the F5.1 PR to Main, and merge when CI is green.
+1. The F5.1 PR to Main is open; merge it when CI is green.
 2. Ask the owner about the event format, then F5.2 (event ports).
 
 ## Read first

@@ -4,6 +4,7 @@
 #include "alloc_counter.h"
 #include "graph.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -1162,4 +1163,41 @@ TEST(graph_dynamic_routing_stays_audio_only_beside_typed_ports) {
     CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
     // in (routed: silence) x amount (silence) + side x 10, all x the 0.75 default
     CHECK_EQ(out.data[0][5], signal(0, 5) * 10.0f * 0.75f);
+}
+
+TEST(graph_reserve_routing_after_processing_drops_the_previous_host_buffer) {
+    // A plain input that was host-fed, then made routable, must read silence, never the last
+    // host buffer it was bound to (which the host may have freed).
+    StereoRoutingModules m;
+    Copy plain(m.plain);
+    GraphExecutor executor;
+    CHECK(executor.prepare({{"plain", &m.plain}}, {}, {&plain}, 0, 16, 48000.0, kBudget) == GraphError::Ok);
+    Planar host(2, 16, 0.5f), out(2, 16);
+    CHECK(executor.process(host.constView(16), out.view(16), 16));
+    CHECK_EQ(out.data[0][3], 0.5f);
+    CHECK(executor.reserveRouting(1, kBudget, true) == GraphError::Ok);
+    for (auto& channel : host.data) std::fill(channel.begin(), channel.end(), 0.9f);
+    CHECK(executor.process(ConstChannelBufferView{}, out.view(16), 16));
+    CHECK_EQ(out.data[0][3], 0.0f);
+    CHECK_EQ(out.data[1][15], 0.0f);
+}
+
+TEST(graph_typed_control_values_saturate_like_routing) {
+    // A held control value must not latch NaN or inf: NaN reads 0, inf reads FLT_MAX.
+    TypedModules m;
+    ControlSource nan(m.control, std::numeric_limits<float>::quiet_NaN());
+    ControlSource inf(m.control, -std::numeric_limits<float>::infinity());
+    ModSource ones(m.mod, 0, 1.0f, true);
+    Processor a(m.proc), b(m.proc);
+    for (int k = 0; k < 2; ++k) {
+        GraphExecutor executor;
+        ControlSource& source = k == 0 ? nan : inf;
+        Processor& proc = k == 0 ? a : b;
+        CHECK(executor.prepare({{"ctl", &m.control}, {"one", &m.mod}, {"p", &m.proc}},
+                               {{0, 0, 2, kLevel}, {1, 0, 2, kAmount}}, {&source, &ones, &proc}, 2, 8, 48000.0, kBudget) ==
+              GraphError::Ok);
+        Planar host(2, 8, 1.0f), out(2, 8);
+        CHECK(executor.process(host.constView(8), out.view(8), 8));
+        CHECK_EQ(out.data[0][0], k == 0 ? 0.0f : -std::numeric_limits<float>::max());
+    }
 }

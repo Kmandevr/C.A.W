@@ -654,7 +654,13 @@ GraphError GraphExecutor::reserveRouting(uint32_t maxSourcesPerInput, const Grap
     std::size_t kept = 0;
     for (Port& port : ports_) {
         if (!port.host) continue;
-        if (routePlainInputs || port.summing) { port.host = false; continue; }  // plain ones already read silence
+        if (routePlainInputs || port.summing) {
+            port.host = false;
+            // A plain one may still hold the last host buffer a process() call bound: unbind it.
+            if (!port.summing)
+                for (uint32_t c = 0; c < port.channels; ++c) inputTable_[port.table + c] = zero_.data();
+            continue;
+        }
         for (uint32_t c = 0; c < port.channels; ++c) hostInputSlots_[kept++] = port.table + c;
     }
     hostInputSlots_.resize(kept);
@@ -778,6 +784,11 @@ bool GraphExecutor::processValidated(const ConstChannelBufferView& input, const 
                 controlInTable_.data() + b.controlIn, b.controlInCount,
                 controlOutTable_.data() + b.controlOut, b.controlOutCount};
             ok = processors_[node]->processPorts(block);
+            // Control values are held across blocks, so a NaN or inf must not latch: same rule as routing.
+            for (uint32_t v = 0; v < b.controlOutCount; ++v) {
+                float& value = *controlOutTable_[b.controlOut + v];
+                value = routeSample(value);
+            }
         }
         if (!ok) { fail(node, output, frames); return false; }
     }

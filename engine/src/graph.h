@@ -103,7 +103,9 @@ CompiledGraph compileGraph(const std::vector<GraphNode>& nodes,
 // (route_math.h). Any other input takes at most one connection.
 // Unconnected inputs: a node's first audio input reads the host input (so all of those must have
 // the same channel count); any other audio input (a sidechain) and every modulation input reads
-// silence; a control input reads its port's defaultValue. Graph output is the output node's first
+// silence; a control input reads its port's defaultValue. Control outputs saturate after each
+// block (NaN reads 0, beyond float range +/-FLT_MAX); plain audio and modulation connections pass
+// bits unchanged. Graph output is the output node's first
 // audio output. Values are never converted between port types.
 // If a processor returns false the block fails: process() returns false, zeroes the host output
 // and records the failing node. process() rebinds host channels into the prepared input table,
