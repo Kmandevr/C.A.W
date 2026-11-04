@@ -74,12 +74,20 @@ struct EventOutput {
     uint32_t capacity = 0;
     uint32_t count = 0;
 };
+// How a parameter's range maps to 0..1 (the normalized scale modulation depth is a fraction of).
+// Exponential needs minimum > 0 and suits frequencies and times.
+enum class ParameterCurve : uint8_t { Linear, Exponential };
+inline constexpr uint32_t kMaxParameterSmoothingFrames = 1u << 20;  // about 22 s at 48 kHz
 struct ParameterDescriptor {
     std::string_view id;
     double defaultValue = 0.0;
     double minimum = 0.0;
     double maximum = 1.0;
     bool automatable = true;
+    ParameterCurve curve = ParameterCurve::Linear;
+    double step = 0.0;             // > 0: values snap to minimum + k * step; 0: continuous
+    uint32_t smoothingFrames = 0;  // a manual or MIDI change ramps linearly over this many frames (at most kMaxParameterSmoothingFrames)
+    std::string_view unit;         // display only ("Hz", "dB"); never interpreted or matched
 };
 enum class UiControlKind : uint8_t { Slider, Toggle, Dropdown, XYPad, Button, Curve };
 struct UiControlDescriptor {
@@ -106,7 +114,8 @@ enum class ModuleValidation : uint8_t {
     EmptyPortId, DuplicatePortId, InvalidPortType, InvalidPortLayout, EmptyParameterId,
     DuplicateParameterId, InvalidParameterRange, DefaultOutsideRange, MissingUiControlArray,
     EmptyUiControlId, InvalidUiControlKind, DuplicateUiControlId, UiControlMissingParameter,
-    InvalidUiControlRange, TooManyChannels, InvalidSummingPort, InvalidPortDefault
+    InvalidUiControlRange, TooManyChannels, InvalidSummingPort, InvalidPortDefault,
+    InvalidParameterStep, InvalidParameterCurve, InvalidParameterSmoothing
 };
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& descriptor) noexcept;
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept;

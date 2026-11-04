@@ -239,6 +239,8 @@ See [vision](vision.md), [architecture](architecture.md), [synth](synth.md), [pe
 
 ### One parameter model
 
+**[Fact, 2026-11-04]** The resolution stage exists as `ParameterResolver` (Foundation F6.1, not yet wired in): its order, operations and the owner's choices on touch, depth units, MIDI CC and native per-block values are in [decisions](decisions.md) ("F6 parameter model").
+
 Use one typed, addressable parameter model across built-in instruments, effects, native modules, the .caw VM, tracks, buses and project-level controls. Each parameter defines a stable identity, value type, range, default, units, scaling/curve, smoothing behavior, automation eligibility and serialization/version rules.
 
 A parameter must be controllable through any supported source without requiring a separate implementation for each module type. UI controls, MIDI/controller input, project automation, modulation links and mathematical expressions all resolve to the same parameter contract. Keep control and UI presentation separate: a parameter can be internally controllable without being displayed, while user-facing parameters can be exposed as knobs, sliders, text/numeric entry, curves or custom controls.
