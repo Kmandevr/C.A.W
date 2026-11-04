@@ -2,7 +2,7 @@
 title: Engine and language reference
 summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI and the tests.
 covers: [engine/, examples/]
-updated: 2026-11-02
+updated: 2026-11-04
 ---
 
 # Engine and language reference
@@ -342,7 +342,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 236 tests and `engine/build/caw_rt_tests` 30 more (CTest runs both):
+`engine/build/caw_tests` runs 239 tests and `engine/build/caw_rt_tests` 33 more (CTest runs both):
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.

@@ -1,10 +1,16 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-03
+updated: 2026-11-04
 ---
 
 # Decisions
+
+## 2026-11-04: F4.4, every track module is a graph node
+
+- **Done now, with float edges (owner).** Asked whether to split tracks into module nodes now or with parallel effects (2.3), the owner chose now, with 32-bit float edges between modules (the F4.2 rule). Each module's output rounds to float, so 9 template and 8 mixer golden hashes were re-recorded. **[Fact, 2026-11-04]** The old engine with only that rounding added renders the new hashes bit for bit, including new effect-chain, seam, pattern and code-swap cases; 24-bit renders differ from before by at most 1 LSB.
+- **A track has 32 module nodes.** The mix graph is prepared once, at Engine construction, so each slot gets a fixed set of module nodes; a longer chain is refused with a layer error, never cut short. F7 may replace the number with a budget.
+- **Seams and code swaps run as lanes, not extra graph shapes.** Module edges carry three lanes (current chain, seam shadow, replaced chain), and chunks end at each playing track's loop restarts and swap points, so every node runs whole segments and the order of state hand-overs stays as before.
 
 ## 2026-11-03: Seeded randomness everywhere, per project and per module
 

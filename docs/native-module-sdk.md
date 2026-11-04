@@ -1,7 +1,7 @@
 ---
 title: Native module SDK
 summary: C ABI contract for trusted native CAW DSP modules, validation, real-time rules, state and packaging.
-updated: 2026-11-03
+updated: 2026-11-04
 covers: [engine/include/caw_module_sdk.h, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
 ---
 
@@ -11,7 +11,7 @@ covers: [engine/include/caw_module_sdk.h, engine/src/module.*, engine/src/module
 
 ## One module system
 
-Built-in modules and add-on modules share the same stable identity, typed ports, parameter metadata, graph validation, state versioning and processing model: internally N-channel planar buffers with a stereo adapter, summing (mix-bus) inputs since F4.1 (2026-11-03) and audio-thread re-routing of summing inputs since F4.3 (`GraphExecutor::setRouting`), which the Engine's mix graph uses; which saturate a processor's inf at ±FLT_MAX and treat NaN as 0 (`route_math.h`). The C ABI v1 below stays stereo with no channel count; `engine/src/sdk_layout.h` maps its layout values explicitly. The C ABI in `engine/include/caw_module_sdk.h` is the native boundary; it intentionally avoids a C++ ABI so modules can be built with different compilers.
+Built-in modules and add-on modules share the same stable identity, typed ports, parameter metadata, graph validation, state versioning and processing model: internally N-channel planar buffers with a stereo adapter, summing (mix-bus) inputs since F4.1 (2026-11-03) and audio-thread re-routing of summing inputs since F4.3 (`GraphExecutor::setRouting`), plus one-source routes into plain inputs since F4.4 (`prepareRouted`), which the Engine's mix graph uses; which saturate a processor's inf at ±FLT_MAX and treat NaN as 0 (`route_math.h`). The C ABI v1 below stays stereo with no channel count; `engine/src/sdk_layout.h` maps its layout values explicitly. The C ABI in `engine/include/caw_module_sdk.h` is the native boundary; it intentionally avoids a C++ ABI so modules can be built with different compilers.
 
 ## Entry point
 

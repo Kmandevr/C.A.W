@@ -1,7 +1,7 @@
 ---
 title: Modular adaptive engine blueprint
 summary: Complete native-engine architecture and implementation requirements; actual progress and recovery are tracked separately.
-updated: 2026-11-03
+updated: 2026-11-04
 covers: [engine/, app/]
 ---
 
@@ -191,12 +191,12 @@ Untrusted .caw source runs in the constrained module language, with no I/O, file
 ## 11. Verification: what “without compromise” means
 
 No one can promise bugs are impossible. The engineering commitment is explicit invariants, tests and measured results. Every meaningful change must preserve or add:
-- Existing language semantics and golden renders.
+- Existing language semantics; golden renders change only for an intended sound change, with the reason and a measurement.
 - Stereo correctness; no clipping or NaN propagation.
 - Deterministic seeded output where promised.
 - Audio-thread safety and sanitizer coverage.
 - Graph validation, cycle handling, bounded resources and safe graph swaps.
-- Stable project/asset serialization and migration tests.
+- Stable project/asset serialization tests, and migration tests from Release 1 on (before it there are no projects to keep, owner 2026-11-03).
 - C ABI/module API version compatibility.
 - Benchmarks for low-end-like budgets and larger desktop workloads.
 - Stress tests for voices, unison, module count, modulation fan-out, long renders and live edits.
@@ -218,7 +218,7 @@ This is the technical dependency order for the modular engine foundations. It is
 8. **Export/integration:** module packages, MIDI/audio exports, then CLAP and VST3 generation.
 9. **Hardware tuning:** benchmark on actual low-end and target devices; tune per-platform policies and document measured results.
 
-Do not attempt a one-shot rewrite. Keep existing project files, .caw modules and C API working through versioned migration. Each stage must leave a buildable, testable product.
+Do not attempt a one-shot rewrite. Each stage must leave a buildable, testable product. Until Release 1, project files need not stay loadable and the old engine's sound is not a target (owner, 2026-11-03); `.caw` modules and the C API change only through versioned, tested steps.
 
 ## 13. Implementation status
 
@@ -347,7 +347,7 @@ Compile/prepare graph topology, routing, parameter resolution and scheduling awa
 
 ### Compatibility and evolution
 
-Version extension APIs, graph data and serialized module state. Preserve existing projects through migrations and defaults. Capability negotiation must identify unavailable modules or features and provide a clear fallback or actionable error rather than silently changing project behavior. Experimental interfaces may evolve, but isolate them from stable contracts and provide migration paths.
+Version extension APIs, graph data and serialized module state. From Release 1 on, preserve existing projects through migrations and defaults. Capability negotiation must identify unavailable modules or features and provide a clear fallback or actionable error rather than silently changing project behavior. Experimental interfaces may evolve, but isolate them from stable contracts and provide migration paths.
 
 ### Required verification
 
