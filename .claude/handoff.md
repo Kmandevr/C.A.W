@@ -12,7 +12,7 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 
 ## Done and verified
 - F1–F6 on Main; F7 caps audit #88, F7.1 #89, F7.2 #92, F7.3 part A #93.
-- F7.3 part B committed on this branch (779c5e8, docs 64f243f), not merged: an audio review found must-fix problems, listed in issue #94. The owner handed the remaining engine work to GPT on 2026-11-04.
+- F7.3 part B merged to Main unfinished (owner, 2026-11-04); the audio review's must-fix problems are open in issue #94. The owner handed the remaining engine work to GPT on 2026-11-04.
 
 ## Open
 - Issue #78: swap-fade import buffers are renumbered (an older bug).
@@ -22,7 +22,7 @@ Owner (2026-11-03): finish the roadmap Foundation stage (#28): F6 → F7 → F8,
 
 ## Next
 1. Engine (GPT): issue #94, then F7.3 part C, F7.4, F8 and F10 (#28).
-2. Claude (owner, 2026-11-04): UI work.
+2. Claude (owner, 2026-11-04): plan the UI work (all of #7, #9, #15, #19, #20, #21, #23, #40 and an overall look-and-layout pass); don't build until the owner says so.
 
 ## Read first
 - `docs/roadmap.md`
