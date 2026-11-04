@@ -30,6 +30,17 @@ updated: 2026-11-04
   - **Zoom and drag:** pinch both ways. Drag and drop adds instruments, effects (always to the track's chain), patterns and new tracks.
   - **Glow:** subtle and adjustable.
   - **Detail:** [UI plan](ui-plan.md#arrangement-home).
+- **Piano roll, hearing and drawing (owner, 2026-11-04):**
+  - **Hearing:** a note plays while it is dragged or placed, and a pitch change ends the old preview before the new one starts. This needs a note on/off C API.
+  - **Drawing:** drawing stays as today, plus the confirmed quality-of-life tweaks.
+  - **Extras:** scale highlight, snap to scale and ghost notes.
+- **Code workspace (owner, 2026-11-04):**
+  - **Tree:** project assets plus picked device folders, showing C.A.W-related files.
+  - **Search and files:** search covers names, tags and contents. Files support new, rename, duplicate, trash, drag to move, drag onto the arrangement, favourites and tags.
+  - **Tabs and running:** tabs with autosave for project files. Code runs automatically after a pause, plus Run.
+  - **Editor:** inline errors, hover docs, find and replace, go to definition, multi-cursor, folding, snippets and format.
+  - **Side panels:** Controls, Problems, Scope and Library.
+  - **Detail:** [UI plan](ui-plan.md#code-workspace).
 - **Why:** the owner wants one place to build a song that feels like a real DAW and good to use. The plan, today's findings and the open questions are in [UI plan](ui-plan.md).
 - **Consequences:** several instruments per track and silent empty tracks change the engine and project model. The engine part goes to GPT as an issue, and the UI waits for it where it must.
 

@@ -178,6 +178,22 @@ updated: 2026-11-04
   - On release, the stroke is simplified to a few clean points on the grid, which the handles then refine.
   - With snap off, the points stay where you drew them, still simplified.
 - **Animation:** snapping, ghosts, handles and detents use the motion rules in Feel. Points and handles grow slightly under the finger, and detents give a light haptic tick on Android.
+- **Hearing notes (owner):**
+  - A note plays when you place it or move it.
+  - While you drag, the note sounds as long as your finger is down and stops when you let go. A pitch change during the drag ends the old note before the new one starts, so previews never pile up.
+  - A group drag plays the selection as a chord. Moving a note in time only doesn't retrigger it.
+  - A tap that places a note plays it for a short time (about 250 ms).
+  - "Hear notes" in ⋮ turns this off.
+  - **Engine dependency:** the C API has no note-on/off call (checked in `engine/include/caw.h`, 2026-11-04). Previews need one: a real-time-safe note on/off into a track's instrument through the engine's event queue. This is a GPT issue.
+- **Drawing notes (owner):** it works as today, which is nice to use on a phone: a tap places a note of the last length, and dragging sets its length. Quality-of-life tweaks (owner-confirmed):
+  - a ghost note under your finger at touch-down, so you see where it lands before you lift
+  - auto-scroll when a draw or drag reaches the edge of the view
+  - the length shown as a number while drawing
+  - a new note keeps the last velocity used
+- **Scale and ghosts (owner):**
+  - The rows of the project's key are shaded on the keyboard and the grid.
+  - A "snap to scale" option keeps notes in the key while drawing and moving.
+  - Other clips' notes, from the same track or chosen tracks, show faintly behind the notes you edit.
 - **Toolbar (owner: one context-aware row):**
   - **Fixed, left to right:**
     - the four tools: Draw, Select, Curve, Erase
@@ -200,19 +216,46 @@ updated: 2026-11-04
 
 ### Code workspace
 
-- **A file tree on the left (Unity's Project window), editor tabs in the middle and problems below.**
-  - The tree has search, folders, tags and favourites. It shows the project's assets and the device folders the user has added.
-  - Editor tabs keep unsaved marks.
-  - The problems list jumps to errors.
-  - Inspector-style controls show beside the code.
-- **Device folders:**
-  - **Windows:** read through `dart:io`.
-  - **Android:** read through the Storage Access Framework. The user picks a folder, and the app keeps that permission.
-  - **[Proposal]** Write this as a small Kotlin platform channel in the app, not a package. `shared_storage` (MIT) exists but has a reported bug where the permission is lost after a reboot, and `saf` has no stated licence.
-  - Files from device folders are untrusted input: a `.caw` from a device folder runs under the same constrained-language rules as a downloaded module.
+**Owner's spec (2026-11-04):** it works like Unity's, a real coding environment rather than a text box. Its panels are ordinary dock panels (Shell and docking), so the phone splits them too.
+
+- **File tree (Unity's Project window):**
+  - It holds the project's assets in folders: instruments, effects, patterns and libraries.
+  - It also holds the device folders the user adds:
+    - **Windows:** read through `dart:io`.
+    - **Android:** read through the Storage Access Framework, as a small Kotlin platform channel in the app (see the open questions).
+  - Device folders show only C.A.W-related files: `.caw`, `.cawproj`, `.mid`, `.wav`, `.txt` and `.md`. Other files are hidden.
+  - **Operations:**
+    - new, rename, duplicate and delete, from a long-press menu or the keyboard. Delete goes to an in-app trash and can be undone.
+    - drag to move between folders. A drag between the project and a device folder copies.
+    - drag onto the arrangement (see Arrangement)
+    - stars that pin favourites at the top, and tags to filter by
+- **Search:**
+  - One box filters the tree by name and tag.
+  - A "contents" toggle also searches inside files, and a result jumps to its line.
+- **Editor:**
+  - **Tabs and saving:** each open file is a tab, with a dot while it is unsaved. Project files autosave after the pause, as the project does today. Device files save on Ctrl+S or the save button. Each file keeps its undo history while it is open.
+  - **Already built:** syntax colours, the phone symbol key row, completion chips, jump to error and optional Vim.
+  - **New (owner):**
+    - inline errors as you type, and hover or long-press docs from the function library
+    - find and replace in a file or the whole project, with regex
+    - go to definition, and find where something is used
+    - multi-cursor (Alt-click on PC, a two-finger tap on touch)
+    - folding blocks, and a minimap on PC
+    - snippets for common blocks (a param, an envelope, an effect), and format document
+  - **Running code:** as today, the code compiles off the UI thread after the pause you set, and a broken change keeps the last working sound. A Run button and Ctrl+Enter run it straight away.
+- **Panels beside the editor (owner, all four):**
+  - **Controls:** the module's generated controls, live, like Unity's Inspector.
+  - **Problems:** every error and warning in the project. A tap jumps to it.
+  - **Scope and meter:** what the module sounds like right now, from the audition scope.
+  - **Library:** the searchable function docs. A tap inserts the function.
+- **Safety:**
+  - Files from device folders are untrusted input. A `.caw` from one runs under the same constrained-language rules as a downloaded module.
+  - Only the folders the user picks are reachable.
   - The security reviewer checks this step.
-- **#20 (Android keyboard Backspace)** is fixed in this step, since the editor is rebuilt.
-- **#10 (new control types)** stays blocked on its language-syntax review.
+- **Folded-in issues:**
+  - **#20** (Android keyboard Backspace) is fixed here, since the editor's text input is rebuilt.
+  - **#10** (new control types) stays blocked on its language-syntax review.
+- **[Assumption] Editor engine:** a custom editor widget is likely needed for multi-cursor, folding, inline errors and the minimap. Flutter's `TextField` has a single cursor. Before the step starts, check whether a permissively licensed Flutter code-editor package covers these; adding one needs the owner's approval.
 
 ### Mixer (fine control)
 
