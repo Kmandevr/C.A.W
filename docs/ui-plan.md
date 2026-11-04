@@ -10,7 +10,7 @@ updated: 2026-11-04
 
 ## The owner's direction (2026-11-04)
 
-- **The arrangement is home.** It is the screen the app opens on, and about 90% of building a song happens there. It looks more like a standard DAW.
+- **The arrangement is home.** The app opens straight into the last project's arrangement, with new, template and open in the project menu (owner). This replaces the 2026-10-28 startup screen. About 90% of building a song happens there, and it looks more like a standard DAW.
 - **Tracks:**
   - Add empty tracks, and nest them in folders.
   - Add instruments and effects to a track, in an order you choose. **A track can hold several instruments** (owner).
@@ -281,6 +281,8 @@ updated: 2026-11-04
 
 ## Order of work
 
+**Engine changes (owner, 2026-11-04):** Claude makes the small ones while building the UI that needs them, such as the note on/off call for previews. The large ones wait for GPT: several instruments per track, parent tracks with their own sound, and Bezier curves.
+
 Each step is one small PR to `Main`. It includes widget tests, screenshot (golden) tests at phone portrait, landscape and desktop, a code-reviewer pass and release-check. It updates [app](app.md) and [UI design](ui.md). Engine changes go to GPT as issues.
 
 1. **U0, foundations:**
@@ -307,7 +309,6 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
 
 ## Open questions for the owner
 
-- **Startup screen:** the 2026-10-28 choice was a startup screen (continue, new, template). Should the app now open straight into the last project's arrangement, with new, template and open in the project menu?
 - **Font for goldens:** stable screenshot tests need a bundled font. JetBrains Mono (SIL OFL 1.1) is the proposal, but it is a new dependency, so it needs your approval.
 - **Several instruments per track:** is "each instrument adds its output to the audio above it" the rule you want? It goes to GPT as an engine issue.
 - **Docking:** build it in-house (proposed), or try a package?
