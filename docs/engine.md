@@ -53,7 +53,7 @@ Unknown header keys are ignored, so newer files still load. With no header, a fi
 ### Statements
 
 - `let name = expression` names a value.
-- `param name = default in min..max` declares a slider. The app shows one per param, and the value is fixed for a whole block. Without `in`, the range is 0–1 if the default is in it, and otherwise 0 to twice the default. Options can come in any order after the default:
+- `param name = default in min..max` declares a slider. The app shows one per param, and the value is fixed for a whole block. Without `in`, the range is 0–1 if the default is in it, and otherwise 0 to twice the default. The default, range and step must be finite numbers (a compile error otherwise). Options can come in any order after the default:
   - `step 0.5`: the slider moves in steps
   - `"How bright the bass is"`: a tooltip
   - `param filter = on` (or `off`): a toggle, 1 or 0
@@ -343,7 +343,7 @@ caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--cl
 
 ## Tests
 
-`engine/build/caw_tests` runs 256 tests and `engine/build/caw_rt_tests` 73 more (CTest runs both):
+`engine/build/caw_tests` runs 261 tests and `engine/build/caw_rt_tests` 73 more (CTest runs both):
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.

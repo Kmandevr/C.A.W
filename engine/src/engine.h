@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -105,6 +106,8 @@ private:
     double slotTarget(const Slot& s) const noexcept;
     void updateSolo() noexcept;
     void prepareLane(Chain& c, int lane, int64_t n0, int len) noexcept;
+    void markTouched(Chain& c, const std::vector<std::string>* ids, const std::string& name);
+    void resolveParams(Chain& c, const Instance& inst, size_t idx, int64_t globalStart, int len) noexcept;
     const double* runModule(Chain& c, int lane, bool shadow, size_t idx, int64_t n0, int64_t globalStart, int len,
                             const double* input, Slot* exportTo, const Pattern* pat, int64_t repeat) noexcept;
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
@@ -126,6 +129,8 @@ private:
     int stopFade_ = 0;  // samples left in the stop fade, 0 when not stopping
     int64_t g_ = 0;     // position in the project loop
     int64_t epoch_ = 0; // project loops completed since play
+    uint64_t touchEpoch_ = 0;  // the play count of the last Play handled (audio thread); ends touches
+    uint32_t touchPlayStamp_ = 0;  // the last knob move's stamp before that Play (audio thread)
     double bpm_ = 120.0;
     int beatsPerBar_ = 4;
     int loopSteps_ = 64;
@@ -199,6 +204,11 @@ private:
     std::map<std::string, LayerState> layers_;
     std::vector<std::string> order_;  // layer ids in project order, for meters
     std::map<std::string, double> globals_;
+    // Knob moves since the last Play (control thread), so a rebuilt chain keeps their touches.
+    std::set<std::pair<std::string, std::string>> touchedParams_;  // (module id, param)
+    std::set<std::string> touchedGlobals_;
+    uint64_t playCount_ = 0;     // Play commands sent (control thread)
+    uint32_t touchCounter_ = 0;  // knob moves (control thread); wraps, compared by difference
     bool slotBusy_[kSlots] = {};
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;

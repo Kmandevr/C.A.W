@@ -290,3 +290,13 @@ TEST(module_exports_are_not_capped_at_16) {
     CHECK(compiled.program != nullptr);
     if (compiled.program) CHECK_EQ(compiled.program->exports.size(), size_t{20});
 }
+
+TEST(param_numbers_must_be_finite) {
+    // A non-finite range or step has no meaning for the parameter model (F6.6), so it fails closed.
+    CHECK(has(err("param a = 1e308\na"), "finite"));  // the default range would end at 2e308 = inf
+    CHECK(has(err("param b = 1 in 0..1e999\nb"), "finite"));
+    CHECK(has(err("param c = 1 in -1e999..2\nc"), "finite"));
+    CHECK(has(err("param d = 1 in 0..2 step 1e999\nd"), "finite"));
+    CHECK(has(err("param e = 1e999\ne"), "finite"));
+    CHECK(err("param f = 1e300\nf").empty());  // large but finite: fine
+}

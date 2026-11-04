@@ -1072,3 +1072,103 @@ TEST(mix_graph_routing_is_never_rejected_through_reparenting_and_removal) {
     run(e, 9600);
     CHECK_EQ(e.routingRejections(), 0u);
 }
+
+namespace {
+// One automated param g (0..2, step 0.25) with a flat lane at 0.25 (0.3 stepped).
+ProjectSpec touchProject(const std::string& source = "param g = 0.5 in 0..2 step 0.25\ng", double stored = -1.0) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"tone", std::string(kFloat) + source, {}});
+    if (stored >= 0.0) p.modules[0].params["g"] = stored;
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "param";
+    lane.moduleId = "tone";
+    lane.target = "g";
+    lane.points = {{0.0, 0.3}};
+    p.automation.push_back(lane);
+    return p;
+}
+}  // namespace
+
+TEST(engine_param_moved_while_stopped_is_not_a_touch_after_play) {
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const double lane = run(e, 512).back();
+    CHECK(lane > 0.05);
+    e.stop();
+    run(e, 4096);
+    e.setParam("tone", "g", 0.8);
+    e.play();  // a (re)start: the lane rules
+    CHECK_NEAR(run(e, 512).back() / lane, 1.0, 1e-4);
+}
+
+TEST(engine_param_restore_is_not_a_touch_but_a_rebuild_keeps_one) {
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const double lane = run(e, 512).back();
+    CHECK(lane > 0.05);
+    // A project update that stores another value is a restore, not a knob move: the lane still rules.
+    CHECK(e.setProject(touchProject("param g = 0.5 in 0..2 step 0.25\ng", 1.0)).find("\"ok\":true") != std::string::npos);
+    CHECK_NEAR(run(e, 512).back() / lane, 1.0, 1e-4);
+    // A touch survives a code edit that rebuilds the chain (the stored value follows the knob).
+    e.setParam("tone", "g", 0.8);
+    CHECK_NEAR(run(e, 512).back() / lane, 3.0, 1e-4);
+    CHECK(e.setProject(touchProject("param g = 0.5 in 0..2 step 0.25\ng + 0", 0.8)).find("\"ok\":true") != std::string::npos);
+    CHECK_NEAR(run(e, 8192).back() / lane, 3.0, 1e-4);
+    e.play();
+    CHECK_NEAR(run(e, 512).back() / lane, 1.0, 1e-4);
+}
+
+TEST(engine_param_touch_overrides_automation_until_playback_restarts) {
+    // F6.6: the Engine's .caw params resolve through the shared parameter model (owner, 2026-11-04).
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"tone", std::string(kFloat) + "param g = 0.5 in 0..2 step 0.25\ng", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "param";
+    lane.moduleId = "tone";
+    lane.target = "g";
+    lane.points = {{0.0, 0.3}};  // stepped to 0.25
+    p.automation.push_back(lane);
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    // Compared with the lane's level, so the layer's gain and pan law cancel out.
+    const double lane025 = run(e, 512).back();
+    CHECK(lane025 > 0.05);
+    e.setParam("tone", "g", 0.8);  // a touch: the manual value (stepped to 0.75) wins over the lane
+    CHECK_NEAR(run(e, 512).back() / lane025, 3.0, 1e-4);
+    CHECK_NEAR(run(e, 512).back() / lane025, 3.0, 1e-4);
+    e.play();  // playback restarts: the lane rules again
+    CHECK_NEAR(run(e, 512).back() / lane025, 1.0, 1e-4);
+}
+
+TEST(engine_param_moved_right_after_play_is_a_touch) {
+    // The knob moves before the audio thread has handled the Play command: still a touch.
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const double lane = run(e, 512).back();
+    CHECK(lane > 0.05);
+    e.play();
+    e.setParam("tone", "g", 0.8);
+    CHECK_NEAR(run(e, 512).back() / lane, 3.0, 1e-4);
+}
