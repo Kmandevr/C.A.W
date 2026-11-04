@@ -68,6 +68,8 @@ The application shell currently exposes eight destinations: Builder, Arranger, M
 
 **Phone (landscape):** the timeline gets the available width. Track headers stay aligned with their lanes while the song timeline scrolls horizontally. The mixer remains a separate panel.
 
+**Coming:** the UI plan replaces this navigation with docking panels; the layout model is in `lib/ui/dock/layout.dart`, not yet on screen ([UI plan](ui-plan.md), U1).
+
 **Desktop / wide:** navigation rail, persistent transport, and a full-width arrangement timeline. Track headers remain fixed beside the horizontally scrolling timeline; the Arranger's mixer panel can be opened without replacing the arrangement, and the dedicated Mixer remains a separate detailed workspace; Files exposes portable project/module import and export.
 
 The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.

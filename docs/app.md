@@ -137,6 +137,11 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - `lib/ui/tokens.dart`: spacing, radii, type sizes, touch targets (48 dp, or 36 dp compact) and colours by role (accent, selection, warning, danger, automation, track).
     - `lib/ui/kit.dart`: the context-aware toolbar row (fixed tools, a middle part that slides and fades when its context changes, ⋮), tool buttons and the ⓘ info button.
     - The existing screens don't use them yet.
+  - **Docking layout model** (`lib/ui/dock/layout.dart`, not yet on screen):
+    - The model is a tree of splits and tab groups holding panels by string id.
+    - Edits are dock (into a group, or split off on any edge), remove, reveal and activate. Split shares keep a 12% minimum.
+    - Presets: Arrange, Mix and Code, for phone portrait, phone landscape and desktop.
+    - The JSON form drops unknown or repeated panels and damaged parts.
   - **Performance profiles:** Full Experience (full glow), Balanced (55% glow), Lightweight (no glow, 4 voices per pattern layer) and Minimal (Lightweight plus hidden scope panels). All profiles keep meter polling at 30 Hz; Minimal does not slow down editing or meters.
     - Existing `light_mode` settings migrate to Lightweight/ Balanced; the legacy key is still written for older builds.
     - Automatic overload response selects Lightweight once, unless disabled.
