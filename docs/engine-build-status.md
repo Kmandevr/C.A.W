@@ -1,7 +1,7 @@
 ---
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
-covers: [engine/, app/]
+covers: [engine/, app/lib/engine/, app/lib/model/, app/lib/ui/track_cards_screen.dart, app/lib/ui/arranger_screen.dart]
 updated: 2026-11-04
 ---
 

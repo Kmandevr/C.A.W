@@ -285,7 +285,7 @@ updated: 2026-11-04
 
 Each step is one small PR to `Main`. It includes widget tests, screenshot (golden) tests at phone portrait, landscape and desktop, a code-reviewer pass and release-check. It updates [app](app.md) and [UI design](ui.md). Engine changes go to GPT as issues.
 
-1. **U0, foundations:**
+1. **U0, foundations** (in progress: the motion rules, the Motion/Haptics/Glow settings and the golden-test setup are built):
    - design tokens (spacing, type scale, one accent plus colours for meaning, track colours)
    - shared widgets
    - motion and snapping helpers

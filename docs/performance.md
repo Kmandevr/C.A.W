@@ -165,7 +165,7 @@ The Settings page now offers four explicit profiles:
 | Full Experience | Full-strength theme glow and available visual feedback | Full voice budget; meter polling remains 30 Hz |
 | Balanced | Decorative glow scaled down to 55% | Full voice budget; meter polling remains 30 Hz |
 | Lightweight | Decorative glow disabled | Existing reduced voice budget (4 per pattern layer); meter polling remains 30 Hz |
-| Minimal | Decorative glow disabled; scope panels hidden | Reduced voice budget; meter polling remains 30 Hz |
+| Minimal | Decorative glow disabled; scope panels hidden; motion off (`lib/ui/motion.dart`) | Reduced voice budget; meter polling remains 30 Hz |
 
 The legacy `light_mode` setting is still read for migration: true maps to Lightweight and false maps to Balanced. New settings persist `performance_mode` by name and also write the legacy boolean for older builds.
 

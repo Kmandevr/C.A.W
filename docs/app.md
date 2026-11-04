@@ -126,6 +126,12 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - The built-in themes are Calm neon (the default), Night (dimmer, no glow) and Amber terminal.
     - Custom themes are `kind: theme` text files in `themes/`.
   - **Density:** comfortable or compact.
+  - **Motion and feel** (`lib/ui/motion.dart`):
+    - **Motion:** Full, Reduced (fades only) or Off. The Minimal profile turns it off, and the system's reduce-motion setting caps it at Reduced.
+    - **Haptic ticks:** on by default.
+    - **Music-reactive glow:** a 0–100% slider, 35% by default.
+    - The slider shows a change while it is dragged and saves when the drag ends.
+    - The motion rules (distance-aware settle times, a small overshoot, snapping maths) are in place, but no screen animates with them yet. The [UI plan](ui-plan.md) adds that step by step.
   - **Performance profiles:** Full Experience (full glow), Balanced (55% glow), Lightweight (no glow, 4 voices per pattern layer) and Minimal (Lightweight plus hidden scope panels). All profiles keep meter polling at 30 Hz; Minimal does not slow down editing or meters.
     - Existing `light_mode` settings migrate to Lightweight/ Balanced; the legacy key is still written for older builds.
     - Automatic overload response selects Lightweight once, unless disabled.
@@ -166,4 +172,9 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - the pattern model (`lib/model/pattern_doc.dart`): exact step fractions, parsing with the engine's errors, comment-keeping write-back and every note edit
 - the actions core (`lib/actions/`): keymap files, conflicts, macros with their recursion guard, counts, `:` commands, `.` repeat and recording
 - settings, theme files and the startup choices
+- the motion rules and the motion, haptics and glow settings (`test/motion_test.dart`)
+- golden (screenshot) tests, which compare a screen with a PNG in `test/goldens/`:
+  - `test/golden_util.dart` loads real fonts (the bundled JetBrains Mono, and the Roboto and Material icons from the Flutter SDK), so layouts measure as they do on a phone. It pumps screens at the plan's sizes: phone 390×844, landscape 844×390, desktop 1280×800.
+  - After an intended visual change, run `flutter test --update-goldens` and review the new PNGs.
+  - CI renders them on Ubuntu, like the local Linux SDK.
 - integration tests through `dart:ffi`: templates, checks, a project sync, a loop export, and the function library with a project library module. It runs when `CAW_LIB` points at a built engine library; CI sets it.
