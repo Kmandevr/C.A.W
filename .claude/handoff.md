@@ -10,9 +10,7 @@ Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `
 - GPT owns the rest of the engine (#94, F7.3 part C, F7.4, F8, F10; #28).
 
 ## Done and verified
-- U0 and U1 PRs 1–3 are merged (#98–#101).
-- Piano roll part 1 (#102): stretch both ends, end zones, second-finger bypass, auto-scroll, ghost note, and the arrangement grid at full height.
-- Piano roll part 2 (#104): one snap magnet with a time and value grid.
+- U0, U1 PRs 1–3 (#98–#101), piano roll parts 1 and 2 (#102, #104: stretch, bypass, auto-scroll, ghost, snap magnet).
 - Note previews (#103):
   - Engine: `caw_engine_note_on` and the pitch/off calls in `engine/include/caw.h`, stopped preview chunks, `endPlayback`, `restartChain`.
   - App: `previewOn` in `app/lib/model/app_state.dart`, and the "hearing notes" section in `app/lib/ui/pattern_editor.dart`.
