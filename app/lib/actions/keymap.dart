@@ -353,7 +353,20 @@ class Keymap {
         }
       }
     }
+    _foldSnapButtons(k);
     return k;
+  }
+
+  /// A roll toolbar saved before the snap magnet held its menu (2026-11-04) has the grid menu followed by the snap
+  /// button: the magnet now holds snap, triplets and adaptive, so those three buttons go. A toolbar that adds them
+  /// elsewhere keeps them.
+  static void _foldSnapButtons(Keymap k) {
+    final list = k.toolbars[Area.pattern];
+    if (list == null) return;
+    final i = list.indexWhere((r) => !r.isMacro && r.id == 'roll.grid.menu');
+    if (i < 0 || i + 1 >= list.length || list[i + 1].isMacro || list[i + 1].id != 'roll.grid.snap') return;
+    const folded = {'roll.grid.snap', 'roll.grid.triplets', 'roll.grid.adaptive'};
+    list.removeWhere((r) => !r.isMacro && folded.contains(r.id));
   }
 
   static String _row(String a, String b, String c) => '${a.padRight(11)} ${b.padRight(15)} $c'.trimRight();

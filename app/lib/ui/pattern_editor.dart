@@ -315,6 +315,33 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   /// Moves and stretches snap to the grid unless snapping is off, Shift is held or a second finger rests on the roll.
   bool get _free => !_snap || _bypass || HardwareKeyboard.instance.isShiftPressed;
 
+  /// A volume, timbre, velocity or chance value (0..1) on the value grid while snapping applies.
+  double _snapValue(double v) => (_free ? v : Snap.to(v, _look.valueGrid.step)).clamp(0.0, 1.0).toDouble();
+
+  /// A curve point's time (in steps) on the time grid while snapping applies.
+  double _snapAt(double steps) => math.max(0.0, _free ? steps : Snap.to(steps, _resSteps.toDouble()));
+
+  /// A pitch point's place along note [n] (0..1) on the time grid while snapping applies.
+  double _snapU(double u, PatternNote n) {
+    final g = _resSteps.toDouble() / n.len.toDouble();
+    return (_free || g >= 1 ? u : Snap.to(u, g)).clamp(0.0, 1.0).toDouble();
+  }
+
+  void _snapMenu(String v) {
+    if (v == 'toggle') {
+      setState(() => _snap = !_snap);
+    } else if (v.startsWith('res:')) {
+      setState(() => _res = int.parse(v.substring(4)));
+    } else if (v == 'triplets') {
+      setState(() => _triplet = !_triplet);
+    } else if (v == 'adaptive') {
+      setState(() => _fixed = !_fixed);
+    } else if (v.startsWith('value:')) {
+      final g = ValueGrid.values.byName(v.substring(6));
+      s.settings.update((x) => x.roll = x.roll.copyWith(valueGrid: g));
+    }
+  }
+
   Steps _snapTime(double steps, Steps level) {
     final t = Steps.fromDouble(math.max(0, steps), maxDenominator: 384);
     return _snap ? t.floorTo(level) : t;
@@ -719,7 +746,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _cAddOnTap = true;
       return;
     }
-    final (added, i) = c.add(_stepAt(p.dx), _laneValue(lane, p.dy));
+    final (added, i) = c.add(_snapAt(_stepAt(p.dx)), _snapValue(_laneValue(lane, p.dy)));
     _setCurve(lane, added);
     _cPoint = i;
     _shapeNotes();
@@ -734,7 +761,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
     final i = _cPoint, seg = _cSeg;
     if (i != null) {
-      _setCurve(lane, _curves[lane]!.move(i, _stepAt(p.dx), _laneValue(lane, p.dy)));
+      _setCurve(lane, _curves[lane]!.move(i, _snapAt(_stepAt(p.dx)), _snapValue(_laneValue(lane, p.dy))));
     } else if (seg != null) {
       if (_cAddOnTap && (p - start).distance <= kTouchSlop) return;
       _cAddOnTap = false;
@@ -751,7 +778,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _hold = null;
     final start = _cStart;
     if (!cancel && _cAddOnTap && start != null) {
-      final (added, _) = _curves[_cLane]!.add(_stepAt(start.dx), _laneValue(_cLane, start.dy));
+      final (added, _) = _curves[_cLane]!.add(_snapAt(_stepAt(start.dx)), _snapValue(_laneValue(_cLane, start.dy)));
       _setCurve(_cLane, added);
       _shapeNotes();
     }
@@ -807,7 +834,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   double _bendValue(double y, PatternNote n) {
     var v = (_noteMid(n) - y) / _rowH;
-    if (_snap && !HardwareKeyboard.instance.isShiftPressed) v = v.roundToDouble();
+    if (!_free) v = v.roundToDouble();
     return v.clamp(-_bendRange, _bendRange).toDouble();
   }
 
@@ -834,9 +861,10 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         return;
       }
     }
-    final u = ((p.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0);
+    // The segment test uses where the finger is; only a new point lands on the grid.
+    final raw = ((p.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0), u = _snapU(raw, n);
     for (var i = 0; i + 1 < pts.length; i++) {
-      if (u > pts[i].t && u < pts[i + 1].t) {
+      if (raw > pts[i].t && raw < pts[i + 1].t) {
         _bSeg = i;
         _bK0 = pts[i].k;
         _bAddOnTap = true;
@@ -870,7 +898,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final i = _bPoint, seg = _bSeg;
     if (i != null && i < pts.length) {
       final lo = i > 0 ? pts[i - 1].t : 0.0, hi = i + 1 < pts.length ? pts[i + 1].t : 1.0;
-      final u = ((p.dx - _noteX(n)) / _noteW(n)).clamp(lo, hi);
+      final u = _snapU((p.dx - _noteX(n)) / _noteW(n), n).clamp(lo, hi);
       pts[i] = NotePoint(u, _bendValue(p.dy, n), pts[i].k);
       _setBend(id, pts);
     } else if (seg != null && seg < pts.length) {
@@ -890,7 +918,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _hold = null;
     if (!cancel && _bAddOnTap && start != null && _doc != null) {
       final n = _doc!.byId(id)!;
-      final u = ((start.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0);
+      final u = _snapU(((start.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0), n);
       _setBend(id, _insertPoint(n.expr.bend, NotePoint(u, _bendValue(start.dy, n))));
     }
     _bNote = _bPoint = _bSeg = null;
@@ -979,15 +1007,16 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         _panning = false;
         if (_tool == PatternTool.draw) _showGhost(p);
       }
-    } else if (_pointers.length == 2 && _dragNote != null && _dragStart != null && _lane == 0) {
-      // A second finger during a note drag frees it from the grid while it rests.
+    } else if (_pointers.length == 2 && _editing) {
+      // A second finger during a drag (a note, a lane, a curve or a pitch point) frees it from the grid while it
+      // rests.
       _hold?.cancel();
       _hold = null;
       _tapCandidate = null; // two fingers aren't a tap: lifting them doesn't arm the double tap
       _bypass = true;
       _restAt = e.localPosition;
       _editAtBypass = _pointers[_editPointer] ?? e.localPosition;
-      _move(_lastP!);
+      _editMove(_lastP!);
     } else if (_pointers.length == 2) {
       _cancelEdit();
       _curveEnd(cancel: true);
@@ -1012,10 +1041,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       // Only the finger that started the drag moves it; the resting one just holds the bypass. A second finger that
       // moves first (the dragging one still) is a pinch after all: the edit is dropped and the view zooms.
       if (e.pointer == _editPointer) {
-        _dragTo(e.localPosition - _origin);
+        _editMove(e.localPosition - _origin);
       } else if ((e.localPosition - _restAt).distance > kTouchSlop &&
           (_pointers[_editPointer]! - _editAtBypass).distance <= kTouchSlop) {
-        _cancelEdit();
+        _bypass = false;
+        _editEnd(cancel: true);
         _startPinch();
       }
       return;
@@ -1060,9 +1090,23 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       }
       return;
     }
+    _editMove(p);
+  }
+
+  /// Whether a one-finger drag is under way: a note, a lane, a curve point or segment, or a pitch point.
+  bool get _editing => (_dragStart != null && (_dragNote != null || _lane != 0)) || _cLane != 0 || _bNote != null;
+
+  void _editMove(Offset p) {
+    _lastP = p;
     if (_bNote != null) return _bendMove(p);
     if (_cLane != 0) return _curveMove(p);
     _dragTo(p);
+  }
+
+  void _editEnd({required bool cancel}) {
+    if (_bNote != null) return _bendEnd(cancel: cancel);
+    if (_cLane != 0) return _curveEnd(cancel: cancel);
+    cancel ? _cancelEdit() : _up();
   }
 
   /// A one-finger drag moved to [p]: the edit follows, and near the grid's edge the view starts scrolling.
@@ -1123,13 +1167,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         // The resting finger lifted: back on the grid where the dragging finger is.
         if (_pointers.length == 1) {
           _bypass = false;
-          _move(_lastP!);
+          _editMove(_lastP!);
         }
         return;
       }
       // The dragging finger lifted first: the edit ends; one finger left scrolls until it lifts, two pinch.
       _bypass = false;
-      cancel ? _cancelEdit() : _up();
+      _editEnd(cancel: cancel);
       if (_pointers.length >= 2) {
         _startPinch();
       } else if (_pointers.isNotEmpty) {
@@ -1159,9 +1203,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       }
       return;
     }
-    if (_bNote != null) return _bendEnd(cancel: cancel);
-    if (_cLane != 0) return _curveEnd(cancel: cancel);
-    cancel ? _cancelEdit() : _up();
+    _editEnd(cancel: cancel);
   }
 
   void _showGhost(Offset p) {
@@ -1416,7 +1458,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     final d = _doc;
     if (d == null) return;
     final top = _lane == 1 ? _gridH : _gridH + (_velLane ? _velH : 0), hgt = _lane == 1 ? _velH : _xH;
-    final v = (1 - (p.dy - top - 3) / (hgt - 6)).clamp(0.0, 1.0);
+    final v = _snapValue((1 - (p.dy - top - 3) / (hgt - 6)).clamp(0.0, 1.0));
     final x = p.dx + _scrollX;
     var hit = {
       for (final n in d.notes)
@@ -1425,7 +1467,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     if (hit.any(_sel.contains)) hit = hit.where(_sel.contains).toSet();
     if (hit.isEmpty) return;
     if (_lane == 1) _lastVel = v;
-    setState(() => _doc = _lane == 1 ? d.setVelocity(hit, v) : d.setProb(hit, (v * 20).round() / 20));
+    setState(() => _doc = _lane == 1 ? d.setVelocity(hit, v) : d.setProb(hit, v));
   }
 
   /// The extras panel for the selected notes: velocity, chance, ratchet, slide. One undo step for the whole visit.
@@ -1454,7 +1496,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
             Text('Velocity ${(n.vel * 100).round()}%'),
             Slider(value: n.vel, onChanged: (v) => change((d) => d.setVelocity(sel, _lastVel = v))),
             Text('Chance ${(n.prob * 100).round()}%'),
-            Slider(value: n.prob, divisions: 20, onChanged: (v) => change((d) => d.setProb(sel, v))),
+            // Chance steps by the value grid while snapping is on, like the chance lane.
+            Slider(
+                value: n.prob,
+                divisions: _snap ? (1 / _look.valueGrid.step).round() : null,
+                onChanged: (v) => change((d) => d.setProb(sel, v))),
             const Text('Ratchet'),
             Wrap(spacing: 6, children: [
               for (var r = 1; r <= 8; r++)
@@ -1476,6 +1522,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
               color: _noteColor,
               // A shared expression edit has no single note duration to snap against.
               timeSnap: _snap && sel.length == 1 ? _resSteps.toDouble() / n.len.toDouble() : 0,
+              valueSnap: _snap ? _look.valueGrid.step : 0,
               onChanged: (e) => change((d) => d.setExpression(sel, e)),
             ),
           ]),
@@ -1586,8 +1633,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       onCopy: () => _runRef(ActionRef.action('roll.edit.copy')),
       onPaste: () => _runRef(ActionRef.action('roll.edit.paste')),
       onRun: _runRef,
-      res: _res,
-      onRes: (r) => setState(() => _res = r),
+      snap: (on: _snap, res: _res, triplet: _triplet, fixed: _fixed, value: _look.valueGrid),
+      onSnap: _snapMenu,
       canCustomise: router != null,
       onMenu: (v) {
         if (v.startsWith('run:')) return _runRef(ActionRef.action(v.substring(4)));
@@ -1794,8 +1841,8 @@ class _Toolbar extends StatelessWidget {
     required this.onCopy,
     required this.onPaste,
     required this.onRun,
-    required this.res,
-    required this.onRes,
+    required this.snap,
+    required this.onSnap,
     required this.fullScreen,
     required this.onFullScreen,
     required this.onMenu,
@@ -1814,8 +1861,8 @@ class _Toolbar extends StatelessWidget {
   final bool fullScreen, velLane, extrasLane, canCustomise;
   final VoidCallback onFullScreen;
   final ValueChanged<String> onMenu;
-  final int res;
-  final ValueChanged<int> onRes;
+  final ({bool on, int res, bool triplet, bool fixed, ValueGrid value}) snap;
+  final ValueChanged<String> onSnap;
 
   String _tip(ActionRef r) {
     final name = r.isMacro ? 'Macro: ${r.id}' : (registry[r.id]?.name ?? r.id);
@@ -1824,16 +1871,7 @@ class _Toolbar extends StatelessWidget {
   }
 
   Widget _item(ActionRef r) {
-    if (!r.isMacro && r.id == 'roll.grid.menu') {
-      return Center(
-        child: DropdownButton<int>(
-          value: res,
-          underline: const SizedBox(),
-          items: [for (final x in _resolutions) DropdownMenuItem(value: x, child: Text(x == 1 ? '1' : '1/$x'))],
-          onChanged: (v) => onRes(v!),
-        ),
-      );
-    }
+    if (!r.isMacro && r.id == 'roll.grid.menu') return _SnapButton(snap: snap, onSnap: onSnap, tip: _tip(r));
     final icon = r.isMacro ? null : _actionIcons[r.id];
     final enabled = r.isMacro || isEnabled(r.id);
     if (icon != null) {
@@ -1910,6 +1948,134 @@ class _Toolbar extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// The snap magnet with its time grid: a tap turns snapping on or off for notes and every curve; the ▾ menu holds
+/// the time grid, triplets, adaptive and the value grid, in a sheet (owner, 2026-11-04).
+class _SnapButton extends StatelessWidget {
+  const _SnapButton({required this.snap, required this.onSnap, required this.tip});
+  final ({bool on, int res, bool triplet, bool fixed, ValueGrid value}) snap;
+  final ValueChanged<String> onSnap;
+  final String tip;
+
+  /// A compact sheet of chip rows (a menu of every choice would be taller than a phone).
+  void _open(BuildContext context) {
+    var now = snap;
+    showGlassSheet<void>(
+      context: context,
+      backgroundColor: Neon.panel,
+      builder: (_) => StatefulBuilder(builder: (context, set) {
+        void pick(String v) {
+          onSnap(v);
+          set(() => now = switch (v) {
+                'toggle' => (on: !now.on, res: now.res, triplet: now.triplet, fixed: now.fixed, value: now.value),
+                'triplets' => (on: now.on, res: now.res, triplet: !now.triplet, fixed: now.fixed, value: now.value),
+                'adaptive' => (on: now.on, res: now.res, triplet: now.triplet, fixed: !now.fixed, value: now.value),
+                _ when v.startsWith('res:') =>
+                  (on: now.on, res: int.parse(v.substring(4)), triplet: now.triplet, fixed: now.fixed, value: now.value),
+                _ => (on: now.on, res: now.res, triplet: now.triplet, fixed: now.fixed,
+                    value: ValueGrid.values.byName(v.substring(6))),
+              });
+        }
+
+        Widget title(String t) => Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 6),
+              child: Text(t, style: const TextStyle(color: Neon.dim, fontSize: 11, letterSpacing: 1.3)),
+            );
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Snap (N)'),
+                subtitle: const Text('Notes and every curve. Shift or a second finger skips it for one drag.'),
+                value: now.on,
+                onChanged: (_) => pick('toggle'),
+              ),
+              title('TIME GRID'),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final x in _resolutions)
+                  ChoiceChip(label: Text(x == 1 ? '1 bar' : '1/$x'), selected: now.res == x, onSelected: (_) => pick('res:$x')),
+              ]),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, children: [
+                FilterChip(label: const Text('Triplets'), selected: now.triplet, onSelected: (_) => pick('triplets')),
+                FilterChip(label: const Text('Adaptive'), selected: !now.fixed, onSelected: (_) => pick('adaptive')),
+              ]),
+              title('VALUE GRID · volume, timbre, velocity, chance'),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final g in ValueGrid.values)
+                  ChoiceChip(label: Text(g.label), selected: now.value == g, onSelected: (_) => pick('value:${g.name}')),
+              ]),
+            ]),
+          ),
+        );
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = snap.on ? Neon.yellow : Neon.dim;
+    final grid = '${snap.res == 1 ? '1' : '1/${snap.res}'}${snap.triplet ? 'T' : ''}';
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Tooltip(
+        message: tip,
+        child: InkWell(
+          key: const ValueKey('roll-snap'),
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => onSnap('toggle'),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                CustomPaint(size: const Size(18, 18), painter: _MagnetPainter(c)),
+                const SizedBox(width: 4),
+                Text(grid, style: TextStyle(color: c, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ),
+        ),
+      ),
+      IconButton(
+        key: const ValueKey('roll-snap-menu'),
+        tooltip: 'Snap and grid settings',
+        icon: const Icon(Icons.arrow_drop_down, color: Neon.dim),
+        onPressed: () => _open(context),
+      ),
+    ]);
+  }
+}
+
+/// A horseshoe magnet: Material has no magnet icon.
+class _MagnetPainter extends CustomPainter {
+  _MagnetPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height, t = w * 0.26;
+    final body = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = t;
+    // An upside-down U: two legs down from an arch, with light tips.
+    final r = (w - t) / 2;
+    final path = Path()
+      ..moveTo(t / 2, h)
+      ..lineTo(t / 2, h * 0.45 + r * 0.2)
+      ..arcToPoint(Offset(w - t / 2, h * 0.45 + r * 0.2), radius: Radius.circular(r))
+      ..lineTo(w - t / 2, h);
+    canvas.drawPath(path, body);
+    final tip = Paint()..color = Neon.text;
+    canvas.drawRect(Rect.fromLTWH(0, h - t * 0.9, t, t * 0.9), tip);
+    canvas.drawRect(Rect.fromLTWH(w - t, h - t * 0.9, t, t * 0.9), tip);
+  }
+
+  @override
+  bool shouldRepaint(_MagnetPainter o) => o.color != color;
 }
 
 /// Edits the roll's toolbar: reorder, remove, add any action or macro, or go back to the default.

@@ -26,12 +26,16 @@ final List<(String, NoteExpression Function(NoteExpression))> expressionPresets 
 
 /// The vibrato knobs, the presets and an editor per curve, for the notes the extras panel is showing.
 class ExpressionPanel extends StatelessWidget {
-  const ExpressionPanel({super.key, required this.expr, required this.onChanged, required this.color, this.timeSnap = 0});
+  const ExpressionPanel(
+      {super.key, required this.expr, required this.onChanged, required this.color, this.timeSnap = 0, this.valueSnap = 0});
   final NoteExpression expr;
   final ValueChanged<NoteExpression> onChanged;
   final Color color;
   /// Grid spacing as a fraction of the note's duration; zero disables time snapping.
   final double timeSnap;
+
+  /// The value grid for volume and timbre (0..1); zero disables value snapping. Pitch always snaps to semitones.
+  final double valueSnap;
 
   @override
   Widget build(BuildContext context) {
@@ -57,10 +61,10 @@ class ExpressionPanel extends StatelessWidget {
       slider('Fade-in', e.vibFade, 0, 1, (v) => '${(v * 100).round()}%', (v) => e.copyWith(vibFade: v)),
       Text('Volume over the note', style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
-          points: e.press, min: 0, max: 1, zero: 1, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(press: p))),
+          points: e.press, min: 0, max: 1, zero: 1, snap: valueSnap, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(press: p))),
       Text('Timbre (the sound reads it as timbre)', style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
-          points: e.timbre, min: 0, max: 1, zero: 0, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(timbre: p))),
+          points: e.timbre, min: 0, max: 1, zero: 0, snap: valueSnap, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(timbre: p))),
     ]);
   }
 }

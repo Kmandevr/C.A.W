@@ -128,6 +128,21 @@ void main() {
     expect(back.macros['Run of four']!.steps.last.arg, '140');
   });
 
+  test('a roll toolbar saved before the snap magnet loses the buttons the magnet now holds', () {
+    List<String> load(List<String> ids) {
+      final km = defaults.copy();
+      km.toolbars[Area.pattern] = [for (final id in ids) ActionRef.action(id)];
+      return [for (final r in Keymap.parse(km.serialize(), registry: reg).toolbars[Area.pattern]!) r.id];
+    }
+
+    const old = ['roll.tool.draw', 'edit.undo', 'roll.grid.menu', 'roll.grid.snap', 'roll.grid.triplets',
+      'roll.grid.adaptive', 'roll.view.switch'];
+    expect(load(old), ['roll.tool.draw', 'edit.undo', 'roll.grid.menu', 'roll.view.switch']);
+    // Added on purpose somewhere else, they stay.
+    const mine = ['roll.grid.snap', 'roll.grid.menu', 'roll.grid.triplets'];
+    expect(load(mine), mine);
+  });
+
   test('the doc example parses', () {
     const text = '''---
 kind: keymap
