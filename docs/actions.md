@@ -2,7 +2,7 @@
 title: Actions, keys and macros
 summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
-updated: 2026-11-01
+updated: 2026-11-05
 ---
 
 # Actions, keys and macros
@@ -158,6 +158,7 @@ Grid and view:
 | Switch piano roll / drum grid | G |
 | Zoom in / out / fit the pattern | Ctrl+= / Ctrl+- / F |
 | Show velocity lane / extras lanes | Alt+V / Alt+X (Ctrl+1/2/3 always switch areas, owner) |
+| Hear notes on / off | ⋮ menu (no default key) |
 
 Generators (buttons; no default keys):
 

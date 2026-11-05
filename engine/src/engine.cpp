@@ -85,6 +85,10 @@ struct Engine::Slot {
     const Pattern* pat = nullptr;
     bool seam = false;          // the shadow lane finishes the previous pass this chunk
     bool fade = false;          // the replaced chain plays on in the fade lane this chunk
+    bool previewing = false;    // audio thread: the chain holds a preview voice, or its sound is still dying away
+    int64_t previewQuiet = 0;   // samples the track's output has been below kPreviewQuiet
+    int64_t previewTail = 0;    // samples since its last preview voice ended
+    int64_t previewN = 0;       // stopped: the sample in the layer's loop that preview chunks run from
 };
 
 // One sounding note of a pattern layer's generator.
@@ -111,11 +115,13 @@ struct Voice {
     double bend = 0, press = 1, timbre = 0, freqNow = 0;
     double dBend = 0, dPress = 0, dTimbre = 0, dFreq = 0;
     int exLeft = 0;  // samples until the next control point
+    int32_t preview = -1;  // a note preview's id (#103), or -1 for a pattern's note
 };
 
 constexpr int kExpressionStep = 16;  // 1/3 ms at 48 kHz: smooth for bends and vibrato up to 30 Hz, 16x cheaper
 
 constexpr uint32_t kOrphanNote = 0xFFFFFFFFu;  // a held note whose pattern was edited: ends at offAt
+constexpr uint32_t kPreviewNote = 0xFFFFFFFEu;  // a note preview: no pattern event matches it, only its own off
 
 // One layer's modules: the main instances plus shadow copies that play the loop's tail across a seam. A layer
 // with a pattern runs its generator as voiceCount voices instead (main[0], shadow[0] and extras), with no seams.
@@ -178,7 +184,7 @@ struct Engine::Chain {
 };
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
@@ -194,6 +200,10 @@ struct Engine::Cmd {
     int voices = kMaxVoices;
     uint64_t playCount = 0;    // Play: the control thread's play count, which ends touches
     uint32_t touchStamp = 0;   // Play: the last touch stamp before it (later stamps are touches after it)
+    // Preview: what to do with preview [previewId] on [slot]: 0 note on, 1 glide to [pitch], 2 note off, 3 all off.
+    int previewOp = 0;
+    int32_t previewId = 0;
+    double pitch = 60, vel = 1;
 };
 
 struct Engine::Retired {
@@ -210,6 +220,10 @@ namespace {
 constexpr double kSwapSeconds = 0.02;
 constexpr double kSeamSeconds = 0.003;
 constexpr double kStopSeconds = 0.01;
+constexpr double kPreviewGlideSeconds = 0.005;  // a held preview glides to a new pitch this fast (a bend being drawn)
+constexpr float kPreviewQuiet = 1e-4f;          // -80 dB: a preview's effect tail below this has died away
+constexpr double kPreviewQuietSeconds = 0.25;   // ... once it has stayed below it this long
+constexpr double kPreviewTailSeconds = 30.0;    // the longest a tail (or a self-oscillating effect) keeps running
 constexpr double kGainSeconds = 0.005;
 constexpr double kLimitCeiling = 0.977;  // about -0.2 dBFS
 // Play retires up to two entries per slot and must always find room, even with the retired queue
@@ -345,9 +359,10 @@ std::shared_ptr<const Pattern> compileArrangement(
 }
 
 // Lets every held note go into its release (at a layer restart, or when the pattern changes).
+// A pattern restarting releases its own notes; held previews keep sounding until their note off.
 void releaseVoices(Voice* voices, int count) {
     for (int v = 0; v < count; ++v)
-        if (voices[v].active && voices[v].gate) {
+        if (voices[v].active && voices[v].gate && voices[v].preview < 0) {
             voices[v].gate = false;
             voices[v].rel = 0;
             voices[v].quiet = 0;
@@ -1752,6 +1767,62 @@ void Engine::setLayerMix(const std::string& layerId, double volume, double pan, 
     writeMix(ls.slot, ls.volume, ls.pan, mute, solo);
 }
 
+void Engine::noteOn(const std::string& layerId, int32_t id, double pitch, double velocity) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    if (!layerId.empty() && layerId[0] == '\x01') return;  // the audition's internal layer: its slot moves on a grow
+    auto it = layers_.find(layerId);
+    if (it == layers_.end() || it->second.slot < 0) return;
+    Cmd c;
+    c.type = Cmd::Preview;
+    c.previewOp = 0;
+    c.slot = it->second.slot;
+    c.previewId = id;
+    c.pitch = std::isfinite(pitch) ? std::clamp(pitch, 0.0, 127.0) : 60.0;
+    c.vel = std::isfinite(velocity) ? std::clamp(velocity, 0.0, 1.0) : 1.0;
+    // A new note on the same id elsewhere ends the old one there first.
+    auto old = previewSlots_.find(id);
+    if (old != previewSlots_.end() && old->second != c.slot) {
+        Cmd off = c;
+        off.previewOp = 2;
+        off.slot = old->second;
+        if (!send(off)) return;  // the queue is full: keep the old note's entry, so its off can still reach it
+    }
+    if (send(c)) previewSlots_[id] = c.slot;
+}
+
+void Engine::notePitch(int32_t id, double pitch) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    auto it = previewSlots_.find(id);
+    if (it == previewSlots_.end() || !std::isfinite(pitch)) return;
+    Cmd c;
+    c.type = Cmd::Preview;
+    c.previewOp = 1;
+    c.slot = it->second;
+    c.previewId = id;
+    c.pitch = std::clamp(pitch, 0.0, 127.0);
+    send(c);
+}
+
+void Engine::noteOff(int32_t id) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    auto it = previewSlots_.find(id);
+    if (it == previewSlots_.end()) return;
+    Cmd c;
+    c.type = Cmd::Preview;
+    c.previewOp = 2;
+    c.slot = it->second;
+    c.previewId = id;
+    if (send(c)) previewSlots_.erase(it);  // a full queue keeps the entry, so a later off still ends the note
+}
+
+void Engine::notesOff() {
+    std::lock_guard<std::mutex> lock(ctl_);
+    Cmd c;
+    c.type = Cmd::Preview;
+    c.previewOp = 3;
+    if (send(c)) previewSlots_.clear();
+}
+
 void Engine::setMaster(double volume) {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
@@ -2035,7 +2106,7 @@ void Engine::applyCommands() noexcept {
                 if (s.cur && s.cur->voiced) {
                     const Pattern* old = s.pattern ? s.pattern->get() : nullptr;
                     for (Voice& v : s.cur->voices) {
-                        if (!v.active || !v.gate || v.note == kOrphanNote) continue;
+                        if (!v.active || !v.gate || v.note == kOrphanNote || v.preview >= 0) continue;
                         if (!old || v.note >= old->notes.size()) {
                             v.gate = false;
                             v.rel = v.quiet = 0;
@@ -2107,10 +2178,7 @@ void Engine::applyCommands() noexcept {
                     }
                     s.swapLeft = 0;
                     s.seamLeft = 0;
-                    if (s.cur) {
-                        for (auto& inst : s.cur->main) inst->reset();
-                        for (Voice& v : s.cur->voices) v.active = false;
-                    }
+                    if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
                     s.fresh = true;
                     s.contiguous = false;
                     s.k = -1;
@@ -2127,6 +2195,9 @@ void Engine::applyCommands() noexcept {
                 break;
             case Cmd::AuditionOnly:
                 auditionOnly_ = c.flag;
+                break;
+            case Cmd::Preview:
+                previewCommand(c);
                 break;
             case Cmd::SetOrder:
                 processCount_ = 0;
@@ -2349,6 +2420,136 @@ static void expressionAt(const NoteExpression& x, double into, double len, doubl
     timbre = !x.timbre.points.empty() ? x.timbre.at(u) : 0.0;
 }
 
+// A free voice, else the oldest released one, else the oldest; a sounding voice it takes is smoothed over.
+Voice& Engine::pickVoice(Chain& c) noexcept {
+    Voice* pick = nullptr;
+    // Only the project's first `voices` voices take new notes (light mode plays fewer).
+    const int limit = std::min(voiceLimit_, c.voiceTake);  // voices: 1 is mono: each note steals the one voice
+    for (int i = 0; i < limit; ++i)
+        if (!c.voices[i].active) {
+            pick = &c.voices[i];
+            break;
+        }
+    for (int pass = 0; pass < 2 && !pick; ++pass)
+        for (int i = 0; i < limit; ++i) {
+            Voice& v = c.voices[i];
+            if ((pass == 1 || !v.gate) && (!pick || v.started < pick->started)) pick = &v;
+        }
+    Voice& v = *pick;
+    if (v.active) c.declick += v.lastY;  // stealing a sounding voice: smooth over the jump
+    v.lastY = 0;
+    return v;
+}
+
+// Play and the end of a stop start a chain from silence: its instances reset and its pattern voices end. A held
+// preview keeps its voice and its instrument's state (voice 0's instrument is main[0]), so it sounds on unbroken.
+void Engine::restartChain(Chain& c) noexcept {
+    const bool keep0 = c.voiced && c.voices[0].active && c.voices[0].preview >= 0;
+    for (size_t i = keep0 ? 1 : 0; i < c.main.size(); ++i) c.main[i]->reset();
+    for (Voice& v : c.voices)
+        if (v.preview < 0) v.active = false;
+}
+
+// Note previews (#103) on the audio thread: a preview takes a voice like a pattern note, with no expression, and
+// holds it until its note off.
+void Engine::previewCommand(const Cmd& c) noexcept {
+    auto release = [](Voice& v) {
+        v.gate = false;
+        v.rel = v.quiet = 0;
+    };
+    if (c.previewOp == 3) {
+        for (int i = 0; i < slotCount_; ++i) {
+            Slot& s = slotAt(i);
+            if (!s.cur || !s.cur->voiced) continue;
+            for (Voice& v : s.cur->voices)
+                if (v.active && v.gate && v.preview >= 0) release(v);
+        }
+        return;
+    }
+    if (c.slot < 0 || c.slot >= slotCount_) return;
+    Slot& s = slotAt(c.slot);
+    if (!s.active || !s.cur || !s.cur->voiced) return;
+    Chain& ch = *s.cur;
+    Voice* held = nullptr;
+    for (Voice& v : ch.voices)
+        if (v.active && v.gate && v.preview == c.previewId) held = &v;
+    if (c.previewOp == 1) {
+        if (!held) return;
+        held->target = c.pitch;
+        held->glideLeft = std::max(1, static_cast<int>(std::floor(kPreviewGlideSeconds * sr_ + 0.5)));
+        held->glideStep = (held->target - held->pitch) / held->glideLeft;
+        return;
+    }
+    if (held) release(*held);  // an off, or a new note on the same id: the old one ends first
+    if (c.previewOp != 0) return;
+    Voice& v = pickVoice(ch);
+    v.inst->reset();
+    v.active = v.gate = v.trig = true;
+    v.note = kPreviewNote;
+    v.sub = 0;
+    v.preview = c.previewId;
+    v.started = ++ch.noteCount;
+    v.since = v.rel = v.quiet = 0;
+    v.pitch = v.target = c.pitch;
+    v.glideLeft = 0;
+    v.glideStep = 0;
+    v.freq = mtof(c.pitch);
+    v.vel = c.vel;
+    v.tacc = v.phase = 0;
+    v.offAt = -1;
+    v.expressive = false;
+    v.exLeft = 0;
+    v.bend = v.timbre = 0;
+    v.press = 1;
+    s.previewing = true;
+    s.previewQuiet = s.previewTail = 0;
+    previewing_ = true;
+}
+
+// After a callback: which slots still preview. A slot keeps running after its last preview voice ends until its
+// output (an effect's tail) has stayed below -80 dB for a moment, so a reverb isn't cut off; a muted or soloed-out
+// slot doesn't run, so its previews end at once. Only previewing slots are looked at: no cost when none was played.
+void Engine::updatePreviewing(int frames) noexcept {
+    bool any = false;
+    for (int i = 0; i < slotCount_; ++i) {
+        Slot& s = slotAt(i);
+        if (!s.previewing) continue;
+        const bool silent = !s.active || (slotTarget(s) == 0.0 && s.gain == 0.0);
+        bool voices = false;
+        if (s.cur && s.cur->voiced)
+            for (Voice& v : s.cur->voices) {
+                if (!v.active || v.preview < 0) continue;
+                if (silent) v.active = false;
+                else voices = true;
+            }
+        s.previewTail = voices ? 0 : s.previewTail + frames;
+        const bool live = voices || (!silent && s.cur && s.cur->voiced && s.previewQuiet < static_cast<int64_t>(kPreviewQuietSeconds * sr_) &&
+                                     s.previewTail < static_cast<int64_t>(kPreviewTailSeconds * sr_));
+        s.previewing = live;
+        any = any || live;
+    }
+    previewing_ = any;
+}
+
+// The stop fade has reached silence: pattern notes end and effects start from silence, so a later preview hears
+// neither the chord that was playing nor a frozen tail. Held previews keep their voices; the master fades them back
+// in. Stopped, a track's time runs on from where it stopped (preview chunks).
+void Engine::endPlayback() noexcept {
+    for (int i = 0; i < slotCount_; ++i) {
+        Slot& s = slotAt(i);
+        if (!s.cur) continue;
+        restartChain(*s.cur);
+        if (s.old) {  // a stop during a code swap: the old chain's fade ends too
+            restartChain(*s.old);
+            for (Voice& v : s.old->voices) v.active = false;
+            s.swapLeft = 0;
+        }
+        s.previewN = s.lastN + 1;
+        s.previewQuiet = 0;
+    }
+    previewRampIn_ = previewing_ ? std::max(1, static_cast<int>(kStopSeconds * sr_)) : 0;
+}
+
 void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept {
     const PatternNote& n = pat.notes[e.note];
     // A note-off just releases whichever voice holds the note; only note-ons ask whether the note plays.
@@ -2379,23 +2580,8 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
                 return;
             }
     }
-    // A free voice, else the oldest released one, else the oldest.
-    Voice* pick = nullptr;
-    // Only the project's first `voices` voices take new notes (light mode plays fewer).
-    const int limit = std::min(voiceLimit_, c.voiceTake);  // voices: 1 is mono: each note steals the one voice
-    for (int i = 0; i < limit; ++i)
-        if (!c.voices[i].active) {
-            pick = &c.voices[i];
-            break;
-        }
-    for (int pass = 0; pass < 2 && !pick; ++pass)
-        for (int i = 0; i < limit; ++i) {
-            Voice& v = c.voices[i];
-            if ((pass == 1 || !v.gate) && (!pick || v.started < pick->started)) pick = &v;
-        }
-    Voice& v = *pick;
-    if (v.active) c.declick += v.lastY;  // stealing a sounding voice: smooth over the jump
-    v.lastY = 0;
+    Voice& v = pickVoice(c);
+    v.preview = -1;
     v.inst->reset();
     v.active = v.gate = v.trig = true;
     v.note = e.note;
@@ -2638,6 +2824,33 @@ void Engine::planTrack(Slot& s, int& m) noexcept {
 // next loop boundary or code swap of any playing track.
 int Engine::planChunk(int maxFrames) noexcept {
     int m = maxFrames;
+    if (previewChunk_) {
+        // Stopped, with previews: only the previewing tracks run, with no pattern events and no transport, through
+        // their effects, mix, folder buses and master. Swaps and removals wait for playback, as they do while stopped.
+        for (int i = 0; i < slotCount_; ++i) {
+            Slot& s = slotAt(i);
+            if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
+            if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
+            s.target = slotTarget(s);
+            if (!s.previewing || !s.cur->voiced || (s.target == 0.0 && s.gain == 0.0)) {
+                s.mode = Slot::Mode::Silent;
+                continue;
+            }
+            s.mode = Slot::Mode::Play;
+            s.pat = nullptr;
+            s.seam = false;
+            s.fade = s.old && s.swapLeft > 0;  // a code edit while a preview sounds still crossfades
+            // The layer's time runs on through its loop, so time-driven effects keep moving; cut at the wrap.
+            const double layerLen = s.steps <= 0 ? static_cast<double>(loopLen_) : s.steps * stepLen_;
+            const int64_t len = std::max<int64_t>(1, static_cast<int64_t>(std::floor(layerLen + 0.5)));
+            s.cur->layerLen = layerLen;
+            if (s.old) s.old->layerLen = layerLen;
+            s.previewN = ((s.previewN % len) + len) % len;
+            s.n0 = s.previewN;
+            m = static_cast<int>(std::min<int64_t>(m, len - s.n0));
+        }
+        return m;
+    }
     for (int i = 0; i < slotCount_; ++i) {
         Slot& s = slotAt(i);
         if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
@@ -2677,6 +2890,14 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         }
     }
     const int m = planChunk(maxFrames);
+    if (previewChunk_)
+        // Stopped, a track that isn't previewing exports silence, not the last block it played.
+        for (int i = 0; i < slotCount_; ++i) {
+            Slot& slot = slotAt(i);
+            if (slot.mode == Slot::Mode::Play || !slot.exportBuf) continue;
+            for (size_t b = 0; b < slot.exportCount; ++b)
+                if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), m, 0.0);
+        }
     ++chunkId_;
     // One graph runs the mix: each track's modules as a chain of nodes then its track node, in
     // dependency order (exporters before readers), each folder bus after its children, then the
@@ -2891,12 +3112,17 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         sp = (sp + 1) % kScopeSize;
     }
     s.scopePos.store(sp, std::memory_order_release);
+    storeMax(s.peak, peak);
+    s.previewQuiet = peak > kPreviewQuiet ? 0 : s.previewQuiet + m;
+    if (previewChunk_) {
+        s.previewN += m;  // the transport isn't moving: its place in the loop stays; the preview's time runs on
+        return;
+    }
     s.lastN = s.n0 + m - 1;
     const int64_t next = g_ + m;
     s.expectG = next >= loopLen_ ? 0 : next;
     s.contiguous = true;
     s.progress.store(static_cast<float>(static_cast<double>(s.n0 + m) / s.cur->layerLen), std::memory_order_relaxed);
-    storeMax(s.peak, peak);
 }
 
 // A folder bus: its children arrive summed in float on the graph's summing input.
@@ -2971,9 +3197,15 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         }
         if (stopFade_ > 0) {
             fade = static_cast<double>(stopFade_) / (kStopSeconds * sr_);
-            if (--stopFade_ == 0) playing_ = false;
-        } else if (!playing_) {
+            if (--stopFade_ == 0) {
+                playing_ = false;
+                stopEnded_ = true;
+            }
+        } else if (!playing_ && !previewChunk_) {
             fade = 0.0;
+        } else if (previewChunk_ && previewRampIn_ > 0) {
+            const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
+            fade = 1.0 - static_cast<double>(previewRampIn_--) / len;
         }
         const float ol = static_cast<float>(yl * gain * fade);
         const float orr = static_cast<float>(yr * gain * fade);
@@ -3015,12 +3247,24 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     int i = 0;
     while (i < frames) {
         if (!playing_) {
-            std::fill(left + i, left + frames, 0.0f);
-            std::fill(right + i, right + frames, 0.0f);
-            break;
+            if (!previewing_) {
+                std::fill(left + i, left + frames, 0.0f);
+                std::fill(right + i, right + frames, 0.0f);
+                break;
+            }
+            // Stopped with previews: they play, the transport stays where it is.
+            previewChunk_ = true;
+            const int m = processChunk(left + i, right + i, std::min(frames - i, kBlock));
+            previewChunk_ = false;
+            i += m;
+            continue;
         }
         const int maxM = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, loopLen_ - g_}));
         const int m = processChunk(left + i, right + i, maxM);
+        if (stopEnded_) {
+            stopEnded_ = false;
+            endPlayback();
+        }
         g_ += m;
         if (g_ >= loopLen_) {
             g_ = 0;
@@ -3028,6 +3272,7 @@ void Engine::process(float* left, float* right, int frames) noexcept {
         }
         i += m;
     }
+    if (previewing_) updatePreviewing(frames);
     playingFlag_.store(playing_, std::memory_order_relaxed);
     posFlag_.store(g_, std::memory_order_relaxed);
 }

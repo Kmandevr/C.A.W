@@ -1,7 +1,7 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # Decisions
@@ -33,7 +33,7 @@ updated: 2026-11-04
   - **Glow:** subtle and adjustable.
   - **Detail:** [UI plan](ui-plan.md#arrangement-home).
 - **Piano roll, hearing and drawing (owner, 2026-11-04):**
-  - **Hearing:** a note plays while it is dragged or placed, and a pitch change ends the old preview before the new one starts. This needs a note on/off C API.
+  - **Hearing (2026-11-05):** a note plays while it is placed, moved, held or bent, through its track's instrument and effects at the track's volume and pan (mute and solo apply), on top of playback too, at the note's velocity. A tapped-in note plays its own length; a held or dragged note sounds until the finger lifts. A pitch change ends the old note before the new one starts; a move in time only doesn't retrigger. A selection plays its opening chord (the notes that start first). While a bend is edited the note follows the pitch at the edited point of the curve. "Hear notes" in ⋮ turns previews off. Claude built the note on/off C API for it (#103).
   - **Drawing:** drawing stays as today, plus the confirmed quality-of-life tweaks.
   - **Extras:** scale highlight, snap to scale and ghost notes.
 - **Code workspace (owner, 2026-11-04):**

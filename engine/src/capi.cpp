@@ -97,6 +97,24 @@ void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume,
     if (e && layer_id) e->engine->setLayerMix(layer_id, volume, pan, mute != 0, solo != 0);
 }
 
+// Previews keep a small id-to-layer map on the control side; out of memory drops the preview, never throws.
+void caw_engine_note_on(CawEngine* e, const char* layer_id, int32_t id, double pitch, double velocity) try {
+    if (e && layer_id) e->engine->noteOn(layer_id, id, pitch, velocity);
+} catch (const std::bad_alloc&) {
+}
+
+void caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch) {
+    if (e) e->engine->notePitch(id, pitch);
+}
+
+void caw_engine_note_off(CawEngine* e, int32_t id) {
+    if (e) e->engine->noteOff(id);
+}
+
+void caw_engine_notes_off(CawEngine* e) {
+    if (e) e->engine->notesOff();
+}
+
 void caw_engine_set_master(CawEngine* e, double volume) {
     if (e) e->engine->setMaster(volume);
 }

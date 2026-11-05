@@ -126,6 +126,13 @@ class Bindings {
             void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int)>('caw_engine_set_layer_mix'),
         setMaster = lib.lookupFunction<Void Function(Pointer<Void>, Double),
             void Function(Pointer<Void>, double)>('caw_engine_set_master'),
+        noteOn = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Int32, Double, Double),
+            void Function(Pointer<Void>, Pointer<Utf8>, int, double, double)>('caw_engine_note_on'),
+        notePitch = lib.lookupFunction<Void Function(Pointer<Void>, Int32, Double),
+            void Function(Pointer<Void>, int, double)>('caw_engine_note_pitch'),
+        noteOff = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
+            'caw_engine_note_off'),
+        notesOff = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_notes_off'),
         play = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_play'),
         stop = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_stop'),
         clearOverload = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
@@ -212,6 +219,10 @@ class Bindings {
   final void Function(Pointer<Void>, Pointer<Utf8>, double) setGlobal;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
   final void Function(Pointer<Void>, double) setMaster;
+  final void Function(Pointer<Void>, Pointer<Utf8>, int, double, double) noteOn;
+  final void Function(Pointer<Void>, int, double) notePitch;
+  final void Function(Pointer<Void>, int) noteOff;
+  final void Function(Pointer<Void>) notesOff;
   final void Function(Pointer<Void>) play;
   final void Function(Pointer<Void>) stop;
   final void Function(Pointer<Void>) clearOverload;

@@ -479,6 +479,7 @@ class RollLook {
     this.emptyDrag = EmptyDrag.scroll,
     this.holdMs = 500,
     this.valueGrid = ValueGrid.eighth,
+    this.hearNotes = true,
   });
 
   final double rowHeight, velocityLane, chanceLane, gridStrength;
@@ -494,6 +495,9 @@ class RollLook {
 
   final ValueGrid valueGrid;
 
+  /// Notes sound while you place, move, hold or bend them (owner, 2026-11-05).
+  final bool hearNotes;
+
   RollLook copyWith({
     double? rowHeight,
     double? velocityLane,
@@ -504,6 +508,7 @@ class RollLook {
     EmptyDrag? emptyDrag,
     int? holdMs,
     ValueGrid? valueGrid,
+    bool? hearNotes,
   }) =>
       RollLook(
         rowHeight: (rowHeight ?? this.rowHeight).clamp(10, 40).toDouble(),
@@ -515,6 +520,7 @@ class RollLook {
         emptyDrag: emptyDrag ?? this.emptyDrag,
         holdMs: (holdMs ?? this.holdMs).clamp(250, 1500),
         valueGrid: valueGrid ?? this.valueGrid,
+        hearNotes: hearNotes ?? this.hearNotes,
       );
 
   Map<String, dynamic> toJson() => {
@@ -527,6 +533,7 @@ class RollLook {
         'empty_drag': emptyDrag.name,
         'hold_ms': holdMs,
         'value_grid': valueGrid.name,
+        'hear_notes': hearNotes,
       };
 
   static RollLook fromJson(Map<String, dynamic> j) {
@@ -541,6 +548,7 @@ class RollLook {
       emptyDrag: EmptyDrag.values.where((e) => e.name == j['empty_drag']).firstOrNull,
       holdMs: n('hold_ms')?.round(),
       valueGrid: ValueGrid.values.where((e) => e.name == j['value_grid']).firstOrNull,
+      hearNotes: j['hear_notes'] is bool ? j['hear_notes'] as bool : null,
     );
   }
 }
