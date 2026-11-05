@@ -1,7 +1,9 @@
 // Shared neon widgets: panels, the oscilloscope, level and progress meters, and small toggle buttons.
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
@@ -148,38 +150,124 @@ class Bar extends StatelessWidget {
       );
 }
 
-/// Peak meter with a slow fall, for one layer or the master.
+/// A peak meter for one layer, folder or the master, on a dB scale: the bar rises at once to each sample peak and
+/// falls at [fallDbPerSecond]; a thin line holds the highest peak for [holdSeconds]; at 0 dBFS or over it turns pink
+/// for [clipSeconds]. It runs on wall-clock time (its own ticker, only while something shows), so it falls the same
+/// on any refresh rate or meter cadence and never freezes partway when the engine goes quiet.
 class PeakMeter extends StatefulWidget {
   const PeakMeter({super.key, required this.state, required this.read, required this.color});
   final AppState state;
   final double Function() read;
   final Color color;
 
+  /// The meter's range: [floorDb] (empty) to 0 dBFS (full).
+  static const floorDb = -60.0;
+  static const fallDbPerSecond = 24.0;
+  static const holdSeconds = 1.5;
+  static const clipSeconds = 3.0;
+
+  /// A linear peak (1 = 0 dBFS) in dB, [floorDb] for silence.
+  static double db(double peak) => peak <= 0 || !peak.isFinite ? floorDb : math.max(floorDb, 20 * math.log(peak) / math.ln10);
+
+  /// Where [db] sits along the meter, 0..1.
+  static double fraction(double db) => ((db - floorDb) / -floorDb).clamp(0.0, 1.0);
+
   @override
-  State<PeakMeter> createState() => _PeakMeterState();
+  State<PeakMeter> createState() => PeakMeterState();
 }
 
-class _PeakMeterState extends State<PeakMeter> {
-  double _shown = 0;
-  int _holdTicks = 0;
+class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixin {
+  late final Ticker _ticker = createTicker(_frame);
+  Duration _last = Duration.zero;
+  double _shownDb = PeakMeter.floorDb, _holdDb = PeakMeter.floorDb;
+  double _holdLeft = 0, _clipLeft = 0; // seconds
+
+  /// The level the bar shows now, in dB (for tests).
+  double get shownDb => _shownDb;
+
+  /// The held peak line, in dB.
+  double get holdDb => _holdDb;
+  bool get clipped => _clipLeft > 0;
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<int>(
-        valueListenable: widget.state.tick,
-        builder: (context, _, _) {
-          final peak = widget.read().clamp(0.0, 1.0).toDouble();
-          if (peak > 0 && peak >= _shown) {
-            _shown = peak;
-            _holdTicks = 12; // 400 ms at the engine's 30 Hz meter cadence.
-          } else if (_holdTicks > 0) {
-            _holdTicks--;
-          } else {
-            _shown *= 0.92;
-            if (_shown < 0.001) _shown = 0;
-          }
-          return Bar(value: _shown, color: _shown > 0.95 ? Neon.pink : widget.color);
-        },
-      );
+  void initState() {
+    super.initState();
+    widget.state.tick.addListener(_read);
+  }
+
+  @override
+  void didUpdateWidget(PeakMeter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.tick.removeListener(_read);
+      widget.state.tick.addListener(_read);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.state.tick.removeListener(_read);
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  // A meter read: the peak since the last one.
+  void _read() {
+    final peak = widget.read();
+    final d = PeakMeter.db(peak);
+    var changed = false;
+    if (d > _shownDb) {
+      _shownDb = d;
+      changed = true;
+    }
+    if (d >= _holdDb && d > PeakMeter.floorDb) {
+      _holdDb = d;
+      _holdLeft = PeakMeter.holdSeconds;
+      changed = true;
+    }
+    if (peak >= 1.0) {
+      _clipLeft = PeakMeter.clipSeconds;
+      changed = true;
+    }
+    if (changed) {
+      if (!_ticker.isActive) {
+        _last = Duration.zero;
+        _ticker.start();
+      }
+      setState(() {});
+    }
+  }
+
+  void _frame(Duration elapsed) {
+    final dt = (elapsed - _last).inMicroseconds / 1e6;
+    _last = elapsed;
+    _shownDb = math.max(PeakMeter.floorDb, _shownDb - PeakMeter.fallDbPerSecond * dt);
+    // The peak line holds, then falls like the bar for whatever part of this frame came after its hold.
+    final held = math.min(_holdLeft, dt);
+    _holdLeft = math.max(0, _holdLeft - dt);
+    _holdDb = math.max(_shownDb, _holdDb - PeakMeter.fallDbPerSecond * (dt - math.max(0, held)));
+    if (_clipLeft > 0) _clipLeft -= dt;
+    if (_shownDb <= PeakMeter.floorDb && _holdDb <= PeakMeter.floorDb && _clipLeft <= 0) _ticker.stop();
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = clipped ? Neon.pink : widget.color;
+    final hold = PeakMeter.fraction(_holdDb);
+    return LayoutBuilder(
+      builder: (context, c) => Stack(alignment: Alignment.centerLeft, children: [
+        Bar(value: PeakMeter.fraction(_shownDb), color: color),
+        if (hold > 0 && c.maxWidth.isFinite)
+          Positioned(
+            left: (c.maxWidth * hold - 1.5).clamp(0.0, math.max(0.0, c.maxWidth - 1.5)),
+            top: 0,
+            bottom: 0,
+            child: IgnorePointer(child: Container(width: 1.5, color: color)),
+          ),
+      ]),
+    );
+  }
 }
 
 /// A compact square toggle such as M (mute) or S (solo).

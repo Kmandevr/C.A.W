@@ -9,6 +9,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/automation_screen.dart';
+import 'package:caw/ui/theme.dart';
 import 'package:caw/ui/builder_screen.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
@@ -73,27 +74,46 @@ void main() {
     expect(tester.getSize(find.byType(InkWell)), const Size(48, 48));
   });
 
-  testWidgets('peak meters hold briefly and then decay on meter ticks', (tester) async {
+  test('peak meters read in dB from -60 to 0 dBFS', () {
+    expect(PeakMeter.db(1.0), 0);
+    expect(PeakMeter.db(0.5), closeTo(-6.02, 0.01));
+    expect(PeakMeter.db(0), PeakMeter.floorDb);
+    expect(PeakMeter.fraction(PeakMeter.db(0.1)), closeTo(2 / 3, 1e-9)); // -20 dB: two thirds up, not a tenth
+    expect(PeakMeter.fraction(PeakMeter.db(2.0)), 1.0);
+  });
+
+  testWidgets('peak meters rise at once, fall on wall-clock time, hold the peak and show a clip', (tester) async {
     var peak = 0.0;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: PeakMeter(state: state, read: () => peak, color: Colors.green)),
     ));
+    PeakMeterState m() => tester.state<PeakMeterState>(find.byType(PeakMeter));
 
-    peak = 0.8;
+    peak = 0.5; // -6 dB
     state.tick.value++;
     await tester.pump();
-    expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.8, 0.0001));
-
+    expect(m().shownDb, closeTo(-6.02, 0.01));
+    expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.9, 0.001));
+    // No more meter reads (the engine went quiet): the bar still falls 24 dB a second, the peak line holds 1.5 s.
     peak = 0;
-    for (var i = 0; i < 12; i++) {
-      state.tick.value++;
-      await tester.pump();
-    }
-    expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.8, 0.0001));
-
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(m().shownDb, closeTo(-6.02 - 12, 0.5));
+    expect(m().holdDb, closeTo(-6.02, 0.01));
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(seconds: 1));
+    expect(m().shownDb, PeakMeter.floorDb);
+    expect(m().holdDb, PeakMeter.floorDb);
+    expect(tester.binding.hasScheduledFrame, isFalse, reason: 'it stops ticking once empty');
+    // 0 dBFS or over: pink for a while.
+    peak = 1.2;
     state.tick.value++;
     await tester.pump();
-    expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.736, 0.0001));
+    expect(m().clipped, isTrue);
+    expect(tester.widget<Bar>(find.byType(Bar)).color, Neon.pink);
+    peak = 0;
+    await tester.pumpAndSettle();
+    expect(m().clipped, isFalse);
   });
 
   test('master gain updates shared state without a full app notification', () {

@@ -32,6 +32,7 @@ The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), 
 ## Verified UI/workflow gaps
 
 - Module/global parameter automation.
+- Correlation, phase and loudness meters: there are only peak meters (dB) and scopes.
 - Sends, full sidechain routing, parallel mixer paths and master effect chains.
 - Audio import, audio clips and non-destructive audio editing.
 - Sample editing, mapping, multisample authoring and SFZ export.

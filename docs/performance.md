@@ -130,7 +130,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - Mute, solo and other structural changes still update everything.
    - Measured after: **10 widgets per keystroke** (was ~3,520) and **169 per slider step** (was ~3,520). The test fails if these grow back past 50 and 300.
 2. **`Poller`** (`app/lib/model/poller.dart`) replaces the `Ticker`:
-   - about 30 reads a second only while playing, plus 1 s after stopping so meters fall to zero
+   - about 30 reads a second only while playing, plus 1 s after stopping; the meters fall on their own clock after that
    - then no timers, no frames and no FFI calls
    - nothing at all while the app is in the background
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
@@ -153,7 +153,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 - The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
 - Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; its Hann window, FFT scratch buffers and 128-bin spectrum buffer are retained between ticks. A 512-point radix-2 FFT is performed at the existing 30 Hz meter cadence; the UI does not allocate new sample buffers each frame.
 - Mixer meters and Builder controls listen to the existing state notifiers rather than introducing a second audio-state polling loop.
-- Peak meters attack immediately, hold the recent peak for 12 meter ticks (about 400 ms), then decay smoothly. The hold/release is presentation-only and never changes the engine's peak samples.
+- Peak meters (`PeakMeter` in `app/lib/ui/widgets.dart`) read on a dB scale from -60 to 0 dBFS: they rise at once to each sample peak and fall 24 dB a second on wall-clock time, with a peak line held 1.5 s and pink for 3 s at 0 dBFS or over. Each meter runs its own ticker only while it shows something, so it falls the same at any refresh rate or meter cadence, and doesn't freeze when the engine goes quiet. The engine's meters are sample peaks of what each track or folder sends on (after volume and pan, the louder channel) and of the master output. The hold and fall are presentation-only.
 - These are architectural reductions in unnecessary rebuild/allocation work; no frame-time, CPU or battery benchmark has yet been captured on physical hardware.
 
 ## UI performance profiles (Task 1)

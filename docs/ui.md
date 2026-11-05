@@ -139,7 +139,7 @@ The broader UI specification below records design intent as well as current beha
 - **Keys:** a key press is a lookup in a per-area table. Search and completion run only while the action list or `:` is open.
 - **Auto-update:** compiles off the UI thread after the pause you set. A change that doesn't compile costs nothing on the audio side.
 - **The audio never depends on the UI.** The C++ engine runs on its own thread ([engine](engine.md)), so a slow frame can't cause a dropout.
-- **Repaint only what moves:** meters, the playhead and scopes use bounded repaint regions. Engine Lab's master scope and spectrum read from the native scope buffer; polling stops when stopped or hidden ([performance](performance.md)).
+- **Repaint only what moves:** meters, the playhead and scopes use bounded repaint regions. Engine Lab's master scope and spectrum read from the native scope buffer; polling stops when stopped or hidden ([performance](performance.md)). Each peak meter falls on its own ticker only while it shows something, then stops.
 - **Draw grids, not widgets:** use painters for dense grids and lists built lazily; do not create a widget for every note or cell.
 - **No heavy assets:** system fonts, built-in icons and restrained short animations.
 - **Compact data:** patterns are flat arrays of note events in the engine. A layer's memory is fixed when it is set up, never while playing.

@@ -45,6 +45,7 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 
 - The active Engine uses `Engine::setProject`, `processChunk`/`planChunk`, the mix-graph node functions (`runModuleNode`, `runTrackNode`, `runBusNode`, `runMasterNode`), `runModule` and `runVoices`.
 - `GraphExecutor` and `ModuleRegistry` still have no production playback integration with Engine/VM.
+- Note previews (#103) and track/folder meters (2026-11-05) run inside the Engine's existing mix-graph nodes; they add no graph features.
 - GraphExecutor is planar N-channel (F3) with typed audio (several, for sidechains), modulation, control (F5.1) and event (F5.2) ports; summing inputs accept fan-in since F4.1 and audio ones can be re-routed on the audio thread (`setRouting`, F4.3). It does not yet implement dynamic routing of non-audio ports, sends/returns, feedback boundaries or nested graphs, or receive MIDI from devices (modulation links, automation lanes and CC mappings from host events feed its resolved parameters, F6.3–F6.5; the Engine's .caw params use the same resolver, F6.6).
 - Do not create a second engine. Integrate existing VM Instances, voices, imports/exports, automation, folder buses, offline rendering and project migration into one prepared execution model. Keep the template and multi-track mixer golden hashes (`golden.txt`, `mix_golden_test.cpp`) unchanged while doing so.
 - Audio callback must remain allocation-free, lock-free, I/O-free and logging-free. No worker waits on callback. Prepare data before activation and reclaim it off callback.

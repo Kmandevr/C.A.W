@@ -73,7 +73,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Mixer / Editor** (`lib/ui/mixer_screen.dart`):
   - a dedicated channel-strip workspace with shared track volume, pan, mute and solo controls
   - channel strips expose existing generator/effect chains, folder-bus enablement and track-to-folder routing
-  - master output level with independent live left/right peak meters and an inspector for the selected compiled module's real engine parameters
+  - master output level with independent live left/right peak meters (dB scale, -60 to 0 dBFS; track and folder meters read what they send on, after volume and pan) and an inspector for the selected compiled module's real engine parameters
   - desktop widths above 1200 px show channels and the module inspector side-by-side; drag the divider to resize. Mobile starts with a compact channel list and switches to a focused editor for the selected channel and module inspector
   - parameter edits use the same module parameter map and engine calls as Builder; the Mixer does not own a separate state model
   - the current engine does not yet expose sends, arbitrary buses, stereo width, correlation, loudness, phase or master effect chains through this screen

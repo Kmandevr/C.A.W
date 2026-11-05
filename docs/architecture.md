@@ -33,7 +33,7 @@ The current app and native implementation are documented in [App](app.md), [Engi
 | Sound engine | **Custom C++20 core** (owner, 2026-10-28), platform separation under engine/platform/ | Portable core; currently CI-verified on Linux x64, Linux Arm64 and Windows x64, and built into the Android app. iOS/macOS/WASM builds are not currently CI-verified |
 | Audio I/O | **miniaudio**, behind `engine/platform/` | Current host backends are selected in the platform layer; upstream miniaudio supports AAudio/OpenSL ES, Core Audio, WASAPI and ALSA/PulseAudio. Do not infer every backend is currently built or tested by this repository |
 | UI | **Flutter** (owner, 2026-10-28) | One UI codebase; current CI builds Android and Windows app artifacts. Linux analysis/tests run, but Linux is not a shipped artifact; iOS/macOS app builds are not configured |
-| Bridge | Thin C API over the engine, called through `dart:ffi` | Only control messages cross it (play, stop, swap program, set parameter, read meters). No audio data, no per-sample calls |
+| Bridge | Thin C API over the engine, called through `dart:ffi` | Only control messages cross it (play, stop, swap program, set parameter, note previews, read meters). No audio data, no per-sample calls |
 | Build | CMake for the engine, Flutter for the app, GitHub Actions CI | CI currently produces Android and Windows app artifacts and verifies Linux/Windows engine targets; it does not produce every target's installable |
 
 - **[Fact]** miniaudio is public domain or MIT-0 (your choice). Its backends are AAudio (Android 8.0+) and OpenSL ES on Android, Core Audio on macOS and iOS, WASAPI on Windows, and ALSA on Linux. ([github.com/mackron/miniaudio](https://github.com/mackron/miniaudio), 2026-10-28)
