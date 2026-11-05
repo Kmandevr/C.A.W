@@ -147,6 +147,17 @@ void main() {
     s.dispose();
   }, skip: skip);
 
+  testWidgets('at launch the arrangement comes to the front, whatever the saved layout showed', (tester) async {
+    final s = await startState(tester);
+    s.settings.dockLayouts = {
+      FormFactor.desktop.name: DockLayout.preset(FormFactor.desktop, DockPreset.mix).reveal(Panels.files).toJson(),
+    };
+    await pumpGolden(tester, Shell(state: s), goldenSizes['desktop']!);
+    final dock = DockController.of(tester.element(find.byType(Scaffold).first));
+    expect(dock.layout.visible, contains(Panels.arrangement));
+    s.dispose();
+  }, skip: skip);
+
   testWidgets('the mixer on a phone: upright strips with chain slots, pan, fader, meter, M and S', (tester) async {
     final s = await startState(tester);
     await pumpGolden(tester, Scaffold(body: MixerScreen(state: s, onOpenBuilder: () {})), goldenSizes['phone']!);

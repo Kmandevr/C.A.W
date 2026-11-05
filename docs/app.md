@@ -126,8 +126,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - The app's file format adds colours, the key, per-layer generator/effect fields, nested folder metadata, automation lanes and arrangement clip instances. The engine receives clip source references and song-time automation points.
 - **Storage:** projects are JSON files in the app's private support folder, under `projects/`. They're written 0.5 s after each change, and right away when the app goes to the background or quits. The app reopens the last project.
 - **Audio:** the device opens at start-up (48 kHz stereo, low-latency profile). When the app goes to the background while stopped, it closes the device, and it reopens it on return. Playing on in the background (an Android foreground service) is not in v1.
-- **Startup screen** (`lib/ui/startup_screen.dart`): continue the last project, start a new blank project, start from the "First loop" template, or open another saved project.
-  - It works from the keyboard: the first choice has focus, and Tab and Enter move and pick.
+- **Opening:** the app opens straight into the last project (`AppState.openStorage`) with the arrangement in front (the shell brings it forward once at launch, whatever the saved layout showed), or the "First loop" template on a first run or when the last project is gone. If the last project's file is damaged, or opening it fails, the template opens and a pink line under the transport says why; the damaged file stays in the projects folder. There is no startup screen. The project menu offers a new blank project, a new one from the template, and every saved project.
   - "First loop" has Kick, Bass and Hats layers of 1 bar each and a 3-bar Byte lead with Bitcrush over a 4-bar loop at 140 BPM, plus a muted Acid layer that plays the Acid synth from the Acid line pattern.
 - **Settings** (`lib/model/settings.dart`, `lib/ui/theme_editor.dart`): saved as `settings.json` next to `projects/`.
   - **Theme**, with a theme editor: each colour can be set with hue, saturation and brightness sliders or as hex, with a live preview and a glow switch. Themes can be saved, duplicated, imported and exported.
@@ -195,7 +194,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - highlighting, editor helpers and completion
 - the pattern model (`lib/model/pattern_doc.dart`): exact step fractions, parsing with the engine's errors, comment-keeping write-back and every note edit
 - the actions core (`lib/actions/`): keymap files, conflicts, macros with their recursion guard, counts, `:` commands, `.` repeat and recording
-- settings, theme files and the startup choices
+- settings, theme files, and opening into the last project or the template (`test/opening_test.dart`)
 - the motion rules and the motion, haptics and glow settings (`test/motion_test.dart`), the Glass setting and surfaces (`test/glass_test.dart`), and the docking model, view and shell (`test/dock_layout_test.dart`, `test/dock_view_test.dart`, `test/dock_shell_test.dart`: every panel at the three sizes without overflow, with goldens)
 - golden (screenshot) tests, which compare a screen with a PNG in `test/goldens/`:
   - `test/golden_util.dart` loads real fonts (the bundled JetBrains Mono, and the Roboto and Material icons from the Flutter SDK), so layouts measure as they do on a phone. It pumps screens at the plan's sizes: phone 390×844, landscape 844×390, desktop 1280×800.
