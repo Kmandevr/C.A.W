@@ -340,10 +340,6 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         if (source.isNotEmpty) sourceCounts[source] = (sourceCounts[source] ?? 0) + 1;
       }
       return ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 96), children: [
-        const Text('FILES / PORTABILITY', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
-        const Text('Your library folders and tags · portable files · choose your own save locations',
-          style: TextStyle(color: Neon.dim, fontSize: 11)),
-        const SizedBox(height: 14),
         NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('CURRENT PROJECT', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),

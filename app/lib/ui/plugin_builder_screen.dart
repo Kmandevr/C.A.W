@@ -124,10 +124,6 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
       final module = s.project.module(_moduleId);
       final info = module == null ? null : s.info[module.id];
       return ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 96), children: [
-        const Text('PLUGIN BUILDER', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
-        const Text('Guided and advanced development for native C.A.W. modules',
-          style: TextStyle(color: Neon.dim, fontSize: 11)),
-        const SizedBox(height: 12),
         SegmentedButton<bool>(
           segments: const [
             ButtonSegment(value: true, label: Text('Guided')),

@@ -20,6 +20,7 @@ The owner's goal (2026-10-28) is a capable, lightweight music-production workspa
   - With no header, an empty file is a byte-mode generator. That is how the language already works ([engine](engine.md#module-files-caw)).
 - **Look details** (owner, 2026-10-28):
   - **Calm neon** stays: near-black, thin neon lines, and glow only on what's active (playhead, selected notes, meters).
+  - **No repeated titles or developer notes (owner, 2026-11-05):** a panel doesn't repeat its tab name as a heading, and notes about how the engine works stay out of the screens. Accent colours and card styles are not yet unified.
   - **Themes:** custom themes, with an in-app theme editor and live preview. It saves a readable theme file you can export, share or let an agent edit. Calm neon is the default, with a couple of starter themes.
   - **Fonts:** the system font for the UI, plus the bundled JetBrains Mono 2.304 (SIL OFL 1.1, about 550 KB, licence shown in the app) for code and numbers, so they look the same on phone and PC ([app](app.md)).
   - **Density:** a setting to switch between comfortable (48 dp targets, the default on phones) and compact (more bars and layers on screen).

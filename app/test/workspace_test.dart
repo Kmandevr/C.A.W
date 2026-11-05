@@ -83,6 +83,9 @@ void main() {
   });
 
   testWidgets('peak meters rise at once, fall on wall-clock time, hold the peak and show a clip', (tester) async {
+    final wall = PeakMeter.clock, start = tester.binding.clock.now();
+    addTearDown(() => PeakMeter.clock = wall);
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start); // test time, not the runner's speed
     var peak = 0.0;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: PeakMeter(state: state, read: () => peak, color: Colors.green)),
@@ -101,7 +104,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 500));
-    expect(m().shownDb, closeTo(-6.02 - 12, 1.5)); // plus the real time between the two reads
+    expect(m().shownDb, closeTo(-6.02 - 24 * .516, 0.01));
     expect(m().holdDb, closeTo(-6.02, 0.01));
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(seconds: 1));
@@ -118,6 +121,23 @@ void main() {
     state.tick.value++;
     await tester.pumpAndSettle();
     expect(m().clipped, isFalse);
+  });
+
+  testWidgets('peak readouts hold the peak in dB, then show silence even after the reads stop', (tester) async {
+    final wall = PeakMeter.clock, start = tester.binding.clock.now();
+    addTearDown(() => PeakMeter.clock = wall);
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start);
+    var peak = 0.5;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PeakReadout(state: state, read: () => peak))));
+    state.tick.value++;
+    await tester.pump();
+    expect(find.text('-6.0 dB'), findsOneWidget);
+    peak = 0;
+    state.tick.value++; // a silent read inside the hold, then no more (the poller settled)
+    await tester.pump();
+    expect(find.text('-6.0 dB'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('-∞ dB'), findsOneWidget);
   });
 
   test('master gain updates shared state without a full app notification', () {
@@ -217,7 +237,7 @@ void main() {
       home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    expect(find.text('MIXER / EDITOR'), findsOneWidget);
+    expect(find.text('MASTER OUTPUT'), findsOneWidget);
     expect(find.text('Channels'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('MODULE INSPECTOR'), findsNothing);
@@ -245,6 +265,10 @@ void main() {
       home: Scaffold(body: BuilderScreen(state: state)),
     ));
 
+    // A narrow panel keeps the track's mix behind the tune button.
+    expect(find.text('ROUTE'), findsNothing);
+    await tester.tap(find.byTooltip('Track mix'));
+    await tester.pump();
     expect(find.text('ROUTE'), findsOneWidget);
     final routePicker = find.ancestor(
       of: find.text('Master'),
@@ -309,7 +333,7 @@ void main() {
       ),
     ));
 
-    expect(find.text('AUTOMATION'), findsOneWidget);
+    expect(find.text('PROJECT AUTOMATION'), findsOneWidget);
     expect(find.text('VOLUME'), findsOneWidget);
     final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
     expect(sliders.length, 4);
@@ -380,7 +404,7 @@ void main() {
     ));
 
     final scrollable = find.byType(Scrollable).first;
-    expect(find.text('ENGINE LAB'), findsOneWidget);
+    expect(find.text('CPU'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('SPECTRUM · 0–24 kHz'), 200, scrollable: scrollable);
     expect(find.text('512-POINT HANN / FFT'), findsOneWidget);
     expect(tester.widgetList<CustomPaint>(find.byType(CustomPaint)).length, greaterThanOrEqualTo(3));
@@ -461,7 +485,7 @@ void main() {
       home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    expect(find.text('FILES / PORTABILITY'), findsOneWidget);
+    expect(find.text('CURRENT PROJECT'), findsOneWidget);
     expect(find.text('Portable project'), findsOneWidget);
     expect(find.text('Export .cawproj'), findsOneWidget);
     expect(find.text('Import project'), findsOneWidget);
@@ -681,7 +705,6 @@ void main() {
       home: Scaffold(body: PluginBuilderScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    expect(find.text('PLUGIN BUILDER'), findsOneWidget);
     expect(find.text('Guided'), findsOneWidget);
     expect(find.text('Advanced'), findsOneWidget);
     expect(find.text('Build boundary: native .caw module validation and source packaging are available. CLAP/VST3 binary builds, plugin sandboxing, host I/O tests and per-plugin CPU/memory profiling require a native plugin SDK/host backend that is not present in this repository. No unavailable binary target is advertised.'), findsOneWidget);

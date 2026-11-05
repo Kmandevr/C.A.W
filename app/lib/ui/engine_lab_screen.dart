@@ -18,14 +18,13 @@ class EngineLabScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(listenable: state, builder: (context, _) =>
     ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 96), children: [
-      const Text('ENGINE LAB', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
-      const Text('Live engine telemetry · compiled module graph', style: TextStyle(color: Neon.dim, fontSize: 11)),
-      const SizedBox(height: 12),
       ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) =>
         NeonPanel(color: Neon.blue, child: Wrap(spacing: 20, runSpacing: 12, children: [
           _Readout('CPU', '${(state.meters.cpu * 100).toStringAsFixed(1)}%'),
-          _Readout('PEAK L', state.meters.peakL.toStringAsFixed(3)),
-          _Readout('PEAK R', state.meters.peakR.toStringAsFixed(3)),
+          _Readout('PEAK L', '', child: PeakReadout(state: state, read: () => state.meters.peakL,
+            style: Neon.code(size: 16, color: Neon.blue))),
+          _Readout('PEAK R', '', child: PeakReadout(state: state, read: () => state.meters.peakR,
+            style: Neon.code(size: 16, color: Neon.blue))),
           _Readout('STATUS', state.meters.playing ? 'RUNNING' : 'IDLE'),
           _Readout('OVERLOADS', state.meters.overloaded.toString()),
         ]))),
@@ -42,10 +41,6 @@ class EngineLabScreen extends StatelessWidget {
       const SizedBox(height: 8),
       if (state.project.modules.isEmpty) const NeonPanel(child: Text('No modules. Create a generator or effect in Builder.')),
       for (final module in state.project.modules) _ModuleReport(state: state, module: module, onOpenBuilder: onOpenBuilder),
-      const SizedBox(height: 12),
-      const NeonPanel(color: Neon.yellow, child: Text(
-        'Engine boundary: the current C API exposes project compilation, parameters, track mixing, scopes and meters. Universal typed connections, sample/buffer editing and custom .cawengine execution are not implemented and are not simulated.',
-        style: TextStyle(color: Neon.dim, fontSize: 12))),
     ]));
 }
 
@@ -107,10 +102,9 @@ class _SignalPath extends StatelessWidget {
           read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
           color: Neon.green)),
         const SizedBox(width: 8),
-        ValueListenableBuilder<int>(valueListenable: state.tick, builder: (context, _, _) {
-          final peak = index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0;
-          return Text(peak.toStringAsFixed(3), style: Neon.code(size: 10, color: Neon.green));
-        }),
+        SizedBox(width: 64, child: PeakReadout(state: state,
+          read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
+          style: Neon.code(size: 10, color: Neon.green))),
       ]),
     ])));
   }
@@ -195,12 +189,13 @@ class _ModuleReport extends StatelessWidget {
 }
 
 class _Readout extends StatelessWidget {
-  const _Readout(this.label, this.value);
+  const _Readout(this.label, this.value, {this.child});
   final String label, value;
+  final Widget? child;
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Text(label, style: Neon.code(size: 10, color: Neon.dim)),
-    Text(value, style: Neon.code(size: 16, color: Neon.blue)),
+    child ?? Text(value, style: Neon.code(size: 16, color: Neon.blue)),
   ]);
 }
 
@@ -309,8 +304,6 @@ class _MasterScopeState extends State<_MasterScope> {
           Text('SPECTRUM · 0–24 kHz', style: TextStyle(color: Neon.violet, fontWeight: FontWeight.w800, fontSize: 10)),
           Text('512-POINT HANN / FFT', style: TextStyle(color: Neon.dim, fontSize: 9)),
         ]),
-        const Text('Read-only mono-sum scope and spectrum from the native master buffer. Left/right peak meters remain independent.',
-          style: TextStyle(color: Neon.dim, fontSize: 11)),
       ],
     ));
   }

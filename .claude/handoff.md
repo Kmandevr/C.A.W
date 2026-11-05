@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: fdd8d2e (plus review fixes in the next commit)
+Commit: 0486589
 
-Branch: claude/caw-engine-foundation-skpirb (on Main 0af9f06; note previews #103 in progress, PR next)
+Branch: claude/caw-engine-foundation-skpirb (on Main f3eeb59; phone cleanup of the panels pushed, PR open)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `Main`. Claude merges each once CI is green.
@@ -10,16 +10,19 @@ Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `
 - GPT owns the rest of the engine (#94, F7.3 part C, F7.4, F8, F10; #28).
 
 ## Done and verified
-- U0 and U1 PRs 1–3 are merged (#98–#101).
-- Piano roll part 1 (#102): stretch both ends, end zones, second-finger bypass, auto-scroll, ghost note, and the arrangement grid at full height.
-- Piano roll part 2 (#104): one snap magnet with a time and value grid.
+- U0, U1 PRs 1–3 (#98–#101), piano roll parts 1 and 2 (#102, #104: stretch, bypass, auto-scroll, ghost, snap magnet).
 - Note previews (#103):
   - Engine: `caw_engine_note_on` and the pitch/off calls in `engine/include/caw.h`, stopped preview chunks, `endPlayback`, `restartChain`.
   - App: `previewOn` in `app/lib/model/app_state.dart`, and the "hearing notes" section in `app/lib/ui/pattern_editor.dart`.
   - Tests: `app/test/roll_preview_test.dart`, plus the engine preview tests.
 
+  - Merged in #105.
+- Accurate meters and the phone arrangement (#106): dB `PeakMeter`, track and folder peaks after pan, a one-row phone toolbar, compact track headers.
+- Phone cleanup of the panels (owner, 2026-11-05, this branch): no repeated titles or developer notes, held dB readouts (`PeakReadout`), compact phone mixer channels, compact Automation, a one-row Code track card.
+
 ## Next
-- Open the #103 PR, then merge it when CI is green.
+- Open the panels PR, then merge it when CI is green.
+- Owner: "then work on the rest of the UI". Next is the Reaper-style mixer (vertical strips with chain slots, UI plan).
 - Piano roll still to build: bend handles with detents, freehand curves, the context toolbar middle, scale highlight, snap to scale, ghost notes.
 - Arrangement automation-lane snapping (U3).
 - U1 PR4 (open straight into the arrangement) and PR5 (transport undo/redo, tap tempo #19).

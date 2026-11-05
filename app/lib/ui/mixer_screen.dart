@@ -67,9 +67,6 @@ class _MixerScreenState extends State<MixerScreen> {
     final columns = constraints.maxWidth >= 1100 ? 3 : constraints.maxWidth >= 680 ? 2 : 1;
     final s = widget.state;
     return ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 96), children: [
-      const Text('MIXER / EDITOR', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
-      const Text('Shared project channels · live engine controls', style: TextStyle(color: Neon.dim, fontSize: 11)),
-      const SizedBox(height: 12),
       NeonPanel(color: Neon.pink, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         ValueListenableBuilder<int>(
           valueListenable: s.masterValueTick,
@@ -89,12 +86,13 @@ class _MixerScreenState extends State<MixerScreen> {
           const SizedBox(width: 48, child: Text('R', style: TextStyle(color: Neon.green, fontSize: 10))),
           Expanded(child: PeakMeter(state: s, read: () => s.meters.peakR, color: Neon.green)),
         ]),
-        ValueListenableBuilder<int>(
-          valueListenable: s.tick,
-          builder: (context, _, _) => Text(
-            'Peak L ${s.meters.peakL.toStringAsFixed(3)}   Peak R ${s.meters.peakR.toStringAsFixed(3)}',
-            style: Neon.code(size: 11, color: Neon.dim)),
-        ),
+        const SizedBox(height: 4),
+        Row(children: [
+          const SizedBox(width: 20),
+          Expanded(child: PeakReadout(key: const ValueKey('master-peak-l'), state: s, read: () => s.meters.peakL)),
+          const SizedBox(width: 48),
+          Expanded(child: PeakReadout(key: const ValueKey('master-peak-r'), state: s, read: () => s.meters.peakR)),
+        ]),
       ])),
       const SizedBox(height: 14),
       if (wide)
@@ -198,43 +196,42 @@ class _MobileChannelRow extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 8),
     child: NeonPanel(
       color: selected ? Neon.blue : Neon.layer(layer.color),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 8),
       child: ValueListenableBuilder<int>(
         valueListenable: state.layerValueTick(layer.id),
+        // Compact on a phone (owner, 2026-11-05): name, M, S and the editor on one row; level and pan side by side
+        // under it, then the meter.
         builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
+          SizedBox(height: 40, child: Row(children: [
             Expanded(child: InkWell(
               onTap: onSelect,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800)),
-              ),
+              child: Align(alignment: Alignment.centerLeft, child: Text(layer.name, maxLines: 1,
+                overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800))),
             )),
-            IconButton(tooltip: layer.mute ? 'Unmute' : 'Mute',
-              onPressed: () => state.mixLayer(layer, mute: !layer.mute),
-              icon: Icon(Icons.volume_off, color: layer.mute ? Neon.pink : Neon.dim)),
-            IconButton(tooltip: layer.solo ? 'Unsolo' : 'Solo',
-              onPressed: () => state.mixLayer(layer, solo: !layer.solo),
-              icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim)),
+            ToggleChip(label: 'M', size: 40, tooltip: layer.mute ? 'Unmute' : 'Mute', on: layer.mute, color: Neon.yellow,
+              onTap: () => state.mixLayer(layer, mute: !layer.mute)),
+            const SizedBox(width: 6),
+            ToggleChip(label: 'S', size: 40, tooltip: layer.solo ? 'Unsolo' : 'Solo', on: layer.solo, color: Neon.blue,
+              onTap: () => state.mixLayer(layer, solo: !layer.solo)),
             IconButton(tooltip: 'Open focused channel editor', onPressed: onSelect,
+              padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 44, minHeight: 40),
               icon: const Icon(Icons.chevron_right, color: Neon.blue)),
-          ]),
-          Row(children: [
-            const SizedBox(width: 48, child: Text('LEVEL', style: TextStyle(color: Neon.dim, fontSize: 10))),
-            Expanded(child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
+          ])),
+          SizedBox(height: 44, child: Row(children: [
+            const Icon(Icons.volume_up, size: 14, color: Neon.dim),
+            Expanded(flex: 3, child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
+              semanticFormatterCallback: (v) => 'Level ${(v * 100).round()}%',
               activeColor: Neon.green, onChanged: (v) => state.mixLayer(layer, volume: v))),
-            SizedBox(width: 38, child: Text('${(layer.volume * 100).round()}%',
+            SizedBox(width: 34, child: Text('${(layer.volume * 100).round()}%',
               textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.green))),
-          ]),
-          Row(children: [
-            const SizedBox(width: 48, child: Text('PAN', style: TextStyle(color: Neon.dim, fontSize: 10))),
-            Expanded(child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
+            const SizedBox(width: 6),
+            Expanded(flex: 2, child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
+              semanticFormatterCallback: (v) => v.abs() < .01 ? 'Pan centre' : 'Pan ${(v.abs() * 100).round()}% ${v < 0 ? 'left' : 'right'}',
               activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v))),
-            SizedBox(width: 38, child: Text(layer.pan.abs() < .01 ? 'C' :
+            SizedBox(width: 30, child: Text(layer.pan.abs() < .01 ? 'C' :
               '${(layer.pan.abs() * 100).round()}${layer.pan < 0 ? 'L' : 'R'}',
               textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.blue))),
-          ]),
+          ])),
           PeakMeter(key: ValueKey(layer.id), state: state,
             read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
             color: Neon.green),

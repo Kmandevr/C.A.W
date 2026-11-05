@@ -475,7 +475,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
     return LayoutBuilder(builder: (context, box) {
       final wide = box.maxWidth >= 900;
       final picker = _ModulePicker(state: s, onNew: _newModule);
-      final trackControls = _BuilderTrackControls(state: s);
+      final trackControls = _BuilderTrackControls(state: s, compact: !wide);
       if (m == null) {
         return Column(children: [
           picker,
@@ -711,12 +711,24 @@ class _BuilderScreenState extends State<BuilderScreen> {
   }
 }
 
-class _BuilderTrackControls extends StatelessWidget {
-  const _BuilderTrackControls({required this.state});
+/// The selected track's mix above the code. On a phone it is one row (track, M, S) and level, pan and route open
+/// from the tune button (owner, 2026-11-05: phone cleanup); a wide screen shows them all.
+class _BuilderTrackControls extends StatefulWidget {
+  const _BuilderTrackControls({required this.state, required this.compact});
   final AppState state;
+  final bool compact;
+
+  @override
+  State<_BuilderTrackControls> createState() => _BuilderTrackControlsState();
+}
+
+class _BuilderTrackControlsState extends State<_BuilderTrackControls> {
+  bool _open = false;
 
   @override
   Widget build(BuildContext context) {
+    final state = widget.state;
+    final showMix = !widget.compact || _open;
     final layers = state.project.layers.where((layer) => !layer.isFolder).toList();
     final layer = layers.where((item) => item.id == state.selectedLayerId).firstOrNull ?? layers.firstOrNull;
     if (layer == null) {
@@ -747,18 +759,23 @@ class _BuilderTrackControls extends StatelessWidget {
                 if (next != null) state.selectLayer(next);
               },
             )),
-            IconButton(
-              tooltip: layer.mute ? 'Unmute track' : 'Mute track',
-              onPressed: () => state.mixLayer(layer, mute: !layer.mute),
-              icon: Icon(Icons.volume_off, color: layer.mute ? Neon.pink : Neon.dim),
-            ),
-            IconButton(
-              tooltip: layer.solo ? 'Unsolo track' : 'Solo track',
-              onPressed: () => state.mixLayer(layer, solo: !layer.solo),
-              icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim),
-            ),
+            ToggleChip(label: 'M', size: 40, tooltip: layer.mute ? 'Unmute track' : 'Mute track', on: layer.mute,
+              color: Neon.yellow, onTap: () => state.mixLayer(layer, mute: !layer.mute)),
+            const SizedBox(width: 6),
+            ToggleChip(label: 'S', size: 40, tooltip: layer.solo ? 'Unsolo track' : 'Solo track', on: layer.solo,
+              color: Neon.blue, onTap: () => state.mixLayer(layer, solo: !layer.solo)),
+            if (widget.compact)
+              IconButton(
+                tooltip: _open ? 'Hide track mix' : 'Track mix',
+                isSelected: _open,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 40),
+                onPressed: () => setState(() => _open = !_open),
+                icon: const Icon(Icons.tune, color: Neon.dim),
+                selectedIcon: const Icon(Icons.tune, color: Neon.blue),
+              ),
           ]),
-          ValueListenableBuilder<int>(valueListenable: state.layerValueTick(layer.id), builder: (context, _, _) => Row(children: [
+          if (showMix) ValueListenableBuilder<int>(valueListenable: state.layerValueTick(layer.id), builder: (context, _, _) => Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('LEVEL · ${(layer.volume * 100).round()}%', style: Neon.code(size: 10, color: Neon.green)),
               Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
@@ -772,7 +789,7 @@ class _BuilderTrackControls extends StatelessWidget {
                 activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v)),
             ])),
           ])),
-          Row(children: [
+          if (showMix) Row(children: [
             const SizedBox(width: 48, child: Text('ROUTE', style: TextStyle(color: Neon.dim, fontSize: 10))),
             Expanded(child: DropdownButton<String?>(
               value: routeId,
@@ -801,12 +818,13 @@ class _ModulePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        height: 56,
+        height: 48,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           children: [
             ActionChip(
+              visualDensity: VisualDensity.compact,
               avatar: const Icon(Icons.add, color: Neon.yellow, size: 18),
               label: const Text('New'),
               onPressed: onNew,
@@ -814,6 +832,7 @@ class _ModulePicker extends StatelessWidget {
             for (final m in state.project.modules) ...[
               const SizedBox(width: 6),
               ChoiceChip(
+                visualDensity: VisualDensity.compact,
                 avatar: Icon(kindIcon(state.kindOf(m.id)), size: 16, color: kindColor(state.kindOf(m.id))),
                 label: Text(m.name + (m.edited ? ' •' : '')),
                 selected: m.id == state.selectedModuleId,
