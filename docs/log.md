@@ -6,6 +6,8 @@ updated: 2026-11-05
 
 # Log
 
+- 2026-11-05: Published the existing native module processor contract as the first public C++ SDK slice (`engine/include/caw/module.hpp`, `CAW::SDK`); internal engine includes now forward to the canonical public contract and the SDK consumer is compiled without `engine/src` access. This is a source-level component API, not yet an installed package or dynamic loader.
+
 - 2026-11-05: Owner chose ordinary general-purpose C++ as C.A.W.'s programming language, a comprehensive C.A.W. Library/SDK and one shared component model for code, visual composition and generated/custom performance UI. The old .caw language/VM is transitional and will be retired after useful capabilities migrate; old-source and pre-release-project compatibility is not required. See [C++ creation platform](cpp-creation-platform.md) and [roadmap](roadmap.md).
 
 - 2026-11-05: Key bindings editor (owner): Settings → Key bindings (or the action list's Edit keys) lists every action with its keys; press or type a key to give it to an action, with a note of what it replaces or clashes with; remove keys, reset one or all. Saved to `keys.txt` as changes over the defaults.
