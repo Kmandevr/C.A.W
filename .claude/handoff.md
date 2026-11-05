@@ -20,8 +20,7 @@ Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `
 - Mixer strips, U6 part 1 (#108): upright Reaper-style strips with chain slots, typed level and pan, `PeakMeter(vertical:)`.
 - Typed parameter values, U6 part 2 (#109): `typeValue`, `parseParam` in `app/lib/ui/widgets.dart`.
 - U1 PR4 (#110): no startup screen; `openStorage` in `app/lib/model/app_state.dart` opens the last project.
-- U1 PR5 part 1 (#111): transport tempo (#19) and bar.beat in `app/lib/ui/shell.dart`.
-- U1 PR5 part 2 (#112): project undo/redo, `app/lib/model/history.dart`.
+- U1 PR5 (#111, #112): transport tempo (#19) and bar.beat in `app/lib/ui/shell.dart`; undo/redo, `app/lib/model/history.dart`.
 - Space pause (this branch): `caw_engine_play_at` (steps), `togglePlay`/`stopPlayback` in `app/lib/model/app_state.dart`.
 
 ## Next
