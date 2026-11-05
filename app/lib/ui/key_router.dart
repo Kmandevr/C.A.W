@@ -340,14 +340,8 @@ class KeyRouterState extends State<KeyRouter> {
       context: context,
       builder: (_) => _ActionList(registry: registry, keymap: vim.keymap, area: _area),
     );
-    if (ref == _editKeys) {
-      if (context.mounted) await showKeyBindings(context);
-    } else if (ref != null) {
-      _show(vim.run(ref));
-    }
+    if (ref != null) _show(vim.run(ref)); // "Edit keys" returns view.keys, which opens the editor
   }
-
-  static const _editKeys = ActionRef.action('view.keys');
 
   /// The key bindings editor (Settings, the action list, or the "Key bindings" action). Each change saves keys.txt.
   Future<void> showKeyBindings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute<void>(
@@ -498,7 +492,7 @@ class _ActionListState extends State<_ActionList> {
         TextButton.icon(
           icon: const Icon(Icons.keyboard),
           label: const Text('Edit keys'),
-          onPressed: () => Navigator.pop(context, KeyRouterState._editKeys),
+          onPressed: () => Navigator.pop(context, const ActionRef.action('view.keys')),
         ),
       ],
       content: SizedBox(

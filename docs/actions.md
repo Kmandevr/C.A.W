@@ -1,7 +1,7 @@
 ---
 title: Actions, keys and macros
 summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
-covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
+covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/key_bindings.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
 updated: 2026-11-05
 ---
 
@@ -20,9 +20,11 @@ updated: 2026-11-05
   - It also serves as the shortcut overlay the [UI design](ui.md#keyboard-pc) asked for.
 - **The key bindings editor** (owner, 2026-11-05; `lib/ui/key_bindings.dart`), from Settings → Key bindings, the action list's **Edit keys**, or the `view.keys` action (no default key):
   - search every action and see its keys; a pencil marks one changed from the default
-  - give an action a key by pressing it (each press adds a chord, up to three, so `G G` works) or by typing it (`Ctrl+Shift+K`), for phones
+  - give an action a key by pressing it (each press adds a chord, up to three, so `G G` works; holding a key counts once; Cmd is Ctrl on macOS, as the router reads it) or by typing it (`Ctrl+Shift+K`), for phones. Typed keys are read as the keyboard sends them: `Shift+/` is `?`, and Shift with a plain digit is refused
+  - a plain digit first is refused: it is always a count (`3D`)
   - before setting, it says what the key would replace (a key taken in the area moves to this action), clash with (one sequence starting another), or hide (an area key over a global one)
-  - remove a key, reset one action, or **Reset all** (macros are kept)
+  - remove a key, reset one action (a default key another action has since been given stays with it, and the sheet says so), or **Reset all** (toolbars and long-press menus go back too; macros are kept)
+  - it lists actions only: a key bound to a macro in `keys.txt` is not shown there, and Reset all removes that key (the macro itself stays)
   - every change saves `keys.txt`, written as what differs from the defaults (a removed default key is a `-` line)
 - **Triggers** (owner chose all four):
   - keys: any combination with Ctrl, Shift and Alt

@@ -113,4 +113,49 @@ void main() {
     expect(router.currentState!.vim.keymap.lookup(Area.global, KeySeq.parse('Alt+M')),
         const ActionRef.action('view.mixer'));
   });
+
+  test('typed keys match what the keyboard sends', () {
+    expect(typedKeys('Shift+/')!.format(), '/');
+    expect(typedKeys('Shift+?')!.format(), '?');
+    expect(typedKeys('Shift+1'), isNull, reason: 'Shift+1 types "!"');
+    expect(typedKeys('Ctrl+Shift+1')!.format(), 'Ctrl+Shift+1');
+    expect(typedKeys('Shift+A')!.format(), 'Shift+A');
+    expect(typedKeys('Shift+Tab')!.format(), 'Shift+Tab');
+    expect(typedKeys('G G')!.format(), 'G G');
+    expect(typedKeys('not a key'), isNull);
+  });
+
+  testWidgets('a plain digit is refused, and holding a key counts once', (tester) async {
+    final (keymap, _, _) = await open(tester);
+    await tester.tap(find.byKey(const ValueKey('add-key')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(find.text('K'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('key-typed')), '3');
+    await tester.pump();
+    expect(find.text('A plain digit is a count; use it with Ctrl or Alt'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('key-set')));
+    await tester.pumpAndSettle();
+    expect(keymap.lookup(Area.global, KeySeq.parse('3')), isNull);
+  });
+
+  testWidgets('resetting an action leaves a default key another action has since been given', (tester) async {
+    final (keymap, _, _) = await open(tester);
+    keymap.bind(Area.global, space, const ActionRef.action('edit.undo'));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('add-key')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('key-typed')), 'P');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('key-set')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reset to default'));
+    await tester.pumpAndSettle();
+    expect(keymap.lookup(Area.global, space), const ActionRef.action('edit.undo'));
+    expect(find.text('Space stays on Undo'), findsOneWidget);
+  });
 }

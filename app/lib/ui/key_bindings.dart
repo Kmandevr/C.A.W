@@ -1,5 +1,6 @@
 // The key bindings editor: search every action, give it keys (pressed or typed), see what a key would clash with,
 // remove keys and reset to the defaults. Changes save to keys.txt through the key router.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -37,6 +38,8 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
   /// The keys an action has in its own area.
   List<KeySeq> _keys(ActionDef d) => _k.keysFor(d.area, ActionRef.action(d.id));
 
+  String _nameOf(ActionRef r) => r.isMacro ? 'the macro "${r.id}"' : widget.registry[r.id]?.name ?? r.id;
+
   bool _isDefault(ActionDef d) {
     final mine = _keys(d).toSet(), theirs = widget.defaults.keysFor(d.area, ActionRef.action(d.id)).toSet();
     return mine.length == theirs.length && mine.containsAll(theirs);
@@ -48,6 +51,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
   }
 
   Future<void> _edit(ActionDef d) async {
+    final kept = <String>[];
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Neon.panel,
@@ -105,14 +109,26 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
                       for (final k in _keys(d)) {
                         _k.unbind(d.area, k);
                       }
+                      kept.clear();
                       for (final k in widget.defaults.keysFor(d.area, ref)) {
-                        _k.bind(d.area, k, ref);
+                        // A default key another action has since been given stays with it.
+                        final other = _k.bindingsIn(d.area)[k];
+                        if (other != null && other != ref) {
+                          kept.add('${k.format()} stays on ${_nameOf(other)}');
+                        } else {
+                          _k.bind(d.area, k, ref);
+                        }
                       }
                       await after();
                     },
                     child: const Text('Reset to default'),
                   ),
               ]),
+              for (final line in kept)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(line, style: const TextStyle(color: Neon.yellow, fontSize: 13)),
+                ),
             ]),
           ),
         );
@@ -126,7 +142,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
       builder: (context) => AlertDialog(
         backgroundColor: Neon.panel,
         title: const Text('Reset every key?'),
-        content: const Text('Every action gets its default keys back. Toolbars go back too; macros are kept.'),
+        content: const Text('Every action gets its default keys back. Toolbars and long-press menus go back too; macros are kept.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Reset')),
@@ -214,9 +230,13 @@ class _KeyCaptureDialogState extends State<KeyCaptureDialog> {
   }
 
   KeySeq? get _seq {
-    if (_typed.text.trim().isNotEmpty) return KeySeq.tryParse(_typed.text);
+    if (_typed.text.trim().isNotEmpty) return typedKeys(_typed.text);
     return _pressed.isEmpty ? null : KeySeq(_pressed);
   }
+
+  /// Why [seq] could never run, or null: a plain digit first is always read as a count (`3D`).
+  static String? _unusable(KeySeq seq) =>
+      seq.chords.first.digit != null ? 'A plain digit is a count; use it with Ctrl or Alt' : null;
 
   String _name(ActionRef r) => r.isMacro ? 'the macro "${r.id}"' : widget.registry[r.id]?.name ?? r.id;
 
@@ -228,7 +248,9 @@ class _KeyCaptureDialogState extends State<KeyCaptureDialog> {
       };
 
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
-    final chord = keyChordFromEvent(e);
+    if (e is KeyRepeatEvent) return KeyEventResult.handled; // holding a key is one press
+    // As the router reads keys: Cmd counts as Ctrl on macOS.
+    final chord = keyChordFromEvent(e, metaAsCtrl: defaultTargetPlatform == TargetPlatform.macOS);
     if (chord == null) return e is KeyUpEvent ? KeyEventResult.ignored : KeyEventResult.handled;
     setState(() {
       _typed.clear();
@@ -241,8 +263,10 @@ class _KeyCaptureDialogState extends State<KeyCaptureDialog> {
   @override
   Widget build(BuildContext context) {
     final seq = _seq;
+    final unusable = seq == null ? null : _unusable(seq);
     final conflicts = seq == null ? const <KeyConflict>[] : widget.keymap.conflictsFor(widget.area, seq, ignoring: widget.ref);
     return AlertDialog(
+      scrollable: true, // the on-screen keyboard leaves little room on a phone
       backgroundColor: Neon.panel,
       title: Text('Key for ${_name(widget.ref)}'),
       content: SizedBox(
@@ -286,10 +310,11 @@ class _KeyCaptureDialogState extends State<KeyCaptureDialog> {
             ),
             onChanged: (v) => setState(() {
               _pressed = [];
-              _typeError = v.trim().isEmpty || KeySeq.tryParse(v) != null ? null : 'Not a key';
+              _typeError = v.trim().isEmpty || typedKeys(v) != null ? null : 'Not a key';
             }),
           ),
           const SizedBox(height: 10),
+          if (unusable != null) Text(unusable, style: const TextStyle(color: Neon.pink, fontSize: 13)),
           for (final c in conflicts)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -311,10 +336,29 @@ class _KeyCaptureDialogState extends State<KeyCaptureDialog> {
         ),
         FilledButton(
           key: const ValueKey('key-set'),
-          onPressed: seq == null ? null : () => Navigator.pop(context, seq),
+          onPressed: seq == null || unusable != null ? null : () => Navigator.pop(context, seq),
           child: const Text('Set'),
         ),
       ],
     );
   }
+}
+
+/// Typed keys as the keyboard sends them, or null when they aren't keys. Without Ctrl, Alt or Meta a shifted symbol
+/// arrives as the symbol itself ("Shift+/" is "?"), so Shift is dropped from it; Shift with a plain digit types a
+/// symbol instead and is refused.
+KeySeq? typedKeys(String text) {
+  final seq = KeySeq.tryParse(text);
+  if (seq == null) return null;
+  final out = <KeyChord>[];
+  for (final c in seq.chords) {
+    final symbol = c.key.length == 1 && c.key.toUpperCase() == c.key.toLowerCase();
+    if (c.shift && symbol && !c.ctrl && !c.alt && !c.meta) {
+      if (RegExp(r'^[0-9]$').hasMatch(c.key)) return null;
+      out.add(KeyChord(c.key));
+    } else {
+      out.add(c);
+    }
+  }
+  return KeySeq(out);
 }
