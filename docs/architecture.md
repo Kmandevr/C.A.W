@@ -57,7 +57,7 @@ The owner may also ship C.A.W as a VST3/CLAP plugin. So the core is plugin-shape
 
 ### Ready-made building blocks
 
-The language, compiler and VM are ours, because they are the product and the sandbox. Everything around them comes from permissive, maintained libraries. All facts checked 2026-10-28.
+The C++ language and compiler are ordinary toolchain facilities; the C.A.W. Library/SDK and component model are the product-specific reusable layer. Use permissively licensed, maintained dependencies where they provide a measured benefit, and record exact licences and versions before adoption. The current .caw compiler/VM is transitional, not the target language. The dependency candidates below are proposals, not adopted dependencies.
 
 | Job | Library | Licence | When |
 | --- | --- | --- | --- |
@@ -129,108 +129,21 @@ The owner wants code-defined sounds to become playable instruments and exportabl
 - **Sample export:** one-shots and loops as WAV (24-bit or 32-bit float). Loops get loop points in a `smpl` chunk, set at exactly repeating lengths where the code repeats. Multisample sets render a range of notes and velocities, plus an SFZ mapping file (an open text format).
 - **Aliasing is a choice:** bit-twiddled waveforms alias when pitched up, which is part of their sound. Voice mode and export offer optional oversampling (2× or 4×) for a cleaner result.
 
-### Synthesis, MIDI and musical helpers — current status and remaining design
+### Current synthesis and MIDI implementation; C++ target
 
-The owner wants proper synthesis, MIDI and musical helpers alongside raw bit-level code. **[Fact, checked 2026-11-01]** The synth patch compiler and app synth workflow are implemented; MIDI pattern files import/export as Standard MIDI Files and MIDI 2.0 Clip Files; the engine has a MIDI 2.0 UMP decoder and bounded input queue. USB/Bluetooth device discovery, connection, MIDI clock and live Engine voice routing are not implemented.
+**[Fact, checked 2026-11-05]** The current engine has a synth patch compiler/playback path, built-in wavetable playback and frame morphing, LFO/modulation primitives, MIDI pattern file import/export and a MIDI 2.0 UMP decoder/input queue. USB/Bluetooth device discovery, connection, MIDI clock and live Engine voice routing are not implemented. See [Engine](engine.md), [Engine implementation status](engine-build-status.md) and the [roadmap](roadmap.md).
 
-- **Synthesis built-ins** (basics in v1, the rest in v2, on top of Signalsmith DSP and DaisySP):
-  - oscillators: sine, saw, square, triangle, band-limited and raw
-  - noise, filters, envelopes (ADSR, decay) and LFOs
-  - FM and phase modulation, additive partials, wavetable playback of our own exported tables, and later granular
+The existing built-ins and algorithms are migration candidates for the C.A.W. C++ Library/SDK. The target is a shared C++ event model for MIDI 1.0, MIDI 2.0 UMP, note identity, MPE/per-note expression, CC, clock and transport, usable from C++ components, visual graphs, performance controls and device adapters. Do not create separate MIDI implementations for each interface. The broader Library scope is in [C++ creation platform](cpp-creation-platform.md).
 
-  They mix freely with bytebeat expressions: `saw(freq) * (t>>8 & 1)` is valid code.
-- **MIDI:**
-  - notes in from the on-screen keyboard, USB/Bluetooth MIDI devices or the plugin host, driving voice mode
-  - CC and pitch bend mapped to `param`s ("MIDI learn")
-  - MIDI clock in, so the tempo follows external gear
-  - MIDI files imported to play a sound, and the sequencer's patterns exported as MIDI files for Reaper
-  - MPE-style per-note expression is supported in the note model and MIDI export; live MIDI hardware remains future work
-- **Musical time is built in:** `bpm` (project setting, or the host's when it's a plugin), `beat`, `bar`, `step` (16ths), and `pos` (0–1 through the loop). Code can say `(beat & 1) ? kick : 0` instead of working out sample counts.
-- **Loops that repeat cleanly:** a project has a loop length in bars at its BPM. Playback wraps at exactly that length, the waveform shows the loop, and export cuts at exactly that length, with loop points set. A bytebeat formula that doesn't repeat on its own gets a short crossfade at the seam, which can be turned off. For classic formulas the engine can also *find* their natural repeat length (powers of two of `t`) and offer it.
-- **Notes and scales:** note names (`C4`, `A#2`) and `mtof()`, plus `scale("minor", i)` and `chord("m7", i)` helpers. Quantizing a pitch to the project's key is one call.
-- **Approachable defaults in the app:**
-  - starter templates (a bytebeat loop, a kick, a bass synth, a pad, a glitch fx)
-  - auto-generated sliders for every `param`
-  - BPM tap, a bar-length picker, and one-tap "export this loop"
+### Current variables and patterns — transitional .caw implementation
 
-  Beginners can start from a template and a few sliders, and every helper is still plain code that can be edited.
+**[Fact, current implementation]** The .caw VM supports module parameters, project globals, exported values, pattern modules, note events, velocity and per-note expression curves, MIDI file import/export, and the current piano-roll/drum-grid workflows. Project/module automation and the shared engine parameter resolver are documented in [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
 
-### Variables and patterns **[Proposal]**
+This section describes the existing .caw implementation only. The owner has chosen ordinary C++ as the future authoring language. Do not extend the old .caw syntax as a parallel product language. Migrate useful parameter, pattern, event and generator capabilities to the shared C++ component/parameter/event model; old .caw source and pre-release-project compatibility is not required. See [C++ creation platform](cpp-creation-platform.md#migration-from-the-current-caw-language).
 
-The owner's requirement (2026-10-28): Unity-style variables (local, global and readable elsewhere, with sliders and tooltips), and a pattern builder whose patterns any sound can play, drawn or procedural. All of it ships in v2 ([roadmap](roadmap.md)).
+### Live editing while playing — current behavior and C++ migration
 
-**Variables**, like Unity's Inspector. **[Fact]** Built in v2 step 1 (2026-10-28), except automation lanes; reference in [engine](engine.md#statements):
-
-```
-// --- Tone ---                                        a header groups the controls below it
-param cutoff = 900 in 100..4000 step 10 "How bright"   slider with step and tooltip
-param wave = saw in [saw, square, tri]                 dropdown
-param filter = on                                      toggle
-global swing = 0.1 in 0..0.5 "Swing for every layer"   one project-wide control
-export let env = ad(trig, 0.001, 0.3)                  a signal other modules read
-```
-
-- **Local** `param`s gain a step, a tooltip, dropdowns (`in [a, b, c]`), toggles (`on`/`off`) and headers (`// --- Name ---`). The Builder lays them out like an inspector.
-- **Global** `global`s live on the project. A Project Controls panel shows each one once, and every module that declares the same name reads the same value. Changing one doesn't recompile anything; it's a parameter write.
-  - **Automation lanes** (owner) let a global move across the loop, for example a filter that opens over 4 bars. The lane is part of the project, so playback and export follow it exactly. A global with no lane stays where it is set.
-- **Exports:** `export let` makes a value readable as `module.name`, for example `bass * (1 - kick.env)` for sidechain ducking.
-  - The mixer runs layers in dependency order, so a reader hears the current block.
-  - A cycle, where two modules read each other, is broken by reading the other side's previous block, 64 samples late. This is reported as a warning, not an error.
-  - Exports stay inside the sandbox: they are only numbers passed between modules.
-
-**Patterns** are modules of `kind: pattern` in the same `.caw` format, so they diff cleanly in git and an AI agent can write them. Details set by the owner on 2026-10-28 ([decisions](decisions.md)).
-
-**[Fact]** Built in v2 step 3a (the owner's first priority: a sound you make plays the notes you make), reference in [engine](engine.md#patterns):
-- single-sound text patterns with fractions for off-grid notes and triplets, chords, probability, ratchets and slide
-- the note variables, and voices (8 per layer, oldest stolen)
-- a Pattern picker per layer, and Solo preview through a layer's pattern
-
-The audio thread consumes pattern events separately from the sound's code, so a pattern edit can update without rebuilding the instrument/effect chain. The arrangement compiles reusable pattern sources into absolute-time clip events on the control thread; the audio callback schedules them at sample positions. **[Fact, checked 2026-11-01]** The piano roll now has editable pitch/pressure/timbre/vibrato note expressions, velocity/chance lane curves, and generator actions (Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion). Remaining gaps include kit-row pattern routing, code-generated procedural patterns, arbitrary custom per-note values, swing/global automation, clip-following automation and plugin/global parameter automation. The session-grid scene launcher is retired; the linear Arranger is the composition view.
-- **Two shapes:**
-  - A **single-sound pattern** drives one layer.
-  - A **kit pattern** has named rows (kick, snare, hats …), and each row is routed to a layer, so one pattern can drive a whole kit.
-- **Length:** 1 step up to the engine's 2^31 − 1 step limit, independent of the layer's length.
-- **Timing:** notes snap to 1/16 by default, can switch to 1/32 or triplets, or go anywhere with snap off. Swing comes from a global.
-- **Notes:** each note has a start, length, pitch and velocity, plus:
-  - **probability**, repeatable by seed
-  - **ratchets**: 2–4 repeats inside the note
-  - **slide** into the next note
-  - **custom values** that the playing module reads by name (for example `timbre`, `crush`)
-- **Curves on notes:** any note can carry curves over its length, for pitch (bends and slides) and for any value.
-  - The piano roll draws the note itself bent along its pitch curve, so a slide is visible as a curved note.
-  - Value curves show as lines under the note.
-  - You draw freehand with a finger, and it smooths into a curve with points and handles you can then drag.
-- **Note model:** stored the MIDI 2.0 way: per-note pitch and per-note controllers at high resolution, not 7-bit channel messages. The owner chose MIDI 2.0 for the project's own data.
-- **Procedural patterns:** code in the module language, run once per step, deciding whether a note starts and its pitch, velocity, length and extras.
-  - New built-ins: `euclid(hits, steps, step)`, `scale(name, degree)`, `chord(name, root)`, `key`, and `loop` (how many times the pattern has repeated).
-  - `hash`/`noise` with the seed make every repeat identical. A pattern can use `loop` to vary between repeats; playback and export still agree because it is deterministic.
-  - "Freeze" turns the code's output into an editable drawn pattern.
-- **Editor:**
-  - a drum grid (rows, steps, a velocity lane) and a piano roll (pitch × time, note lengths and curves), switchable on any pattern
-  - chord stamping in the project's key
-  - generator buttons that write notes you can edit: Euclid, random in key, arpeggiate, humanize
-  - no recording in v2: notes are drawn or generated
-- **Playing a pattern:** pick (later: drag) a pattern onto a layer and that layer's generator plays it through new variables:
-  - `trig` (1 on the first sample of a note), `gate`, `note`, `freq`, `vel` and `rel`
-  - the current value of each note curve: `bend` for pitch, and custom values by name
-
-  Polyphony (chords) uses the voice pool from the house synth's voice mode ([Instruments, wavetables and samples](#instruments-wavetables-and-samples)), each voice with its own curves. The built-in default pattern, for a layer without one, is one C4 note held through each layer loop (`trig` on its first sample), so templates written with `step % 4 == 0` keep working unchanged. **[Proposal]** Slide becomes a generated pitch curve once note curves exist, so there's one glide mechanism.
-- **Scenes/session grid:** retired by the owner in the 2026-10-31 arrangement-first decision. Do not treat the earlier scene proposal as active roadmap scope.
-- **MIDI 2.0 scope** (owner, 2026-10-28): MIDI 2.0 is how C.A.W stores notes, plus MIDI files. Connecting MIDI devices (controllers in, notes out) comes later.
-- **MIDI files** (owner chose them over device connections):
-  - import of ordinary `.mid` files into patterns
-  - export of both a standard `.mid` (MIDI 1.0, which every DAW opens; fine pitch and curves become pitch bends or are rounded) and a MIDI 2.0 clip file that keeps full detail
-  - **[Assumption]** which DAWs, Reaper included, read MIDI 2.0 clip files is unverified. Check before relying on it.
-  - On desktop, dropping a `.mid` file onto the app needs a drag-and-drop package with a permissive licence: **[Assumption]** check one before choosing it.
-- **MIDI 2.0 on the platforms, for when devices come:**
-  - **[Fact]** Android: MIDI 2.0 over USB host mode since Android 13, and over virtual (app-to-app) ports since Android 15. Bluetooth MIDI is MIDI 1.0 ([Android source docs](https://source.android.com/docs/core/audio/midi), checked 2026-10-28).
-  - **[Fact]** Windows: Windows MIDI Services brings MIDI 2.0 into Windows 11, rolling out from February 2026, officially on 24H2 and 25H2. The SDK apps need for MIDI 2.0 features is a separate install, still in preview ([Microsoft](https://blogs.windows.com/windowsexperience/2026/02/17/making-music-with-midi-just-got-a-real-boost-in-windows-11/), [heise](https://heise.de/-11181074), checked 2026-10-28).
-  - **[Assumption]** The S22+ supports USB MIDI 2.0 because it runs Android 13 or later. Test it on the phone.
-  - **[Assumption]** `flutter_midi_command` documents only MIDI 1.0, so MIDI 2.0 would go through the C++ engine (Android's AMidi, Windows MIDI Services). Unverified.
-
-### Live editing while playing **[Proposal]**
-
-The owner's requirement (2026-10-28): edit notes and code while the music plays, with changes heard as soon as reasonably possible.
+The existing .caw editor/VM supports live code swaps and pattern updates while playback continues. The C++ component workflow should retain useful live-update behavior where safe, using prepared component replacement and bounded state transfer rather than depending on the old VM's bytecode/state-matching mechanism.
 
 **[Fact]** The engine side is built: swap timing, pattern edits that let sounding notes finish, and state carried across code swaps ([engine](engine.md#playback)). The app also implements delayed auto-update, an enable/disable switch and selectable swap timing; see [App](app.md).
 
