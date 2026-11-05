@@ -232,8 +232,17 @@ TEST(offline_export_installs_projects_larger_than_the_command_queue_and_matches_
     CHECK(renderExport(p, options, rendered));
     CHECK_EQ(rendered.frames, int64_t{512});
 
+    std::string projectJson = R"({"caw_project":1,"bpm":400,"loop_bars":1,"modules":[{"id":"tone","source":"---\\nmode: float\\n---\\n0.5"}],"layers":[)";
+    for (int i = 0; i < 1025; ++i) {
+        if (i) projectJson += ",";
+        projectJson += R"({"id":"layer-)" + std::to_string(i) +
+                       R"(","chain":["tone"],"volume":)" +
+                       (i == 1024 ? "1" : "0") + "}";
+    }
+    projectJson += "]}";
+
     Engine playback(48000);
-    CHECK(playback.setProjectOffline(p).find(R"("ok":true)") != std::string::npos);
+    CHECK(playback.setProjectJson(projectJson).find(R"("ok":true)") != std::string::npos);
     playback.play();
     float left[512], right[512];
     playback.process(left, right, 512);
