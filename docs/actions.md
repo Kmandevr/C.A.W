@@ -79,7 +79,7 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | Action | Default keys |
 | --- | --- |
 | Play / stop | Space |
-| Undo / redo | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
+| Undo / redo (the piano roll's own history inside it, a text field's own text undo while one has focus, such as the code editor; the project's everywhere else) | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
 | Show the Code / Arrange / Export panel | Ctrl+1 / Ctrl+2 / Ctrl+3 (already built; the panel is revealed in the dock) |

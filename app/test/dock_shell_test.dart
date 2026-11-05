@@ -1,5 +1,6 @@
 // Tests the docking shell: the controller's saved layouts, reveal, focus and screen shapes, and the shell at phone,
 // landscape and desktop sizes with every panel shown in turn (no overflow), plus goldens of the shell and the phone mixer (they need CAW_LIB).
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
@@ -194,6 +195,32 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
     expect(find.text('Tap tempo'), findsNothing);
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('the transport undoes and redoes project edits; Ctrl+Z does too', (tester) async {
+    final s = await startState(tester);
+    s.history.reset(jsonEncode(s.project.toJson()));
+    await pumpGolden(tester, Shell(state: s), goldenSizes['phone']!);
+    IconButton button(String key) => tester.widget<IconButton>(find.byKey(ValueKey(key)));
+    expect(button('transport-undo').onPressed, isNull);
+    final bpm = s.project.bpm;
+    s.editProject((p) => p.bpm = bpm + 10);
+    await tester.pump(const Duration(milliseconds: 700)); // the burst settles
+    expect(button('transport-undo').onPressed, isNotNull);
+    await tester.tap(find.byKey(const ValueKey('transport-undo')));
+    await tester.pump();
+    expect(s.project.bpm, bpm);
+    expect(button('transport-redo').onPressed, isNotNull);
+    await tester.tap(find.byKey(const ValueKey('transport-redo')));
+    await tester.pump();
+    expect(s.project.bpm, bpm + 10);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(s.project.bpm, bpm);
+    await tester.pumpAndSettle();
     s.dispose();
   }, skip: skip);
 

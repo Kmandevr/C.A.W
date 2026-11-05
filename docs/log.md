@@ -6,6 +6,7 @@ updated: 2026-11-05
 
 # Log
 
+- 2026-11-05: Project undo and redo (UI plan U1 PR 5 part 2): the transport's undo and redo walk one project history, a step per burst of edits (until a 600 ms pause), up to 100; Ctrl+Z and Ctrl+Shift+Z do the same outside the piano roll, which keeps its own.
 - 2026-11-05: Transport tempo (#19, UI plan U1 PR 5 part 1): tap the BPM to type it, long-press it for a tap-tempo pad (T taps there too); the playhead reads bar.beat over the engine's whole loop. Undo and redo are still to come.
 - 2026-11-05: Open straight into the arrangement (UI plan U1, PR 4): the startup screen is gone. The app opens the last project with the arrangement in front, or the "First loop" template on a first run or when the last project is gone (a damaged file or a failed open says so in a pink line, and the app never stays on the logo); New, New from template and Open are in the project menu.
 - 2026-11-05: Typed parameter values (UI plan U6, part 2): tapping a number parameter's value in any inspector (Builder, Mixer, track cards) opens a box to type it, clamped to the range and snapped to the step; an entry that isn't a number is refused. A double-tap still resets it. The typing dialog is shared with the Mixer's level and pan.
