@@ -91,7 +91,11 @@ template <class Sink>
 bool recordTo(const ProjectSpec& p, int sr, int64_t keepFrom, int64_t total, Sink&& sink, std::string& error,
               int32_t* progress, int32_t* cancel) {
     Engine eng(sr);
-    eng.setProject(p);
+    const std::string projectResult = eng.setProjectOffline(p);
+    if (projectResult.find("\"ok\":true") == std::string::npos) {
+        error = "couldn't install project for offline export: " + projectResult;
+        return false;
+    }
     eng.play();
     constexpr int kChunk = 512;
     float l[kChunk], r[kChunk], lr[kChunk * 2];
