@@ -50,6 +50,9 @@ class ProjectStorage {
     return out;
   }
 
+  /// Whether a file for [id] exists, readable or not ([load] returns null for both a missing and a damaged one).
+  Future<bool> has(String id) => _file(id).exists();
+
   Future<ProjectDoc?> load(String id) async {
     final f = _file(id);
     if (!await f.exists()) return null;

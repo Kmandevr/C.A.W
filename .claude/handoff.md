@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: a242067
+Commit: 8af9dd5
 
-Branch: claude/caw-engine-foundation-skpirb (on Main a242067; typed parameter values, U6 part 2, PR open)
+Branch: claude/caw-engine-foundation-skpirb (on Main 8af9dd5; open straight into the arrangement, U1 PR4, PR open)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `Main`. Claude merges each once CI is green.
@@ -20,13 +20,13 @@ Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `
 - Accurate meters and the phone arrangement (#106): dB `PeakMeter`, track and folder peaks after pan, a one-row phone toolbar, compact track headers.
 - Phone cleanup of the panels (#107): no repeated titles or developer notes, held dB readouts (`PeakReadout`), compact Automation, a one-row Code track card.
 - Mixer strips, U6 part 1 (#108): upright Reaper-style strips with chain slots, typed level and pan, `PeakMeter(vertical:)`.
-- Typed parameter values, U6 part 2 (this branch): `typeValue`, `parseParam` in `app/lib/ui/widgets.dart`.
+- Typed parameter values, U6 part 2 (#109): `typeValue`, `parseParam` in `app/lib/ui/widgets.dart`.
+- U1 PR4 (this branch): no startup screen; `openStorage` in `app/lib/model/app_state.dart` opens the last project, the shell brings the arrangement forward.
 
 ## Next
-- Merge the typed values PR when CI is green. Then the next UI plan step (owner: "then work on the rest of the UI").
+- Merge the opening PR when CI is green. Then U1 PR5: transport undo/redo and tap tempo (#19).
 - Piano roll still to build: bend handles with detents, freehand curves, the context toolbar middle, scale highlight, snap to scale, ghost notes.
 - Arrangement automation-lane snapping (U3).
-- U1 PR4 (open straight into the arrangement) and PR5 (transport undo/redo, tap tempo #19).
 
 ## Open (owner)
 - Should chance stay at 5% steps, or follow the value grid? It follows the value grid now.

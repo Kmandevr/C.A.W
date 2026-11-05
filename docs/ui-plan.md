@@ -312,7 +312,7 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
       - Settings keeps `dock_layouts` as raw JSON, so a damaged layout falls back to its preset on its own
       - screens read their panel's size, not the screen's (the piano roll's finger-size taps still follow the device's screen). The Builder's narrow layouts scroll, so a short panel doesn't overflow.
       - the layout button in the transport: presets and every panel
-   4. **Open straight into the arrangement:** the startup screen goes, and New, Template and Open move to the project menu.
+   4. **Open straight into the arrangement** (built 2026-11-05): the startup screen is gone; the app opens the last project, or the template on a first run. New, Template and Open are in the project menu.
    5. **The transport bar:** undo and redo, and tap tempo (#19).
 3. **U2, arrangement:**
    - track headers, nesting, add and reorder

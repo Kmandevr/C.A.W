@@ -17,7 +17,6 @@ import 'engine_lab_screen.dart';
 import 'file_manager_screen.dart';
 import 'plugin_builder_screen.dart';
 import 'key_router.dart';
-import 'startup_screen.dart';
 import 'theme.dart';
 import 'theme_editor.dart';
 import 'widgets.dart';
@@ -61,6 +60,9 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> {
   late final AppLifecycleListener _life;
   late final DockController _dock = DockController(s.settings);
+
+  // The arrangement is home (UI plan U1): shown in front once at launch, whatever panel the saved layout had there.
+  bool _homeShown = false;
 
   AppState get s => widget.state;
 
@@ -113,7 +115,6 @@ class _ShellState extends State<Shell> {
         listenable: s,
         builder: (context, _) {
           if (!s.ready) return const Scaffold(body: Center(child: CrowLogo(size: 64)));
-          if (s.starting) return StartupScreen(state: s);
           // Built once per app-state change; a layout change (a divider drag, a tab) reuses them, so it rebuilds
           // only the dock, not the screens.
           final screens = _screens();
@@ -123,6 +124,12 @@ class _ShellState extends State<Shell> {
               body: SafeArea(
                 child: LayoutBuilder(builder: (context, box) {
                   _dock.form = formFactorFor(box.biggest);
+                  if (!_homeShown) {
+                    _homeShown = true;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _dock.reveal(Panels.arrangement);
+                    });
+                  }
                   return ListenableBuilder(
                     listenable: _dock,
                     builder: (context, _) => KeyRouter(
@@ -131,12 +138,13 @@ class _ShellState extends State<Shell> {
                       onView: (i) => _dock.reveal(_viewPanels[i]),
                       child: Column(children: [
                         _TransportBar(state: s, dock: _dock),
-                        if (s.engineError != null || s.audioError != null)
+                        if (s.engineError != null || s.audioError != null || s.openError != null)
                           Container(
                             width: double.infinity,
                             color: Neon.pink.withValues(alpha: 0.15),
                             padding: const EdgeInsets.all(8),
-                            child: Text(s.engineError ?? s.audioError!, style: const TextStyle(color: Neon.pink)),
+                            child: Text(s.engineError ?? s.audioError ?? s.openError!,
+                                style: const TextStyle(color: Neon.pink)),
                           ),
                         Expanded(
                           child: DockView(

@@ -1,9 +1,7 @@
-// Tests saving and loading the settings and custom themes, and the startup screen's choices.
+// Tests saving and loading the settings and custom themes.
 import 'dart:io';
 
-import 'package:caw/model/app_state.dart';
 import 'package:caw/model/settings.dart';
-import 'package:caw/model/storage.dart';
 import 'package:caw/ui/theme.dart';
 import 'package:flutter/material.dart' show Color;
 import 'package:flutter_test/flutter_test.dart';
@@ -153,13 +151,5 @@ void main() {
     File('${dir.path}/settings.json').writeAsStringSync('{not json');
     final s = await Settings.open(base: dir);
     expect(s.liveDelayMs, 400);
-  });
-
-  test('startup offers Continue only when the last project still exists', () {
-    final a = ProjectSummary('a', 'Alpha', DateTime(2026));
-    final b = ProjectSummary('b', 'Beta', DateTime(2026));
-    expect(startupChoices('b', [a, b]).last?.name, 'Beta');
-    expect(startupChoices('gone', [a, b]).last, isNull);
-    expect(startupChoices(null, const []).last, isNull);
   });
 }

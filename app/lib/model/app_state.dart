@@ -13,10 +13,6 @@ import 'pattern_doc.dart';
 import 'settings.dart';
 import 'storage.dart';
 
-/// What the startup screen offers: the last project (if it still exists) and every saved project.
-({ProjectSummary? last, List<ProjectSummary> projects}) startupChoices(String? lastId, List<ProjectSummary> projects) =>
-    (last: projects.where((p) => p.id == lastId).firstOrNull, projects: projects);
-
 class _LibrarySnapshot {
   _LibrarySnapshot(ProjectDoc project)
       : folders = List.of(project.libraryFolders),
@@ -84,6 +80,9 @@ class AppState extends ChangeNotifier {
   final Map<String, String> _lastGoodRunSources = {};
   String? engineError;
   String? audioError;
+
+  /// Why the last project didn't open on launch (the template opened instead); cleared by opening another.
+  String? openError;
   ProjectStorage? _storage;
   List<Template> templates = const [];
 
@@ -142,7 +141,7 @@ class AppState extends ChangeNotifier {
   bool previewOnly = false;
   bool ready = false;
 
-  /// True until the startup screen's choice opens a project.
+  /// True until the first project opens (the last one, or the template on a first run); nothing is saved before.
   bool starting = true;
   String? lastProjectId;
   List<ProjectSummary> savedProjects = const [];
@@ -194,28 +193,41 @@ class AppState extends ChangeNotifier {
     } catch (e) {
       engineError = 'The sound engine did not load: $e';
     }
-    _storage = await ProjectStorage.open();
-    lastProjectId = await _storage!.lastOpened();
+    try {
+      await openStorage(await ProjectStorage.open());
+    } catch (e) {
+      // Never stuck on the logo: show the app with whatever opened, and say why.
+      openError = 'Projects could not be opened: $e';
+      starting = false;
+    } finally {
+      ready = true;
+      notifyListeners();
+      _poller.wake();
+    }
+  }
+
+  /// Reads the saved projects from [storage] and opens straight into the last one: the arrangement is home (UI
+  /// plan U1). On a first run, or when the last project is gone, it opens the "First loop" template. New, Template
+  /// and Open are in the project menu.
+  Future<void> openStorage(ProjectStorage storage) async {
+    _storage = storage;
+    lastProjectId = await storage.lastOpened();
     savedProjects = await listProjects();
-    ready = true;
-    notifyListeners();
-    _poller.wake();
-  }
-
-  /// The startup screen's choice: opens [p] without saving the placeholder project shown before it.
-  Future<void> start(ProjectDoc p) async {
+    final id = lastProjectId;
+    final last = id == null ? null : await storage.load(id);
+    // A damaged file reads as null too; it stays on disk, and the app says so instead of replacing it silently.
+    final damaged = id != null && last == null && await storage.has(id);
     starting = false;
-    await _switchTo(p, saveCurrent: false);
-  }
-
-  Future<void> startLast() async {
-    final p = lastProjectId == null ? null : await _storage?.load(lastProjectId!);
-    await start(p ?? starterProject());
-  }
-
-  Future<void> startProject(String id) async {
-    final p = await _storage?.load(id);
-    if (p != null) await start(p);
+    String? error = damaged ? 'The last project could not be read, so the First loop template opened instead. '
+        'Its file is still in the projects folder.' : null;
+    try {
+      await _switchTo(last ?? starterProject(), saveCurrent: false);
+    } catch (e) {
+      if (last == null) rethrow;
+      error = 'The last project, "${last.name}", could not be opened ($e), so the First loop template opened instead.';
+      await _switchTo(starterProject(), saveCurrent: false);
+    }
+    openError = error;
   }
 
   /// An empty project: no modules and no layers.
@@ -419,7 +431,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> flush() async {
     _saveTimer?.cancel();
-    if (starting) return; // the placeholder shown behind the startup screen is never saved
+    if (starting) return; // the placeholder before the first project opens is never saved
     await _storage?.save(project);
   }
 
@@ -1359,6 +1371,7 @@ class AppState extends ChangeNotifier {
     _moduleValueTicks.clear();
     _layerValueTicks.clear();
     project = p;
+    openError = null;
     masterValueTick.value++;
     info = {};
     blankKinds.clear();
