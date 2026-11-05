@@ -725,9 +725,11 @@ bool Engine::send(const Cmd& c) {
     // Reclaim completed objects before publishing more work. This also makes room
     // for the audio thread to transfer any pending retirements into the SPSC queue.
     drainRetired();
-    // The audio thread empties the queue every callback; wait briefly if it is full.
+    if (offlineControl_) applyCommands();
+    // The audio thread empties the queue every callback; offline installation drains it synchronously.
     for (int tries = 0; !cmds_->push(c); ++tries) {
         drainRetired();
+        if (offlineControl_) applyCommands();
         if (tries > 2000) {
             if (c.type == Cmd::Install) delete c.chain;  // audio stalled; drop rather than hang the app
             delete c.pattern;
@@ -738,6 +740,7 @@ bool Engine::send(const Cmd& c) {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    if (offlineControl_) applyCommands();
     return true;
 }
 
@@ -983,7 +986,20 @@ std::string Engine::setProjectJson(std::string_view json) {
 }
 
 std::string Engine::setProject(const ProjectSpec& p) {
+    return setProjectImpl(p, false);
+}
+
+std::string Engine::setProjectOffline(const ProjectSpec& p) {
+    return setProjectImpl(p, true);
+}
+
+std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     std::lock_guard<std::mutex> lock(ctl_);
+    offlineControl_ = offline;
+    struct OfflineControlReset {
+        bool& active;
+        ~OfflineControlReset() { active = false; }
+    } reset{offlineControl_};
     drainRetired();
 
     // Layer slots: refuse a project the budget cannot hold, then grow before any layer is sent, so
