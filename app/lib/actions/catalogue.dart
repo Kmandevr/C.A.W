@@ -33,6 +33,7 @@ const List<ActionDef> standardActions = [
   ActionDef('edit.redo', 'Redo', _g, defaultKeys: ['Ctrl+Shift+Z', 'Ctrl+Y']),
   ActionDef('project.save', 'Save now', _g, description: 'Projects also autosave', defaultKeys: ['Ctrl+S']),
   ActionDef('view.actions', 'Action list', _g, description: 'Search every action and its keys', defaultKeys: ['?']),
+  ActionDef('view.keys', 'Key bindings', _g, description: 'Choose what each key does'),
   ActionDef('view.builder', 'Go to Sounds', _g, defaultKeys: ['Ctrl+1']),
   ActionDef('view.arranger', 'Go to Tracks', _g, defaultKeys: ['Ctrl+2']),
   ActionDef('view.exporter', 'Go to Export', _g, defaultKeys: ['Ctrl+3']),

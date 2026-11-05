@@ -13,6 +13,8 @@ import '../actions/macro.dart';
 import '../actions/vim.dart';
 import '../model/app_state.dart';
 import '../model/settings.dart';
+import 'glass.dart';
+import 'key_bindings.dart';
 import 'theme.dart';
 import 'touch_quick_actions.dart';
 
@@ -241,6 +243,8 @@ class KeyRouterState extends State<KeyRouter> {
         s.flush();
       case 'view.actions':
         showActionList(context);
+      case 'view.keys':
+        showKeyBindings(context);
       case 'focus.next':
         FocusManager.instance.primaryFocus?.nextFocus();
       case 'focus.prev':
@@ -336,8 +340,21 @@ class KeyRouterState extends State<KeyRouter> {
       context: context,
       builder: (_) => _ActionList(registry: registry, keymap: vim.keymap, area: _area),
     );
-    if (ref != null) _show(vim.run(ref));
+    if (ref != null) _show(vim.run(ref)); // "Edit keys" returns view.keys, which opens the editor
   }
+
+  /// The key bindings editor (Settings, the action list, or the "Key bindings" action). Each change saves keys.txt.
+  Future<void> showKeyBindings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => GlassPage(child: KeyBindingsPage(
+          registry: registry,
+          keymap: () => vim.keymap,
+          defaults: _defaults,
+          onSave: () async {
+            _changed();
+            await saveKeymap();
+          },
+        )),
+      ));
 
   @override
   Widget build(BuildContext context) {
@@ -471,6 +488,13 @@ class _ActionListState extends State<_ActionList> {
           if (found.isNotEmpty) Navigator.pop(context, ActionRef.action(found.first.id));
         },
       ),
+      actions: [
+        TextButton.icon(
+          icon: const Icon(Icons.keyboard),
+          label: const Text('Edit keys'),
+          onPressed: () => Navigator.pop(context, const ActionRef.action('view.keys')),
+        ),
+      ],
       content: SizedBox(
         width: 520,
         height: 420,

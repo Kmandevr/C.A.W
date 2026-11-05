@@ -6,6 +6,7 @@ updated: 2026-11-05
 
 # Log
 
+- 2026-11-05: Key bindings editor (owner): Settings → Key bindings (or the action list's Edit keys) lists every action with its keys; press or type a key to give it to an action, with a note of what it replaces or clashes with; remove keys, reset one or all. Saved to `keys.txt` as changes over the defaults.
 - 2026-11-05: Space pauses (owner): Space plays and pauses, resuming where it paused, and Shift+Space or the transport's Stop goes back to the start. The engine plays from a position (`caw_engine_play_at`).
 - 2026-11-05: Project undo and redo (UI plan U1 PR 5 part 2): the transport's undo and redo walk one project history, a step per burst of edits (until a 600 ms pause), up to 100; Ctrl+Z and Ctrl+Shift+Z do the same outside the piano roll, which keeps its own.
 - 2026-11-05: Transport tempo (#19, UI plan U1 PR 5 part 1): tap the BPM to type it, long-press it for a tap-tempo pad (T taps there too); the playhead reads bar.beat over the engine's whole loop. Undo and redo are still to come.

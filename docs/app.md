@@ -164,11 +164,11 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - **Vim keys in the code editor:** off by default.
 - **Keys** (`lib/ui/key_router.dart`): with a keyboard, every key goes through the action system in [actions](actions.md): per-area keymaps, Vim modes, counts, `:` commands, `.` and macros.
   - A badge at the bottom right shows the mode, a recording macro, pending keys, key hints and short toasts.
-  - `?` opens the action list: search, keys and run.
+  - `?` opens the action list: search, keys and run. Its **Edit keys**, Settings → Key bindings, or the `view.keys` action open the key bindings editor (`lib/ui/key_bindings.dart`): press or type a key for any action, see what it would replace or clash with, remove keys, reset one action or all.
   - Recorded macros are saved in `keys.txt` next to `settings.json`; a user `keys.txt` is merged over the default keys.
   - Text fields keep plain typing and their own Ctrl+Z/Y/A/C/V/X.
   - The roll, the Builder and the code editor's Vim mode each run their area's actions; the Arranger's actions work on a keyboard-selected layer.
-  - **Not built yet:** editing key bindings directly in the action list and keymap-driven long-press menu entries. The piano-roll toolbar and phone Quick Actions strips are configurable.
+  - **Not built yet:** keymap-driven long-press menu entries, and binding macros from the editor (macros are bound in `keys.txt`). The piano-roll toolbar and phone Quick Actions strips are configurable.
 - **Fonts:** the UI uses the system font. Code and numbers use the bundled JetBrains Mono (Regular and Bold, about 550 KB), whose licence (SIL OFL 1.1) is shown in the app's licence page.
 
 ## Build
