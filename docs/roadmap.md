@@ -51,7 +51,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | SFZ multisample workflow, stems, persistent queue and broader batch delivery |
 | Audio assets | Generated audio and module/effect processing | Audio import, non-destructive audio clips, sample editor and multisample mapping |
 | Recording | No audio or live MIDI recording workflow | MIDI/audio recording, monitoring, latency compensation, punch, loop recording, takes and comping |
-| Plugins | Plugin Builder validates/packages native .caw source; native SDK/graph foundations exist | Dynamic native loading/isolation and external CLAP/VST3/AU hosting |
+| Plugins | Plugin Builder currently validates/packages native .caw source; native SDK/graph foundations exist | Replace the legacy .caw packaging path with C++ component build/package; dynamic native loading/isolation and external CLAP/VST3/AU hosting |
 | AI/video | No in-app AI; video sync is not planned | AI remains excluded; video sync remains off-roadmap |
 
 ## Roadmap sequence
@@ -68,9 +68,9 @@ This is the product's programming and extension foundation. It precedes dependen
 | CP.2 | Shared component descriptor and lifecycle: identity, roles, typed ports, parameters, assets, events/MIDI, state, capabilities, UI metadata and resource/real-time contracts | Planned | engine | CP.1; integrate with Foundation F1–F6 | Existing module descriptors and native SDK cover parts of this; they are not yet the unified authoring/component model |
 | CP.3 | Comprehensive C.A.W. Library/SDK for DSP, synthesis, MIDI, tables/samples, math, bit manipulation, data and general-purpose utilities | Planned | engine | CP.1, CP.2 | Existing .caw built-ins and engine algorithms need to be catalogued, migrated or replaced behind the shared C++ APIs; many requested facilities are not implemented |
 | CP.4 | Stable extension and registration contracts, capability negotiation, state/API versioning and explicit ownership/lifetime rules | Planned | engine | CP.2 | Existing native SDK v1 is a starting point, not the complete contract |
-| CP.5 | Migrate useful existing .caw/VM capabilities into C++ components and Library; retire the custom language and VM after all retained workflows have tested replacements | Planned | both | CP.1–CP.4; unified interfaces | No migration or retirement has been done. Old .caw source and pre-release project compatibility is explicitly not required |
+| CP.5 | Port useful existing .caw/VM algorithms and sound capabilities into the C++ Library/SDK and native components | Planned | engine | CP.1–CP.4 | No migration has been done; preserve useful capabilities, not old syntax or implementation details |
 
-**Exit gate:** ordinary C++ is the authoring language; a component is implemented and registered once; the SDK and Library expose useful documented APIs; typed ports, parameters, assets, events, state, lifecycle and real-time requirements have explicit contracts; retained existing capabilities have tested C++ paths. The old .caw parser/compiler/VM is removed only after the app no longer depends on it. No old-source or pre-release-project compatibility layer is required.
+**Exit gate:** ordinary C++ components compile and register through the shared contracts; the SDK and Library expose useful documented APIs; typed ports, parameters, assets, events, state, lifecycle and real-time requirements have explicit contracts; the selected existing capabilities have tested C++ paths. The old .caw editor and VM remain only as a temporary migration path until the later authoring-interface stage's retirement gate. No old-source or pre-release-project compatibility layer is required.
 
 Each stage is a table. **Where** says which part does the work: *engine* (`engine/`, C++), *app* (`app/`, Flutter) or *both*. **Depends on** names the items or stages that must exist first. **What's missing** is the gap between today's code and the item's exit gate. Statuses use the language above and were checked on 2026-11-03.
 
@@ -259,7 +259,7 @@ These stages ship as updates. Their order still holds.
 | 9.2 | External CLAP hosting, then VST3 and AU where licensing and platforms allow | Conditional | engine | 9.1 | Not built. **[Assumption]** Out-of-process isolation on Android is unverified and may be desktop-first |
 | 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Planned | engine | CP.2–CP.4, F4 | Not built; the processor implementation must be reused rather than duplicated per format |
 | 9.4 | iOS, macOS and Linux app builds with platform audio/device testing | Conditional | both | — | Not configured in CI; iOS distribution is an open owner question |
-| 9.5 | Plugin Builder for .caw modules stays distinct from binary plugin hosting | Implemented | app | — | Plugin Builder validates and packages native .caw source |
+| 9.5 | Plugin Builder packages C++ components; binary plugin hosting/export remains a separate adapter workflow | Partial | app | CP.1–CP.4, UI.1 | The current Plugin Builder validates/packages .caw source; it must move to the shared C++ component build and descriptor contract |
 
 **Exit gate:** each claimed plugin format and platform has real build, host/device and lifecycle tests; all three trust modes work and a crash in an Isolated plugin cannot take down the app.
 
