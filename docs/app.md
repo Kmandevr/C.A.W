@@ -35,7 +35,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - a scope, and a Controls panel built from the module's `param`s and `global`s:
     - sliders (with steps), toggles, and dropdowns (buttons when there are 4 or fewer choices)
     - grouped under `// --- Headers ---`, with tips and doc comments on long-press or hover
-    - a double-tap on a value resets it
+    - tap a number's value to type one (clamped to its range and snapped to its step; an entry that isn't a number is refused); a double-tap resets it
     - a "Shares" line naming the module's exports (`kick.env`), and warnings in yellow
     - for a library module, the functions other modules can call
   - **Run** (Ctrl+Enter) sends the code and hot-swaps it. Code that fails keeps the old sound and puts the cursor on the error
@@ -74,7 +74,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Mixer / Editor** (`lib/ui/mixer_screen.dart`):
   - Reaper-style upright channel strips in a row that scrolls sideways, the master first, on every screen size. Each track strip, top to bottom: the name, the chain as slots (instrument then effects; a folder shows its bus switch instead), the output (master or a folder), pan, an upright fader with an upright meter, the held peak in dB, the level, M and S
   - tapping a slot opens that module's parameters in the inspector: beside the strips when the panel is 1200 px wide or more (drag the divider to resize), in a sheet otherwise
-  - the level and pan values under the controls can be typed: the level in percent, the pan as C, 30L or 30R; an entry that doesn't parse is refused and changes nothing. Module parameters in the inspector are set by drag only
+  - the level and pan values under the controls can be typed: the level in percent, the pan as C, 30L or 30R; an entry that doesn't parse is refused and changes nothing. Module parameters in the inspector can be typed the same way as in Builder
   - the master strip has its fader, upright left and right meters (dB scale, -60 to 0 dBFS) and held dB readouts; track and folder meters read what they send on, after volume and pan
   - parameter edits use the same module parameter map and engine calls as Builder; the Mixer does not own a separate state model
   - the current engine does not yet expose sends, arbitrary buses, stereo width, correlation, loudness, phase or master effect chains through this screen

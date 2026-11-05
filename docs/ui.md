@@ -94,7 +94,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 - **Value controls:** a phone uses full-width sliders, never small knobs.
   - Dragging further away from the slider (up or down) gives finer control, like scrubbing a video.
   - Double-tap resets the value.
-  - The value is always shown as a number, and tapping the number lets you type one.
+  - The value is always shown as a number, and tapping the number lets you type one: clamped to the range, snapped to the step, and refused when it isn't a number.
 - **Undo and redo** are always on screen. On touch they're the safety net that makes experimenting feel safe.
 
 ## Editors

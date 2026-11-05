@@ -443,6 +443,71 @@ class Heading extends StatelessWidget {
       );
 }
 
+/// Asks for a typed value; [apply] gets it only if it parses and the text was changed (the [initial] text may be
+/// rounded, so setting it unedited would round the value).
+Future<void> typeValue(BuildContext context, {required String title, required String initial,
+    required double? Function(String) parse, required void Function(double) apply,
+    TextInputType keyboardType = TextInputType.text}) async {
+  final v = await showDialog<double>(context: context,
+    builder: (context) => ValueDialog(title: title, initial: initial, parse: parse, keyboardType: keyboardType));
+  if (v != null) apply(v);
+}
+
+/// The dialog [typeValue] shows: refuses an entry that doesn't parse, and says so.
+class ValueDialog extends StatefulWidget {
+  const ValueDialog({super.key, required this.title, required this.initial, required this.parse,
+      this.keyboardType = TextInputType.text});
+  final String title, initial;
+  final double? Function(String) parse;
+  final TextInputType keyboardType;
+
+  @override
+  State<ValueDialog> createState() => _ValueDialogState();
+}
+
+class _ValueDialogState extends State<ValueDialog> {
+  late final _text = TextEditingController(text: widget.initial);
+  bool _bad = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _done() {
+    if (_text.text.trim() == widget.initial.trim()) return Navigator.pop(context);
+    final v = widget.parse(_text.text);
+    if (v == null) {
+      setState(() => _bad = true);
+    } else {
+      Navigator.pop(context, v);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: TextField(controller: _text, autofocus: true, keyboardType: widget.keyboardType,
+      onSubmitted: (_) => _done(),
+      decoration: InputDecoration(errorText: _bad ? 'Not a value' : null)),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      TextButton(onPressed: _done, child: const Text('Set')),
+    ],
+  );
+}
+
+/// A typed parameter value: a finite number ("0,5" reads as 0.5), clamped to the parameter's range and snapped to its
+/// step; null if not.
+double? parseParam(String text, ParamInfo p) {
+  final v = double.tryParse(text.trim().replaceAll(',', '.'));
+  if (v == null || !v.isFinite) return null;
+  final c = v.clamp(p.min, p.max).toDouble();
+  if (p.step <= 0) return c;
+  return (p.min + ((c - p.min) / p.step).round() * p.step).clamp(p.min, p.max).toDouble();
+}
+
 String formatParam(double v, ParamInfo p) {
   final span = (p.max - p.min).abs();
   if (v == v.roundToDouble() && span >= 4) return v.toStringAsFixed(0);

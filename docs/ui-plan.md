@@ -322,7 +322,7 @@ Each step is one small PR to `Main`. It includes widget tests, screenshot (golde
 4. **U3, automation lanes:** the drop-down lanes and the parameter dropdown.
 5. **U4, piano roll:** docked, with #7, #21, #15 and #9, plus note stretching.
 6. **U5, track chain and Inspector:** reorder, bypass, drag and drop from files. Several instruments arrive when the engine issue lands.
-7. **U6, mixer:** strips with chains and parameter editing. Strips, chain slots that open their parameters, and typed level and pan are built (2026-11-05); typed parameter values are still to come.
+7. **U6, mixer:** strips with chains and parameter editing. Built 2026-11-05: strips, chain slots that open their parameters, typed level and pan, and typed parameter values (in every inspector). Sends and master effects wait for the engine.
 8. **U7, code workspace:** the file tree, tabs, problems and device folders (security review), plus #20.
 9. **U8, the remaining panels:** Exporter, Files, Engine Lab and Plugin Builder become panels with the U0 widgets.
 

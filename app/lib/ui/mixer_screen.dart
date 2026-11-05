@@ -163,54 +163,6 @@ double? _parsePan(String text) {
 String _levelText(double v) => '${(v * 100).round()}%';
 String _panText(double v) => v.abs() < .01 ? 'C' : '${(v.abs() * 100).round()}${v < 0 ? 'L' : 'R'}';
 
-/// Asks for a typed value; [apply] gets it only if it parses.
-Future<void> _typeValue(BuildContext context, {required String title, required String initial,
-    required double? Function(String) parse, required void Function(double) apply}) async {
-  final v = await showDialog<double>(context: context,
-    builder: (context) => _ValueDialog(title: title, initial: initial, parse: parse));
-  if (v != null) apply(v);
-}
-
-class _ValueDialog extends StatefulWidget {
-  const _ValueDialog({required this.title, required this.initial, required this.parse});
-  final String title, initial;
-  final double? Function(String) parse;
-
-  @override
-  State<_ValueDialog> createState() => _ValueDialogState();
-}
-
-class _ValueDialogState extends State<_ValueDialog> {
-  late final _text = TextEditingController(text: widget.initial);
-  bool _bad = false;
-
-  @override
-  void dispose() {
-    _text.dispose();
-    super.dispose();
-  }
-
-  void _done() {
-    final v = widget.parse(_text.text);
-    if (v == null) {
-      setState(() => _bad = true);
-    } else {
-      Navigator.pop(context, v);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.title),
-    content: TextField(controller: _text, autofocus: true, onSubmitted: (_) => _done(),
-      decoration: InputDecoration(errorText: _bad ? 'Not a value' : null)),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-      TextButton(onPressed: _done, child: const Text('Set')),
-    ],
-  );
-}
-
 /// A value under a control: tap it to type a new one.
 class _TypedValue extends StatelessWidget {
   const _TypedValue({super.key, required this.text, required this.tooltip, required this.color, required this.onTap});
@@ -270,7 +222,7 @@ class _MasterStrip extends StatelessWidget {
             style: Neon.code(size: 10, color: Neon.green)),
           _TypedValue(key: const ValueKey('level-master'), text: _levelText(s.project.master),
             tooltip: 'Type master level', color: Neon.pink,
-            onTap: () => _typeValue(context, title: 'Master level (%)', initial: '${(s.project.master * 100).round()}',
+            onTap: () => typeValue(context, title: 'Master level (%)', initial: '${(s.project.master * 100).round()}',
               parse: _parseLevel, apply: s.setMaster)),
         ]),
       ),
@@ -373,7 +325,7 @@ class _ChannelStrip extends StatelessWidget {
             onChanged: (v) => state.mixLayer(layer, pan: v),
           )),
           _TypedValue(key: ValueKey('pan-value-${layer.id}'), text: _panText(layer.pan), tooltip: 'Type ${layer.name} pan',
-            color: Neon.blue, onTap: () => _typeValue(context, title: 'Pan (C, 30L, 30R or -30)',
+            color: Neon.blue, onTap: () => typeValue(context, title: 'Pan (C, 30L, 30R or -30)',
               initial: _panText(layer.pan), parse: _parsePan, apply: (v) => state.mixLayer(layer, pan: v))),
           Expanded(child: Row(children: [
             Expanded(child: _Fader(key: ValueKey('fader-${layer.id}'), value: layer.volume, color: Neon.green,
@@ -386,7 +338,7 @@ class _ChannelStrip extends StatelessWidget {
           PeakReadout(state: state, read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
             style: Neon.code(size: 10, color: Neon.dim)),
           _TypedValue(key: ValueKey('level-${layer.id}'), text: _levelText(layer.volume), tooltip: 'Type ${layer.name} level',
-            color: Neon.green, onTap: () => _typeValue(context, title: 'Level (%)',
+            color: Neon.green, onTap: () => typeValue(context, title: 'Level (%)',
               initial: '${(layer.volume * 100).round()}', parse: _parseLevel,
               apply: (v) => state.mixLayer(layer, volume: v))),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [

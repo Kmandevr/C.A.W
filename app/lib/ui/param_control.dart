@@ -1,4 +1,5 @@
-// One inspector row for a param or global: a slider (with steps), a toggle or a dropdown, with its tip on long-press or hover.
+// One inspector row for a param or global: a slider (with steps) whose value can be typed, a toggle or a dropdown, with its
+// tip on long-press or hover.
 import 'package:flutter/material.dart';
 
 import '../engine/engine.dart';
@@ -70,12 +71,25 @@ class ParamControl extends StatelessWidget {
                   )
                 : _slider(p, v, divisions),
           ),
-          GestureDetector(
-            onDoubleTap: () => onChanged(p.defaultValue),
-            child: SizedBox(
-              width: compact ? 48 : 60,
-              child: Text(formatParam(v, p),
-                  textAlign: TextAlign.right, style: Neon.code(size: compact ? 12 : 14, color: color)),
+          // Tap the value to type one; double-tap resets it.
+          Semantics(
+            button: true,
+            label: 'Type ${p.name}',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => typeValue(context,
+                  title: '${p.name} (${formatParam(p.min, p)} to ${formatParam(p.max, p)})',
+                  initial: formatParam(v, p),
+                  parse: (t) => parseParam(t, p),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                  apply: onChanged),
+              onDoubleTap: () => onChanged(p.defaultValue),
+              child: SizedBox(
+                width: compact ? 48 : 60,
+                height: compact ? null : 40, // compact rows stay as tight as their slider
+                child: Align(alignment: Alignment.centerRight, child: Text(formatParam(v, p),
+                    style: Neon.code(size: compact ? 12 : 14, color: color))),
+              ),
             ),
           ),
         ]);
