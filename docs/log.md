@@ -6,6 +6,7 @@ updated: 2026-11-05
 
 # Log
 
+- 2026-11-05: Mixer strips (UI plan U6, part 1): the Mixer is a row of Reaper-style upright channel strips on every screen size, each with its chain as slots that open the module's parameters (beside the strips on wide panels, in a sheet otherwise), the output, pan, an upright fader and meter, and M and S; level and pan values can be typed. The old channel grid, phone channel list and focused editor are gone.
 - 2026-11-05: Phone cleanup, panels (owner): no screen repeats its tab name as a title and subtitle, developer notes are out of the body text (including the Engine Lab boundary note and the Plugin Builder title), peaks read as held dB numbers that fall to silence after Stop (Mixer, Engine Lab), the phone mixer's channels are shorter with 40 dp M and S toggles and labelled sliders, Automation lists tracks without lanes as one row each, and the Code panel's track card is one row with its mix behind the tune button.
 - 2026-11-05: Phone cleanup, arrangement (owner): the arrangement toolbar is one sideways-scrolling row of icons on phones, and track headers are compact (name, M, S, a live meter, the instrument in ⋮), so a phone shows a track more.
 - 2026-11-05: Accurate meters (owner): peak meters read in dB (-60 to 0 dBFS) and fall on wall-clock time with a held peak line and a clip colour, so they no longer freeze partway after Stop or fall slower in light mode; track meters read the output after pan (a centred track read 3 dB hot) and folder meters work (they read 0).

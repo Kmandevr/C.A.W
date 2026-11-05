@@ -72,10 +72,10 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - the playhead overlay reads the 30 Hz meter tick independently, so the moving line repaints without rebuilding the clip grid or track layout
   - a banner appears when the engine muted layers to keep audio clean, with Unmute
 - **Mixer / Editor** (`lib/ui/mixer_screen.dart`):
-  - a dedicated channel-strip workspace with shared track volume, pan, mute and solo controls
-  - channel strips expose existing generator/effect chains, folder-bus enablement and track-to-folder routing
-  - master output level with independent live left/right peak meters (dB scale, -60 to 0 dBFS, with held dB readouts; track and folder meters read what they send on, after volume and pan) and an inspector for the selected compiled module's real engine parameters
-  - desktop widths above 1200 px show channels and the module inspector side-by-side; drag the divider to resize. Mobile starts with a compact channel list (each channel: name, M, S and the editor on one row, level and pan side by side, then a meter) and switches to a focused editor for the selected channel and module inspector
+  - Reaper-style upright channel strips in a row that scrolls sideways, the master first, on every screen size. Each track strip, top to bottom: the name, the chain as slots (instrument then effects; a folder shows its bus switch instead), the output (master or a folder), pan, an upright fader with an upright meter, the held peak in dB, the level, M and S
+  - tapping a slot opens that module's parameters in the inspector: beside the strips when the panel is 1200 px wide or more (drag the divider to resize), in a sheet otherwise
+  - the level and pan values under the controls can be typed: the level in percent, the pan as C, 30L or 30R; an entry that doesn't parse is refused and changes nothing. Module parameters in the inspector are set by drag only
+  - the master strip has its fader, upright left and right meters (dB scale, -60 to 0 dBFS) and held dB readouts; track and folder meters read what they send on, after volume and pan
   - parameter edits use the same module parameter map and engine calls as Builder; the Mixer does not own a separate state model
   - the current engine does not yet expose sends, arbitrary buses, stereo width, correlation, loudness, phase or master effect chains through this screen
 - **Engine Lab** (`lib/ui/engine_lab_screen.dart`):

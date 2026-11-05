@@ -226,7 +226,7 @@ void main() {
     expect(restored.properties.value, '34 percent');
   });
 
-  testWidgets('Mixer channel controls update the shared project model', (tester) async {
+  testWidgets('Mixer strips: a slot opens its parameters, the fader, pan and typed values set the shared model', (tester) async {
     final module = ModuleDoc(id: 'gen-1', name: 'Bass synth', source: '');
     final layer = LayerDoc(id: 'layer-1', name: 'Bass', color: 0, generatorId: module.id, volume: 0.5);
     state.project = ProjectDoc(id: 'project-1', name: 'Workspace test', modules: [module], layers: [layer]);
@@ -237,21 +237,48 @@ void main() {
       home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    expect(find.text('MASTER OUTPUT'), findsOneWidget);
-    expect(find.text('Channels'), findsOneWidget);
+    expect(find.text('MASTER'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('MODULE INSPECTOR'), findsNothing);
-    await tester.tap(find.text('Bass'));
-    await tester.pump();
+    // A chain slot opens its module's parameters (a sheet on narrow panels).
+    await tester.tap(find.text('Bass synth'));
+    await tester.pumpAndSettle();
     expect(find.text('MODULE INSPECTOR'), findsOneWidget);
-    expect(find.text('Focused editor'), findsOneWidget);
     expect(state.selectedLayerId, 'layer-1');
     expect(state.selectedModuleId, module.id);
-    final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
-    expect(sliders.length, greaterThanOrEqualTo(3));
-    sliders[1].onChanged!(0.72);
+    Navigator.of(tester.element(find.text('MODULE INSPECTOR'))).pop();
+    await tester.pumpAndSettle();
+
+    tester.widget<Slider>(find.descendant(of: find.byKey(const ValueKey('fader-layer-1')), matching: find.byType(Slider)))
+      .onChanged!(0.72);
     await tester.pump();
     expect(layer.volume, closeTo(0.72, 0.0001));
+    expect(find.text('72%'), findsOneWidget);
+
+    // Typed values: the level in percent, the pan as C, 30L or 30R.
+    await tester.tap(find.byKey(const ValueKey('level-layer-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'NaN');
+    await tester.tap(find.text('Set'));
+    await tester.pump();
+    expect(find.text('Not a value'), findsOneWidget);
+    expect(layer.volume, closeTo(0.72, 0.0001));
+    await tester.enterText(find.byType(TextField), '40');
+    await tester.tap(find.text('Set'));
+    await tester.pumpAndSettle();
+    expect(layer.volume, closeTo(0.4, 0.0001));
+    await tester.tap(find.byKey(const ValueKey('pan-value-layer-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'left');
+    await tester.tap(find.text('Set'));
+    await tester.pump();
+    expect(find.text('Not a value'), findsOneWidget, reason: 'a bad entry stays open and changes nothing');
+    expect(layer.pan, 0);
+    await tester.enterText(find.byType(TextField), '30L');
+    await tester.tap(find.text('Set'));
+    await tester.pumpAndSettle();
+    expect(layer.pan, closeTo(-0.3, 0.0001));
+    expect(find.text('30L'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 600));
   });
 
@@ -283,7 +310,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Mixer focused editor remains usable on phone widths with long effect chains', (tester) async {
+  testWidgets('in a short docked panel the strips keep a usable fader and the panel scrolls', (tester) async {
+    tester.view.physicalSize = const Size(390, 300);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    state.project = ProjectDoc(id: 'short', name: 'Short panel', layers: [LayerDoc(id: 'l', name: 'Lead', color: 0)]);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {}))));
+    expect(tester.takeException(), isNull);
+    // The fader is turned upright, so its length is its rotated box's height.
+    expect(tester.getSize(find.byKey(const ValueKey('fader-l'))).height, greaterThanOrEqualTo(100));
+  });
+
+  testWidgets('Mixer strips stay usable on phone widths with long effect chains', (tester) async {
     tester.view.physicalSize = const Size(360, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -291,28 +330,39 @@ void main() {
 
     final modules = [
       ModuleDoc(id: 'gen', name: 'Generator', source: ''),
-      for (var i = 1; i <= 4; i++)
+      for (var i = 1; i <= 6; i++)
         ModuleDoc(id: 'fx$i', name: 'Effect $i', source: ''),
     ];
     state.project = ProjectDoc(id: 'mobile-mixer', name: 'Mobile mixer',
       modules: modules,
-      layers: [LayerDoc(id: 'mobile-layer', name: 'Mobile layer', color: 0,
-        generatorId: 'gen', effectIds: ['fx1', 'fx2', 'fx3', 'fx4'])]);
+      layers: [
+        LayerDoc(id: 'mobile-layer', name: 'Mobile layer', color: 0,
+          generatorId: 'gen', effectIds: ['fx1', 'fx2', 'fx3', 'fx4', 'fx5', 'fx6']),
+        for (var i = 1; i <= 4; i++) LayerDoc(id: 'more-$i', name: 'Track $i', color: i),
+      ]);
     state.selectedLayerId = 'mobile-layer';
     state.selectedModuleId = 'gen';
     state.info = {
       'gen': const ModuleInfo(ok: true, kind: 'generator'),
-      for (var i = 1; i <= 4; i++) 'fx$i': const ModuleInfo(ok: true, kind: 'effect'),
+      for (var i = 1; i <= 6; i++) 'fx$i': const ModuleInfo(ok: true, kind: 'effect'),
     };
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
     ));
-    await tester.tap(find.text('Focused editor'));
+    expect(tester.takeException(), isNull);
+    // The slot list scrolls inside its strip; the strips scroll sideways.
+    await tester.ensureVisible(find.text('Effect 6'));
     await tester.pumpAndSettle();
-
-    expect(find.text('Effect 4'), findsOneWidget);
+    await tester.tap(find.text('Effect 6'));
+    await tester.pumpAndSettle();
+    expect(state.selectedModuleId, 'fx6');
     expect(find.text('MODULE INSPECTOR'), findsOneWidget);
+    Navigator.of(tester.element(find.text('MODULE INSPECTOR'))).pop();
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Track 4'), 200, scrollable: find.descendant(
+      of: find.byKey(const ValueKey('mixer-strips')), matching: find.byType(Scrollable)).first);
+    expect(find.text('Track 4'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

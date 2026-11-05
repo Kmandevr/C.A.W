@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: 0486589
+Commit: 90331d9
 
-Branch: claude/caw-engine-foundation-skpirb (on Main f3eeb59; phone cleanup of the panels pushed, PR open)
+Branch: claude/caw-engine-foundation-skpirb (on Main 90331d9; Mixer strips, U6 part 1, PR open)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `Main`. Claude merges each once CI is green.
@@ -18,11 +18,12 @@ Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `
 
   - Merged in #105.
 - Accurate meters and the phone arrangement (#106): dB `PeakMeter`, track and folder peaks after pan, a one-row phone toolbar, compact track headers.
-- Phone cleanup of the panels (owner, 2026-11-05, this branch): no repeated titles or developer notes, held dB readouts (`PeakReadout`), compact phone mixer channels, compact Automation, a one-row Code track card.
+- Phone cleanup of the panels (#107): no repeated titles or developer notes, held dB readouts (`PeakReadout`), compact Automation, a one-row Code track card.
+- Mixer strips, U6 part 1 (this branch): upright Reaper-style strips with chain slots, typed level and pan, `PeakMeter(vertical:)`.
 
 ## Next
-- Open the panels PR, then merge it when CI is green.
-- Owner: "then work on the rest of the UI". Next is the Reaper-style mixer (vertical strips with chain slots, UI plan).
+- Merge the Mixer strips PR when CI is green.
+- U6 part 2: typed module parameter values in the inspector (owner: "then work on the rest of the UI").
 - Piano roll still to build: bend handles with detents, freehand curves, the context toolbar middle, scale highlight, snap to scale, ghost notes.
 - Arrangement automation-lane snapping (U3).
 - U1 PR4 (open straight into the arrangement) and PR5 (transport undo/redo, tap tempo #19).
