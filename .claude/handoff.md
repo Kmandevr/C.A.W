@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: 8af9dd5
+Commit: 454b395
 
-Branch: claude/caw-engine-foundation-skpirb (on Main 8af9dd5; open straight into the arrangement, U1 PR4, PR open)
+Branch: claude/caw-engine-foundation-skpirb (on Main 454b395; transport tempo #19, U1 PR5 part 1, PR open)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `Main`. Claude merges each once CI is green.
@@ -14,17 +14,16 @@ Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `
 - Note previews (#103):
   - Engine: `caw_engine_note_on` and the pitch/off calls in `engine/include/caw.h`, stopped preview chunks, `endPlayback`, `restartChain`.
   - App: `previewOn` in `app/lib/model/app_state.dart`, and the "hearing notes" section in `app/lib/ui/pattern_editor.dart`.
-  - Tests: `app/test/roll_preview_test.dart`, plus the engine preview tests.
-
-  - Merged in #105.
+  - Tests: `app/test/roll_preview_test.dart`, plus the engine preview tests. Merged in #105.
 - Accurate meters and the phone arrangement (#106): dB `PeakMeter`, track and folder peaks after pan, a one-row phone toolbar, compact track headers.
 - Phone cleanup of the panels (#107): no repeated titles or developer notes, held dB readouts (`PeakReadout`), compact Automation, a one-row Code track card.
 - Mixer strips, U6 part 1 (#108): upright Reaper-style strips with chain slots, typed level and pan, `PeakMeter(vertical:)`.
 - Typed parameter values, U6 part 2 (#109): `typeValue`, `parseParam` in `app/lib/ui/widgets.dart`.
-- U1 PR4 (this branch): no startup screen; `openStorage` in `app/lib/model/app_state.dart` opens the last project, the shell brings the arrangement forward.
+- U1 PR4 (#110): no startup screen; `openStorage` in `app/lib/model/app_state.dart` opens the last project.
+- U1 PR5 part 1 (this branch): transport tempo (#19) and bar.beat in `app/lib/ui/shell.dart`.
 
 ## Next
-- Merge the opening PR when CI is green. Then U1 PR5: transport undo/redo and tap tempo (#19).
+- Merge the tempo PR when CI is green. Then U1 PR5 part 2: project-wide undo and redo in the transport (design first).
 - Piano roll still to build: bend handles with detents, freehand curves, the context toolbar middle, scale highlight, snap to scale, ghost notes.
 - Arrangement automation-lane snapping (U3).
 

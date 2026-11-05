@@ -11,7 +11,7 @@ This file is a concise handoff, not a live Git branch/CI tracker. Previous commi
 
 ## Current implementation
 
-The Flutter app currently exposes eight workspaces: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder. They share one AppState and the same native engine/project model. The app opens straight into the last project, with the arrangement in front; there is no startup screen.
+The Flutter app currently exposes eight workspaces: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder. They share one AppState and the same native engine/project model. The app opens straight into the last project, with the arrangement in front; there is no startup screen. The transport's tempo is typed with a tap or tapped on a pad (#19).
 
 The app reference [App](app.md) is the authoritative inventory of implemented screens and behavior. The [UI design](ui.md) describes the design direction and current editor state. The [core development plan](core-and-feature-plan.md) gives the ordered work sequence.
 
