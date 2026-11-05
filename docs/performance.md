@@ -7,7 +7,7 @@ updated: 2026-11-05
 
 # Performance
 
-The owner's requirement (2026-10-28): run as light as possible, down to low-end phones ([UI design](ui.md#light-on-cpu-and-ram)). This note records how performance is measured and what the audit found.
+The owner's requirement (2026-10-28): run as light as possible, down to low-end phones ([UI design](ui.md#light-on-cpu-and-ram)). This note records how performance is measured and what the audit found. The in-tree `CAW::SDK` target is an interface-only source contract; it adds no processing path or audio-callback work by itself. Component runtime costs remain unmeasured until native processors are integrated into prepared playback.
 
 ## How it's measured
 

@@ -1,7 +1,7 @@
 ---
 title: How it works
 summary: The path a sound takes from a .caw file to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
-covers: [engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/src/builtins.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart]
+covers: [engine/include/caw/module.hpp, engine/CMakeLists.txt, engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/src/builtins.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart]
 updated: 2026-11-05
 ---
 
@@ -30,7 +30,8 @@ The modular foundation is real native C++ code, but it is not yet the active pla
 
 | Area | Implementation | What is true today |
 | --- | --- | --- |
-| Module contract | `engine/src/module.h`, `module.cpp` | Typed audio, control, modulation and event port descriptors; the `Event` record (note id, raw UMP); parameter metadata; generated/custom UI metadata; descriptor validation; the processor interface (`process`, `processPorts`). |
+| Module contract | `engine/include/caw/module.hpp`, `engine/src/module.cpp` | Public canonical C++ contract for typed audio, control, modulation and event ports; the `Event` record (note id, raw UMP); parameter metadata; generated/custom UI metadata; descriptor validation; and the processor interface (`process`, `processPorts`). Internal `engine/src/module.h` forwards to this header. |
+| C++ SDK build target | `engine/CMakeLists.txt` | `CAW::SDK` is an interface target exporting the public include directory and C++20 requirement. Engine-internal `engine/src` headers are no longer propagated to SDK consumers. There is no installed SDK package or dynamic native loader yet. |
 | Parameter resolver | `engine/src/params.h`, `params.cpp` | One parameter's value per block from its manual/MIDI base (smoothed), automation (unless touched) and modulation links in id order, on the descriptor's curve, then clamped and stepped (F6.1). The graph executor resolves every node's parameters each block, with modulation links from other nodes' modulation outputs (F6.3), automation lanes at the transport position (F6.4) and MIDI CC mappings from host events (F6.5), and passes them to processors (F6.2). The Engine's .caw params and globals resolve the same way (F6.6). |
 | Module registry | `engine/src/module_registry.h`, `module_registry.cpp` | Static in-process registry with stable-ID lookup, factory creation, descriptor checks and reset/versioned-state hooks. It does not dynamically load third-party binaries. |
 | Processing graph | `engine/src/graph.h`, `graph.cpp` | Typed graph validation and deterministic topological ordering. The compiler has no former fixed node/connection count caps; node indices remain `uint32_t`. Compile/prepare require `GraphResourceBudget.maxWorkingBytes`, with optional count ceilings defaulting to unlimited; internal working-set estimates are checked before allocation. The executor accepts caller-selected block sizes without the former 8,192-frame cap, is planar N-channel with summing inputs, and can be re-routed on the audio thread (`setRouting`). The Engine owns one such graph for its mix (F4.3). |

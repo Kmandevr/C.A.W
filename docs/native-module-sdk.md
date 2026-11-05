@@ -1,8 +1,8 @@
 ---
 title: Native module SDK
 summary: C ABI contract for trusted native CAW DSP modules, validation, real-time rules, state and packaging.
-updated: 2026-11-04
-covers: [engine/include/caw_module_sdk.h, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
+updated: 2026-11-05
+covers: [engine/include/caw_module_sdk.h, engine/include/caw/module.hpp, engine/CMakeLists.txt, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
 ---
 
 # Native module SDK v1
@@ -11,7 +11,7 @@ covers: [engine/include/caw_module_sdk.h, engine/src/module.*, engine/src/module
 
 ## One module system
 
-Built-in modules and add-on modules share the same stable identity, typed ports, parameter metadata, graph validation, state versioning and processing model: internally N-channel planar buffers with a stereo adapter, summing (mix-bus) inputs since F4.1 (2026-11-03) and audio-thread re-routing of summing inputs since F4.3 (`GraphExecutor::setRouting`), plus one-source routes into plain inputs since F4.4 (`prepareRouted`), which the Engine's mix graph uses (and whose `workingBytes()` estimate sets how many layers the Engine can grow to, F7.3), and since F5.1/F5.2 several audio ports, modulation, control and event ports for internal modules that implement `processPorts`; which saturate a processor's inf at ±FLT_MAX and treat NaN as 0 (`route_math.h`). The C ABI v1 below stays stereo with no channel count; `engine/src/sdk_layout.h` maps its layout values explicitly. The C ABI in `engine/include/caw_module_sdk.h` is the native boundary; it intentionally avoids a C++ ABI so modules can be built with different compilers.
+Built-in modules and add-on modules share the same stable identity, typed ports, parameter metadata, graph validation, state versioning and processing model: internally N-channel planar buffers with a stereo adapter, summing (mix-bus) inputs since F4.1 (2026-11-03) and audio-thread re-routing of summing inputs since F4.3 (`GraphExecutor::setRouting`), plus one-source routes into plain inputs since F4.4 (`prepareRouted`), which the Engine's mix graph uses (and whose `workingBytes()` estimate sets how many layers the Engine can grow to, F7.3), and since F5.1/F5.2 several audio ports, modulation, control and event ports for internal modules that implement `processPorts`; which saturate a processor's inf at ±FLT_MAX and treat NaN as 0 (`route_math.h`). The C ABI v1 below stays stereo with no channel count; `engine/src/sdk_layout.h` maps its layout values explicitly. The C ABI in `engine/include/caw_module_sdk.h` remains the native host boundary; it intentionally avoids a C++ ABI so binaries can be built with different compilers. The source-level C++ component contract is exposed through `engine/include/caw/module.hpp` and the in-tree `CAW::SDK` CMake interface target. Internal `engine/src/module.h` forwards to that canonical header. The C++ target currently exports headers and the C++20 requirement only; there is no installed SDK package or dynamic loader.
 
 ## Entry point
 

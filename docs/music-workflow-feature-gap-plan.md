@@ -48,8 +48,8 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 ### Modules and plugins
 
-- **[Implemented]** Code-defined generators/effects, parameter metadata, reusable functions and Plugin Builder for validating/packaging native .caw modules.
-- **[Partial]** Native module SDK and graph-processing foundations exist (planar N-channel executor with fan-in since Foundation F3/F4.1). Since F4.3/F4.4 the mixer itself runs as one graph: each module of a track is a node, then the track, folder buses and master. Since F5.1/F5.2 graph nodes can take sidechain audio, modulation, control and event (note/MIDI) inputs, and F6.1–F6.6 add the shared parameter resolver, with resolved values (with modulation links between nodes, automation lanes and MIDI CC mappings) passed to every node, and the Engine's .caw params on it; the app does not yet use modulation links or CC mappings.
+- **[Implemented, current transitional path]** Code-defined generators/effects, parameter metadata, reusable functions and Plugin Builder for validating/packaging native .caw modules.
+- **[Partial]** The public C++ source SDK now exposes the existing `ModuleProcessor` contract through `engine/include/caw/module.hpp` and the in-tree `CAW::SDK` CMake target. It is not an installed package, dynamic loader or production playback host. Graph-processing foundations exist (planar N-channel executor with fan-in since Foundation F3/F4.1). Since F4.3/F4.4 the mixer itself runs as one graph: each module of a track is a node, then the track, folder buses and master. Since F5.1/F5.2 graph nodes can take sidechain audio, modulation, control and event (note/MIDI) inputs, and F6.1–F6.6 add the shared parameter resolver, with resolved values (with modulation links between nodes, automation lanes and MIDI CC mappings) passed to every node, and the Engine's .caw params on it; the app does not yet use modulation links or CC mappings.
 - **[Incomplete]** Dynamic native loading/isolation and external CLAP/VST3/AU hosting.
 
 ### Audio assets and sampling

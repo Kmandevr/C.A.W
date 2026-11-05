@@ -10,6 +10,12 @@ option(CAW_TOOLS "Build the caw CLI and the tests" ON)
 option(CAW_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 get_filename_component(CAW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
+# Public source-level C++ SDK. Internal engine headers stay private to engine targets.
+add_library(caw_sdk INTERFACE)
+add_library(CAW::SDK ALIAS caw_sdk)
+target_include_directories(caw_sdk INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_features(caw_sdk INTERFACE cxx_std_20)
+
 # Determinism: no fast-math and no fused multiply-add contraction (MSVC /fp:precise never contracts), so every platform rounds alike.
 if(MSVC)
   set(CAW_FLAGS /W4 /fp:precise /utf-8 /EHsc)
@@ -85,17 +91,17 @@ add_library(caw_core STATIC
   src/engine.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/sdk_layout.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
   "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
-target_include_directories(caw_core PUBLIC include src)
+target_include_directories(caw_core PRIVATE src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
 find_package(Threads REQUIRED)
-target_link_libraries(caw_core PUBLIC Threads::Threads)
+target_link_libraries(caw_core PUBLIC CAW::SDK Threads::Threads)
 set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
 
 # The library the app loads through dart:ffi.
 if(CAW_AUDIO)
   add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_miniaudio.cpp platform/miniaudio_impl.c)
-  target_include_directories(caw_engine PRIVATE third_party/miniaudio)
+  target_include_directories(caw_engine PRIVATE src third_party/miniaudio)
   target_compile_options(caw_engine PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CAW_FLAGS}>)
   if(ANDROID)
     target_link_libraries(caw_engine PRIVATE log)
@@ -106,6 +112,7 @@ if(CAW_AUDIO)
 else()
   add_library(caw_engine SHARED src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_compile_options(caw_engine PRIVATE ${CAW_FLAGS})
+  target_include_directories(caw_engine PRIVATE src)
 endif()
 target_link_libraries(caw_engine PRIVATE caw_core)
 
@@ -116,14 +123,21 @@ if(CAW_TOOLS)
   add_executable(caw_cli cli/main.cpp platform/audio_none.cpp)
   set_target_properties(caw_cli PROPERTIES OUTPUT_NAME caw)
   target_compile_options(caw_cli PRIVATE ${CAW_FLAGS})
+target_include_directories(caw_cli PRIVATE src)
   target_link_libraries(caw_cli PRIVATE caw_core)
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
     tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
-    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp
+    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp
     src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
+  target_include_directories(caw_tests PRIVATE src)
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_tests PRIVATE caw_core)
+  # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
+  add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)
+  target_link_libraries(caw_sdk_public_compile PRIVATE CAW::SDK)
+  target_compile_options(caw_sdk_public_compile PRIVATE ${CAW_FLAGS})
+  add_dependencies(caw_tests caw_sdk_public_compile)
   enable_testing()
   # Split the suite into independent processes so CTest can run shards concurrently.
   # Process isolation avoids sharing test state while keeping every case enabled.
@@ -139,6 +153,7 @@ if(CAW_TOOLS)
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
                               tests/alloc_counter.cpp)
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
+  target_include_directories(caw_rt_tests PRIVATE src)
   target_compile_definitions(caw_rt_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
   target_link_libraries(caw_rt_tests PRIVATE caw_core)
   add_test(NAME caw_rt_tests COMMAND caw_rt_tests)
@@ -146,5 +161,6 @@ if(CAW_TOOLS)
   # Times the engine like an audio callback (see docs/performance.md); run it on a release build.
 add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cpp)
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
+  target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
 endif()

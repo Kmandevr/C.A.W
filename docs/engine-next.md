@@ -188,7 +188,7 @@ Keep deterministic mode and golden-render contract. SIMD, multithreading and GPU
 
 The callback and everything it calls must avoid allocation, locks, I/O, logging, UI calls, exceptions and unbounded work. Prepare graphs, buffers, voice pools and state before publishing to audio. Use reviewed real-time-safe handoff; retire old graphs and free memory off callback.
 
-Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. Native SDK modules are not sandboxed. **Owner decision (2026-11-03):** each external plugin or third-party native module runs in a mode the user chooses: Isolated (separate process), Trusted (in-process) or Blocked.
+Untrusted .caw source runs in the constrained module language, with no I/O, filesystem, network or system calls and explicit source/program/state/execution limits. The source-level C++ component contract is exposed through `engine/include/caw/module.hpp` and the in-tree `CAW::SDK` CMake interface target; this is not a dynamic loader or sandbox. Native SDK modules are not sandboxed. **Owner decision (2026-11-03):** each external plugin or third-party native module runs in a mode the user chooses: Isolated (separate process), Trusted (in-process) or Blocked.
 
 ## 11. Verification: what “without compromise” means
 

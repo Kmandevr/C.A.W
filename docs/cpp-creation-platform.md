@@ -6,7 +6,7 @@ updated: 2026-11-05
 
 # C++ creation platform
 
-**Status:** The language direction and product requirements below are owner decisions (2026-11-05). The detailed API shape and sequencing are architecture proposals until implemented and verified. This note is a technical design supporting the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
+**Status:** The language direction and product requirements below are owner decisions (2026-11-05). The first public C++ SDK slice is implemented on the current branch: the existing typed module processor contract is exposed through `engine/include/caw/module.hpp` and the `CAW::SDK` CMake interface target. The broader C++ toolchain, full component metadata, Library, dynamic loading, editor, visual scripting and generated/custom UI remain planned. This note supports the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
 
 ## 1. The four distinct layers
 

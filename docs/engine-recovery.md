@@ -11,17 +11,18 @@ updated: 2026-11-05
 
 ## Current checkpoint
 
-- Branch: `feature/native-engine-refactor-integration`
-- Base: `Main` at `20fd3da9a37f8936f1c3ff6069878978d064ae37`
-- Code checkpoint: `8ddbb1bfabba5ca4eec6d3238e7a617d4dac0286` (191 ahead, 0 behind Main at the time checked). Recompare before any PR.
-- Latest code checkpoint: `8ddbb1bfabba5ca4eec6d3238e7a617d4dac0286` (not CI-green).
-- Engine CI run `41455843126` failed on all four jobs; App `41455843138` passed; Docs `41455843017` passed. Previous green checkpoint: `07c796f8e745cd44e7be37992747b8263ac27e9a`.
-- Working tree/remote state is represented by GitHub branch commits; no local build/test environment is available through the current connector workflow.
-- PR: none. Do not open a PR until the complete assignment is reviewable; do not merge, approve or delete branches.
+- **Main:** `fcfa5b210f99103031c83b5ba04fb4d3256155de` at the start of the C++ SDK task.
+- **Issue #28:** still open for native engine/runtime integration. Its owner-approved scope now replaces the old compatibility requirement: ordinary C++ is the target authoring language; old `.caw` source and pre-release project compatibility are not required. The previously referenced `feature/native-engine-refactor-integration` branch no longer exists.
+- **First C++ SDK slice:** issue #117, branch `gpt/117-public-cpp-sdk`, commit `134276f7489ca7e43d97fe46f224677036d4b1a4`. The public contract header and `CAW::SDK` CMake interface target are implemented; focused SDK test passed. Strict docs check is being repaired because several engine notes still describe the old internal-only contract.
+- **PR:** none yet for #117. Do not merge or approve your own PR.
+- **Build environment:** connector-only; local build/test is unavailable. GitHub Actions is the compiler/test runner.
 
-## Immediate continuation — current CI repair follow-up
+## Immediate continuation — public SDK documentation check
 
-The original seven failure groups (nine assertions) have been addressed. The confirmed green checkpoint `fa438f874571550515bccdeb193e1dde72747286` passed all four Engine jobs, all App jobs and Docs. The follow-up at `1c88f05e` clears `ProjectSpec` and the error string at the start of `parseProject`, ensuring an oversized JSON rejection cannot leave stale previously parsed project state. A regression test seeds stale state and checks it is cleared. Its Engine run `41503176374` and App run `41503176276` were pending; Docs `41503176230` passed. Check those runs before proceeding with further engine changes.
+1. Refresh every stale note named by the #117 Quick Check docs report, especially the engine integration, SDK, progress and recovery notes.
+2. Push with `run: docs` and read the report for the exact commit.
+3. When docs passes, run the default Quick Check (docs/build/test/examples), then open PR #117 with `Closes #117`.
+4. After #117 is reviewed/merged, create a fresh branch from then-current Main for #28 and re-audit the remaining engine integration. Do not resume old branch refs.
 
 ## Latest ownership-safety change — retirement backpressure
 
@@ -49,8 +50,8 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 - GraphExecutor is planar N-channel (F3) with typed audio (several, for sidechains), modulation, control (F5.1) and event (F5.2) ports; summing inputs accept fan-in since F4.1 and audio ones can be re-routed on the audio thread (`setRouting`, F4.3). It does not yet implement dynamic routing of non-audio ports, sends/returns, feedback boundaries or nested graphs, or receive MIDI from devices (modulation links, automation lanes and CC mappings from host events feed its resolved parameters, F6.3–F6.5; the Engine's .caw params use the same resolver, F6.6).
 - Do not create a second engine. Integrate existing VM Instances, voices, imports/exports, automation, folder buses, offline rendering and project migration into one prepared execution model. Keep the template and multi-track mixer golden hashes (`golden.txt`, `mix_golden_test.cpp`) unchanged while doing so.
 - Audio callback must remain allocation-free, lock-free, I/O-free and logging-free. No worker waits on callback. Prepare data before activation and reclaim it off callback.
-- Existing `.caw` VM remains the constrained untrusted-code path; trusted native code is not sandboxed without process isolation.
-- Preserve deterministic semantics, project/module compatibility, live/offline parity and existing audio behavior.
+- The current `.caw` VM remains a constrained transitional path while useful capabilities are migrated; it is not the target authoring language. Trusted native C++ is not sandboxed without process isolation, and old-source/pre-release-project compatibility is not required.
+- Preserve deterministic behavior, live/offline parity and retained engine capabilities. Old `.caw` source and pre-release-project compatibility are not required.
 
 ## Remaining fixed capacities and correctness risks
 
