@@ -983,6 +983,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   final Map<int, ({int id, double pitch})> _heard = {};
   Timer? _tapOff;
   int? _drawnNote; // the note this gesture drew: a tap plays it for its length
+  final _drawnAt = Stopwatch()..start(); // since that note was drawn: only a quick tap plays out its length
 
   String? get _hearLayer => _look.hearNotes ? s.previewLayerFor(widget.module.id) : null;
 
@@ -1417,6 +1418,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _hear(_sel);
       _holdAt = p;
       _hold = Timer(Duration(milliseconds: _look.holdMs), () {
+        // Opening the extras sheet takes the touch from the roll (its route cancels it), so the note's preview ends.
         _up();
         _openExtras();
       });
@@ -1432,6 +1434,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         _dragBase = r.doc;
         Motion.tick();
         _drawnNote = r.id;
+        _drawnAt.reset();
         _hear({r.id!});
       }
     } else {
@@ -1506,8 +1509,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _hold = null;
     _scroller.stop();
     _edge = 0;
-    // A note tapped in (drawn, not stretched) plays out its own length, at most 4 s; anything held stops now.
-    final tapped = _drawnNote == null || !identical(_dragBase, _doc) ? null : _doc?.byId(_drawnNote!);
+    // A note tapped in (drawn quickly, not stretched) plays out its own length, at most 4 s; anything held stops now.
+    final quick = _drawnAt.elapsedMilliseconds < _look.holdMs;
+    final tapped = _drawnNote == null || !quick || !identical(_dragBase, _doc) ? null : _doc?.byId(_drawnNote!);
     _drawnNote = null;
     if (tapped != null && _heard.isNotEmpty) {
       final secs = math.min(4.0, tapped.len.toDouble() * 15 / s.project.bpm);

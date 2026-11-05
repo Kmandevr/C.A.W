@@ -1,39 +1,36 @@
 # Handoff
 
-Commit: e05e918
+Commit: fdd8d2e (plus review fixes in the next commit)
 
-Branch: claude/caw-engine-foundation-skpirb (on Main 808e826; PR #101: glass everywhere, blur switch, track gap and spacers, in review)
+Branch: claude/caw-engine-foundation-skpirb (on Main 0af9f06; note previews #103 in progress, PR next)
 
 ## Goal
-Owner (2026-11-04): Claude does the UI. The arrangement is home and DAW-like: docking panels (the phone too), a Unity-like code workspace, a Reaper-like mixer, a docked piano roll, and smooth, distance-aware motion. The whole spec, the open questions and the order of work (U0–U8) are in `docs/ui-plan.md`, and the owner's choices are in `docs/decisions.md`.
-- Each step is one small PR to `Main` with widget and golden tests, a code-reviewer pass and release-check. Claude merges when CI is green.
-- Claude makes the small engine changes the UI needs, such as a note on/off C API for previews. The large ones wait for GPT: several instruments per track, parent tracks with their own sound, and Bezier curves.
+Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `Main`. Claude merges each once CI is green.
+- Claude makes the small engine changes the UI needs (the note preview C API is built, #103). The large ones wait for GPT: several instruments per track, parent tracks with their own sound, and Bezier curves.
 - GPT owns the rest of the engine (#94, F7.3 part C, F7.4, F8, F10; #28).
 
 ## Done and verified
-- The UI plan and specs are on Main: #96 and #97.
-- U0 is merged (#98): part two adds `app/lib/ui/tokens.dart`, eight track colours and `app/lib/ui/kit.dart` (the context toolbar, tool and info buttons). Part one:
-  - `app/lib/ui/motion.dart`
-  - the Motion, Haptics and Glow settings, with saves run one after another
-  - golden tests with real fonts (`app/test/golden_util.dart`)
-  - Checks: `flutter analyze` is clean, and `flutter test` gives 191 passed, 19 skipped (without `CAW_LIB`).
+- U0 and U1 PRs 1–3 are merged (#98–#101).
+- Piano roll part 1 (#102): stretch both ends, end zones, second-finger bypass, auto-scroll, ghost note, and the arrangement grid at full height.
+- Piano roll part 2 (#104): one snap magnet with a time and value grid.
+- Note previews (#103):
+  - Engine: `caw_engine_note_on` and the pitch/off calls in `engine/include/caw.h`, stopped preview chunks, `endPlayback`, `restartChain`.
+  - App: `previewOn` in `app/lib/model/app_state.dart`, and the "hearing notes" section in `app/lib/ui/pattern_editor.dart`.
+  - Tests: `app/test/roll_preview_test.dart`, plus the engine preview tests.
 
 ## Next
-U1 has five PRs (architect review, 2026-11-04; detail in `docs/ui-plan.md`, U1):
-1. The layout model: merged (#99). Glass surfaces and setting (owner, 2026-11-04): in review.
-2. The dock view (`app/lib/ui/dock/dock_view.dart`): merged (#100).
-3. The shell switch (`app/lib/ui/dock/dock_controller.dart`, `app/lib/ui/shell.dart`): merged (#100). Glass everywhere (owner): in review. Left for later: hidden tabs still rebuild on the 30 Hz tick; the phone quick-actions strip overlays the lower panel.
-4. Open straight into the arrangement.
-- Owner (2026-11-04): after #101, work on the piano roll next (the U3 spec in `docs/ui-plan.md`, Piano roll): it is what makes the app feel good.
-5. The transport bar: undo/redo and tap tempo (#19).
+- Open the #103 PR, then merge it when CI is green.
+- Piano roll still to build: bend handles with detents, freehand curves, the context toolbar middle, scale highlight, snap to scale, ghost notes.
+- Arrangement automation-lane snapping (U3).
+- U1 PR4 (open straight into the arrangement) and PR5 (transport undo/redo, tap tempo #19).
 
 ## Open (owner)
-- How several instruments on one track combine: is "each adds to the audio above it" the rule?
-- The code-editor component for multi-cursor and folding: custom, or a package (which needs approval)?
+- Should chance stay at 5% steps, or follow the value grid? It follows the value grid now.
+- Holding a note opens its extras sheet, which ends its preview. Should the extras open on the lift instead?
+- How several instruments on one track combine.
+- The code-editor component: custom, or a package?
 
 ## Read first
 - `docs/ui-plan.md`
-- `docs/ui.md`
 - `docs/app.md`
-- `app/lib/ui/theme.dart`
-- `app/lib/ui/motion.dart`
+- `app/lib/ui/pattern_editor.dart`

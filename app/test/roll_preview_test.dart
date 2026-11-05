@@ -92,11 +92,13 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
     s.calls.clear();
     final g = await tester.startGesture(const Offset(300 + 2, 300));
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 200)); // short of the hold that opens its extras
     expect((s.ons.length, s.offs.length), (1, 0), reason: s.calls.join(', '));
     await g.up();
     await settle(tester);
     expect(s.offs, hasLength(1), reason: s.calls.join(', '));
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
     s.dispose();
   }, skip: skip);
 

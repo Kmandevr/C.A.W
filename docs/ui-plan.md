@@ -187,6 +187,8 @@ updated: 2026-11-05
   - A selection plays its opening chord: the selected notes that start first.
   - While a pitch point is dragged the note sounds at that point's pitch; on a segment, at the curve under the finger.
   - "Hear notes" in ⋮ turns this off (`RollLook.hearNotes`).
+  - A preview reopens the audio device if the app closed it while idle, and keeps it open while a note is held.
+  - **Open (owner):** holding a note still opens its extras sheet, and opening the sheet ends the preview, because the sheet's route cancels the roll's touch and the finger's lift no longer reaches it. Should the extras open on the lift instead, so the note sounds until then?
   - **Engine:** `caw_engine_note_on`/`note_pitch`/`note_off`/`notes_off` in `engine/include/caw.h` hold a voice on a layer's instrument through the command queue. Stopped, the engine runs only the previewing tracks (their effects, buses and master) without moving the transport, and keeps a track running until its effect tail has died away.
 - **Drawing notes (owner):** it works as today, which is nice to use on a phone: a tap places a note of the last length, and dragging sets its length. Quality-of-life tweaks (owner-confirmed):
   - a ghost note under your finger at touch-down, so you see where it lands before you lift

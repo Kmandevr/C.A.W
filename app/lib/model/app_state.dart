@@ -176,7 +176,7 @@ class AppState extends ChangeNotifier {
       poll: _poll,
       interval: const Duration(milliseconds: 33),
       onIdle: () {
-    if (!meters.playing) engine?.stopAudio();
+    if (!meters.playing && _heldPreviews.isEmpty) engine?.stopAudio();
   });
 
   Future<void> init() async {
@@ -341,10 +341,31 @@ class AppState extends ChangeNotifier {
   /// A fresh note-preview id, unique across every roll on screen.
   int nextPreviewId() => ++_previewIds;
 
-  /// Note previews on the engine (tests override these to watch them).
-  void previewOn(String layerId, int id, double pitch, double velocity) => engine?.noteOn(layerId, id, pitch, velocity);
+  final Set<int> _heldPreviews = {};
+
+  /// Note previews on the engine (tests override these to watch them). A preview reopens the audio device if it was
+  /// closed while idle, and keeps it open while any note is held.
+  void previewOn(String layerId, int id, double pitch, double velocity) {
+    final e = engine;
+    if (e == null) return;
+    if (!e.audioOn) audioError = e.startAudio();
+    e.noteOn(layerId, id, pitch, velocity);
+    _heldPreviews.add(id);
+    _poller.wake();
+  }
+
   void previewPitch(int id, double pitch) => engine?.notePitch(id, pitch);
-  void previewOff(int id) => engine?.noteOff(id);
+
+  void previewOff(int id) {
+    final e = engine;
+    if (e == null) return;
+    e.noteOff(id);
+    _heldPreviews.remove(id);
+    if (_heldPreviews.isEmpty) {
+      e.notesOff(); // a backstop: an off dropped by a full command queue can't leave a note stuck
+      _poller.wake(); // the idle countdown starts again
+    }
+  }
 
   /// What Solo preview plays for the selected module: a generator alone, an effect after a generator that uses it,
   /// or a pattern through the sound of a layer that plays it. Each plays the pattern of its layer, if it has one.
