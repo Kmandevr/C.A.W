@@ -7,7 +7,7 @@ covers: [engine/, app/lib/engine/, app/lib/ui/shell.dart, app/pubspec.yaml]
 
 # Architecture
 
-The technical plan for the owner's brief in [vision](vision.md). Build order: [roadmap](roadmap.md). Why each choice was made: [decisions](decisions.md).
+The technical plan for the owner's brief in [vision](vision.md). The C++ language, SDK and shared component architecture are specified in [C++ creation platform](cpp-creation-platform.md). Build order: [roadmap](roadmap.md). Why each choice was made: [decisions](decisions.md).
 
 Labels used below:
 - **[Fact]** is verified, either in this repo or from a primary source. The date is noted when it matters.
@@ -17,6 +17,10 @@ Labels used below:
 ## Product focus and capability
 
 C.A.W. is not a conventional DAW and doesn't have to work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile ([vision](vision.md)). Architecture choices serve that capability through C.A.W.'s own model (code, patterns, one shared project and engine) on a lightweight, phone-first core. Audio recording is not implemented yet; it is roadmap Stage 7, before the first release ([roadmap](roadmap.md)).
+
+## C++ creation platform direction
+
+**[Owner decision, 2026-11-05]** C.A.W. will use ordinary general-purpose C++ as its programming language, a comprehensive C.A.W. Library/SDK, and one shared component model for code, visual scripting and generated/custom performance interfaces. The current .caw language/VM is transitional and will be retired after its useful capabilities have been migrated and verified; old source/project compatibility is not required. The detailed design, component contract, library scope, authoring interfaces, real-time boundaries, versioning and migration gates are in [C++ creation platform](cpp-creation-platform.md).
 
 ## 0. Current state
 
@@ -80,7 +84,7 @@ Avoid: JUCE (revenue-capped free tier), Tracktion Engine (GPL or commercial, nee
 
 ## 2. Audio and code execution
 
-The central decision: **user code is compiled into bytecode for our own small VM, and that VM runs inside the C++ engine.** The source is never interpreted on the audio thread.
+**[Fact, current implementation checked 2026-11-05]** The existing .caw authoring language is compiled into bytecode for a small VM inside the C++ engine; source is not interpreted on the audio thread. **[Owner decision, 2026-11-05]** This VM is not the target language architecture. Ordinary C++ and the shared component SDK replace it after useful functionality and product workflows have migrated. See [C++ creation platform](cpp-creation-platform.md#migration-from-the-current-caw-language).
 
 ```
  source text ──► parser/compiler (worker thread) ──► Program (bytecode + constants)
@@ -246,88 +250,41 @@ The owner's requirement (2026-10-28): edit notes and code while the music plays,
   - Calls are matched by function and position in the code, including inside `fn` and library calls. A call that is new or changed starts fresh, and the 20 ms crossfade covers what can't be carried over.
   - **[Assumption]** Matching by function and order is enough for typical edits. Test it on real edits: a reordered or renamed line may not match.
 
-### Standard library and connectors **[Proposal]**
+### C.A.W. Library/SDK and shared components [Proposal]
 
-The owner's requirement (2026-10-28): a built-in library of documented building blocks for the hard audio jobs, such as envelopes, connectors and MIDI input. A person or an AI agent should be able to see what each one does and how it works.
+The selected direction is a comprehensive C++ Library/SDK, not a growing set of functions in a music-only language. It provides reusable DSP, synthesis, MIDI, sample/table, math, bit-manipulation, data and general-purpose facilities. Components are registered once and reused by code, visual composition, generated UI, mixer controls and later plugin adapters.
 
-**[Fact]** Built in v2 step 2: the two layers, every category below except MIDI in (step 5) and multi-stage envelopes, library modules (`kind: library`, called as `namespace.fn`, instead of a `use` import), the generated reference and agent guide checked in CI, borrowed tips, and in-app help as a Library sheet plus completion chips. Playing an example from the help, and golden hashes for examples (they're checked to compile and make sound), aren't built. What exists is in [engine](engine.md#built-ins-and-libraries) and the [function library](library.md).
+The shared component descriptor defines stable identity, role/capabilities, typed audio/event/MIDI/control/modulation/data ports, parameter metadata, assets, lifecycle, state/presets, real-time and resource contracts, UI metadata and export capabilities. One parameter definition drives generated controls, automation, modulation, MIDI mappings and plugin-host exposure. One processor implementation serves all interfaces.
 
-- **Two layers, one namespace style** (`env.adsr(…)`, `midi.cc(74)`):
-  - **Built-ins in C++** for speed and exact repeatability (like v1's `ad`, `lpf` and `sine`).
-  - **Library modules in the C.A.W language**, built from those, so anyone can open one and see how it works.
-- **Categories in v2** (owner chose all four):
-  - **Envelopes and LFOs:** `env.adsr`, `env.ar`, multi-stage envelopes, `lfo.sine/tri/saw/square/random` synced to the tempo, `slew` and smoothing.
-  - **Filters and effects:** more filter types, `fx.delay` (tempo-synced), a reverb, distortion and saturation, a compressor, `fx.crush`.
-  - **MIDI and music theory:**
-    - MIDI in: `midi.note`, `midi.vel`, `midi.cc(n)`, `midi.bend`, `midi.clock`
-    - `scale`, `chord`, `arp`, `euclid`, `quantize(note, key)`
-  - **Glitch and bit tools:** `glitch.stutter`, `glitch.fold`, sample-and-hold, bit masks, and seeded random helpers built on `hash`.
-- **Your own functions** (owner: "yes, but simpler"):
-  - `fn name(args) = expression` in library files works like the built-ins and can be shared through the library repo.
-  - Only the app's own library gets generated reference pages and in-app help.
-  - A user function's doc comment still shows as its tooltip.
-- **Documentation from one source.** Each library function carries a doc comment: what it does, each argument with its unit and range, the output, and a short example. The build turns that into:
-  - **a reference page** in `docs/`
-  - **an agent guide**: a compact list of every function with its signature and one line on what it does, for any AI agent
-  - **in-app help**: autocomplete in the code editor, and a long-press (hover on desktop) on a name to show its docs and play its example
-  - **inspector tips**: the sliders a function's arguments become carry the argument's description as their tooltip
-- **CI checks the docs:** `caw docs --check` fails when a library function has no doc comment or an argument isn't described. Every example must compile and render non-silent audio (golden-hashed), so the docs can't drift from the code.
-- **Connectors.** The owner wants every kind of connector eventually.
-  - **v2 builds what is already in scope:**
-    - **Sidechain** between layers, through `export` signals ([Variables and patterns](#variables-and-patterns-proposal)).
-    - **Modulation links:** connect an LFO, envelope or pattern curve to any `param` or `global` with an amount, like Bitwig's modulators. You drag from the source onto a slider; in code, it's `mod(target, source, amount)`.
-    - **MIDI ports:** USB and Bluetooth MIDI devices feed `midi.*`, and MIDI clock can drive the tempo.
-  - **Later:** sends, returns and buses (roadmap Stage 2), and free module patching like a modular synth, beyond the fixed generator → effects chain.
+The Library should include waveform and wavetable generation, oscillators, noise, interpolation, filters, EQ, distortion, saturation, dynamics, delay, reverb, modulation effects, FFT, convolution and resampling; synth voices, envelopes, LFOs, FM/AM, additive, granular and physical-modeling building blocks; samplers and sample buffers; MIDI 1.0, MIDI 2.0 UMP, MPE/per-note expression, sequencing and music-theory utilities; tables, windows, random distributions, vectors, matrices, complex math, transforms, bit operations and data utilities. Functions accept declared parameters, tables, buffers, events or other data and return audio, waveforms, transformed data, analysis results or events. Use the standard C++ library for standard facilities rather than duplicating it.
 
-### Language direction **[Proposal]**
+The full proposed scope and contracts are in [C++ creation platform](cpp-creation-platform.md). The current built-in function inventory remains [Function library](library.md); do not mark planned SDK functionality as built.
 
-- Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
-- **[Fact]** v1 has `let`, `param` and the stateful built-ins (envelope, filter, oscillators, noise).
-- **[Fact]** v2 adds user functions (`fn`), library modules and the standard library ([above](#standard-library-and-connectors-proposal)).
-- Add a sequencing mini-language later (not yet scheduled in the roadmap), designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
+### Shared MIDI and event routing [Proposal]
 
-### NKIDO evaluation
+C++ components, visual blocks, the performance UI and external device adapters use one event model. It covers MIDI 1.0, MIDI 2.0 UMP, note identity, note-on/off, velocity, pitch, pressure, per-note expression, CC, program changes, clock, transport and timestamped events. Device I/O remains a separate adapter/integration task; a component does not get a private MIDI implementation.
 
-- **[Fact]** As of 2026-10-28: [mlaass/nkido](https://github.com/mlaass/nkido) is MIT-licensed, C++20/CMake, and pairs a stack-based bytecode synthesis VM ("Cedar") with a Tidal-style language ("Akkado"). It supports hot-swap with crossfade and runs natively and in the browser via WASM. The project is small: 8 stars and essentially one developer.
-- **[Assumption]** Unverified: Android and iOS builds, a stable embedding API, and long-term maintenance.
-- **[Proposal]** Don't depend on it for v1. A bytebeat VM is small enough to own. NKIDO uses the same architecture recommended here, which supports the design. In v2, do a 1-day spike to judge whether Cedar could serve as the graph/DSP layer. Keep our engine behind an interface (`compile(source) → Program`, `process(Program, buffer)`) so we can swap the backend either way.
+### Real-time boundary [Proposal]
 
-## 3. Source and module structure
+C++ itself remains general-purpose. Only code scheduled in the audio callback must meet the explicit real-time contract: bounded work, no allocation/free, blocking locks, I/O, logging or UI calls. Native C++ is not sandboxed by the SDK; untrusted native code must be isolated, trusted in-process by explicit choice, or blocked. The current VM's restrictions are not a reason to restrict ordinary C++ globally.
 
-### This repo (Repository A — app)
+## 3. Source and component package structure
 
-**[Fact]** Built as of v1:
+### This repository (C.A.W.)
 
-```
-engine/src/      C++ core: compiler, VM, built-ins, mixer, exports, WAV writer, C API (no platform deps)
-engine/platform/ Audio output (miniaudio)
-engine/cli/      Desktop CLI: `caw check`, `caw render` (used by CI and AI agents)
-engine/tests/    Unit tests and golden renders (hash of rendered output per template)
-app/             Flutter app: lib/ (engine bindings, model, screens), android/, windows/, linux/ (local testing)
-docs/            These notes and the language reference
-examples/        Bundled starter sounds in the module format (later mirrored to the library)
-```
+The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app, tests, documentation and bundled examples. The existing .caw module files and VM remain current implementation facts until the migration exit gate is met.
 
-### Sound library (Repository B, created in Stage 3)
+### C++ component source
 
-```
-caw-library.json       library name, module format version
-instruments/  kick-grit.caw, bass-xor.caw …
-effects/      bitcrush.caw, bytefold.caw, stutter.caw …
-functions/    reusable helpers
-patterns/     sequences
-presets/      parameter sets for modules
-projects/     full pieces that reference modules
-AGENTS.md     language + format guide for any AI agent
-```
+**[Proposal]** Components use ordinary C++ source and headers, with supported project/build metadata and declared dependencies. A component may span multiple files and use ordinary C++ libraries. Its descriptor is registered with the shared component system; no special-purpose .caw syntax or separate component language is required. Existing CMake/native build conventions are the starting point, with supported imported-project/build configurations documented by the editor.
 
-### Module file
+### Reusable library and project assets
 
-One plain-text file per module: a small metadata header followed by code. Single files are easy for AI agents to edit and produce clean git diffs.
+The planned C.A.W. Library can contain reusable C++ components, functions, instruments, effects, generators, data utilities, presets, examples and assets. Project-local assets travel with the project; global-library references use stable IDs and explicit versions. Asset handles define ownership and lifetime so sample buffers, tables and impulse responses are not copied unnecessarily.
 
-- **[Fact]** Built in v1: the header holds `caw: 1`, `kind` (`generator` or `effect`), `name`, `summary`, `mode` and `rate`. Sliders come from `param` lines in the code, so a module's whole interface lives in one place. Format and language: [engine](engine.md).
-- **[Proposal]** Later kinds (`function`, `pattern`, `project`), referencing modules by path (`use effects/bitcrush`), and projects that pin the library to a **commit SHA**, so an old project always sounds the same.
-- The engine reads only format version 1 and rejects others with a clear error, so incompatible modules are listed but never played.
+### Legacy .caw files
+
+The current .caw format documents the existing VM implementation only. It is not the future component source format. No compatibility layer for old .caw source or pre-release project files is required. Retain the old parser/VM only until every capability selected for migration has a tested C++/Library path and the app no longer depends on it; then remove the obsolete format and documentation.
 
 ## 4. GitHub sync
 
@@ -352,10 +309,10 @@ The GitHub library-sync/source-picker workflow described in earlier proposals is
 
 | Risk | Mitigation |
 | --- | --- |
-| User code glitches the audio thread | Own VM, no allocation or locks, bounded execution, cost guard (§2) |
-| Malicious or broken downloaded modules | No I/O by design; limits on source size, AST depth, program size and memory; failures mute only that module |
+| Native code disrupts real-time audio | Explicit callback contract, prepared resources, bounded execution, tests and per-component trust policy; ordinary non-real-time C++ remains unrestricted |
+| Untrusted native components | Native C++ is not sandboxed; Isolated, Trusted and Blocked modes are explicit, with no silent in-process loading |
 | Hearing or speaker damage from harsh output | Safety limiter, NaN guard, low default gain, fade on start/stop |
-| Language scope creep | Ship the bytebeat expression subset first and grow it one feature per milestone |
+| SDK and component complexity | Keep stable contracts small, add extension seams for real needs, and test that new components do not require unrelated rewrites |
 | Developing from a phone (no PC or IDE) | GitHub Actions builds every target. Android debug APKs are signed with a fixed keystore in CI secrets so updates install over each other. The engine is tested on Linux in CI |
 | Apple builds | iOS and macOS builds need macOS runners. The repository is public, so standard GitHub-hosted runners cost nothing; check this if it goes private again **[Assumption: check current GitHub pricing]**. Distributing them needs a paid Apple Developer membership. Build Apple targets only on release branches or on demand |
 | Device audio differences | miniaudio's per-platform backends, float output, restart on disconnect, early testing on the S22+ and each new platform; Oboe as an Android fallback |
@@ -365,17 +322,11 @@ The GitHub library-sync/source-picker workflow described in earlier proposals is
 | Selling only through AutoStacc (owner) | **[Proposal]** Android: one release signing key kept for good in repository secrets (every update must be signed with it), plus clear install steps on the AutoStacc page. Windows: code-sign installers so SmartScreen doesn't block them. macOS: sign and notarize with an Apple Developer account. A privacy policy is needed everywhere (the app stores GitHub tokens) |
 | iOS can't be sold only through AutoStacc | **[Fact]** Outside the App Store, iOS apps can only be distributed through alternative marketplaces in the EU (and now Japan). That requires Apple's approval, notarization and an organization account ([Apple](https://developer.apple.com/support/alternative-app-marketplace-in-the-eu), 2026-10-28). iOS realistically means the App Store, so it's an open question in [vision](vision.md#open-questions) |
 
-## Proposed module and interface extensions
+## C++ creation platform architecture
 
-The following are **[Proposal]**, not settled requirements or claims of implementation:
+The earlier proposal to keep readable .caw source authoritative and add visual controls around that language is superseded by the owner's 2026-11-05 C++ decision. The target is ordinary C++, a comprehensive C.A.W. Library/SDK, and one shared component model across the code editor, visual composition and generated/custom performance UI. Components are authored once and reused through the native runtime, component browser, mixer and later CLAP/VST3/standalone adapters.
 
-- Keep readable `.caw` source as the authoritative module definition. Visual assembly and generated controls should edit the same underlying module and parameter model rather than creating a second, incompatible representation.
-- Allow modules to describe their ordinary controls from parameter metadata, while permitting a specialised hand-built interface when generated controls are insufficient. UI code remains outside the audio-processing callback.
-- Use typed signal/port metadata and stable module identifiers where visual connections are needed. Keep code-defined module chains usable without requiring a graph editor.
-- Distinguish project-local assets from reusable global assets. Local references should travel with the project; global references should resolve through stable IDs and explicit versions.
-- Keep platform-specific device access behind adapters. The same portable native core should remain usable by the Flutter app, CLI, offline renderer and any later plugin host.
-
-These proposals should be implemented only when a concrete v2 feature needs them; they are not a reason to introduce framework layers in advance.
+See [C++ creation platform](cpp-creation-platform.md) for the full component descriptor, typed port and parameter contracts, library categories, editor and visual-scripting requirements, generated/custom UI, MIDI/event model, real-time safety, trust boundaries, versioning, migration and verification gates.
 
 ## Sources
 

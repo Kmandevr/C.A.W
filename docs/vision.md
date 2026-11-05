@@ -1,7 +1,7 @@
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-03
+updated: 2026-11-05
 ---
 
 # Vision and principles
@@ -16,7 +16,9 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 
 **Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design.
 
-Code remains a first-class way to define sounds and effects. Visual controls and editors expose the same underlying project and engine state rather than creating parallel systems. C.A.W. complements established production tools through practical WAV, MIDI, SFZ, stem and plugin handoff.
+**Owner decision (2026-11-05):** ordinary C++ is C.A.W.'s programming language. It is general-purpose, not a music-only DSL; users can write anything ordinary C++ allows. The C.A.W. Library/SDK supplies reusable audio, music, math, bit-manipulation, data and general-purpose building blocks. One shared component model makes each component available to the C++ editor, visual composition, generated/custom performance UI, mixer and later plugin/standalone adapters. These are coordinated views of one project and runtime, not parallel implementations. See [C++ creation platform](cpp-creation-platform.md).
+
+The current repository still contains the constrained .caw language and VM; that is an implementation fact, not the chosen destination. Useful existing engine capabilities are to be migrated into the C++ Library/SDK and shared component system before the old language and VM are removed. The owner has waived backwards compatibility for old .caw source and pre-release projects.
 
 ## Platforms and actual support
 
@@ -35,7 +37,7 @@ Do not describe a platform as supported for release solely because Flutter or th
 The app currently has eight workspaces: Builder, Arranger, Mixer, Engine Lab, Automation, Exporter, Files and Plugin Builder.
 
 The repository currently includes:
-- A portable C++20 engine and constrained .caw module language for code-defined generators, effects, patterns, libraries and synth patches.
+- A portable C++20 engine and constrained .caw module language for code-defined generators, effects, patterns, libraries and synth patches (current implementation, not the target language). The planned C++ authoring/toolchain and shared component SDK are not implemented yet.
 - Module parameters, project globals, exported signals and reusable functions.
 - Pattern editing with a piano roll and drum grid, note expressions, velocity/chance curves and pattern generators.
 - Arrangement clips, nested folders, stereo folder buses and track/folder volume-pan automation.
@@ -66,6 +68,7 @@ Important boundaries:
 6. **Resource-aware.** Work on weak devices with bounded memory and callback cost, while using stronger hardware when it benefits active work.
 7. **Safe real-time audio.** The callback stays bounded and avoids allocation, locks, I/O, logging and UI calls.
 8. **Evidence over claims.** Performance, platform support and feature completion require tests or device measurements.
+9. **Extensible without rewrites.** New components, algorithms, ports, parameters, UI controls, MIDI capabilities, formats and platform adapters must plug into defined contracts without requiring unrelated systems to be rewritten.
 
 ## Sound-design direction
 

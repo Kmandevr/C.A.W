@@ -6,6 +6,21 @@ updated: 2026-11-05
 
 # Decisions
 
+## 2026-11-05: Ordinary C++ and one shared creation platform
+
+- **Owner decision:** C.A.W. uses ordinary, general-purpose C++ as its programming language. It is not a music-only DSL. The user can write anything ordinary C++ permits; the C.A.W. Library/SDK provides reusable building blocks rather than restricting the language.
+- **The language, Library/SDK, component model and runtime are distinct.** The SDK is a broad toolbox of useful audio, DSP, synthesis, MIDI, sample/table, math, bit-manipulation, data and general-purpose functions and algorithms. Components expose one shared descriptor and lifecycle to the native runtime.
+- **Three interfaces, one source of truth:** a practical C++ code editor; typed visual scripting/composition using built-in and user-created components; and a generated/custom performance UI and mixer surface. These are not separate engines. A C++ component is implemented once and reused in all three.
+- **Shared metadata:** component descriptors cover stable identity, role/capabilities, typed audio/event/MIDI/control/modulation/data ports, channel layouts, parameters, assets/tables, lifecycle, state/presets, latency/resource/real-time requirements, UI metadata and plugin capabilities. One parameter definition drives generated controls, automation, modulation, MIDI mapping and host exposure.
+- **Generated UI is the default.** A valid component receives usable controls from parameter metadata without hand-authored UI. Fully custom and hybrid interfaces are optional; processing remains independent of UI.
+- **Visual graphs use the native runtime.** Built-in Library functions and user C++ components become typed blocks; graphs compile/prepare into the same native execution system. No separate visual interpreter or duplicated DSP implementation.
+- **MIDI is shared.** C++ components, visual graphs, on-screen performance controls and device adapters use the same MIDI 1.0/MIDI 2.0 UMP/event model, including note identity and per-note expression.
+- **Extensibility without rewrites is permanent.** New algorithms, components, parameter/port types, controls, MIDI capabilities, file formats, hardware backends and plugin targets use defined interfaces, registrations and adapters. Version extension contracts and component state; avoid speculative abstraction and hot-path overhead.
+- **Real-time and trust boundaries remain explicit.** C++ is unrestricted in general-purpose code, but audio-callback code must be bounded and avoid allocation, blocking, I/O, logging and UI calls. Native C++ is not sandboxed by the SDK; use explicit Isolated/Trusted/Blocked policy for native code.
+- **Plugin/standalone reuse:** components are C.A.W. components first; CLAP, VST3 and standalone support are host adapters around the same processor and metadata, planned after the SDK and authoring interfaces.
+- **No backwards compatibility for the old .caw language or pre-release projects (owner).** The current .caw parser/compiler/bytecode VM is transitional. Migrate useful existing capabilities to C++/Library components and verify their workflows first, then remove the old language/VM. The owner is the only user and explicitly waives old-source and pre-release-project compatibility.
+- Detailed technical requirements and migration gates: [C++ creation platform](cpp-creation-platform.md). Canonical sequencing remains in [roadmap](roadmap.md).
+
 ## 2026-11-04: UI direction, the arrangement is home
 
 - **Owner:** the arrangement is the home screen, where about 90% of a song is built, and looks like a standard DAW. Empty, nestable tracks hold **several instruments** and effects in a chosen order. Automation lanes drop down under a track, each with a parameter dropdown. MIDI clips are made in the arrangement as in Reaper, and the piano roll opens docked below. The code workspace works like Unity's, with a searchable tree of project assets and user-picked device folders. The mixer is the fine-control screen, like Reaper's. Panels dock and move like Unity's **on the phone too**, with drag and drop onto the arrangement. Motion is light and snapping smooth. Clips and track headers glow with their track's level, and this can be switched off. Track colours plus one accent. A track without clips is silent.
