@@ -10,6 +10,7 @@ import 'package:caw/ui/dock/layout.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'golden_util.dart';
@@ -144,6 +145,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await expectLater(goldenScreen, matchesGoldenFile('goldens/shell_desktop_mix.png'));
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('the transport tempo: tap to type it, long-press for the tap pad (#19)', (tester) async {
+    final s = await startState(tester);
+    await pumpGolden(tester, Shell(state: s), goldenSizes['phone']!);
+    // Tap tempo runs on the real clock, so the test times the gap itself: the tempo is 60 s over it.
+    final gap = Stopwatch();
+    Future<void> halfASecond() => tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 500)));
+    double tempoOf(Stopwatch w) => (60000 / w.elapsedMilliseconds).clamp(20, 400).toDouble();
+    // The T key runs the same tap tempo as the pad.
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+    gap.start();
+    await halfASecond();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+    gap.stop();
+    await tester.pump();
+    // The stopwatch starts and stops a few ms off each tap (either way), so the tempo is close to 60 s over it.
+    expect(s.project.bpm, inInclusiveRange(tempoOf(gap) * 0.8, tempoOf(gap) * 1.25));
+    await tester.tap(find.byKey(const ValueKey('transport-bpm')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '128');
+    await tester.tap(find.text('Set'));
+    await tester.pumpAndSettle();
+    expect(s.project.bpm, 128);
+    expect(find.text('128 BPM'), findsOneWidget);
+    await tester.longPress(find.byKey(const ValueKey('transport-bpm')));
+    await tester.pumpAndSettle();
+    expect(find.text('Tap tempo'), findsOneWidget);
+    // Over two seconds (real time) since the T taps, so the pad starts a new measurement.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2500)));
+    await tester.tap(find.byKey(const ValueKey('tap-pad')));
+    gap..reset()..start();
+    await halfASecond();
+    await tester.tap(find.byKey(const ValueKey('tap-pad')));
+    gap.stop();
+    await tester.pump();
+    expect(s.project.bpm, inInclusiveRange(tempoOf(gap) * 0.8, tempoOf(gap) * 1.25));
+    // On a keyboard, T taps on the open pad too (it is outside the key router).
+    final before = s.project.bpm;
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2500)));
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+    await halfASecond();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+    await tester.pump();
+    expect(s.project.bpm, isNot(before));
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.text('Tap tempo'), findsNothing);
     s.dispose();
   }, skip: skip);
 

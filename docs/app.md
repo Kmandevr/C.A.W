@@ -20,7 +20,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Top bar:**
   - the crow mark
   - the project name, which opens the project menu: rename, new blank project, new from a template, duplicate, open, delete and **Settings…**
-  - BPM, beat and CPU readouts
+  - the tempo, the playhead as bar.beat while playing, and CPU. Tap the tempo to type it (20 to 400 BPM, to 0.1); long-press it for a tap-tempo pad. The T key taps too, with the same timing (taps over two seconds apart start a new measurement, #19)
   - Play/Stop (the space bar on desktop)
 - **Builder** (`lib/ui/builder_screen.dart`):
   - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)

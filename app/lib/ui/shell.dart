@@ -2,6 +2,7 @@
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
 import '../model/app_state.dart';
@@ -264,11 +265,10 @@ class _TransportBar extends StatelessWidget {
           builder: (context, _, _) {
             final m = state.meters;
             final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-            final beat = m.playing ? (m.position / (m.loopLength / p.loopSteps) / 4).floor() + 1 : 0;
             return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-              Text('${p.bpm.toStringAsFixed(p.bpm == p.bpm.roundToDouble() ? 0 : 1)} BPM',
-                  style: Neon.code(size: 14, color: Neon.blue)),
-              Text(m.playing ? 'beat $beat · CPU $cpu%' : 'CPU $cpu%',
+              _BpmButton(state: state),
+              Text(m.playing ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+                  : 'CPU $cpu%',
                   style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)),
             ]);
           },
@@ -301,6 +301,98 @@ class _TransportBar extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// The playhead as bar.beat ("2.3"), counting from 1: [position] of [loopLength] (engine units) over the engine's
+/// loop of [loopSteps] sixteenth steps (`engineLoopSteps`: the loop grows to cover the arrangement), [stepsPerBar] to
+/// the bar.
+String transportPosition(num position, num loopLength, int loopSteps, int stepsPerBar) {
+  if (loopLength <= 0 || loopSteps <= 0 || stepsPerBar <= 0) return '1.1';
+  // A read during the wrap can land on the end itself: that is still the last step.
+  final step = (position / (loopLength / loopSteps)).floor().clamp(0, loopSteps - 1);
+  return '${step ~/ stepsPerBar + 1}.${(step % stepsPerBar) ~/ 4 + 1}';
+}
+
+/// A typed tempo: a finite number, clamped to the engine's 20 to 400 BPM and rounded to 0.1; null if not.
+double? parseBpm(String text) {
+  final v = double.tryParse(text.trim().replaceAll(',', '.'));
+  if (v == null || !v.isFinite) return null;
+  return double.parse(v.clamp(20.0, 400.0).toStringAsFixed(1));
+}
+
+String _bpmText(double bpm) => bpm.toStringAsFixed(bpm == bpm.roundToDouble() ? 0 : 1);
+
+/// The transport's tempo (#19): tap to type it, long-press for a tap-tempo pad. The T key taps too; both use
+/// [AppState.tapTempo].
+class _BpmButton extends StatelessWidget {
+  const _BpmButton({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final bpm = state.project.bpm;
+    void type() => typeValue(context,
+        title: 'Tempo (20 to 400 BPM)',
+        initial: _bpmText(bpm),
+        parse: parseBpm,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        apply: (v) => state.editProject((p) => p.bpm = v));
+    void pad() => showDialog<void>(context: context, builder: (_) => _TapTempoPad(state: state));
+    // A screen reader gets both actions: double-tap types, a long-press opens the pad.
+    return Semantics(
+      button: true,
+      label: 'Tempo ${_bpmText(bpm)} BPM',
+      hint: 'Type the tempo',
+      onTap: type,
+      onLongPress: pad,
+      onLongPressHint: 'Tap tempo',
+      excludeSemantics: true,
+      child: Tooltip(
+        message: 'Tap to type the tempo, long-press to tap it (T)',
+        child: InkWell(
+          key: const ValueKey('transport-bpm'),
+          onTap: type,
+          onLongPress: pad,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Text('${_bpmText(bpm)} BPM', style: Neon.code(size: 14, color: Neon.blue)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tap in time on the big pad; the tempo follows. A pause of over two seconds starts a new measurement.
+class _TapTempoPad extends StatelessWidget {
+  const _TapTempoPad({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(
+      // The dialog is outside the key router, so T taps here too (Space and Enter press the focused pad).
+      bindings: {const SingleActivator(LogicalKeyboardKey.keyT): state.tapTempo},
+      child: AlertDialog(
+        title: const Text('Tap tempo'),
+        content: ListenableBuilder(
+          listenable: state,
+          builder: (context, _) => Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('${_bpmText(state.project.bpm)} BPM', style: Neon.code(size: 22, color: Neon.blue)),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: 200,
+              height: 120,
+              child: FilledButton(
+                key: const ValueKey('tap-pad'),
+                autofocus: true,
+                onPressed: state.tapTempo,
+                child: const Text('TAP', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+              ),
+            ),
+          ]),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))],
+      ));
 }
 
 Future<void> showProjectMenu(BuildContext context, AppState s) async {
