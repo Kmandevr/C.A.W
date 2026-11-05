@@ -1579,3 +1579,133 @@ TEST(audition_scope_follows_the_audition_slot_across_a_grow) {
     CHECK_EQ(e.scope(64, scope, 64), 64);
     CHECK(scope[63] > 0.0f && scope[63] < 0.01f);
 }
+
+// ---- Note previews (#103) ----
+
+namespace {
+// A layer playing an empty pattern through a tone that outputs gate * vel * note / 128, so the level shows which
+// pitch and velocity are held (and a sum of two voices would show as a jump).
+ProjectSpec previewProject() {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * note / 128", {}});
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 16\n---\n", {}});
+    p.modules.push_back({"drone", std::string(kFloat) + "0.25", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.name = "Track";
+    layer.chain = {"tone"};
+    layer.pattern = "phrase";
+    layer.volume = 1.0;
+    p.layers.push_back(layer);
+    LayerSpec free;  // no pattern: it can't preview
+    free.id = "free";
+    free.name = "Free";
+    free.chain = {"drone"};
+    free.volume = 1.0;
+    free.mute = true;
+    p.layers.push_back(free);
+    return p;
+}
+}  // namespace
+
+TEST(a_preview_sounds_while_stopped_and_stops_at_its_note_off_without_moving_the_transport) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(previewProject()).find("\"ok\":true") != std::string::npos);
+    const double pan = std::cos(kPi / 4.0);
+    CHECK_NEAR(run(e, 2000).back(), 0.0, 1e-9);  // stopped and silent
+    e.noteOn("track", 7, 64, 0.5);
+    const std::vector<float> held = run(e, 4800);
+    CHECK_NEAR(held.back(), 0.5 * 64 / 128.0 * pan, 1e-4);
+    CHECK_EQ(e.meters().position, 0);  // the transport stays where it was
+    e.noteOff(7);
+    const std::vector<float> after = run(e, 4800);
+    CHECK_NEAR(after.back(), 0.0, 1e-6);
+    CHECK_EQ(e.meters().playing, false);
+    // A preview on a layer without a pattern does nothing.
+    e.noteOn("free", 8, 60, 1);
+    CHECK_NEAR(run(e, 2400).back(), 0.0, 1e-9);
+}
+
+TEST(a_held_preview_glides_to_a_new_pitch_and_the_same_id_retriggers_instead_of_stacking) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(previewProject());
+    const double pan = std::cos(kPi / 4.0);
+    e.noteOn("track", 1, 60, 1);
+    CHECK_NEAR(run(e, 2400).back(), 60 / 128.0 * pan, 1e-4);
+    e.notePitch(1, 72);  // a bend being drawn: the same voice, a 5 ms glide
+    CHECK_NEAR(run(e, 2400).back(), 72 / 128.0 * pan, 1e-4);
+    e.noteOn("track", 1, 48, 1);  // the same id again: the old note ends, one voice sounds
+    CHECK_NEAR(run(e, 4800).back(), 48 / 128.0 * pan, 1e-4);
+    e.noteOn("track", 2, 50, 1);  // another id: a chord
+    CHECK_NEAR(run(e, 2400).back(), (48 + 50) / 128.0 * pan, 1e-4);
+    e.notesOff();
+    CHECK_NEAR(run(e, 4800).back(), 0.0, 1e-6);
+}
+
+TEST(after_stop_a_preview_hears_neither_the_chord_that_was_playing_nor_a_jump_back_to_full_level) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    ProjectSpec p = previewProject();
+    p.modules[1].source = "---\nkind: pattern\nlength: 16\n---\n0 C4 16\n";  // a note held through the loop
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    const double pan = std::cos(kPi / 4.0);
+    e.play();
+    CHECK_NEAR(run(e, 2400).back(), 60 / 128.0 * pan, 1e-4);
+    // A preview held across Stop: the stop fades out, then the preview alone fades back in, with no step.
+    e.noteOn("track", 1, 72, 1);
+    run(e, 2400);
+    e.stop();
+    const std::vector<float> across = run(e, 4800);
+    float step = 0;
+    for (size_t i = 1; i < across.size(); ++i) step = std::max(step, std::fabs(across[i] - across[i - 1]));
+    CHECK(step < 0.01f);
+    CHECK_NEAR(across.back(), 72 / 128.0 * pan, 1e-4);  // the pattern's C4 doesn't come back
+    e.noteOff(1);
+    CHECK_NEAR(run(e, 4800).back(), 0.0, 1e-6);
+    e.noteOn("track", 2, 48, 1);  // a fresh preview while stopped: only its own note
+    CHECK_NEAR(run(e, 2400).back(), 48 / 128.0 * pan, 1e-4);
+    e.notesOff();
+}
+
+TEST(a_preview_held_across_play_keeps_its_instrument_running) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    ProjectSpec p = previewProject();
+    p.modules[0].source = std::string(kFloat) + "gate * lpf(0.5, 4, 0.7)";  // a slow rise that a reset would restart
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.noteOn("track", 1, 60, 1);
+    std::vector<float> out = run(e, 4801);
+    e.play();
+    const std::vector<float> playing = run(e, 4800);
+    out.insert(out.end(), playing.begin(), playing.end());
+    float step = 0;
+    for (size_t i = 2400; i < out.size(); ++i) step = std::max(step, std::fabs(out[i] - out[i - 1]));
+    CHECK(step < 0.001f);  // the filter rises smoothly; a reset would drop it to 0
+    e.notesOff();
+}
+
+TEST(previews_follow_the_layer_mix_and_play_on_top_of_playback) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(previewProject());
+    const double pan = std::cos(kPi / 4.0);
+    e.setLayerMix("track", 1.0, 0.0, true, false);  // muted: silent
+    e.noteOn("track", 1, 64, 1);
+    CHECK_NEAR(run(e, 4800).back(), 0.0, 1e-6);
+    e.setLayerMix("track", 0.5, 0.0, false, false);  // a preview on a muted track ended: unmuting doesn't bring it back
+    CHECK_NEAR(run(e, 4800).back(), 0.0, 1e-6);
+    e.noteOn("track", 1, 64, 1);
+    CHECK_NEAR(run(e, 9600).back(), 0.5 * 64 / 128.0 * pan, 1e-3);
+    e.noteOff(1);
+    e.play();
+    run(e, 2400);
+    e.noteOn("track", 2, 32, 1);  // while playing: heard, and the empty pattern adds nothing
+    CHECK_NEAR(run(e, 4800).back(), 0.5 * 32 / 128.0 * pan, 1e-3);
+    CHECK(e.meters().position > 0);
+}

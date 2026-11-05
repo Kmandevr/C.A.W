@@ -185,6 +185,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   @override
   void dispose() {
     _hold?.cancel();
+    _hearStop();
     _spring.dispose();
     _scroller.dispose();
     s.settings.removeListener(_settingsChanged);
@@ -914,6 +915,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _bendEnd({required bool cancel}) {
     final id = _bNote, start = _bStart;
     if (id == null) return;
+    _hearStop();
     _hold?.cancel();
     _hold = null;
     if (!cancel && _bAddOnTap && start != null && _doc != null) {
@@ -975,6 +977,77 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
   }
 
+  // ---------- hearing notes (owner, 2026-11-05) ----------
+  // A note sounds while you place, move, hold or bend it; a tapped-in note plays its own length. A selection sounds
+  // its opening chord (the notes that start first). Each sounding note: its preview id and the pitch it plays.
+  final Map<int, ({int id, double pitch})> _heard = {};
+  Timer? _tapOff;
+  int? _drawnNote; // the note this gesture drew: a tap plays it for its length
+
+  String? get _hearLayer => _look.hearNotes ? s.previewLayerFor(widget.module.id) : null;
+
+  /// Starts [ids]' previews (ending any before): of several notes, those that start first.
+  void _hear(Iterable<int> ids) {
+    _hearStop();
+    final d = _doc, layer = _hearLayer;
+    if (d == null || layer == null) return;
+    final notes = [for (final id in ids) ?d.byId(id)];
+    if (notes.isEmpty) return;
+    final first = notes.map((n) => n.at).reduce(Steps.min);
+    for (final n in notes) {
+      if (n.at != first) continue;
+      final pid = s.nextPreviewId();
+      s.previewOn(layer, pid, n.pitch, n.vel);
+      _heard[n.id] = (id: pid, pitch: n.pitch);
+    }
+  }
+
+  /// After a move: a note whose pitch changed ends and starts again at its new pitch; a move in time doesn't.
+  void _hearFollow() {
+    final d = _doc, layer = _hearLayer;
+    if (d == null || layer == null) return;
+    for (final entry in _heard.entries.toList()) {
+      final n = d.byId(entry.key);
+      if (n == null || n.pitch == entry.value.pitch) continue;
+      s.previewOn(layer, entry.value.id, n.pitch, n.vel);
+      _heard[entry.key] = (id: entry.value.id, pitch: n.pitch);
+    }
+  }
+
+  /// While a pitch point is dragged the note sounds at that point's pitch; on a segment, at the curve under the finger.
+  void _hearBendAt(Offset p) {
+    final id = _bNote, d = _doc, layer = _hearLayer;
+    if (id == null || d == null || layer == null) return;
+    final n = d.byId(id);
+    if (n == null) return;
+    final pts = n.expr.bend, i = _bPoint;
+    final pitch = (n.pitch +
+            (i != null && i < pts.length
+                ? pts[i].v
+                : NoteExpression.valueAt(pts, ((p.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0))))
+        .clamp(0.0, 127.0)
+        .toDouble();
+    final h = _heard[id];
+    if (h == null) {
+      _hearStop();
+      final pid = s.nextPreviewId();
+      s.previewOn(layer, pid, pitch, n.vel);
+      _heard[id] = (id: pid, pitch: pitch);
+    } else if (h.pitch != pitch) {
+      s.previewPitch(h.id, pitch);
+      _heard[id] = (id: h.id, pitch: pitch);
+    }
+  }
+
+  void _hearStop() {
+    _tapOff?.cancel();
+    _tapOff = null;
+    for (final h in _heard.values) {
+      s.previewOff(h.id);
+    }
+    _heard.clear();
+  }
+
   // ---------- pointer ----------
 
   static const _origin = Offset(_keyW, _rulerH);
@@ -996,6 +1069,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
           _curveDown(p);
         } else if (bendOn != null) {
           _bendDown(p, bendOn);
+          _hearBendAt(p);
         } else {
           _pending = p;
           _panning = false;
@@ -1098,7 +1172,10 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   void _editMove(Offset p) {
     _lastP = p;
-    if (_bNote != null) return _bendMove(p);
+    if (_bNote != null) {
+      _bendMove(p);
+      return _hearBendAt(p);
+    }
     if (_cLane != 0) return _curveMove(p);
     _dragTo(p);
   }
@@ -1219,6 +1296,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _cancelEdit() {
     _hold?.cancel();
     _hold = null;
+    _hearStop();
     _scroller.stop();
     _bypass = false;
     final base = _dragBase;
@@ -1335,6 +1413,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       final id = hit;
       if (!_sel.contains(id)) setState(() => _sel = {id});
       _edge = edge;
+      _drawnNote = null;
+      _hear(_sel);
       _holdAt = p;
       _hold = Timer(Duration(milliseconds: _look.holdMs), () {
         _up();
@@ -1351,6 +1431,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         _edge = 1;
         _dragBase = r.doc;
         Motion.tick();
+        _drawnNote = r.id;
+        _hear({r.id!});
       }
     } else {
       setState(() {
@@ -1415,6 +1497,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _dragMovedT = dt;
       _dragMovedP = dp;
       setState(() => _doc = base.move(_sel, dt, dp));
+      _hearFollow();
     }
   }
 
@@ -1423,6 +1506,16 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     _hold = null;
     _scroller.stop();
     _edge = 0;
+    // A note tapped in (drawn, not stretched) plays out its own length, at most 4 s; anything held stops now.
+    final tapped = _drawnNote == null || !identical(_dragBase, _doc) ? null : _doc?.byId(_drawnNote!);
+    _drawnNote = null;
+    if (tapped != null && _heard.isNotEmpty) {
+      final secs = math.min(4.0, tapped.len.toDouble() * 15 / s.project.bpm);
+      _tapOff?.cancel();
+      _tapOff = Timer(Duration(microseconds: (secs * 1e6).round()), _hearStop);
+    } else {
+      _hearStop();
+    }
     if (_lag != 0) {
       // The stretched edge springs onto its snapped place.
       final d = Motion.move(const Duration(milliseconds: 150), Motion.of(context));
@@ -1658,12 +1751,16 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
             setState(() => _velLane = !_velLane);
           case 'extras':
             setState(() => _extrasLane = !_extrasLane);
+          case 'hear':
+            _hearStop();
+            s.settings.update((x) => x.roll = x.roll.copyWith(hearNotes: !x.roll.hearNotes));
           case 'note':
             _openExtras();
         }
       },
       velLane: _velLane,
       extrasLane: _extrasLane,
+      hearNotes: _look.hearNotes,
       fullScreen: widget.fullScreen,
       onFullScreen: () {
         _flush();
@@ -1848,6 +1945,7 @@ class _Toolbar extends StatelessWidget {
     required this.onMenu,
     required this.velLane,
     required this.extrasLane,
+    required this.hearNotes,
     required this.canCustomise,
   });
   final List<ActionRef> items;
@@ -1858,7 +1956,7 @@ class _Toolbar extends StatelessWidget {
   final bool canPaste;
   final VoidCallback onCopy, onPaste;
   final ValueChanged<ActionRef> onRun;
-  final bool fullScreen, velLane, extrasLane, canCustomise;
+  final bool fullScreen, velLane, extrasLane, canCustomise, hearNotes;
   final VoidCallback onFullScreen;
   final ValueChanged<String> onMenu;
   final ({bool on, int res, bool triplet, bool fixed, ValueGrid value}) snap;
@@ -1925,6 +2023,7 @@ class _Toolbar extends StatelessWidget {
             const PopupMenuItem(value: 'note', child: Text('Note extras… (I, or hold a note)')),
             CheckedPopupMenuItem(value: 'vel', checked: velLane, child: const Text('Velocity lane (Alt+V)')),
             CheckedPopupMenuItem(value: 'extras', checked: extrasLane, child: const Text('Chance lane (Alt+X)')),
+            CheckedPopupMenuItem(value: 'hear', checked: hearNotes, child: const Text('Hear notes')),
             const PopupMenuDivider(),
             for (final id in const [
               'roll.gen.euclid',

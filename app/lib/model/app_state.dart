@@ -328,6 +328,24 @@ class AppState extends ChangeNotifier {
 
   // ---------- engine sync and saving ----------
 
+  /// The layer a pattern's note previews play on: the selected layer if it plays [patternId], else the first that
+  /// does; null when no layer plays it.
+  String? previewLayerFor(String patternId) {
+    bool plays(LayerDoc l) => l.generatorId != null && (l.patternId == patternId || l.clips.any((c) => c.patternId == patternId));
+    final selected = project.layers.where((l) => l.id == selectedLayerId && plays(l)).firstOrNull;
+    return (selected ?? project.layers.where(plays).firstOrNull)?.id;
+  }
+
+  int _previewIds = 0;
+
+  /// A fresh note-preview id, unique across every roll on screen.
+  int nextPreviewId() => ++_previewIds;
+
+  /// Note previews on the engine (tests override these to watch them).
+  void previewOn(String layerId, int id, double pitch, double velocity) => engine?.noteOn(layerId, id, pitch, velocity);
+  void previewPitch(int id, double pitch) => engine?.notePitch(id, pitch);
+  void previewOff(int id) => engine?.noteOff(id);
+
   /// What Solo preview plays for the selected module: a generator alone, an effect after a generator that uses it,
   /// or a pattern through the sound of a layer that plays it. Each plays the pattern of its layer, if it has one.
   ({List<String> chain, String? pattern})? get preview {

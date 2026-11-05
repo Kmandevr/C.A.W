@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across eight shared-state workspaces, with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-04
+updated: 2026-11-05
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 

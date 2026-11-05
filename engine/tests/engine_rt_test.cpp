@@ -136,3 +136,45 @@ TEST(parameter_resolver_never_allocates_on_the_audio_thread) {
     CHECK(sum > 0.0);
     CHECK_EQ(operations, 0u);
 }
+
+TEST(note_previews_never_allocate_on_the_audio_thread_playing_or_stopped) {
+    ProjectSpec p;
+    p.bpm = 140;
+    p.loopBars = 1;
+    for (const char* file : {"acid-synth.caw", "bitcrush.caw", "acid-line.caw"}) {
+        std::string id(file);
+        id.resize(id.size() - 4);
+        p.modules.push_back({id, templateSource(file), {}});
+    }
+    p.layers = {layer("a", {"acid-synth", "bitcrush"})};
+    p.layers[0].pattern = "acid-line";
+    Engine e(48000);
+    e.setProject(p);
+    std::vector<float> l(192), r(192);
+    // The control-side map grows here, off the audio thread.
+    for (int id = 0; id < 8; ++id) e.noteOn("a", id, 48 + id, 0.8);
+    e.notesOff();
+    double sum = 0.0;
+    std::size_t operations = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        if (pass == 1) e.play();
+        e.noteOn("a", 1, 50, 0.8);
+        e.noteOn("a", 2, 57, 0.8);
+        e.notePitch(2, 59);
+        // Held, then released (the offs are control-thread calls, outside the measured audio path).
+        for (int half = 0; half < 2; ++half) {
+            if (half == 1) {
+                e.noteOff(1);
+                e.noteOff(2);
+            }
+            cawtest::AllocationScope scope;
+            for (int k = 0; k < 50; ++k) {
+                e.process(l.data(), r.data(), 192);
+                for (float v : l) sum += std::fabs(v);
+            }
+            operations += scope.count();
+        }
+    }
+    CHECK(sum > 0.0);
+    CHECK_EQ(operations, 0u);
+}

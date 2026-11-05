@@ -109,6 +109,14 @@ CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value)
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
                                       int32_t solo);
 CAW_API void caw_engine_set_master(CawEngine* e, double volume);
+/* Note previews: a held note on a layer's instrument, heard through the layer's effects and mix (mute and solo
+   apply), while playing or stopped; stopped, the transport stays where it is. `id` is the caller's handle: a second
+   note on with the same id ends the first. Pitch is a MIDI note number (fractions allowed), velocity 0..1. Only a
+   layer that plays a pattern can preview. note_pitch glides a held preview to a new pitch without a new attack. */
+CAW_API void caw_engine_note_on(CawEngine* e, const char* layer_id, int32_t id, double pitch, double velocity);
+CAW_API void caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch);
+CAW_API void caw_engine_note_off(CawEngine* e, int32_t id);
+CAW_API void caw_engine_notes_off(CawEngine* e);
 CAW_API void caw_engine_play(CawEngine* e);
 CAW_API void caw_engine_stop(CawEngine* e);
 CAW_API void caw_engine_clear_overload(CawEngine* e);

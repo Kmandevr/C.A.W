@@ -1,7 +1,7 @@
 ---
 title: UI plan
 summary: The owner's UI direction (2026-11-04): the arrangement is home and looks like a standard DAW, with docking panels, a Unity-like code workspace and a Reaper-like mixer; today's findings, the order of work and open questions. Nothing here is built yet.
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # UI plan
@@ -180,13 +180,14 @@ updated: 2026-11-04
   - On release, the stroke is simplified to a few clean points on the grid, which the handles then refine.
   - With snap off, the points stay where you drew them, still simplified.
 - **Animation:** snapping, ghosts, handles and detents use the motion rules in Feel. Points and handles grow slightly under the finger, and detents give a light haptic tick on Android.
-- **Hearing notes (owner):**
-  - A note plays when you place it or move it.
-  - While you drag, the note sounds as long as your finger is down and stops when you let go. A pitch change during the drag ends the old note before the new one starts, so previews never pile up.
-  - A group drag plays the selection as a chord. Moving a note in time only doesn't retrigger it.
-  - A tap that places a note plays it for a short time (about 250 ms).
-  - "Hear notes" in ⋮ turns this off.
-  - **Engine dependency:** the C API has no note-on/off call (checked in `engine/include/caw.h`, 2026-11-04). Previews need one: a real-time-safe note on/off into a track's instrument through the engine's event queue. The engine also renders nothing while stopped (`Engine::process`), so previews need a stopped-mode path: GPT issue #103.
+- **Hearing notes (owner, 2026-11-05; built in #103):**
+  - A note plays when you place, move, hold or bend it, through its track's instrument and effects, at the track's volume and pan, with mute and solo applied, and on top of playback. Loudness follows the note's velocity.
+  - A tap that places a note plays it for the note's own length (at most 4 s). A held or dragged note sounds until the finger lifts.
+  - A pitch change during a drag ends the old note before the new one starts, so previews never pile up. Moving a note in time only doesn't retrigger it.
+  - A selection plays its opening chord: the selected notes that start first.
+  - While a pitch point is dragged the note sounds at that point's pitch; on a segment, at the curve under the finger.
+  - "Hear notes" in ⋮ turns this off (`RollLook.hearNotes`).
+  - **Engine:** `caw_engine_note_on`/`note_pitch`/`note_off`/`notes_off` in `engine/include/caw.h` hold a voice on a layer's instrument through the command queue. Stopped, the engine runs only the previewing tracks (their effects, buses and master) without moving the transport, and keeps a track running until its effect tail has died away.
 - **Drawing notes (owner):** it works as today, which is nice to use on a phone: a tap places a note of the last length, and dragging sets its length. Quality-of-life tweaks (owner-confirmed):
   - a ghost note under your finger at touch-down, so you see where it lands before you lift
   - auto-scroll when a draw or drag reaches the edge of the view

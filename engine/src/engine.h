@@ -72,6 +72,13 @@ public:
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
+    // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
+    // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play a pattern
+    // (a voiced chain) can preview.
+    void noteOn(const std::string& layerId, int32_t id, double pitch, double velocity);
+    void notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
+    void noteOff(int32_t id);
+    void notesOff();
     void setMaster(double volume);
     void play();
     void stop();
@@ -130,6 +137,11 @@ private:
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
                    int offset, const BlockCtx& base) noexcept;
     void noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept;
+    struct Voice& pickVoice(Chain& c) noexcept;
+    void previewCommand(const Cmd& c) noexcept;
+    void updatePreviewing(int frames) noexcept;
+    void endPlayback() noexcept;
+    static void restartChain(Chain& c) noexcept;
     void takeExpression(struct Voice& v, const Pattern& pat, const PatternNote& n) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
@@ -158,6 +170,10 @@ private:
     Slot& slotAt(int i) noexcept { return *slots_[i]; }
     const Slot& slotAt(int i) const noexcept { return *slots_[i]; }
     bool playing_ = false;
+    bool previewing_ = false;     // some slot holds a preview voice (still sounding or releasing)
+    bool previewChunk_ = false;   // this chunk runs only the previewing slots, with the transport stopped
+    bool stopEnded_ = false;      // the stop fade reached silence this callback (endPlayback runs after the chunk)
+    int previewRampIn_ = 0;       // samples left of the master's fade back in for previews after a stop
     int stopFade_ = 0;  // samples left in the stop fade, 0 when not stopping
     int64_t g_ = 0;     // position in the project loop
     int64_t epoch_ = 0; // project loops completed since play
@@ -235,6 +251,7 @@ private:
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
+    std::map<int32_t, int> previewSlots_;  // control thread: each held preview's slot, for its pitch and off
     std::vector<std::string> order_;  // layer ids in project order, for meters
     std::map<std::string, double> globals_;
     // Knob moves since the last Play (control thread), so a rebuilt chain keeps their touches.

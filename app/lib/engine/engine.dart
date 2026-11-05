@@ -319,6 +319,18 @@ class Engine {
 
   void setMaster(double volume) => _b.setMaster(_handle, volume);
 
+  /// Note previews: a held note on a layer's instrument, through its effects and mix, playing or stopped. A second
+  /// [noteOn] with the same [id] ends the first; [notePitch] glides a held one without a new attack.
+  void noteOn(String layerId, int id, double pitch, double velocity) {
+    final l = layerId.toNativeUtf8();
+    _b.noteOn(_handle, l, id, pitch, velocity);
+    calloc.free(l);
+  }
+
+  void notePitch(int id, double pitch) => _b.notePitch(_handle, id, pitch);
+  void noteOff(int id) => _b.noteOff(_handle, id);
+  void notesOff() => _b.notesOff(_handle);
+
   void play() => _b.play(_handle);
   void stop() => _b.stop(_handle);
   void clearOverload() => _b.clearOverload(_handle);

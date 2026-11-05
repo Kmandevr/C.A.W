@@ -1,11 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # Log
 
+- 2026-11-05: Note previews (owner, #103): notes sound while placed, moved, held or bent, through the track's instrument, effects and mix, stopped or playing, at the note's velocity; a tapped-in note plays its length, a selection its opening chord, a bend follows the edited point; "Hear notes" in ⋮ turns them off. Engine: a note on/pitch/off C API and a stopped preview mode that leaves the transport in place.
 - 2026-11-04: Piano roll, second part (owner): one snap magnet in the toolbar (it replaces the grid, snap, triplets and adaptive buttons in the default toolbar) with a sheet for the time grid, triplets, adaptive and a new saved value grid (`RollLook.valueGrid`); velocity, chance, lane curves, volume and timbre snap to it, pitch points snap in time, and the second-finger bypass covers every drag. Note previews need engine work while stopped: GPT issue #103.
 - 2026-11-04: Piano roll, first part (owner): both note ends stretch, a selection by the same amount (`PatternDoc.stretch`), with the edge following the finger, a ghost of the snapped length, a length number and a spring on release; 48 dp end zones on touch; a second finger bypasses snapping; a ghost note at touch-down, edge auto-scroll while dragging, and new notes keep the last velocity. Review fixes: taps just past a drawn note draw again, a bypass doesn't arm the double tap or the hold, a second finger that moves first still pinches. The arrangement grid runs the full height of the view (owner: like Reaper).
 - 2026-11-04: Glass without blur (owner): a Frosted blur switch, unblurred overlays that still read as glass, and Lightweight keeps glass unblurred. Thinner outlines, opaque slider knobs, pushed pages on their own glass background, the shell remounts when glass or blur actually changes, disabled sliders fade. The arrangement gets a track gap (Settings `track_gap`) and spacer rows under tracks (`space_below`, app-only).
