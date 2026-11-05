@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-04
+updated: 2026-11-05
 ---
 
 # C.A.W. roadmap
@@ -14,7 +14,9 @@ The roadmap is the single source for feature sequencing. [App](app.md), [Engine]
 
 C.A.W. is a phone-first, code-driven sound-design and music-production workspace. It is not a conventional DAW and needn't work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile ([vision](vision.md), owner 2026-11-03). That covers arrangement, recording, editing, instruments, mixing and delivery, without a heavyweight conventional-DAW architecture.
 
-- **One product and project model:** code, visual editors, instruments, patterns, audio assets and automation share the same underlying project and engine state.
+- **One product and project model:** C++ source, visual composition, instruments, patterns, audio assets, parameters, automation and performance controls share the same component, project and engine state.
+- **Ordinary C++ and one SDK:** C++ is the general-purpose authoring language; the C.A.W. Library/SDK supplies reusable building blocks without restricting the language to audio. The current .caw DSL/VM is transitional and will be removed after its useful capabilities have migrated.
+- **Extensible without rewrites:** new components, algorithms, ports, parameters, UI controls, MIDI capabilities, formats and platform/plugin adapters plug into stable contracts rather than requiring unrelated systems to be rewritten.
 - **Phone-first, desktop-capable:** practical touch workflows on phones, with full keyboard/mouse access on desktop.
 - **Local and offline first:** core creation, playback, editing and rendering work locally. Optional collaboration or synchronization must never make the core application cloud-dependent.
 - **Lightweight by default:** weak phones remain a first-class target; stronger hardware may use additional cores and resources when the active workload benefits.
@@ -40,7 +42,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | Area | Implemented today | Remaining work |
 |---|---|---|
 | App/platforms | Eight Flutter workspaces; Android and Windows app CI artifacts; autosave; per-editor undo/redo; project format version check | App-wide undo, crash recovery, project migrations, onboarding/help; iOS/macOS builds; Linux app is not a shipped CI artifact |
-| Engine | Portable C++20 engine, constrained module VM, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | The typed graph and N-channel contract exist but don't run playback yet (Foundation stage, issue #28) |
+| Engine | Portable C++20 engine, current constrained .caw module VM, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | The C++ authoring toolchain, shared component SDK and Library are not built; the typed graph and N-channel contract have integration gaps (Foundation, issue #28) |
 | Patterns | Piano roll, drum grid, note expressions, lane curves, generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze and advanced groove/quantize extensions |
 | Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
 | Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths and master effect chain |
@@ -49,12 +51,26 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | SFZ multisample workflow, stems, persistent queue and broader batch delivery |
 | Audio assets | Generated audio and module/effect processing | Audio import, non-destructive audio clips, sample editor and multisample mapping |
 | Recording | No audio or live MIDI recording workflow | MIDI/audio recording, monitoring, latency compensation, punch, loop recording, takes and comping |
-| Plugins | Plugin Builder validates/packages native .caw source; native SDK/graph foundations exist | Dynamic native loading/isolation and external CLAP/VST3/AU hosting |
+| Plugins | Plugin Builder currently validates/packages native .caw source; native SDK/graph foundations exist | Replace the legacy .caw packaging path with C++ component build/package; dynamic native loading/isolation and external CLAP/VST3/AU hosting |
 | AI/video | No in-app AI; video sync is not planned | AI remains excluded; video sync remains off-roadmap |
 
 ## Roadmap sequence
 
-The stages are ordered by dependency and product value (owner, 2026-11-03): **Foundation first**, then Stages 0–7, then **Release 1**. Stages 8–10 ship as updates after Release 1. Work may be split into smaller issues and pull requests, but keep the stage dependencies and exit gates. The owner can reprioritize explicitly.
+The stages are ordered by dependency and product value: first the **C++ creation-platform foundation**, then the existing **Engine graph/N-channel Foundation**, then the **unified authoring interfaces**, then Stages 0–7 and **Release 1**. Stages 8–10 ship as updates after Release 1. Work may be split into smaller issues and pull requests, but keep the stage dependencies and exit gates. The owner can reprioritize explicitly.
+
+### Creation-platform foundation — C++ language, Library/SDK and shared component model
+
+This is the product's programming and extension foundation. It precedes dependent editor, visual, generated-UI and plugin work. It does not claim that the new toolchain or SDK already exists. The current engine remains C++20, but its .caw DSL/VM is only the present authoring implementation.
+
+| # | Item | Status | Where | Depends on | What's missing |
+|---|---|---|---|---|---|
+| CP.1 | General-purpose C++ source, project and build toolchain integrated with C.A.W. | Planned | both | Existing C++20 engine/toolchain | No in-app C++ project/source model or native component build workflow |
+| CP.2 | Shared component descriptor and lifecycle: identity, roles, typed ports, parameters, assets, events/MIDI, state, capabilities, UI metadata and resource/real-time contracts | Planned | engine | CP.1; integrate with Foundation F1–F6 | Existing module descriptors and native SDK cover parts of this; they are not yet the unified authoring/component model |
+| CP.3 | Comprehensive C.A.W. Library/SDK for DSP, synthesis, MIDI, tables/samples, math, bit manipulation, data and general-purpose utilities | Planned | engine | CP.1, CP.2 | Existing .caw built-ins and engine algorithms need to be catalogued, migrated or replaced behind the shared C++ APIs; many requested facilities are not implemented |
+| CP.4 | Stable extension and registration contracts, capability negotiation, state/API versioning and explicit ownership/lifetime rules | Planned | engine | CP.2 | Existing native SDK v1 is a starting point, not the complete contract |
+| CP.5 | Port useful existing .caw/VM algorithms and sound capabilities into the C++ Library/SDK and native components | Planned | engine | CP.1–CP.4 | No migration has been done; preserve useful capabilities, not old syntax or implementation details |
+
+**Exit gate:** ordinary C++ components compile and register through the shared contracts; the SDK and Library expose useful documented APIs; typed ports, parameters, assets, events, state, lifecycle and real-time requirements have explicit contracts; the selected existing capabilities have tested C++ paths. The old .caw editor and VM remain only as a temporary migration path until the later authoring-interface stage's retirement gate. No old-source or pre-release-project compatibility layer is required.
 
 Each stage is a table. **Where** says which part does the work: *engine* (`engine/`, C++), *app* (`app/`, Flutter) or *both*. **Depends on** names the items or stages that must exist first. **What's missing** is the gap between today's code and the item's exit gate. Statuses use the language above and were checked on 2026-11-03.
 
@@ -77,6 +93,23 @@ Comes first (owner, 2026-11-03), before the remaining Stage 0 and Stage 1 featur
 
 **Exit gate:** live playback and offline render both run through the one graph; golden hashes change only where the owner-approved float graph edges round (F4.2, F4.4), each change cross-checked against the old engine with the same rounding; N-channel buffers are tested with real processing beyond stereo; budgets fail with clear errors instead of silent truncation; Engine, App and Docs CI are green.
 
+### Unified authoring interfaces — code, visual composition and performance UI
+
+These are three interfaces to the same C++ components and project state, not separate engines or representations. They follow the C++ component contracts and native graph foundation.
+
+| # | Item | Status | Where | Depends on | What's missing |
+|---|---|---|---|---|---|
+| UI.1 | Practical C++ code editor: project tree, tabs, highlighting, SDK-aware completion/docs, diagnostics, navigation, formatting, refactoring, build/run/preview and debugging | Planned | app | CP.1–CP.3 | The current editor targets .caw syntax and has no C++ IDE/toolchain integration |
+| UI.2 | Import/drop existing C++ source and projects with supported build configuration/dependencies; register valid components automatically | Planned | both | CP.1, CP.2, UI.1 | Not built |
+| UI.3 | Typed visual scripting using built-in Library functions and user C++ components as automatically generated blocks; reusable subgraphs | Planned | both | CP.2–CP.3, Foundation F1–F6 | Not built; the visual graph must compile/prepare into the native runtime, not a separate interpreter |
+| UI.4 | Generated performance UI from parameter metadata: knobs, sliders, switches, selectors, pads, keyboards, XY controls and meters | Planned | app | CP.2, CP.4 | Existing parameter descriptors and framework-neutral generated-control metadata are partial foundations; full component UI generation is not integrated |
+| UI.5 | Optional custom and hybrid component interfaces, with processing/UI separation | Planned | both | UI.4 | Not built |
+| UI.6 | Mixer/component browser integration: load components like plugins, expose selected controls, change parameters live and reuse the same processors in tracks/chains/graphs | Planned | both | CP.2, UI.4, Foundation | Existing Mixer and native module/graph foundations are partial; the shared C++ component workflow is not built |
+| UI.7 | Shared MIDI performance and routing across C++ components, visual graphs, on-screen keys/pads and external devices | Planned | both | CP.2, Foundation F5–F6, Stage 5 | MIDI file import/export and UMP decoding exist; USB/Bluetooth I/O and live Engine voice routing are not built |
+| UI.8 | Remove old .caw editor paths, templates, parser/compiler/VM and obsolete docs after equivalent retained workflows pass tests | Planned | both | CP.5, UI.1–UI.7 | Not started; do not remove the old path before its replacements work |
+
+**Exit gate:** one C++ component appears in the code/component browser, as a typed visual block and in the generated performance UI; all three use the same implementation, parameters, state and event routing. Generated UI works without custom code; custom/hybrid UI is optional. C++ and visual graphs use the same prepared native execution path. MIDI uses the shared event model. The old .caw path is removed only after retained workflows are verified.
+
 ### Stage 0 — Complete approved v2 commitments and the engine foundation
 
 | # | Item | Status | Where | Depends on | What's missing |
@@ -85,7 +118,7 @@ Comes first (owner, 2026-11-03), before the remaining Stage 0 and Stage 1 featur
 | 0.2 | WAV/SFZ multisample: import WAV samples (own or third-party), map zones by hand (key ranges, velocity layers), play them in C.A.W, export WAV + SFZ | Planned | both | Foundation; project folders | No audio import, sampler zones or SFZ export exist. Samples live in the project folder or the global library; this pulls the needed parts of Stages 3 and 4 forward (owner, 2026-11-03) |
 | 0.3 | Stems export through the native export pipeline | Planned | both | Foundation (per-bus graph renders) | No stems export exists |
 
-**Exit gate:** automation remains fully functional; the refactored engine uses one coherent execution model; existing projects and modules remain compatible; the portable fallback works; callback safety, deterministic behavior, playback/export parity, performance budgets and CI are verified. Device performance claims require real-device evidence.
+**Exit gate:** automation remains fully functional; the refactored engine uses one coherent execution model; retained capabilities have tests; the portable fallback works; callback safety, deterministic behavior, playback/export parity, performance budgets and CI are verified. Compatibility with old .caw source and pre-release projects is not required. Device performance claims require real-device evidence.
 
 ### Stage 1 — Pattern workflow and editing safety
 
@@ -224,9 +257,9 @@ These stages ship as updates. Their order still holds.
 |---|---|---|---|---|---|
 | 9.1 | Native module host and lifecycle with three user-chosen modes per plugin/module: Isolated (separate process), Trusted (in-process) or Blocked (owner, 2026-11-03) | Partial | engine | F4 | The native SDK, static registry and module lifecycle contract exist; no dynamic loading, isolation or trust modes. The default mode for unseen code is an open owner question |
 | 9.2 | External CLAP hosting, then VST3 and AU where licensing and platforms allow | Conditional | engine | 9.1 | Not built. **[Assumption]** Out-of-process isolation on Android is unverified and may be desktop-first |
-| 9.3 | Export any C.A.W graph as a CLAP, then VST3 plugin (every built-in node is plugin-exportable) | Planned | engine | F4 | Not built |
+| 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Planned | engine | CP.2–CP.4, F4 | Not built; the processor implementation must be reused rather than duplicated per format |
 | 9.4 | iOS, macOS and Linux app builds with platform audio/device testing | Conditional | both | — | Not configured in CI; iOS distribution is an open owner question |
-| 9.5 | Plugin Builder for .caw modules stays distinct from binary plugin hosting | Implemented | app | — | Plugin Builder validates and packages native .caw source |
+| 9.5 | Plugin Builder packages C++ components; binary plugin hosting/export remains a separate adapter workflow | Partial | app | CP.1–CP.4, UI.1 | The current Plugin Builder validates/packages .caw source; it must move to the shared C++ component build and descriptor contract |
 
 **Exit gate:** each claimed plugin format and platform has real build, host/device and lifecycle tests; all three trust modes work and a crash in an Isolated plugin cannot take down the app.
 
@@ -247,6 +280,8 @@ These stages ship as updates. Their order still holds.
 These apply to every stage, not as a final optimization pass.
 
 - Measure CPU, callback p99/max duration, memory, allocations, battery/thermal behavior, UI frame time and audio dropouts on weak and strong devices.
+- Keep one canonical implementation of each processor and algorithm; code, visual blocks, mixer controls and plugin adapters must not create duplicate processing paths.
+- Treat extensibility without unrelated rewrites as a permanent acceptance criterion; test adding components, parameters, ports, UI controls and adapters against the stable contracts.
 - Keep idle overhead near zero: no recurring analysis, polling or background search when features are closed or unused.
 - Use the existing worker pool and adaptive workload planner for bounded background work. Parallelize independent preparation/render jobs only when it helps; avoid oversubscription and contention.
 - Keep audio callback work bounded, allocation-free, lock-free and free of file I/O, logging, UI calls and unbounded loops. Prepare assets and state off the callback.

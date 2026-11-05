@@ -7,7 +7,7 @@ covers: [engine/, app/lib/engine/, app/lib/ui/shell.dart, app/pubspec.yaml]
 
 # Architecture
 
-The technical plan for the owner's brief in [vision](vision.md). Build order: [roadmap](roadmap.md). Why each choice was made: [decisions](decisions.md).
+The technical plan for the owner's brief in [vision](vision.md). The C++ language, SDK and shared component architecture are specified in [C++ creation platform](cpp-creation-platform.md). Build order: [roadmap](roadmap.md). Why each choice was made: [decisions](decisions.md).
 
 Labels used below:
 - **[Fact]** is verified, either in this repo or from a primary source. The date is noted when it matters.
@@ -17,6 +17,10 @@ Labels used below:
 ## Product focus and capability
 
 C.A.W. is not a conventional DAW and doesn't have to work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile ([vision](vision.md)). Architecture choices serve that capability through C.A.W.'s own model (code, patterns, one shared project and engine) on a lightweight, phone-first core. Audio recording is not implemented yet; it is roadmap Stage 7, before the first release ([roadmap](roadmap.md)).
+
+## C++ creation platform direction
+
+**[Owner decision, 2026-11-05]** C.A.W. will use ordinary general-purpose C++ as its programming language, a comprehensive C.A.W. Library/SDK, and one shared component model for code, visual scripting and generated/custom performance interfaces. The current .caw language/VM is transitional and will be retired after its useful capabilities have been migrated and verified; old source/project compatibility is not required. The detailed design, component contract, library scope, authoring interfaces, real-time boundaries, versioning and migration gates are in [C++ creation platform](cpp-creation-platform.md).
 
 ## 0. Current state
 
@@ -53,7 +57,7 @@ The owner may also ship C.A.W as a VST3/CLAP plugin. So the core is plugin-shape
 
 ### Ready-made building blocks
 
-The language, compiler and VM are ours, because they are the product and the sandbox. Everything around them comes from permissive, maintained libraries. All facts checked 2026-10-28.
+The C++ language and compiler are ordinary toolchain facilities; the C.A.W. Library/SDK and component model are the product-specific reusable layer. Use permissively licensed, maintained dependencies where they provide a measured benefit, and record exact licences and versions before adoption. The current .caw compiler/VM is transitional, not the target language. The dependency candidates below are proposals, not adopted dependencies.
 
 | Job | Library | Licence | When |
 | --- | --- | --- | --- |
@@ -80,7 +84,7 @@ Avoid: JUCE (revenue-capped free tier), Tracktion Engine (GPL or commercial, nee
 
 ## 2. Audio and code execution
 
-The central decision: **user code is compiled into bytecode for our own small VM, and that VM runs inside the C++ engine.** The source is never interpreted on the audio thread.
+**[Fact, current implementation checked 2026-11-05]** The existing .caw authoring language is compiled into bytecode for a small VM inside the C++ engine; source is not interpreted on the audio thread. **[Owner decision, 2026-11-05]** This VM is not the target language architecture. Ordinary C++ and the shared component SDK replace it after useful functionality and product workflows have migrated. See [C++ creation platform](cpp-creation-platform.md#migration-from-the-current-caw-language).
 
 ```
  source text ──► parser/compiler (worker thread) ──► Program (bytecode + constants)
@@ -125,108 +129,21 @@ The owner wants code-defined sounds to become playable instruments and exportabl
 - **Sample export:** one-shots and loops as WAV (24-bit or 32-bit float). Loops get loop points in a `smpl` chunk, set at exactly repeating lengths where the code repeats. Multisample sets render a range of notes and velocities, plus an SFZ mapping file (an open text format).
 - **Aliasing is a choice:** bit-twiddled waveforms alias when pitched up, which is part of their sound. Voice mode and export offer optional oversampling (2× or 4×) for a cleaner result.
 
-### Synthesis, MIDI and musical helpers — current status and remaining design
+### Current synthesis and MIDI implementation; C++ target
 
-The owner wants proper synthesis, MIDI and musical helpers alongside raw bit-level code. **[Fact, checked 2026-11-01]** The synth patch compiler and app synth workflow are implemented; MIDI pattern files import/export as Standard MIDI Files and MIDI 2.0 Clip Files; the engine has a MIDI 2.0 UMP decoder and bounded input queue. USB/Bluetooth device discovery, connection, MIDI clock and live Engine voice routing are not implemented.
+**[Fact, checked 2026-11-05]** The current engine has a synth patch compiler/playback path, built-in wavetable playback and frame morphing, LFO/modulation primitives, MIDI pattern file import/export and a MIDI 2.0 UMP decoder/input queue. USB/Bluetooth device discovery, connection, MIDI clock and live Engine voice routing are not implemented. See [Engine](engine.md), [Engine implementation status](engine-build-status.md) and the [roadmap](roadmap.md).
 
-- **Synthesis built-ins** (basics in v1, the rest in v2, on top of Signalsmith DSP and DaisySP):
-  - oscillators: sine, saw, square, triangle, band-limited and raw
-  - noise, filters, envelopes (ADSR, decay) and LFOs
-  - FM and phase modulation, additive partials, wavetable playback of our own exported tables, and later granular
+The existing built-ins and algorithms are migration candidates for the C.A.W. C++ Library/SDK. The target is a shared C++ event model for MIDI 1.0, MIDI 2.0 UMP, note identity, MPE/per-note expression, CC, clock and transport, usable from C++ components, visual graphs, performance controls and device adapters. Do not create separate MIDI implementations for each interface. The broader Library scope is in [C++ creation platform](cpp-creation-platform.md).
 
-  They mix freely with bytebeat expressions: `saw(freq) * (t>>8 & 1)` is valid code.
-- **MIDI:**
-  - notes in from the on-screen keyboard, USB/Bluetooth MIDI devices or the plugin host, driving voice mode
-  - CC and pitch bend mapped to `param`s ("MIDI learn")
-  - MIDI clock in, so the tempo follows external gear
-  - MIDI files imported to play a sound, and the sequencer's patterns exported as MIDI files for Reaper
-  - MPE-style per-note expression is supported in the note model and MIDI export; live MIDI hardware remains future work
-- **Musical time is built in:** `bpm` (project setting, or the host's when it's a plugin), `beat`, `bar`, `step` (16ths), and `pos` (0–1 through the loop). Code can say `(beat & 1) ? kick : 0` instead of working out sample counts.
-- **Loops that repeat cleanly:** a project has a loop length in bars at its BPM. Playback wraps at exactly that length, the waveform shows the loop, and export cuts at exactly that length, with loop points set. A bytebeat formula that doesn't repeat on its own gets a short crossfade at the seam, which can be turned off. For classic formulas the engine can also *find* their natural repeat length (powers of two of `t`) and offer it.
-- **Notes and scales:** note names (`C4`, `A#2`) and `mtof()`, plus `scale("minor", i)` and `chord("m7", i)` helpers. Quantizing a pitch to the project's key is one call.
-- **Approachable defaults in the app:**
-  - starter templates (a bytebeat loop, a kick, a bass synth, a pad, a glitch fx)
-  - auto-generated sliders for every `param`
-  - BPM tap, a bar-length picker, and one-tap "export this loop"
+### Current variables and patterns — transitional .caw implementation
 
-  Beginners can start from a template and a few sliders, and every helper is still plain code that can be edited.
+**[Fact, current implementation]** The .caw VM supports module parameters, project globals, exported values, pattern modules, note events, velocity and per-note expression curves, MIDI file import/export, and the current piano-roll/drum-grid workflows. Project/module automation and the shared engine parameter resolver are documented in [Engine](engine.md) and [Engine implementation status](engine-build-status.md).
 
-### Variables and patterns **[Proposal]**
+This section describes the existing .caw implementation only. The owner has chosen ordinary C++ as the future authoring language. Do not extend the old .caw syntax as a parallel product language. Migrate useful parameter, pattern, event and generator capabilities to the shared C++ component/parameter/event model; old .caw source and pre-release-project compatibility is not required. See [C++ creation platform](cpp-creation-platform.md#migration-from-the-current-caw-language).
 
-The owner's requirement (2026-10-28): Unity-style variables (local, global and readable elsewhere, with sliders and tooltips), and a pattern builder whose patterns any sound can play, drawn or procedural. All of it ships in v2 ([roadmap](roadmap.md)).
+### Live editing while playing — current behavior and C++ migration
 
-**Variables**, like Unity's Inspector. **[Fact]** Built in v2 step 1 (2026-10-28), except automation lanes; reference in [engine](engine.md#statements):
-
-```
-// --- Tone ---                                        a header groups the controls below it
-param cutoff = 900 in 100..4000 step 10 "How bright"   slider with step and tooltip
-param wave = saw in [saw, square, tri]                 dropdown
-param filter = on                                      toggle
-global swing = 0.1 in 0..0.5 "Swing for every layer"   one project-wide control
-export let env = ad(trig, 0.001, 0.3)                  a signal other modules read
-```
-
-- **Local** `param`s gain a step, a tooltip, dropdowns (`in [a, b, c]`), toggles (`on`/`off`) and headers (`// --- Name ---`). The Builder lays them out like an inspector.
-- **Global** `global`s live on the project. A Project Controls panel shows each one once, and every module that declares the same name reads the same value. Changing one doesn't recompile anything; it's a parameter write.
-  - **Automation lanes** (owner) let a global move across the loop, for example a filter that opens over 4 bars. The lane is part of the project, so playback and export follow it exactly. A global with no lane stays where it is set.
-- **Exports:** `export let` makes a value readable as `module.name`, for example `bass * (1 - kick.env)` for sidechain ducking.
-  - The mixer runs layers in dependency order, so a reader hears the current block.
-  - A cycle, where two modules read each other, is broken by reading the other side's previous block, 64 samples late. This is reported as a warning, not an error.
-  - Exports stay inside the sandbox: they are only numbers passed between modules.
-
-**Patterns** are modules of `kind: pattern` in the same `.caw` format, so they diff cleanly in git and an AI agent can write them. Details set by the owner on 2026-10-28 ([decisions](decisions.md)).
-
-**[Fact]** Built in v2 step 3a (the owner's first priority: a sound you make plays the notes you make), reference in [engine](engine.md#patterns):
-- single-sound text patterns with fractions for off-grid notes and triplets, chords, probability, ratchets and slide
-- the note variables, and voices (8 per layer, oldest stolen)
-- a Pattern picker per layer, and Solo preview through a layer's pattern
-
-The audio thread consumes pattern events separately from the sound's code, so a pattern edit can update without rebuilding the instrument/effect chain. The arrangement compiles reusable pattern sources into absolute-time clip events on the control thread; the audio callback schedules them at sample positions. **[Fact, checked 2026-11-01]** The piano roll now has editable pitch/pressure/timbre/vibrato note expressions, velocity/chance lane curves, and generator actions (Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion). Remaining gaps include kit-row pattern routing, code-generated procedural patterns, arbitrary custom per-note values, swing/global automation, clip-following automation and plugin/global parameter automation. The session-grid scene launcher is retired; the linear Arranger is the composition view.
-- **Two shapes:**
-  - A **single-sound pattern** drives one layer.
-  - A **kit pattern** has named rows (kick, snare, hats …), and each row is routed to a layer, so one pattern can drive a whole kit.
-- **Length:** 1 step up to the engine's 2^31 − 1 step limit, independent of the layer's length.
-- **Timing:** notes snap to 1/16 by default, can switch to 1/32 or triplets, or go anywhere with snap off. Swing comes from a global.
-- **Notes:** each note has a start, length, pitch and velocity, plus:
-  - **probability**, repeatable by seed
-  - **ratchets**: 2–4 repeats inside the note
-  - **slide** into the next note
-  - **custom values** that the playing module reads by name (for example `timbre`, `crush`)
-- **Curves on notes:** any note can carry curves over its length, for pitch (bends and slides) and for any value.
-  - The piano roll draws the note itself bent along its pitch curve, so a slide is visible as a curved note.
-  - Value curves show as lines under the note.
-  - You draw freehand with a finger, and it smooths into a curve with points and handles you can then drag.
-- **Note model:** stored the MIDI 2.0 way: per-note pitch and per-note controllers at high resolution, not 7-bit channel messages. The owner chose MIDI 2.0 for the project's own data.
-- **Procedural patterns:** code in the module language, run once per step, deciding whether a note starts and its pitch, velocity, length and extras.
-  - New built-ins: `euclid(hits, steps, step)`, `scale(name, degree)`, `chord(name, root)`, `key`, and `loop` (how many times the pattern has repeated).
-  - `hash`/`noise` with the seed make every repeat identical. A pattern can use `loop` to vary between repeats; playback and export still agree because it is deterministic.
-  - "Freeze" turns the code's output into an editable drawn pattern.
-- **Editor:**
-  - a drum grid (rows, steps, a velocity lane) and a piano roll (pitch × time, note lengths and curves), switchable on any pattern
-  - chord stamping in the project's key
-  - generator buttons that write notes you can edit: Euclid, random in key, arpeggiate, humanize
-  - no recording in v2: notes are drawn or generated
-- **Playing a pattern:** pick (later: drag) a pattern onto a layer and that layer's generator plays it through new variables:
-  - `trig` (1 on the first sample of a note), `gate`, `note`, `freq`, `vel` and `rel`
-  - the current value of each note curve: `bend` for pitch, and custom values by name
-
-  Polyphony (chords) uses the voice pool from the house synth's voice mode ([Instruments, wavetables and samples](#instruments-wavetables-and-samples)), each voice with its own curves. The built-in default pattern, for a layer without one, is one C4 note held through each layer loop (`trig` on its first sample), so templates written with `step % 4 == 0` keep working unchanged. **[Proposal]** Slide becomes a generated pitch curve once note curves exist, so there's one glide mechanism.
-- **Scenes/session grid:** retired by the owner in the 2026-10-31 arrangement-first decision. Do not treat the earlier scene proposal as active roadmap scope.
-- **MIDI 2.0 scope** (owner, 2026-10-28): MIDI 2.0 is how C.A.W stores notes, plus MIDI files. Connecting MIDI devices (controllers in, notes out) comes later.
-- **MIDI files** (owner chose them over device connections):
-  - import of ordinary `.mid` files into patterns
-  - export of both a standard `.mid` (MIDI 1.0, which every DAW opens; fine pitch and curves become pitch bends or are rounded) and a MIDI 2.0 clip file that keeps full detail
-  - **[Assumption]** which DAWs, Reaper included, read MIDI 2.0 clip files is unverified. Check before relying on it.
-  - On desktop, dropping a `.mid` file onto the app needs a drag-and-drop package with a permissive licence: **[Assumption]** check one before choosing it.
-- **MIDI 2.0 on the platforms, for when devices come:**
-  - **[Fact]** Android: MIDI 2.0 over USB host mode since Android 13, and over virtual (app-to-app) ports since Android 15. Bluetooth MIDI is MIDI 1.0 ([Android source docs](https://source.android.com/docs/core/audio/midi), checked 2026-10-28).
-  - **[Fact]** Windows: Windows MIDI Services brings MIDI 2.0 into Windows 11, rolling out from February 2026, officially on 24H2 and 25H2. The SDK apps need for MIDI 2.0 features is a separate install, still in preview ([Microsoft](https://blogs.windows.com/windowsexperience/2026/02/17/making-music-with-midi-just-got-a-real-boost-in-windows-11/), [heise](https://heise.de/-11181074), checked 2026-10-28).
-  - **[Assumption]** The S22+ supports USB MIDI 2.0 because it runs Android 13 or later. Test it on the phone.
-  - **[Assumption]** `flutter_midi_command` documents only MIDI 1.0, so MIDI 2.0 would go through the C++ engine (Android's AMidi, Windows MIDI Services). Unverified.
-
-### Live editing while playing **[Proposal]**
-
-The owner's requirement (2026-10-28): edit notes and code while the music plays, with changes heard as soon as reasonably possible.
+The existing .caw editor/VM supports live code swaps and pattern updates while playback continues. The C++ component workflow should retain useful live-update behavior where safe, using prepared component replacement and bounded state transfer rather than depending on the old VM's bytecode/state-matching mechanism.
 
 **[Fact]** The engine side is built: swap timing, pattern edits that let sounding notes finish, and state carried across code swaps ([engine](engine.md#playback)). The app also implements delayed auto-update, an enable/disable switch and selectable swap timing; see [App](app.md).
 
@@ -246,88 +163,41 @@ The owner's requirement (2026-10-28): edit notes and code while the music plays,
   - Calls are matched by function and position in the code, including inside `fn` and library calls. A call that is new or changed starts fresh, and the 20 ms crossfade covers what can't be carried over.
   - **[Assumption]** Matching by function and order is enough for typical edits. Test it on real edits: a reordered or renamed line may not match.
 
-### Standard library and connectors **[Proposal]**
+### C.A.W. Library/SDK and shared components [Proposal]
 
-The owner's requirement (2026-10-28): a built-in library of documented building blocks for the hard audio jobs, such as envelopes, connectors and MIDI input. A person or an AI agent should be able to see what each one does and how it works.
+The selected direction is a comprehensive C++ Library/SDK, not a growing set of functions in a music-only language. It provides reusable DSP, synthesis, MIDI, sample/table, math, bit-manipulation, data and general-purpose facilities. Components are registered once and reused by code, visual composition, generated UI, mixer controls and later plugin adapters.
 
-**[Fact]** Built in v2 step 2: the two layers, every category below except MIDI in (step 5) and multi-stage envelopes, library modules (`kind: library`, called as `namespace.fn`, instead of a `use` import), the generated reference and agent guide checked in CI, borrowed tips, and in-app help as a Library sheet plus completion chips. Playing an example from the help, and golden hashes for examples (they're checked to compile and make sound), aren't built. What exists is in [engine](engine.md#built-ins-and-libraries) and the [function library](library.md).
+The shared component descriptor defines stable identity, role/capabilities, typed audio/event/MIDI/control/modulation/data ports, parameter metadata, assets, lifecycle, state/presets, real-time and resource contracts, UI metadata and export capabilities. One parameter definition drives generated controls, automation, modulation, MIDI mappings and plugin-host exposure. One processor implementation serves all interfaces.
 
-- **Two layers, one namespace style** (`env.adsr(…)`, `midi.cc(74)`):
-  - **Built-ins in C++** for speed and exact repeatability (like v1's `ad`, `lpf` and `sine`).
-  - **Library modules in the C.A.W language**, built from those, so anyone can open one and see how it works.
-- **Categories in v2** (owner chose all four):
-  - **Envelopes and LFOs:** `env.adsr`, `env.ar`, multi-stage envelopes, `lfo.sine/tri/saw/square/random` synced to the tempo, `slew` and smoothing.
-  - **Filters and effects:** more filter types, `fx.delay` (tempo-synced), a reverb, distortion and saturation, a compressor, `fx.crush`.
-  - **MIDI and music theory:**
-    - MIDI in: `midi.note`, `midi.vel`, `midi.cc(n)`, `midi.bend`, `midi.clock`
-    - `scale`, `chord`, `arp`, `euclid`, `quantize(note, key)`
-  - **Glitch and bit tools:** `glitch.stutter`, `glitch.fold`, sample-and-hold, bit masks, and seeded random helpers built on `hash`.
-- **Your own functions** (owner: "yes, but simpler"):
-  - `fn name(args) = expression` in library files works like the built-ins and can be shared through the library repo.
-  - Only the app's own library gets generated reference pages and in-app help.
-  - A user function's doc comment still shows as its tooltip.
-- **Documentation from one source.** Each library function carries a doc comment: what it does, each argument with its unit and range, the output, and a short example. The build turns that into:
-  - **a reference page** in `docs/`
-  - **an agent guide**: a compact list of every function with its signature and one line on what it does, for any AI agent
-  - **in-app help**: autocomplete in the code editor, and a long-press (hover on desktop) on a name to show its docs and play its example
-  - **inspector tips**: the sliders a function's arguments become carry the argument's description as their tooltip
-- **CI checks the docs:** `caw docs --check` fails when a library function has no doc comment or an argument isn't described. Every example must compile and render non-silent audio (golden-hashed), so the docs can't drift from the code.
-- **Connectors.** The owner wants every kind of connector eventually.
-  - **v2 builds what is already in scope:**
-    - **Sidechain** between layers, through `export` signals ([Variables and patterns](#variables-and-patterns-proposal)).
-    - **Modulation links:** connect an LFO, envelope or pattern curve to any `param` or `global` with an amount, like Bitwig's modulators. You drag from the source onto a slider; in code, it's `mod(target, source, amount)`.
-    - **MIDI ports:** USB and Bluetooth MIDI devices feed `midi.*`, and MIDI clock can drive the tempo.
-  - **Later:** sends, returns and buses (roadmap Stage 2), and free module patching like a modular synth, beyond the fixed generator → effects chain.
+The Library should include waveform and wavetable generation, oscillators, noise, interpolation, filters, EQ, distortion, saturation, dynamics, delay, reverb, modulation effects, FFT, convolution and resampling; synth voices, envelopes, LFOs, FM/AM, additive, granular and physical-modeling building blocks; samplers and sample buffers; MIDI 1.0, MIDI 2.0 UMP, MPE/per-note expression, sequencing and music-theory utilities; tables, windows, random distributions, vectors, matrices, complex math, transforms, bit operations and data utilities. Functions accept declared parameters, tables, buffers, events or other data and return audio, waveforms, transformed data, analysis results or events. Use the standard C++ library for standard facilities rather than duplicating it.
 
-### Language direction **[Proposal]**
+The full proposed scope and contracts are in [C++ creation platform](cpp-creation-platform.md). The current built-in function inventory remains [Function library](library.md); do not mark planned SDK functionality as built.
 
-- Accept the **JS-style bytebeat expression subset** first (`t`, `>> >>> << & | ^ ~ % * / + -`, comparisons, ternary, `sin`, `floor`…), with the semantics above, so formulas from the community paste in and sound the same.
-- **[Fact]** v1 has `let`, `param` and the stateful built-ins (envelope, filter, oscillators, noise).
-- **[Fact]** v2 adds user functions (`fn`), library modules and the standard library ([above](#standard-library-and-connectors-proposal)).
-- Add a sequencing mini-language later (not yet scheduled in the roadmap), designed for phone typing, e.g. `kck p8 snr p16 hat*3 @ 140`. It compiles into the same VM. Polyrhythm comes from independent loop lengths against a shared clock.
+### Shared MIDI and event routing [Proposal]
 
-### NKIDO evaluation
+C++ components, visual blocks, the performance UI and external device adapters use one event model. It covers MIDI 1.0, MIDI 2.0 UMP, note identity, note-on/off, velocity, pitch, pressure, per-note expression, CC, program changes, clock, transport and timestamped events. Device I/O remains a separate adapter/integration task; a component does not get a private MIDI implementation.
 
-- **[Fact]** As of 2026-10-28: [mlaass/nkido](https://github.com/mlaass/nkido) is MIT-licensed, C++20/CMake, and pairs a stack-based bytecode synthesis VM ("Cedar") with a Tidal-style language ("Akkado"). It supports hot-swap with crossfade and runs natively and in the browser via WASM. The project is small: 8 stars and essentially one developer.
-- **[Assumption]** Unverified: Android and iOS builds, a stable embedding API, and long-term maintenance.
-- **[Proposal]** Don't depend on it for v1. A bytebeat VM is small enough to own. NKIDO uses the same architecture recommended here, which supports the design. In v2, do a 1-day spike to judge whether Cedar could serve as the graph/DSP layer. Keep our engine behind an interface (`compile(source) → Program`, `process(Program, buffer)`) so we can swap the backend either way.
+### Real-time boundary [Proposal]
 
-## 3. Source and module structure
+C++ itself remains general-purpose. Only code scheduled in the audio callback must meet the explicit real-time contract: bounded work, no allocation/free, blocking locks, I/O, logging or UI calls. Native C++ is not sandboxed by the SDK; untrusted native code must be isolated, trusted in-process by explicit choice, or blocked. The current VM's restrictions are not a reason to restrict ordinary C++ globally.
 
-### This repo (Repository A — app)
+## 3. Source and component package structure
 
-**[Fact]** Built as of v1:
+### This repository (C.A.W.)
 
-```
-engine/src/      C++ core: compiler, VM, built-ins, mixer, exports, WAV writer, C API (no platform deps)
-engine/platform/ Audio output (miniaudio)
-engine/cli/      Desktop CLI: `caw check`, `caw render` (used by CI and AI agents)
-engine/tests/    Unit tests and golden renders (hash of rendered output per template)
-app/             Flutter app: lib/ (engine bindings, model, screens), android/, windows/, linux/ (local testing)
-docs/            These notes and the language reference
-examples/        Bundled starter sounds in the module format (later mirrored to the library)
-```
+The current repository contains the portable C++20 engine and CLI, platform audio layer, Flutter app, tests, documentation and bundled examples. The existing .caw module files and VM remain current implementation facts until the migration exit gate is met.
 
-### Sound library (Repository B, created in Stage 3)
+### C++ component source
 
-```
-caw-library.json       library name, module format version
-instruments/  kick-grit.caw, bass-xor.caw …
-effects/      bitcrush.caw, bytefold.caw, stutter.caw …
-functions/    reusable helpers
-patterns/     sequences
-presets/      parameter sets for modules
-projects/     full pieces that reference modules
-AGENTS.md     language + format guide for any AI agent
-```
+**[Proposal]** Components use ordinary C++ source and headers, with supported project/build metadata and declared dependencies. A component may span multiple files and use ordinary C++ libraries. Its descriptor is registered with the shared component system; no special-purpose .caw syntax or separate component language is required. Existing CMake/native build conventions are the starting point, with supported imported-project/build configurations documented by the editor.
 
-### Module file
+### Reusable library and project assets
 
-One plain-text file per module: a small metadata header followed by code. Single files are easy for AI agents to edit and produce clean git diffs.
+The planned C.A.W. Library can contain reusable C++ components, functions, instruments, effects, generators, data utilities, presets, examples and assets. Project-local assets travel with the project; global-library references use stable IDs and explicit versions. Asset handles define ownership and lifetime so sample buffers, tables and impulse responses are not copied unnecessarily.
 
-- **[Fact]** Built in v1: the header holds `caw: 1`, `kind` (`generator` or `effect`), `name`, `summary`, `mode` and `rate`. Sliders come from `param` lines in the code, so a module's whole interface lives in one place. Format and language: [engine](engine.md).
-- **[Proposal]** Later kinds (`function`, `pattern`, `project`), referencing modules by path (`use effects/bitcrush`), and projects that pin the library to a **commit SHA**, so an old project always sounds the same.
-- The engine reads only format version 1 and rejects others with a clear error, so incompatible modules are listed but never played.
+### Legacy .caw files
+
+The current .caw format documents the existing VM implementation only. It is not the future component source format. No compatibility layer for old .caw source or pre-release project files is required. Retain the old parser/VM only until every capability selected for migration has a tested C++/Library path and the app no longer depends on it; then remove the obsolete format and documentation.
 
 ## 4. GitHub sync
 
@@ -352,10 +222,10 @@ The GitHub library-sync/source-picker workflow described in earlier proposals is
 
 | Risk | Mitigation |
 | --- | --- |
-| User code glitches the audio thread | Own VM, no allocation or locks, bounded execution, cost guard (§2) |
-| Malicious or broken downloaded modules | No I/O by design; limits on source size, AST depth, program size and memory; failures mute only that module |
+| Native code disrupts real-time audio | Explicit callback contract, prepared resources, bounded execution, tests and per-component trust policy; ordinary non-real-time C++ remains unrestricted |
+| Untrusted native components | Native C++ is not sandboxed; Isolated, Trusted and Blocked modes are explicit, with no silent in-process loading |
 | Hearing or speaker damage from harsh output | Safety limiter, NaN guard, low default gain, fade on start/stop |
-| Language scope creep | Ship the bytebeat expression subset first and grow it one feature per milestone |
+| SDK and component complexity | Keep stable contracts small, add extension seams for real needs, and test that new components do not require unrelated rewrites |
 | Developing from a phone (no PC or IDE) | GitHub Actions builds every target. Android debug APKs are signed with a fixed keystore in CI secrets so updates install over each other. The engine is tested on Linux in CI |
 | Apple builds | iOS and macOS builds need macOS runners. The repository is public, so standard GitHub-hosted runners cost nothing; check this if it goes private again **[Assumption: check current GitHub pricing]**. Distributing them needs a paid Apple Developer membership. Build Apple targets only on release branches or on demand |
 | Device audio differences | miniaudio's per-platform backends, float output, restart on disconnect, early testing on the S22+ and each new platform; Oboe as an Android fallback |
@@ -365,17 +235,11 @@ The GitHub library-sync/source-picker workflow described in earlier proposals is
 | Selling only through AutoStacc (owner) | **[Proposal]** Android: one release signing key kept for good in repository secrets (every update must be signed with it), plus clear install steps on the AutoStacc page. Windows: code-sign installers so SmartScreen doesn't block them. macOS: sign and notarize with an Apple Developer account. A privacy policy is needed everywhere (the app stores GitHub tokens) |
 | iOS can't be sold only through AutoStacc | **[Fact]** Outside the App Store, iOS apps can only be distributed through alternative marketplaces in the EU (and now Japan). That requires Apple's approval, notarization and an organization account ([Apple](https://developer.apple.com/support/alternative-app-marketplace-in-the-eu), 2026-10-28). iOS realistically means the App Store, so it's an open question in [vision](vision.md#open-questions) |
 
-## Proposed module and interface extensions
+## C++ creation platform architecture
 
-The following are **[Proposal]**, not settled requirements or claims of implementation:
+The earlier proposal to keep readable .caw source authoritative and add visual controls around that language is superseded by the owner's 2026-11-05 C++ decision. The target is ordinary C++, a comprehensive C.A.W. Library/SDK, and one shared component model across the code editor, visual composition and generated/custom performance UI. Components are authored once and reused through the native runtime, component browser, mixer and later CLAP/VST3/standalone adapters.
 
-- Keep readable `.caw` source as the authoritative module definition. Visual assembly and generated controls should edit the same underlying module and parameter model rather than creating a second, incompatible representation.
-- Allow modules to describe their ordinary controls from parameter metadata, while permitting a specialised hand-built interface when generated controls are insufficient. UI code remains outside the audio-processing callback.
-- Use typed signal/port metadata and stable module identifiers where visual connections are needed. Keep code-defined module chains usable without requiring a graph editor.
-- Distinguish project-local assets from reusable global assets. Local references should travel with the project; global references should resolve through stable IDs and explicit versions.
-- Keep platform-specific device access behind adapters. The same portable native core should remain usable by the Flutter app, CLI, offline renderer and any later plugin host.
-
-These proposals should be implemented only when a concrete v2 feature needs them; they are not a reason to introduce framework layers in advance.
+See [C++ creation platform](cpp-creation-platform.md) for the full component descriptor, typed port and parameter contracts, library categories, editor and visual-scripting requirements, generated/custom UI, MIDI/event model, real-time safety, trust boundaries, versioning, migration and verification gates.
 
 ## Sources
 

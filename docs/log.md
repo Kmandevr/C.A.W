@@ -6,6 +6,8 @@ updated: 2026-11-05
 
 # Log
 
+- 2026-11-05: Owner chose ordinary general-purpose C++ as C.A.W.'s programming language, a comprehensive C.A.W. Library/SDK and one shared component model for code, visual composition and generated/custom performance UI. The old .caw language/VM is transitional and will be retired after useful capabilities migrate; old-source and pre-release-project compatibility is not required. See [C++ creation platform](cpp-creation-platform.md) and [roadmap](roadmap.md).
+
 - 2026-11-05: Key bindings editor (owner): Settings → Key bindings (or the action list's Edit keys) lists every action with its keys; press or type a key to give it to an action, with a note of what it replaces or clashes with; remove keys, reset one or all. Saved to `keys.txt` as changes over the defaults.
 - 2026-11-05: Space pauses (owner): Space plays and pauses, resuming where it paused, and Shift+Space or the transport's Stop goes back to the start. The engine plays from a position (`caw_engine_play_at`).
 - 2026-11-05: Project undo and redo (UI plan U1 PR 5 part 2): the transport's undo and redo walk one project history, a step per burst of edits (until a 600 ms pause), up to 100; Ctrl+Z and Ctrl+Shift+Z do the same outside the piano roll, which keeps its own.
