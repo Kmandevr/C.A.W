@@ -33,7 +33,6 @@ The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), 
 
 - Module/global parameter automation.
 - Correlation, phase and loudness meters: there are only peak meters (dB) and scopes.
-- Typing module parameter values in the Mixer's inspector (the UI plan asks for every value by drag or by typing; level and pan can be typed, parameters only dragged).
 - Sends, full sidechain routing, parallel mixer paths and master effect chains.
 - Audio import, audio clips and non-destructive audio editing.
 - Sample editing, mapping, multisample authoring and SFZ export.
