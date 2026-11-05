@@ -820,6 +820,78 @@ TEST(project_parser_refuses_arrangement_values_it_cannot_represent) {
     CHECK_EQ(p.loopSteps(), maxSteps3);
 }
 
+TEST(play_from_a_position_resumes_mid_loop) {
+    // As in layers_loop_at_their_own_length: a 12-step layer (72000 samples) in a 96000-sample project loop.
+    ProjectSpec p = project({{"a", std::string(kFloat) + "pos * 0.5"}});
+    p.seamCrossfade = false;
+    p.layers[0].lengthSteps = 12;
+    const double g = std::cos(kPi / 4.0);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play(80000.0 / 6000.0);  // step 13.33 (6000 samples a step): in the layer's second pass
+    std::vector<float> out = run(e, 20000);
+    // It fades in over 10 ms (480 samples) so the jump from silence doesn't click, then plays the layer from there.
+    CHECK_NEAR(out[0], 0.0, 1e-7);
+    CHECK(std::fabs(out[100]) < std::fabs(out[1000]));
+    CHECK_NEAR(out[1000], 9000.0 / 72000.0 * 0.5 * g, 1e-6);
+    CHECK_NEAR(out[15999], 23999.0 / 72000.0 * 0.5 * g, 1e-6);
+    CHECK_NEAR(out[16000], 0.0, 1e-7);  // the project loop wraps as usual
+    Meters m = e.meters();
+    CHECK_EQ(m.position, int64_t{4000});
+    for (double bad : {-5.0, 16.0, 1e30, std::nan(""), static_cast<double>(INFINITY)}) {
+        e.play(bad);  // outside the loop: from the start
+        out = run(e, 64);
+        CHECK_NEAR(out[0], 0.0, 1e-7);
+    }
+    // A tempo change before the play: the step lands on the same beat at the new tempo (12000 samples a step).
+    p.bpm = 60;
+    e.setProject(p);
+    e.play(13.0);
+    out = run(e, 2000);
+    CHECK_NEAR(out[1000], (13.0 * 12000.0 - 144000.0 + 1000.0) / 144000.0 * 0.5 * g, 1e-6);
+}
+
+TEST(play_during_a_stop_fade_fades_back_in) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.5"}});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    run(e, 4800);
+    e.stop();
+    std::vector<float> out = run(e, 240);  // halfway through the 480-sample stop fade
+    const float half = out.back();
+    e.play();
+    out = run(e, 1000);
+    CHECK(std::fabs(out[0]) <= std::fabs(half) + 1e-6f);  // no jump back to full level
+    CHECK(maxStep(out, 0, 1000) < 0.01f);
+    CHECK_NEAR(out[999], 0.5 * std::cos(kPi / 4.0), 1e-5);
+}
+
+TEST(play_from_a_position_reaches_a_later_clip_on_time) {
+    ProjectSpec p;
+    p.bpm = 400;
+    p.loopBars = 80;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * 0.5", {}});
+    p.modules.push_back({"hit", "---\nkind: pattern\nlength: 4\n---\n0 A4 4 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"late", "hit", 70 * 16, 4, 0, false});  // bar 71: sample 336000 at 8 kHz
+    p.layers.push_back(std::move(layer));
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play(330000.0 / 300.0);  // 300 samples a step
+    const auto out = run(e, 6400);
+    CHECK_NEAR(out[5900], 0.0, 1e-7);
+    CHECK(out[6000 + 300] > 0.1f);
+}
+
 TEST(arrangement_plays_clips_past_bar_64) {
     ProjectSpec p;
     p.bpm = 400;  // a step is 0.0375 s

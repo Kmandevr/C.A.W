@@ -123,6 +123,10 @@ void caw_engine_play(CawEngine* e) {
     if (e) e->engine->play();
 }
 
+void caw_engine_play_at(CawEngine* e, double step) {
+    if (e) e->engine->play(step);
+}
+
 void caw_engine_stop(CawEngine* e) {
     if (e) e->engine->stop();
 }

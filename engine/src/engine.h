@@ -80,7 +80,7 @@ public:
     void noteOff(int32_t id);
     void notesOff();
     void setMaster(double volume);
-    void play();
+    void play(double fromStep = 0);  // fromStep: sixteenth steps into the project loop (out of range starts at 0)
     void stop();
     void clearOverload();
     Meters meters();
@@ -175,6 +175,7 @@ private:
     bool stopEnded_ = false;      // the stop fade reached silence this callback (endPlayback runs after the chunk)
     int previewRampIn_ = 0;       // samples left of the master's fade back in for previews after a stop
     int stopFade_ = 0;  // samples left in the stop fade, 0 when not stopping
+    int playRampIn_ = 0;  // samples left of the fade in after a Play mid-loop or during a stop fade (no click)
     int64_t g_ = 0;     // position in the project loop
     int64_t epoch_ = 0; // project loops completed since play
     uint64_t touchEpoch_ = 0;  // the play count of the last Play handled (audio thread); ends touches

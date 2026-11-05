@@ -555,17 +555,54 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Where a pause left the transport, in sixteenth steps of the engine's loop (so a tempo change while paused still
+  /// resumes on the same beat); null when stopped at the start.
+  double? pausedStep;
+
+  /// Whether the transport was last told to play. Play and stop reach the engine at its next audio block, so the
+  /// meters lag; Space and Stop go by this, so a quick second press still pauses or stops.
+  bool get transportOn => _transportOn;
+  bool _transportOn = false;
+
+  /// Off in tests that play the engine with no sound card (they pull its audio themselves).
+  @visibleForTesting
+  bool useAudioDevice = true;
+
+  /// Play and pause (Space, the transport's play button): a pause keeps the position and the next play resumes there.
   void togglePlay() {
     final e = engine;
     if (e == null) return;
-    if (meters.playing) {
+    if (_transportOn) {
+      // Read now: the stop's short fade still moves the transport on.
+      final m = e.meters();
+      pausedStep = m.loopLength > 0 ? m.position * project.engineLoopSteps / m.loopLength : null;
       e.stop();
+      _transportOn = false;
     } else {
-      if (!e.audioOn) audioError = e.startAudio();
-      e.play();
+      if (useAudioDevice && !e.audioOn) {
+        audioError = e.startAudio();
+        if (audioError != null) return notifyListeners(); // no sound card: the pause stays where it was
+      }
+      final from = pausedStep;
+      from == null ? e.play() : e.playAt(from);
+      pausedStep = null;
+      _transportOn = true;
     }
     meters = e.meters();
     _poller.wake();
+    notifyListeners();
+  }
+
+  /// Stop (Shift+Space, the transport's stop button): the next play starts from the beginning.
+  void stopPlayback() {
+    final e = engine;
+    pausedStep = null;
+    _transportOn = false;
+    if (e != null) {
+      e.stop(); // the engine ignores a stop when it isn't playing
+      meters = e.meters();
+      _poller.wake();
+    }
     notifyListeners();
   }
 
@@ -1429,6 +1466,8 @@ class AppState extends ChangeNotifier {
   Future<void> _switchTo(ProjectDoc p, {bool saveCurrent = true}) async {
     if (saveCurrent) await flush();
     engine?.stop();
+    pausedStep = null;
+    _transportOn = false;
     _lastGoodRunSources.clear();
     _libraryUndo.clear();
     _libraryRedo.clear();

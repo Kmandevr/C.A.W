@@ -233,7 +233,7 @@ class _TransportBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = state.project;
-    final playing = state.meters.playing;
+    final playing = state.transportOn;
     return Container(
       padding: EdgeInsets.fromLTRB(10, Neon.compact(context) ? 3 : 6, 10, Neon.compact(context) ? 3 : 6),
       // Glass: see-through over the backdrop, with a thin bright edge underneath.
@@ -267,7 +267,12 @@ class _TransportBar extends StatelessWidget {
             final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
             return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
               _BpmButton(state: state),
-              Text(m.playing ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+              // Paused, it shows where play will resume.
+              Text(m.playing
+                  ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+                  : state.pausedStep != null
+                      ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
+                        ' · CPU $cpu%'
                   : 'CPU $cpu%',
                   style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)),
             ]);
@@ -298,8 +303,18 @@ class _TransportBar extends StatelessWidget {
           icon: const Icon(Icons.dashboard_customize),
           onPressed: () => showLayoutMenu(context, dock),
         ),
+        // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
+        if (playing || state.pausedStep != null) IconButton(
+          key: const ValueKey('transport-stop'),
+          tooltip: 'Stop, back to the start (Shift+Space)',
+          color: Neon.green,
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+          icon: const Icon(Icons.stop),
+          onPressed: state.stopPlayback,
+        ),
         Tooltip(
-          message: playing ? 'Stop (Space)' : 'Play (Space)',
+          message: playing ? 'Pause (Space)' : state.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
           child: InkWell(
             borderRadius: BorderRadius.circular(28),
             onTap: state.togglePlay,
@@ -313,7 +328,7 @@ class _TransportBar extends StatelessWidget {
                 border: Border.all(color: Neon.green, width: 2),
                 boxShadow: Neon.glow(Neon.green, strength: playing ? 0.8 : 0.3),
               ),
-              child: Icon(playing ? Icons.stop : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
+              child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
             ),
           ),
         ),

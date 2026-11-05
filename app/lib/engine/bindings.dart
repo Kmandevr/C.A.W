@@ -134,6 +134,8 @@ class Bindings {
             'caw_engine_note_off'),
         notesOff = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_notes_off'),
         play = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_play'),
+        playAt = lib.lookupFunction<Void Function(Pointer<Void>, Double), void Function(Pointer<Void>, double)>(
+            'caw_engine_play_at'),
         stop = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_stop'),
         clearOverload = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
             'caw_engine_clear_overload'),
@@ -224,6 +226,7 @@ class Bindings {
   final void Function(Pointer<Void>, int) noteOff;
   final void Function(Pointer<Void>) notesOff;
   final void Function(Pointer<Void>) play;
+  final void Function(Pointer<Void>, double) playAt;
   final void Function(Pointer<Void>) stop;
   final void Function(Pointer<Void>) clearOverload;
   final void Function(Pointer<Void>, Pointer<CawMetersStruct>) meters;

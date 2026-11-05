@@ -69,7 +69,7 @@ updated: 2026-11-05
   - **Phone landscape:** two panes side by side.
   - Touch targets stay at least 48 dp.
 - **Built in-house, with no new dependency.** fl_panel (MIT) and dock_panel (BSD-3) exist on pub.dev, but neither handles phone-sized split panes or C.A.W's touch rules, and both are young packages. A small layout tree (split, tabs, panel) in `app/lib/ui/` is cheaper to own.
-- **Transport bar, always visible:** play/stop, position (bar.beat), loop on/off, BPM (tap to type, long-press for tap tempo, #19), and undo and redo.
+- **Transport bar, always visible:** play/pause (Space) and Stop (Shift+Space), built 2026-11-05; position (bar.beat), loop on/off, BPM (tap to type, long-press for tap tempo, #19), and undo and redo.
 - **The quick actions (#23)** become a toolbar that belongs to each panel. They no longer float over content.
 
 ### Arrangement (home)

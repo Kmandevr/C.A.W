@@ -332,6 +332,24 @@ class Engine {
   void notesOff() => _b.notesOff(_handle);
 
   void play() => _b.play(_handle);
+
+  /// Plays from [step] sixteenth steps into the project loop (fractions allowed); outside it, from 0.
+  void playAt(double step) => _b.playAt(_handle, step);
+
+  /// Runs [frames] of audio with no device, discarding it: for tests, which play the transport without a sound card.
+  /// Never call it while the device is on.
+  void pullForTest(int frames) {
+    final l = calloc<Float>(frames), r = calloc<Float>(frames);
+    try {
+      for (var i = 0; i < frames; i += 512) {
+        final n = frames - i < 512 ? frames - i : 512;
+        _b.process(_handle, l + i, r + i, n);
+      }
+    } finally {
+      calloc.free(l);
+      calloc.free(r);
+    }
+  }
   void stop() => _b.stop(_handle);
   void clearOverload() => _b.clearOverload(_handle);
 

@@ -134,7 +134,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - then no timers, no frames and no FFI calls
    - nothing at all while the app is in the background
    - Tests in `app/test/poller_test.dart` check the rate, the settle, the idle and the background.
-3. **The audio device closes after 30 s stopped and idle.** Play reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
+3. **The audio device closes after 30 s stopped and idle.** Play (or resuming a pause) reopens it, as the app already did after returning from the background. **[Assumption]** Reopening takes well under a second on Android; check it on the phone.
 
 ### Native worker-pool lifecycle (2026-10-31)
 

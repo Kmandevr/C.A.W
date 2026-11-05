@@ -37,7 +37,8 @@ name: My keys
 # area      keys            action
 roll        W               roll.notes.up
 roll        Ctrl+W          roll.cursor.up
-global      Space           transport.playstop
+global      Space           transport.playstop   (play / pause)
+global      Shift+Space     transport.stop
 roll        Ctrl+Shift+E    macro "Run of four"
 
 macro "Run of four"
@@ -78,7 +79,8 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 
 | Action | Default keys |
 | --- | --- |
-| Play / stop | Space |
+| Play / pause (resumes where it paused; the id `transport.playstop` stays, so saved keymaps keep it) | Space |
+| Stop: the next play starts from the beginning | Shift+Space |
 | Undo / redo (the piano roll's own history inside it, a text field's own text undo while one has focus, such as the code editor; the project's everywhere else) | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |
@@ -201,7 +203,6 @@ Building the core turned up some clashes in this draft. They're resolved for now
   - `+` and `_` are fine velocity steps.
   - The toolbar's grid button opens a Grid size menu.
 
-- Is Space for play/stop right on the phone with a keyboard, too?
 - The word-jump and half-screen keys proposed for the code editor's Vim mode.
 
 ## Phone toolbar

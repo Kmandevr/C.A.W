@@ -199,6 +199,7 @@ struct Engine::Cmd {
     int swapMode = 0;
     int voices = kMaxVoices;
     uint64_t playCount = 0;    // Play: the control thread's play count, which ends touches
+    double fromStep = 0;       // Play: where in the project loop to start, in sixteenth steps
     uint32_t touchStamp = 0;   // Play: the last touch stamp before it (later stamps are touches after it)
     // Preview: what to do with preview [previewId] on [slot]: 0 note on, 1 glide to [pitch], 2 note off, 3 all off.
     int previewOp = 0;
@@ -1831,11 +1832,12 @@ void Engine::setMaster(double volume) {
     send(c);
 }
 
-void Engine::play() {
+void Engine::play(double fromStep) {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
     Cmd c;
     c.type = Cmd::Play;
+    c.fromStep = fromStep;
     c.playCount = playCount_ + 1;
     c.touchStamp = touchCounter_;
     if (!send(c)) return;  // nothing changed on the audio side, so keep the control side as it was
@@ -2163,8 +2165,16 @@ void Engine::applyCommands() noexcept {
                 playing_ = true;
                 touchEpoch_ = c.playCount;  // chains from before this Play drop their touches at their next chunk
                 touchPlayStamp_ = c.touchStamp;
+                // Resuming starts mid-loop: each track works out its own loop pass from g_ at its next chunk. Code
+                // there may be far from zero, and a Play during a stop fade cuts it short, so both fade in.
+                // In steps, converted with the tempo the Transport commands before it set, so a tempo change made
+                // while paused still resumes on the same beat.
+                {
+                    const double at = std::isfinite(c.fromStep) && c.fromStep > 0 ? std::floor(c.fromStep * stepLen_ + 0.5) : 0.0;
+                    g_ = at > 0 && at < static_cast<double>(loopLen_) ? static_cast<int64_t>(at) : 0;
+                }
+                playRampIn_ = g_ > 0 || stopFade_ > 0 ? std::max(1, static_cast<int>(kStopSeconds * sr_)) : 0;
                 stopFade_ = 0;
-                g_ = 0;
                 epoch_ = 0;
                 dcL_[0] = dcL_[1] = dcR_[0] = dcR_[1] = 0;
                 limEnv_ = 0;
@@ -2194,6 +2204,7 @@ void Engine::applyCommands() noexcept {
                 break;
             case Cmd::Stop:
                 if (playing_ && stopFade_ == 0) stopFade_ = std::max(1, static_cast<int>(kStopSeconds * sr_));
+                playRampIn_ = 0;
                 break;
             case Cmd::AuditionOnly:
                 auditionOnly_ = c.flag;
@@ -3213,6 +3224,9 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         } else if (previewChunk_ && previewRampIn_ > 0) {
             const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
             fade = 1.0 - static_cast<double>(previewRampIn_--) / len;
+        } else if (playing_ && playRampIn_ > 0) {
+            const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
+            fade = 1.0 - static_cast<double>(playRampIn_--) / len;
         }
         const float ol = static_cast<float>(yl * gain * fade);
         const float orr = static_cast<float>(yr * gain * fade);

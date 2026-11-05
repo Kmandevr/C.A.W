@@ -18,6 +18,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 - **[Implemented]** Pattern files, piano-roll editor, draw/select/erase tools, adaptive grid, snapping/free timing (with a second-finger bypass), note stretching from either end, triplets, keyboard navigation, note preview, velocity lane, and per-note velocity, chance, ratchet and slide editing.
 - **[Implemented]** Patterns hold any number of notes and curve points in the app as in the engine (F7.1, 2026-11-04).
 - **[Implemented]** Opening straight into the last project; New, New from template and Open are in the project menu.
+- **[Implemented]** Pause and resume (Space) on the same beat, and Stop (Shift+Space) back to the start (2026-11-05, `caw_engine_play_at`).
 - **[Implemented]** Project-wide undo and redo in the transport (whole-project snapshots, one per burst of edits, 100 steps). The piano roll, library and automation keep their own histories too.
 - **[Implemented]** MIDI pattern import/export (.mid, .midi2) through the pattern editor. Imported MIDI tempo is not applied to project tempo.
 - **[Implemented]** Curve tool for velocity and chance lane curves; per-note expression editors support pitch bend, pressure/volume, timbre and vibrato, including editable points and segment bends.
