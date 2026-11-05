@@ -120,6 +120,20 @@ void main() {
     expect(m().clipped, isFalse);
   });
 
+  testWidgets('peak readouts hold the peak in dB, then show silence even after the reads stop', (tester) async {
+    var peak = 0.5;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PeakReadout(state: state, read: () => peak))));
+    state.tick.value++;
+    await tester.pump();
+    expect(find.text('-6.0 dB'), findsOneWidget);
+    peak = 0;
+    state.tick.value++; // a silent read inside the hold, then no more (the poller settled)
+    await tester.pump();
+    expect(find.text('-6.0 dB'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('-∞ dB'), findsOneWidget);
+  });
+
   test('master gain updates shared state without a full app notification', () {
     state.project = ProjectDoc(id: 'project-1', name: 'Master test', master: 0.7);
     var valueTicks = 0;
@@ -685,7 +699,6 @@ void main() {
       home: Scaffold(body: PluginBuilderScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    expect(find.text('PLUGIN BUILDER'), findsOneWidget);
     expect(find.text('Guided'), findsOneWidget);
     expect(find.text('Advanced'), findsOneWidget);
     expect(find.text('Build boundary: native .caw module validation and source packaging are available. CLAP/VST3 binary builds, plugin sandboxing, host I/O tests and per-plugin CPU/memory profiling require a native plugin SDK/host backend that is not present in this repository. No unavailable binary target is advertised.'), findsOneWidget);

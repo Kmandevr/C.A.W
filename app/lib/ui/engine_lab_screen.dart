@@ -41,10 +41,6 @@ class EngineLabScreen extends StatelessWidget {
       const SizedBox(height: 8),
       if (state.project.modules.isEmpty) const NeonPanel(child: Text('No modules. Create a generator or effect in Builder.')),
       for (final module in state.project.modules) _ModuleReport(state: state, module: module, onOpenBuilder: onOpenBuilder),
-      const SizedBox(height: 12),
-      const NeonPanel(color: Neon.yellow, child: Text(
-        'Engine boundary: the current C API exposes project compilation, parameters, track mixing, scopes and meters. Universal typed connections, sample/buffer editing and custom .cawengine execution are not implemented and are not simulated.',
-        style: TextStyle(color: Neon.dim, fontSize: 12))),
     ]));
 }
 

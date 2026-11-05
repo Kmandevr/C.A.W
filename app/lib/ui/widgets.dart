@@ -1,4 +1,5 @@
 // Shared neon widgets: panels, the oscilloscope, level and progress meters, and small toggle buttons.
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -304,6 +305,8 @@ class _PeakReadoutState extends State<PeakReadout> {
   final _clock = Stopwatch()..start();
   double _db = PeakMeter.floorDb;
   Duration _heldAt = Duration.zero;
+  // The meter reads stop about a second after the sound does, before the hold ends: this ends the hold anyway.
+  Timer? _expire;
 
   @override
   void initState() {
@@ -323,7 +326,13 @@ class _PeakReadoutState extends State<PeakReadout> {
   @override
   void dispose() {
     widget.state.tick.removeListener(_read);
+    _expire?.cancel();
     super.dispose();
+  }
+
+  void _show(double d) {
+    if (d.toStringAsFixed(1) != _db.toStringAsFixed(1) && mounted) setState(() {});
+    _db = d;
   }
 
   void _read() {
@@ -331,9 +340,15 @@ class _PeakReadoutState extends State<PeakReadout> {
     final now = _clock.elapsed;
     final held = (now - _heldAt).inMicroseconds < PeakMeter.holdSeconds * 1e6;
     if (d >= _db || !held) {
-      if (d.toStringAsFixed(1) != _db.toStringAsFixed(1)) setState(() {});
-      _db = d;
+      _show(d);
       _heldAt = now;
+      _expire?.cancel();
+      _expire = d > PeakMeter.floorDb
+          ? Timer(Duration(microseconds: (PeakMeter.holdSeconds * 1e6).round()), () {
+              _expire = null;
+              _show(PeakMeter.db(widget.read()));
+            })
+          : null;
     }
   }
 

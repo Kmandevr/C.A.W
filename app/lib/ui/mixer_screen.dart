@@ -202,29 +202,31 @@ class _MobileChannelRow extends StatelessWidget {
         // Compact on a phone (owner, 2026-11-05): name, M, S and the editor on one row; level and pan side by side
         // under it, then the meter.
         builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(height: 32, child: Row(children: [
+          SizedBox(height: 40, child: Row(children: [
             Expanded(child: InkWell(
               onTap: onSelect,
-              child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800)),
+              child: Align(alignment: Alignment.centerLeft, child: Text(layer.name, maxLines: 1,
+                overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800))),
             )),
-            ToggleChip(label: 'M', size: 30, tooltip: layer.mute ? 'Unmute' : 'Mute', on: layer.mute, color: Neon.yellow,
+            ToggleChip(label: 'M', size: 40, tooltip: layer.mute ? 'Unmute' : 'Mute', on: layer.mute, color: Neon.yellow,
               onTap: () => state.mixLayer(layer, mute: !layer.mute)),
-            const SizedBox(width: 3),
-            ToggleChip(label: 'S', size: 30, tooltip: layer.solo ? 'Unsolo' : 'Solo', on: layer.solo, color: Neon.blue,
+            const SizedBox(width: 6),
+            ToggleChip(label: 'S', size: 40, tooltip: layer.solo ? 'Unsolo' : 'Solo', on: layer.solo, color: Neon.blue,
               onTap: () => state.mixLayer(layer, solo: !layer.solo)),
             IconButton(tooltip: 'Open focused channel editor', onPressed: onSelect,
-              padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
+              padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 44, minHeight: 40),
               icon: const Icon(Icons.chevron_right, color: Neon.blue)),
           ])),
-          SizedBox(height: 36, child: Row(children: [
+          SizedBox(height: 44, child: Row(children: [
             const Icon(Icons.volume_up, size: 14, color: Neon.dim),
             Expanded(flex: 3, child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
+              semanticFormatterCallback: (v) => 'Level ${(v * 100).round()}%',
               activeColor: Neon.green, onChanged: (v) => state.mixLayer(layer, volume: v))),
             SizedBox(width: 34, child: Text('${(layer.volume * 100).round()}%',
               textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.green))),
             const SizedBox(width: 6),
             Expanded(flex: 2, child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
+              semanticFormatterCallback: (v) => v.abs() < .01 ? 'Pan centre' : 'Pan ${(v.abs() * 100).round()}% ${v < 0 ? 'left' : 'right'}',
               activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v))),
             SizedBox(width: 30, child: Text(layer.pan.abs() < .01 ? 'C' :
               '${(layer.pan.abs() * 100).round()}${layer.pan < 0 ? 'L' : 'R'}',

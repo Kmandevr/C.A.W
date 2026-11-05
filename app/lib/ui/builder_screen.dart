@@ -759,17 +759,17 @@ class _BuilderTrackControlsState extends State<_BuilderTrackControls> {
                 if (next != null) state.selectLayer(next);
               },
             )),
-            ToggleChip(label: 'M', size: 30, tooltip: layer.mute ? 'Unmute track' : 'Mute track', on: layer.mute,
+            ToggleChip(label: 'M', size: 40, tooltip: layer.mute ? 'Unmute track' : 'Mute track', on: layer.mute,
               color: Neon.yellow, onTap: () => state.mixLayer(layer, mute: !layer.mute)),
-            const SizedBox(width: 3),
-            ToggleChip(label: 'S', size: 30, tooltip: layer.solo ? 'Unsolo track' : 'Solo track', on: layer.solo,
+            const SizedBox(width: 6),
+            ToggleChip(label: 'S', size: 40, tooltip: layer.solo ? 'Unsolo track' : 'Solo track', on: layer.solo,
               color: Neon.blue, onTap: () => state.mixLayer(layer, solo: !layer.solo)),
             if (widget.compact)
               IconButton(
                 tooltip: _open ? 'Hide track mix' : 'Track mix',
                 isSelected: _open,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 40),
                 onPressed: () => setState(() => _open = !_open),
                 icon: const Icon(Icons.tune, color: Neon.dim),
                 selectedIcon: const Icon(Icons.tune, color: Neon.blue),

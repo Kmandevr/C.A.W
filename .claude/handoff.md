@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: f3eeb59
+Commit: 0486589
 
-Branch: claude/caw-engine-foundation-skpirb (on Main f3eeb59; phone cleanup of the panels in progress, PR next)
+Branch: claude/caw-engine-foundation-skpirb (on Main f3eeb59; phone cleanup of the panels pushed, PR open)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `Main`. Claude merges each once CI is green.

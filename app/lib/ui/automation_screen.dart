@@ -193,7 +193,8 @@ class _TrackAutomation extends StatelessWidget {
     child: NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Expanded(child: Text(layer.name, style: const TextStyle(fontWeight: FontWeight.w800))),
-        _AddLane(state: state, layer: layer),
+        if (layer.automation.where((a) => a.target == 'volume' || a.target == 'pan').map((a) => a.target).toSet().length < 2)
+          _AddLane(state: state, layer: layer),
       ]),
       for (final lane in layer.automation) _AutomationLane(state: state, layer: layer, lane: lane),
     ])),
