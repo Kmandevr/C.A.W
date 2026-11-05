@@ -242,7 +242,7 @@ TEST(offline_export_installs_projects_larger_than_the_command_queue_and_matches_
         same = rendered.samples[static_cast<size_t>(i) * 2] == left[i] &&
                rendered.samples[static_cast<size_t>(i) * 2 + 1] == right[i];
     CHECK(same);
-    CHECK_NEAR(left[256], static_cast<float>(0.5 * std::cos(kPi / 4.0)), 1e-5);
+    CHECK_NEAR(left[256], static_cast<float>(0.5 * 0.7071067811865476), 1e-5);
 }
 TEST(wav_encoding) {
     const float x[6] = {0.0f, 1.0f, -1.0f, 0.5f, 2.0f, -0.25f};
