@@ -157,10 +157,13 @@ class Bar extends StatelessWidget {
 /// in, the meter reads (about 30 a second) move it; once they report silence its own ticker finishes the fall at the
 /// same rate and then stops, so it never freezes partway when the engine goes quiet.
 class PeakMeter extends StatefulWidget {
-  const PeakMeter({super.key, required this.state, required this.read, required this.color});
+  const PeakMeter({super.key, required this.state, required this.read, required this.color, this.vertical = false});
   final AppState state;
   final double Function() read;
   final Color color;
+
+  /// Upright, filling from the bottom (a mixer strip's meter), instead of a bar filling from the left.
+  final bool vertical;
 
   /// The meter's range: [floorDb] (empty) to 0 dBFS (full).
   static const floorDb = -60.0;
@@ -279,6 +282,26 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
   Widget build(BuildContext context) {
     final color = clipped ? Neon.pink : widget.color;
     final hold = PeakMeter.fraction(_holdDb);
+    if (widget.vertical) {
+      return RepaintBoundary(child: Container(
+        decoration: BoxDecoration(
+          color: Neon.line.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(3),
+          border: Border.all(color: Neon.line, width: 0.8),
+        ),
+        child: LayoutBuilder(builder: (context, c) {
+          final h = c.maxHeight.isFinite ? c.maxHeight : 0.0;
+          return Stack(children: [
+            Positioned(left: 0, right: 0, bottom: 0, height: h * PeakMeter.fraction(_shownDb),
+              child: Container(color: color.withValues(alpha: 0.6))),
+            if (hold > 0)
+              Positioned(left: 0, right: 0, height: 1.5,
+                bottom: (h * hold - 1.5).clamp(0.0, math.max(0.0, h - 1.5)),
+                child: IgnorePointer(child: Container(color: color))),
+          ]);
+        }),
+      ));
+    }
     // Its own layer: a meter moving doesn't repaint the panel around it.
     return RepaintBoundary(child: LayoutBuilder(
       builder: (context, c) => Stack(alignment: Alignment.centerLeft, children: [

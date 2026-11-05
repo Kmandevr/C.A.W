@@ -1,5 +1,5 @@
 // Tests the docking shell: the controller's saved layouts, reveal, focus and screen shapes, and the shell at phone,
-// landscape and desktop sizes with every panel shown in turn (no overflow), plus goldens (the shell needs CAW_LIB).
+// landscape and desktop sizes with every panel shown in turn (no overflow), plus goldens of the shell and the phone mixer (they need CAW_LIB).
 import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
@@ -7,6 +7,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/dock/dock_controller.dart';
 import 'package:caw/ui/dock/layout.dart';
+import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -143,6 +144,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await expectLater(goldenScreen, matchesGoldenFile('goldens/shell_desktop_mix.png'));
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('the mixer on a phone: upright strips with chain slots, pan, fader, meter, M and S', (tester) async {
+    final s = await startState(tester);
+    await pumpGolden(tester, Scaffold(body: MixerScreen(state: s, onOpenBuilder: () {})), goldenSizes['phone']!);
+    expect(tester.takeException(), isNull);
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/mixer_phone.png'));
     s.dispose();
   }, skip: skip);
 }

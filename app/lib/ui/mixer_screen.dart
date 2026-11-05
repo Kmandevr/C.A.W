@@ -1,5 +1,7 @@
-// Mixer / Editor: detailed channel controls and the shared module inspector.
+// Mixer: Reaper-style channel strips (chain slots, pan, fader, meter, M and S) and the shared module inspector.
 // All edits flow through AppState; this screen does not own a second mix or processing model.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../model/app_state.dart';
@@ -7,6 +9,10 @@ import '../model/project.dart';
 import 'param_control.dart';
 import 'theme.dart';
 import 'widgets.dart';
+
+/// Below this the strips keep their height and the panel scrolls up and down instead.
+const _minStripHeight = 500.0;
+const _stripWidth = 100.0;
 
 class MixerScreen extends StatefulWidget {
   const MixerScreen({super.key, required this.state, required this.onOpenBuilder});
@@ -19,7 +25,6 @@ class MixerScreen extends StatefulWidget {
 
 class _MixerScreenState extends State<MixerScreen> {
   double _inspectorFraction = 0.34;
-  int _mobilePage = 0;
   final FocusNode _dividerFocusNode = FocusNode(debugLabel: 'Mixer inspector width');
 
   @override
@@ -34,340 +39,366 @@ class _MixerScreenState extends State<MixerScreen> {
     });
   }
 
-  Widget _channelPanel(int columns) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Text('CHANNELS', style: TextStyle(color: Neon.green, fontWeight: FontWeight.w800)),
-      const SizedBox(height: 8),
-      if (widget.state.project.layers.isEmpty)
-        const NeonPanel(child: Text('No channels yet. Add a track in Arranger.'))
-      else
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: widget.state.project.layers.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            mainAxisExtent: 280,
+  // A chain slot was tapped: its parameters show in the inspector beside the strips, or in a sheet on narrow panels.
+  void _openSlot(LayerDoc layer, String id, {required bool wide}) {
+    final s = widget.state;
+    s.selectLayer(layer); // this selects its instrument, or its first effect
+    if (s.selectedModuleId != id) s.selectModule(id);
+    if (wide) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Neon.panel,
+      builder: (context) => SafeArea(child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.8),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child: ListenableBuilder(listenable: s,
+            builder: (context, _) => _ModuleInspector(state: s, onOpenBuilder: widget.onOpenBuilder)),
+        ),
+      )),
+    );
+  }
+
+  Widget _strips(double height, {required bool wide}) {
+    final s = widget.state;
+    final layers = s.project.layers;
+    return SizedBox(height: height, child: ListView(
+      key: const ValueKey('mixer-strips'),
+      scrollDirection: Axis.horizontal,
+      children: [
+        _MasterStrip(state: s),
+        const SizedBox(width: 8),
+        if (layers.isEmpty)
+          const SizedBox(width: 180, child: Center(child: Text('Add a track to mix it.',
+            style: TextStyle(color: Neon.dim)))),
+        for (var i = 0; i < layers.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: _ChannelStrip(state: s, layer: layers[i], index: i, onSlot: (id) => _openSlot(layers[i], id, wide: wide)),
           ),
-          itemBuilder: (context, index) => _ChannelStrip(
-            state: widget.state,
-            layer: widget.state.project.layers[index],
-            index: index,
+      ],
+    ));
+  }
+
+  Widget _divider(double available, double height) => Focus(
+    focusNode: _dividerFocusNode,
+    onFocusChange: (_) => setState(() {}),
+    onKeyEvent: (node, event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        _adjustInspector(0.02);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        _adjustInspector(-0.02);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    },
+    child: Semantics(
+      container: true,
+      focused: _dividerFocusNode.hasFocus,
+      label: 'Mixer inspector width',
+      value: '${(_inspectorFraction * 100).round()} percent',
+      increasedValue: '${((_inspectorFraction + 0.02).clamp(0.24, 0.52) * 100).round()} percent',
+      decreasedValue: '${((_inspectorFraction - 0.02).clamp(0.24, 0.52) * 100).round()} percent',
+      onIncrease: () => _adjustInspector(0.02),
+      onDecrease: () => _adjustInspector(-0.02),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeColumn,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragUpdate: (details) => _adjustInspector(-details.delta.dx / available),
+          child: SizedBox(width: 12, height: height,
+            child: Center(child: Container(width: 2, height: 72,
+              decoration: BoxDecoration(color: Neon.blue, borderRadius: BorderRadius.circular(2)))),
           ),
         ),
-    ],
+      ),
+    ),
   );
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, constraints) {
     final wide = constraints.maxWidth >= 1200;
-    final columns = constraints.maxWidth >= 1100 ? 3 : constraints.maxWidth >= 680 ? 2 : 1;
+    const pad = 12.0;
+    final height = constraints.maxHeight.isFinite
+        ? math.max(_minStripHeight, constraints.maxHeight - 2 * pad) : _minStripHeight;
     final s = widget.state;
-    return ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 96), children: [
-      NeonPanel(color: Neon.pink, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ValueListenableBuilder<int>(
-          valueListenable: s.masterValueTick,
-          builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              const Expanded(child: Text('MASTER OUTPUT', style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800))),
-              Text('${(s.project.master * 100).round()}%', style: Neon.code(color: Neon.pink)),
-            ]),
-            Slider(value: s.project.master.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
-              activeColor: Neon.pink, onChanged: s.setMaster),
-          ]),
-        ),
-        const SizedBox(height: 4),
-        Row(children: [
-          const SizedBox(width: 20, child: Text('L', style: TextStyle(color: Neon.blue, fontSize: 10))),
-          Expanded(child: PeakMeter(state: s, read: () => s.meters.peakL, color: Neon.blue)),
-          const SizedBox(width: 48, child: Text('R', style: TextStyle(color: Neon.green, fontSize: 10))),
-          Expanded(child: PeakMeter(state: s, read: () => s.meters.peakR, color: Neon.green)),
-        ]),
-        const SizedBox(height: 4),
-        Row(children: [
-          const SizedBox(width: 20),
-          Expanded(child: PeakReadout(key: const ValueKey('master-peak-l'), state: s, read: () => s.meters.peakL)),
-          const SizedBox(width: 48),
-          Expanded(child: PeakReadout(key: const ValueKey('master-peak-r'), state: s, read: () => s.meters.peakR)),
-        ]),
-      ])),
-      const SizedBox(height: 14),
-      if (wide)
+    return ListView(padding: const EdgeInsets.all(pad), children: [
+      if (!wide)
+        _strips(height, wide: false)
+      else
         LayoutBuilder(builder: (context, inner) {
-          final dividerWidth = 12.0;
-          final available = inner.maxWidth - dividerWidth;
+          final available = inner.maxWidth - 12;
           final inspectorWidth = available * _inspectorFraction;
-          final channelWidth = available - inspectorWidth;
           return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SizedBox(width: channelWidth, child: _channelPanel(columns)),
-            Focus(
-              focusNode: _dividerFocusNode,
-              onFocusChange: (_) => setState(() {}),
-              onKeyEvent: (node, event) {
-                if (event is! KeyDownEvent) return KeyEventResult.ignored;
-                if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                  _adjustInspector(0.02);
-                  return KeyEventResult.handled;
-                }
-                if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                  _adjustInspector(-0.02);
-                  return KeyEventResult.handled;
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Semantics(
-                container: true,
-                focused: _dividerFocusNode.hasFocus,
-                label: 'Mixer inspector width',
-                value: '${(_inspectorFraction * 100).round()} percent',
-                increasedValue: '${((_inspectorFraction + 0.02).clamp(0.24, 0.52) * 100).round()} percent',
-                decreasedValue: '${((_inspectorFraction - 0.02).clamp(0.24, 0.52) * 100).round()} percent',
-                onIncrease: () => _adjustInspector(0.02),
-                onDecrease: () => _adjustInspector(-0.02),
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.resizeColumn,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onHorizontalDragUpdate: (details) => _adjustInspector(-details.delta.dx / available),
-                    child: SizedBox(width: dividerWidth, height: 520,
-                      child: Center(child: Container(width: 2, height: 72,
-                        decoration: BoxDecoration(color: Neon.blue, borderRadius: BorderRadius.circular(2)))),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            SizedBox(width: inspectorWidth,
-              child: _ModuleInspector(state: s, onOpenBuilder: widget.onOpenBuilder)),
+            SizedBox(width: available - inspectorWidth, child: _strips(height, wide: true)),
+            _divider(available, height),
+            SizedBox(width: inspectorWidth, height: height, child: SingleChildScrollView(
+              child: _ModuleInspector(state: s, onOpenBuilder: widget.onOpenBuilder))),
           ]);
-        })
-      else ...[
-        SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(value: 0, label: Text('Channels'), icon: Icon(Icons.tune)),
-            ButtonSegment(value: 1, label: Text('Focused editor'), icon: Icon(Icons.edit_note)),
-          ],
-          selected: {_mobilePage},
-          showSelectedIcon: false,
-          onSelectionChanged: (value) => setState(() => _mobilePage = value.first),
-        ),
-        const SizedBox(height: 12),
-        if (_mobilePage == 0)
-          if (s.project.layers.isEmpty)
-            const NeonPanel(child: Text('No channels yet. Add a track in Arranger.'))
-          else
-            for (var i = 0; i < s.project.layers.length; i++)
-              _MobileChannelRow(
-                state: s,
-                layer: s.project.layers[i],
-                index: i,
-                selected: s.selectedLayerId == s.project.layers[i].id,
-                onSelect: () => setState(() {
-                  s.selectLayer(s.project.layers[i]);
-                  _mobilePage = 1;
-                }),
-              )
-        else
-          _MobileFocusedEditor(state: s, onOpenBuilder: widget.onOpenBuilder),
-      ],
+        }),
     ]);
   });
 }
 
-class _MobileChannelRow extends StatelessWidget {
-  const _MobileChannelRow({
-    required this.state,
-    required this.layer,
-    required this.index,
-    required this.selected,
-    required this.onSelect,
-  });
-  final AppState state;
-  final LayerDoc layer;
-  final int index;
-  final bool selected;
-  final VoidCallback onSelect;
+/// "72%" to 0.72; null when it isn't a number.
+double? _parseLevel(String text) {
+  final v = double.tryParse(text.replaceAll('%', '').trim());
+  return v == null || !v.isFinite ? null : (v / 100).clamp(0.0, 1.0).toDouble();
+}
+
+/// "C" or "0" is centre, "30L" or "-30" is 30% left, "30R" or "30" is 30% right; null when it isn't a pan.
+double? _parsePan(String text) {
+  final t = text.trim().toUpperCase();
+  if (t == 'C') return 0;
+  final left = t.endsWith('L'), right = t.endsWith('R');
+  final v = double.tryParse(left || right ? t.substring(0, t.length - 1).trim() : t);
+  if (v == null || !v.isFinite) return null;
+  return ((left ? -v.abs() : right ? v.abs() : v) / 100).clamp(-1.0, 1.0).toDouble();
+}
+
+String _levelText(double v) => '${(v * 100).round()}%';
+String _panText(double v) => v.abs() < .01 ? 'C' : '${(v.abs() * 100).round()}${v < 0 ? 'L' : 'R'}';
+
+/// Asks for a typed value; [apply] gets it only if it parses.
+Future<void> _typeValue(BuildContext context, {required String title, required String initial,
+    required double? Function(String) parse, required void Function(double) apply}) async {
+  final v = await showDialog<double>(context: context,
+    builder: (context) => _ValueDialog(title: title, initial: initial, parse: parse));
+  if (v != null) apply(v);
+}
+
+class _ValueDialog extends StatefulWidget {
+  const _ValueDialog({required this.title, required this.initial, required this.parse});
+  final String title, initial;
+  final double? Function(String) parse;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: NeonPanel(
-      color: selected ? Neon.blue : Neon.layer(layer.color),
-      padding: const EdgeInsets.fromLTRB(10, 6, 6, 8),
+  State<_ValueDialog> createState() => _ValueDialogState();
+}
+
+class _ValueDialogState extends State<_ValueDialog> {
+  late final _text = TextEditingController(text: widget.initial);
+  bool _bad = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _done() {
+    final v = widget.parse(_text.text);
+    if (v == null) {
+      setState(() => _bad = true);
+    } else {
+      Navigator.pop(context, v);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: TextField(controller: _text, autofocus: true, onSubmitted: (_) => _done(),
+      decoration: InputDecoration(errorText: _bad ? 'Not a value' : null)),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      TextButton(onPressed: _done, child: const Text('Set')),
+    ],
+  );
+}
+
+/// A value under a control: tap it to type a new one.
+class _TypedValue extends StatelessWidget {
+  const _TypedValue({super.key, required this.text, required this.tooltip, required this.color, required this.onTap});
+  final String text, tooltip;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(message: tooltip, child: InkWell(
+    onTap: onTap,
+    child: SizedBox(height: 36, child: Center(child: Text(text, style: Neon.code(size: 11, color: color)))),
+  ));
+}
+
+/// An upright fader: drag up and down.
+class _Fader extends StatelessWidget {
+  const _Fader({super.key, required this.value, required this.color, required this.label, required this.onChanged});
+  final double value;
+  final Color color;
+  final String label;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) => RotatedBox(quarterTurns: 3, child: Slider(
+    value: value.clamp(0.0, 1.0).toDouble(), min: 0, max: 1, activeColor: color,
+    semanticFormatterCallback: (v) => '$label ${(v * 100).round()}%',
+    onChanged: onChanged,
+  ));
+}
+
+class _MasterStrip extends StatelessWidget {
+  const _MasterStrip({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = state;
+    return SizedBox(width: 120, child: NeonPanel(
+      color: Neon.pink,
+      padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
       child: ValueListenableBuilder<int>(
-        valueListenable: state.layerValueTick(layer.id),
-        // Compact on a phone (owner, 2026-11-05): name, M, S and the editor on one row; level and pan side by side
-        // under it, then the meter.
-        builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(height: 40, child: Row(children: [
-            Expanded(child: InkWell(
-              onTap: onSelect,
-              child: Align(alignment: Alignment.centerLeft, child: Text(layer.name, maxLines: 1,
-                overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800))),
-            )),
-            ToggleChip(label: 'M', size: 40, tooltip: layer.mute ? 'Unmute' : 'Mute', on: layer.mute, color: Neon.yellow,
-              onTap: () => state.mixLayer(layer, mute: !layer.mute)),
-            const SizedBox(width: 6),
-            ToggleChip(label: 'S', size: 40, tooltip: layer.solo ? 'Unsolo' : 'Solo', on: layer.solo, color: Neon.blue,
-              onTap: () => state.mixLayer(layer, solo: !layer.solo)),
-            IconButton(tooltip: 'Open focused channel editor', onPressed: onSelect,
-              padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 44, minHeight: 40),
-              icon: const Icon(Icons.chevron_right, color: Neon.blue)),
+        valueListenable: s.masterValueTick,
+        builder: (context, _, _) => Column(children: [
+          const SizedBox(height: 28, child: Center(child: Text('MASTER',
+            style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800, fontSize: 12)))),
+          Expanded(child: Row(children: [
+            Expanded(child: _Fader(key: const ValueKey('fader-master'), value: s.project.master, color: Neon.pink,
+              label: 'Master level', onChanged: s.setMaster)),
+            SizedBox(width: 10, child: PeakMeter(state: s, read: () => s.meters.peakL, color: Neon.blue, vertical: true)),
+            const SizedBox(width: 3),
+            SizedBox(width: 10, child: PeakMeter(state: s, read: () => s.meters.peakR, color: Neon.green, vertical: true)),
+            const SizedBox(width: 4),
           ])),
-          SizedBox(height: 44, child: Row(children: [
-            const Icon(Icons.volume_up, size: 14, color: Neon.dim),
-            Expanded(flex: 3, child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
-              semanticFormatterCallback: (v) => 'Level ${(v * 100).round()}%',
-              activeColor: Neon.green, onChanged: (v) => state.mixLayer(layer, volume: v))),
-            SizedBox(width: 34, child: Text('${(layer.volume * 100).round()}%',
-              textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.green))),
-            const SizedBox(width: 6),
-            Expanded(flex: 2, child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
-              semanticFormatterCallback: (v) => v.abs() < .01 ? 'Pan centre' : 'Pan ${(v.abs() * 100).round()}% ${v < 0 ? 'left' : 'right'}',
-              activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v))),
-            SizedBox(width: 30, child: Text(layer.pan.abs() < .01 ? 'C' :
-              '${(layer.pan.abs() * 100).round()}${layer.pan < 0 ? 'L' : 'R'}',
-              textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.blue))),
-          ])),
-          PeakMeter(key: ValueKey(layer.id), state: state,
-            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
-            color: Neon.green),
+          PeakReadout(key: const ValueKey('master-peak-l'), state: s, read: () => s.meters.peakL,
+            style: Neon.code(size: 10, color: Neon.blue)),
+          PeakReadout(key: const ValueKey('master-peak-r'), state: s, read: () => s.meters.peakR,
+            style: Neon.code(size: 10, color: Neon.green)),
+          _TypedValue(key: const ValueKey('level-master'), text: _levelText(s.project.master),
+            tooltip: 'Type master level', color: Neon.pink,
+            onTap: () => _typeValue(context, title: 'Master level (%)', initial: '${(s.project.master * 100).round()}',
+              parse: _parseLevel, apply: s.setMaster)),
         ]),
       ),
-    ),
-  );
+    ));
+  }
 }
 
-class _MobileFocusedEditor extends StatelessWidget {
-  const _MobileFocusedEditor({required this.state, required this.onOpenBuilder});
-  final AppState state;
-  final VoidCallback onOpenBuilder;
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: state,
-    builder: (context, _) {
-      final layers = state.project.layers;
-      final selected = layers.where((layer) => layer.id == state.selectedLayerId).firstOrNull ?? layers.firstOrNull;
-      if (selected == null) {
-        return const NeonPanel(child: Text('Add a track in Arranger to open its focused editor.'));
-      }
-      final index = layers.indexOf(selected);
-      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        NeonPanel(color: Neon.blue, child: DropdownButton<String>(
-          value: selected.id,
-          isExpanded: true,
-          underline: const SizedBox.shrink(),
-          items: [for (final layer in layers) DropdownMenuItem(value: layer.id, child: Text(layer.name))],
-          onChanged: (id) {
-            final layer = layers.where((item) => item.id == id).firstOrNull;
-            if (layer != null) state.selectLayer(layer);
-          },
-        )),
-        const SizedBox(height: 10),
-        SizedBox(height: 340 + (selected.chain.length > 3 ? (selected.chain.length - 3) * 24.0 : 0),
-          child: _ChannelStrip(state: state, layer: selected, index: index)),
-        const SizedBox(height: 12),
-        _ModuleInspector(state: state, onOpenBuilder: onOpenBuilder),
-      ]);
-    },
-  );
-}
-
+/// One track's or folder's strip, top to bottom: name, chain slots (or the folder's bus switch), route, pan, fader
+/// and meter, level and peak, M and S.
 class _ChannelStrip extends StatelessWidget {
-  const _ChannelStrip({required this.state, required this.layer, required this.index});
+  const _ChannelStrip({required this.state, required this.layer, required this.index, required this.onSlot});
   final AppState state;
   final LayerDoc layer;
   final int index;
+  final ValueChanged<String> onSlot;
+
+  Widget _slot(String id, Color color) {
+    final selected = state.selectedLayerId == layer.id && state.selectedModuleId == id;
+    final name = state.project.module(id)?.name ?? 'Missing module';
+    final role = id == layer.generatorId ? 'instrument' : 'effect';
+    return Semantics(button: true, selected: selected, label: '${layer.name} $role $name', excludeSemantics: true,
+      child: Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Material(
+        color: selected ? color.withValues(alpha: 0.28) : Neon.panelHi,
+        borderRadius: BorderRadius.circular(4),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: () => onSlot(id),
+          child: Container(
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 5),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              border: Border(left: BorderSide(color: color, width: 3)),
+            ),
+            alignment: Alignment.centerLeft,
+            child: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
+          ),
+        ),
+      ),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
     final folders = state.project.layers.where((item) => item.isFolder && item.id != layer.id).toList();
     final routeId = folders.any((folder) => folder.id == layer.parentId) ? layer.parentId : null;
-    return NeonPanel(
-      color: state.selectedLayerId == layer.id ? Neon.blue : Neon.layer(layer.color),
-      padding: const EdgeInsets.all(10),
+    final tint = Neon.layer(layer.color);
+    return SizedBox(width: _stripWidth, child: NeonPanel(
+      color: state.selectedLayerId == layer.id ? Neon.blue : tint,
+      padding: const EdgeInsets.fromLTRB(5, 6, 5, 6),
       child: ValueListenableBuilder<int>(
         valueListenable: state.layerValueTick(layer.id),
-        builder: (context, _, _) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Expanded(child: InkWell(
-                onTap: () => state.selectLayer(layer),
-                child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800)),
-              )),
-              IconButton(tooltip: layer.mute ? 'Unmute' : 'Mute', onPressed: () => state.mixLayer(layer, mute: !layer.mute),
-                icon: Icon(Icons.volume_off, color: layer.mute ? Neon.pink : Neon.dim)),
-              IconButton(tooltip: layer.solo ? 'Unsolo' : 'Solo', onPressed: () => state.mixLayer(layer, solo: !layer.solo),
-                icon: Icon(Icons.headphones, color: layer.solo ? Neon.yellow : Neon.dim)),
-            ]),
-            if (layer.isFolder)
-              Row(children: [
-                const Expanded(child: Text('GROUP BUS', style: TextStyle(color: Neon.dim, fontSize: 10))),
-                Switch.adaptive(
-                  value: layer.busEnabled,
-                  onChanged: (v) => state.setFolderBus(layer, v),
-                ),
+        builder: (context, _, _) => Column(children: [
+          InkWell(
+            onTap: () => state.selectLayer(layer),
+            child: Container(
+              height: 32,
+              decoration: BoxDecoration(border: Border(top: BorderSide(color: tint, width: 3))),
+              alignment: Alignment.center,
+              child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 11)),
+            ),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(height: 3 * 43, child: layer.isFolder
+            ? Column(children: [
+                const Text('GROUP BUS', style: TextStyle(color: Neon.dim, fontSize: 10)),
+                Switch.adaptive(value: layer.busEnabled, onChanged: (v) => state.setFolderBus(layer, v)),
               ])
-            else ...[
-              if (layer.chain.isEmpty)
-                const Text('No generator or effects', style: TextStyle(color: Neon.dim, fontSize: 11))
-              else
-                Wrap(spacing: 4, runSpacing: 2, children: [
+            : layer.chain.isEmpty
+              ? const Center(child: Text('No instrument', style: TextStyle(color: Neon.dim, fontSize: 10)))
+              // A chain is a handful of slots: all built, scrolling inside the strip when there are more than three.
+              : SingleChildScrollView(child: Column(children: [
                   for (final id in layer.chain)
-                    ActionChip(
-                      label: Text(state.project.module(id)?.name ?? 'Missing module',
-                        maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
-                      onPressed: () { state.selectLayer(layer); state.selectModule(id); },
-                      side: const BorderSide(color: Neon.line),
-                      backgroundColor: Neon.panelHi,
-                    ),
-                ]),
-              Row(children: [
-                const SizedBox(width: 48, child: Text('ROUTE', style: TextStyle(color: Neon.dim, fontSize: 10))),
-                Expanded(child: DropdownButton<String?>(
-                  value: routeId,
-                  isExpanded: true,
-                  underline: const SizedBox.shrink(),
-                  items: [
-                    const DropdownMenuItem<String?>(value: null, child: Text('Master')),
-                    for (final folder in folders)
-                      DropdownMenuItem<String?>(value: folder.id, child: Text(folder.name,
-                        maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  ],
-                  onChanged: (id) { state.moveLayerIntoFolder(layer, id); },
-                )),
-              ]),
-            ],
-            const SizedBox(height: 6),
-            PeakMeter(key: ValueKey(layer.id), state: state,
+                    _slot(id, id == layer.generatorId ? Neon.green : Neon.pink),
+                ]))),
+          if (!layer.isFolder)
+            // Where the track's sound goes: the master or a folder's bus.
+            SizedBox(height: 40, child: Tooltip(message: '${layer.name} output', child: DropdownButton<String?>(
+              value: routeId,
+              isExpanded: true,
+              isDense: true,
+              underline: const SizedBox.shrink(),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 10),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('Master')),
+                for (final folder in folders)
+                  DropdownMenuItem<String?>(value: folder.id, child: Text(folder.name,
+                    maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: (id) { state.moveLayerIntoFolder(layer, id); },
+            ))),
+          SizedBox(height: 40, child: Slider(
+            key: ValueKey('pan-${layer.id}'),
+            value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1, activeColor: Neon.blue,
+            semanticFormatterCallback: (v) => v.abs() < .01 ? '${layer.name} pan centre'
+              : '${layer.name} pan ${(v.abs() * 100).round()}% ${v < 0 ? 'left' : 'right'}',
+            onChanged: (v) => state.mixLayer(layer, pan: v),
+          )),
+          _TypedValue(key: ValueKey('pan-value-${layer.id}'), text: _panText(layer.pan), tooltip: 'Type ${layer.name} pan',
+            color: Neon.blue, onTap: () => _typeValue(context, title: 'Pan (C, 30L, 30R or -30)',
+              initial: _panText(layer.pan), parse: _parsePan, apply: (v) => state.mixLayer(layer, pan: v))),
+          Expanded(child: Row(children: [
+            Expanded(child: _Fader(key: ValueKey('fader-${layer.id}'), value: layer.volume, color: Neon.green,
+              label: '${layer.name} level', onChanged: (v) => state.mixLayer(layer, volume: v))),
+            SizedBox(width: 10, child: PeakMeter(key: ValueKey(layer.id), state: state,
               read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
-              color: Neon.green),
-            const Spacer(),
-            Row(children: [
-              const SizedBox(width: 48, child: Text('LEVEL', style: TextStyle(color: Neon.dim, fontSize: 10))),
-              Expanded(child: Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
-                activeColor: Neon.green, onChanged: (v) => state.mixLayer(layer, volume: v))),
-              SizedBox(width: 38, child: Text((layer.volume * 100).round().toString(),
-                textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.green))),
-            ]),
-            Row(children: [
-              const SizedBox(width: 48, child: Text('PAN', style: TextStyle(color: Neon.dim, fontSize: 10))),
-              Expanded(child: Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
-                activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v))),
-              SizedBox(width: 38, child: Text(layer.pan.abs() < .01 ? 'C' :
-                (layer.pan.abs() * 100).round().toString() + (layer.pan < 0 ? 'L' : 'R'),
-                textAlign: TextAlign.end, style: Neon.code(size: 11, color: Neon.blue))),
-            ]),
-          ],
-        ),
+              color: Neon.green, vertical: true)),
+            const SizedBox(width: 4),
+          ])),
+          PeakReadout(state: state, read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
+            style: Neon.code(size: 10, color: Neon.dim)),
+          _TypedValue(key: ValueKey('level-${layer.id}'), text: _levelText(layer.volume), tooltip: 'Type ${layer.name} level',
+            color: Neon.green, onTap: () => _typeValue(context, title: 'Level (%)',
+              initial: '${(layer.volume * 100).round()}', parse: _parseLevel,
+              apply: (v) => state.mixLayer(layer, volume: v))),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            ToggleChip(label: 'M', size: 40, tooltip: layer.mute ? 'Unmute ${layer.name}' : 'Mute ${layer.name}', on: layer.mute, color: Neon.yellow,
+              onTap: () => state.mixLayer(layer, mute: !layer.mute)),
+            const SizedBox(width: 6),
+            ToggleChip(label: 'S', size: 40, tooltip: layer.solo ? 'Unsolo ${layer.name}' : 'Solo ${layer.name}', on: layer.solo, color: Neon.blue,
+              onTap: () => state.mixLayer(layer, solo: !layer.solo)),
+          ]),
+        ]),
       ),
-    );
+    ));
   }
 }
 
@@ -390,7 +421,7 @@ class _ModuleInspector extends StatelessWidget {
           icon: const Icon(Icons.open_in_new, size: 16), label: const Text('Open in Builder')),
       ]),
       if (module == null)
-        const Text('Select a generator, effect or instrument in Builder to inspect its parameters.')
+        const Text('Tap a chain slot to inspect its parameters.')
       else ...[
         Text(module.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         Text(info?.summary.isNotEmpty == true ? info!.summary : state.kindOf(module.id),
