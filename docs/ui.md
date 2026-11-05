@@ -122,7 +122,7 @@ The broader UI specification below records design intent as well as current beha
   - Tab and arrow keys move focus between panels and inside grids, with a visible neon focus ring.
   - Enter opens or plays. The Menu key or Shift+F10 opens the same options as a long-press.
   - Every control can be adjusted from the keyboard: arrows for steps, Shift+arrows for fine steps, typing a number to set it.
-- **Shortcuts like Reaper's where they overlap:** Space for play/stop, Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
+- **Shortcuts like Reaper's where they overlap:** Space for play/pause (owner, 2026-11-05: Space pauses, and Shift+Space stops), Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
 - **Workspace shortcuts:** Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
 - **Shortcut overlay:** `?` shows every shortcut for the current screen.
 - **Customisable, like Reaper** (owner, 2026-10-28): every command is an action with keys you can change per area, plus macros and your own toolbars. The draft is in [actions](actions.md).

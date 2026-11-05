@@ -180,7 +180,7 @@ Latency is a workload property, not a universal requirement. Report known/estima
 
 ### Quality and determinism
 
-**Owner decision (2026-11-03):** offline renders and exports are bit-identical on every platform. Live preview may use faster, non-identical paths only when they are labelled as preview modes. **[Fact, 2026-11-05]** Note previews are such a live-only path: they never reach renders or exports ([engine status](engine-build-status.md)).
+**Owner decision (2026-11-03):** offline renders and exports are bit-identical on every platform. Live preview may use faster, non-identical paths only when they are labelled as preview modes. **[Fact, 2026-11-05]** Note previews are such a live-only path: they never reach renders or exports ([engine status](engine-build-status.md)). Resuming from a pause (`caw_engine_play_at`) is live only too: each track starts its loop pass at that step after a 10 ms fade in, notes that began earlier are not heard, and renders still start at 0.
 
 Keep deterministic mode and golden-render contract. SIMD, multithreading and GPU paths must be bit-equivalent where promised, or explicitly identified as a different render mode with separate tests and a user-visible choice. Parallelize independent work; never introduce races or nondeterministic ordering into shared state. Optimization is not permission to change sound silently.
 

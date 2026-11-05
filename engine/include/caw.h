@@ -118,6 +118,10 @@ CAW_API void caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch);
 CAW_API void caw_engine_note_off(CawEngine* e, int32_t id);
 CAW_API void caw_engine_notes_off(CawEngine* e);
 CAW_API void caw_engine_play(CawEngine* e);
+/* Plays from `step` sixteenth steps into the project loop (fractions allowed), so a pause resumes where it stopped,
+   on the same beat even if the tempo changed meanwhile; outside the loop (or not finite) it starts at 0. It fades in
+   over 10 ms. Notes that began before it are not heard, and a module's trig fires at its next pass, not here. */
+CAW_API void caw_engine_play_at(CawEngine* e, double step);
 CAW_API void caw_engine_stop(CawEngine* e);
 CAW_API void caw_engine_clear_overload(CawEngine* e);
 CAW_API void caw_engine_meters(CawEngine* e, CawMeters* out);

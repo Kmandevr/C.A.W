@@ -56,7 +56,7 @@ Regression coverage added across these slices includes 8,195 graph nodes/8,194 c
 
 - Layer slots grow within the memory budget (F7.3); 32 voices; 6 VM call arguments; 1,024 VM registers; 64 KiB VM source; 8 MiB state per module; ratchets up to 8.
 - MIDI file size remains 16 MiB; MIDI event count remains 65,536; MIDI 2.0 input queue is 1,024 and drops newest with a counter.
-- Command queue is bounded at 1,024; sender times out after about two seconds. Project updates propagate key failures, but standalone transport/control methods still ignore the result.
+- Command queue is bounded at 1,024; sender times out after about two seconds. Project updates propagate key failures, but standalone transport/control methods (play, play from a position, stop) still ignore the result.
 - Retirement queue is 1,024 and pending retirement list is 256. Commands reserve worst-case retirement capacity before consumption; callback-side swaps/removals defer when capacity is exhausted rather than dropping pointers. Stress verification of sustained saturation remains.
 - Project-state budget is hardware-derived and enforced; graph working share has a conversion helper but is not yet connected to active Engine graph compilation. Compile and retirement shares are not yet consumed.
 - Exports/imports are dynamically sized. Per-slot export buffers use a stable pointer table and lazily allocated storage bounded by EngineResourceBudget.graphWorkingBytes; allocation/budget failures are explicit. The graph-working share is currently also the export-pool budget and will need a shared allocator when GraphExecutor is integrated.

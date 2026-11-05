@@ -229,6 +229,8 @@ class KeyRouterState extends State<KeyRouter> {
     switch (id) {
       case 'transport.playstop':
         s.togglePlay();
+      case 'transport.stop':
+        s.stopPlayback();
       case 'transport.tap':
         s.tapTempo();
       case 'edit.undo':

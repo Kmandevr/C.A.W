@@ -1923,6 +1923,7 @@ const Map<String, IconData> _actionIcons = {
   'roll.gen.reverse': Icons.swap_horiz,
   'roll.gen.invertPitch': Icons.swap_vert,
   'transport.playstop': Icons.play_arrow,
+  'transport.stop': Icons.stop,
 };
 
 /// Actions the roll can't run yet; they stay in the keymap but don't show on its toolbar.

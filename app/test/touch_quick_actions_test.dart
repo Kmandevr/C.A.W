@@ -24,7 +24,7 @@ void main() {
       ),
     ));
 
-    await tester.tap(find.text('Play / stop'));
+    await tester.tap(find.text('Play / pause'));
     expect(calls, [ActionRef.action('transport.playstop')]);
   });
 

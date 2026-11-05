@@ -26,7 +26,9 @@ const Map<Area, List<String>> standardToolbars = {
 /// `roll.edit.duplicate`).
 const List<ActionDef> standardActions = [
   // Global.
-  ActionDef('transport.playstop', 'Play / stop', _g, defaultKeys: ['Space']),
+  // The id stays from when Space stopped, so saved keymaps keep it.
+  ActionDef('transport.playstop', 'Play / pause', _g, description: 'Resumes where it paused', defaultKeys: ['Space']),
+  ActionDef('transport.stop', 'Stop', _g, description: 'The next play starts from the beginning', defaultKeys: ['Shift+Space']),
   ActionDef('edit.undo', 'Undo', _g, defaultKeys: ['Ctrl+Z']),
   ActionDef('edit.redo', 'Redo', _g, defaultKeys: ['Ctrl+Shift+Z', 'Ctrl+Y']),
   ActionDef('project.save', 'Save now', _g, description: 'Projects also autosave', defaultKeys: ['Ctrl+S']),
