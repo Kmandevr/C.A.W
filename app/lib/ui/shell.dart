@@ -273,6 +273,25 @@ class _TransportBar extends StatelessWidget {
             ]);
           },
         ),
+        // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
+        IconButton(
+          key: const ValueKey('transport-undo'),
+          tooltip: 'Undo (Ctrl+Z)',
+          color: Neon.text,
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+          icon: const Icon(Icons.undo),
+          onPressed: state.canUndo ? state.undo : null,
+        ),
+        IconButton(
+          key: const ValueKey('transport-redo'),
+          tooltip: 'Redo (Ctrl+Shift+Z)',
+          color: Neon.text,
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+          icon: const Icon(Icons.redo),
+          onPressed: state.canRedo ? state.redo : null,
+        ),
         IconButton(
           tooltip: 'Layout and panels',
           color: Neon.dim,

@@ -231,6 +231,10 @@ class KeyRouterState extends State<KeyRouter> {
         s.togglePlay();
       case 'transport.tap':
         s.tapTempo();
+      case 'edit.undo':
+        if (!s.undo()) _say('Nothing to undo');
+      case 'edit.redo':
+        if (!s.redo()) _say('Nothing to redo');
       case 'project.save':
         s.flush();
       case 'view.actions':

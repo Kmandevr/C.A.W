@@ -1,8 +1,8 @@
 # Handoff
 
-Commit: 454b395
+Commit: d471cce
 
-Branch: claude/caw-engine-foundation-skpirb (on Main 454b395; transport tempo #19, U1 PR5 part 1, PR open)
+Branch: claude/caw-engine-foundation-skpirb (on Main d471cce; project undo/redo, U1 PR5 part 2, PR open)
 
 ## Goal
 Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `Main`. Claude merges each once CI is green.
@@ -20,10 +20,11 @@ Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `
 - Mixer strips, U6 part 1 (#108): upright Reaper-style strips with chain slots, typed level and pan, `PeakMeter(vertical:)`.
 - Typed parameter values, U6 part 2 (#109): `typeValue`, `parseParam` in `app/lib/ui/widgets.dart`.
 - U1 PR4 (#110): no startup screen; `openStorage` in `app/lib/model/app_state.dart` opens the last project.
-- U1 PR5 part 1 (this branch): transport tempo (#19) and bar.beat in `app/lib/ui/shell.dart`.
+- U1 PR5 part 1 (#111): transport tempo (#19) and bar.beat in `app/lib/ui/shell.dart`.
+- U1 PR5 part 2 (this branch): project undo/redo, `app/lib/model/history.dart`.
 
 ## Next
-- Merge the tempo PR when CI is green. Then U1 PR5 part 2: project-wide undo and redo in the transport (design first).
+- Merge the undo PR when CI is green. Then the owner's request (2026-11-05): Space pauses and resumes where it stopped (needs a small engine play-from-position call), and a key bindings editor.
 - Piano roll still to build: bend handles with detents, freehand curves, the context toolbar middle, scale highlight, snap to scale, ghost notes.
 - Arrangement automation-lane snapping (U3).
 

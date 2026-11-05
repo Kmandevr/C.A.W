@@ -238,10 +238,13 @@ class _BuilderScreenState extends State<BuilderScreen> {
     return m.source.isEmpty || info == null || !info.ok || (info.params.isEmpty && !info.isLibrary);
   }
 
+  /// Loads the selected module's code: on a new selection, or when its source changed outside the editor (an undo).
+  /// Typing writes the source straight back, so the two only differ after such a change.
   void _syncEditor(ModuleDoc? m) {
-    if (m?.id == _shownId) return;
+    final source = m?.source ?? '';
+    if (m?.id == _shownId && _code.text == source) return;
     _shownId = m?.id;
-    _code.text = m?.source ?? '';
+    _code.text = source;
   }
 
   /// The built-in functions plus the project's own libraries; null if the engine library can't load.

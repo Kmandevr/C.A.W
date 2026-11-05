@@ -1,5 +1,6 @@
 // App state: settings, the startup choice, the open project, engine sync, autosave, meters and every edit.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import '../engine/execution.dart';
 import '../platform/resource_signals.dart';
 import 'poller.dart';
 import 'project.dart';
+import 'history.dart';
 import 'pattern_doc.dart';
 import 'settings.dart';
 import 'storage.dart';
@@ -244,6 +246,7 @@ class AppState extends ChangeNotifier {
     _liveTimer?.cancel();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
+    _historyTimer?.cancel();
     masterValueTick.dispose();
     values.dispose();
     tick.dispose();
@@ -425,8 +428,73 @@ class AppState extends ChangeNotifier {
   }
 
   void _save() {
+    _recordHistory();
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 500), flush);
+  }
+
+  // ---------- undo and redo (the whole project) ----------
+
+  /// Every project edit saves, so every edit lands here: a burst of edits, until a 600 ms pause, is one step.
+  final ProjectHistory history = ProjectHistory();
+  Timer? _historyTimer;
+  bool _restoring = false;
+
+  String _snapshot() => jsonEncode(project.toJson());
+
+  void _recordHistory() {
+    if (starting || _restoring) return;
+    final could = (history.canUndo, history.canRedo);
+    history.begin();
+    // Drags save without notifying (so they stay light); the transport's buttons still need to see a flip.
+    if ((history.canUndo, history.canRedo) != could) notifyListeners();
+    _historyTimer?.cancel();
+    _historyTimer = Timer(const Duration(milliseconds: 600), () {
+      final was = (history.canUndo, history.canRedo);
+      history.settle(_snapshot());
+      if ((history.canUndo, history.canRedo) != was) notifyListeners();
+    });
+  }
+
+  bool get canUndo => history.canUndo;
+  bool get canRedo => history.canRedo;
+
+  /// Goes back one step of project edits (the transport's undo, Ctrl+Z outside an editor with its own).
+  bool undo() => _restore(history.undo(_snapshot()));
+
+  bool redo() => _restore(history.redo(_snapshot()));
+
+  bool _restore(String? snapshot) {
+    _historyTimer?.cancel();
+    if (snapshot == null) return false;
+    _restoring = true;
+    try {
+      project = ProjectDoc.fromJson(jsonDecode(snapshot) as Map<String, dynamic>);
+      // The other undo stacks and the last good Run sources describe the project before the restore.
+      _lastGoodRunSources.clear();
+      _libraryUndo.clear();
+      _libraryRedo.clear();
+      _automationUndo.clear();
+      _automationRedo.clear();
+      masterValueTick.value++;
+      // Ticks of modules and layers the restore removed are dropped (left to their widgets, which go with them).
+      _moduleValueTicks.removeWhere((id, _) => project.module(id) == null);
+      _layerValueTicks.removeWhere((id, _) => project.layers.every((l) => l.id != id));
+      for (final n in _moduleValueTicks.values) { n.value++; }
+      for (final n in _layerValueTicks.values) { n.value++; }
+      timeSelectionStart = timeSelectionEnd = timeSelectionAnchor = null;
+      previewOnly = false;
+      if (project.layers.every((l) => l.id != selectedLayerId)) selectedLayerId = null;
+      if (project.module(selectedModuleId) == null) {
+        selectedModuleId = project.modules.isEmpty ? null : project.modules.first.id;
+      }
+      selectedClipId = null;
+      selectedClipIds.clear();
+      _changed();
+    } finally {
+      _restoring = false;
+    }
+    return true;
   }
 
   Future<void> flush() async {
@@ -1372,6 +1440,8 @@ class AppState extends ChangeNotifier {
     _layerValueTicks.clear();
     project = p;
     openError = null;
+    _historyTimer?.cancel();
+    history.reset(_snapshot());
     masterValueTick.value++;
     info = {};
     blankKinds.clear();

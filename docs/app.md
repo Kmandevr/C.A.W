@@ -20,6 +20,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Top bar:**
   - the crow mark
   - the project name, which opens the project menu: rename, new blank project, new from a template, duplicate, open, delete and **Settings…**
+  - undo and redo of project edits (`lib/model/history.dart`): one step per burst of edits (until a 600 ms pause, so a drag or a run of typing is one step), up to 100 steps; a project opened fresh starts with none. A burst that changed nothing (Run on unedited code) adds no step and keeps redo, and an undo also drops the library and automation undo steps and the time selection, which described the project before it. Ctrl+Z and Ctrl+Shift+Z do the same outside the piano roll, which keeps its own history, and outside a focused text field such as the code editor, which keeps its own text undo; the code editor shows the undone code
   - the tempo, the playhead as bar.beat while playing, and CPU. Tap the tempo to type it (20 to 400 BPM, to 0.1); long-press it for a tap-tempo pad. The T key taps too, with the same timing (taps over two seconds apart start a new measurement, #19)
   - Play/Stop (the space bar on desktop)
 - **Builder** (`lib/ui/builder_screen.dart`):

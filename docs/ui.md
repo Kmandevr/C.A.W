@@ -69,7 +69,7 @@ The application shell shows eight workspaces as docking panels: Builder (Code), 
 
 **Glass (on by default):** a soft ambient background behind see-through panels, cards, track headers and the transport; bottom sheets slide up as frosted glass; sliders, level bars, switches, buttons, M/S toggles and clips have a light fill and a solid outline ([App](app.md), Look).
 
-**Transport:** the project menu, the tempo (tap the BPM to type it, long-press it for a tap-tempo pad; T taps too), the playhead as bar.beat while playing, CPU, the layout button and Play.
+**Transport:** the project menu, the tempo (tap the BPM to type it, long-press it for a tap-tempo pad; T taps too), the playhead as bar.beat while playing, CPU, undo and redo of project edits, the layout button and Play.
 
 **Phone (portrait):** transport at the top, the arrangement above, and the other panels as tabs below it. Inside the arrangement, the track headers sit beside a horizontally scrolling song timeline, with the Arranger's compact mixer panel below the timeline.
 
