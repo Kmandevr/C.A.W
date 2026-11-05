@@ -810,9 +810,6 @@ class _ExporterScreenState extends State<ExporterScreen> {
           padding: const EdgeInsets.only(top: 12),
           child: Text(_message!, style: TextStyle(color: _messageIsError ? Neon.pink : Neon.green)),
         ),
-      const SizedBox(height: 12),
-      const Text('Offline exports use the native C.A.W. renderer with captured project settings. Exact output reproducibility can depend on engine version, platform and module implementation.',
-          style: TextStyle(color: Neon.dim, fontSize: 12)),
     ]);
   }
 

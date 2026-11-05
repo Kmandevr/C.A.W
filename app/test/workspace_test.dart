@@ -217,7 +217,7 @@ void main() {
       home: Scaffold(body: MixerScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    expect(find.text('MIXER / EDITOR'), findsOneWidget);
+    expect(find.text('MASTER OUTPUT'), findsOneWidget);
     expect(find.text('Channels'), findsOneWidget);
     expect(find.text('Bass'), findsOneWidget);
     expect(find.text('MODULE INSPECTOR'), findsNothing);
@@ -245,6 +245,10 @@ void main() {
       home: Scaffold(body: BuilderScreen(state: state)),
     ));
 
+    // A narrow panel keeps the track's mix behind the tune button.
+    expect(find.text('ROUTE'), findsNothing);
+    await tester.tap(find.byTooltip('Track mix'));
+    await tester.pump();
     expect(find.text('ROUTE'), findsOneWidget);
     final routePicker = find.ancestor(
       of: find.text('Master'),
@@ -309,7 +313,7 @@ void main() {
       ),
     ));
 
-    expect(find.text('AUTOMATION'), findsOneWidget);
+    expect(find.text('PROJECT AUTOMATION'), findsOneWidget);
     expect(find.text('VOLUME'), findsOneWidget);
     final sliders = tester.widgetList<Slider>(find.byType(Slider)).toList();
     expect(sliders.length, 4);
@@ -380,7 +384,7 @@ void main() {
     ));
 
     final scrollable = find.byType(Scrollable).first;
-    expect(find.text('ENGINE LAB'), findsOneWidget);
+    expect(find.text('CPU'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('SPECTRUM · 0–24 kHz'), 200, scrollable: scrollable);
     expect(find.text('512-POINT HANN / FFT'), findsOneWidget);
     expect(tester.widgetList<CustomPaint>(find.byType(CustomPaint)).length, greaterThanOrEqualTo(3));
@@ -461,7 +465,7 @@ void main() {
       home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
     ));
 
-    expect(find.text('FILES / PORTABILITY'), findsOneWidget);
+    expect(find.text('CURRENT PROJECT'), findsOneWidget);
     expect(find.text('Portable project'), findsOneWidget);
     expect(find.text('Export .cawproj'), findsOneWidget);
     expect(find.text('Import project'), findsOneWidget);

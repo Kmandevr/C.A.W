@@ -24,7 +24,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
   - Play/Stop (the space bar on desktop)
 - **Builder** (`lib/ui/builder_screen.dart`):
   - a row of module chips (generators green, effects pink, libraries blue, patterns yellow)
-  - a compact active-track panel shared with the Mixer for track selection, volume, pan, mute and solo
+  - a compact active-track panel shared with the Mixer for track selection, volume, pan, mute and solo; below 900 px wide it is one row (track, M, S) and the tune button opens level, pan and route
   - **New:** a blank Sound, Effect, Pattern or Library first, then the templates (including the Acid synth and the Acid line and Chords patterns)
     - A blank module is a truly empty file. A faint hint shows an example header for the chosen kind until you type.
     - The chosen kind isn't saved, so after a restart an empty file shows the Sound hint. With no header the engine plays it as a bytebeat.
@@ -74,18 +74,18 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Mixer / Editor** (`lib/ui/mixer_screen.dart`):
   - a dedicated channel-strip workspace with shared track volume, pan, mute and solo controls
   - channel strips expose existing generator/effect chains, folder-bus enablement and track-to-folder routing
-  - master output level with independent live left/right peak meters (dB scale, -60 to 0 dBFS; track and folder meters read what they send on, after volume and pan) and an inspector for the selected compiled module's real engine parameters
-  - desktop widths above 1200 px show channels and the module inspector side-by-side; drag the divider to resize. Mobile starts with a compact channel list and switches to a focused editor for the selected channel and module inspector
+  - master output level with independent live left/right peak meters (dB scale, -60 to 0 dBFS, with held dB readouts; track and folder meters read what they send on, after volume and pan) and an inspector for the selected compiled module's real engine parameters
+  - desktop widths above 1200 px show channels and the module inspector side-by-side; drag the divider to resize. Mobile starts with a compact channel list (each channel: name, M, S and the editor on one row, level and pan side by side, then a meter) and switches to a focused editor for the selected channel and module inspector
   - parameter edits use the same module parameter map and engine calls as Builder; the Mixer does not own a separate state model
   - the current engine does not yet expose sends, arbitrary buses, stereo width, correlation, loudness, phase or master effect chains through this screen
 - **Engine Lab** (`lib/ui/engine_lab_screen.dart`):
-  - live CPU, left/right peak, playback and overload telemetry
+  - live CPU, left/right peak (held, in dB), playback and overload telemetry; each track's path shows its peak in dB
   - track signal-chain inspection from the project's generator/effect assignments, with live signal pulses driven by the existing meter tick and direct navigation to the selected module in Builder
   - a read-only 512-sample native master scope (mono sum) and a 512-point Hann-window FFT spectrum spanning 0–24 kHz; left/right peak readouts remain independent
   - compiler summaries, errors, warnings, imports and exports from the engine's module information
   - it is an inspector for existing engine capabilities, not yet an editable universal processing graph or sample/buffer debugger
 - **Automation** (`lib/ui/automation_screen.dart`):
-  - edits the existing track volume and pan lanes stored on each `LayerDoc`
+  - edits the existing track volume and pan lanes stored on each `LayerDoc`; tracks with no lanes are one row each in a single list, with + to add one
   - adds/removes lanes; tap the curve to add points, drag existing points directly, remove individual points or use precise step/value sliders
   - the same serialized points are consumed by the Arranger and native engine; plugin parameter, modulation-link and processing-behavior automation remain engine/API dependencies
 - **Exporter** (`lib/ui/exporter_screen.dart`):

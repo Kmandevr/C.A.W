@@ -174,6 +174,10 @@ class PeakMeter extends StatefulWidget {
   /// Where [db] sits along the meter, 0..1.
   static double fraction(double db) => ((db - floorDb) / -floorDb).clamp(0.0, 1.0);
 
+  /// A level for people: "-6.0 dB", "+1.2 dB" over full scale, "-∞ dB" for silence.
+  static String label(double db) =>
+      db <= floorDb ? '-∞ dB' : '${db > 0 ? '+' : ''}${db.toStringAsFixed(1)} dB';
+
   @override
   State<PeakMeter> createState() => PeakMeterState();
 }
@@ -283,6 +287,58 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
       ]),
     ));
   }
+}
+
+/// The highest recent peak in dB, held for [PeakMeter.holdSeconds] so it can be read (the meter's number).
+class PeakReadout extends StatefulWidget {
+  const PeakReadout({super.key, required this.state, required this.read, this.style});
+  final AppState state;
+  final double Function() read;
+  final TextStyle? style;
+
+  @override
+  State<PeakReadout> createState() => _PeakReadoutState();
+}
+
+class _PeakReadoutState extends State<PeakReadout> {
+  final _clock = Stopwatch()..start();
+  double _db = PeakMeter.floorDb;
+  Duration _heldAt = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.tick.addListener(_read);
+  }
+
+  @override
+  void didUpdateWidget(PeakReadout oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.tick.removeListener(_read);
+      widget.state.tick.addListener(_read);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.state.tick.removeListener(_read);
+    super.dispose();
+  }
+
+  void _read() {
+    final d = PeakMeter.db(widget.read());
+    final now = _clock.elapsed;
+    final held = (now - _heldAt).inMicroseconds < PeakMeter.holdSeconds * 1e6;
+    if (d >= _db || !held) {
+      if (d.toStringAsFixed(1) != _db.toStringAsFixed(1)) setState(() {});
+      _db = d;
+      _heldAt = now;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Text(PeakMeter.label(_db), style: widget.style ?? Neon.code(size: 11, color: Neon.dim));
 }
 
 /// A compact square toggle such as M (mute) or S (solo).

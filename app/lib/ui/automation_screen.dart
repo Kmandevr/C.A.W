@@ -13,17 +13,20 @@ class AutomationScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final tracks = state.project.layers.where((l) => !l.isFolder).toList();
     return ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 96), children: [
-      const Text('AUTOMATION', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.w900, fontSize: 12)),
-      const Text('Song-time curves · shared with Arranger and native engine', style: TextStyle(color: Neon.dim, fontSize: 11)),
-      const SizedBox(height: 12),
       _ProjectAutomation(state: state),
       const SizedBox(height: 12),
-      if (tracks.isEmpty) const NeonPanel(child: Text('Create a track in Arranger to begin automating its level or pan.')),
-      for (final layer in tracks) _TrackAutomation(state: state, layer: layer),
-      const SizedBox(height: 12),
-      const NeonPanel(color: Neon.blue, child: Text(
-        'Project automation targets module parameters and shared globals. Track volume and pan remain on their own lanes.',
-        style: TextStyle(color: Neon.dim, fontSize: 12))),
+      if (tracks.isEmpty) const NeonPanel(child: Text('Add a track to automate its volume or pan.')),
+      for (final layer in tracks.where((l) => l.automation.isNotEmpty)) _TrackAutomation(state: state, layer: layer),
+      // Tracks with no lanes yet: one row each, not a card each.
+      if (tracks.any((l) => l.automation.isEmpty))
+        NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('TRACK VOLUME AND PAN', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800, fontSize: 12)),
+          for (final layer in tracks.where((l) => l.automation.isEmpty))
+            Row(children: [
+              Expanded(child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
+              _AddLane(state: state, layer: layer),
+            ]),
+        ])),
     ]);
   }
 }
@@ -190,21 +193,30 @@ class _TrackAutomation extends StatelessWidget {
     child: NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Expanded(child: Text(layer.name, style: const TextStyle(fontWeight: FontWeight.w800))),
-        PopupMenuButton<String>(
-          tooltip: 'Add automation lane',
-          onSelected: (target) => state.addAutomationLane(layer, target),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'volume', child: Text('Track volume')),
-            PopupMenuItem(value: 'pan', child: Text('Track pan')),
-          ],
-          icon: const Icon(Icons.add, color: Neon.blue),
-        ),
+        _AddLane(state: state, layer: layer),
       ]),
-      if (layer.automation.isEmpty)
-        const Text('No automation lanes. Add volume or pan automation.', style: TextStyle(color: Neon.dim, fontSize: 12)),
       for (final lane in layer.automation) _AutomationLane(state: state, layer: layer, lane: lane),
     ])),
   );
+}
+
+/// The + that adds a track's volume or pan lane.
+class _AddLane extends StatelessWidget {
+  const _AddLane({required this.state, required this.layer});
+  final AppState state;
+  final LayerDoc layer;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+        tooltip: 'Add automation lane',
+        onSelected: (target) => state.addAutomationLane(layer, target),
+        itemBuilder: (_) => [
+          if (!layer.automation.any((a) => a.target == 'volume'))
+            const PopupMenuItem(value: 'volume', child: Text('Track volume')),
+          if (!layer.automation.any((a) => a.target == 'pan')) const PopupMenuItem(value: 'pan', child: Text('Track pan')),
+        ],
+        icon: const Icon(Icons.add, color: Neon.blue),
+      );
 }
 
 class _AutomationLane extends StatelessWidget {
