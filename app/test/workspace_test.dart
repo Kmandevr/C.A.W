@@ -83,6 +83,9 @@ void main() {
   });
 
   testWidgets('peak meters rise at once, fall on wall-clock time, hold the peak and show a clip', (tester) async {
+    final wall = PeakMeter.clock, start = tester.binding.clock.now();
+    addTearDown(() => PeakMeter.clock = wall);
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start); // test time, not the runner's speed
     var peak = 0.0;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: PeakMeter(state: state, read: () => peak, color: Colors.green)),
@@ -101,7 +104,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 500));
-    expect(m().shownDb, closeTo(-6.02 - 12, 1.5)); // plus the real time between the two reads
+    expect(m().shownDb, closeTo(-6.02 - 24 * .516, 0.01));
     expect(m().holdDb, closeTo(-6.02, 0.01));
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(seconds: 1));
@@ -121,6 +124,9 @@ void main() {
   });
 
   testWidgets('peak readouts hold the peak in dB, then show silence even after the reads stop', (tester) async {
+    final wall = PeakMeter.clock, start = tester.binding.clock.now();
+    addTearDown(() => PeakMeter.clock = wall);
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start);
     var peak = 0.5;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: PeakReadout(state: state, read: () => peak))));
     state.tick.value++;

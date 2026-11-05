@@ -165,6 +165,12 @@ class PeakMeter extends StatefulWidget {
   /// The meter's range: [floorDb] (empty) to 0 dBFS (full).
   static const floorDb = -60.0;
   static const fallDbPerSecond = 24.0;
+
+  static final _wall = Stopwatch()..start();
+
+  /// The wall clock meters and readouts measure time between reads with; tests drive it from the test clock.
+  @visibleForTesting
+  static Duration Function() clock = () => _wall.elapsed;
   static const holdSeconds = 1.5;
   static const clipSeconds = 3.0;
   static const clipDb = -0.1;
@@ -186,7 +192,6 @@ class PeakMeter extends StatefulWidget {
 class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_frame);
   Duration _last = Duration.zero, _built = Duration.zero;
-  final _clock = Stopwatch()..start();
   Duration _lastRead = Duration.zero;
   double _shownDb = PeakMeter.floorDb, _holdDb = PeakMeter.floorDb;
   double _holdLeft = 0, _clipLeft = 0; // seconds
@@ -224,7 +229,7 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
 
   // A meter read: the peak since the last one. The time since the previous read moves the fall first.
   void _read() {
-    final now = _clock.elapsed;
+    final now = PeakMeter.clock();
     if (!_ticker.isActive) _fall((now - _lastRead).inMicroseconds / 1e6);
     _lastRead = now;
     final peak = widget.read();
@@ -249,7 +254,7 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
   void _frame(Duration elapsed) {
     final dt = (elapsed - _last).inMicroseconds / 1e6;
     _last = elapsed;
-    _lastRead = _clock.elapsed;
+    _lastRead = PeakMeter.clock();
     _fall(dt);
     if (_empty) {
       _ticker.stop();
@@ -302,7 +307,6 @@ class PeakReadout extends StatefulWidget {
 }
 
 class _PeakReadoutState extends State<PeakReadout> {
-  final _clock = Stopwatch()..start();
   double _db = PeakMeter.floorDb;
   Duration _heldAt = Duration.zero;
   // The meter reads stop about a second after the sound does, before the hold ends: this ends the hold anyway.
@@ -337,7 +341,7 @@ class _PeakReadoutState extends State<PeakReadout> {
 
   void _read() {
     final d = PeakMeter.db(widget.read());
-    final now = _clock.elapsed;
+    final now = PeakMeter.clock();
     final held = (now - _heldAt).inMicroseconds < PeakMeter.holdSeconds * 1e6;
     if (d >= _db || !held) {
       _show(d);
