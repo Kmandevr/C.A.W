@@ -6,6 +6,7 @@ updated: 2026-11-05
 
 # Log
 
+- 2026-11-05: Phone cleanup, arrangement (owner): the arrangement toolbar is one sideways-scrolling row of icons on phones, and track headers are compact (name, M, S, a live meter, the instrument in ⋮), so a phone shows a track more.
 - 2026-11-05: Accurate meters (owner): peak meters read in dB (-60 to 0 dBFS) and fall on wall-clock time with a held peak line and a clip colour, so they no longer freeze partway after Stop or fall slower in light mode; track meters read the output after pan (a centred track read 3 dB hot) and folder meters work (they read 0).
 - 2026-11-05: Note previews (owner, #103): notes sound while placed, moved, held or bent, through the track's instrument, effects and mix, stopped or playing, at the note's velocity; a tapped-in note plays its length, a selection its opening chord, a bend follows the edited point; "Hear notes" in ⋮ turns them off. Engine: a note on/pitch/off C API and a stopped preview mode that leaves the transport in place.
 - 2026-11-04: Piano roll, second part (owner): one snap magnet in the toolbar (it replaces the grid, snap, triplets and adaptive buttons in the default toolbar) with a sheet for the time grid, triplets, adaptive and a new saved value grid (`RollLook.valueGrid`); velocity, chance, lane curves, volume and timbre snap to it, pitch points snap in time, and the second-finger bypass covers every drag. Note previews need engine work while stopped: GPT issue #103.

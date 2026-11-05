@@ -151,9 +151,10 @@ class Bar extends StatelessWidget {
 }
 
 /// A peak meter for one layer, folder or the master, on a dB scale: the bar rises at once to each sample peak and
-/// falls at [fallDbPerSecond]; a thin line holds the highest peak for [holdSeconds]; at 0 dBFS or over it turns pink
-/// for [clipSeconds]. It runs on wall-clock time (its own ticker, only while something shows), so it falls the same
-/// on any refresh rate or meter cadence and never freezes partway when the engine goes quiet.
+/// falls at [fallDbPerSecond]; a thin line holds the highest peak for [holdSeconds]; at [clipDb] or over it turns
+/// pink for [clipSeconds]. It runs on wall-clock time, so it falls the same at any meter cadence. While sound comes
+/// in, the meter reads (about 30 a second) move it; once they report silence its own ticker finishes the fall at the
+/// same rate and then stops, so it never freezes partway when the engine goes quiet.
 class PeakMeter extends StatefulWidget {
   const PeakMeter({super.key, required this.state, required this.read, required this.color});
   final AppState state;
@@ -165,6 +166,7 @@ class PeakMeter extends StatefulWidget {
   static const fallDbPerSecond = 24.0;
   static const holdSeconds = 1.5;
   static const clipSeconds = 3.0;
+  static const clipDb = -0.1;
 
   /// A linear peak (1 = 0 dBFS) in dB, [floorDb] for silence.
   static double db(double peak) => peak <= 0 || !peak.isFinite ? floorDb : math.max(floorDb, 20 * math.log(peak) / math.ln10);
@@ -178,7 +180,9 @@ class PeakMeter extends StatefulWidget {
 
 class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_frame);
-  Duration _last = Duration.zero;
+  Duration _last = Duration.zero, _built = Duration.zero;
+  final _clock = Stopwatch()..start();
+  Duration _lastRead = Duration.zero;
   double _shownDb = PeakMeter.floorDb, _holdDb = PeakMeter.floorDb;
   double _holdLeft = 0, _clipLeft = 0; // seconds
 
@@ -211,51 +215,62 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
     super.dispose();
   }
 
-  // A meter read: the peak since the last one.
+  bool get _empty => _shownDb <= PeakMeter.floorDb && _holdDb <= PeakMeter.floorDb && _clipLeft <= 0;
+
+  // A meter read: the peak since the last one. The time since the previous read moves the fall first.
   void _read() {
+    final now = _clock.elapsed;
+    if (!_ticker.isActive) _fall((now - _lastRead).inMicroseconds / 1e6);
+    _lastRead = now;
     final peak = widget.read();
     final d = PeakMeter.db(peak);
-    var changed = false;
-    if (d > _shownDb) {
-      _shownDb = d;
-      changed = true;
-    }
+    if (d > _shownDb) _shownDb = d;
     if (d >= _holdDb && d > PeakMeter.floorDb) {
       _holdDb = d;
       _holdLeft = PeakMeter.holdSeconds;
-      changed = true;
     }
-    if (peak >= 1.0) {
-      _clipLeft = PeakMeter.clipSeconds;
-      changed = true;
+    if (d >= PeakMeter.clipDb) _clipLeft = PeakMeter.clipSeconds;
+    // Sound coming in: the reads drive the meter. Silence: the ticker finishes the fall (the reads may stop soon).
+    if (peak > 0) {
+      _ticker.stop();
+    } else if (!_empty && !_ticker.isActive) {
+      _last = _built = Duration.zero;
+      _ticker.start();
     }
-    if (changed) {
-      if (!_ticker.isActive) {
-        _last = Duration.zero;
-        _ticker.start();
-      }
-      setState(() {});
-    }
+    if (mounted) setState(() {});
   }
 
+  // The tail after the reads report silence: about 30 updates a second, then the ticker stops.
   void _frame(Duration elapsed) {
     final dt = (elapsed - _last).inMicroseconds / 1e6;
     _last = elapsed;
+    _lastRead = _clock.elapsed;
+    _fall(dt);
+    if (_empty) {
+      _ticker.stop();
+    } else if (elapsed - _built < const Duration(milliseconds: 33)) {
+      return;
+    }
+    _built = elapsed;
+    setState(() {});
+  }
+
+  void _fall(double dt) {
+    if (dt <= 0) return;
     _shownDb = math.max(PeakMeter.floorDb, _shownDb - PeakMeter.fallDbPerSecond * dt);
     // The peak line holds, then falls like the bar for whatever part of this frame came after its hold.
     final held = math.min(_holdLeft, dt);
     _holdLeft = math.max(0, _holdLeft - dt);
     _holdDb = math.max(_shownDb, _holdDb - PeakMeter.fallDbPerSecond * (dt - math.max(0, held)));
     if (_clipLeft > 0) _clipLeft -= dt;
-    if (_shownDb <= PeakMeter.floorDb && _holdDb <= PeakMeter.floorDb && _clipLeft <= 0) _ticker.stop();
-    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     final color = clipped ? Neon.pink : widget.color;
     final hold = PeakMeter.fraction(_holdDb);
-    return LayoutBuilder(
+    // Its own layer: a meter moving doesn't repaint the panel around it.
+    return RepaintBoundary(child: LayoutBuilder(
       builder: (context, c) => Stack(alignment: Alignment.centerLeft, children: [
         Bar(value: PeakMeter.fraction(_shownDb), color: color),
         if (hold > 0 && c.maxWidth.isFinite)
@@ -266,18 +281,22 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
             child: IgnorePointer(child: Container(width: 1.5, color: color)),
           ),
       ]),
-    );
+    ));
   }
 }
 
 /// A compact square toggle such as M (mute) or S (solo).
 class ToggleChip extends StatelessWidget {
-  const ToggleChip({super.key, required this.label, required this.on, required this.color, required this.onTap, this.tooltip});
+  const ToggleChip(
+      {super.key, required this.label, required this.on, required this.color, required this.onTap, this.tooltip, this.size = 48});
   final String label;
   final bool on;
   final Color color;
   final VoidCallback onTap;
   final String? tooltip;
+
+  /// Its width; compact track headers use a smaller chip (the height follows, a little flatter).
+  final double size;
 
   @override
   Widget build(BuildContext context) => Tooltip(
@@ -287,8 +306,8 @@ class ToggleChip extends StatelessWidget {
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            width: 48,
-            height: 48,
+            width: size,
+            height: size >= 48 ? size : size * 0.84,
             alignment: Alignment.center,
             // Glass: on is a faint fill with a solid outline (not a solid block); off is outlined only.
             decoration: BoxDecoration(
@@ -301,7 +320,7 @@ class ToggleChip extends StatelessWidget {
                 style: TextStyle(
                     fontWeight: FontWeight.w700,
                     color: on ? (Glass.active ? color : Neon.bg) : Neon.dim,
-                    fontSize: 15)),
+                    fontSize: size >= 48 ? 15 : 12)),
           ),
         ),
       );

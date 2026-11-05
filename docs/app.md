@@ -57,7 +57,8 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
     - Curve mode edits velocity/chance lane curves and per-note expression curves (pitch bend, pressure/volume and timbre); point and segment-bend editing is implemented, with no cap on notes or curve points (F7.1, 2026-11-04). Pattern actions include Euclid, random-in-key, arpeggiate, humanize, chord stamp, legato, reverse and pitch inversion.
 - **Arranger** (`lib/ui/arranger_screen.dart`):
   - the main workspace is a horizontal timeline with a bar ruler and one lane per track (no 64-bar limit since F7.2, 2026-11-04; the ruler and grid paint only the visible span; the Builder's audition scope uses the engine's `CAW_SCOPE_AUDITION` id since F7.3); the former layer-card list has been replaced
-  - tracks have a generator selector, mute/solo controls and a menu for adding MIDI clips from existing pattern modules
+  - track headers are compact (owner, 2026-11-05; UI plan): a colour strip, the name, M and S, a live dB meter (a folder's too) and ⋮, whose menu also picks the instrument and adds MIDI clips from existing pattern modules; a 54 px track puts M and S on the name's row
+  - below 760 px wide the toolbar is one row of icon buttons (add track, zoom, track height, snap, add folder, mixer, settings, track cards) that scrolls sideways, with no heading
   - track height can be set to 54, 76, 96 or 120 px from the timeline toolbar, and the same menu sets the gap between tracks (none, 3, 6, 12 or 20 px; 6 by default, saved in Settings)
   - one grid runs behind every track, through the gaps and spacers and down to the bottom of the view below the last track
   - a track's menu adds or removes a spacer below it: an empty row that only separates tracks on screen. Drag its bottom grip to resize it (8–160 px), or tap × to remove it. It is saved with the project (`space_below`) and never sent to the engine

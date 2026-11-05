@@ -45,7 +45,7 @@ updated: 2026-11-05
 2. **The inline piano roll is about 200 px tall on a phone,** under the track card, the pattern header and the description.
 3. **The timeline hides sound that plays.** A layer with no clips plays its module all song long (`project.dart` sends its pattern directly), but its row says "Add MIDI clip with +". That is four of five template tracks.
 4. **The transport has only play, BPM and CPU.** There is no stop, no position, no loop toggle, and no undo or redo.
-5. **Track headers are cramped.** Names are cut off, and clip labels are clipped at the default height.
+5. **Track headers were cramped** (names cut off, M and S clipped). Fixed 2026-11-05: compact headers with a meter, and a one-row phone toolbar.
 6. **The workspaces don't look like one app.** Each has its own accent colour and card style. Developer notes appear as body text.
 7. **Phone navigation labels only the selected destination.**
 8. **The desktop arranger leaves the space below the tracks empty.**

@@ -94,24 +94,28 @@ void main() {
     await tester.pump();
     expect(m().shownDb, closeTo(-6.02, 0.01));
     expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.9, 0.001));
-    // No more meter reads (the engine went quiet): the bar still falls 24 dB a second, the peak line holds 1.5 s.
+    expect(tester.binding.hasScheduledFrame, isFalse, reason: 'while sound comes in, the reads move it: no ticker');
+    // A silent read, then no more (the engine went quiet): the bar still falls 24 dB a second, the line holds 1.5 s.
     peak = 0;
+    state.tick.value++;
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 500));
-    expect(m().shownDb, closeTo(-6.02 - 12, 0.5));
+    expect(m().shownDb, closeTo(-6.02 - 12, 1.5)); // plus the real time between the two reads
     expect(m().holdDb, closeTo(-6.02, 0.01));
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(seconds: 1));
     expect(m().shownDb, PeakMeter.floorDb);
     expect(m().holdDb, PeakMeter.floorDb);
     expect(tester.binding.hasScheduledFrame, isFalse, reason: 'it stops ticking once empty');
-    // 0 dBFS or over: pink for a while.
-    peak = 1.2;
+    // Within 0.1 dB of 0 dBFS, or over: pink for a while.
+    peak = 0.995;
     state.tick.value++;
     await tester.pump();
     expect(m().clipped, isTrue);
     expect(tester.widget<Bar>(find.byType(Bar)).color, Neon.pink);
     peak = 0;
+    state.tick.value++;
     await tester.pumpAndSettle();
     expect(m().clipped, isFalse);
   });
@@ -609,7 +613,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Arranger toolbar wraps cleanly on phone widths', (tester) async {
+  testWidgets('Arranger toolbar is one row on phone widths, with compact track headers', (tester) async {
     tester.view.physicalSize = const Size(360, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -622,8 +626,15 @@ void main() {
       home: Scaffold(body: ArrangerScreen(state: state)),
     ));
 
-    expect(find.text('ARRANGEMENT'), findsOneWidget);
-    expect(find.text('Track'), findsOneWidget);
+    // One sideways-scrolling row of icon buttons, no heading (owner, 2026-11-05).
+    expect(find.text('ARRANGEMENT'), findsNothing);
+    expect(find.byTooltip('Add track'), findsOneWidget);
+    expect(tester.getSize(find.byKey(const ValueKey('arrange-toolbar'))).height, lessThanOrEqualTo(48));
+    // The header: name, M, S and a meter, with the instrument in its menu.
+    expect(find.text('Mobile track'), findsOneWidget);
+    expect(find.byTooltip('Mute'), findsOneWidget);
+    expect(find.byTooltip('Solo'), findsOneWidget);
+    expect(find.byKey(const ValueKey('meter-mobile-track')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
