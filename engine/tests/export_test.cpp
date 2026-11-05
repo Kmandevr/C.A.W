@@ -233,7 +233,7 @@ TEST(offline_export_installs_projects_larger_than_the_command_queue_and_matches_
     CHECK_EQ(rendered.frames, int64_t{512});
 
     Engine playback(48000);
-        CHECK(playback.setProjectOffline(p).find(R"("ok":true)") != std::string::npos);
+    CHECK(playback.setProjectOffline(p).find(R"("ok":true)") != std::string::npos);
     playback.play();
     float left[512], right[512];
     playback.process(left, right, 512);
