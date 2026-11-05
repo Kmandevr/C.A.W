@@ -66,11 +66,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     return Column(children: [
       if (s.meters.overloaded > 0) _OverloadBanner(state: s),
       Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
         child: LayoutBuilder(builder: (context, constraints) {
+          // A phone gets one row of icon buttons that scrolls sideways, instead of two rows of labelled buttons
+          // under a heading (owner, 2026-11-05: one toolbar row, as in the UI plan).
+          final narrow = constraints.maxWidth < 760;
           final controls = <Widget>[
-            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
-              icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
+            if (narrow)
+              IconButton(onPressed: p.layers.length >= 64 ? null : s.addLayer,
+                icon: const Icon(Icons.add), color: Neon.green, tooltip: 'Add track')
+            else
+              TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
+                icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
             if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
               IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt),
                 icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
@@ -100,8 +107,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
               items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
               onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
-            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
-              icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
+            if (narrow)
+              IconButton(onPressed: p.layers.length >= 64 ? null : s.addFolder,
+                icon: const Icon(Icons.create_new_folder_outlined), color: Neon.green, tooltip: 'Add folder')
+            else
+              TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
+                icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
             IconButton(onPressed: () => setState(() => mixer = !mixer),
               color: mixer ? Neon.blue : Neon.dim, icon: const Icon(Icons.tune), tooltip: 'Mixer'),
             IconButton(onPressed: () => setState(() => settings = !settings),
@@ -109,13 +120,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             IconButton(onPressed: () => setState(() => cardsView = true),
               icon: const Icon(Icons.view_agenda_outlined), tooltip: 'Track cards'),
           ];
-          if (constraints.maxWidth < 760) {
-            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Padding(padding: EdgeInsets.only(left: 4, bottom: 2),
-                child: Text('ARRANGEMENT', style: TextStyle(
-                  color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
-              Wrap(spacing: 2, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: controls),
-            ]);
+          if (narrow) {
+            return SingleChildScrollView(
+              key: const ValueKey('arrange-toolbar'),
+              scrollDirection: Axis.horizontal,
+              child: Row(children: controls),
+            );
           }
           return Row(children: [
             const Expanded(child: Text('ARRANGEMENT', style: TextStyle(
@@ -245,18 +255,40 @@ class _TimelineHeader extends StatelessWidget {
               ))
           : const BoxDecoration(color: Neon.panel,
               border: Border(bottom: BorderSide(color: Neon.line), right: BorderSide(color: Neon.line))),
-      child: Column(children: [
-        Row(children: [
+      // Compact (UI plan): a colour strip, the name, M and S, the ⋮ menu (which also picks the instrument) and a
+      // meter. A short track puts everything on one row with the meter under it.
+      child: LayoutBuilder(builder: (context, box) {
+        final oneRow = box.maxHeight < 60;
+        final mute = ToggleChip(label: 'M', size: 30, tooltip: layer.isFolder ? 'Mute folder' : 'Mute',
+            on: layer.mute, color: Neon.yellow,
+            onTap: () => layer.isFolder
+                ? state.editLayer(layer, (l) => l.mute = !l.mute)
+                : state.mixLayer(layer, mute: !layer.mute));
+        final solo = ToggleChip(label: 'S', size: 30, tooltip: layer.isFolder ? 'Solo folder' : 'Solo',
+            on: layer.solo, color: Neon.blue,
+            onTap: () => layer.isFolder
+                ? state.editLayer(layer, (l) => l.solo = !l.solo)
+                : state.mixLayer(layer, solo: !layer.solo));
+        final meter = PeakMeter(key: ValueKey('meter-${layer.id}'), state: state, color: color,
+            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0);
+        final top = SizedBox(height: 28, child: Row(children: [
           if (layer.isFolder)
-            IconButton(padding: const EdgeInsets.all(8), constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              tooltip: layer.collapsed ? 'Show folder' : 'Hide folder',
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
               onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed))
-          else Container(width: 6, height: 20, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
+          else Container(width: 5, height: 18, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3))),
           const SizedBox(width: 5),
-          Expanded(child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
-          PopupMenuButton<String>(padding: EdgeInsets.zero, iconSize: 16,
+          Expanded(child: Tooltip(
+            message: layer.isFolder
+                ? (layer.busEnabled ? 'Folder with a group bus' : 'Folder')
+                : 'Instrument: ${gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'none'}',
+            child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)))),
+          if (oneRow) ...[mute, const SizedBox(width: 3), solo],
+          PopupMenuButton<String>(padding: EdgeInsets.zero, iconSize: 16, tooltip: 'Track menu',
             onSelected: (v) {
+              if (v.startsWith('gen:')) state.editLayer(layer, (l) => l.generatorId = v.substring(4));
               if (v == 'up' && index > 0) state.moveLayer(index, index - 1);
               if (v == 'down' && index < state.project.layers.length - 1) state.moveLayer(index, index + 2);
               if (v == 'delete') state.removeLayer(layer);
@@ -271,6 +303,12 @@ class _TimelineHeader extends StatelessWidget {
               if (v == 'remove-automation-pan') state.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'pan'));
             },
             itemBuilder: (_) => [
+              if (!layer.isFolder && gens.isNotEmpty) ...[
+                for (final g in gens)
+                  CheckedPopupMenuItem(value: 'gen:${g.id}', checked: g.id == layer.generatorId,
+                    child: Text('Instrument · ${g.name}')),
+                const PopupMenuDivider(),
+              ],
               if (index > 0) const PopupMenuItem(value: 'up', child: Text('Move up')),
               if (index < state.project.layers.length - 1) const PopupMenuItem(value: 'down', child: Text('Move down')),
               if (layer.parentId != null) const PopupMenuItem(value: 'unparent', child: Text('Move out of folder')),
@@ -289,40 +327,26 @@ class _TimelineHeader extends StatelessWidget {
               PopupMenuItem(value: 'spacer', child: Text(layer.spaceBelow > 0 ? 'Remove spacer below' : 'Add spacer below')),
               const PopupMenuItem(value: 'delete', child: Text('Delete')),
             ]),
-        ]),
-        if (!layer.isFolder) Expanded(child: Row(children: [
-          ToggleChip(label: 'M', tooltip: 'Mute', on: layer.mute, color: Neon.yellow,
-            onTap: () => state.mixLayer(layer, mute: !layer.mute)),
-          const SizedBox(width: 3),
-          ToggleChip(label: 'S', tooltip: 'Solo', on: layer.solo, color: Neon.blue,
-            onTap: () => state.mixLayer(layer, solo: !layer.solo)),
-          const SizedBox(width: 4),
-          Expanded(child: Tooltip(
-            message: 'Generator: ${gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'None'} · choose generator',
-            child: DropdownButton<String?>(
-              isExpanded: true, isDense: true, iconSize: 10,
-              icon: const SizedBox.shrink(), padding: EdgeInsets.zero,
-              value: gens.any((g) => g.id == layer.generatorId) ? layer.generatorId : null,
-              hint: const Icon(Icons.graphic_eq, size: 12),
-              underline: const SizedBox.shrink(),
-              items: [for (final g in gens) DropdownMenuItem(value: g.id,
-                child: Text(g.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 9)))],
-              onChanged: (id) => state.editLayer(layer, (l) => l.generatorId = id),
-            ),
-          )),
-        ])) else Expanded(child: Row(children: [
-          ToggleChip(label: 'M', tooltip: 'Mute folder', on: layer.mute, color: Neon.yellow,
-            onTap: () => state.editLayer(layer, (l) => l.mute = !l.mute)),
-          const SizedBox(width: 3),
-          ToggleChip(label: 'S', tooltip: 'Solo folder', on: layer.solo, color: Neon.blue,
-            onTap: () => state.editLayer(layer, (l) => l.solo = !l.solo)),
-          const SizedBox(width: 5),
-          Text(layer.busEnabled ? 'GROUP BUS' : 'GROUP', style: const TextStyle(color: Neon.dim, fontSize: 9)),
-          const Spacer(),
-          Icon(Icons.account_tree_outlined, size: 13, color: color),
-        ])),
-      ]),
+        ]));
+        if (oneRow) {
+          return Column(mainAxisSize: MainAxisSize.min, children: [top, const SizedBox(height: 4), meter]);
+        }
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          top,
+          const SizedBox(height: 4),
+          SizedBox(height: 26, child: Row(children: [
+            mute,
+            const SizedBox(width: 3),
+            solo,
+            const SizedBox(width: 8),
+            Expanded(child: meter),
+            if (layer.isFolder) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.account_tree_outlined, size: 13, color: color),
+            ],
+          ])),
+        ]);
+      }),
     );
   }
 }

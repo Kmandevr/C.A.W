@@ -2037,6 +2037,7 @@ void Engine::applyCommands() noexcept {
                     s.old = nullptr;
                     s.swapLeft = 0;
                     s.seamLeft = 0;
+                    s.peak.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
                     s.active = true;
                     s.removing = false;
                     s.fresh = true;
@@ -2087,6 +2088,7 @@ void Engine::applyCommands() noexcept {
                 retire(s.pending, nullptr);
                 s.cur = s.old = s.pending = nullptr;
                 s.pattern = nullptr;
+                s.peak.store(0, std::memory_order_relaxed);
                 s.active = true;
                 s.removing = false;
                 s.bus = true;
@@ -3082,7 +3084,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.old = nullptr;
         routingDirty_ = true;  // the fade lane's extra module nodes stop running
     }
-    float peak = 0;
+    float peak = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
     for (int i = 0; i < m; ++i) {
         const double step = static_cast<double>(g_ + i) / stepLen_;
@@ -3106,14 +3108,16 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
         outL[i] = routeSample(v * gl);
         outR[i] = routeSample(v * gr);
-        const float av = static_cast<float>(std::fabs(v));
+        // The meter reads what the track sends on (after volume and pan), the louder channel's sample peak.
+        const float av = std::max(std::fabs(outL[i]), std::fabs(outR[i]));
         if (av > peak) peak = av;
+        sig = std::max(sig, static_cast<float>(std::fabs(v)));  // before pan: a preview's tail test, like the scope
         s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
         sp = (sp + 1) % kScopeSize;
     }
     s.scopePos.store(sp, std::memory_order_release);
     storeMax(s.peak, peak);
-    s.previewQuiet = peak > kPreviewQuiet ? 0 : s.previewQuiet + m;
+    s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (previewChunk_) {
         s.previewN += m;  // the transport isn't moving: its place in the loop stays; the preview's time runs on
         return;
@@ -3160,10 +3164,13 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     }
     if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; routingDirty_ = true; }
     // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
+    float peak = 0;
     for (int j = 0; j < m; ++j) {
         outL[j] = routeSample(s.outL[j]);
         outR[j] = routeSample(s.outR[j]);
+        peak = std::max(peak, std::max(std::fabs(outL[j]), std::fabs(outR[j])));
     }
+    storeMax(s.peak, peak);  // a folder's meter: its mix after volume and pan
 }
 
 void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {

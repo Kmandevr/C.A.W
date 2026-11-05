@@ -33,7 +33,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 ### Mixer and signal flow
 
-- **[Implemented]** Track volume/pan/mute/solo, generator/effect chains, nested folder buses, folder routing and group volume/pan, master output level and stereo peak meters. Routing between tracks, buses and master carries 32-bit float since 2026-11-03 (Foundation F4.2).
+- **[Implemented]** Track volume/pan/mute/solo, generator/effect chains, nested folder buses, folder routing and group volume/pan, master output level, and peak meters for the master (stereo), each track and each folder, on a dB scale. Routing between tracks, buses and master carries 32-bit float since 2026-11-03 (Foundation F4.2).
 - **[Partial]** Exported module signals and sidechain concepts exist in the engine/module system, but full user-facing routing and modulation connections are not integrated as a general mixer workflow.
 - **[Incomplete]** Sends, arbitrary buses, parallel routing/effects, master effect chain and full plugin/global parameter automation.
 

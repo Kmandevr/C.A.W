@@ -319,7 +319,7 @@ The native hardware probe is a one-time, non-real-time snapshot. It uses active/
   - `caw_engine_set_project(json)` returns the same description per module, plus `ref` (its name for exports) and `warnings`.
   - Live controls: `caw_engine_set_param`, `caw_engine_set_global`, `caw_engine_set_layer_mix`, `caw_engine_set_master` (a 5 ms audio-thread gain ramp), `caw_engine_play`, `caw_engine_stop`, `caw_engine_clear_overload`.
   - Note previews (#103): `caw_engine_note_on(layer_id, id, pitch, velocity)`, `caw_engine_note_pitch`, `caw_engine_note_off`, `caw_engine_notes_off`; heard through the layer's effects and mix while playing or stopped, without moving the transport (detail: [engine build status](engine-build-status.md)).
-- **Meters:** `caw_engine_meters`, `caw_engine_layer_meter` and `caw_engine_scope` (1024 samples per layer, for the audition at index 64, or for the master at −1).
+- **Meters:** `caw_engine_meters` (master sample peaks since the last read, left and right), `caw_engine_layer_meter` (a track's or folder's sample peak since the last read, after volume and pan) and `caw_engine_scope` (1024 samples of a track's signal before pan, per layer, or for the master and the audition by `CAW_SCOPE_MASTER`/`CAW_SCOPE_AUDITION`).
 - **Hosts and devices:** `caw_engine_process(left, right, frames)` lets hosts such as a plugin drive the audio. `caw_audio_start` and `caw_audio_stop` open the device through miniaudio: AAudio or OpenSL ES on Android, WASAPI on Windows, Core Audio, and ALSA or PulseAudio.
 - **Exports:** `caw_render(project_json, options, path, progress, cancel, …)` writes a WAV. Progress counts 0–1000, and a non-zero cancel stops it.
 - **Templates:** `caw_template_count`, `caw_template_file` and `caw_template_source`.

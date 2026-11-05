@@ -28,6 +28,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Shell(state: s)));
     await tester.pump();
     // The detailed timeline remains the default; select the compact track-card view for this test.
+    await tester.ensureVisible(find.byTooltip('Track cards')); // the phone toolbar scrolls sideways
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Track cards'));
     await tester.pumpAndSettle();
 
@@ -70,7 +72,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: ArrangerScreen(state: s))));
     await tester.pump();
     final timeline = find.descendant(of: find.byType(ArrangerScreen), matching: find.byType(Scrollable))
-        .evaluate().map((e) => (e.widget as Scrollable)).where((w) => w.axisDirection == AxisDirection.right);
+        .evaluate().map((e) => (e.widget as Scrollable)).where((w) => w.axisDirection == AxisDirection.right && w.controller != null); // the timeline, not the toolbar row
     expect(timeline, isNotEmpty);
     final controller = timeline.first.controller!;
     controller.jumpTo(controller.position.maxScrollExtent);

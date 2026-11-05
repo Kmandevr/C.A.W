@@ -17,7 +17,7 @@ The owner's direction (2026-10-30) is explicit: the engine is one coherent syste
 
 The portable C++ core is the single source of processing behavior. Hosts must not reimplement DSP or invent a parallel project format.
 
-- **CAW app:** authors projects, browses the library, edits module parameters, previews and exports.
+- **CAW app:** authors projects, browses the library, edits module parameters, previews (modules and single notes) and exports.
 - **Project runtime:** resolves dependencies, instantiates modules and stores user-visible state.
 - **Add-ons:** call the versioned C ABI and use the same module, parameter, render and capability contracts as the app. Add-ons do not reach into private C++ classes.
 - **CLI and CI:** validate, render, package and test the same project/module formats without launching the UI.

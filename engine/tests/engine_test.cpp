@@ -55,6 +55,47 @@ float maxStep(const std::vector<float>& v, size_t from, size_t to) {
 
 }  // namespace
 
+TEST(meters_read_what_each_track_and_folder_sends_on_after_volume_and_pan) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"tone", std::string(kFloat) + "0.5", {}});
+    LayerSpec folder;
+    folder.id = "folder";
+    folder.name = "Folder";
+    folder.folder = true;
+    folder.volume = 0.5;
+    p.layers.push_back(folder);
+    LayerSpec centre;  // centred: each channel gets 0.5 * cos(pi/4)
+    centre.id = "centre";
+    centre.name = "Centre";
+    centre.chain = {"tone"};
+    centre.volume = 1.0;
+    centre.parentId = "folder";
+    p.layers.push_back(centre);
+    LayerSpec left;  // hard left, at half volume: 0.25 on the left only
+    left.id = "left";
+    left.name = "Left";
+    left.chain = {"tone"};
+    left.volume = 0.5;
+    left.pan = -1.0;
+    p.layers.push_back(left);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    run(e, 9600);
+    LayerMeter lm;
+    const double c = 0.5 * std::cos(kPi / 4.0);
+    CHECK(e.layerMeter(1, lm) && lm.active);
+    CHECK_NEAR(lm.peak, c, 1e-4);
+    CHECK(e.layerMeter(2, lm) && lm.active);
+    CHECK_NEAR(lm.peak, 0.25, 1e-4);
+    CHECK(e.layerMeter(0, lm) && lm.active);  // the folder: its child at half volume, through the folder's pan
+    CHECK_NEAR(lm.peak, 0.5 * c, 1e-4);
+}
+
 TEST(audition_only_uses_the_dedicated_audition_slot) {
     ProjectSpec p = project({{"tone", std::string(kFloat) + "0.5"}});
     p.layers.clear();
