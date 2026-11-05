@@ -12,8 +12,11 @@ import 'widgets.dart';
 import 'glass.dart';
 
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, required this.settings, this.engineProfile, this.executionPlan});
+  const SettingsPage({super.key, required this.settings, this.engineProfile, this.executionPlan, this.onEditKeys});
   final Settings settings;
+
+  /// Opens the key bindings editor; null hides its row (no key router above).
+  final Future<void> Function(BuildContext context)? onEditKeys;
   final EngineHardwareProfile? engineProfile;
   final EngineExecutionPlan? executionPlan;
 
@@ -215,6 +218,15 @@ class SettingsPage extends StatelessWidget {
                 onSelectionChanged: (v) => settings.update((s) => s.swapTiming = v.first),
               ),
             ),
+            if (onEditKeys != null)
+              ListTile(
+                key: const ValueKey('settings-keys'),
+                leading: Icon(Icons.keyboard_alt_outlined, color: Neon.yellow),
+                title: const Text('Key bindings'),
+                subtitle: Text('Choose what each key does', style: TextStyle(color: Neon.dim)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => onEditKeys!(context),
+              ),
             SwitchListTile(
               secondary: Icon(Icons.keyboard, color: Neon.yellow),
               title: const Text('Vim keys in the code editor'),

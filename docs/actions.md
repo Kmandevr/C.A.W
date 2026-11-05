@@ -15,9 +15,15 @@ updated: 2026-11-05
 - **Areas, like Reaper's sections:** Global, Sounds (Builder), Tracks (Arranger), Pattern editor (roll and grid), Mixer, Engine Lab, Automation, Export, Files and Plugin Builder. A key can do different things in each area. Global keys work everywhere unless the area has its own binding.
 - **The action list** (`?`, or Help → Actions):
   - search every action by name, with its keys
-  - show the current key bindings for each action (editing bindings in this screen is not implemented)
+  - show the current key bindings for each action; **Edit keys** opens the key bindings editor
   - run the action
   - It also serves as the shortcut overlay the [UI design](ui.md#keyboard-pc) asked for.
+- **The key bindings editor** (owner, 2026-11-05; `lib/ui/key_bindings.dart`), from Settings → Key bindings, the action list's **Edit keys**, or the `view.keys` action (no default key):
+  - search every action and see its keys; a pencil marks one changed from the default
+  - give an action a key by pressing it (each press adds a chord, up to three, so `G G` works) or by typing it (`Ctrl+Shift+K`), for phones
+  - before setting, it says what the key would replace (a key taken in the area moves to this action), clash with (one sequence starting another), or hide (an area key over a global one)
+  - remove a key, reset one action, or **Reset all** (macros are kept)
+  - every change saves `keys.txt`, written as what differs from the defaults (a removed default key is a `-` line)
 - **Triggers** (owner chose all four):
   - keys: any combination with Ctrl, Shift and Alt
   - on-screen toolbars you fill with your own actions and macros, so the phone gets one-tap macros without a keyboard
