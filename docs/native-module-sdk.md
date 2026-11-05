@@ -1,7 +1,7 @@
 ---
 title: Native module SDK
 summary: C ABI contract for trusted native CAW DSP modules, validation, real-time rules, state and packaging.
-updated: 2026-11-04
+updated: 2026-11-05
 covers: [engine/include/caw_module_sdk.h, engine/include/caw/module.hpp, engine/CMakeLists.txt, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
 ---
 
