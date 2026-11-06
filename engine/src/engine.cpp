@@ -3236,13 +3236,17 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
 }
 
 void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
-    // Master: gain, DC blocker, then the safety limiter, always last.
+    // Master order: gain/DC block, trusted native stereo effects, safety limiter last.
     const double R = 1.0 - kTwoPi * 5.0 / sr_;
     const double rel = detExp(-1.0 / (0.1 * sr_));
     double fade = 1.0;
     float pl = 0, pr = 0;
     const bool bypass = bypass_.load(std::memory_order_relaxed);
     int sp = masterScopePos_.load(std::memory_order_relaxed);
+
+    // Preallocate two stereo stages on Engine. The callback only writes into these fixed buffers.
+    float* stage0L = masterStageL_[0].data();
+    float* stage0R = masterStageR_[0].data();
     for (int i = 0; i < m; ++i) {
         if (masterRamp_ > 0) {
             master_ += masterStep_;
@@ -3250,20 +3254,52 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         }
         const double xl = finiteOr0(static_cast<double>(inL[i])) * master_;
         const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
-        double yl = xl - dcL_[0] + R * dcL_[1];
+        const double yl = xl - dcL_[0] + R * dcL_[1];
         dcL_[0] = xl;
         dcL_[1] = yl;
-        double yr = xr - dcR_[0] + R * dcR_[1];
+        const double yr = xr - dcR_[0] + R * dcR_[1];
         dcR_[0] = xr;
         dcR_[1] = yr;
+        stage0L[i] = static_cast<float>(bypass ? xl : yl);
+        stage0R[i] = static_cast<float>(bypass ? xr : yr);
+    }
+
+    const float* currentL = stage0L;
+    const float* currentR = stage0R;
+    if (masterChain_) {
+        for (size_t index = 0; index < masterChain_->processors.size(); ++index) {
+            ModuleProcessor* processor = masterChain_->processors[index].get();
+            const size_t destination = (index & 1u) == 0u ? 1u : 0u;
+            float* destinationL = masterStageL_[destination].data();
+            float* destinationR = masterStageR_[destination].data();
+            std::copy_n(currentL, m, destinationL);
+            std::copy_n(currentR, m, destinationR);
+            const float* inputChannels[2] = {currentL, currentR};
+            float* outputChannels[2] = {destinationL, destinationR};
+            const AudioProcessBlock block{
+                {inputChannels, 2, static_cast<uint32_t>(m)},
+                {outputChannels, 2, static_cast<uint32_t>(m)},
+                static_cast<uint32_t>(m),
+                sr_,
+                nullptr,
+                0,
+            };
+            if (!processor->process(block)) {
+                std::copy_n(currentL, m, destinationL);
+                std::copy_n(currentR, m, destinationR);
+            }
+            currentL = destinationL;
+            currentR = destinationR;
+        }
+    }
+
+    // Keep the safety limiter after native code so a component cannot bypass the master ceiling.
+    for (int i = 0; i < m; ++i) {
+        double yl = currentL[i];
+        double yr = currentR[i];
         const double env = std::max(std::fabs(yl), std::fabs(yr));
         limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
-        double gain = limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0;
-        if (bypass) {
-            yl = xl;
-            yr = xr;
-            gain = 1.0;
-        }
+        const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
         if (stopFade_ > 0) {
             fade = static_cast<double>(stopFade_) / (kStopSeconds * sr_);
             if (--stopFade_ == 0) {
