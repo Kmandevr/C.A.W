@@ -1,9 +1,6 @@
 // Exercises the component entry points and the shared stereo processor contract.
 #include <caw/component.hpp>
 
-extern "C" const caw::ModuleDescriptor* caw_component_descriptor() noexcept;
-extern "C" caw::ModuleProcessor* caw_component_create() noexcept;
-
 int main() {
     const caw::ModuleDescriptor* descriptor = caw_component_descriptor();
     if (!descriptor || descriptor->id != "org.caw.examples.minimal" ||
