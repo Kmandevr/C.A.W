@@ -2,6 +2,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../model/cpp_component.dart';
+import '../model/project.dart';
+import '../model/storage.dart';
+
 class CppBuildDiagnostic {
   const CppBuildDiagnostic({
     required this.severity,
@@ -32,6 +36,47 @@ class CppBuildResult {
   final int exitCode;
   final String output;
   final List<CppBuildDiagnostic> diagnostics;
+}
+
+/// Joins project persistence, safe source materialization and the local CMake runner.
+class CppComponentBuildService {
+  const CppComponentBuildService(
+    this._storage, {
+    this.runner = const CppComponentBuildRunner(),
+  });
+
+  final ProjectStorage _storage;
+  final CppComponentBuildRunner runner;
+
+  Future<CppBuildResult> build({
+    required ProjectDoc project,
+    required CppComponentDoc component,
+    required String cmakeExecutable,
+    required String sdkDirectory,
+    required int parallelJobs,
+    String configuration = 'Release',
+    String? toolchainFile,
+    String? androidAbi,
+    String? androidPlatform,
+    Map<String, String>? environment,
+  }) async {
+    // Preserve the user's latest source before any external build tool is started.
+    await _storage.save(project);
+    final sourceDirectory = await _storage.materializeCppComponent(project, component);
+    final buildDirectory = await _storage.prepareCppBuildDirectory(project.id, component.id);
+    return runner.build(
+      cmakeExecutable: cmakeExecutable,
+      projectDirectory: sourceDirectory.path,
+      buildDirectory: buildDirectory.path,
+      sdkDirectory: sdkDirectory,
+      parallelJobs: parallelJobs,
+      configuration: configuration,
+      toolchainFile: toolchainFile,
+      androidAbi: androidAbi,
+      androidPlatform: androidPlatform,
+      environment: environment,
+    );
+  }
 }
 
 /// Parses Clang/GCC, MSVC and CMake diagnostics without losing file/line information.
