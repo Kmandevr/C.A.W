@@ -179,7 +179,7 @@ C++ components, visual blocks, the performance UI and external device adapters u
 
 ### Real-time boundary [Proposal]
 
-C++ itself remains general-purpose. Only code scheduled in the audio callback must meet the explicit real-time contract: bounded work, no allocation/free, blocking locks, I/O, logging or UI calls. Native C++ is not sandboxed by the SDK; untrusted native code must be isolated, trusted in-process by explicit choice, or blocked. The current VM's restrictions are not a reason to restrict ordinary C++ globally.
+C++ itself remains general-purpose. Only code scheduled in the audio callback must meet the explicit real-time contract: bounded work, no allocation/free, blocking locks, I/O, logging or UI calls. The Engine host preallocates its master-chain buffers, performs no host allocation/locking in the callback, sanitizes component output and keeps the safety limiter after native processing; old component chains are retired off the callback. The current loader refuses Blocked before opening a library, rejects Isolated until a separate-process host exists, and loads Trusted in-process only after an explicit caller choice. Trusted component code can still violate real-time rules or access process memory; the host cannot sandbox it.
 
 ## 3. Source and component package structure
 
