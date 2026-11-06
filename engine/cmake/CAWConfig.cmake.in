@@ -1,0 +1,3 @@
+# CMake package config for the installed C.A.W. C++ SDK.
+@PACKAGE_INIT@
+include("${CMAKE_CURRENT_LIST_DIR}/CAWSDKTargets.cmake")
