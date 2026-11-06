@@ -215,6 +215,7 @@ TEST(offline_export_installs_projects_larger_than_the_command_queue_and_matches_
     ProjectSpec p;
     p.bpm = 400;
     p.loopBars = 1;
+    p.master = 1.0;  // The sample assertion below is for unity master gain.
     p.modules.push_back({"tone", "---\nmode: float\n---\n0.5", {}});
     for (int i = 0; i < 1025; ++i) {
         LayerSpec layer;
