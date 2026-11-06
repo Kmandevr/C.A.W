@@ -15,6 +15,10 @@ The app calls the shared native engine only through the versioned C API in `lib/
 
 Settings shows the detected logical cores, conservative work-memory budget, SIMD capability, GPU-compute capability and the interactive workload plan. The engine splits that work-memory budget into internal shares for project state, graph working memory, compilation and retirement (`EngineResourceBudget` in `engine/src/execution.h`; a 128 MiB total is assumed when memory cannot be measured). Settings does not show the shares. On Android, the host reads `PowerManager` thermal status (Android 10+) and battery-saver state, then listens for thermal and power-save changes without polling. Foreground/background and audio-playing transitions also refresh the active worker budget. Unsupported platforms remain explicitly `Unknown` rather than assuming normal pressure; background/offline work reserves one host core where possible, and GPU work is disabled while pressure is unknown. The current engine reports GPU compute unavailable. Native project/check/render jobs now use the C++ pool; generation and analysis jobs remain future integration work.
 
+## C++ project sources
+
+The project model stores C++ component entries alongside the existing project modules. Each entry keeps its project-relative `CMakeLists.txt`, `caw.component`, source/header files and exact dependency-version pins in the project JSON. Paths are validated as safe relative paths before materialization. This preserves source and dependency metadata through project save/restore and handoff; it does **not** yet compile locally, resolve/install dependencies, load a native library or register a component with the running engine. Those are the next CP.1 integration steps.
+
 ## Areas
 
 - **Top bar:**
