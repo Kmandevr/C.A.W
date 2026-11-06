@@ -301,6 +301,7 @@ class Engine {
   int _pendingNativeOps = 0;
   bool _destroyRequested = false;
   bool _nativeDestroyed = false;
+  List<String> lastProjectWarnings = const [];
 
   static Engine create() {
     final b = Bindings.instance;
@@ -324,6 +325,10 @@ class Engine {
             .result;
         if (result == null) throw StateError('native project job returned no result');
         final j = jsonDecode(result) as Map<String, dynamic>;
+        final projectError = j['error'] as String?;
+        if (projectError != null && projectError.isNotEmpty) throw StateError(projectError);
+        final warnings = j['warnings'] as Map<String, dynamic>? ?? const {};
+        lastProjectWarnings = ((warnings['project'] as List?) ?? const []).whereType<String>().toList();
         final mods = (j['modules'] as Map<String, dynamic>? ?? {})
             .map((k, v) => MapEntry(k, ModuleInfo.fromJson(v as Map<String, dynamic>)));
         done.complete(mods);
