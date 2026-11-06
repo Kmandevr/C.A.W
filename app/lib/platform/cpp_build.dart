@@ -60,6 +60,9 @@ class CppComponentBuildService {
     String? androidPlatform,
     Map<String, String>? environment,
   }) async {
+    if (!project.cppComponents.any((candidate) => identical(candidate, component))) {
+      throw ArgumentError.value(component.id, 'component', 'Must belong to the project being built.');
+    }
     // Preserve the user's latest source before any external build tool is started.
     await _storage.save(project);
     final sourceDirectory = await _storage.materializeCppComponent(project, component);
