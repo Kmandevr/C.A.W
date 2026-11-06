@@ -47,7 +47,7 @@ jobs:
       - name: Configure and install the SDK for the build host
         run: |
           cmake -S engine -B "$RUNNER_TEMP/caw-sdk-build" \
-            -DCAW_AUDIO=OFF -DCAW_TOOLS=OFF \
+            -DCAW_AUDIO=OFF -DCAW_TOOLS=OFF -DCAW_INSTALL_SDK=ON \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/caw-sdk"
           cmake --install "$RUNNER_TEMP/caw-sdk-build" --config Release
       - name: Download Android NDK r30 (Google SDK licence accepted by owner)
