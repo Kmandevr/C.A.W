@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:caw/model/project.dart';
 import 'package:caw/model/cpp_component.dart';
+import 'package:caw/model/project.dart';
 import 'package:caw/model/storage.dart';
 
 void main() {
