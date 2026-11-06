@@ -179,6 +179,18 @@ class ProjectStorage {
     }
   }
 
+  /// Returns the persistent CMake build directory; unlike source workspaces, this is not cleared between builds.
+  Future<Directory> prepareCppBuildDirectory(String projectId, String componentId) async {
+    final safeProjectId = _validatedProjectId(projectId);
+    final safeComponentId = _validatedProjectId(componentId);
+    final directory = Directory(
+      '\${_root.path}\${Platform.pathSeparator}cpp-builds'
+      '\${Platform.pathSeparator}$safeProjectId\${Platform.pathSeparator}$safeComponentId',
+    );
+    await directory.create(recursive: true);
+    return directory;
+  }
+
   Future<void> delete(String id) async {
     final f = _file(id);
     if (await f.exists()) await f.delete();
