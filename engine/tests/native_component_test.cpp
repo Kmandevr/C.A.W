@@ -1,5 +1,8 @@
 // Exercises explicit trust, stable-ID validation, dynamic loading and library lifetime.
 #include <cstdlib>
+#include <string>
+
+#include "caw.h"
 
 #include "module_registry.h"
 #include "test.h"
@@ -8,6 +11,44 @@ using namespace caw;
 
 namespace {
 constexpr const char* kComponentId = "org.caw.tests.native-loader";
+}
+
+TEST(c_api_native_component_load_requires_an_explicit_trust_level) {
+    const char* path = std::getenv("CAW_TEST_COMPONENT_PATH");
+    CHECK(path != nullptr);
+    CHECK(path && path[0] != 0);
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine || !path) return;
+
+    char* blocked = caw_engine_load_component(engine, path, "org.caw.tests.native-loader", CAW_NATIVE_TRUST_BLOCKED);
+    CHECK(blocked != nullptr);
+    if (blocked) {
+        const std::string json(blocked);
+        caw_free(blocked);
+        CHECK(json.find(R"("ok":false)") != std::string::npos);
+        CHECK(json.find("blocked") != std::string::npos);
+    }
+
+    char* isolated = caw_engine_load_component(engine, path, "org.caw.tests.native-loader", CAW_NATIVE_TRUST_ISOLATED);
+    CHECK(isolated != nullptr);
+    if (isolated) {
+        const std::string json(isolated);
+        caw_free(isolated);
+        CHECK(json.find(R"("ok":false)") != std::string::npos);
+        CHECK(json.find("Isolated") != std::string::npos);
+    }
+
+    char* trusted = caw_engine_load_component(engine, path, "org.caw.tests.native-loader", CAW_NATIVE_TRUST_TRUSTED);
+    CHECK(trusted != nullptr);
+    if (trusted) {
+        const std::string json(trusted);
+        caw_free(trusted);
+        CHECK(json.find(R"("ok":true)") != std::string::npos);
+        CHECK(json.find("org.caw.tests.native-loader") != std::string::npos);
+    }
+    CHECK_EQ(caw_engine_unload_component(engine, "org.caw.tests.native-loader"), 1);
+    caw_engine_destroy(engine);
 }
 
 TEST(module_registry_loads_native_components_only_after_explicit_trust) {
