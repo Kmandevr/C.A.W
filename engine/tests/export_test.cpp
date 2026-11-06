@@ -1,3 +1,4 @@
+// Exercises offline WAV export and file encoding behavior.
 // Export tests: exact loop lengths, export matching playback, one-shots, wavetables and the WAV encoding.
 #include <chrono>
 #include <cmath>
