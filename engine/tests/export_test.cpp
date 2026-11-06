@@ -228,19 +228,20 @@ TEST(offline_export_installs_projects_larger_than_the_command_queue_and_matches_
 
     ExportOptions options;
     options.kind = ExportKind::Free;
-    options.seconds = 512.0 / 48000.0;
+    // Free exports have a 100 ms minimum duration; compare that complete render with playback.
+    options.seconds = 0.1;
     RenderResult rendered;
     CHECK(renderExport(p, options, rendered));
-    CHECK_EQ(rendered.frames, int64_t{512});
+    CHECK_EQ(rendered.frames, int64_t{4800});
 
     // No audio callback is attached: install synchronously, then drive process as the playback reference.
     Engine playback(48000);
     CHECK(playback.setProjectOffline(p).find(R"("ok":true)") != std::string::npos);
     playback.play();
-    float left[512], right[512];
-    playback.process(left, right, 512);
+    std::vector<float> left(4800), right(4800);
+    playback.process(left.data(), right.data(), 4800);
     bool same = true;
-    for (int i = 0; i < 512 && same; ++i)
+    for (int i = 0; i < 4800 && same; ++i)
         same = rendered.samples[static_cast<size_t>(i) * 2] == left[i] &&
                rendered.samples[static_cast<size_t>(i) * 2 + 1] == right[i];
     CHECK(same);
