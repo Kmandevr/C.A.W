@@ -38,7 +38,7 @@ The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), 
 - Sample editing, mapping, multisample authoring and SFZ export.
 - USB/Bluetooth MIDI device discovery/connection, controller mapping and live Engine voice routing.
 - Stems export, persistent export queue and richer batch delivery.
-- C++ component editing, local/offline compilation, dynamic loading and engine registration; project sources/dependency pins persist and materialize into an app-private workspace, and a local CMake runner now invokes an installed toolchain with structured diagnostics. A Linux end-to-end test now builds a manifest-driven component with the repository's CMake helper and verifies the CMake build directory survives a source edit/rebuild. Toolchain provisioning (especially an Android-hosted compiler), the editor, native loader and runtime registration remain outstanding.
+- C++ component editing, local/offline compilation, dynamic loading and engine registration; project sources/dependency pins persist and materialize into an app-private workspace, and a local CMake runner now invokes an installed toolchain with structured diagnostics. The build service accepts only a component owned by the project being built; a Linux end-to-end test builds a manifest-driven component with the repository's CMake helper and verifies the CMake build directory survives a source edit/rebuild. Toolchain provisioning (especially an Android-hosted compiler), the editor, native loader and runtime registration remain outstanding.
 - External CLAP/VST3 binary build/hosting and native module dynamic loading.
 - Additional polish only where tests or real-device use demonstrate a gap.
 
