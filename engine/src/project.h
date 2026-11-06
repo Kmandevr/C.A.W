@@ -70,6 +70,7 @@ struct ProjectSpec {
     int keyScale = 1;                       // a scale.* id (1 = minor)
     std::vector<DependencyRef> dependencies;
     std::vector<ModuleSpec> modules;
+    std::vector<std::string> masterComponents;  // explicitly loaded native stereo effects, in master-chain order
     std::vector<LayerSpec> layers;
     std::vector<ProjectAutomationLaneSpec> automation;
     std::vector<std::string> auditionChain;  // the Builder's preview, if any
