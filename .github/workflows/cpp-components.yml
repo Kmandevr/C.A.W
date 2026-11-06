@@ -1,0 +1,88 @@
+# Builds an independently authored component against the installed CAW SDK on each supported target.
+name: C++ components
+on:
+  pull_request:
+    paths:
+      - "engine/CMakeLists.txt"
+      - "engine/cmake/**"
+      - "engine/include/caw/**"
+      - "examples/cpp/**"
+      - ".github/workflows/cpp-components.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  component:
+    name: Component (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-24.04
+            android: false
+          - name: Windows x64
+            os: windows-2025
+            android: false
+          - name: Android ARM64
+            os: ubuntu-24.04
+            android: true
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure and install the SDK for the build host
+        run: |
+          cmake -S engine -B "$RUNNER_TEMP/caw-sdk-build" \
+            -DCAW_AUDIO=OFF -DCAW_TOOLS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/caw-sdk"
+          cmake --build "$RUNNER_TEMP/caw-sdk-build" --config Release --parallel
+          cmake --install "$RUNNER_TEMP/caw-sdk-build" --config Release
+      - name: Download Android NDK r30 (Google SDK licence accepted by owner)
+        if: ${{ matrix.android }}
+        run: |
+          curl --fail --location --retry 3 \
+            https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
+            --output "$RUNNER_TEMP/android-ndk.zip"
+          echo "5107f898313790e449e87eee2183d9a20602dee9  $RUNNER_TEMP/android-ndk.zip" | sha1sum --check
+          unzip -q "$RUNNER_TEMP/android-ndk.zip" -d "$RUNNER_TEMP"
+          echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r30" >> "$GITHUB_ENV"
+      - name: Configure component
+        if: ${{ !matrix.android }}
+        run: |
+          cmake -S examples/cpp/minimal -B "$RUNNER_TEMP/caw-component-build" \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/caw-sdk" -DCMAKE_BUILD_TYPE=Release
+      - name: Configure Android ARM64 component
+        if: ${{ matrix.android }}
+        run: |
+          cmake -S examples/cpp/minimal -B "$RUNNER_TEMP/caw-component-build" \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/caw-sdk" -DCMAKE_BUILD_TYPE=Release
+      - name: Build component
+        run: cmake --build "$RUNNER_TEMP/caw-component-build" --config Release --parallel
+      - name: Test component contract
+        if: ${{ !matrix.android }}
+        run: ctest --test-dir "$RUNNER_TEMP/caw-component-build" --build-config Release --output-on-failure
+      - name: Upload Android component artifact
+        if: matrix.android
+        uses: actions/upload-artifact@v7
+        with:
+          name: caw-minimal-component-android-arm64
+          path: ${{ runner.temp }}/caw-component-build/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload desktop component artifact
+        if: ${{ !matrix.android }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: caw-minimal-component-${{ matrix.name }}
+          path: ${{ runner.temp }}/caw-component-build/*
+          if-no-files-found: error
+          retention-days: 14
