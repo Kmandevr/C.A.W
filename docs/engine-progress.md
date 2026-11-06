@@ -19,7 +19,7 @@ updated: 2026-11-06
 ## CP.1 continuation — native C++ integration
 
 1. Verify the current Quick Check on `gpt/119-native-component-host` and all required PR #125 checks for the exact `gpt/119-cpp-build-pipeline` head. Do not merge queued checks as if they passed.
-2. Once the SDK/build PR is merged, open the stacked native-host work against updated Main. Wire the Dart FFI for `caw_engine_load_component`/`caw_engine_unload_component` and a per-component trust UI. Build completion must never load or authorize code; Blocked remains the safe initial state, and Isolated must stay unavailable until a real separate-process host exists.
+2. Once the SDK/build PR is merged, open the stacked native-host work against updated Main. Add the per-component trust UI/store on top of the existing Dart FFI load/unload wrapper. Build completion must never load or authorize code; Blocked remains the safe initial state, and Isolated must stay unavailable until a real separate-process host exists.
 3. Connect `ModuleRegistry.create()` processors to the existing Engine chain and live `MixGraph`. The current `Chain` stores VM `Instance` objects and `runModuleNode` executes `.caw` programs; start with one minimal stereo effect component, then generalize typed ports/parameters. Preserve no allocation, locks, waits or frees on the audio callback.
 4. Package and validate an Android-hosted C++ toolchain that can run offline after installation; do not mistake the Android NDK cross-compiler (which runs on desktop hosts) for an on-device compiler. Then add optional dependency detection/pre-acquisition and local cache verification.
 
