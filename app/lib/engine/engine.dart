@@ -325,6 +325,7 @@ class Engine {
             .result;
         if (result == null) throw StateError('native project job returned no result');
         final j = jsonDecode(result) as Map<String, dynamic>;
+        lastProjectWarnings = const [];
         final projectError = j['error'] as String?;
         if (projectError != null && projectError.isNotEmpty) throw StateError(projectError);
         final warnings = j['warnings'] as Map<String, dynamic>? ?? const {};
