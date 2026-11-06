@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:caw/model/project.dart';
+import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/storage.dart';
 
 void main() {
@@ -35,6 +36,31 @@ void main() {
     expect(restored?.name, 'Original session');
     expect(await storage.loadRestorePoint('project-b', first), isNull);
     expect(await storage.loadRestorePoint(project.id, '../project-b'), isNull);
+  });
+
+  test('C++ sources materialize under the app-private workspace without escaping it', () async {
+    final project = ProjectDoc(id: 'project-cpp', name: 'Native component');
+    final component = CppComponentDoc(
+      id: 'component-1',
+      name: 'Stereo component',
+      componentId: 'caw.example.stereo',
+      files: {
+        'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.22)',
+        'src/component.cpp': 'int process() { return 1; }',
+        'include/component.hpp': '#pragma once',
+      },
+      dependencies: {'fmt': '11.0.2'},
+    );
+
+    final workspace = await storage.materializeCppComponent(project, component);
+    expect(await File('${workspace.path}${Platform.pathSeparator}src${Platform.pathSeparator}component.cpp')
+        .readAsString(), 'int process() { return 1; }');
+    expect(await File('${workspace.path}${Platform.pathSeparator}include${Platform.pathSeparator}component.hpp')
+        .readAsString(), '#pragma once');
+
+    component.files['../outside.cpp'] = 'must not be written';
+    await expectLater(storage.materializeCppComponent(project, component), throwsFormatException);
+    expect(await File('${root.path}${Platform.pathSeparator}outside.cpp').exists(), isFalse);
   });
 
   test('deleting a project also removes its restore-point history', () async {
