@@ -59,10 +59,10 @@ void main() {
       name: 'Local test component',
       componentId: 'org.caw.tests.local',
       files: {
-        'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.22)\\n'
-            'project(caw_local_component LANGUAGES CXX)\\n'
-            'add_library(caw_local_component MODULE src/component.cpp)\\n',
-        'src/component.cpp': 'extern "C" int caw_component_value() { return 42; }\\n',
+        'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.22)\n'
+            'project(caw_local_component LANGUAGES CXX)\n'
+            'add_library(caw_local_component MODULE src/component.cpp)\n',
+        'src/component.cpp': 'extern "C" int caw_component_value() { return 42; }\n',
       },
     );
     final project = ProjectDoc(
@@ -71,8 +71,7 @@ void main() {
       cppComponents: [component],
     );
     final storage = ProjectStorage(root);
-    const service = CppComponentBuildService;
-    final buildService = service(storage);
+    final buildService = CppComponentBuildService(storage);
 
     final first = await buildService.build(
       project: project,
@@ -87,7 +86,7 @@ void main() {
     expect((await storage.load(project.id))?.cppComponents.single.files['src/component.cpp'],
         contains('return 42'));
 
-    component.files['src/component.cpp'] = 'extern "C" int caw_component_value() { return 43; }\\n';
+    component.files['src/component.cpp'] = 'extern "C" int caw_component_value() { return 43; }\n';
     final second = await buildService.build(
       project: project,
       component: component,
