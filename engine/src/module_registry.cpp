@@ -114,6 +114,8 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
     if (trust == NativeModuleTrust::Isolated)
         return {false, ModuleLoadError::IsolationUnavailable, std::string(expectedId),
                 "Isolated native execution is not available in this host; choose Trusted explicitly or keep the component Blocked."};
+    if (trust != NativeModuleTrust::Trusted)
+        return {false, ModuleLoadError::InvalidArgument, std::string(expectedId), "Unknown native component trust level."};
     if (path.empty() || expectedId.empty())
         return {false, ModuleLoadError::InvalidArgument, {}, "A component path and expected stable component ID are required."};
 
