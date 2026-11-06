@@ -327,6 +327,7 @@ class ProjectDoc {
         'modules': [
           for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
+        'master_components': masterComponents,
         'layers': [
           for (final l in layers)
             {
