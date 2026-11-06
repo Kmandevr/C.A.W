@@ -164,3 +164,12 @@ Newest first.
 
 - 2026-11-02: Removed the 16-export compiler/runtime cap. Each Engine now lazily allocates stable per-slot export buffers from the hardware-derived graph-working share; a fixed pointer table and heap-stable buffers keep import addresses valid across project updates. Export counts are checked before installation, failures are explicit, and inactive/muted export sources are zeroed without double-clearing active producers. Added 20-export compiler and end-to-end import routing tests plus a low-memory budget rejection test. Latest code/test checkpoint: 80e2664a5f9af2c3f6628ba94a0529ead4a42165. Fresh CI is not yet inspectable.
 - 2026-11-06: C++ prototype direction (owner): local/offline compilation is required; internet may only help acquire dependencies that are cached locally. Prioritize a working C++ component vertical slice, live early diagnostics, incremental builds, fast shared-library integration, REAPER-like self-contained project handoff, user-selected trust, transparent overridable resource budgets, real-time safety and practical recovery. Plan compatibility now without building a full migration framework; AutoStacc integration is later.
+
+
+## 2026-11-06 — C++ local build and first playback integration
+
+- The local/offline C++ project path now persists component sources and exact dependency pins, builds through the local CMake runner, and returns a verified artifact path. GitHub Actions remains repository CI only.
+- The Engine ModuleRegistry dynamically loads a component only after an explicit trust value. Blocked refuses, Isolated is unavailable until a separate-process host exists, and Trusted loads in-process. Dart FFI exposes load/unload on a background isolate.
+- The first live audio adapter is a project-owned zero-parameter stereo master-effect chain. It runs before the safety limiter; host buffers are preallocated and old chains are reclaimed off the audio callback. Project files store component IDs/order, not trust decisions.
+- Added parser, registry, C API, Dart FFI, project-storage and live-master-processing tests. CI verification for the stacked integration branch is pending.
+- Remaining: per-component trust UI/store, parameter mapping, track-chain integration, Android-hosted offline compiler/toolchain, and low-end-device benchmarks including plugin-private memory/runtime costs.
