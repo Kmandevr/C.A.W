@@ -1798,7 +1798,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
         mods += "]}";
     }
-    return std::string("{\"ok\":") + (allOk ? "true" : "false") + ",\"modules\":{" + mods + "}}";
+    std::string projectWarnings;
+    auto projectWarningIt = warnings.find("project");
+    if (projectWarningIt != warnings.end()) {
+        auto& messages = projectWarningIt->second;
+        std::sort(messages.begin(), messages.end());
+        messages.erase(std::unique(messages.begin(), messages.end()), messages.end());
+        for (size_t i = 0; i < messages.size(); ++i)
+            projectWarnings += (i ? ",\"" : "\"") + jsonEscape(messages[i]) + "\"";
+    }
+    return std::string("{\"ok\":") + (allOk ? "true" : "false") +
+           ",\"modules\":{" + mods + "},\"warnings\":{\"project\":[" + projectWarnings + "]}}";
 }
 
 void Engine::setParam(const std::string& moduleId, const std::string& name, double value) {
