@@ -42,7 +42,7 @@ function(caw_add_component)
     endif()
     string(REPLACE "\\" "/" _source_normalized "${_source}")
     if(_source MATCHES ";" OR IS_ABSOLUTE "${_source}" OR _source_normalized MATCHES "^[A-Za-z]:" OR
-       _source_normalized MATCHES "(^|/)\.\.(/|$)")
+       _source_normalized MATCHES "(^|/)[.][.](/|$)")
       message(FATAL_ERROR "Component source must stay inside its project: ${_source}")
     endif()
     get_filename_component(_source_path "${_source}" ABSOLUTE BASE_DIR "${_manifest_dir}")
@@ -88,7 +88,7 @@ function(caw_add_component)
       string(REPLACE "\\" "/" _include_normalized "${_include}")
       if(NOT _json_error STREQUAL "NOTFOUND" OR _include STREQUAL "" OR _include MATCHES ";" OR
          IS_ABSOLUTE "${_include}" OR _include_normalized MATCHES "^[A-Za-z]:" OR
-         _include_normalized MATCHES "(^|/)\.\.(/|$)")
+         _include_normalized MATCHES "(^|/)[.][.](/|$)")
         message(FATAL_ERROR "Invalid component include directory: ${_include}")
       endif()
       get_filename_component(_include_path "${_include}" ABSOLUTE BASE_DIR "${_manifest_dir}")
