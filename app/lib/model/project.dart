@@ -2,8 +2,8 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'pattern_doc.dart';
 import 'cpp_component.dart';
+import 'pattern_doc.dart';
 
 String newId(String prefix) {
   final r = Random.secure();
