@@ -1,12 +1,13 @@
 ---
 title: C++ creation platform
-summary: Proposed C++ language, C.A.W. Library/SDK, shared component model and coordinated code, visual and performance interfaces.
-updated: 2026-11-05
+summary: Owner-approved C++ authoring direction and implementation status for the shared SDK, component model and code, visual and performance interfaces.
+covers: [engine/include/caw/, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
+updated: 2026-11-06
 ---
 
 # C++ creation platform
 
-**Status:** The language direction and product requirements below are owner decisions (2026-11-05). The first public C++ SDK slice is implemented on the current branch: the existing typed module processor contract is exposed through `engine/include/caw/module.hpp` and the `CAW::SDK` CMake interface target. The broader C++ toolchain, full component metadata, Library, dynamic loading, editor, visual scripting and generated/custom UI remain planned. This note supports the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
+**Status:** The language direction and product requirements below are owner decisions (2026-11-05). The public C++ processor contract is exposed through `engine/include/caw/module.hpp`. The first CP.1 toolchain slice is now present in code: an installable `CAW::SDK` CMake package, a versioned `caw.component` project manifest, a CMake helper that builds component shared-library targets, exported descriptor/factory entry points, a Node build driver that writes structured diagnostics, and a GitHub Actions matrix for Linux x64, Windows x64 and Android ARM64. The matrix has not yet produced a verified result for this branch. App-private project storage, app-to-build-service submission/download, runtime registration/loading and the trust-mode host remain incomplete; full component metadata, Library, editor, visual scripting and generated/custom UI remain planned. This note supports the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
 
 ## 1. The four distinct layers
 
