@@ -94,7 +94,7 @@ void main() {
     final engine = Engine.create();
     await expectLater(
       engine.setProject('{"caw_project":1,"master_components":["org.caw.tests.not-loaded"]}'),
-      throwsA(isA<StateError>()),
+      throwsA(predicate((error) => error is StateError && error.message.contains('not loaded'))),
     );
     engine.dispose();
   }, skip: skip);
