@@ -1166,8 +1166,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (const std::string& componentId : p.masterComponents) {
             const ModuleDescriptor* descriptor = nativeModules_.find(componentId);
             if (!descriptor)
-                return "{\\"ok\\":false,\\"error\\":\\"native component '\\" + jsonEscape(componentId) +
-                       "\\' is not loaded; load it with an explicit trust choice first\\",\\"modules\\":{}}";
+                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
+                       "' is not loaded; load it with an explicit trust choice first\",\"modules\":{}}";
             const bool stereoEffect = descriptor->portCount == 2 && descriptor->ports &&
                 descriptor->ports[0].type == PortType::Audio && descriptor->ports[0].input &&
                 descriptor->ports[0].layout == ChannelLayout::Stereo && descriptor->ports[0].channelCount == 2 &&
@@ -1175,12 +1175,12 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 descriptor->ports[1].layout == ChannelLayout::Stereo && descriptor->ports[1].channelCount == 2 &&
                 descriptor->parameterCount == 0;
             if (!stereoEffect)
-                return "{\\"ok\\":false,\\"error\\":\\"native component '\\" + jsonEscape(componentId) +
-                       "\\' must currently expose one stereo audio input, one stereo audio output and no parameters\\",\\"modules\\":{}}";
+                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
+                       "' must currently expose one stereo audio input, one stereo audio output and no parameters\",\"modules\":{}}";
             auto processor = nativeModules_.create(componentId);
             if (!processor)
-                return "{\\"ok\\":false,\\"error\\":\\"native component '\\" + jsonEscape(componentId) +
-                       "\\' could not create a processor instance\\",\\"modules\\":{}}";
+                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
+                       "' could not create a processor instance\",\"modules\":{}}";
             nextMasterChain->processors.push_back(std::move(processor));
         }
     }
