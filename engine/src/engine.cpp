@@ -183,13 +183,18 @@ struct Engine::Chain {
     double tb[kBlock], rateb[kBlock], zero[kBlock];
 };
 
+struct Engine::MasterChain {
+    std::vector<std::unique_ptr<ModuleProcessor>> processors;
+};
+
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
     int slot = 0;
     Chain* chain = nullptr;
+    MasterChain* masterChain = nullptr;
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
@@ -214,6 +219,7 @@ struct Engine::Retired {
     AutomationData* automation = nullptr;
     std::vector<int>* order = nullptr;
     SlotTable* table = nullptr;  // a slot table (and its mix graph) a Grow replaced
+    MasterChain* masterChain = nullptr;
 };
 
 namespace {
