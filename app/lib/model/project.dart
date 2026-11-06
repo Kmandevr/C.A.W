@@ -259,7 +259,7 @@ class ProjectDoc {
   List<String> libraryFolders;
   Map<String, String> savedLibrarySearches;
   List<CppComponentDoc> cppComponents;
-  List<String> masterComponents; // explicitly trusted native stereo effects in master-chain order
+  List<String> masterComponents; // native stereo master-effect IDs; this is not a trust grant
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
