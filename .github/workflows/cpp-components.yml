@@ -42,7 +42,6 @@ jobs:
           cmake -S engine -B "$RUNNER_TEMP/caw-sdk-build" \
             -DCAW_AUDIO=OFF -DCAW_TOOLS=OFF \
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/caw-sdk"
-          cmake --build "$RUNNER_TEMP/caw-sdk-build" --config Release --parallel
           cmake --install "$RUNNER_TEMP/caw-sdk-build" --config Release
       - name: Download Android NDK r30 (Google SDK licence accepted by owner)
         if: ${{ matrix.android }}
@@ -75,7 +74,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: caw-minimal-component-android-arm64
-          path: ${{ runner.temp }}/caw-component-build/*
+          path: ${{ runner.temp }}/caw-component-build/artifacts/*
           if-no-files-found: error
           retention-days: 14
       - name: Upload desktop component artifact
@@ -83,6 +82,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: caw-minimal-component-${{ matrix.name }}
-          path: ${{ runner.temp }}/caw-component-build/*
+          path: ${{ runner.temp }}/caw-component-build/artifacts/*
           if-no-files-found: error
           retention-days: 14
