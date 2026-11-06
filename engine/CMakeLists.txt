@@ -22,29 +22,39 @@ target_include_directories(caw_sdk INTERFACE
 target_compile_features(caw_sdk INTERFACE cxx_std_20)
 set_target_properties(caw_sdk PROPERTIES EXPORT_NAME SDK)
 
-# Installable CMake package for projects that build components outside this repository.
-set(CAW_SDK_VERSION 1.0.0)
-set(CAW_SDK_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/CAW")
-configure_package_config_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWConfig.cmake.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/CAWConfig.cmake"
-  INSTALL_DESTINATION "${CAW_SDK_CMAKE_DIR}"
-)
-write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/CAWConfigVersion.cmake"
-  VERSION "${CAW_SDK_VERSION}"
-  COMPATIBILITY SameMajorVersion
-)
-install(TARGETS caw_sdk EXPORT CAWSDKTargets)
-install(EXPORT CAWSDKTargets NAMESPACE CAW:: DESTINATION "${CAW_SDK_CMAKE_DIR}")
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWComponent.cmake"
-  DESTINATION "${CAW_SDK_CMAKE_DIR}")
-install(DIRECTORY include/caw/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/caw")
-install(FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/CAWConfig.cmake"
-  "${CMAKE_CURRENT_BINARY_DIR}/CAWConfigVersion.cmake"
-  DESTINATION "${CAW_SDK_CMAKE_DIR}"
-)
+# Install the SDK package only when engine is configured as the top-level project.
+# The app embeds engine as a subdirectory and has a generator-expression install prefix;
+# it needs the runtime library, not a development SDK package beside the application.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  set(_caw_install_sdk_default ON)
+else()
+  set(_caw_install_sdk_default OFF)
+endif()
+option(CAW_INSTALL_SDK "Install the public C++ SDK CMake package" ${_caw_install_sdk_default})
+if(CAW_INSTALL_SDK)
+  set(CAW_SDK_VERSION 1.0.0)
+  set(CAW_SDK_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/CAW")
+  configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/CAWConfig.cmake"
+    INSTALL_DESTINATION "${CAW_SDK_CMAKE_DIR}"
+  )
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/CAWConfigVersion.cmake"
+    VERSION "${CAW_SDK_VERSION}"
+    COMPATIBILITY SameMajorVersion
+  )
+  install(TARGETS caw_sdk EXPORT CAWSDKTargets)
+  install(EXPORT CAWSDKTargets NAMESPACE CAW:: DESTINATION "${CAW_SDK_CMAKE_DIR}")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWComponent.cmake"
+    DESTINATION "${CAW_SDK_CMAKE_DIR}")
+  install(DIRECTORY include/caw/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/caw")
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/CAWConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/CAWConfigVersion.cmake"
+    DESTINATION "${CAW_SDK_CMAKE_DIR}"
+  )
+endif()
 
 # Determinism: no fast-math and no fused multiply-add contraction (MSVC /fp:precise never contracts), so every platform rounds alike.
 if(MSVC)
