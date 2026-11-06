@@ -42,6 +42,18 @@ test('parses MSVC diagnostics including the compiler code', () => {
   }]);
 });
 
+test('parses CMake configure errors with source locations', () => {
+  const parsed = parseDiagnostics('CMake Error at CMakeLists.txt:12 (find_package): Missing SDK package');
+  assert.deepEqual(parsed, [{
+    file: 'CMakeLists.txt',
+    line: 12,
+    column: null,
+    severity: 'error',
+    code: 'CMAKE',
+    message: 'Missing SDK package',
+  }]);
+});
+
 test('does not mistake CMake progress lines for compiler diagnostics', () => {
   assert.deepEqual(parseDiagnostics('[100%] Built target caw_component'), []);
 });
