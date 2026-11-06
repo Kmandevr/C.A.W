@@ -2,6 +2,7 @@
 import 'dart:convert';
 
 import 'package:caw/model/project.dart';
+import 'package:caw/model/cpp_component.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'swing': 0.2}, modules: [
