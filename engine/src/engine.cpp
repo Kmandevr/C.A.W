@@ -3300,34 +3300,81 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
     const bool bypass = bypass_.load(std::memory_order_relaxed);
     int sp = masterScopePos_.load(std::memory_order_relaxed);
 
-    // Preallocate two stereo stages on Engine. The callback only writes into these fixed buffers.
-    float* stage0L = masterStageL_[0].data();
-    float* stage0R = masterStageR_[0].data();
-    for (int i = 0; i < m; ++i) {
-        if (masterRamp_ > 0) {
-            master_ += masterStep_;
-            if (--masterRamp_ == 0) master_ = masterTarget_;
+    auto finishSample = [&](int frame, double yl, double yr) noexcept {
+        const double env = std::max(std::fabs(yl), std::fabs(yr));
+        limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
+        const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
+        if (stopFade_ > 0) {
+            fade = static_cast<double>(stopFade_) / (kStopSeconds * sr_);
+            if (--stopFade_ == 0) {
+                playing_ = false;
+                stopEnded_ = true;
+            }
+        } else if (!playing_ && !previewChunk_) {
+            fade = 0.0;
+        } else if (previewChunk_ && previewRampIn_ > 0) {
+            const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
+            fade = 1.0 - static_cast<double>(previewRampIn_--) / len;
+        } else if (playing_ && playRampIn_ > 0) {
+            const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
+            fade = 1.0 - static_cast<double>(playRampIn_--) / len;
         }
-        const double xl = finiteOr0(static_cast<double>(inL[i])) * master_;
-        const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
-        const double yl = xl - dcL_[0] + R * dcL_[1];
-        dcL_[0] = xl;
-        dcL_[1] = yl;
-        const double yr = xr - dcR_[0] + R * dcR_[1];
-        dcR_[0] = xr;
-        dcR_[1] = yr;
-        stage0L[i] = static_cast<float>(bypass ? xl : yl);
-        stage0R[i] = static_cast<float>(bypass ? xr : yr);
-    }
+        const float ol = static_cast<float>(yl * gain * fade);
+        const float orr = static_cast<float>(yr * gain * fade);
+        outL[frame] = ol;
+        outR[frame] = orr;
+        pl = std::max(pl, std::fabs(ol));
+        pr = std::max(pr, std::fabs(orr));
+        masterScope_[sp].store(0.5f * (ol + orr), std::memory_order_relaxed);
+        sp = (sp + 1) % kScopeSize;
+    };
 
-    const float* currentL = stage0L;
-    const float* currentR = stage0R;
-    if (masterChain_) {
+    if (!masterChain_) {
+        // Keep the normal Engine path allocation-free and free of extra staging copies.
+        for (int i = 0; i < m; ++i) {
+            if (masterRamp_ > 0) {
+                master_ += masterStep_;
+                if (--masterRamp_ == 0) master_ = masterTarget_;
+            }
+            const double xl = finiteOr0(static_cast<double>(inL[i])) * master_;
+            const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
+            const double yl = xl - dcL_[0] + R * dcL_[1];
+            dcL_[0] = xl;
+            dcL_[1] = yl;
+            const double yr = xr - dcR_[0] + R * dcR_[1];
+            dcR_[0] = xr;
+            dcR_[1] = yr;
+            finishSample(i, bypass ? xl : yl, bypass ? xr : yr);
+        }
+    } else {
+        // Scratch buffers live inside MasterChain, so projects without native components pay no
+        // additional Engine-object memory cost. The callback never allocates or locks.
+        float* stage0L = masterChain_->stageL[0].data();
+        float* stage0R = masterChain_->stageR[0].data();
+        for (int i = 0; i < m; ++i) {
+            if (masterRamp_ > 0) {
+                master_ += masterStep_;
+                if (--masterRamp_ == 0) master_ = masterTarget_;
+            }
+            const double xl = finiteOr0(static_cast<double>(inL[i])) * master_;
+            const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
+            const double yl = xl - dcL_[0] + R * dcL_[1];
+            dcL_[0] = xl;
+            dcL_[1] = yl;
+            const double yr = xr - dcR_[0] + R * dcR_[1];
+            dcR_[0] = xr;
+            dcR_[1] = yr;
+            stage0L[i] = static_cast<float>(bypass ? xl : yl);
+            stage0R[i] = static_cast<float>(bypass ? xr : yr);
+        }
+
+        const float* currentL = stage0L;
+        const float* currentR = stage0R;
         for (size_t index = 0; index < masterChain_->processors.size(); ++index) {
             ModuleProcessor* processor = masterChain_->processors[index].get();
             const size_t destination = (index & 1u) == 0u ? 1u : 0u;
-            float* destinationL = masterStageL_[destination].data();
-            float* destinationR = masterStageR_[destination].data();
+            float* destinationL = masterChain_->stageL[destination].data();
+            float* destinationR = masterChain_->stageR[destination].data();
             std::copy_n(currentL, m, destinationL);
             std::copy_n(currentR, m, destinationR);
             const float* inputChannels[2] = {currentL, currentR};
@@ -3351,39 +3398,9 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             currentL = destinationL;
             currentR = destinationR;
         }
+        for (int i = 0; i < m; ++i) finishSample(i, currentL[i], currentR[i]);
     }
 
-    // Keep the safety limiter after native code so a component cannot bypass the master ceiling.
-    for (int i = 0; i < m; ++i) {
-        double yl = currentL[i];
-        double yr = currentR[i];
-        const double env = std::max(std::fabs(yl), std::fabs(yr));
-        limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
-        const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
-        if (stopFade_ > 0) {
-            fade = static_cast<double>(stopFade_) / (kStopSeconds * sr_);
-            if (--stopFade_ == 0) {
-                playing_ = false;
-                stopEnded_ = true;
-            }
-        } else if (!playing_ && !previewChunk_) {
-            fade = 0.0;
-        } else if (previewChunk_ && previewRampIn_ > 0) {
-            const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
-            fade = 1.0 - static_cast<double>(previewRampIn_--) / len;
-        } else if (playing_ && playRampIn_ > 0) {
-            const int len = std::max(1, static_cast<int>(kStopSeconds * sr_));
-            fade = 1.0 - static_cast<double>(playRampIn_--) / len;
-        }
-        const float ol = static_cast<float>(yl * gain * fade);
-        const float orr = static_cast<float>(yr * gain * fade);
-        outL[i] = ol;
-        outR[i] = orr;
-        pl = std::max(pl, std::fabs(ol));
-        pr = std::max(pr, std::fabs(orr));
-        masterScope_[sp].store(0.5f * (ol + orr), std::memory_order_relaxed);
-        sp = (sp + 1) % kScopeSize;
-    }
     masterScopePos_.store(sp, std::memory_order_release);
     storeMax(peakL_, pl);
     storeMax(peakR_, pr);
