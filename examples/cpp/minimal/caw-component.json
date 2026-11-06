@@ -1,0 +1,11 @@
+{
+  "format": "caw.component",
+  "version": 1,
+  "component": {
+    "id": "org.caw.examples.minimal",
+    "name": "Minimal stereo pass-through"
+  },
+  "sources": [
+    "src/minimal_component.cpp"
+  ]
+}

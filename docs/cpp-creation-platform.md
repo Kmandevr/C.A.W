@@ -1,12 +1,13 @@
 ---
 title: C++ creation platform
-summary: Proposed C++ language, C.A.W. Library/SDK, shared component model and coordinated code, visual and performance interfaces.
-updated: 2026-11-05
+summary: Owner-approved C++ authoring direction and implementation status for the shared SDK, component model and code, visual and performance interfaces.
+covers: [engine/include/caw/, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
+updated: 2026-11-06
 ---
 
 # C++ creation platform
 
-**Status:** The language direction and product requirements below are owner decisions (2026-11-05). The first public C++ SDK slice is implemented on the current branch: the existing typed module processor contract is exposed through `engine/include/caw/module.hpp` and the `CAW::SDK` CMake interface target. The broader C++ toolchain, full component metadata, Library, dynamic loading, editor, visual scripting and generated/custom UI remain planned. This note supports the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
+**Status (2026-11-06):** The public C++ processor contract is exposed through `engine/include/caw/module.hpp`. The first CP.1 code slice is present: an installable `CAW::SDK` CMake package, a versioned `caw.component` project manifest, a CMake shared-library helper, exported descriptor/factory entry points, a minimal stereo fixture, and a Node build driver with structured diagnostics. The Linux x64, Windows x64 and Android ARM64 GitHub Actions matrix is repository CI only; it tests the component build path and is not a CAW user build service. Its component jobs were still queued at the last status check. **The product requirement is local/offline C++ compilation**; the app-local compiler/toolchain packaging, proactive local dependency manager, project/source storage, app build integration, runtime registration/loading and user-configured trust host are not yet implemented. Full Library coverage, editor, visual scripting, generated/custom UI and self-contained project handoff remain incomplete. This note supports the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
 
 ## 1. The four distinct layers
 
@@ -73,7 +74,8 @@ The editor is a practical integrated C++ development environment, not a replacem
 
 - syntax highlighting, indentation and formatting;
 - completion and signature help aware of the C.A.W. SDK and the current project;
-- inline diagnostics, a Problems list, clickable errors and source locations;
+- fast live syntax/semantic diagnostics, a Problems list, clickable errors and source locations, with the earliest actionable cause prioritized over cascades;
+- project-aware dependency detection while files are opened and edited; when online, missing packages may be downloaded and installed in the background before the user requests a build;
 - go-to-definition, find references, project-wide search and find/replace;
 - tabs, multiple files, a project tree and imported source folders;
 - build, run, component validation, preview and useful build output;
@@ -81,6 +83,8 @@ The editor is a practical integrated C++ development environment, not a replacem
 - debugging support appropriate to the target, including breakpoints and inspection for ordinary non-real-time code.
 
 Users can add or drop in existing C++ files and projects. C.A.W. should respect supported build configuration and dependencies, explain unsupported build requirements, and make the resulting component available through the shared registry when it supplies a valid descriptor. C++ remains general-purpose; code is not restricted to producing an audio component.
+
+The editor should catch inexpensive syntax and semantic errors before full compilation, resolve includes/configuration and linker requirements early, and keep diagnostics attached to their source locations. Do not launch a full compile for every keystroke. Use incremental compilation and a local cache so unchanged translation units are reused; perform expensive linking and validation after earlier checks pass. All compilation and linking happen locally, including when the device is offline.
 
 ### B. Visual scripting and composition
 
@@ -128,6 +132,8 @@ A plugin host may have different UI requirements from C.A.W. The shared metadata
 
 The Library is a broad, practical toolbox, not just a thin wrapper around the current engine. Prefer one canonical implementation of each algorithm and expose it to C++ components, visual blocks and generated controls where applicable. Use the C++ standard library for standard general-purpose facilities instead of needlessly cloning it.
 
+Make the Library the easiest and fastest route into the engine: built-in, Library and user-authored components use the same registration, descriptor, typed-port, parameter and lifecycle contracts. A user should be able to add or insert a component and use its declared inputs/outputs without manually recreating engine integration. Preinstall the common packages most CAW projects are likely to use; keep less common packages modular and locally cached. Predict requirements from project files and install missing dependencies in the background when connected, while keeping already-installed projects buildable offline.
+
 ### Audio and DSP
 
 Provide reusable implementations and building blocks for:
@@ -174,6 +180,8 @@ Native C++ is not sandboxed because it uses the SDK. A native component can acce
 
 Performance requirements apply from the start: prepared execution, direct native processing, borrowed/zero-copy buffers where ownership permits, bounded pools, explicit lifetimes, lazy loading, serial fast paths for small workloads, adaptive scheduling for independent work, and SIMD/accelerators only when measurement shows a net benefit. Avoid unnecessary virtual dispatch, pointer chasing, copies, locks and abstractions on hot paths. Benchmark realistic low-end and desktop workloads; do not trade worse end-to-end performance for architectural neatness.
 
+Resource use must be visible and user-configurable: show meaningful CPU, memory, audio and build usage, explain consequences, and allow users to override advisory budgets. Do not hide arbitrary caps behind the UI. Preserve real format/representation limits and the explicit real-time audio safety contract. Each native component's trust mode is chosen by the user; build success or package installation never changes it.
+
 ## 7. Extensibility and versioning without rewrites
 
 Extensibility without broad rewrites is a permanent architecture requirement.
@@ -189,7 +197,7 @@ Extensibility without broad rewrites is a permanent architecture requirement.
 
 Version public SDK/extension contracts and serialized component state. Declare capabilities and negotiate optional features explicitly. Keep experimental APIs separate from stable contracts until validated. Versioning is for extension boundaries and future evolution; it does not create a requirement to preserve the old .caw language or pre-release projects.
 
-Avoid speculative frameworks. Add an extension seam when a real feature needs it, define ownership/lifetime/error behavior, and test that a new component, parameter, port, control or adapter can be added without changing unrelated systems.
+Plan stable component and serialized-state version identifiers now, but defer a comprehensive compatibility/migration framework until real prototype requirements justify it. Avoid speculative frameworks. Add an extension seam when a real feature needs it, define ownership/lifetime/error behavior, and test that a new component, parameter, port, control or adapter can be added without changing unrelated systems.
 
 ## 8. Migration from the current .caw language
 
@@ -208,6 +216,10 @@ Migration order:
 
 Do not remove the old implementation before its replacement is usable. Do not keep the old VM indefinitely as a second product language. No source/project compatibility layer is required for the retired language.
 
+### Self-contained project handoff
+
+The current project-delivery goal is a REAPER-like handoff bundle, not cloud collaboration: package a project so it carries its source, required assets, build configuration, pinned dependency versions and required dependency payloads. The recipient should not need to find and install the project's dependencies manually. A bundled project must be usable offline once received. AutoStacc-based distribution or synchronization is a future direction, not a current implementation priority.
+
 ## 9. Plugin and standalone reuse
 
 A component is authored and implemented once. C.A.W. loads it through the shared component model; visual scripting uses it as a block; the performance UI controls it from its descriptor; the component browser discovers it; and presets/state use the shared state contract.
@@ -221,7 +233,11 @@ External formats are adapters, not separate processors:
 
 Plugin export is a later roadmap stage. It must not block the initial SDK or the three C.A.W. authoring interfaces.
 
-## 10. Verification gates
+## 10. Prototype-first delivery
+
+The immediate goal is a working prototype, not completion of every architecture layer. The first useful vertical slice should prove that a user can create/open a C++ component project, edit ordinary C++, receive early actionable diagnostics, build locally with the network disabled, register and use the resulting component in the engine, and preserve the project. Start with one minimal real component and the narrowest required path. Add only the code and interfaces needed to make that slice reliable. Keep the larger shared component model, dependency/library strategy, trust choice, resource controls and handoff requirements documented, but defer full visual editing, comprehensive compatibility migration, AutoStacc integration, plugin export and other later systems until the prototype works.
+
+## 11. Verification gates
 
 The design is not complete merely because interfaces exist. Tests and CI should prove:
 

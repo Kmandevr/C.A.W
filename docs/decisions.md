@@ -1,10 +1,26 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # Decisions
+
+## 2026-11-06: Offline-first C++ prototype and delivery requirements
+
+- **Owner decision — offline operation:** No part of the C.A.W. app may require an internet connection. C++ project editing, dependency resolution for already-installed packages, compilation, linking, component registration/use, project/library management, saving and project packaging must work locally. There is no required cloud compiler, remote build service, GitHub account or GitHub workflow in the user's app experience. GitHub Actions remains repository CI only; its component matrix validates the code and is not the product build path.
+- **Owner decision — local toolchain:** C++ components must compile on the user's device. The exact compiler distribution, target-toolchain packaging and Android implementation remain implementation questions to prove with a working prototype; do not substitute a remote build path. Compiler modules and target SDKs should be installed/cached locally and loaded only when needed.
+- **Owner decision — optional dependency acquisition:** When internet is available, C.A.W. may proactively detect missing dependencies while the user writes or opens a project and install them in the background before Build. Ship a small core plus commonly used/preinstalled packages and the C.A.W. Library; obtain less common dependencies on demand. Verify package identity/integrity and licensing, pin project versions, retain installed packages for offline use, and never silently replace a version a project relies on.
+- **Owner decision — prototype first:** Prioritize a working end-to-end prototype over a comprehensive framework. Prove the smallest useful vertical slice: create/open a C++ project, edit a component, surface inexpensive errors early, compile locally without network access, register/use the result in the engine, and show actionable diagnostics. Add only architecture needed by that slice; plan future compatibility seams without building a full migration system prematurely.
+- **Owner decision — build feedback and speed:** Detect syntax/semantic problems and dependency/configuration issues before expensive compilation where practical. Prepare likely dependencies while the user codes; use incremental compilation and caching so unchanged source is not rebuilt unnecessarily. Full compilation and linking remain local.
+- **Owner decision — Library integration:** The C.A.W. Library should be the easiest and fastest way to use components in the engine. Built-in, Library and user C++ components share the same registration, descriptor, ports, parameter and lifecycle contracts; users should be able to add or insert a component without manually recreating its integration.
+- **Owner decision — project handoff:** Current priority is REAPER-like self-contained project/build packaging, not cloud collaboration. A handoff bundle should carry the project, required source/assets, pinned dependency versions and the required dependency payloads/configuration so the recipient does not have to hunt them down. Future AutoStacc distribution/synchronization is a later direction, not a current priority.
+- **Owner decision — real-time safety:** Keep audio callback work bounded and free of allocation, blocking locks/waits, file/network I/O, logging and UI calls. Prepare memory, assets and execution state before activation.
+- **Owner decision — trust:** The user explicitly chooses the trust level for each native component (Blocked, Isolated or Trusted). Building or installing a component never silently changes its trust level. A build process is not runtime isolation.
+- **Owner decision — resource controls:** Make CPU, memory, audio load, compilation use and other meaningful resource consumption visible. Budgets and performance recommendations should be transparent and configurable; users may override advisory limits and accept the consequences. Do not impose arbitrary hidden ceilings. Retain genuine format, representation and real-time safety requirements.
+- **Owner decision — reliability and security:** Provide practical autosave/recovery and protect projects from partial writes, failed builds and unsafe updates. Verify dependency origin/integrity and record licences, but keep safeguards proportionate; do not build an elaborate package-security framework before the prototype needs it.
+- **Owner decision — compatibility:** Design component contracts and project/dependency metadata with future versioning in mind, but do not implement a comprehensive compatibility/migration framework yet.
+- **Scope:** These are product requirements and sequencing decisions, not claims that the local compiler, dependency manager, project packager, trust host or recovery system is already implemented.
 
 ## 2026-11-05: Ordinary C++ and one shared creation platform
 
