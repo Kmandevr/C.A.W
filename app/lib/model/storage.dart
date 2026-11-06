@@ -4,8 +4,8 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
-import 'project.dart';
 import 'cpp_component.dart';
+import 'project.dart';
 
 class ProjectSummary {
   const ProjectSummary(this.id, this.name, this.modified);
