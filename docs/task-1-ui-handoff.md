@@ -38,7 +38,7 @@ The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), 
 - Sample editing, mapping, multisample authoring and SFZ export.
 - USB/Bluetooth MIDI device discovery/connection, controller mapping and live Engine voice routing.
 - Stems export, persistent export queue and richer batch delivery.
-- C++ component editing, local/offline compilation, dynamic loading and engine registration; the project model now persists component sources and pinned dependency metadata, but the build/runtime bridge is still outstanding.
+- C++ component editing, local/offline compilation, dynamic loading and engine registration; the project model now persists component sources and pinned dependency metadata and can materialize them into an app-private build workspace, but the local compiler runner and build/runtime bridge are still outstanding.
 - External CLAP/VST3 binary build/hosting and native module dynamic loading.
 - Additional polish only where tests or real-device use demonstrate a gap.
 
