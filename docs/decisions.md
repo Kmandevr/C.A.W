@@ -6,6 +6,16 @@ updated: 2026-11-05
 
 # Decisions
 
+## 2026-11-06: C++ component build toolchain
+
+- **Owner decision:** GitHub Actions is the required/default build path for C++ components. Desktop-local builds may be offered as an optional power-user path; on-device compilation is not required.
+- **Android cross-compilation:** CI may use the Android NDK under Google's Android SDK License Agreement for Android ARM64 builds. This is a deliberate exception to the repository's default permissive-dependency preference, limited to the CI build toolchain; it does not add the NDK to the shipped app or redistribute the NDK with C.A.W.
+- **Build targets:** begin with Android ARM64, Windows x64 and Linux x64, and claim only targets that the workflow actually builds and tests. Pin toolchain versions and cache downloads where practical.
+- **Trust boundary:** a successful build does not authorize execution. Native output remains blocked until the user explicitly chooses Trusted or a genuinely process-isolated Isolated host; a build runner, downloaded artifact or compiler subprocess is not runtime isolation. Never load native code silently.
+- **Why:** the owner works from an Android phone and expects builds/installables from GitHub Actions. A remote compiler avoids shipping a large compiler toolchain on the phone and supports the current app workflow. Desktop builds remain optional rather than a prerequisite.
+- **Research:** Android NDK r30 is the current LTS documented at [NDK downloads](https://developer.android.com/ndk/downloads) (checked 2026-11-06; Linux archive 738,633,529 bytes, Windows 727,980,788 bytes). Android documents CMake integration and license acceptance at [Install and configure the NDK and CMake](https://developer.android.com/studio/projects/install-ndk). LLVM/Clang licensing and platform build details are recorded in issue #119's research comment.
+- **Scope:** this selects the build toolchain only. It does not claim that the remote build service, project model, native artifact loader, Isolated host, C++ editor or visual editor is implemented.
+
 ## 2026-11-05: Ordinary C++ and one shared creation platform
 
 - **Owner decision:** C.A.W. uses ordinary, general-purpose C++ as its programming language. It is not a music-only DSL. The user can write anything ordinary C++ permits; the C.A.W. Library/SDK provides reusable building blocks rather than restricting the language.
