@@ -1006,6 +1006,7 @@ ModuleLoadResult Engine::loadNativeComponent(
 
 bool Engine::unloadNativeComponent(const std::string& id) {
     std::lock_guard<std::mutex> lock(ctl_);
+    drainRetired();
     return nativeModules_.unload(id);
 }
 
