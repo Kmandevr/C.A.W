@@ -37,6 +37,8 @@ write_basic_package_version_file(
 )
 install(TARGETS caw_sdk EXPORT CAWSDKTargets)
 install(EXPORT CAWSDKTargets NAMESPACE CAW:: DESTINATION "${CAW_SDK_CMAKE_DIR}")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWComponent.cmake"
+  DESTINATION "${CAW_SDK_CMAKE_DIR}")
 install(DIRECTORY include/caw/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/caw")
 install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/CAWConfig.cmake"
