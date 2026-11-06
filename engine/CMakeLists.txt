@@ -1,6 +1,8 @@
 # Builds the C.A.W engine: core library, shared library for the app (with audio output), the caw CLI and tests.
 cmake_minimum_required(VERSION 3.22)
 project(caw_engine LANGUAGES C CXX)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -13,8 +15,34 @@ get_filename_component(CAW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 # Public source-level C++ SDK. Internal engine headers stay private to engine targets.
 add_library(caw_sdk INTERFACE)
 add_library(CAW::SDK ALIAS caw_sdk)
-target_include_directories(caw_sdk INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(caw_sdk INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
 target_compile_features(caw_sdk INTERFACE cxx_std_20)
+set_target_properties(caw_sdk PROPERTIES EXPORT_NAME SDK)
+
+# Installable CMake package for projects that build components outside this repository.
+set(CAW_SDK_VERSION 1.0.0)
+set(CAW_SDK_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/CAW")
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/CAWConfig.cmake"
+  INSTALL_DESTINATION "${CAW_SDK_CMAKE_DIR}"
+)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/CAWConfigVersion.cmake"
+  VERSION "${CAW_SDK_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+install(TARGETS caw_sdk EXPORT CAWSDKTargets)
+install(EXPORT CAWSDKTargets NAMESPACE CAW:: DESTINATION "${CAW_SDK_CMAKE_DIR}")
+install(DIRECTORY include/caw/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/caw")
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/CAWConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/CAWConfigVersion.cmake"
+  DESTINATION "${CAW_SDK_CMAKE_DIR}"
+)
 
 # Determinism: no fast-math and no fused multiply-add contraction (MSVC /fp:precise never contracts), so every platform rounds alike.
 if(MSVC)
