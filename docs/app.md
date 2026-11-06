@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # App
@@ -125,6 +125,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 - **Model:** `lib/model/project.dart` holds the project.
   - Each module keeps its editor text (`source`) and the code last run (`run_source`). The engine only ever gets the code last run, so other edits never compile half-typed code.
   - The app's file format adds colours, the key, per-layer generator/effect fields, nested folder metadata, automation lanes and arrangement clip instances. The engine receives clip source references and song-time automation points.
+  - The saved project model also carries C++ component entries (`CppComponentDoc`): each keeps its stable SDK component ID, project-relative file contents and exact pinned dependency versions in the project JSON. Autosave and restore points therefore retain those sources. The path validator rejects absolute paths, traversal segments, Windows separators, drive prefixes and NULs before files are materialized. This is project persistence only; a local compiler runner, app editor, native loader and runtime registration are not implemented yet.
 - **Storage:** projects are JSON files in the app's private support folder, under `projects/`. They're written 0.5 s after each change, and right away when the app goes to the background or quits. The app reopens the last project.
 - **Audio:** the device opens at start-up (48 kHz stereo, low-latency profile). When the app goes to the background while stopped, it closes the device, and it reopens it on return. Playing on in the background (an Android foreground service) is not in v1.
 - **Opening:** the app opens straight into the last project (`AppState.openStorage`) with the arrangement in front (the shell brings it forward once at launch, whatever the saved layout showed), or the "First loop" template on a first run or when the last project is gone. If the last project's file is damaged, or opening it fails, the template opens and a pink line under the transport says why; the damaged file stays in the projects folder. There is no startup screen. The project menu offers a new blank project, a new one from the template, and every saved project.
