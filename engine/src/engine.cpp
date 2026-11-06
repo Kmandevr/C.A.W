@@ -985,6 +985,22 @@ std::string Engine::setProjectJson(std::string_view json) {
     return setProject(p);
 }
 
+ModuleLoadResult Engine::loadNativeComponent(
+    const std::string& path, const std::string& expectedId, NativeModuleTrust trust) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    return nativeModules_.loadSharedLibrary(path, expectedId, trust);
+}
+
+bool Engine::unloadNativeComponent(const std::string& id) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    return nativeModules_.unload(id);
+}
+
+std::unique_ptr<ModuleProcessor> Engine::createNativeComponent(const std::string& id) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    return nativeModules_.create(id);
+}
+
 std::string Engine::setProject(const ProjectSpec& p) {
     return setProjectImpl(p, false);
 }
