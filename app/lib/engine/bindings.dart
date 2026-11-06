@@ -118,6 +118,12 @@ class Bindings {
         destroy = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_destroy'),
         setProject = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>),
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>)>('caw_engine_set_project'),
+        loadComponent = lib.lookupFunction<
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32),
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_engine_load_component'),
+        unloadComponent = lib.lookupFunction<
+            Int32 Function(Pointer<Void>, Pointer<Utf8>),
+            int Function(Pointer<Void>, Pointer<Utf8>)>('caw_engine_unload_component'),
         setParam = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Double),
             void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double)>('caw_engine_set_param'),
         setGlobal = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double),
@@ -217,6 +223,8 @@ class Bindings {
   final Pointer<Void> Function(int) create;
   final void Function(Pointer<Void>) destroy;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) setProject;
+  final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) loadComponent;
+  final int Function(Pointer<Void>, Pointer<Utf8>) unloadComponent;
   final void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setParam;
   final void Function(Pointer<Void>, Pointer<Utf8>, double) setGlobal;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
