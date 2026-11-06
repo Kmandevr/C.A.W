@@ -688,6 +688,7 @@ Engine::~Engine() {
         delete c.automation;
         delete c.orderList;
         delete c.table;
+        delete c.masterChain;
     }
     Retired r;
     while (retired_->pop(r)) {
@@ -696,6 +697,7 @@ Engine::~Engine() {
         delete r.automation;
         delete r.order;
         delete r.table;
+        delete r.masterChain;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
@@ -703,7 +705,10 @@ Engine::~Engine() {
         delete pending_[i].automation;
         delete pending_[i].order;
         delete pending_[i].table;
+        delete pending_[i].masterChain;
     }
+    delete masterChain_;
+    masterChain_ = nullptr;
     for (const auto& slot : slotStore_) {
         delete slot->cur;
         delete slot->old;
@@ -723,6 +728,7 @@ void Engine::drainRetired() {
         delete r.automation;
         delete r.order;
         delete r.table;
+        delete r.masterChain;
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -742,6 +748,7 @@ bool Engine::send(const Cmd& c) {
             delete c.automation;
             delete c.orderList;
             delete c.table;
+            delete c.masterChain;
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1973,9 +1980,10 @@ bool Engine::canRetire(size_t count) const noexcept {
 }
 
 void Engine::retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern,
-                    AutomationData* automation, std::vector<int>* order, SlotTable* table) noexcept {
-    if (!c && !freed && !pattern && !automation && !order && !table) return;
-    Retired r{c, freed, pattern, automation, order, table};
+                    AutomationData* automation, std::vector<int>* order, SlotTable* table,
+                    MasterChain* masterChain) noexcept {
+    if (!c && !freed && !pattern && !automation && !order && !table && !masterChain) return;
+    Retired r{c, freed, pattern, automation, order, table, masterChain};
     if (pendingCount_ == 0 && retired_->push(r)) return;
     if (pendingCount_ < pendingMax_) pending_[pendingCount_++] = r;
     // All callers reserve queue capacity before changing ownership. This is a
@@ -2052,6 +2060,7 @@ void Engine::applyCommands() noexcept {
         switch (c.type) {
             case Cmd::Install: retirementNeed = 2; break;
             case Cmd::SetAutomation:
+            case Cmd::SetMasterChain:
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
@@ -2198,6 +2207,10 @@ void Engine::applyCommands() noexcept {
                 masterTarget_ = std::isfinite(c.master) ? std::clamp(c.master, 0.0, 1.0) : 0.0;
                 masterRamp_ = std::max(1, static_cast<int>(sr_ * kGainSeconds));
                 masterStep_ = (masterTarget_ - master_) / masterRamp_;
+                break;
+            case Cmd::SetMasterChain:
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
+                masterChain_ = c.masterChain;
                 break;
             case Cmd::Play:
                 playing_ = true;
