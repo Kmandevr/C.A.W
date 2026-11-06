@@ -1,8 +1,8 @@
 // Model tests: project files round-trip, the engine JSON uses run code, header parsing and layer length choices.
 import 'dart:convert';
 
-import 'package:caw/model/project.dart';
 import 'package:caw/model/cpp_component.dart';
+import 'package:caw/model/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'swing': 0.2}, modules: [
