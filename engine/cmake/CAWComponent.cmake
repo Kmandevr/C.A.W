@@ -41,7 +41,7 @@ function(caw_add_component)
       message(FATAL_ERROR "Invalid source entry ${_index} in ${_manifest}")
     endif()
     string(REPLACE "\\" "/" _source_normalized "${_source}")
-    if(IS_ABSOLUTE "${_source}" OR _source_normalized MATCHES "^[A-Za-z]:" OR
+    if(_source MATCHES ";" OR IS_ABSOLUTE "${_source}" OR _source_normalized MATCHES "^[A-Za-z]:" OR
        _source_normalized MATCHES "(^|/)\.\.(/|$)")
       message(FATAL_ERROR "Component source must stay inside its project: ${_source}")
     endif()
@@ -86,7 +86,7 @@ function(caw_add_component)
     foreach(_index RANGE 0 ${_last_include})
       string(JSON _include ERROR_VARIABLE _json_error GET "${_json}" includeDirectories ${_index})
       string(REPLACE "\\" "/" _include_normalized "${_include}")
-      if(NOT _json_error STREQUAL "NOTFOUND" OR _include STREQUAL "" OR
+      if(NOT _json_error STREQUAL "NOTFOUND" OR _include STREQUAL "" OR _include MATCHES ";" OR
          IS_ABSOLUTE "${_include}" OR _include_normalized MATCHES "^[A-Za-z]:" OR
          _include_normalized MATCHES "(^|/)\.\.(/|$)")
         message(FATAL_ERROR "Invalid component include directory: ${_include}")
