@@ -68,16 +68,16 @@ TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) 
     CHECK(loaded.success);
     if (!loaded.success) return;
 
-    ProjectSpec p = project({{"tone", std::string(kFloat) + "0.8"}});
+    ProjectSpec p = project({{"tone", std::string(kFloat) + "sine(220) * 0.8"}});
     p.masterComponents.push_back(componentId);
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     e.play();
     std::vector<float> right;
-    const auto left = run(e, 256, 64, &right);
+    const auto left = run(e, 2048, 64, &right);
     // The component doubles the stereo signal; the master safety limiter still runs after it.
-    CHECK(std::fabs(left[200]) > 0.9f);
-    CHECK(std::fabs(left[200]) <= 0.98f);
-    CHECK_NEAR(left[200], right[200], 1e-5);
+    CHECK(std::fabs(left[1145]) > 0.9f);
+    CHECK(std::fabs(left[1145]) <= 0.98f);
+    CHECK_NEAR(left[1145], right[1145], 1e-5);
 
     p.masterComponents.clear();
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
