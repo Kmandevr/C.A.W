@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-05
+updated: 2026-11-06
 covers: [engine/, app/lib/engine/, app/lib/ui/shell.dart, app/pubspec.yaml]
 ---
 
