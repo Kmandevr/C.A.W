@@ -3,6 +3,7 @@
 #include <string>
 
 #include "caw.h"
+#include "project.h"
 
 #include "module_registry.h"
 #include "test.h"
@@ -11,6 +12,18 @@ using namespace caw;
 
 namespace {
 constexpr const char* kComponentId = "org.caw.tests.native-loader";
+}
+
+TEST(project_json_preserves_native_master_component_order) {
+    ProjectSpec project;
+    std::string error;
+    CHECK(parseProject(
+        R"({"caw_project":1,"master_components":["org.caw.fx.first","org.caw.fx.second"]})",
+        project,
+        error));
+    CHECK_EQ(project.masterComponents.size(), 2u);
+    CHECK_EQ(project.masterComponents[0], std::string("org.caw.fx.first"));
+    CHECK_EQ(project.masterComponents[1], std::string("org.caw.fx.second"));
 }
 
 TEST(c_api_native_component_load_requires_an_explicit_trust_level) {
