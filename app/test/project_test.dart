@@ -231,6 +231,45 @@ void main() {
     expect(imported.libraryFolders.any((path) => path.contains('..')), isFalse);
   });
 
+  test('C++ component sources and pinned dependencies round-trip with the project', () {
+    final p = sample();
+    p.cppComponents.add(CppComponentDoc(
+      id: 'native-1',
+      name: 'Stereo shaper',
+      componentId: 'caw.examples.stereo-shaper',
+      files: {
+        'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.22)',
+        'caw.component': 'schema_version: 1',
+        'src/stereo_shaper.cpp': 'class StereoShaper {};',
+        'include/stereo_shaper.hpp': '#pragma once',
+      },
+      dependencies: {'fmt': '11.0.2'},
+    ));
+
+    final back = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    final component = back.cppComponents.single;
+    expect(component.id, 'native-1');
+    expect(component.componentId, 'caw.examples.stereo-shaper');
+    expect(component.files['src/stereo_shaper.cpp'], 'class StereoShaper {};');
+    expect(component.dependencies, {'fmt': '11.0.2'});
+    expect(jsonDecode(back.toEngineJson()).containsKey('cpp_components'), isFalse);
+  });
+
+  test('older project files without C++ components remain valid', () {
+    final legacy = sample().toJson()..remove('cpp_components');
+    final back = ProjectDoc.fromJson(legacy);
+    expect(back.cppComponents, isEmpty);
+  });
+
+  test('C++ project paths cannot escape the project directory', () {
+    expect(CppComponentDoc.isSafeRelativePath('src/component.cpp'), isTrue);
+    expect(CppComponentDoc.isSafeRelativePath('include/caw/component.hpp'), isTrue);
+    for (final path in ['', '/tmp/out.cpp', '../outside.cpp', 'src/../../outside.cpp',
+      r'src\\outside.cpp', r'C:\\outside.cpp', 'src/./component.cpp']) {
+      expect(CppComponentDoc.isSafeRelativePath(path), isFalse, reason: path);
+    }
+  });
+
   test('header values', () {
     const src = '---\ncaw: 1\nkind: effect  # comment\nname: Fold\n---\nin';
     expect(headerValue(src, 'kind'), 'effect');
