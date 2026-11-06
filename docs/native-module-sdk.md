@@ -7,7 +7,7 @@ covers: [engine/include/caw_module_sdk.h, engine/include/caw/module.hpp, engine/
 
 # Native module SDK v1
 
-**Status [Fact, checked 2026-11-06]:** the versioned C ABI header, internal descriptor validation, static in-process registry and graph/processor foundations exist. The C++ SDK is now installable as a CMake package; a manifest-driven component build fixture, exported descriptor/factory entry points, structured diagnostics and Linux/Windows/Android CI workflow are present in PR #125, with CI verification pending. Dynamic loading, host-side adapter, app project integration, signing, crash isolation and runtime packaging are not implemented. Third-party native binaries cannot currently be loaded by the app. When loading is built, each one runs in a user-chosen mode: Isolated, Trusted (in-process) or Blocked (owner, 2026-11-03).
+**Status [Fact, checked 2026-11-06]:** the versioned C ABI header, internal descriptor validation, static in-process registry and graph/processor foundations exist. The C++ SDK is installable as a CMake package for standalone engine builds (the app's embedded engine build opts out); a manifest-driven component build fixture, exported descriptor/factory entry points, structured diagnostics and Linux/Windows/Android CI workflow are present in PR #125, with CI verification pending. Dynamic loading, host-side adapter, app project integration, signing, crash isolation and runtime packaging are not implemented. Third-party native binaries cannot currently be loaded by the app. When loading is built, each one runs in a user-chosen mode: Isolated, Trusted (in-process) or Blocked (owner, 2026-11-03).
 
 ## One module system
 
