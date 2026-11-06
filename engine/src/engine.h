@@ -106,9 +106,9 @@ public:
     void reportLoad(double load) noexcept;  // fraction of the callback's time budget used
 
     struct Chain;
+    struct MasterChain;
 
 private:
-    struct MasterChain;
     struct Slot;
     struct Cmd;
     struct Retired;
