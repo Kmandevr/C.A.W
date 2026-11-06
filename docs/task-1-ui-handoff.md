@@ -2,7 +2,7 @@
 title: Task 1 UI implementation handoff
 summary: Current UI implementation pointer and verified outstanding workflow gaps; no stale branch or CI snapshot.
 updated: 2026-11-06
-covers: [app/]
+covers: [app/, app/lib/model/cpp_component.dart, app/lib/model/project.dart, app/test/project_test.dart]
 ---
 
 # Task 1 UI implementation handoff
