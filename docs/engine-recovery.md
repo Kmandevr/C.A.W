@@ -27,7 +27,7 @@ updated: 2026-11-06
 ## Immediate continuation — native C++ integration
 
 1. Verify Quick Check for `gpt/119-native-component-host` and every required PR #125 check for the exact `gpt/119-cpp-build-pipeline` head. Do not merge while any required check is queued or failing.
-2. After PR #125 merges, open the stacked native-host branch against updated Main. Wire the Dart FFI for the Engine load/unload C API and a per-component trust UI. Build success must never trigger loading. Keep Blocked as the safe initial state; keep Isolated unavailable until a real process-isolated audio host is implemented.
+2. After PR #125 merges, open the stacked native-host branch against updated Main. Add the per-component trust UI/store on top of the existing Dart FFI load/unload wrapper. Build success must never trigger loading. Keep Blocked as the safe initial state; keep Isolated unavailable until a real process-isolated audio host is implemented.
 3. Integrate `ModuleRegistry.create()` into the existing Engine chain and live `MixGraph`; do not create a second engine. Current `Chain` storage and `runModuleNode` are VM-`.caw`-specific. Start with a stereo effect component, then generalize typed ports and parameters while preserving the callback's no-allocation/no-lock/no-free contract.
 4. Build and validate a real Android-hosted compiler/toolchain package. The NDK's desktop-hosted cross-compiler is not an on-device compiler. Cache the installed toolchain and dependencies so builds remain offline.
 
