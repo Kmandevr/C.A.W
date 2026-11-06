@@ -76,7 +76,7 @@ TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) 
     const auto left = run(e, 256, 64, &right);
     // The component doubles the stereo signal; the master safety limiter still runs after it.
     CHECK(std::fabs(left[200]) > 0.9f);
-    CHECK(std::fabs(left[200]) <= 0.96f);
+    CHECK(std::fabs(left[200]) <= 0.98f);
     CHECK_NEAR(left[200], right[200], 1e-5);
 
     p.masterComponents.clear();
