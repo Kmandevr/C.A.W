@@ -228,8 +228,6 @@ private:
     std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)
     std::unique_ptr<std::atomic<float>[]> masterScope_;
     std::atomic<int> masterScopePos_{0};
-    std::array<std::array<float, kBlock>, 2> masterStageL_{};
-    std::array<std::array<float, kBlock>, 2> masterStageR_{};
 
     // ---- control-thread state ----
     std::mutex ctl_;
