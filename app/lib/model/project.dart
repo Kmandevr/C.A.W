@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'pattern_doc.dart';
+import 'cpp_component.dart';
 
 String newId(String prefix) {
   final r = Random.secure();
@@ -208,12 +209,14 @@ class ProjectDoc {
     List<ProjectAutomationLaneDoc>? automation,
     List<String>? libraryFolders,
     Map<String, String>? savedLibrarySearches,
+    List<CppComponentDoc>? cppComponents,
   })  : globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
         automation = automation ?? [],
         libraryFolders = libraryFolders ?? [],
-        savedLibrarySearches = savedLibrarySearches ?? {} {
+        savedLibrarySearches = savedLibrarySearches ?? {},
+        cppComponents = cppComponents ?? [] {
     // Keep the in-memory model canonical: a track owns clip instances, not a legacy
     // single-pattern pointer. The stable ID makes repeated saves deterministic.
     for (final layer in this.layers) {
@@ -253,6 +256,7 @@ class ProjectDoc {
   List<ProjectAutomationLaneDoc> automation;
   List<String> libraryFolders;
   Map<String, String> savedLibrarySearches;
+  List<CppComponentDoc> cppComponents;
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
@@ -366,6 +370,7 @@ class ProjectDoc {
         'layers': [for (final l in layers) l.toJson()],
         'library_folders': libraryFolders,
         'saved_library_searches': savedLibrarySearches,
+        'cpp_components': [for (final component in cppComponents) component.toJson()],
       };
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
@@ -389,6 +394,8 @@ class ProjectDoc {
           if (_boundedProjectText(entry.key, 64).isNotEmpty && _boundedProjectText(entry.value, 256).isNotEmpty)
             _boundedProjectText(entry.key, 64): _boundedProjectText(entry.value, 256),
       },
+      cppComponents: ((j['cpp_components'] as List?) ?? const [])
+          .map((component) => CppComponentDoc.fromJson(component as Map<String, dynamic>)).toList(),
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
