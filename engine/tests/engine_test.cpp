@@ -78,6 +78,7 @@ TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) 
     CHECK(std::fabs(left[1145]) > 0.9f);
     CHECK(std::fabs(left[1145]) <= 0.98f);
     CHECK_NEAR(left[1145], right[1145], 1e-5);
+    CHECK(!e.unloadNativeComponent(componentId)); // the active master chain keeps its library loaded
 
     p.masterComponents.clear();
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
