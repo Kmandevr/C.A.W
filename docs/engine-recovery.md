@@ -14,7 +14,7 @@ updated: 2026-11-06
 - **Main base for CP.1:** `38820aded14aa9e4c079a6e8cc8cb5c887557120`.
 - **Issue #28:** still open for native engine/runtime integration. Its owner-approved scope now replaces the old compatibility requirement: ordinary C++ is the target authoring language; old `.caw` source and pre-release project compatibility are not required. The previously referenced `feature/native-engine-refactor-integration` branch no longer exists.
 - **Public SDK foundation:** issue #117 / PR #118 is merged. The public contract header is `engine/include/caw/module.hpp`.
-- **Active CP.1 work:** issue #119, branch `gpt/119-cpp-build-pipeline`, PR #125. The owner approved GitHub Actions as the required build path, desktop builds as optional and Android NDK use for CI-only cross-compilation. The branch adds an installable SDK package, v1 component manifest, manifest-driven CMake helper, exported component entry points, structured build diagnostics and a Linux/Windows/Android CI matrix. CI verification is in progress.
+- **Active CP.1 work:** issue #119, PR #125 on `gpt/119-cpp-build-pipeline`, plus stacked continuation `gpt/119-native-component-host`. The user requires app-side C++ builds to run locally and offline; internet may optionally acquire dependencies/toolchains for local caching, and GitHub Actions is repository CI only. The app now persists component sources and exact dependency pins, materializes a safe private workspace, runs local CMake, reuses an incremental build directory and returns a verified artifact path. The Engine `ModuleRegistry` and C API now load shared libraries only after an explicit trust argument: Blocked refuses, Isolated is unsupported until a separate-process host exists, and Trusted loads in-process. Flutter FFI/trust UI, live playback-chain integration and an Android-hosted compiler package remain outstanding.
 - **Build environment:** connector-only; local build/test is unavailable. GitHub Actions is the compiler/test runner.
 
 ## Immediate continuation — CP.1 component build
@@ -23,6 +23,13 @@ updated: 2026-11-06
 2. Keep #119 open until its acceptance criteria include a buildable and registered component, structured diagnostics, target coverage and the required native-code trust boundary.
 3. Continue with app-private project/source storage and the app-to-build-service submission/download path, then implement registration/loading only behind explicit Trusted or genuinely process-isolated Isolated modes. Never silently load native code.
 4. Keep issue #94 open and resume it after the current C++ platform work is verified; do not work on Main or revive stale branches.
+
+## Immediate continuation — native C++ integration
+
+1. Verify Quick Check for `gpt/119-native-component-host` and every required PR #125 check for the exact `gpt/119-cpp-build-pipeline` head. Do not merge while any required check is queued or failing.
+2. After PR #125 merges, open the stacked native-host branch against updated Main. Wire the Dart FFI for the Engine load/unload C API and a per-component trust UI. Build success must never trigger loading. Keep Blocked as the safe initial state; keep Isolated unavailable until a real process-isolated audio host is implemented.
+3. Integrate `ModuleRegistry.create()` into the existing Engine chain and live `MixGraph`; do not create a second engine. Current `Chain` storage and `runModuleNode` are VM-`.caw`-specific. Start with a stereo effect component, then generalize typed ports and parameters while preserving the callback's no-allocation/no-lock/no-free contract.
+4. Build and validate a real Android-hosted compiler/toolchain package. The NDK's desktop-hosted cross-compiler is not an on-device compiler. Cache the installed toolchain and dependencies so builds remain offline.
 
 ## Latest ownership-safety change — retirement backpressure
 
