@@ -90,6 +90,15 @@ void main() {
     expect(afterDisposeRequest.error, contains('blocked'));
   }, skip: skip);
 
+  test('a project cannot use a native component before an explicit trust load', () async {
+    final engine = Engine.create();
+    await expectLater(
+      engine.setProject('{"caw_project":1,"master_components":["org.caw.tests.not-loaded"]}'),
+      throwsA(isA<StateError>()),
+    );
+    engine.dispose();
+  }, skip: skip);
+
   test('a generator plays the notes of a pattern', () async {
     final templates = Engine.templates();
     final synth = templates.firstWhere((t) => t.file == 'acid-synth.caw');
