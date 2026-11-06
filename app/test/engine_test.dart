@@ -61,6 +61,35 @@ void main() {
     await dir.delete(recursive: true);
   }, skip: skip);
 
+  test('native component loading requires an explicit trust choice', () async {
+    final engine = Engine.create();
+    final blocked = await engine.loadNativeComponent(
+      artifactPath: '/not/opened/while/blocked.so',
+      expectedComponentId: 'org.caw.tests.blocked',
+      trust: NativeComponentTrust.blocked,
+    );
+    expect(blocked.ok, isFalse);
+    expect(blocked.error, contains('blocked'));
+
+    final isolated = await engine.loadNativeComponent(
+      artifactPath: '/not/opened/while/isolated.so',
+      expectedComponentId: 'org.caw.tests.isolated',
+      trust: NativeComponentTrust.isolated,
+    );
+    expect(isolated.ok, isFalse);
+    expect(isolated.error, contains('Isolated'));
+
+    final pending = engine.loadNativeComponent(
+      artifactPath: '/not/opened/while/dispose-is-pending.so',
+      expectedComponentId: 'org.caw.tests.dispose',
+      trust: NativeComponentTrust.blocked,
+    );
+    engine.dispose();
+    final afterDisposeRequest = await pending;
+    expect(afterDisposeRequest.ok, isFalse);
+    expect(afterDisposeRequest.error, contains('blocked'));
+  }, skip: skip);
+
   test('a generator plays the notes of a pattern', () async {
     final templates = Engine.templates();
     final synth = templates.firstWhere((t) => t.file == 'acid-synth.caw');
