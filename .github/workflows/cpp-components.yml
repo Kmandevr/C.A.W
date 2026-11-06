@@ -7,6 +7,8 @@ on:
       - "engine/cmake/**"
       - "engine/include/caw/**"
       - "examples/cpp/**"
+      - "scripts/caw-component-build.js"
+      - "scripts/caw-component-build.test.js"
       - ".github/workflows/cpp-components.yml"
   workflow_dispatch:
 permissions:
@@ -37,6 +39,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Test structured build diagnostics
+        run: node --test scripts/caw-component-build.test.js
       - name: Configure and install the SDK for the build host
         run: |
           cmake -S engine -B "$RUNNER_TEMP/caw-sdk-build" \
