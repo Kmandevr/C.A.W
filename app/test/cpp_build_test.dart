@@ -119,6 +119,7 @@ void main() {
     expect((await storage.load(project.id))?.cppComponents.single.files['src/component.cpp'],
         contains('return 42'));
     expect((await storage.load(project.id))?.masterComponents, [component.componentId]);
+    expect(project.toEngineJson(), contains('"master_components":["${component.componentId}"]'));
 
     component.files['src/component.cpp'] = 'extern "C" int caw_component_value() { return 43; }\n';
     final second = await buildService.build(
