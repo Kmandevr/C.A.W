@@ -3335,6 +3335,10 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
                 std::copy_n(currentL, m, destinationL);
                 std::copy_n(currentR, m, destinationR);
             }
+            for (int frame = 0; frame < m; ++frame) {
+                destinationL[frame] = static_cast<float>(finiteOr0(static_cast<double>(destinationL[frame])));
+                destinationR[frame] = static_cast<float>(finiteOr0(static_cast<double>(destinationR[frame])));
+            }
             currentL = destinationL;
             currentR = destinationR;
         }
