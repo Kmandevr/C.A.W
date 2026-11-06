@@ -1158,6 +1158,38 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     }
     modules_ = std::move(next);
 
+    // The first native playback slice is a zero-parameter stereo master-effect chain.
+    // Components must already be explicitly loaded through the trust-gated Engine API.
+    std::unique_ptr<MasterChain> nextMasterChain;
+    if (!p.masterComponents.empty()) {
+        nextMasterChain = std::make_unique<MasterChain>();
+        for (const std::string& componentId : p.masterComponents) {
+            const ModuleDescriptor* descriptor = nativeModules_.find(componentId);
+            if (!descriptor)
+                return "{\\"ok\\":false,\\"error\\":\\"native component '\\" + jsonEscape(componentId) +
+                       "\\' is not loaded; load it with an explicit trust choice first\\",\\"modules\\":{}}";
+            const bool stereoEffect = descriptor->portCount == 2 && descriptor->ports &&
+                descriptor->ports[0].type == PortType::Audio && descriptor->ports[0].input &&
+                descriptor->ports[0].layout == ChannelLayout::Stereo && descriptor->ports[0].channelCount == 2 &&
+                descriptor->ports[1].type == PortType::Audio && !descriptor->ports[1].input &&
+                descriptor->ports[1].layout == ChannelLayout::Stereo && descriptor->ports[1].channelCount == 2 &&
+                descriptor->parameterCount == 0;
+            if (!stereoEffect)
+                return "{\\"ok\\":false,\\"error\\":\\"native component '\\" + jsonEscape(componentId) +
+                       "\\' must currently expose one stereo audio input, one stereo audio output and no parameters\\",\\"modules\\":{}}";
+            auto processor = nativeModules_.create(componentId);
+            if (!processor)
+                return "{\\"ok\\":false,\\"error\\":\\"native component '\\" + jsonEscape(componentId) +
+                       "\\' could not create a processor instance\\",\\"modules\\":{}}";
+            nextMasterChain->processors.push_back(std::move(processor));
+        }
+    }
+    Cmd masterChainCommand;
+    masterChainCommand.type = Cmd::SetMasterChain;
+    masterChainCommand.masterChain = nextMasterChain.release();
+    if (!send(masterChainCommand))
+        return R"({"ok":false,"error":"audio command queue is not accepting native master-chain updates","modules":{}})";
+
     // Layers: diff against what the audio thread has, sending only what changed.
     struct Want {
         std::string id;
