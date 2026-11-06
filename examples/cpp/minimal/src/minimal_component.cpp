@@ -1,4 +1,5 @@
 // Minimal stereo pass-through component used to verify the external SDK build contract.
+#include <cstdint>
 #include <new>
 
 #include <caw/component.hpp>
@@ -31,7 +32,7 @@ public:
     void process(const caw::StereoProcessBlock& block) noexcept override {
         if (!block.inputLeft || !block.inputRight || !block.outputLeft || !block.outputRight)
             return;
-        for (uint32_t frame = 0; frame < block.frames; ++frame) {
+        for (std::uint32_t frame = 0; frame < block.frames; ++frame) {
             block.outputLeft[frame] = block.inputLeft[frame];
             block.outputRight[frame] = block.inputRight[frame];
         }
