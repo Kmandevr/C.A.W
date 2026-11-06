@@ -37,10 +37,10 @@ class CppBuildResult {
 /// Parses Clang/GCC, MSVC and CMake diagnostics without losing file/line information.
 List<CppBuildDiagnostic> parseCppBuildDiagnostics(String output) {
   final diagnostics = <CppBuildDiagnostic>[];
-  final gcc = RegExp(r'^(.*?):(\\d+):(\\d+):\\s*(fatal error|error|warning|note):\\s*(.*)$');
-  final msvc = RegExp(r'^(.*)\\((\\d+),(\\d+)\\):\\s*(fatal error|error|warning|note)\\s*([A-Z]+\\d+)?\\s*:\\s*(.*)$');
-  final cmake = RegExp(r'^CMake (Error|Warning) at (.*):(\\d+) \\(([^)]+)\\):(.*)$');
-  final lines = output.split(RegExp(r'\\r?\\n'));
+  final gcc = RegExp(r'^(.*?):(\d+):(\d+):\s*(fatal error|error|warning|note):\s*(.*)$');
+  final msvc = RegExp(r'^(.*)\((\d+),(\d+)\):\s*(fatal error|error|warning|note)\s*([A-Z]+\d+)?\s*:\s*(.*)$');
+  final cmake = RegExp(r'^CMake (Error|Warning) at (.*):(\d+) \(([^)]+)\):(.*)$');
+  final lines = output.split(RegExp(r'\r?\n'));
 
   for (var index = 0; index < lines.length; index++) {
     final line = lines[index];
@@ -137,7 +137,7 @@ class CppComponentBuildRunner {
     final text = output.toString();
     final diagnostics = parseCppBuildDiagnostics(text);
     if (exitCode != 0 && diagnostics.isEmpty) {
-      final lines = text.trim().split(RegExp(r'\\r?\\n'));
+      final lines = text.trim().split(RegExp(r'\r?\n'));
       diagnostics.add(CppBuildDiagnostic(
         severity: 'error',
         code: 'CAW_BUILD_FAILED',
