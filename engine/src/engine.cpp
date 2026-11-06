@@ -1038,8 +1038,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     // The first native playback slice is a zero-parameter stereo master-effect chain.
     // Components must already be explicitly loaded through the trust-gated Engine API.
     std::unique_ptr<MasterChain> nextMasterChain;
+    uint64_t masterChainBytes = 0;
     if (!p.masterComponents.empty()) {
+        const uint64_t count = static_cast<uint64_t>(p.masterComponents.size());
+        if (count > (std::numeric_limits<uint64_t>::max() - sizeof(MasterChain)) /
+                        sizeof(std::unique_ptr<ModuleProcessor>))
+            return R"({"ok":false,"error":"native master chain size overflows the project memory estimate","modules":{}})";
+        masterChainBytes = sizeof(MasterChain) + count * sizeof(std::unique_ptr<ModuleProcessor>);
+        if (masterChainBytes > resourceBudget_.projectStateBytes)
+            return R"({"ok":false,"error":"native master chain exceeds this Engine's project-state memory budget","modules":{}})";
         nextMasterChain = std::make_unique<MasterChain>();
+        nextMasterChain->processors.reserve(p.masterComponents.size());
         for (const std::string& componentId : p.masterComponents) {
             const ModuleDescriptor* descriptor = nativeModules_.find(componentId);
             if (!descriptor)
@@ -1243,7 +1252,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             warnings[id].push_back(std::to_string(late) + " note" + (late == 1 ? " starts" : "s start") +
                                    " after the pattern's length and never play" + (late == 1 ? "s" : ""));
     }
-    uint64_t projectStateBytes = 0;
+    uint64_t projectStateBytes = masterChainBytes;  // includes the known master-chain object and processor pointer storage
     std::vector<std::vector<int>> readsFrom(static_cast<size_t>(slotCount));
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}, nullptr, {}, {}, {}};
