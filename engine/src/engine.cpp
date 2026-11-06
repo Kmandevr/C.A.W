@@ -1110,11 +1110,6 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     t.voices = p.voices;
     if (!send(t))
         return "{\"ok\":false,\"error\":\"audio command queue is not accepting project updates\",\"modules\":{}}";
-    Cmd masterChainCommand;
-    masterChainCommand.type = Cmd::SetMasterChain;
-    masterChainCommand.masterChain = nextMasterChain.release();
-    if (!send(masterChainCommand))
-        return R"({"ok":false,"error":"audio command queue is not accepting native master-chain updates","modules":{}})";
     const double stepLen = 60.0 * ctlSr_ / (p.bpm * 4.0);
     ctlLoopLen_ = static_cast<int64_t>(std::floor(p.loopSteps() * stepLen + 0.5));
 
@@ -1772,6 +1767,14 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     if (!send(a)) {
         allOk = false;
         warnings["project"].push_back("audio command queue rejected audition mode update");
+    }
+
+    Cmd masterChainCommand;
+    masterChainCommand.type = Cmd::SetMasterChain;
+    masterChainCommand.masterChain = nextMasterChain.release();
+    if (!send(masterChainCommand)) {
+        allOk = false;
+        warnings["project"].push_back("audio command queue rejected native master-chain update");
     }
 
     std::string mods;
