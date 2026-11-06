@@ -4,15 +4,9 @@ project(caw_minimal_component LANGUAGES CXX)
 
 find_package(CAW 1.0 CONFIG REQUIRED)
 
-add_library(caw_minimal_component MODULE src/minimal_component.cpp)
-target_link_libraries(caw_minimal_component PRIVATE CAW::SDK)
-target_compile_features(caw_minimal_component PRIVATE cxx_std_20)
-set_target_properties(caw_minimal_component PROPERTIES
-  PREFIX ""
-  CXX_VISIBILITY_PRESET hidden
-  VISIBILITY_INLINES_HIDDEN ON
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
+caw_add_component(
+  MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/caw-component.json"
+  TARGET caw_minimal_component
 )
 
 include(CTest)
