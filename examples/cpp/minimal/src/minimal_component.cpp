@@ -50,3 +50,8 @@ extern "C" CAW_COMPONENT_EXPORT caw::ModuleProcessor*
 caw_component_create() noexcept {
     return new (std::nothrow) MinimalComponent();
 }
+
+extern "C" CAW_COMPONENT_EXPORT void
+caw_component_destroy(caw::ModuleProcessor* processor) noexcept {
+    delete processor;
+}
