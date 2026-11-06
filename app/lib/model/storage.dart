@@ -184,8 +184,8 @@ class ProjectStorage {
     final safeProjectId = _validatedProjectId(projectId);
     final safeComponentId = _validatedProjectId(componentId);
     final directory = Directory(
-      '\${_root.path}\${Platform.pathSeparator}cpp-builds'
-      '\${Platform.pathSeparator}$safeProjectId\${Platform.pathSeparator}$safeComponentId',
+      '${_root.path}${Platform.pathSeparator}cpp-builds'
+      '${Platform.pathSeparator}$safeProjectId${Platform.pathSeparator}$safeComponentId',
     );
     await directory.create(recursive: true);
     return directory;
