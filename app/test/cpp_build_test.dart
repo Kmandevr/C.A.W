@@ -109,6 +109,9 @@ void main() {
       parallelJobs: 1,
     );
     expect(first.success, isTrue, reason: first.output);
+    expect(first.artifactPath, isNotNull);
+    expect(first.artifactPath, endsWith('caw_local_component.so'));
+    expect(await File(first.artifactPath!).exists(), isTrue);
     final buildDirectory = await storage.prepareCppBuildDirectory(project.id, component.id);
     expect(await File('${buildDirectory.path}${Platform.pathSeparator}CMakeCache.txt').exists(), isTrue);
     expect(await File('${buildDirectory.path}${Platform.pathSeparator}artifacts${Platform.pathSeparator}caw_local_component.so').exists(), isTrue);
