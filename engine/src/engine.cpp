@@ -225,6 +225,7 @@ struct Engine::Retired {
 namespace {
 
 constexpr double kSwapSeconds = 0.02;
+constexpr uint64_t kMasterScratchBytes = 4ull * kBlock * sizeof(float);
 constexpr double kSeamSeconds = 0.003;
 constexpr double kStopSeconds = 0.01;
 constexpr double kPreviewGlideSeconds = 0.005;  // a held preview glides to a new pitch this fast (a bend being drawn)
@@ -605,8 +606,9 @@ Engine::Engine(double sampleRate)
 Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     : sr_(sampleRate),
       resourceBudget_(resourceBudget),
-      exportPerSlot_(static_cast<size_t>(resourceBudget.graphWorkingBytes /
-                                         (static_cast<uint64_t>(kInitialLayerCapacity + 1) * kExportSlotBytes))),
+      exportPerSlot_(static_cast<size_t>((resourceBudget.graphWorkingBytes > kMasterScratchBytes
+              ? resourceBudget.graphWorkingBytes - kMasterScratchBytes : 0) /
+              (static_cast<uint64_t>(kInitialLayerCapacity + 1) * kExportSlotBytes))),
       cmds_(new Spsc<Cmd, 1024>()),
       retired_(new Spsc<Retired, 1024>()),
       masterScope_(new std::atomic<float>[kScopeSize]) {
@@ -644,7 +646,8 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
         const double perSlot = static_cast<double>(sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) +
                                                    sizeof(int) + 2 * sizeof(Retired)) +
             static_cast<double>(exportPerSlot_) * static_cast<double>(kExportSlotBytes - kExportBufferBytes);
-        const double budget = static_cast<double>(resourceBudget_.graphWorkingBytes);
+        const double budget = static_cast<double>(resourceBudget_.graphWorkingBytes > kMasterScratchBytes
+            ? resourceBudget_.graphWorkingBytes - kMasterScratchBytes : 0);
         auto fits = [&](int c) {
             const double cap = c;
             return 2.0 * std::max(0.0, a + b * cap + q * cap * cap) + perSlot * (cap + 1.0) <= budget;
