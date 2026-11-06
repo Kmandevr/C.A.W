@@ -7,7 +7,7 @@ updated: 2026-11-06
 
 # Performance
 
-The owner's requirement (2026-10-28): run as light as possible, down to low-end phones ([UI design](ui.md#light-on-cpu-and-ram)). This note records how performance is measured and what the audit found. The in-tree `CAW::SDK` target is an interface-only source contract; it adds no processing path or audio-callback work by itself. Component runtime costs remain unmeasured until native processors are integrated into prepared playback.
+The owner's requirement (2026-10-28): run as light as possible, down to low-end phones ([UI design](ui.md#light-on-cpu-and-ram)). This note records how performance is measured and what the audit found. The installable `CAW::SDK` target is interface-only; the manifest-driven component build produces a shared library but adds no engine processing path or audio-callback work by itself. Component runtime costs remain unmeasured until native processors are integrated into prepared playback.
 
 ## How it's measured
 
