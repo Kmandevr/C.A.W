@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import 'project.dart';
+import 'cpp_component.dart';
 
 class ProjectSummary {
   const ProjectSummary(this.id, this.name, this.modified);
@@ -142,6 +143,39 @@ class ProjectStorage {
       return project.id == projectId ? project : null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Materializes saved C++ sources into a disposable app-private workspace for a local build.
+  /// The project JSON remains authoritative; deleting this workspace never deletes user source.
+  Future<Directory> materializeCppComponent(ProjectDoc project, CppComponentDoc component) async {
+    final projectId = _validatedProjectId(project.id);
+    final componentId = _validatedProjectId(component.id);
+    for (final path in component.files.keys) {
+      if (!CppComponentDoc.isSafeRelativePath(path)) {
+        throw FormatException('Unsafe C++ project path: $path');
+      }
+    }
+
+    final workspace = Directory(
+      '${_root.path}${Platform.pathSeparator}cpp-workspaces'
+      '${Platform.pathSeparator}$projectId${Platform.pathSeparator}$componentId',
+    );
+    if (await workspace.exists()) await workspace.delete(recursive: true);
+    await workspace.create(recursive: true);
+    try {
+      for (final entry in component.files.entries) {
+        final segments = entry.key.split('/');
+        final file = File(
+          '${workspace.path}${Platform.pathSeparator}${segments.join(Platform.pathSeparator)}',
+        );
+        await file.parent.create(recursive: true);
+        await file.writeAsString(entry.value, flush: true);
+      }
+      return workspace;
+    } catch (_) {
+      if (await workspace.exists()) await workspace.delete(recursive: true);
+      rethrow;
     }
   }
 
