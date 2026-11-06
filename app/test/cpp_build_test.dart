@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('parses Clang and GCC diagnostics with file, line and column', () {
     final diagnostics = parseCppBuildDiagnostics(
-      "src/stereo.cpp:12:7: error: use of undeclared identifier 'gain'\\n"
+      "src/stereo.cpp:12:7: error: use of undeclared identifier 'gain'\n"
       "include/stereo.hpp:4:2: warning: unused parameter 'frames'",
     );
 
@@ -24,8 +24,8 @@ void main() {
 
   test('parses MSVC and CMake diagnostics', () {
     final diagnostics = parseCppBuildDiagnostics(
-      'C:/work/stereo.cpp(5,9): error C2143: syntax error: missing semicolon' '\\n'
-      'CMake Error at CMakeLists.txt:12 (add_library):\\n'
+      'C:/work/stereo.cpp(5,9): error C2143: syntax error: missing semicolon' '\n'
+      'CMake Error at CMakeLists.txt:12 (add_library):\n'
       '  Cannot find source file: missing.cpp',
     );
 
@@ -63,16 +63,16 @@ void main() {
     final helper = File('${repoRoot.path}${Platform.pathSeparator}engine${Platform.pathSeparator}cmake${Platform.pathSeparator}CAWComponent.cmake');
     await helper.copy('${sdkCmake.path}${Platform.pathSeparator}CAWComponent.cmake');
     await File('${sdkCmake.path}${Platform.pathSeparator}CAWConfig.cmake').writeAsString(
-      'add_library(CAW::SDK INTERFACE IMPORTED)\\n'
-      r'include("${CMAKE_CURRENT_LIST_DIR}/CAWComponent.cmake")' '\\n',
+      'add_library(CAW::SDK INTERFACE IMPORTED)\n'
+      r'include("${CMAKE_CURRENT_LIST_DIR}/CAWComponent.cmake")' '\n',
     );
     await File('${sdkCmake.path}${Platform.pathSeparator}CAWConfigVersion.cmake').writeAsString(
-      'set(PACKAGE_VERSION "1.0")\\n'
-      'if(PACKAGE_FIND_VERSION VERSION_GREATER PACKAGE_VERSION)\\n'
-      '  set(PACKAGE_VERSION_COMPATIBLE FALSE)\\n'
-      'else()\\n'
-      '  set(PACKAGE_VERSION_COMPATIBLE TRUE)\\n'
-      'endif()\\n',
+      'set(PACKAGE_VERSION "1.0")\n'
+      'if(PACKAGE_FIND_VERSION VERSION_GREATER PACKAGE_VERSION)\n'
+      '  set(PACKAGE_VERSION_COMPATIBLE FALSE)\n'
+      'else()\n'
+      '  set(PACKAGE_VERSION_COMPATIBLE TRUE)\n'
+      'endif()\n',
     );
 
     final component = CppComponentDoc(
@@ -80,17 +80,17 @@ void main() {
       name: 'Local test component',
       componentId: 'org.caw.tests.local',
       files: {
-        'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.22)\\n'
-            'project(caw_local_component LANGUAGES CXX)\\n'
-            'find_package(CAW 1.0 CONFIG REQUIRED)\\n'
-            r'caw_add_component(MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/caw-component.json" TARGET caw_local_component)' '\\n',
-        'caw-component.json': '{\\n'
-            '  "format": "caw.component",\\n'
-            '  "version": 1,\\n'
-            '  "component": {"id": "org.caw.tests.local", "name": "Local test"},\\n'
-            '  "sources": ["src/component.cpp"]\\n'
-            '}\\n',
-        'src/component.cpp': 'extern "C" int caw_component_value() { return 42; }\\n',
+        'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.22)\n'
+            'project(caw_local_component LANGUAGES CXX)\n'
+            'find_package(CAW 1.0 CONFIG REQUIRED)\n'
+            r'caw_add_component(MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/caw-component.json" TARGET caw_local_component)' '\n',
+        'caw-component.json': '{\n'
+            '  "format": "caw.component",\n'
+            '  "version": 1,\n'
+            '  "component": {"id": "org.caw.tests.local", "name": "Local test"},\n'
+            '  "sources": ["src/component.cpp"]\n'
+            '}\n',
+        'src/component.cpp': 'extern "C" int caw_component_value() { return 42; }\n',
       },
     );
     final project = ProjectDoc(
@@ -115,7 +115,7 @@ void main() {
     expect((await storage.load(project.id))?.cppComponents.single.files['src/component.cpp'],
         contains('return 42'));
 
-    component.files['src/component.cpp'] = 'extern "C" int caw_component_value() { return 43; }\\n';
+    component.files['src/component.cpp'] = 'extern "C" int caw_component_value() { return 43; }\n';
     final second = await buildService.build(
       project: project,
       component: component,
