@@ -6,6 +6,8 @@ updated: 2026-11-06
 
 # Log
 
+- 2026-11-06: Began CP.1 after the owner approved GitHub Actions as the required/default C++ component build path, desktop builds as optional and Android NDK use for CI-only cross-compilation. Added an installable `CAW::SDK` CMake package (standalone engine builds only), `caw.component` v1 manifest helper, exported component entry points, minimal external component fixture, Node build driver with structured diagnostics and Linux/Windows/Android CI matrix. CI also exposed the offline-export test sampling the initial master-gain ramp; the fixture now checks after the ramp settles. CI verification is pending. App project storage, remote build service integration, runtime loading and trust-mode enforcement remain incomplete. See [C++ creation platform](cpp-creation-platform.md) and issue #119.
+
 - 2026-11-05: Published the existing native module processor contract as the first public C++ SDK slice (`engine/include/caw/module.hpp`, `CAW::SDK`); internal engine includes now forward to the canonical public contract and the SDK consumer is compiled without `engine/src` access. This is a source-level component API, not yet an installed package or dynamic loader.
 
 - 2026-11-05: Owner chose ordinary general-purpose C++ as C.A.W.'s programming language, a comprehensive C.A.W. Library/SDK and one shared component model for code, visual composition and generated/custom performance UI. The old .caw language/VM is transitional and will be retired after useful capabilities migrate; old-source and pre-release-project compatibility is not required. See [C++ creation platform](cpp-creation-platform.md) and [roadmap](roadmap.md).
