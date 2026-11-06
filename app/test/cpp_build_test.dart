@@ -1,4 +1,9 @@
+import 'dart:io';
+
 // Tests local CMake build diagnostics and command-runner input validation.
+import 'package:caw/model/cpp_component.dart';
+import 'package:caw/model/project.dart';
+import 'package:caw/model/storage.dart';
 import 'package:caw/platform/cpp_build.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -34,6 +39,68 @@ void main() {
     expect(diagnostics.last.line, 12);
     expect(diagnostics.last.code, 'CMAKE');
     expect(diagnostics.last.message, contains('missing.cpp'));
+  });
+
+  test('builds saved C++ component sources locally and reuses the build directory', () async {
+    if (!Platform.isLinux) return;
+    final cmakeCheck = await Process.run('cmake', ['--version']);
+    final compilerCheck = await Process.run('c++', ['--version']);
+    if (cmakeCheck.exitCode != 0 || compilerCheck.exitCode != 0) return;
+
+    final temporary = await Directory.systemTemp.createTemp('caw-cpp-build-');
+    addTearDown(() => temporary.delete(recursive: true));
+    final root = Directory('${temporary.path}${Platform.pathSeparator}projects');
+    await root.create(recursive: true);
+    final sdk = Directory('${temporary.path}${Platform.pathSeparator}sdk');
+    await sdk.create();
+
+    final component = CppComponentDoc(
+      id: 'native-component',
+      name: 'Local test component',
+      componentId: 'org.caw.tests.local',
+      files: {
+        'CMakeLists.txt': 'cmake_minimum_required(VERSION 3.22)\\n'
+            'project(caw_local_component LANGUAGES CXX)\\n'
+            'add_library(caw_local_component MODULE src/component.cpp)\\n',
+        'src/component.cpp': 'extern "C" int caw_component_value() { return 42; }\\n',
+      },
+    );
+    final project = ProjectDoc(
+      id: 'local-cpp-project',
+      name: 'Local C++ build test',
+      cppComponents: [component],
+    );
+    final storage = ProjectStorage(root);
+    const service = CppComponentBuildService;
+    final buildService = service(storage);
+
+    final first = await buildService.build(
+      project: project,
+      component: component,
+      cmakeExecutable: 'cmake',
+      sdkDirectory: sdk.path,
+      parallelJobs: 1,
+    );
+    expect(first.success, isTrue, reason: first.output);
+    final buildDirectory = await storage.prepareCppBuildDirectory(project.id, component.id);
+    expect(await File('${buildDirectory.path}${Platform.pathSeparator}CMakeCache.txt').exists(), isTrue);
+    expect((await storage.load(project.id))?.cppComponents.single.files['src/component.cpp'],
+        contains('return 42'));
+
+    component.files['src/component.cpp'] = 'extern "C" int caw_component_value() { return 43; }\\n';
+    final second = await buildService.build(
+      project: project,
+      component: component,
+      cmakeExecutable: 'cmake',
+      sdkDirectory: sdk.path,
+      parallelJobs: 1,
+    );
+    expect(second.success, isTrue, reason: second.output);
+    final reusedDirectory = await storage.prepareCppBuildDirectory(project.id, component.id);
+    expect(reusedDirectory.path, buildDirectory.path);
+    expect(await File('${reusedDirectory.path}${Platform.pathSeparator}CMakeCache.txt').exists(), isTrue);
+    expect((await storage.load(project.id))?.cppComponents.single.files['src/component.cpp'],
+        contains('return 43'));
   });
 
   test('rejects a zero or negative parallel build budget', () async {
