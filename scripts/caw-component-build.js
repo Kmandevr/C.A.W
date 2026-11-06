@@ -7,7 +7,10 @@ function parseDiagnostics(output) {
   const diagnostics = [];
   const gcc = /^(.*?):(\d+):(\d+):\s*(fatal error|error|warning|note):\s*(.*)$/;
   const msvc = /^(.*)\((\d+),(\d+)\):\s*(fatal error|error|warning|note)\s*([A-Z]+\d+)?\s*:\s*(.*)$/;
-  for (const line of output.split(/\r?\n/)) {
+  const cmake = /^CMake (Error|Warning) at (.*):(\d+) \(([^)]+)\):(.*)$/;
+  const lines = output.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     let match = line.match(gcc);
     if (match) {
       diagnostics.push({
@@ -30,6 +33,18 @@ function parseDiagnostics(output) {
         code: match[5] || null,
         message: match[6],
       });
+      continue;
+    }
+    match = line.match(cmake);
+    if (match) {
+      diagnostics.push({
+        file: match[2],
+        line: Number(match[3]),
+        column: null,
+        severity: match[1].toLowerCase(),
+        code: 'CMAKE',
+        message: match[5].trim() || (lines[index + 1] || '').trim() || match[4],
+      });
     }
   }
   return diagnostics;
@@ -40,12 +55,12 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const key = argv[i];
     if (!key.startsWith('--') || i + 1 >= argv.length) {
-      throw new Error(`Expected --option value, got: ${key}`);
+      throw new Error('Expected --option value, got: ' + key);
     }
     values[key.slice(2)] = argv[++i];
   }
   for (const key of ['project', 'sdk', 'build']) {
-    if (!values[key]) throw new Error(`Missing required --${key}`);
+    if (!values[key]) throw new Error('Missing required --' + key);
   }
   return {
     project: path.resolve(values.project),
@@ -62,8 +77,8 @@ function parseArgs(argv) {
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', windowsHide: true });
   const output = [result.stdout || '', result.stderr || ''].filter(Boolean).join('\n');
-  if (output) process.stdout.write(output.endsWith('\n') ? output : `${output}\n`);
-  if (result.error) throw result.error;
+  if (output) process.stdout.write(output.endsWith('\n') ? output : output + '\n');
+  if (result.error) return { status: 1, output: output + result.error.message };
   return { status: result.status === null ? 1 : result.status, output };
 }
 
@@ -72,12 +87,12 @@ function build(options) {
   const configureArgs = [
     '-S', options.project,
     '-B', options.build,
-    `-DCMAKE_PREFIX_PATH=${options.sdk}`,
-    `-DCMAKE_BUILD_TYPE=${options.config}`,
+    '-DCMAKE_PREFIX_PATH=' + options.sdk,
+    '-DCMAKE_BUILD_TYPE=' + options.config,
   ];
-  if (options.toolchain) configureArgs.push(`-DCMAKE_TOOLCHAIN_FILE=${options.toolchain}`);
-  if (options.androidAbi) configureArgs.push(`-DANDROID_ABI=${options.androidAbi}`);
-  if (options.androidPlatform) configureArgs.push(`-DANDROID_PLATFORM=${options.androidPlatform}`);
+  if (options.toolchain) configureArgs.push('-DCMAKE_TOOLCHAIN_FILE=' + options.toolchain);
+  if (options.androidAbi) configureArgs.push('-DANDROID_ABI=' + options.androidAbi);
+  if (options.androidPlatform) configureArgs.push('-DANDROID_PLATFORM=' + options.androidPlatform);
   const configure = run('cmake', configureArgs, options.project);
   let status = configure.status;
   let output = configure.output;
@@ -116,7 +131,7 @@ if (require.main === module) {
   try {
     process.exitCode = build(parseArgs(process.argv.slice(2)));
   } catch (error) {
-    process.stderr.write(`caw-component-build: ${error.message}\n`);
+    process.stderr.write('caw-component-build: ' + error.message + '\n');
     process.exitCode = 2;
   }
 }
