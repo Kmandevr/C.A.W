@@ -211,6 +211,42 @@ TEST(streamed_wav_exports_match_the_in_memory_encoding_byte_for_byte) {
     CHECK(readBytes(hugePath).empty());
 }
 
+TEST(offline_export_installs_projects_larger_than_the_command_queue_and_matches_playback) {
+    ProjectSpec p;
+    p.bpm = 400;
+    p.loopBars = 1;
+    p.master = 1.0;  // The sample assertion below is for unity master gain.
+    p.modules.push_back({"tone", "---\nmode: float\n---\n0.5", {}});
+    for (int i = 0; i < 1025; ++i) {
+        LayerSpec layer;
+        layer.id = "layer-" + std::to_string(i);
+        layer.name = layer.id;
+        layer.chain = {"tone"};
+        layer.volume = i == 1024 ? 1.0 : 0.0;
+        p.layers.push_back(std::move(layer));
+    }
+
+    ExportOptions options;
+    options.kind = ExportKind::Free;
+    // Free exports have a 100 ms minimum duration; compare that complete render with playback.
+    options.seconds = 0.1;
+    RenderResult rendered;
+    CHECK(renderExport(p, options, rendered));
+    CHECK_EQ(rendered.frames, int64_t{4800});
+
+    // No audio callback is attached: install synchronously, then drive process as the playback reference.
+    Engine playback(48000);
+    CHECK(playback.setProjectOffline(p).find(R"("ok":true)") != std::string::npos);
+    playback.play();
+    std::vector<float> left(4800), right(4800);
+    playback.process(left.data(), right.data(), 4800);
+    bool same = true;
+    for (int i = 0; i < 4800 && same; ++i)
+        same = rendered.samples[static_cast<size_t>(i) * 2] == left[i] &&
+               rendered.samples[static_cast<size_t>(i) * 2 + 1] == right[i];
+    CHECK(same);
+    CHECK_NEAR(left[256], static_cast<float>(0.5 * 0.7071067811865476), 1e-5);
+}
 TEST(wav_encoding) {
     const float x[6] = {0.0f, 1.0f, -1.0f, 0.5f, 2.0f, -0.25f};
     WavSpec s;

@@ -1,7 +1,7 @@
 ---
 title: Modular adaptive engine blueprint
 summary: Complete native-engine architecture and implementation requirements; actual progress and recovery are tracked separately.
-updated: 2026-11-05
+updated: 2026-11-06
 covers: [engine/, app/lib/engine/]
 ---
 

@@ -67,7 +67,9 @@ public:
     int maxLayers() const noexcept { return maxLayers_; }
 
     // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
-    std::string setProject(const ProjectSpec& p);  // result JSON: per-module ok/error and params
+    std::string setProject(const ProjectSpec& p);  // live: commands are applied by the audio callback
+    // Offline render only: call while no audio callback can run; project commands are applied synchronously.
+    std::string setProjectOffline(const ProjectSpec& p);
     std::string setProjectJson(std::string_view json);
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
@@ -112,6 +114,7 @@ private:
     void drainRetired();
     bool canRetire(size_t count) const noexcept;
     bool send(const Cmd& c);
+    std::string setProjectImpl(const ProjectSpec& p, bool offline);
     void applyCommands() noexcept;
     void retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr, std::vector<int>* order = nullptr,
@@ -222,6 +225,7 @@ private:
 
     // ---- control-thread state ----
     std::mutex ctl_;
+    bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     struct ModuleState {
         std::string source;
         std::string ref;     // the name other modules use for its exports

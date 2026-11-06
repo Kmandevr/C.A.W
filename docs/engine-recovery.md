@@ -2,7 +2,7 @@
 title: Native engine recovery
 summary: Short resume guide for continuing the native engine refactor without repeating completed work.
 covers: [engine/, app/lib/engine/]
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # Native engine recovery
