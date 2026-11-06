@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "execution.h"
+#include "module_registry.h"
 #include "pattern.h"
 #include "program.h"
 #include "project.h"
@@ -71,6 +72,10 @@ public:
     // Offline render only: call while no audio callback can run; project commands are applied synchronously.
     std::string setProjectOffline(const ProjectSpec& p);
     std::string setProjectJson(std::string_view json);
+    // Native components are loaded only after an explicit per-component trust decision.
+    ModuleLoadResult loadNativeComponent(const std::string& path, const std::string& expectedId, NativeModuleTrust trust);
+    bool unloadNativeComponent(const std::string& id);
+    std::unique_ptr<ModuleProcessor> createNativeComponent(const std::string& id);
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
@@ -225,6 +230,7 @@ private:
 
     // ---- control-thread state ----
     std::mutex ctl_;
+    ModuleRegistry nativeModules_;  // control-thread registry; loaded processors keep their library alive
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     struct ModuleState {
         std::string source;
