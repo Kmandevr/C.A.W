@@ -52,6 +52,9 @@ function parseArgs(argv) {
     sdk: path.resolve(values.sdk),
     build: path.resolve(values.build),
     config: values.config || 'Release',
+    toolchain: values.toolchain ? path.resolve(values.toolchain) : null,
+    androidAbi: values['android-abi'] || null,
+    androidPlatform: values['android-platform'] || null,
     diagnostics: path.resolve(values.diagnostics || path.join(values.build, 'caw-build-diagnostics.json')),
   };
 }
@@ -66,12 +69,16 @@ function run(command, args, cwd) {
 
 function build(options) {
   fs.mkdirSync(options.build, { recursive: true });
-  const configure = run('cmake', [
+  const configureArgs = [
     '-S', options.project,
     '-B', options.build,
     `-DCMAKE_PREFIX_PATH=${options.sdk}`,
     `-DCMAKE_BUILD_TYPE=${options.config}`,
-  ], options.project);
+  ];
+  if (options.toolchain) configureArgs.push(`-DCMAKE_TOOLCHAIN_FILE=${options.toolchain}`);
+  if (options.androidAbi) configureArgs.push(`-DANDROID_ABI=${options.androidAbi}`);
+  if (options.androidPlatform) configureArgs.push(`-DANDROID_PLATFORM=${options.androidPlatform}`);
+  const configure = run('cmake', configureArgs, options.project);
   let status = configure.status;
   let output = configure.output;
   if (status === 0) {
