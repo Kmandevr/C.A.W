@@ -1,13 +1,13 @@
 ---
 title: Native module SDK
-summary: C ABI contract for trusted native CAW DSP modules, validation, real-time rules, state and packaging.
+summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-06
 covers: [engine/include/caw_module_sdk.h, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
 ---
 
 # Native module SDK v1
 
-**Status [Fact, checked 2026-11-01]:** the versioned C ABI header, internal descriptor validation, static in-process registry and graph/processor foundations exist. Dynamic loading, host-side adapter, project integration, signing, crash isolation and platform packaging are not implemented. Third-party native binaries cannot currently be loaded by the app. When loading is built, each one runs in a user-chosen mode: Isolated, Trusted (in-process) or Blocked (owner, 2026-11-03).
+**Status [Fact, checked 2026-11-06]:** the versioned C ABI header, internal descriptor validation, static in-process registry and graph/processor foundations exist. The C++ SDK is now installable as a CMake package; a manifest-driven component build fixture, exported descriptor/factory entry points, structured diagnostics and Linux/Windows/Android CI workflow are present in PR #125, with CI verification pending. Dynamic loading, host-side adapter, app project integration, signing, crash isolation and runtime packaging are not implemented. Third-party native binaries cannot currently be loaded by the app. When loading is built, each one runs in a user-chosen mode: Isolated, Trusted (in-process) or Blocked (owner, 2026-11-03).
 
 ## One module system
 
