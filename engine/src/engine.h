@@ -108,6 +108,7 @@ public:
     struct Chain;
 
 private:
+    struct MasterChain;
     struct Slot;
     struct Cmd;
     struct Retired;
@@ -123,7 +124,7 @@ private:
     void applyCommands() noexcept;
     void retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr, std::vector<int>* order = nullptr,
-                SlotTable* table = nullptr) noexcept;
+                SlotTable* table = nullptr, MasterChain* masterChain = nullptr) noexcept;
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
@@ -227,10 +228,13 @@ private:
     std::atomic<uint32_t> routingRejections_{0};  // mix-graph routes the executor refused (never expected)
     std::unique_ptr<std::atomic<float>[]> masterScope_;
     std::atomic<int> masterScopePos_{0};
+    std::array<std::array<float, kBlock>, 2> masterStageL_{};
+    std::array<std::array<float, kBlock>, 2> masterStageR_{};
 
     // ---- control-thread state ----
     std::mutex ctl_;
     ModuleRegistry nativeModules_;  // control-thread registry; loaded processors keep their library alive
+    MasterChain* masterChain_ = nullptr;  // audio-thread-owned; replaced/retired through commands
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     struct ModuleState {
         std::string source;
