@@ -11,18 +11,18 @@ updated: 2026-11-06
 
 ## Current checkpoint
 
-- **Main:** `fcfa5b210f99103031c83b5ba04fb4d3256155de` at the start of the C++ SDK task.
+- **Main base for CP.1:** `38820aded14aa9e4c079a6e8cc8cb5c887557120`.
 - **Issue #28:** still open for native engine/runtime integration. Its owner-approved scope now replaces the old compatibility requirement: ordinary C++ is the target authoring language; old `.caw` source and pre-release project compatibility are not required. The previously referenced `feature/native-engine-refactor-integration` branch no longer exists.
-- **First C++ SDK slice:** issue #117, branch `gpt/117-public-cpp-sdk`, commit `134276f7489ca7e43d97fe46f224677036d4b1a4`. The public contract header and `CAW::SDK` CMake interface target are implemented; focused SDK test passed. Strict docs check is being repaired because several engine notes still describe the old internal-only contract.
-- **PR:** none yet for #117. Do not merge or approve your own PR.
+- **Public SDK foundation:** issue #117 / PR #118 is merged. The public contract header is `engine/include/caw/module.hpp`.
+- **Active CP.1 work:** issue #119, branch `gpt/119-cpp-build-pipeline`, PR #125. The owner approved GitHub Actions as the required build path, desktop builds as optional and Android NDK use for CI-only cross-compilation. The branch adds an installable SDK package, v1 component manifest, manifest-driven CMake helper, exported component entry points, structured build diagnostics and a Linux/Windows/Android CI matrix. CI verification is in progress.
 - **Build environment:** connector-only; local build/test is unavailable. GitHub Actions is the compiler/test runner.
 
-## Immediate continuation — public SDK documentation check
+## Immediate continuation — CP.1 component build
 
-1. Refresh every stale note named by the #117 Quick Check docs report, especially the engine integration, SDK, progress and recovery notes.
-2. Push with `run: docs` and read the report for the exact commit.
-3. When docs passes, run the default Quick Check (docs/build/test/examples), then open PR #117 with `Closes #117`.
-4. After #117 is reviewed/merged, create a fresh branch from then-current Main for #28 and re-audit the remaining engine integration. Do not resume old branch refs.
+1. Inspect PR #125's Docs, Engine, App and C++ components checks for the exact head commit; fix every failure and re-run the full required CI.
+2. Keep #119 open until its acceptance criteria include a buildable and registered component, structured diagnostics, target coverage and the required native-code trust boundary.
+3. Continue with app-private project/source storage and the app-to-build-service submission/download path, then implement registration/loading only behind explicit Trusted or genuinely process-isolated Isolated modes. Never silently load native code.
+4. Keep issue #94 open and resume it after the current C++ platform work is verified; do not work on Main or revive stale branches.
 
 ## Latest ownership-safety change — retirement backpressure
 
