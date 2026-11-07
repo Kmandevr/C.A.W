@@ -119,5 +119,9 @@ function(caw_add_component)
     target_compile_definitions(${_target} PRIVATE ${_definitions})
   endif()
 
+  file(GENERATE
+    OUTPUT "${CMAKE_BINARY_DIR}/caw-component-artifact-$<CONFIG>.txt"
+    CONTENT "$<TARGET_FILE:${_target}>\n"
+  )
   set(CAW_COMPONENT_TARGET "${_target}" PARENT_SCOPE)
 endfunction()

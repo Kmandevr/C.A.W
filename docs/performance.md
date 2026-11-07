@@ -7,9 +7,11 @@ updated: 2026-11-06
 
 # Performance
 
-The owner's requirement (2026-10-28): run as light as possible, down to low-end phones ([UI design](ui.md#light-on-cpu-and-ram)). This note records how performance is measured and what the audit found. The installable `CAW::SDK` target is interface-only; the manifest-driven component build produces a shared library but adds no engine processing path or audio-callback work by itself. Component runtime costs remain unmeasured until native processors are integrated into prepared playback.
+The owner's requirement (2026-10-28): run as light as possible, down to low-end phones ([UI design](ui.md#light-on-cpu-and-ram)). This note records how performance is measured and what the audit found. The first native runtime slice now processes zero-parameter stereo effects on the live master path. The host uses fixed preallocated stereo stages, performs no host allocation/locking in the callback, sanitizes component output and keeps the safety limiter after native code; old chains are reclaimed off-thread. This path has not yet been benchmarked on low-end Android, and plugin-internal allocations/CPU remain the component author's responsibility and are not yet reported by ABI v1.
 
 ## How it's measured
+
+**Native component measurement still required:** add a `caw_bench` scenario that runs a trusted test component in `ProjectDoc.masterComponents`, then record mean/p99/max callback time, component-chain count scaling, project-state memory and retained memory after clearing/unloading the chain. The two preallocated stereo scratch stages live inside MasterChain and are included in the project-state estimate, so projects without native effects do not pay their baseline memory cost. ABI v1 does not report plugin-private heap/state size, so that portion is currently unknown rather than silently treated as zero.
 
 - **`caw_bench`** (`engine/bench/caw_bench.cpp`, built with the engine tools) plays scenarios through `Engine::process` in 192-frame callbacks at 48 kHz, a common Android low-latency burst. The budget is 4,000 µs per callback. For each scenario it reports:
   - the mean, p99 and maximum time per callback, and the load (mean time ÷ budget)

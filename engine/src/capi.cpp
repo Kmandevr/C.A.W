@@ -84,6 +84,36 @@ char* caw_engine_set_project(CawEngine* e, const char* json) try {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"modules\":{}}");
 }
 
+char* caw_engine_load_component(CawEngine* e, const char* library_path,
+                                const char* expected_component_id, int32_t trust_level) try {
+    using namespace caw;
+    if (!e || !e->engine || !library_path || !expected_component_id)
+        return dup("{\"ok\":false,\"error\":\"missing engine, library path or component ID\",\"errorCode\":3}");
+    NativeModuleTrust trust;
+    switch (trust_level) {
+        case CAW_NATIVE_TRUST_BLOCKED: trust = NativeModuleTrust::Blocked; break;
+        case CAW_NATIVE_TRUST_ISOLATED: trust = NativeModuleTrust::Isolated; break;
+        case CAW_NATIVE_TRUST_TRUSTED: trust = NativeModuleTrust::Trusted; break;
+        default:
+            return dup("{\"ok\":false,\"error\":\"invalid native component trust level\",\"errorCode\":3}");
+    }
+    const ModuleLoadResult result = e->engine->loadNativeComponent(library_path, expected_component_id, trust);
+    return dup(std::string("{\"ok\":") + (result.success ? "true" : "false") +
+               ",\"componentId\":\"" + jsonEscape(result.componentId) +
+               "\",\"error\":\"" + jsonEscape(result.message) +
+               "\",\"errorCode\":" + std::to_string(static_cast<int>(result.error)) + "}");
+} catch (const std::bad_alloc&) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"errorCode\":4}");
+} catch (...) {
+    return dup("{\"ok\":false,\"error\":\"native component loading failed\",\"errorCode\":4}");
+}
+
+int32_t caw_engine_unload_component(CawEngine* e, const char* component_id) try {
+    return e && e->engine && component_id && e->engine->unloadNativeComponent(component_id) ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
 void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value) {
     if (e && module_id && name) e->engine->setParam(module_id, name, value);
 }

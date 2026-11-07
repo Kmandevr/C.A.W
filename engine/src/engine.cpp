@@ -183,13 +183,20 @@ struct Engine::Chain {
     double tb[kBlock], rateb[kBlock], zero[kBlock];
 };
 
+struct Engine::MasterChain {
+    std::vector<std::unique_ptr<ModuleProcessor>> processors;
+    std::array<std::array<float, kBlock>, 2> stageL{};
+    std::array<std::array<float, kBlock>, 2> stageR{};
+};
+
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
     int slot = 0;
     Chain* chain = nullptr;
+    MasterChain* masterChain = nullptr;
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
@@ -214,6 +221,7 @@ struct Engine::Retired {
     AutomationData* automation = nullptr;
     std::vector<int>* order = nullptr;
     SlotTable* table = nullptr;  // a slot table (and its mix graph) a Grow replaced
+    MasterChain* masterChain = nullptr;
 };
 
 namespace {
@@ -682,6 +690,7 @@ Engine::~Engine() {
         delete c.automation;
         delete c.orderList;
         delete c.table;
+        delete c.masterChain;
     }
     Retired r;
     while (retired_->pop(r)) {
@@ -690,6 +699,7 @@ Engine::~Engine() {
         delete r.automation;
         delete r.order;
         delete r.table;
+        delete r.masterChain;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
@@ -697,7 +707,10 @@ Engine::~Engine() {
         delete pending_[i].automation;
         delete pending_[i].order;
         delete pending_[i].table;
+        delete pending_[i].masterChain;
     }
+    delete masterChain_;
+    masterChain_ = nullptr;
     for (const auto& slot : slotStore_) {
         delete slot->cur;
         delete slot->old;
@@ -717,6 +730,7 @@ void Engine::drainRetired() {
         delete r.automation;
         delete r.order;
         delete r.table;
+        delete r.masterChain;
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -736,6 +750,7 @@ bool Engine::send(const Cmd& c) {
             delete c.automation;
             delete c.orderList;
             delete c.table;
+            delete c.masterChain;
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -985,6 +1000,23 @@ std::string Engine::setProjectJson(std::string_view json) {
     return setProject(p);
 }
 
+ModuleLoadResult Engine::loadNativeComponent(
+    const std::string& path, const std::string& expectedId, NativeModuleTrust trust) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    return nativeModules_.loadSharedLibrary(path, expectedId, trust);
+}
+
+bool Engine::unloadNativeComponent(const std::string& id) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    drainRetired();
+    return nativeModules_.unload(id);
+}
+
+std::unique_ptr<ModuleProcessor> Engine::createNativeComponent(const std::string& id) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    return nativeModules_.create(id);
+}
+
 std::string Engine::setProject(const ProjectSpec& p) {
     return setProjectImpl(p, false);
 }
@@ -1002,6 +1034,41 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     } reset{offlineControl_};
     drainRetired();
 
+    // The first native playback slice is a zero-parameter stereo master-effect chain.
+    // Components must already be explicitly loaded through the trust-gated Engine API.
+    std::unique_ptr<MasterChain> nextMasterChain;
+    uint64_t masterChainBytes = 0;
+    if (!p.masterComponents.empty()) {
+        const uint64_t count = static_cast<uint64_t>(p.masterComponents.size());
+        if (count > (std::numeric_limits<uint64_t>::max() - sizeof(MasterChain)) /
+                        sizeof(std::unique_ptr<ModuleProcessor>))
+            return R"({"ok":false,"error":"native master chain size overflows the project memory estimate","modules":{}})";
+        masterChainBytes = sizeof(MasterChain) + count * sizeof(std::unique_ptr<ModuleProcessor>);
+        if (masterChainBytes > resourceBudget_.projectStateBytes)
+            return R"({"ok":false,"error":"native master chain exceeds this Engine's project-state memory budget","modules":{}})";
+        nextMasterChain = std::make_unique<MasterChain>();
+        nextMasterChain->processors.reserve(p.masterComponents.size());
+        for (const std::string& componentId : p.masterComponents) {
+            const ModuleDescriptor* descriptor = nativeModules_.find(componentId);
+            if (!descriptor)
+                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
+                       "' is not loaded; load it with an explicit trust choice first\",\"modules\":{}}";
+            const bool stereoEffect = descriptor->portCount == 2 && descriptor->ports &&
+                descriptor->ports[0].type == PortType::Audio && descriptor->ports[0].input &&
+                descriptor->ports[0].layout == ChannelLayout::Stereo && descriptor->ports[0].channelCount == 2 &&
+                descriptor->ports[1].type == PortType::Audio && !descriptor->ports[1].input &&
+                descriptor->ports[1].layout == ChannelLayout::Stereo && descriptor->ports[1].channelCount == 2 &&
+                descriptor->parameterCount == 0;
+            if (!stereoEffect)
+                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
+                       "' must currently expose one stereo audio input, one stereo audio output and no parameters\",\"modules\":{}}";
+            auto processor = nativeModules_.create(componentId);
+            if (!processor)
+                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
+                       "' could not create a processor instance\",\"modules\":{}}";
+            nextMasterChain->processors.push_back(std::move(processor));
+        }
+    }
     // Layer slots: refuse a project the budget cannot hold, then grow before any layer is sent, so
     // every command below uses the new table. A folder without a bus takes no slot.
     {
@@ -1179,7 +1246,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             warnings[id].push_back(std::to_string(late) + " note" + (late == 1 ? " starts" : "s start") +
                                    " after the pattern's length and never play" + (late == 1 ? "s" : ""));
     }
-    uint64_t projectStateBytes = 0;
+    uint64_t projectStateBytes = masterChainBytes;  // includes the known master-chain object and processor pointer storage
     std::vector<std::vector<int>> readsFrom(static_cast<size_t>(slotCount));
     for (Want& w : wants) {
         Planned pl{w, {}, {}, {}, nullptr, {}, {}, {}};
@@ -1701,6 +1768,14 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         warnings["project"].push_back("audio command queue rejected audition mode update");
     }
 
+    Cmd masterChainCommand;
+    masterChainCommand.type = Cmd::SetMasterChain;
+    masterChainCommand.masterChain = nextMasterChain.release();
+    if (!send(masterChainCommand)) {
+        allOk = false;
+        warnings["project"].push_back("audio command queue rejected native master-chain update");
+    }
+
     std::string mods;
     for (const ModuleSpec& m : p.modules) {
         const ModuleState& st = modules_.at(m.id);
@@ -1722,7 +1797,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
         mods += "]}";
     }
-    return std::string("{\"ok\":") + (allOk ? "true" : "false") + ",\"modules\":{" + mods + "}}";
+    std::string projectWarnings;
+    auto projectWarningIt = warnings.find("project");
+    if (projectWarningIt != warnings.end()) {
+        auto& messages = projectWarningIt->second;
+        std::sort(messages.begin(), messages.end());
+        messages.erase(std::unique(messages.begin(), messages.end()), messages.end());
+        for (size_t i = 0; i < messages.size(); ++i)
+            projectWarnings += (i ? ",\"" : "\"") + jsonEscape(messages[i]) + "\"";
+    }
+    return std::string("{\"ok\":") + (allOk ? "true" : "false") +
+           ",\"modules\":{" + mods + "},\"warnings\":{\"project\":[" + projectWarnings + "]}}";
 }
 
 void Engine::setParam(const std::string& moduleId, const std::string& name, double value) {
@@ -1951,9 +2036,10 @@ bool Engine::canRetire(size_t count) const noexcept {
 }
 
 void Engine::retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern,
-                    AutomationData* automation, std::vector<int>* order, SlotTable* table) noexcept {
-    if (!c && !freed && !pattern && !automation && !order && !table) return;
-    Retired r{c, freed, pattern, automation, order, table};
+                    AutomationData* automation, std::vector<int>* order, SlotTable* table,
+                    MasterChain* masterChain) noexcept {
+    if (!c && !freed && !pattern && !automation && !order && !table && !masterChain) return;
+    Retired r{c, freed, pattern, automation, order, table, masterChain};
     if (pendingCount_ == 0 && retired_->push(r)) return;
     if (pendingCount_ < pendingMax_) pending_[pendingCount_++] = r;
     // All callers reserve queue capacity before changing ownership. This is a
@@ -2030,6 +2116,7 @@ void Engine::applyCommands() noexcept {
         switch (c.type) {
             case Cmd::Install: retirementNeed = 2; break;
             case Cmd::SetAutomation:
+            case Cmd::SetMasterChain:
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
@@ -2176,6 +2263,10 @@ void Engine::applyCommands() noexcept {
                 masterTarget_ = std::isfinite(c.master) ? std::clamp(c.master, 0.0, 1.0) : 0.0;
                 masterRamp_ = std::max(1, static_cast<int>(sr_ * kGainSeconds));
                 masterStep_ = (masterTarget_ - master_) / masterRamp_;
+                break;
+            case Cmd::SetMasterChain:
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
+                masterChain_ = c.masterChain;
                 break;
             case Cmd::Play:
                 playing_ = true;
@@ -3201,34 +3292,18 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
 }
 
 void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
-    // Master: gain, DC blocker, then the safety limiter, always last.
+    // Master order: gain/DC block, trusted native stereo effects, safety limiter last.
     const double R = 1.0 - kTwoPi * 5.0 / sr_;
     const double rel = detExp(-1.0 / (0.1 * sr_));
     double fade = 1.0;
     float pl = 0, pr = 0;
     const bool bypass = bypass_.load(std::memory_order_relaxed);
     int sp = masterScopePos_.load(std::memory_order_relaxed);
-    for (int i = 0; i < m; ++i) {
-        if (masterRamp_ > 0) {
-            master_ += masterStep_;
-            if (--masterRamp_ == 0) master_ = masterTarget_;
-        }
-        const double xl = finiteOr0(static_cast<double>(inL[i])) * master_;
-        const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
-        double yl = xl - dcL_[0] + R * dcL_[1];
-        dcL_[0] = xl;
-        dcL_[1] = yl;
-        double yr = xr - dcR_[0] + R * dcR_[1];
-        dcR_[0] = xr;
-        dcR_[1] = yr;
+
+    auto finishSample = [&](int frame, double yl, double yr) noexcept {
         const double env = std::max(std::fabs(yl), std::fabs(yr));
         limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
-        double gain = limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0;
-        if (bypass) {
-            yl = xl;
-            yr = xr;
-            gain = 1.0;
-        }
+        const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
         if (stopFade_ > 0) {
             fade = static_cast<double>(stopFade_) / (kStopSeconds * sr_);
             if (--stopFade_ == 0) {
@@ -3246,13 +3321,86 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         }
         const float ol = static_cast<float>(yl * gain * fade);
         const float orr = static_cast<float>(yr * gain * fade);
-        outL[i] = ol;
-        outR[i] = orr;
+        outL[frame] = ol;
+        outR[frame] = orr;
         pl = std::max(pl, std::fabs(ol));
         pr = std::max(pr, std::fabs(orr));
         masterScope_[sp].store(0.5f * (ol + orr), std::memory_order_relaxed);
         sp = (sp + 1) % kScopeSize;
+    };
+
+    if (!masterChain_) {
+        // Keep the normal Engine path allocation-free and free of extra staging copies.
+        for (int i = 0; i < m; ++i) {
+            if (masterRamp_ > 0) {
+                master_ += masterStep_;
+                if (--masterRamp_ == 0) master_ = masterTarget_;
+            }
+            const double xl = finiteOr0(static_cast<double>(inL[i])) * master_;
+            const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
+            const double yl = xl - dcL_[0] + R * dcL_[1];
+            dcL_[0] = xl;
+            dcL_[1] = yl;
+            const double yr = xr - dcR_[0] + R * dcR_[1];
+            dcR_[0] = xr;
+            dcR_[1] = yr;
+            finishSample(i, bypass ? xl : yl, bypass ? xr : yr);
+        }
+    } else {
+        // Scratch buffers live inside MasterChain, so projects without native components pay no
+        // additional Engine-object memory cost. The callback never allocates or locks.
+        float* stage0L = masterChain_->stageL[0].data();
+        float* stage0R = masterChain_->stageR[0].data();
+        for (int i = 0; i < m; ++i) {
+            if (masterRamp_ > 0) {
+                master_ += masterStep_;
+                if (--masterRamp_ == 0) master_ = masterTarget_;
+            }
+            const double xl = finiteOr0(static_cast<double>(inL[i])) * master_;
+            const double xr = finiteOr0(static_cast<double>(inR[i])) * master_;
+            const double yl = xl - dcL_[0] + R * dcL_[1];
+            dcL_[0] = xl;
+            dcL_[1] = yl;
+            const double yr = xr - dcR_[0] + R * dcR_[1];
+            dcR_[0] = xr;
+            dcR_[1] = yr;
+            stage0L[i] = static_cast<float>(bypass ? xl : yl);
+            stage0R[i] = static_cast<float>(bypass ? xr : yr);
+        }
+
+        const float* currentL = stage0L;
+        const float* currentR = stage0R;
+        for (size_t index = 0; index < masterChain_->processors.size(); ++index) {
+            ModuleProcessor* processor = masterChain_->processors[index].get();
+            const size_t destination = (index & 1u) == 0u ? 1u : 0u;
+            float* destinationL = masterChain_->stageL[destination].data();
+            float* destinationR = masterChain_->stageR[destination].data();
+            std::copy_n(currentL, m, destinationL);
+            std::copy_n(currentR, m, destinationR);
+            const float* inputChannels[2] = {currentL, currentR};
+            float* outputChannels[2] = {destinationL, destinationR};
+            const AudioProcessBlock block{
+                {inputChannels, 2, static_cast<uint32_t>(m)},
+                {outputChannels, 2, static_cast<uint32_t>(m)},
+                static_cast<uint32_t>(m),
+                sr_,
+                nullptr,
+                0,
+            };
+            if (!processor->process(block)) {
+                std::copy_n(currentL, m, destinationL);
+                std::copy_n(currentR, m, destinationR);
+            }
+            for (int frame = 0; frame < m; ++frame) {
+                destinationL[frame] = static_cast<float>(finiteOr0(static_cast<double>(destinationL[frame])));
+                destinationR[frame] = static_cast<float>(finiteOr0(static_cast<double>(destinationR[frame])));
+            }
+            currentL = destinationL;
+            currentR = destinationR;
+        }
+        for (int i = 0; i < m; ++i) finishSample(i, currentL[i], currentR[i]);
     }
+
     masterScopePos_.store(sp, std::memory_order_release);
     storeMax(peakL_, pl);
     storeMax(peakR_, pr);

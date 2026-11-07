@@ -227,7 +227,7 @@ class _PluginBuilderScreenState extends State<PluginBuilderScreen> {
           child: Text(_message!, style: TextStyle(color: _error ? Neon.pink : Neon.green))),
         const SizedBox(height: 12),
         const NeonPanel(color: Neon.yellow, child: Text(
-          'Build boundary: native .caw module validation and source packaging are available. CLAP/VST3 binary builds, plugin sandboxing, host I/O tests and per-plugin CPU/memory profiling require a native plugin SDK/host backend that is not present in this repository. No unavailable binary target is advertised.',
+          'This screen edits and validates .caw modules. The separate C++ component path now has the CAW SDK, local CMake build service, explicit-trust loader and a zero-parameter stereo master-effect adapter. C++ source/build/trust controls are not wired into this screen yet, and on-device toolchain provisioning is still missing. CLAP/VST3 hosting and true separate-process isolation are also not implemented.',
           style: TextStyle(color: Neon.dim, fontSize: 12))),
       ]);
     },

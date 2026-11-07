@@ -97,6 +97,7 @@ void main() {
       id: 'local-cpp-project',
       name: 'Local C++ build test',
       cppComponents: [component],
+      masterComponents: [component.componentId],
     );
     final storage = ProjectStorage(root);
     final buildService = CppComponentBuildService(storage);
@@ -109,11 +110,16 @@ void main() {
       parallelJobs: 1,
     );
     expect(first.success, isTrue, reason: first.output);
+    expect(first.artifactPath, isNotNull);
+    expect(first.artifactPath, endsWith('caw_local_component.so'));
+    expect(await File(first.artifactPath!).exists(), isTrue);
     final buildDirectory = await storage.prepareCppBuildDirectory(project.id, component.id);
     expect(await File('${buildDirectory.path}${Platform.pathSeparator}CMakeCache.txt').exists(), isTrue);
     expect(await File('${buildDirectory.path}${Platform.pathSeparator}artifacts${Platform.pathSeparator}caw_local_component.so').exists(), isTrue);
     expect((await storage.load(project.id))?.cppComponents.single.files['src/component.cpp'],
         contains('return 42'));
+    expect((await storage.load(project.id))?.masterComponents, [component.componentId]);
+    expect(project.toEngineJson(), contains('"master_components":["${component.componentId}"]'));
 
     component.files['src/component.cpp'] = 'extern "C" int caw_component_value() { return 43; }\n';
     final second = await buildService.build(

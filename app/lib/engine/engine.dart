@@ -2,6 +2,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -10,6 +12,37 @@ import 'bindings.dart';
 import 'execution.dart';
 
 enum ParamKind { number, toggle, choice }
+
+/// Explicit, per-component native-code trust. There is intentionally no implicit Trusted default.
+enum NativeComponentTrust {
+  blocked(0),
+  isolated(1),
+  trusted(2);
+
+  const NativeComponentTrust(this.nativeValue);
+  final int nativeValue;
+}
+
+class NativeComponentLoadResult {
+  const NativeComponentLoadResult({
+    required this.ok,
+    this.componentId = '',
+    this.error = '',
+    this.errorCode = 0,
+  });
+
+  final bool ok;
+  final String componentId;
+  final String error;
+  final int errorCode;
+
+  static NativeComponentLoadResult fromJson(Map<String, dynamic> json) => NativeComponentLoadResult(
+        ok: json['ok'] == true,
+        componentId: (json['componentId'] as String?) ?? '',
+        error: (json['error'] as String?) ?? '',
+        errorCode: (json['errorCode'] as num?)?.toInt() ?? 0,
+      );
+}
 
 class ParamInfo {
   const ParamInfo(
@@ -265,6 +298,10 @@ class Engine {
   final Pointer<Float> _scope = calloc<Float>(1024);
   bool _audioOn = false;
   bool _disposed = false;
+  int _pendingNativeOps = 0;
+  bool _destroyRequested = false;
+  bool _nativeDestroyed = false;
+  List<String> lastProjectWarnings = const [];
 
   static Engine create() {
     final b = Bindings.instance;
@@ -288,11 +325,97 @@ class Engine {
             .result;
         if (result == null) throw StateError('native project job returned no result');
         final j = jsonDecode(result) as Map<String, dynamic>;
+        lastProjectWarnings = const [];
+        final projectError = j['error'] as String?;
+        if (projectError != null && projectError.isNotEmpty) throw StateError(projectError);
+        final warnings = j['warnings'] as Map<String, dynamic>? ?? const {};
+        lastProjectWarnings = ((warnings['project'] as List?) ?? const []).whereType<String>().toList();
         final mods = (j['modules'] as Map<String, dynamic>? ?? {})
             .map((k, v) => MapEntry(k, ModuleInfo.fromJson(v as Map<String, dynamic>)));
         done.complete(mods);
       } catch (e, st) {
         done.completeError(e, st);
+      }
+    });
+    return done.future;
+  }
+
+  /// Loads a built component only after the caller supplies its explicit trust decision.
+  /// The blocking library load runs on a background isolate, never on the UI or audio thread.
+  Future<NativeComponentLoadResult> loadNativeComponent({
+    required String artifactPath,
+    required String expectedComponentId,
+    required NativeComponentTrust trust,
+  }) {
+    if (_disposed) return Future.error(StateError('engine is disposed'));
+    if (Platform.isIOS) {
+      return Future.value(NativeComponentLoadResult(
+        ok: false,
+        componentId: expectedComponentId,
+        error: 'Dynamic native components are not supported on iOS.',
+        errorCode: -1,
+      ));
+    }
+    _pendingNativeOps++;
+    final done = Completer<NativeComponentLoadResult>();
+    final engineAddress = _handle.address;
+    final trustValue = trust.nativeValue;
+    _queue = _queue.then((_) async {
+      try {
+        final text = await Isolate.run(() {
+          final bindings = Bindings.instance;
+          final engine = Pointer<Void>.fromAddress(engineAddress);
+          final path = artifactPath.toNativeUtf8();
+          final id = expectedComponentId.toNativeUtf8();
+          try {
+            final result = bindings.loadComponent(engine, path, id, trustValue);
+            if (result == nullptr) throw StateError('native component loader returned no result');
+            try {
+              return result.toDartString();
+            } finally {
+              bindings.free(result);
+            }
+          } finally {
+            calloc.free(path);
+            calloc.free(id);
+          }
+        });
+        done.complete(NativeComponentLoadResult.fromJson(jsonDecode(text) as Map<String, dynamic>));
+      } catch (error, stack) {
+        done.completeError(error, stack);
+      } finally {
+        _pendingNativeOps--;
+        if (_destroyRequested && _pendingNativeOps == 0) _destroyNative();
+      }
+    });
+    return done.future;
+  }
+
+  /// Returns false when the component is not loaded or a live processor still retains its library.
+  Future<bool> unloadNativeComponent(String componentId) {
+    if (_disposed) return Future.error(StateError('engine is disposed'));
+    if (Platform.isIOS) return Future.value(false);
+    _pendingNativeOps++;
+    final done = Completer<bool>();
+    final engineAddress = _handle.address;
+    _queue = _queue.then((_) async {
+      try {
+        final unloaded = await Isolate.run(() {
+          final bindings = Bindings.instance;
+          final engine = Pointer<Void>.fromAddress(engineAddress);
+          final id = componentId.toNativeUtf8();
+          try {
+            return bindings.unloadComponent(engine, id) == 1;
+          } finally {
+            calloc.free(id);
+          }
+        });
+        done.complete(unloaded);
+      } catch (error, stack) {
+        done.completeError(error, stack);
+      } finally {
+        _pendingNativeOps--;
+        if (_destroyRequested && _pendingNativeOps == 0) _destroyNative();
       }
     });
     return done.future;
@@ -404,6 +527,13 @@ class Engine {
     if (_disposed) return;
     _disposed = true;
     stopAudio();
+    _destroyRequested = true;
+    if (_pendingNativeOps == 0) _destroyNative();
+  }
+
+  void _destroyNative() {
+    if (_nativeDestroyed) return;
+    _nativeDestroyed = true;
     _b.destroy(_handle);
     calloc.free(_meters);
     calloc.free(_layer);
