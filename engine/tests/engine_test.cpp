@@ -12,6 +12,7 @@
 
 #include "detmath.h"
 #include "engine.h"
+#include "native_component_test_path.h"
 #include "test.h"
 
 using namespace caw;
@@ -58,7 +59,7 @@ float maxStep(const std::vector<float>& v, size_t from, size_t to) {
 
 TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) {
     constexpr const char* componentId = "org.caw.tests.native-loader";
-    const char* path = std::getenv("CAW_TEST_COMPONENT_PATH");
+    const char* path = caw::test::nativeComponentPath();
     CHECK(path != nullptr);
     CHECK(path && path[0] != 0);
     if (!path) return;
