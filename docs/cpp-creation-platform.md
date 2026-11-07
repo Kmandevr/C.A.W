@@ -1,7 +1,7 @@
 ---
 title: C++ creation platform
 summary: Owner-approved C++ authoring direction and implementation status for the shared SDK, component model and code, visual and performance interfaces.
-covers: [engine/include/caw/, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
+covers: [engine/include/caw/, engine/cmake/, engine/src/module_registry.*, engine/src/capi.cpp, engine/CMakeLists.txt, app/lib/model/cpp_component.dart, app/lib/model/project.dart, app/lib/model/storage.dart, app/lib/platform/cpp_build.dart, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
 updated: 2026-11-06
 ---
 
