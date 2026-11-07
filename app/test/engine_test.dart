@@ -69,7 +69,7 @@ void main() {
       trust: NativeComponentTrust.blocked,
     );
     expect(blocked.ok, isFalse);
-    expect(blocked.error, contains('blocked'));
+    expect(blocked.error, contains('blocked'), reason: 'Blocked result: ${blocked.error}');
 
     final isolated = await engine.loadNativeComponent(
       artifactPath: '/not/opened/while/isolated.so',
@@ -77,7 +77,7 @@ void main() {
       trust: NativeComponentTrust.isolated,
     );
     expect(isolated.ok, isFalse);
-    expect(isolated.error, contains('Isolated'));
+    expect(isolated.error, contains('Isolated'), reason: 'Isolated result: ${isolated.error}');
 
     final pending = engine.loadNativeComponent(
       artifactPath: '/not/opened/while/dispose-is-pending.so',
@@ -87,7 +87,7 @@ void main() {
     engine.dispose();
     final afterDisposeRequest = await pending;
     expect(afterDisposeRequest.ok, isFalse);
-    expect(afterDisposeRequest.error, contains('blocked'));
+    expect(afterDisposeRequest.error, contains('blocked'), reason: 'Disposed-engine result: ${afterDisposeRequest.error}');
   }, skip: skip);
 
   test('a project cannot use a native component before an explicit trust load', () async {
