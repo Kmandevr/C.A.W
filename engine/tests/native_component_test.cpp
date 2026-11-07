@@ -5,6 +5,7 @@
 
 #include "caw.h"
 #include "project.h"
+#include "native_component_test_path.h"
 
 #include "module_registry.h"
 #include "test.h"
@@ -28,7 +29,7 @@ TEST(project_json_preserves_native_master_component_order) {
 }
 
 TEST(c_api_native_component_load_requires_an_explicit_trust_level) {
-    const char* path = std::getenv("CAW_TEST_COMPONENT_PATH");
+    const char* path = caw::test::nativeComponentPath();
     CHECK(path != nullptr);
     CHECK(path && path[0] != 0);
     CawEngine* engine = caw_engine_create(48000);
