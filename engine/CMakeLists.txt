@@ -176,7 +176,8 @@ target_include_directories(caw_cli PRIVATE src)
   add_dependencies(caw_tests caw_test_component)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_tests PRIVATE src)
-  target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
+  target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}"
+    "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\"")
   target_link_libraries(caw_tests PRIVATE caw_core)
   # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
   add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)
