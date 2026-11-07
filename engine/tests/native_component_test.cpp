@@ -1,4 +1,5 @@
 // Exercises explicit trust, stable-ID validation, dynamic loading and library lifetime.
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -57,6 +58,8 @@ TEST(c_api_native_component_load_requires_an_explicit_trust_level) {
     if (trusted) {
         const std::string json(trusted);
         caw_free(trusted);
+        if (json.find(R"("ok":true)") == std::string::npos)
+            std::fprintf(stderr, "trusted C API component load returned: %s\n", json.c_str());
         CHECK(json.find(R"("ok":true)") != std::string::npos);
         CHECK(json.find("org.caw.tests.native-loader") != std::string::npos);
     }
@@ -82,10 +85,16 @@ TEST(module_registry_loads_native_components_only_after_explicit_trust) {
 
     const auto mismatch = registry.loadSharedLibrary(path ? path : "", "org.caw.wrong-id", NativeModuleTrust::Trusted);
     CHECK(!mismatch.success);
+    if (mismatch.error != ModuleLoadError::ComponentIdMismatch)
+        std::fprintf(stderr, "wrong-ID component load returned error %u: %s\n",
+                     static_cast<unsigned>(mismatch.error), mismatch.message.c_str());
     CHECK(mismatch.error == ModuleLoadError::ComponentIdMismatch);
     CHECK_EQ(registry.size(), 0u);
 
     const auto loaded = registry.loadSharedLibrary(path ? path : "", kComponentId, NativeModuleTrust::Trusted);
+    if (!loaded.success)
+        std::fprintf(stderr, "trusted component load returned error %u: %s\n",
+                     static_cast<unsigned>(loaded.error), loaded.message.c_str());
     CHECK(loaded.success);
     CHECK(loaded.error == ModuleLoadError::None);
     CHECK_EQ(loaded.componentId, std::string(kComponentId));
