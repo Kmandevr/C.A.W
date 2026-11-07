@@ -63,11 +63,16 @@ void main() {
 
   test('native component loading requires an explicit trust choice', () async {
     final engine = Engine.create();
-    final blocked = await engine.loadNativeComponent(
-      artifactPath: '/not/opened/while/blocked.so',
-      expectedComponentId: 'org.caw.tests.blocked',
-      trust: NativeComponentTrust.blocked,
-    );
+    late final NativeComponentLoadResult blocked;
+    try {
+      blocked = await engine.loadNativeComponent(
+        artifactPath: '/not/opened/while/blocked.so',
+        expectedComponentId: 'org.caw.tests.blocked',
+        trust: NativeComponentTrust.blocked,
+      );
+    } catch (error, stack) {
+      fail('Blocked native component load threw: $error\\n$stack');
+    }
     expect(blocked.ok, isFalse);
     expect(blocked.error, contains('blocked'), reason: 'Blocked result: ${blocked.error}');
 
