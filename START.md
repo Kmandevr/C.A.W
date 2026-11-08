@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `fcfa5b210f99103031c83b5ba04fb4d3256155de` on the default branch at 2026-11-05T17:57:19Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `a94476ccf74d65ae02036d7613ee8bb9dd2c275a` on the default branch at 2026-11-08T18:00:24Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`fcfa5b2`).
+1. The commit this file was generated from (`a94476c`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -249,6 +249,8 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 
 **Owner decision (2026-11-05):** ordinary C++ is C.A.W.'s programming language. It is general-purpose, not a music-only DSL; users can write anything ordinary C++ allows. The C.A.W. Library/SDK supplies reusable audio, music, math, bit-manipulation, data and general-purpose building blocks. One shared component model makes each component available to the C++ editor, visual composition, generated/custom performance UI, mixer and later plugin/standalone adapters. These are coordinated views of one project and runtime, not parallel implementations. See [C++ creation platform](cpp-creation-platform.md).
 
+**Current delivery priority (owner, 2026-11-06):** create a working prototype before building out the full architecture. Deliver a narrow, useful end-to-end slice and expand it through working product behavior. Plan for future compatibility and extensibility where they affect today's interfaces, but do not build comprehensive migration systems, marketplace plumbing or speculative frameworks ahead of demonstrated need.
+
 The current repository still contains the constrained .caw language and VM; that is an implementation fact, not the chosen destination. Useful existing engine capabilities are to be migrated into the C++ Library/SDK and shared component system before the old language and VM are removed. The owner has waived backwards compatibility for old .caw source and pre-release projects.
 
 ## Platforms and actual support
@@ -293,10 +295,10 @@ Important boundaries:
 
 1. **Code and visual editing share one source of truth.** A visual control must update the same project/module data that code and playback use.
 2. **Fast experimentation.** Make a sound, audition it, adjust it and export it without unnecessary setup.
-3. **Local and offline first.** Core sound creation, playback, editing and rendering do not require a cloud service or account. Optional collaboration must not make network access mandatory.
+3. **Local and offline first.** No app capability requires internet access. Editing, compiling and linking C++, resolving already-installed dependencies, playback, project/library management, saving, packaging and rendering work locally. Internet access is optional and may only improve the experience by obtaining or updating dependencies/toolchain packages that are then cached for offline use; it is never a remote execution dependency.
 4. **Modular and reusable.** Generators, effects, functions, patterns, recordings and project assets should be reusable without duplicating incompatible systems.
 5. **Phone-first, desktop-capable.** Touch workflows must be practical on a phone; desktop must support keyboard and mouse without becoming a separate product.
-6. **Resource-aware.** Work on weak devices with bounded memory and callback cost, while using stronger hardware when it benefits active work.
+6. **Transparent resource controls.** Show CPU, memory, audio and build load. Make budgets and recommendations configurable and allow users to override advisory limits; do not impose arbitrary hidden ceilings. Keep genuine format and real-time safety constraints explicit.
 7. **Safe real-time audio.** The callback stays bounded and avoids allocation, locks, I/O, logging and UI calls.
 8. **Evidence over claims.** Performance, platform support and feature completion require tests or device measurements.
 9. **Extensible without rewrites.** New components, algorithms, ports, parameters, UI controls, MIDI capabilities, formats and platform adapters must plug into defined contracts without requiring unrelated systems to be rewritten.
@@ -332,7 +334,7 @@ Only the owner can settle these questions. Do not silently convert them into imp
 | iOS distribution: App Store exception or no iOS release | Open |
 | Licence for user-created/shared sound modules | Open |
 | How a future AutoStacc purchase would deliver/unlock the app | Open |
-| Default trust mode (Isolated, Trusted or Blocked) for a plugin or native module the user hasn't seen before | Open; the three modes are decided ([decisions](decisions.md), 2026-11-03) |
+| Initial trust state for a newly encountered native component | Open; each component's trust level must be explicitly chosen by the user; no silent trust assignment ([decisions](decisions.md), 2026-11-06) |
 | How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
 
