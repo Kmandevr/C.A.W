@@ -77,7 +77,7 @@ class CppToolchainManifest {
     final expectedMode = host == 'android-arm64'
         ? CppToolchainExecutionMode.inProcess : CppToolchainExecutionMode.process;
     if (executionMode != expectedMode) {
-      throw FormatException('The $host toolchain must use \${expectedMode.name} execution.');
+      throw FormatException('The $host toolchain must use ' + expectedMode.name + ' execution.');
     }
     if (rawArtifacts is! List || rawArtifacts.isEmpty) throw const FormatException('Toolchain must declare at least one artifact.');
     final artifacts = rawArtifacts.map((entry) {
