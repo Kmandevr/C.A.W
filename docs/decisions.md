@@ -1,10 +1,24 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-05
+updated: 2026-11-08
 ---
 
 # Decisions
+
+## 2026-11-08: Native note, voice and channel processing; direct pitch-expression editing
+
+- **Owner decision — one native processing model:** per-note, per-voice and per-channel processing are first-class capabilities across the C++ SDK, component model, instruments, synthesis, effects, routing, automation, mixer and runtime. They are not separate feature islands and must not require users to duplicate signals or build manual workarounds.
+- **Preserve identity until an intentional merge:** note identity, voice identity, per-note expression, channel identity/layout and event timing remain available to components that declare they use them. A component may explicitly transform, aggregate or discard a domain, but the engine must not silently lose note expression, collapse channels or reinterpret a layout.
+- **Components declare their processing scope:** whole-stream, per-channel, per-voice and per-note processing are explicit capabilities alongside typed audio, event, MIDI, control and modulation ports. Components may support more than one scope. Effects and instruments use the same contract; an effect that needs individual note/voice context receives it through the native processing model rather than a special-case workaround.
+- **Native stereo synthesis is required:** instruments can generate genuinely distinct left/right signals, distribute unison voices across the stereo field, and control per-voice phase, detune, gain, pan and modulation. Stereo oscillators, stereo modulation and stereo effects are native Library/SDK building blocks, not mono duplication followed by a widening workaround.
+- **Stereo is the ordinary default; channel capacity follows resources:** new tracks default to stereo. The engine supports explicit mono, stereo and arbitrary N-channel layouts, with practical capacity limited by available CPU, memory, device and host budgets rather than an arbitrary fixed product ceiling. Track layouts are independent of physical output count; any required mapping or downmix is explicit at the output boundary.
+- **No hidden channel or expression loss:** incompatible layouts require a visible, declared conversion. A stereo or multichannel effect must not silently collapse to mono, and a component that cannot preserve a processing domain must make the merge/conversion explicit.
+- **Piano-roll direction — MIDISketch-inspired per-note pitch curves:** pitch slides and bends should primarily be drawn and edited as continuous curves on the note itself, with the curve representing the pitch the engine actually plays. The note remains visible and editable. A separate slide event remains available where it is musically useful, but it is not required for an ordinary glide.
+- **Touch editing must be direct and smooth:** users can select the pitch curve/slide they intend to edit without accidentally selecting the underlying note; move, stretch and reshape it with continuous feedback; keep the underlying note visible; and use accessible handles and helpful snapping without abrupt jumps. Visual editing, note preview and playback use the same expression data.
+- **Simple by default, deep when requested:** compatible components connect and work with sensible defaults. Ordinary stereo, unison, effects, panning and pitch expression must not require obscure routing, duplicated signals or manual channel plumbing. Advanced channel maps and per-note/per-voice controls remain available without burdening basic workflows.
+- **Safety remains mandatory:** richer note/voice/channel processing stays within the resource budget and real-time callback rules; preparation and allocation happen off the audio thread.
+- Detailed SDK contracts and tests: [C++ creation platform](cpp-creation-platform.md). Piano-roll interaction and sequencing: [roadmap](roadmap.md#stage-1-pattern-workflow-and-editing-safety), with current UI design in [UI plan](ui-plan.md#piano-roll).
 
 ## 2026-11-05: Ordinary C++ and one shared creation platform
 
