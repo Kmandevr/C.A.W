@@ -47,8 +47,10 @@ class CppToolchainManifest {
 
   static CppToolchainManifest decode(String source) {
     final decoded = jsonDecode(source);
-    if (decoded is! Map<String, dynamic>) throw const FormatException('Toolchain manifest must be a JSON object.');
-    return fromJson(decoded);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Toolchain manifest must be a JSON object.');
+    }
+    return CppToolchainManifest.fromJson(decoded);
   }
 
   factory CppToolchainManifest.fromJson(Map<String, dynamic> json) {
@@ -77,15 +79,21 @@ class CppToolchainManifest {
     final expectedMode = host == 'android-arm64'
         ? CppToolchainExecutionMode.inProcess : CppToolchainExecutionMode.process;
     if (executionMode != expectedMode) {
-      throw FormatException('The $host toolchain must use ' + expectedMode.name + ' execution.');
+      throw FormatException('The $host toolchain must use ${expectedMode.name} execution.');
     }
-    if (rawArtifacts is! List || rawArtifacts.isEmpty) throw const FormatException('Toolchain must declare at least one artifact.');
+    if (rawArtifacts is! List || rawArtifacts.isEmpty) {
+      throw const FormatException('Toolchain must declare at least one artifact.');
+    }
     final artifacts = rawArtifacts.map((entry) {
-      if (entry is! Map<String, dynamic>) throw const FormatException('Toolchain artifact entries must be objects.');
+      if (entry is! Map<String, dynamic>) {
+        throw const FormatException('Toolchain artifact entries must be objects.');
+      }
       return CppToolchainArtifact.fromJson(entry);
     }).toList(growable: false);
     final paths = artifacts.map((artifact) => artifact.path).toSet();
-    if (paths.length != artifacts.length) throw const FormatException('Toolchain artifact paths must be unique.');
+    if (paths.length != artifacts.length) {
+      throw const FormatException('Toolchain artifact paths must be unique.');
+    }
 
     final androidMinApi = json['android_min_api'];
     final entryLibrary = json['entry_library'];
@@ -122,6 +130,6 @@ class CppToolchainManifest {
 }
 
 bool _isSafeRelativePath(String path) =>
-    path.isNotEmpty && !path.startsWith('/') && !path.contains(r'\') &&
-    !path.contains(':') && !path.contains('\u0000') &&
+    path.isNotEmpty && !path.startsWith('/') && !path.contains(r'\\') &&
+    !path.contains(':') && !path.contains('\\u0000') &&
     path.split('/').every((part) => part.isNotEmpty && part != '.' && part != '..');
