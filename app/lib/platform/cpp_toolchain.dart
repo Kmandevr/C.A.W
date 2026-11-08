@@ -130,6 +130,6 @@ class CppToolchainManifest {
 }
 
 bool _isSafeRelativePath(String path) =>
-    path.isNotEmpty && !path.startsWith('/') && !path.contains(r'\\') &&
+    path.isNotEmpty && !path.startsWith('/') && !path.contains(String.fromCharCode(92)) &&
     !path.contains(':') && !path.contains('\\u0000') &&
     path.split('/').every((part) => part.isNotEmpty && part != '.' && part != '..');
