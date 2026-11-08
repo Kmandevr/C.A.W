@@ -7,5 +7,5 @@
 | [gpt--117-public-cpp-sdk](gpt--117-public-cpp-sdk.md) | FINISHED | PASS | b55dca32cb65 | 2026-11-05T18:21:42Z |
 | [gpt--119-cpp-build-pipeline](gpt--119-cpp-build-pipeline.md) | FINISHED | PASS | 0032a8c51d74 | 2026-11-06T23:14:25Z |
 | [gpt--119-native-component-host](gpt--119-native-component-host.md) | FINISHED | FAIL | 4ca76c0d20be | 2026-11-07T02:23:41Z |
-| [gpt--127-native-expression-channel-model](gpt--127-native-expression-channel-model.md) | RUNNING |  | 3e24101bbd6f | 2026-11-08T17:20:44Z |
+| [gpt--127-native-expression-channel-model](gpt--127-native-expression-channel-model.md) | FINISHED | FAIL | 3e24101bbd6f | 2026-11-08T17:21:18Z |
 | [gpt--94-export-fixes](gpt--94-export-fixes.md) | FINISHED | FAIL | 573b809af2a4 | 2026-11-06T21:24:06Z |
