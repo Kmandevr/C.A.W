@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # C.A.W. roadmap
@@ -64,7 +64,7 @@ This is the product's programming and extension foundation. It precedes dependen
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| CP.1 | General-purpose C++ source, project and build toolchain integrated with C.A.W. | Planned | both | Existing C++20 engine/toolchain | No in-app C++ project/source model or native component build workflow |
+| CP.1 | General-purpose C++ source, project and local/offline build toolchain integrated with C.A.W. | Partial | both | Existing C++20 engine/toolchain | An installable SDK package, v1 component manifest, manifest-driven shared-library build helper, structured build diagnostics and Linux/Windows/Android repository-CI matrix are present in code; the component matrix was queued at the last check. The app-local compiler/toolchain and dependency cache, project/source storage, proactive dependency preparation, local build integration, runtime registration/loading and user-configured trust workflow are not built. First deliver a minimal end-to-end C++ component prototype; do not introduce a remote build service |
 | CP.2 | Shared component descriptor and lifecycle: identity, roles, typed ports, parameters, assets, events/MIDI, state, capabilities, UI metadata and resource/real-time contracts | Partial | engine | CP.1; integrate with Foundation F1–F6 | Public C++ SDK now exposes the existing processor, typed ports, parameter descriptors, events, process blocks and versioned state contract; complete identity/role/capability/assets and lifecycle metadata plus engine/app integration remain |
 | CP.3 | Comprehensive C.A.W. Library/SDK for DSP, synthesis, MIDI, tables/samples, math, bit manipulation, data and general-purpose utilities | Planned | engine | CP.1, CP.2 | Existing .caw built-ins and engine algorithms need to be catalogued, migrated or replaced behind the shared C++ APIs; many requested facilities are not implemented |
 | CP.4 | Stable extension and registration contracts, capability negotiation, state/API versioning and explicit ownership/lifetime rules | Planned | engine | CP.2 | Existing native SDK v1 is a starting point, not the complete contract |

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'cpp_component.dart';
 import 'project.dart';
 
 class ProjectSummary {
@@ -143,6 +144,51 @@ class ProjectStorage {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Materializes saved C++ sources into a disposable app-private workspace for a local build.
+  /// The project JSON remains authoritative; deleting this workspace never deletes user source.
+  Future<Directory> materializeCppComponent(ProjectDoc project, CppComponentDoc component) async {
+    final projectId = _validatedProjectId(project.id);
+    final componentId = _validatedProjectId(component.id);
+    for (final path in component.files.keys) {
+      if (!CppComponentDoc.isSafeRelativePath(path)) {
+        throw FormatException('Unsafe C++ project path: $path');
+      }
+    }
+
+    final workspace = Directory(
+      '${_root.path}${Platform.pathSeparator}cpp-workspaces'
+      '${Platform.pathSeparator}$projectId${Platform.pathSeparator}$componentId',
+    );
+    if (await workspace.exists()) await workspace.delete(recursive: true);
+    await workspace.create(recursive: true);
+    try {
+      for (final entry in component.files.entries) {
+        final segments = entry.key.split('/');
+        final file = File(
+          '${workspace.path}${Platform.pathSeparator}${segments.join(Platform.pathSeparator)}',
+        );
+        await file.parent.create(recursive: true);
+        await file.writeAsString(entry.value, flush: true);
+      }
+      return workspace;
+    } catch (_) {
+      if (await workspace.exists()) await workspace.delete(recursive: true);
+      rethrow;
+    }
+  }
+
+  /// Returns the persistent CMake build directory; unlike source workspaces, this is not cleared between builds.
+  Future<Directory> prepareCppBuildDirectory(String projectId, String componentId) async {
+    final safeProjectId = _validatedProjectId(projectId);
+    final safeComponentId = _validatedProjectId(componentId);
+    final directory = Directory(
+      '${_root.path}${Platform.pathSeparator}cpp-builds'
+      '${Platform.pathSeparator}$safeProjectId${Platform.pathSeparator}$safeComponentId',
+    );
+    await directory.create(recursive: true);
+    return directory;
   }
 
   Future<void> delete(String id) async {

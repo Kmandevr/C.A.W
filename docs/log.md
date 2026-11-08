@@ -1,10 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # Log
+
+- 2026-11-06: Began CP.1 after the owner approved GitHub Actions as the required/default C++ component build path, desktop builds as optional and Android NDK use for CI-only cross-compilation. Added an installable `CAW::SDK` CMake package (standalone engine builds only), `caw.component` v1 manifest helper, exported component entry points, minimal external component fixture, Node build driver with structured diagnostics and Linux/Windows/Android CI matrix. CI also exposed the offline-export test sampling the initial master-gain ramp; the fixture now checks after the ramp settles. CI verification is pending. App project storage, remote build service integration, runtime loading and trust-mode enforcement remain incomplete. See [C++ creation platform](cpp-creation-platform.md) and issue #119.
 
 - 2026-11-05: Published the existing native module processor contract as the first public C++ SDK slice (`engine/include/caw/module.hpp`, `CAW::SDK`); internal engine includes now forward to the canonical public contract and the SDK consumer is compiled without `engine/src` access. This is a source-level component API, not yet an installed package or dynamic loader.
 
@@ -161,3 +163,4 @@ Newest first.
 - 2026-11-02: Corrected pattern hot-swap command ordering: install the chain with its pre-reserved curve capacity before publishing a changed pattern. If the chain install is rejected, the old pattern remains active; this prevents an oversized new expression from reaching a chain whose voice vectors were prepared for fewer points. Latest code checkpoint: ff8b5a566e6ab2d8b3cb8282eeb520d857d2aa56.
 
 - 2026-11-02: Removed the 16-export compiler/runtime cap. Each Engine now lazily allocates stable per-slot export buffers from the hardware-derived graph-working share; a fixed pointer table and heap-stable buffers keep import addresses valid across project updates. Export counts are checked before installation, failures are explicit, and inactive/muted export sources are zeroed without double-clearing active producers. Added 20-export compiler and end-to-end import routing tests plus a low-memory budget rejection test. Latest code/test checkpoint: 80e2664a5f9af2c3f6628ba94a0529ead4a42165. Fresh CI is not yet inspectable.
+- 2026-11-06: C++ prototype direction (owner): local/offline compilation is required; internet may only help acquire dependencies that are cached locally. Prioritize a working C++ component vertical slice, live early diagnostics, incremental builds, fast shared-library integration, REAPER-like self-contained project handoff, user-selected trust, transparent overridable resource budgets, real-time safety and practical recovery. Plan compatibility now without building a full migration framework; AutoStacc integration is later.
