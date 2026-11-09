@@ -2,7 +2,7 @@
 title: C++ creation platform
 summary: Owner-approved C++ authoring direction and implementation status for the shared SDK, component model and code, visual and performance interfaces.
 covers: [engine/include/caw/, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
-updated: 2026-11-06
+updated: 2026-11-09
 ---
 
 # C++ creation platform
@@ -29,7 +29,7 @@ A descriptor should cover:
 - **Identity and discovery:** stable component ID, display name, version, description, category, tags, author and capability declarations.
 - **Role:** instrument/voice, generator, effect, utility processor, event processor, analysis tool or other declared role. A component may support more than one role where its behavior genuinely allows it.
 - **Typed ports:** named inputs and outputs, direction, type, channel layout, units, rate, multiplicity, optional/default behavior and sidechain designation.
-- **Parameters:** stable parameter ID, name, description, value type, default, minimum/maximum, step, unit, display format, curve, choices, smoothing and visibility.
+- **Parameters:** stable parameter ID, name, description, value type, default, minimum/maximum, step, unit, display format, curve, choices, smoothing, visibility and control scope (project, track, channel, voice or note).
 - **Parameter capabilities:** whether a parameter supports automation, modulation, MIDI mapping, host exposure, sample-accurate changes or block-rate changes.
 - **Assets and data:** declared sample, wavetable, impulse-response, table, preset and other resource inputs; ownership, lifetime, version and missing-resource behavior.
 - **Events and MIDI:** accepted/emitted event kinds, MIDI 1.0 and MIDI 2.0 UMP support, note identity, per-note expression and timestamp/frame semantics.
@@ -53,6 +53,33 @@ The component system must support at least:
 - **Data and tables:** typed buffers, sample data, wavetable data, lookup tables, envelopes, analysis results and other declared data objects.
 
 Connections are type-checked before execution. No silent reinterpretation between domains is allowed. A conversion is an explicit component or adapter with declared cost and semantics. Port contracts define channel layouts, rates, ownership, buffer lifetime and whether a port may fan in or fan out.
+
+### Native note, voice and channel processing
+
+Per-note, per-voice and per-channel processing are native processing scopes in the shared component/runtime contract, not separate APIs that individual instruments or effects must invent.
+
+- **Processing scopes:** a component descriptor declares whether processing applies to a complete stream/buffer, individual channels, individual sounding voices, individual notes, or a supported combination. Instruments, generators, effects and utility processors use the same capability model. A component may offer a simple whole-buffer fast path and a more specific note/voice/channel path.
+- **Preserved context:** where a component declares that it consumes note/voice context, the runtime supplies stable note identity, voice identity, event/frame timing, expression values and channel identity/layout alongside the relevant audio/event data. That context remains correlated until an explicit mix, aggregation or conversion boundary. A component may intentionally combine voices or channels, but the boundary and resulting loss of granularity are explicit.
+- **Per-note expression:** note identity and expression are not limited to the MIDI input edge. Pitch, pressure, timbre, gain, pan/spatial position and other typed expression/automation values can be addressed independently for simultaneous notes. MIDI 1.0, MIDI 2.0 UMP and MPE-style adapters translate at the boundary while the internal model retains stable note identity and higher-resolution values.
+- **Per-voice processing:** synth voices and unison layers can be independently addressed for phase, detune, gain, pan/spread, modulation and processing before they are intentionally combined. The runtime must not force a synth to collapse its voices before a voice-aware processor can act.
+- **Per-channel processing:** components can independently process channels in a declared layout, or operate on the complete layout when their algorithm requires it. Layouts include mono, stereo, standard surround and discrete N-channel configurations. Channel capacity is bounded by measured/declared CPU, memory and host/device budgets, not an arbitrary fixed product ceiling.
+- **Native stereo generation:** instruments and generators can produce genuinely distinct left/right signals at the source. Stereo oscillators, independent or linked L/R modulation, unison voice distribution, phase/detune offsets, stereo effects and width/spatial controls are Library/SDK primitives. Stereo must not mean duplicating a mono signal and adding a workaround afterward.
+- **Effects declare what they do:** descriptors state accepted/produced layouts and whether an effect processes a whole stream, channels independently, voices or notes. A stereo widener, stereo distortion, chorus or delay receives native stereo data; a note-aware effect can receive the relevant note/voice context. No effect silently converts stereo or N-channel audio to mono. Any downmix, channel remap, or loss of note/voice granularity is an explicit conversion/merge with defined semantics.
+- **Track and output defaults:** new tracks use stereo by default. A track may carry more channels than the current physical output device; explicit mapping/downmix happens at the device/output boundary rather than restricting the internal track layout.
+- **Simple connection behavior:** compatible layouts and processing scopes connect directly with sensible defaults. The host performs ordinary compatible wiring and exposes advanced pin/channel maps only when needed. It must explain incompatible layouts and offer an explicit conversion instead of requiring users to duplicate signals or discover obscure routing tricks.
+- **Real-time contract:** note/voice/channel context, buffers and processing plans are prepared off the audio thread. The callback remains bounded and allocation-free; resource limits produce actionable errors rather than silent truncation.
+
+### Native stereo synthesis and unison
+
+A C++ instrument must be able to build stereo sound from its oscillators and voices, not merely pass a mono result through stereo effects. The SDK should make these common operations direct:
+
+- independent or linked left/right oscillator signals and phase;
+- per-voice detune, phase offsets, pan and stereo spread for unison stacks;
+- per-note pitch glide/bend and modulation while other notes continue independently;
+- stereo filters, distortion, chorus, phaser, delay, reverb and mid/side processing; and
+- explicit split, merge, map and recombine operations for more elaborate channel structures.
+
+A typical instrument—multiple detuned voices distributed across stereo, with per-note pitch expression and stereo chorus/distortion—must be straightforward to implement with the SDK's native building blocks. Advanced custom routing remains possible, but is not a prerequisite for ordinary stereo sound design.
 
 ### One parameter definition everywhere
 
@@ -159,11 +186,11 @@ Provide reusable implementations and building blocks for:
 - delay, feedback delay, reverb, convolution, chorus, flanger, phaser and modulation effects;
 - FFT and other spectral/time-frequency analysis;
 - granular, additive, FM/AM, wavetable and physical-modeling building blocks; and
-- stereo and multichannel processing, channel mapping and explicit format conversion.
+- native stereo generation and multichannel processing, per-channel/per-voice/per-note DSP, channel mapping and explicit format conversion.
 
 ### Instruments, samples and musical systems
 
-Provide reusable synth voices, oscillators, envelopes, LFOs, modulation sources, samplers, drum generators, sample buffers, wavetable tools, sample/zone mapping, MIDI event utilities, sequencers, note generators, arpeggiators, chord/scale/rhythm helpers and per-note expression tools.
+Provide reusable synth voices, stereo-capable oscillators, envelopes, LFOs, modulation sources, samplers, drum generators, sample buffers, wavetable tools, sample/zone mapping, MIDI event utilities, sequencers, note generators, arpeggiators, chord/scale/rhythm helpers, unison/voice distribution and per-note expression tools.
 
 Support MIDI 1.0, MIDI 2.0 UMP and MPE-style expression through one event model. Device input/output adapters feed that same model; a C++ component, visual block and performance UI must not each invent separate MIDI routing.
 
@@ -286,6 +313,11 @@ The design is not complete merely because interfaces exist. Tests and CI should 
 - one parameter definition drives generated controls, automation, modulation, MIDI mapping and host exposure;
 - generated UI works with no custom UI, and custom/hybrid UI does not change processor behavior;
 - MIDI 1.0, MIDI 2.0 UMP, note identity and per-note expression traverse the shared event path;
+- multiple simultaneous notes retain independent pitch, pressure, timbre and other supported expression through note-aware components and the playback path;
+- unison voices retain independent phase, detune, pan/spread and modulation until an explicit voice-mix boundary;
+- a C++ instrument can generate distinct native left/right signals, and stereo effects preserve and process both channels without mono collapse;
+- per-channel processors correctly handle multi-channel layouts within the declared resource budget, with explicit channel maps and conversions;
+- a track defaults to stereo and may carry more channels than the physical output device, with any required output mapping/downmix explicit;
 - state/preset save and restore are versioned and deterministic within the declared contract;
 - real-time processing performs no allocation, blocking lock, I/O or UI call and remains within declared bounds;
 - untrusted native code is never silently loaded in-process;
