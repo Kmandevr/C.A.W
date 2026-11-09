@@ -22,6 +22,9 @@ updated: 2026-11-09
   - Dart tests: about 2 min;
   - the rest: under 1 min;
   - the compiler test: minutes once its LLVM build is cached (built once per LLVM version).
+- **Owner direction:** split a job into parallel parts where the parts are really independent, keeping it readable and reliable.
+  - Where it helps: the Windows build compiles each target's files in parallel (`/MP`), because nearly all of the Windows engine job was compiling.
+  - Where it doesn't: the engine tests already run as 4 parallel shards. The Dart tests take under a minute themselves, so splitting them would add more runner setup than it saves.
 
 ## 2026-11-09: A C++ effect behaves like a CLAP plugin in REAPER (owner, #137)
 

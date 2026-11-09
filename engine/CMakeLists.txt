@@ -83,6 +83,11 @@ if(MSVC)
 else()
   set(CAW_FLAGS -Wall -Wextra -ffp-contract=off -fno-fast-math)
 endif()
+# Build speed only (the output is the same): Visual Studio builds compile one file at a time per target
+# unless asked; /MP compiles a target's files in parallel.
+if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_GENERATOR MATCHES "Visual Studio")
+  add_compile_options(/MP)
+endif()
 if(CAW_SANITIZE AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
   add_link_options(-fsanitize=address,undefined)
