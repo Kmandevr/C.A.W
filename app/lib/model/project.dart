@@ -564,7 +564,9 @@ class ProjectDoc {
 
     project.automation = project.automation.where((lane) =>
       lane.target.isNotEmpty && (lane.targetType == 'global' ||
-        (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true)))
+        (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true) ||
+        // A native component's parameter: its chain index (the layer is optional: absent is the master).
+        (lane.targetType == 'component' && (lane.component ?? -1) >= 0 && (lane.component ?? -1) < 64)))
       .toList();
     for (final lane in project.automation) {
       lane.points = lane.points.toList()
