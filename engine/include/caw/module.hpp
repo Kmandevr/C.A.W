@@ -18,11 +18,6 @@ constexpr uint32_t channelCountForLayout(ChannelLayout layout, uint32_t discrete
     }
     return 0;
 }
-// The component header revision. A host refuses a library built against any other revision:
-// revision 2 (CP.2) grew ModuleDescriptor and ParameterDescriptor, so an older library's
-// descriptor cannot be read safely. Older libraries lack the export and are refused before
-// their descriptor is touched. The stable C interface (v2) will replace this check.
-inline constexpr uint32_t kComponentHeaderRevision = 2;
 // Hard ceiling on channels per audio port, for every layout including Discrete. It bounds
 // pointer tables and buffer sizes; hosts may set a lower limit in their graph budget.
 inline constexpr uint32_t kMaxPortChannels = 64;
@@ -270,6 +265,13 @@ public:
         process(stereo);
         return stereoImplemented_;
     }
+    // Control thread, before the first block and again after a deactivate: prepare for this sample
+    // rate and blocks of at most maxFrames (allocate here, never in process). False refuses the
+    // instance. Hosts call deactivate before activating again and before destroying it.
+    virtual bool activate(double sampleRate, uint32_t maxFrames) noexcept {
+        (void)sampleRate; (void)maxFrames; return true;
+    }
+    virtual void deactivate() noexcept {}
     virtual void reset() noexcept {}
     virtual uint32_t stateVersion() const noexcept { return 1; }
     virtual bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept {
@@ -283,3 +285,21 @@ private:
     bool stereoImplemented_ = true;  // cleared only by the default stereo overload
 };
 }  // namespace caw
+
+// The C interface (caw_component.h) is the binary boundary; these C++ types must match it exactly,
+// so the SDK and host can pass process blocks across it without converting each field.
+#include <cstddef>
+#include "../caw_component.h"
+namespace caw::detail {
+static_assert(static_cast<uint32_t>(PortType::Event) == CAW_PORT_EVENT);
+static_assert(static_cast<uint32_t>(ChannelLayout::Stereo) == CAW_LAYOUT_STEREO);
+static_assert(static_cast<uint32_t>(ChannelLayout::Discrete) == CAW_LAYOUT_DISCRETE);
+static_assert(static_cast<uint32_t>(ModuleRole::Analyzer) == CAW_ROLE_ANALYZER);
+static_assert(static_cast<uint32_t>(ParameterCurve::Exponential) == CAW_CURVE_EXPONENTIAL);
+static_assert(static_cast<uint32_t>(UiControlKind::Curve) == CAW_UI_CURVE);
+static_assert(static_cast<uint32_t>(EventKind::Midi) == CAW_EVENT_MIDI);
+static_assert(sizeof(Event) == sizeof(CawEvent) && offsetof(Event, frame) == offsetof(CawEvent, frame) &&
+              offsetof(Event, kind) == offsetof(CawEvent, kind) && offsetof(Event, flags) == offsetof(CawEvent, flags) &&
+              offsetof(Event, noteId) == offsetof(CawEvent, note_id) && offsetof(Event, data) == offsetof(CawEvent, data));
+static_assert(kInfiniteTail == CAW_INFINITE_TAIL);
+}  // namespace caw::detail

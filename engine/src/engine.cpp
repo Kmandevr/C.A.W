@@ -1066,6 +1066,10 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             if (!processor)
                 return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
                        "' could not create a processor instance\",\"modules\":{}}";
+            // Prepared here, on the control thread: the chain processes blocks of at most kBlock.
+            if (!processor->activate(sr_, static_cast<uint32_t>(kBlock)))
+                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
+                       "' could not prepare for playback\",\"modules\":{}}";
             nextMasterChain->processors.push_back(std::move(processor));
         }
     }

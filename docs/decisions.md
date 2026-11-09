@@ -179,7 +179,7 @@ updated: 2026-11-09
 
 ## 2026-11-03: Seeded randomness everywhere, per project and per module
 
-- **Every random source is seeded (owner).** Any randomness in `.caw` modules, built-in nodes and native plugins comes from a seed, so the same project gives the same result every time. **[Fact, 2026-11-03]** `.caw` already works this way for `rand`, `randi`, `hash`, `noise` and pattern note probability, all from the single project seed; there is no per-module seed, and the native SDK (`caw_module_sdk.h` v1) passes plugins no seed and offers no random source.
+- **Every random source is seeded (owner).** Any randomness in `.caw` modules, built-in nodes and native plugins comes from a seed, so the same project gives the same result every time. **[Fact, 2026-11-03]** `.caw` already works this way for `rand`, `randi`, `hash`, `noise` and pattern note probability, all from the single project seed; there is no per-module seed, and the component C interface v2 (`caw_component.h`, 2026-11-09) passes components no seed and offers no random source yet (a seed would be a host extension).
 - **Per-module seeds follow the project unless pinned (owner).** By default a module's seed is derived from the project seed with a per-module offset, so modules differ but all move when the project seed changes. A module can be pinned to its own seed, which then ignores project seed changes.
 - **Seeding can be switched off per module or per project (owner).** Off means fresh randomness on each play or export.
 - **[Proposal]** When seeding is off, the seed actually used is still recorded (shown and saved with each export), so a take you like can be pinned and reproduced; exports with seeding on stay bit-identical across platforms.

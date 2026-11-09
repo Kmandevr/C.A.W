@@ -37,21 +37,6 @@ public:
 
 }  // namespace
 
-#ifndef CAW_TEST_OMIT_HEADER_REVISION  // the second fixture plays a library built before revisions
-CAW_COMPONENT_DEFINE_HEADER_REVISION()
+#ifndef CAW_TEST_OMIT_ENTRY  // the second fixture plays a library without the v2 entry point
+CAW_EXPORT_COMPONENT(TestNativeProcessor, kDescriptor)
 #endif
-
-extern "C" CAW_COMPONENT_EXPORT const caw::ModuleDescriptor*
-caw_component_descriptor() noexcept {
-    return &kDescriptor;
-}
-
-extern "C" CAW_COMPONENT_EXPORT caw::ModuleProcessor*
-caw_component_create() noexcept {
-    return new (std::nothrow) TestNativeProcessor();
-}
-
-extern "C" CAW_COMPONENT_EXPORT void
-caw_component_destroy(caw::ModuleProcessor* processor) noexcept {
-    delete processor;
-}

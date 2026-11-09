@@ -49,6 +49,7 @@ if(CAW_INSTALL_SDK)
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWComponent.cmake"
     DESTINATION "${CAW_SDK_CMAKE_DIR}")
   install(DIRECTORY include/caw/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/caw")
+  install(FILES include/caw_component.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
   install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/CAWConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/CAWConfigVersion.cmake"
@@ -128,7 +129,7 @@ ${_lsrcs}nullptr};
 
 add_library(caw_core STATIC
   src/builtins.cpp src/compile.cpp src/detmath.cpp src/docs.cpp src/pattern.cpp
-  src/engine.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/sdk_layout.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/engine.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
   "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
 target_include_directories(caw_core PRIVATE src)
@@ -173,17 +174,21 @@ target_include_directories(caw_cli PRIVATE src)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
   set_target_properties(caw_test_component PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_component")
-  add_library(caw_test_component_unrevisioned MODULE tests/native_component_fixture.cpp)
-  target_link_libraries(caw_test_component_unrevisioned PRIVATE CAW::SDK)
-  target_compile_options(caw_test_component_unrevisioned PRIVATE ${CAW_FLAGS})
-  target_compile_definitions(caw_test_component_unrevisioned PRIVATE CAW_TEST_OMIT_HEADER_REVISION)
-  set_target_properties(caw_test_component_unrevisioned PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_component_unrevisioned")
-  add_dependencies(caw_tests caw_test_component caw_test_component_unrevisioned)
+  add_library(caw_test_component_no_entry MODULE tests/native_component_fixture.cpp)
+  target_link_libraries(caw_test_component_no_entry PRIVATE CAW::SDK)
+  target_compile_options(caw_test_component_no_entry PRIVATE ${CAW_FLAGS})
+  target_compile_definitions(caw_test_component_no_entry PRIVATE CAW_TEST_OMIT_ENTRY)
+  set_target_properties(caw_test_component_no_entry PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_component_no_entry")
+  # The component C interface compiles as plain C.
+  add_library(caw_component_c_check OBJECT tests/component_header_check.c)
+  target_include_directories(caw_component_c_check PRIVATE include)
+  set_target_properties(caw_component_c_check PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+  add_dependencies(caw_tests caw_test_component caw_test_component_no_entry caw_component_c_check)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_tests PRIVATE src)
   target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}"
     "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\""
-    "CAW_TEST_UNREVISIONED_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_unrevisioned>\"")
+    "CAW_TEST_NO_ENTRY_COMPONENT_PATH=\"$<TARGET_FILE:caw_test_component_no_entry>\"")
   target_link_libraries(caw_tests PRIVATE caw_core)
   # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
   add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)
