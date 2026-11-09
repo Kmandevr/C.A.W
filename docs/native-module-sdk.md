@@ -7,7 +7,87 @@ covers: [engine/include/caw_component.h, engine/include/caw/module.hpp, engine/i
 
 # Native module SDK v1
 
-**Status [Fact, checked 2026-11-06]:** the versioned C ABI header, internal descriptor validation, static registry and graph/processor foundations exist. The C++ SDK is installable as a CMake package for standalone engine builds (the app's embedded engine build opts out); the manifest-driven component helper, exported descriptor/create/destroy entry points, structured diagnostics and Linux/Windows/Android CI workflow are implemented. The app now persists C++ source and pinned dependencies, runs a local CMake build, and receives a verified artifact path. `ModuleRegistry` now loads shared libraries through `Engine` and the C API only after an explicit trust value: Blocked refuses to open the library, Isolated is refused because no process sandbox exists, and Trusted loads in-process. The Flutter FFI/UI and playback-graph insertion are still outstanding; a successfully built component is not automatically loaded or authorized. Signing, crash isolation and runtime packaging remain future work.
+**Status [Fact, checked 2026-11-09]:**
+- **Interface and SDK:** the plain-C component interface v3 and the installable C++ SDK (`CAW::SDK`) exist.
+- **Desktop build:** a manifest-driven CMake build, and CI for Linux, Windows and Android.
+- **In-app compiler:** written (`engine/compiler/`) and CI-built for Android; its first on-device run is still to come.
+- **Loading:** explicit trust (Blocked / Trusted; Isolated is refused, since there is no sandbox), and rebuilds that switch in while playing.
+- **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master.
+- **Still to come:** the UI, process isolation, signing, and effects with other ports.
+
+## Writing an effect
+
+A component is ordinary C++20 against `caw/component.hpp`. A new effect starts from the blank template (`CppComponentDoc.blankEffect`): a stereo pass-through with its `caw-component.json`. The parts:
+
+```cpp
+#include <algorithm>
+#include <vector>
+
+#include <caw/component.hpp>
+
+namespace {
+constexpr caw::PortDescriptor kPorts[] = {caw::stereoInput("in"), caw::stereoOutput("out")};
+
+caw::ParameterDescriptor time() {                 // a knob: id, range, default, smoothing
+    caw::ParameterDescriptor p;
+    p.id = "time"; p.name = "Time"; p.unit = "ms";
+    p.minimum = 1; p.maximum = 1000; p.defaultValue = 250;
+    p.smoothingFrames = 480;                      // moves glide over 10 ms instead of clicking
+    return p;
+}
+const caw::ParameterDescriptor kParams[] = {time()};
+
+caw::ModuleDescriptor describe() {
+    caw::ModuleDescriptor d;
+    d.id = "local.my-echo"; d.name = "My echo"; d.role = caw::ModuleRole::Effect;
+    d.ports = kPorts; d.portCount = 2; d.parameters = kParams; d.parameterCount = 1;
+    d.tailFrames = caw::kInfiniteTail;            // it rings on after the input stops
+    return d;
+}
+const caw::ModuleDescriptor kDescriptor = describe();
+
+class Echo final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kDescriptor; }
+    bool activate(double rate, uint32_t) noexcept override {  // allocate here, never in process()
+        rate_ = rate;
+        try { line_.assign(static_cast<size_t>(rate), 0.0f); } catch (...) { return false; }
+        return true;
+    }
+    void reset() noexcept override { std::fill(line_.begin(), line_.end(), 0.0f); }
+    using caw::ModuleProcessor::process;
+    bool process(const caw::AudioProcessBlock& b) noexcept override {
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            // A parameter is per frame while it moves (samples), otherwise one value for the block.
+            const double ms = b.parameters[0].samples ? b.parameters[0].samples[i] : b.parameters[0].value;
+            // b.transport (null while stopped) gives tempo and the song position, for tempo-synced effects.
+            const size_t delay = static_cast<size_t>(ms * rate_ / 1000.0);
+            const size_t read = (pos_ + line_.size() - delay) % line_.size();
+            for (uint32_t c = 0; c < 2; ++c) b.output.channels[c][i] = b.input.channels[c][i] + 0.5f * line_[read];
+            line_[pos_] = 0.5f * (b.input.channels[0][i] + b.input.channels[1][i]);
+            pos_ = (pos_ + 1) % line_.size();
+        }
+        return true;
+    }
+private:
+    std::vector<float> line_;
+    size_t pos_ = 0;
+    double rate_ = 48000;
+};
+}  // namespace
+
+CAW_EXPORT_COMPONENT(Echo, kDescriptor)
+```
+
+The rules that matter:
+- **Allocate in `activate`, never in `process`.** No locks, file access or logging there either.
+- **Declare what the host must know:**
+  - `latencyFrames`, so other tracks are delayed to match;
+  - `tailFrames`, so the effect rings out after Stop;
+  - `maxStateBytes`, together with `saveState`/`loadState` if it keeps state beyond its parameters.
+- **Make `saveState` safe while `process` runs:** the host may save a playing project.
+- **Make `reset()` clear what you hold.** The host calls it so the next play starts from silence.
+- **Use the Library for the same sound everywhere:** `caw/library/` (pan law, width, drive and crush, delays) and `caw/detmath.hpp` give the same bits on every device.
 
 ## One module system
 
