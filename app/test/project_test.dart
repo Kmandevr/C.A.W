@@ -37,6 +37,20 @@ void main() {
     expect(bad.single.params, {'b': 1.0});
   });
 
+  test('components the engine has not loaded are left out, and their lanes renumbered', () {
+    final p = ProjectDoc(id: 'p', name: 'P', bpm: 120, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    p.layers.first.components = [ComponentUseDoc('org.x.untrusted'), ComponentUseDoc('org.x.gain')];
+    p.automation.addAll([
+      ProjectAutomationLaneDoc(targetType: 'component', target: 'a', layerId: 'l', component: 0, points: [AutomationPointDoc(step: 0, value: 1)]),
+      ProjectAutomationLaneDoc(targetType: 'component', target: 'b', layerId: 'l', component: 1, points: [AutomationPointDoc(step: 0, value: 1)]),
+    ]);
+    final engine = jsonDecode(p.toEngineJson(playableComponents: {'org.x.gain'})) as Map<String, dynamic>;
+    expect((engine['layers'] as List).first['components'], ['org.x.gain']);
+    final lanes = (engine['automation'] as List).cast<Map<String, dynamic>>();
+    expect(lanes.single['target'], 'b');
+    expect(lanes.single['component'], 0);
+  });
+
   test('component bypass, state and automation lanes reach the engine and come back', () {
     final p = ProjectDoc(id: 'p', name: 'P', bpm: 120, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
     p.layers.first.components = [ComponentUseDoc('org.x.gain', {}, true)];

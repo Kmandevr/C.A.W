@@ -19,6 +19,9 @@ abstract class CppCompiler {
   Future<({int code, String output})> run(List<String> args);
 }
 
+/// This device's in-app compiler, or null where there is none (desktop builds use the CMake runner).
+CppCompiler? platformCppCompiler() => Platform.isAndroid ? AndroidCppCompiler() : null;
+
 class AndroidCppCompiler implements CppCompiler {
   static const _channel = MethodChannel('caw/compiler');
   String? _toolchain;

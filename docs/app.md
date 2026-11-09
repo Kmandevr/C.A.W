@@ -134,7 +134,12 @@ The project model stores C++ component entries alongside existing project module
   - other code asks once, and the answer is remembered for exactly that source or library fingerprint (SHA-256, `lib/model/sha256.dart`), so changed code asks again;
   - `forget` resets a choice;
   - trust is never stored in a project.
-The in-app build and toolchain install exist (see the C++ platform note). Still to come: the trust prompt UI, and any screen that places components on tracks.
+The in-app build and toolchain install exist (see the C++ platform note). When a project opens, `NativeComponentManager` (`lib/model/native_components.dart`) handles its C++ components in the background, so the project plays at once:
+  - Each component's trust decision comes first: own code is Trusted, blocked code never builds, and other code waits in `AppState.nativeStatus.needsTrust`.
+  - A trusted component builds in-app, or reuses its cached build while the sources are unchanged.
+  - The build then loads, or reloads if the component was already loaded from other sources.
+  - The project is sent again. Components that aren't loaded are left out of what the engine gets (`toEngineJson(playableComponents:)`), and their automation lanes are renumbered, so the rest of the song plays.
+Still to come: the trust prompt UI, and any screen that places components on tracks.
 - **Storage:** projects are JSON files in the app's private support folder, under `projects/`. They're written 0.5 s after each change, and right away when the app goes to the background or quits. The app reopens the last project.
 - **Audio:** the device opens at start-up (48 kHz stereo, low-latency profile). When the app goes to the background while stopped, it closes the device, and it reopens it on return. Playing on in the background (an Android foreground service) is not in v1.
 - **Opening:** the app opens straight into the last project (`AppState.openStorage`) with the arrangement in front (the shell brings it forward once at launch, whatever the saved layout showed), or the "First loop" template on a first run or when the last project is gone. If the last project's file is damaged, or opening it fails, the template opens and a pink line under the transport says why; the damaged file stays in the projects folder. There is no startup screen. The project menu offers a new blank project, a new one from the template, and every saved project.

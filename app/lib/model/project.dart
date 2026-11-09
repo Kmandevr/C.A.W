@@ -422,8 +422,27 @@ class ProjectDoc {
 
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
-      {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
+      {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now',
+      Set<String>? playableComponents}) {
     final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
+    // Native components the engine hasn't loaded (awaiting trust, blocked, failed to build) are left out, so the
+    // rest of the song still plays; their automation lanes go with them and the others are renumbered.
+    List<ComponentUseDoc> playable(List<ComponentUseDoc> chain) =>
+        playableComponents == null ? chain : [for (final c in chain) if (playableComponents.contains(c.id)) c];
+    int? playableIndex(List<ComponentUseDoc> chain, int index) {
+      if (playableComponents == null) return index;
+      if (index < 0 || index >= chain.length || !playableComponents.contains(chain[index].id)) return null;
+      return chain.take(index).where((c) => playableComponents.contains(c.id)).length;
+    }
+    List<ComponentUseDoc> chainOf(String? layerId) =>
+        layerId == null ? masterComponents : layers.where((l) => l.id == layerId).firstOrNull?.components ?? const [];
+    final engineAutomation = [
+      for (final lane in automation)
+        if (lane.targetType != 'component')
+          lane.toJson()
+        else if (playableIndex(chainOf(lane.layerId), lane.component ?? -1) case final int index)
+          lane.toJson()..['component'] = index,
+    ];
     final result = jsonEncode({
         'caw_project': 1,
         'name': name,
@@ -437,18 +456,18 @@ class ProjectDoc {
         'swap': swap,
         if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
         'globals': globals,
-        'automation': [for (final lane in automation) lane.toJson()],
+        'automation': engineAutomation,
         'modules': [
           for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
-        'master_components': [for (final c in masterComponents) c.toJson()],
+        'master_components': [for (final c in playable(masterComponents)) c.toJson()],
         'layers': [
           for (final l in layers)
             {
               'id': l.id,
               'name': l.name,
               'chain': l.chain,
-              if (l.components.isNotEmpty && !l.isFolder) 'components': [for (final c in l.components) c.toJson()],
+              if (playable(l.components).isNotEmpty && !l.isFolder) 'components': [for (final c in playable(l.components)) c.toJson()],
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
               'automation': [for (final a in l.automation) a.toJson()],
               if (l.clips.isEmpty && l.patternId != null) 'pattern': l.patternId,
