@@ -2,6 +2,7 @@
 #include "engine.h"
 #include "graph.h"
 #include "route_math.h"
+#include "caw/library/stereo.hpp"
 #include "hardware.h"
 
 #include <algorithm>
@@ -3248,9 +3249,9 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
     if ((!s.automation || s.automation->pan.empty()) && pan != s.panCache) {
         s.panCache = pan;
-        const double th = (pan + 1.0) * (kPi / 4.0);
-        s.gl = detCos(th);
-        s.gr = detSin(th);
+        const lib::PanGains g = lib::constantPowerPan(pan);
+        s.gl = g.left;
+        s.gr = g.right;
     }
     double* y = tmp_;
     for (int i = 0; i < m; ++i) y[i] = static_cast<double>(in[0][i]);
@@ -3295,8 +3296,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         double gl = s.gl, gr = s.gr;
         if (s.automation && !s.automation->pan.empty()) {
             const double automatedPan = automationValue(s.automation->pan, step, pan);
-            const double th = (automatedPan + 1.0) * (kPi / 4.0);
-            gl = detCos(th); gr = detSin(th);
+            const lib::PanGains g = lib::constantPowerPan(automatedPan);
+            gl = g.left; gr = g.right;
         }
         // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
         outL[i] = routeSample(v * gl);

@@ -6,6 +6,12 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: Where the C++ Library lives (#121, architect review)
+
+- **Library kernels are public, header-only SDK code** in `engine/include/caw/library/` (installed with `CAW::SDK`), so built-in components and third-party components use one implementation, compiled into each; only `caw_component.h` crosses a binary boundary. Built-in components are thin wrappers in the engine (to come with #121). The first kernel is the pan law, `caw::lib::constantPowerPan` (`library/stereo.hpp`), which the mixer's track pan now calls.
+- **The deterministic maths is public too** (`engine/include/caw/detmath.hpp`; `engine/src/detmath.h` forwards), moved unchanged: every golden render still matches.
+- **Every component built against the SDK gets the engine's floating-point flags** (`-ffp-contract=off -fno-fast-math`, MSVC `/fp:precise`) as `CAW::SDK` interface options, so Library code gives the same bits in components as in the engine.
+
 ## 2026-11-09: Mono stays mono until it becomes stereo; packages; narrower doc coverage
 
 - **Owner decision — mono processing (#17):** a mono source or effect is processed once and copied to both channels while its signal is mono. Once the signal has actually become stereo (a stereo source, pan or width upstream), a mono effect processes each channel separately ("dual mono"), from that point on. Mono work therefore costs one channel until something makes it stereo; there is no silent downmix.

@@ -179,6 +179,8 @@ Make the Library the easiest and fastest route into the engine: built-in, Librar
 
 ### Audio and DSP
 
+**[Fact, 2026-11-09]** The Library's public home is `engine/include/caw/library/` (header-only, installed with `CAW::SDK`), next to the deterministic maths in `caw/detmath.hpp`. It holds the pan law (`library/stereo.hpp`) so far; the stereo effects of #121 come next.
+
 Provide reusable implementations and building blocks for:
 
 - oscillators, waveform functions, band-limited and raw waveforms, noise and wavetable generation;

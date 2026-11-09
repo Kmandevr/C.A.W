@@ -2,6 +2,8 @@
 #include "test.h"
 
 #include <caw/module.hpp>
+#include <caw/detmath.hpp>
+#include <caw/library/stereo.hpp>
 
 namespace {
 using namespace caw;
@@ -58,4 +60,23 @@ TEST(public_cpp_sdk_component_uses_typed_contract_and_state) {
     CHECK(processor.saveState(nullptr, 0, written));
     CHECK_EQ(written, 0u);
     CHECK(processor.loadState(nullptr, 0, 1));
+}
+
+TEST(public_cpp_sdk_library_pan_law_is_constant_power_and_deterministic) {
+    // The Library's pan law is the mixer's (caw/library/stereo.hpp): equal gains at the centre,
+    // one side only at the ends, constant power everywhere, from the SDK's deterministic maths.
+    const caw::lib::PanGains centre = caw::lib::constantPowerPan(0.0);
+    CHECK_NEAR(centre.left, centre.right, 1e-15);
+    CHECK_NEAR(centre.left, 0.70710678118654752, 1e-15);
+    const caw::lib::PanGains left = caw::lib::constantPowerPan(-1.0);
+    CHECK_NEAR(left.left, 1.0, 1e-15);
+    CHECK_NEAR(left.right, 0.0, 1e-15);
+    const caw::lib::PanGains right = caw::lib::constantPowerPan(1.0);
+    CHECK_NEAR(right.left, 0.0, 1e-15);
+    CHECK_NEAR(right.right, 1.0, 1e-15);
+    for (double pan = -1.0; pan <= 1.0; pan += 0.125) {
+        const caw::lib::PanGains g = caw::lib::constantPowerPan(pan);
+        CHECK_NEAR(g.left * g.left + g.right * g.right, 1.0, 1e-14);
+    }
+    CHECK_EQ(caw::detSin(0.5), caw::detCos(0.5 - caw::kPi / 2.0));
 }
