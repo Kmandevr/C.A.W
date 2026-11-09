@@ -10,7 +10,7 @@ covers: [engine/include/caw_component.h, engine/include/caw/module.hpp, engine/i
 **Status [Fact, checked 2026-11-09]:**
 - **Interface and SDK:** the plain-C component interface v3 and the installable C++ SDK (`CAW::SDK`) exist.
 - **Desktop build:** a manifest-driven CMake build, and CI for Linux, Windows and Android.
-- **In-app compiler:** written (`engine/compiler/`) and CI-built for Android; its first on-device run is still to come.
+- **In-app compiler:** `engine/compiler/` is built for Android by CI, and in CI it compiles real components to arm64 libraries; its first run on a phone is still to come.
 - **Loading:** explicit trust (Blocked / Trusted; Isolated is refused, since there is no sandbox), and rebuilds that switch in while playing.
 - **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master.
 - **Still to come:** the UI, process isolation, signing, and effects with other ports.
