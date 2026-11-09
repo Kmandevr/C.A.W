@@ -1,7 +1,7 @@
 ---
 title: Engine integration contract
 summary: How CAW's shared native engine is consumed by projects, add-ons, the app, the library and external build targets.
-covers: [engine/, app/lib/engine/]
+covers: [engine/include/caw.h]
 updated: 2026-11-09
 ---
 

@@ -1,7 +1,6 @@
 ---
 title: Lightweight creative audio systems plan
 summary: Prioritized, performance-aware research plan for distinctive non-AI sound generation, transformation, exploration and inspection features.
-covers: [engine/, app/lib/engine/]
 updated: 2026-11-09
 ---
 
