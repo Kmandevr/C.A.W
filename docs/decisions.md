@@ -62,7 +62,7 @@ updated: 2026-11-09
 - Same thing, same place, same name on every screen size, so habits carry over.
 - Select first, then act: the selection drives the inspector, FX and editors.
 - Simple first, more on demand (an FX stack before the routing canvas).
-- **Compact, not "grandma-sized":** rows 32-36 dp, code text 12-13 sp, icons about 18 dp, each control's touch area padded to about 40 dp without drawing it bigger. Icons over words; hold an icon for its name. Show only what matters now (no error count without errors). The neon theme stays, calmer: fewer glows and borders.
+- **Compact, not "grandma-sized":** rows 32-36 dp, code text 12-13 sp, icons about 18 dp, each control's touch area padded to about 40 dp without drawing it bigger. Icons over words; hold an icon for its name. Show only what matters now (no error count without errors). The neon theme stays, calmer: fewer glows and borders. The glass look and its transparency stay as they are (owner: "it works well"): see-through panels, sheets, cards and the transport over the ambient background (`docs/ui.md`, Glass).
 
 **The frame.**
 - Three main tab types: **Build** (C++ Builder), **Files** and **Arrange**. Several tabs of one type (two Builders) switch from a small selector at the top of that section. The other workspaces fold into these three (#139).
