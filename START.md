@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `edd84d607977b73410d74fa919e926c91a1fc5de` on the default branch at 2026-11-09T19:50:54Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `f017e46251dabd6a6d8f8d7515ef1c1a072ccb65` on the default branch at 2026-11-09T22:21:06Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`edd84d6`).
+1. The commit this file was generated from (`f017e46`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -219,7 +219,7 @@ Keep context while it helps; clean up only at a task boundary (task done, PR ope
 
 ## Checking changes
 
-Run `node scripts/docs-test.js` after touching any note, `README.md`, `CLAUDE.md` or `.claude/`. Before calling a change ready, run the `release-check` skill. CI (`.github/workflows/docs.yml`) runs the same checks on every push and pull request. Engine: build `engine/` with CMake and run `caw_tests` (commands in [docs/engine.md](docs/engine.md); golden hashes change only with an intended sound change: `--update-golden`). App: `flutter analyze` and `flutter test` in `app/` (`CAW_LIB=<built libcaw.so>` adds the engine integration test). CI (`engine.yml`, `app.yml`) runs both.
+Run `node scripts/docs-test.js` after touching any note, `README.md`, `CLAUDE.md` or `.claude/`. Before calling a change ready, run the `release-check` skill. CI (`.github/workflows/docs.yml`) runs the same checks on Main and every pull request. Engine: build `engine/` with CMake and run `caw_tests` (commands in [docs/engine.md](docs/engine.md); golden hashes change only with an intended sound change: `--update-golden`). App: `flutter analyze` and `flutter test` in `app/` (`CAW_LIB=<built libcaw.so>` adds the engine integration test). CI (`engine.yml`, `app.yml`) runs both.
 
 ## Git
 
