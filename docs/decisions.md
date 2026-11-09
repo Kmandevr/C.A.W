@@ -6,6 +6,69 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: Faster CI: pull requests test, Main builds (owner)
+
+- **Owner decision:** "we don't need to build the whole app in a PR, but we do need to test it."
+  - Pull requests run Dart analysis and tests, the engine tests on every platform, the C++ component builds, the compiler test and the docs checks.
+  - The Android APK and the Windows app are built on Main, or on any branch with Run workflow.
+- A branch's own pushes no longer start the App, Engine and Docs workflows next to its pull request, so each commit is checked once. `gpt/**` branches keep the Quick check.
+- **Owner decision:** run only the checks a change relates to, quickly and in parallel. Path filters:
+  - Engine tests: engine code, not the compiler wrapper, plus `examples/`.
+  - App checks: app code and the engine code the app embeds, not engine tests, benchmarks, CLI or compiler. On Main the APK also rebuilds for a compiler change.
+  - Components and compiler: as before.
+  - Docs checks run on everything (about 10 s).
+- Jobs within a workflow already run in parallel. Measured on 2026-11-09:
+  - Windows engine tests: 2–3 min;
+  - Dart tests: about 2 min;
+  - the rest: under 1 min;
+  - the compiler test: minutes once its LLVM build is cached (built once per LLVM version).
+- **Owner direction:** checks can run on a branch while it is being worked on, not only through a pull request.
+  - Every workflow has Run workflow. The Quick check runs chosen commands on any branch. The App workflow's run can skip the installables for a quick test-only run.
+  - Agents also run the engine tests and the Dart analysis and tests locally before pushing.
+- **Faster app builds (owner: "builds are fast, not 10 min"):**
+  - The APK is built for arm64 only, the owner's Galaxy S22+ and the phones C.A.W targets. Before, every build compiled the engine and the Dart code for 32-bit ARM and x86_64 too. **[Assumption]** No one needs a 32-bit or emulator build; one can be made on demand by adding a target platform.
+  - Gradle's dependencies are cached, the engine's native build reuses compiled files (ccache), and the packaged compiler is cached until the compiler or the SDK changes.
+- **The APK and the compiler cache:** GitHub scopes a cache to the branch (or pull request) that saved it, so Main's APK can only use an LLVM build cached on Main. When the Compiler workflow finishes on Main, the App workflow builds the APK again (only that job), so Main's APK always carries the compiler.
+- **Owner direction:** split a job into parallel parts where the parts are really independent, keeping it readable and reliable.
+  - Where it helps: the Windows build compiles each target's files in parallel (`/MP`), because nearly all of the Windows engine job was compiling.
+  - Where it doesn't: the engine tests already run as 4 parallel shards. The Dart tests take under a minute themselves, so splitting them would add more runner setup than it saves.
+
+## 2026-11-09: A C++ effect behaves like a CLAP plugin in REAPER (owner, #137)
+
+- **Owner decision:** "the code will run like a CLAP does in REAPER": the same behaviour, in C.A.W's own component format; adopting the CLAP format is not part of this work. Effects run in-process for now; Isolated (a separate process) comes later.
+- So an effect has, as built (2026-11-09):
+  - an FX-chain place;
+  - live, smoothed values;
+  - automation lanes (a knob move overrides its lane until the next Play);
+  - a click-free bypass that stops processing;
+  - state saved into the project, read on every save.
+- Also built: tails after Stop and latency compensation.
+  - Effects with a declared tail ring out until quiet. They reuse the note-preview path, so the 10 ms stop fade dips the tail briefly.
+  - The other tracks are delayed to match the most-delayed track, up to 32,768 frames.
+    - A bypassed effect adds no latency.
+    - A delay change while playing continues from the old line and crossfades.
+    - Delays start each play from silence.
+  - A tail that reaches its cap while still audible fades out over 20 ms.
+- Also built: the host transport reaches components in each block, as a CLAP host gives it: tempo and beats per bar always, plus the beat position and `playing` while the song plays. It is a trailing `CawProcessBlock` field, read only when `struct_size` covers it; a component accepts a host whose block ends before it.
+- Also built: a rebuild switches in while playing, crossfaded, keeping values and state; any chain swap crossfades. Still to come: custom GUIs.
+- **Interface rule changed:** `save_state` may now run on the control thread while the instance processes (as in CLAP), so a playing project can be saved. A component that keeps state must make that safe; one without state needs nothing. `caw_component.h` says so.
+
+## 2026-11-09: How writing and using a C++ effect looks (owner, #137)
+
+- **A C++ workspace of its own** (the ninth, docked like the others): a side-drawer file tree, the editor at full width and Build. A new effect always starts from one blank pass-through template.
+- **Errors:** red marks on their lines and the first error on one line under the code; a tap lists them all, and a tap on one jumps to it.
+- **Trust:** effects the user built on this device are Trusted without a prompt. Effects from elsewhere ask Trust or Block once, remembered per effect and changeable in its settings. "Built here" means sources the user created or edited here (a shared project's sources count as from elsewhere until the user edits them). A choice is remembered for exactly that code (a SHA-256 fingerprint of the sources or library), so changed code from elsewhere asks again; `NativeTrustStore` holds it, app-private.
+- **A test strip under the editor:** a source (a track, a loop, a sine, noise), Play and the effect's generated knobs. Build swaps the new version in while it plays.
+- **Using it:** "+ C++ effect" in a track's or the master's effect chain lists the built effects; a placed effect is a card with knobs generated from its parameters.
+
+## 2026-11-09: The on-device compiler is LLVM 23.1.5 as one library (#137)
+
+- **Dependency:** LLVM, Clang and LLD 23.1.5 (`llvm-project-23.1.5.src.tar.xz`, SHA-256 `fb50b1ea…6a6e`, release checked 2026-11-09), Apache-2.0 with LLVM exception. Built by `.github/workflows/compiler.yml` with AArch64 code generation only; the build is cached per version.
+- **Shape:** `engine/compiler/` wraps them as `libcaw_compiler.so` with three C functions (`caw_compiler_run`, `_free`, `_version`). Clang's driver plans each build; its compile steps run through cc1 and its link step through LLD, all in the calling process. So no executable is ever started, which Android forbids for app files. The Android app loads it in the `:compiler` process (§6 of the C++ platform note).
+- **Offline data bundle** (`engine/compiler/bundle.sh`): Clang's headers, the NDK r30 sysroot for arm64 at API 26 (headers, `crtbegin_so.o`/`crtend_so.o`, `libc`/`libm`/`libdl`/`liblog` stubs, `libc++_static.a`, `libc++abi.a`), compiler-rt builtins and `libunwind.a`, the C.A.W SDK headers, and licence texts.
+  - **[Assumption]** the redistributed NDK parts are permissive: bionic is BSD/Apache, while libc++, libunwind and compiler-rt are Apache-2.0 with LLVM exception. The bundle carries the NDK `NOTICE`, which must be read before the APK ships them.
+- Components link the C++ library statically (`-static-libstdc++`), so a built `.so` needs only libc, libm and libdl.
+
 ## 2026-11-09: Where the C++ Library lives (#121, architect review)
 
 - **Library kernels are public, header-only SDK code** in `engine/include/caw/library/` (installed with `CAW::SDK`), so built-in components and third-party components use one implementation, compiled into each; only `caw_component.h` crosses a binary boundary. Built-in components are thin wrappers in the engine (to come with #121). The first kernel is the pan law, `caw::lib::constantPowerPan` (`library/stereo.hpp`), which the mixer's track pan now calls.
@@ -350,12 +413,16 @@ updated: 2026-11-09
 Project layers and synth patches may describe dynamically sized module/effect chains. Parsing and engine preparation must preserve every authored chain element; no silent truncation or arbitrary eight-effect ceiling is allowed. Memory and processing costs are handled by explicit host resource budgets and clear preparation errors. This change does not remove unrelated limits such as the current project layer-slot model or export-buffer capacity; those remain separate integration work.
 
 
-## 2026-11-06: First native C++ playback slice
+## 2026-11-06: Native C++ effects in playback (updated 2026-11-09)
 
-**Implementation decision (initial prototype, not the final component limitation):** route explicitly loaded, zero-parameter stereo C++ effects through a project-owned master-effect list (master_components). This uses the existing stereo master stage without forcing stereo processors into the current three-lane VM track chain, which is still mono per module. Keep the master safety limiter after native processing.
+**Implementation decision:** explicitly loaded stereo C++ effects run in two kinds of project-owned chain: a track's (`components` on a layer) and the master's (`master_components`), each entry an id or `{"id", "params"}`. A track's chain runs after its .caw modules, whose mono output enters as two equal channels, and before volume and pan; what the effects make of it stays stereo, and the pan law then works per side. The master's runs before the safety limiter, which stays last. Components between .caw modules wait for the dual-mono rule (#17). Folder buses take no components yet.
+
+- One type, `ComponentChain`, serves both. It is built and activated on the control thread before anything is sent, so a component that is not loaded, has other ports or names a parameter it lacks refuses the whole update. An update with the same components in the same order keeps the chain, and its running state (a reverb's tail), and only sets values; any other change rebuilds it.
+- Native effects without a tail start each play from silence (reset on Stop, and when a silent track sounds again), and a kept chain takes the project's values with the rest at their defaults, so playback matches a fresh render (export). A project runs at most 256 native component instances. Adding, removing or reordering a component rebuilds the whole chain, crossfaded over 20 ms while it sounds (the other components' tails restart).
+- Parameter values ramp through the F6 resolver. `caw_engine_set_component_param` changes one while playing; the app stores it in the project too. Project automation lanes drive component parameters too (`target_type: component`).
 
 - A successful build never loads or authorizes code. The caller must pass an explicit Blocked, Isolated or Trusted value to the Engine C API; Blocked refuses before opening the library, Isolated is rejected until a real separate-process host exists, and Trusted runs in-process.
-- Trust is not serialized into the portable project. The project stores component IDs/order only; each user/device must make its own trust decision before the component can be used.
+- Trust is not serialized into the portable project. The project stores component IDs, order and values only; each user/device must make its own trust decision before the component can be used.
 - The audio callback uses fixed preallocated stereo stages, performs no host allocation or locking, sanitizes output and publishes/retires master chains through the existing command/retirement path. Component code itself must obey the real-time contract.
 - The known scratch and chain-pointer storage is included in Engine budgets. ABI v1 does not report component-private heap/state size; that remains an explicit measurement gap.
-- Next integration work: parameter mapping, then track-chain support with a deliberate stereo/state design, then the per-component trust UI/store and Android-hosted toolchain.
+- Next (issue #137): the Android-hosted compiler, the per-component trust UI/store and the in-app C++ editor.

@@ -95,7 +95,98 @@ class AutomationLaneDoc {
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
-class ProjectAutomationLaneDoc { ProjectAutomationLaneDoc({required this.targetType, required this.target, this.moduleId, List<AutomationPointDoc>? points}) : points = points ?? []; String targetType; String target; String? moduleId; List<AutomationPointDoc> points; Map<String, dynamic> toJson() => {'target_type': targetType, 'target': target, if (moduleId != null) 'module': moduleId, 'points': [for (final p in points) p.toJson()]}; static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(targetType: j['target_type'] as String? ?? 'global', target: j['target'] as String? ?? '', moduleId: j['module'] as String?, points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList()); }
+/// A project-level automation lane: a module parameter (`param`), a global (`global`), or a native component's
+/// parameter (`component`: [layerId] null for the master chain, [component] its index in that chain).
+class ProjectAutomationLaneDoc {
+  ProjectAutomationLaneDoc(
+      {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points})
+      : points = points ?? [];
+  String targetType;
+  String target;
+  String? moduleId;
+  String? layerId;
+  int? component;
+  List<AutomationPointDoc> points;
+
+  Map<String, dynamic> toJson() => {
+        'target_type': targetType,
+        'target': target,
+        if (moduleId != null) 'module': moduleId,
+        if (layerId != null) 'layer': layerId,
+        if (component != null) 'component': component,
+        'points': [for (final p in points) p.toJson()],
+      };
+
+  static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(
+        targetType: j['target_type'] as String? ?? 'global',
+        target: j['target'] as String? ?? '',
+        moduleId: j['module'] as String?,
+        layerId: j['layer'] as String?,
+        component: (j['component'] as num?)?.toInt(),
+        points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList(),
+      );
+}
+
+/// A native C++ component placed in a chain (a track's inserts or the master's), with the parameter
+/// values the project sets. Placing one is not a trust grant: the component must be loaded first.
+class ComponentUseDoc {
+  ComponentUseDoc(this.id, [Map<String, double>? params, this.bypass = false, this.state, this.stateVersion = 1])
+      : params = params ?? {};
+
+  final String id;
+  Map<String, double> params;
+
+  /// Passes its input through and is not run.
+  bool bypass;
+
+  /// What the component's save_state wrote, base64 (`Engine.componentStates`), so a reload or an export starts
+  /// from it; null for none.
+  String? state;
+  int stateVersion;
+
+  /// A bare id when nothing else is set, as older projects stored it.
+  Object toJson() => params.isEmpty && !bypass && state == null
+      ? id
+      : {
+          'id': id,
+          if (params.isNotEmpty) 'params': params,
+          if (bypass) 'bypass': true,
+          if (state != null) ...{'state': state, 'state_version': stateVersion},
+        };
+
+  /// Null for an entry without a usable id. Ids and parameter names are bounded; values must be finite.
+  static ComponentUseDoc? fromJson(Object? j) {
+    if (j is String) {
+      final id = _boundedProjectText(j, 128);
+      return id.isEmpty ? null : ComponentUseDoc(id);
+    }
+    if (j is! Map) return null;
+    final id = _boundedProjectText(j['id'], 128);
+    if (id.isEmpty) return null;
+    final params = <String, double>{};
+    if (j['params'] case final Map raw) {
+      for (final entry in raw.entries.take(256)) {
+        final name = _boundedProjectText(entry.key, 64);
+        if (name.isNotEmpty && entry.value is num && (entry.value as num).isFinite) {
+          params[name] = (entry.value as num).toDouble();
+        }
+      }
+    }
+    final state = j['state'];
+    final version = j['state_version'];
+    return ComponentUseDoc(
+      id,
+      params,
+      j['bypass'] == true,
+      state is String && state.length <= (16 << 20) && RegExp(r'^[A-Za-z0-9+/]*={0,2}$').hasMatch(state) ? state : null,
+      version is int && version >= 0 && version <= 0xFFFFFFFF ? version : 1,
+    );
+  }
+
+  static List<ComponentUseDoc> listFromJson(Object? raw) => [
+        for (final entry in ((raw as List?) ?? const []).take(64)) ?ComponentUseDoc.fromJson(entry),
+      ];
+}
 
 class LayerDoc {
   LayerDoc({
@@ -112,12 +203,13 @@ class LayerDoc {
     this.solo = false,
     List<ClipDoc>? clips,
     List<AutomationLaneDoc>? automation,
+    List<ComponentUseDoc>? components,
     this.parentId,
     this.isFolder = false,
     this.busEnabled = true,
     this.collapsed = false,
     this.spaceBelow = 0,
-  }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [];
+  }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [], components = components ?? [];
 
   /// The tallest visual spacer under a track, in logical pixels.
   static const maxSpaceBelow = 160.0;
@@ -136,6 +228,7 @@ class LayerDoc {
   bool mute, solo;
   List<ClipDoc> clips;
   List<AutomationLaneDoc> automation;
+  List<ComponentUseDoc> components; // native C++ effects after the chain, before volume and pan
   String? parentId;
   bool isFolder, busEnabled, collapsed;
 
@@ -159,6 +252,7 @@ class LayerDoc {
         'solo': solo,
         'clips': [for (final c in clips) c.toJson()],
         'automation': [for (final a in automation) a.toJson()],
+        if (components.isNotEmpty) 'components': [for (final c in components) c.toJson()],
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
         if (spaceBelow > 0) 'space_below': spaceBelow,
       };
@@ -177,6 +271,7 @@ class LayerDoc {
         solo: j['solo'] == true,
         clips: ((j['clips'] as List?) ?? const []).map((c) => ClipDoc.fromJson(c as Map<String, dynamic>)).toList(),
         automation: ((j['automation'] as List?) ?? const []).map((a) => AutomationLaneDoc.fromJson(a as Map<String, dynamic>)).toList(),
+        components: ComponentUseDoc.listFromJson(j['components']),
         parentId: j['parent'] as String?, isFolder: j['folder'] == true,
         busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
         spaceBelow: switch (j['space_below']) {
@@ -210,7 +305,7 @@ class ProjectDoc {
     List<String>? libraryFolders,
     Map<String, String>? savedLibrarySearches,
     List<CppComponentDoc>? cppComponents,
-    List<String>? masterComponents,
+    List<ComponentUseDoc>? masterComponents,
   })  : globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
@@ -259,7 +354,7 @@ class ProjectDoc {
   List<String> libraryFolders;
   Map<String, String> savedLibrarySearches;
   List<CppComponentDoc> cppComponents;
-  List<String> masterComponents; // native stereo master-effect IDs; this is not a trust grant
+  List<ComponentUseDoc> masterComponents; // native stereo master effects; this is not a trust grant
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
@@ -273,6 +368,25 @@ class ProjectDoc {
         layer.clips.fold<int>(end, (value, clip) => max(value, clip.startSteps + clip.lengthSteps)));
     return automation.fold<int>(clipsEnd, (end, lane) =>
         lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
+  }
+
+  /// Stores what [states] reports (Engine.componentStates, per layer id; null for the master) into the
+  /// component entries, so the saved project carries each effect's state. Entries it doesn't name keep theirs.
+  void storeComponentStates(Map<int, ({String state, int version})> Function(String? layerId) states) {
+    void store(List<ComponentUseDoc> chain, String? layerId) {
+      if (chain.isEmpty) return;
+      states(layerId).forEach((index, s) {
+        if (index < 0 || index >= chain.length) return;
+        // An empty state is no state: the component keeps nothing beyond its parameters.
+        chain[index].state = s.state.isEmpty ? null : s.state;
+        chain[index].stateVersion = s.version;
+      });
+    }
+
+    store(masterComponents, null);
+    for (final l in layers) {
+      if (!l.isFolder) store(l.components, l.id);
+    }
   }
 
   /// The loop the engine plays: whole bars reaching [arrangementEndSteps], as [toEngineJson] sends it.
@@ -308,8 +422,27 @@ class ProjectDoc {
 
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
-      {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now'}) {
+      {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now',
+      Set<String>? playableComponents}) {
     final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
+    // Native components the engine hasn't loaded (awaiting trust, blocked, failed to build) are left out, so the
+    // rest of the song still plays; their automation lanes go with them and the others are renumbered.
+    List<ComponentUseDoc> playable(List<ComponentUseDoc> chain) =>
+        playableComponents == null ? chain : [for (final c in chain) if (playableComponents.contains(c.id)) c];
+    int? playableIndex(List<ComponentUseDoc> chain, int index) {
+      if (playableComponents == null) return index;
+      if (index < 0 || index >= chain.length || !playableComponents.contains(chain[index].id)) return null;
+      return chain.take(index).where((c) => playableComponents.contains(c.id)).length;
+    }
+    List<ComponentUseDoc> chainOf(String? layerId) =>
+        layerId == null ? masterComponents : layers.where((l) => l.id == layerId).firstOrNull?.components ?? const [];
+    final engineAutomation = [
+      for (final lane in automation)
+        if (lane.targetType != 'component')
+          lane.toJson()
+        else if (playableIndex(chainOf(lane.layerId), lane.component ?? -1) case final int index)
+          lane.toJson()..['component'] = index,
+    ];
     final result = jsonEncode({
         'caw_project': 1,
         'name': name,
@@ -323,17 +456,18 @@ class ProjectDoc {
         'swap': swap,
         if (keyNumbers case (final root, final scale)) ...{'key_root': root, 'key_scale': scale},
         'globals': globals,
-        'automation': [for (final lane in automation) lane.toJson()],
+        'automation': engineAutomation,
         'modules': [
           for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
-        'master_components': masterComponents,
+        'master_components': [for (final c in playable(masterComponents)) c.toJson()],
         'layers': [
           for (final l in layers)
             {
               'id': l.id,
               'name': l.name,
               'chain': l.chain,
+              if (playable(l.components).isNotEmpty && !l.isFolder) 'components': [for (final c in playable(l.components)) c.toJson()],
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
               'automation': [for (final a in l.automation) a.toJson()],
               if (l.clips.isEmpty && l.patternId != null) 'pattern': l.patternId,
@@ -375,7 +509,7 @@ class ProjectDoc {
         'library_folders': libraryFolders,
         'saved_library_searches': savedLibrarySearches,
         'cpp_components': [for (final component in cppComponents) component.toJson()],
-        'master_components': masterComponents,
+        'master_components': [for (final c in masterComponents) c.toJson()],
       };
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
@@ -401,9 +535,7 @@ class ProjectDoc {
       },
       cppComponents: ((j['cpp_components'] as List?) ?? const [])
           .map((component) => CppComponentDoc.fromJson(component as Map<String, dynamic>)).toList(),
-      masterComponents: ((j['master_components'] as List?) ?? const [])
-          .whereType<String>().take(64).map((id) => _boundedProjectText(id, 128))
-          .where((id) => id.isNotEmpty).toList(),
+      masterComponents: ComponentUseDoc.listFromJson(j['master_components']),
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
@@ -451,7 +583,9 @@ class ProjectDoc {
 
     project.automation = project.automation.where((lane) =>
       lane.target.isNotEmpty && (lane.targetType == 'global' ||
-        (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true)))
+        (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true) ||
+        // A native component's parameter: its chain index (the layer is optional: absent is the master).
+        (lane.targetType == 'component' && (lane.component ?? -1) >= 0 && (lane.component ?? -1) < 64)))
       .toList();
     for (final lane in project.automation) {
       lane.points = lane.points.toList()

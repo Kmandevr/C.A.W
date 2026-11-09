@@ -1,4 +1,4 @@
-// Android thermal and battery-saver signals exposed to the shared Flutter resource adapter.
+// The Android host: thermal and battery-saver signals for the resource adapter, and the C++ compiler channel.
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -24,6 +24,29 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 if (call.method == "read") {
                     result.success(readResourceSignals())
+                } else {
+                    result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, COMPILER_METHOD_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                val args = call.argument<List<String>>("args")
+                if (call.method == "run" && args != null) {
+                    CompilerClient(applicationContext).run(args) { code, output ->
+                        result.success(mapOf("code" to code, "output" to output))
+                    }
+                } else if (call.method == "installToolchain") {
+                    // Unpacking takes seconds the first time: off the main thread.
+                    val main = android.os.Handler(mainLooper)
+                    Thread {
+                        try {
+                            val dir = ToolchainInstaller.install(applicationContext)
+                            main.post { result.success(dir.absolutePath) }
+                        } catch (e: Exception) {
+                            main.post { result.error("unavailable", e.message, null) }
+                        }
+                    }.start()
                 } else {
                     result.notImplemented()
                 }
@@ -111,5 +134,6 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val RESOURCE_METHOD_CHANNEL = "caw/resource_signals"
         private const val RESOURCE_EVENT_CHANNEL = "caw/resource_signals/events"
+        private const val COMPILER_METHOD_CHANNEL = "caw/compiler"
     }
 }

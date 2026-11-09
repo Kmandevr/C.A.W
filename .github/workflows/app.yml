@@ -1,18 +1,55 @@
-# App builds: analysis, tests, Android APK and Windows app run independently.
+# App checks: analysis and tests on every pull request; the Android APK and Windows app on Main or on demand.
 name: App
 on:
+  # Pull requests test the app (analysis, tests); Main also builds the installable APK and Windows app.
+  # A branch's own pushes run nothing here, so a PR's commits aren't checked twice; "Run workflow" builds
+  # everything on any branch (an APK to try before merging).
   push:
-    # gpt/** branches get the Quick check until they open a pull request; agent-results holds only reports.
-    branches-ignore: ["gpt/**", agent-results]
-    paths: [app/**, engine/**, examples/**, .github/workflows/app.yml]
+    branches: [Main]
+    paths:
+      - "app/**"
+      # The engine code the app embeds (not its tests, benchmarks, CLI or the compiler wrapper).
+      - "engine/CMakeLists.txt"
+      - "engine/cmake/**"
+      - "engine/include/**"
+      - "engine/src/**"
+      - "engine/platform/**"
+      - "engine/lib/**"
+      - "engine/third_party/**"
+      - "examples/**"
+      - ".github/workflows/app.yml"
+      - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
-    paths: [app/**, engine/**, examples/**, .github/workflows/app.yml]
+    paths:
+      - "app/**"
+      # The engine code the app embeds (not its tests, benchmarks, CLI or the compiler wrapper).
+      - "engine/CMakeLists.txt"
+      - "engine/cmake/**"
+      - "engine/include/**"
+      - "engine/src/**"
+      - "engine/platform/**"
+      - "engine/lib/**"
+      - "engine/third_party/**"
+      - "examples/**"
+      - ".github/workflows/app.yml"
   workflow_dispatch:
+    inputs:
+      installables:
+        description: Also build the Android APK and the Windows app (off for a quick test-only run)
+        type: boolean
+        default: true
+  # The APK carries the on-device compiler, whose LLVM build the Compiler workflow caches on Main. When that
+  # workflow finishes there, the APK is built again so Main's APK always has the compiler (only the APK runs).
+  workflow_run:
+    workflows: [Compiler]
+    types: [completed]
+    branches: [Main]
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # By trigger too: the APK run after the Compiler workflow never cancels Main's own checks.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 env:
   FLUTTER_VERSION: 3.47.7
@@ -22,6 +59,7 @@ env:
 jobs:
   analyze:
     name: Dart analysis
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -54,6 +92,7 @@ jobs:
 
   tests:
     name: Dart tests
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -105,6 +144,12 @@ jobs:
 
   android:
     name: Android APK
+    # Installables come from Main, from Run workflow (unless switched off) and after the Compiler workflow
+    # succeeds on Main; never from a pull request.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.installables) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -112,6 +157,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle  # Gradle's dependencies and wrapper, so a build doesn't fetch them again
       - name: Restore Flutter SDK
         id: flutter-cache
         uses: actions/cache@v4
@@ -132,6 +178,18 @@ jobs:
           path: ~/.pub-cache
           key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
           restore-keys: pub-linux-
+      # The engine's native build (libcaw.so) reuses compiled files: only changed sources recompile.
+      - name: Install ccache
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then sudo apt-get update -q && sudo apt-get install -y -q ccache; fi
+          ccache --max-size=500M
+          echo "CAW_CCACHE=1" >> "$GITHUB_ENV"
+      - name: Restore the native compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-android-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
+          restore-keys: ccache-android-
       - name: Signing key (when the repository has one)
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -143,6 +201,45 @@ jobs:
           else
             echo "No ANDROID_KEYSTORE_BASE64 secret: signing with a throwaway debug key (uninstall before installing the next build)."
           fi
+      # The on-device C++ compiler goes in the APK. The finished package is cached and rebuilt only when the
+      # compiler or the SDK changes; building it needs the Compiler workflow's cached LLVM build. Until that
+      # exists the APK is built without the compiler, and says so.
+      - name: Restore the packaged compiler
+        id: package-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/compiler-package
+          key: caw-compiler-package-llvm-23.1.5-${{ hashFiles('engine/compiler/**', 'engine/include/**', 'engine/CMakeLists.txt', 'engine/cmake/**') }}
+      - name: Restore the compiler's LLVM build
+        id: llvm-cache
+        if: steps.package-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/llvm-install
+          key: llvm-23.1.5-android-arm64-${{ hashFiles('engine/compiler/build-llvm.sh') }}
+      - name: Package the on-device compiler
+        if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit == 'true'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip
+          curl --fail --location --retry 3 https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
+            --output "$RUNNER_TEMP/android-ndk.zip"
+          echo "5107f898313790e449e87eee2183d9a20602dee9  $RUNNER_TEMP/android-ndk.zip" | sha1sum --check
+          unzip -q "$RUNNER_TEMP/android-ndk.zip" -d "$RUNNER_TEMP" && rm "$RUNNER_TEMP/android-ndk.zip"
+          engine/compiler/package-android.sh "$RUNNER_TEMP/llvm-install" "$RUNNER_TEMP/android-ndk-r30" \
+            "$GITHUB_WORKSPACE" "$RUNNER_TEMP/compiler-package"
+      - name: Save the packaged compiler
+        if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/compiler-package
+          key: ${{ steps.package-cache.outputs.cache-primary-key }}
+      - name: Use the packaged compiler
+        if: steps.package-cache.outputs.cache-hit == 'true' || steps.llvm-cache.outputs.cache-hit == 'true'
+        run: echo "CAW_COMPILER_PACKAGE=$RUNNER_TEMP/compiler-package" >> "$GITHUB_ENV"
+      - name: Note a build without the compiler
+        if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "::warning::This APK has no C++ compiler yet: the Compiler workflow has not cached its LLVM build. Re-run this job when it has."
       - name: Build
         working-directory: app
         env:
@@ -151,7 +248,10 @@ jobs:
           CAW_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           flutter --disable-analytics
-          flutter build apk --release
+          # arm64 only: the phones C.A.W targets (the owner's Galaxy S22+). Each extra ABI builds the engine and
+          # the Dart code again.
+          flutter build apk --release --target-platform android-arm64
+          ccache --show-stats || true
           mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
       - uses: actions/upload-artifact@v7
         with:
@@ -161,6 +261,7 @@ jobs:
 
   windows:
     name: Windows app
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.installables)
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v7

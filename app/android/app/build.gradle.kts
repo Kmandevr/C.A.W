@@ -27,12 +27,17 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // 64-bit ARM: the phones C.A.W targets. Every ABI listed builds the engine again.
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
         }
         externalNativeBuild {
             cmake {
                 arguments += listOf("-DCAW_TOOLS=OFF", "-DANDROID_STL=c++_static")
+                // CI sets CAW_CCACHE so unchanged engine sources aren't compiled again.
+                if (System.getenv("CAW_CCACHE") == "1") {
+                    arguments += listOf("-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
+                }
             }
         }
     }
@@ -41,6 +46,16 @@ android {
         cmake {
             path = file("../../../engine/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+
+    // The on-device C++ compiler, when CI packaged it (engine/compiler/package-android.sh): the library and its
+    // offline data. Without it the app works and says the compiler isn't in this build.
+    val compilerPackage = System.getenv("CAW_COMPILER_PACKAGE")
+    if (compilerPackage != null) {
+        sourceSets.getByName("main") {
+            jniLibs.srcDir("$compilerPackage/jniLibs")
+            assets.srcDir("$compilerPackage/assets")
         }
     }
 

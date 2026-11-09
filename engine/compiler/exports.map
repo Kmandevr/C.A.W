@@ -1,0 +1,4 @@
+{
+  global: caw_compiler_run; caw_compiler_free; caw_compiler_version; Java_*;
+  local: *;
+};

@@ -273,7 +273,7 @@ public:
         if ((block.input.channelCount && (audioIn_.empty() || block.input.channelCount != inChannels_)) ||
             (block.output.channelCount && (audioOut_.empty() || block.output.channelCount != outChannels_)))
             return false;
-        CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount);
+        CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount, block.transport);
         if (!audioIn_.empty() && block.input.channelCount) {
             audioIn_[0] = {block.input.channels, block.input.channelCount, block.input.frames};
             c.audio_in = audioIn_.data();
@@ -303,7 +303,7 @@ public:
             block.audioOutCount > audioOut_.size() ||
             block.eventInCount > eventIn_.size() || block.eventOutCount > eventOut_.size())
             return false;
-        CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount);
+        CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount, block.transport);
         for (uint32_t k = 0; k < block.audioInCount; ++k)
             audioIn_[k] = {block.audioIn[k].channels, block.audioIn[k].channelCount, block.audioIn[k].frames};
         for (uint32_t k = 0; k < block.audioOutCount; ++k)
@@ -361,7 +361,7 @@ public:
 
 private:
     CawProcessBlock baseBlock(uint32_t frames, double sampleRate, const ParameterValue* parameters,
-                              uint32_t parameterCount) noexcept {
+                              uint32_t parameterCount, const Transport* transport) noexcept {
         CawProcessBlock c{};
         c.struct_size = sizeof(CawProcessBlock);
         c.frames = frames;
@@ -371,6 +371,11 @@ private:
         for (uint32_t k = 0; k < count; ++k) parameters_[k] = {parameters[k].samples, parameters[k].value};
         c.parameters = parameters_.data();
         c.parameter_count = count;
+        if (transport) {
+            transport_ = {sizeof(CawTransport), transport->playing ? CAW_TRANSPORT_PLAYING : 0u, transport->tempo,
+                          transport->beat, transport->beatsPerBar, 0};
+            c.transport = &transport_;
+        }
         return c;
     }
 
@@ -381,6 +386,7 @@ private:
     uint32_t maxFrames_ = 0;  // the block size the component prepared for at activate
     uint32_t inChannels_ = 0, outChannels_ = 0;  // the single audio in/out port's channels (non-port path)
     mutable uint32_t stateVersion_ = 1;  // the version the component last saved with
+    CawTransport transport_{};           // the block's transport as the C interface carries it
     std::vector<CawConstAudio> audioIn_;
     std::vector<CawAudio> audioOut_;
     std::vector<CawEventInput> eventIn_;
@@ -400,7 +406,7 @@ bool ModuleRegistry::add(const ModuleDescriptor& descriptor, ModuleFactory facto
 }
 
 ModuleLoadResult ModuleRegistry::loadSharedLibrary(
-    const std::string& path, std::string_view expectedId, NativeModuleTrust trust) {
+    const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace) {
     if (trust == NativeModuleTrust::Blocked)
         return {false, ModuleLoadError::Blocked, std::string(expectedId), "Native component is blocked by the user's trust setting."};
     if (trust == NativeModuleTrust::Isolated)
@@ -476,7 +482,10 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         if (component->descriptor.id != expectedId)
             return {false, ModuleLoadError::ComponentIdMismatch, std::string(expectedId),
                     "The built component ID does not match the project manifest ID."};
-        if (find(component->descriptor.id))
+        ModuleRegistration* existing = nullptr;
+        for (ModuleRegistration& r : registrations_)
+            if (r.descriptor && r.descriptor->id == component->descriptor.id) existing = &r;
+        if (existing && (!replace || !existing->component))
             return {false, ModuleLoadError::DuplicateId, std::string(component->descriptor.id),
                     "A component with this stable ID is already loaded."};
 
@@ -484,7 +493,11 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         component->host = CawHost{sizeof(CawHost), CAW_COMPONENT_ABI_VERSION, "C.A.W", "1", nullptr, &noHostExtension};
         component->library = std::move(library);
         const std::string id(component->descriptor.id);
-        registrations_.push_back({&component->descriptor, nullptr, nullptr, component->library, std::move(component)});
+        if (existing) {
+            *existing = {&component->descriptor, nullptr, nullptr, component->library, std::move(component)};
+        } else {
+            registrations_.push_back({&component->descriptor, nullptr, nullptr, component->library, std::move(component)});
+        }
         return {true, ModuleLoadError::None, id, {}};
     } catch (const std::bad_alloc&) {
         return {false, ModuleLoadError::LoadFailed, std::string(expectedId), "Out of memory while loading the component."};
@@ -513,6 +526,13 @@ std::vector<const ModuleDescriptor*> ModuleRegistry::loadedComponents() const {
     std::vector<const ModuleDescriptor*> out;
     for (const ModuleRegistration& registration : registrations_)
         if (registration.component && registration.descriptor) out.push_back(registration.descriptor);
+    return out;
+}
+
+std::vector<const ModuleDescriptor*> ModuleRegistry::builtinComponents() const {
+    std::vector<const ModuleDescriptor*> out;
+    for (const ModuleRegistration& registration : registrations_)
+        if (!registration.component && registration.factory && registration.descriptor) out.push_back(registration.descriptor);
     return out;
 }
 

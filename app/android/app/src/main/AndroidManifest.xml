@@ -25,6 +25,11 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- The C++ compiler runs in its own process: a crash there only fails that build. -->
+        <service
+            android:name=".CompilerService"
+            android:process=":compiler"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

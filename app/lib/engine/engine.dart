@@ -343,10 +343,14 @@ class Engine {
 
   /// Loads a built component only after the caller supplies its explicit trust decision.
   /// The blocking library load runs on a background isolate, never on the UI or audio thread.
+  ///
+  /// With [reload], the artifact is a rebuild of a component already loaded (a new file): every chain using it
+  /// switches to the new build while playing, crossfaded, keeping its values and, if the new build takes it, state.
   Future<NativeComponentLoadResult> loadNativeComponent({
     required String artifactPath,
     required String expectedComponentId,
     required NativeComponentTrust trust,
+    bool reload = false,
   }) {
     if (_disposed) return Future.error(StateError('engine is disposed'));
     if (Platform.isIOS) {
@@ -363,7 +367,7 @@ class Engine {
     final trustValue = trust.nativeValue;
     _queue = _queue.then((_) async {
       try {
-        final text = await _loadComponentOffThread(engineAddress, artifactPath, expectedComponentId, trustValue);
+        final text = await _loadComponentOffThread(engineAddress, artifactPath, expectedComponentId, trustValue, reload);
         done.complete(NativeComponentLoadResult.fromJson(jsonDecode(text) as Map<String, dynamic>));
       } catch (error, stack) {
         done.completeError(error, stack);
@@ -423,6 +427,44 @@ class Engine {
     _b.setParam(_handle, m, n, value);
     calloc.free(m);
     calloc.free(n);
+  }
+
+  /// A playing native component's parameter: component [index] of the layer's components, or of the
+  /// master chain when [layerId] is null. It ramps over the parameter's smoothing; false if there is no
+  /// such component or parameter. Store the value in the project too, so the next update keeps it.
+  bool setComponentParam(String? layerId, int index, String param, double value) {
+    final l = (layerId ?? '').toNativeUtf8(), p = param.toNativeUtf8();
+    try {
+      return _b.setComponentParam(_handle, l, index, p, value) == 1;
+    } finally {
+      calloc.free(l);
+      calloc.free(p);
+    }
+  }
+
+  /// Bypasses (or brings back) a playing native component, crossfaded; null [layerId] is the master chain.
+  bool setComponentBypass(String? layerId, int index, bool bypass) {
+    final l = (layerId ?? '').toNativeUtf8();
+    try {
+      return _b.setComponentBypass(_handle, l, index, bypass ? 1 : 0) == 1;
+    } finally {
+      calloc.free(l);
+    }
+  }
+
+  /// Each playing component's state in a chain (null [layerId]: the master), by chain index, as its save_state
+  /// writes it now. Stored in [ComponentUseDoc.state] it makes a reload or an export start from it.
+  Map<int, ({String state, int version})> componentStates(String? layerId) {
+    final l = (layerId ?? '').toNativeUtf8();
+    final r = _b.componentStates(_handle, l);
+    calloc.free(l);
+    if (r == nullptr) return const {};
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    _b.free(r);
+    return {
+      for (final c in (j['components'] as List? ?? const []).cast<Map<String, dynamic>>())
+        if (c['ok'] == true) (c['index'] as num).toInt(): (state: c['state'] as String, version: (c['version'] as num).toInt()),
+    };
   }
 
   void setGlobal(String name, double value) {
@@ -617,14 +659,14 @@ class RenderJob {
 
 // Isolate.run sends its closure's whole captured context to the new isolate. These top-level
 // helpers keep that context to sendable values only (the Engine method's Completer is not).
-Future<String> _loadComponentOffThread(int engineAddress, String artifactPath, String componentId, int trust) =>
+Future<String> _loadComponentOffThread(int engineAddress, String artifactPath, String componentId, int trust, bool reload) =>
     Isolate.run(() {
       final bindings = Bindings.instance;
       final engine = Pointer<Void>.fromAddress(engineAddress);
       final path = artifactPath.toNativeUtf8();
       final id = componentId.toNativeUtf8();
       try {
-        final result = bindings.loadComponent(engine, path, id, trust);
+        final result = (reload ? bindings.reloadComponent : bindings.loadComponent)(engine, path, id, trust);
         if (result == nullptr) throw StateError('native component loader returned no result');
         try {
           return result.toDartString();

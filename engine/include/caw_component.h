@@ -19,7 +19,9 @@
  * - The host calls create, activate, deactivate, save_state, load_state, get_extension and destroy
  *   on a control thread, never concurrently for one instance.
  * - process and reset run on the audio thread, only between activate and deactivate, and never at
- *   the same time as a control-thread call on the same instance.
+ *   the same time as a control-thread call on the same instance, except save_state: the host may
+ *   save state while the instance processes (to store a playing project), so a component that
+ *   keeps state makes save_state safe against process (as CLAP plugins do).
  * - process must not allocate, lock, block or do I/O. A component allocates in create or activate.
  *
  * Bundles: one library may export several components through the same entry point, by index.
@@ -174,6 +176,18 @@ typedef struct CawParameterValue {
     double value;
 } CawParameterValue;
 
+/* The host's transport for a block, as a CLAP host gives it: tempo and position, so a component can
+ * sync to the song (a tempo-synced delay, an LFO). */
+#define CAW_TRANSPORT_PLAYING 1u
+typedef struct CawTransport {
+    uint32_t struct_size;
+    uint32_t flags;          /* CAW_TRANSPORT_* */
+    double tempo;            /* beats (quarter notes) per minute */
+    double beat;             /* song position of the block's first frame, in beats */
+    uint32_t beats_per_bar;
+    uint32_t reserved;       /* 0 */
+} CawTransport;
+
 typedef struct CawProcessBlock {
     uint32_t struct_size;
     uint32_t frames;
@@ -196,6 +210,8 @@ typedef struct CawProcessBlock {
     uint32_t event_out_count;
     const CawParameterValue* parameters; /* descriptor order */
     uint32_t parameter_count;
+    /* NULL when there is none (stopped, or a host without one). Read it only when struct_size covers it. */
+    const CawTransport* transport;
 } CawProcessBlock;
 
 typedef struct CawHost {

@@ -1,37 +1,34 @@
 # Handoff
 
-Commit: 4105764
+Commit: b350bf8
 
-Branch: ccr-56285e11-0xrj3h (PR #136 open, CI and an audio review running)
+Branch: ccr-56285e11-0xrj3h (PR #138 open; everything below is in it)
 
 ## Goal
-Owner (2026-11-09): Claude builds the engine; GPT is paused.
-- Order: #120 → #17 → #121 → #122 (issue #123). Merge own engine PRs when CI is green and an audio review finds nothing blocking.
-- Use judgment, but never a whole change of direction. Fix tooling that gets in the way. Ask the owner how UI should look before building it.
+Owner (2026-11-09): write, compile and use a C++ effect in the app, offline, without workarounds (#137).
+- It behaves like a CLAP in REAPER, in C.A.W's format, in-process. UI is on hold: build everything else and ask before UI.
+- UI decisions so far: `docs/decisions.md` (2026-11-09), #137, #139.
 
-## Done and verified (merged)
-- #130: GPT's note/channel docs, Android toolchain manifest and component host, with fixes.
-- #131: seed fields keep edits (#20). The issue awaits the owner's phone check.
-- #132: CP.2 descriptor and the plain-C component interface, `engine/include/caw_component.h`.
-- #134: export buffers held to a project-wide budget (#133 items 1, 4, 5).
-- #135: `caw_engine_components` listing, bundles, owner decisions (mono stays mono until stereo; packages), narrowed doc coverage.
-
-## In review
-- #136:
-  - Public deterministic maths in `engine/include/caw/detmath.hpp`.
-  - The pan law in `engine/include/caw/library/stereo.hpp`, which the mixer uses (goldens unchanged).
-  - SDK float flags, interface v3, UTF-8-safe JSON.
+## Done and verified
+- Engine (Release and ASan CTest pass locally): `engine/src/component_chain.h`.
+  - Inserts with params, bypass, state, automation, tails, latency compensation, crossfaded swaps, reload. Audio-review fixes are in.
+- Toolchain bundle layout: checked with the NDK r30 clang++ driver via `engine/compiler/test.sh`.
+- CI: Compiler (Android ARM64) passes. LLVM is cached, and `engine/compiler/package-android.sh` works.
+- Dart has CI only, no local Flutter:
+  - `app/lib/platform/cpp_compiler.dart`, `app/lib/model/native_trust.dart`, `app/lib/model/native_components.dart`;
+  - the Kotlin side is in `app/android/app/src/main/kotlin/com/kmandevr/caw/`.
 
 ## Next
-- #17: the 3-PR plan is in the issue. First, stereo-capable lanes with a per-lane mono/stereo flag (no sound change). Then C++ components in track chains. Then dual-mono .caw effects after the stereo point.
-- #121: master-chain parameters, then built-in pan/balance/width wrappers registered in the Engine's registry.
-- #133 items 2 and 3, with callgrind before and after.
+- The Linux compiler test (first run 42695179714) is still building LLVM. When it ends:
+  - re-run Compiler on the head, then fix `engine/compiler/caw_compiler.cpp` if it fails;
+  - re-run the APK job so the compiler is in the APK.
+- Cancel duplicate Compiler runs started before the host cache existed. A check-in is set for 22:50 UTC.
+- Merge #138 when all CI is green.
+- Follow-ups: #17 dual mono; #121.
 
 ## Open (owner)
-- #20: phone check of Backspace with the Samsung keyboard.
-- The owner deletes old merged branches by hand, since git deletes are blocked here. The list is in the chat.
+- UI pass (#137, #139), #20 phone check, deleting old branches.
 
 ## Read first
-- `docs/native-module-sdk.md`
 - `docs/decisions.md`
-- `engine/src/engine.cpp`
+- `engine/compiler/caw_compiler.cpp`

@@ -70,7 +70,7 @@ TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) 
     if (!loaded.success) return;
 
     ProjectSpec p = project({{"tone", std::string(kFloat) + "sine(220) * 0.8"}});
-    p.masterComponents.push_back(componentId);
+    p.masterComponents.push_back({componentId, {}});
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     e.play();
     std::vector<float> right;
@@ -83,7 +83,7 @@ TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) 
 
     p.masterComponents.clear();
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    run(e, 128);
+    run(e, 2048);  // the removed chain crossfades out over 20 ms, then goes back to the control thread
     CHECK(e.unloadNativeComponent(componentId));
 }
 

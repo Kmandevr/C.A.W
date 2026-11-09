@@ -18,6 +18,18 @@ struct ModuleSpec {
     std::string name = {};  // how other modules refer to this one (module.export); falls back to the header name
 };
 
+// One native component in a chain (a track's inserts or the master's): its id and the parameter
+// values the project sets (the rest keep their defaults).
+struct ComponentSpec {
+    std::string id;
+    std::vector<std::pair<std::string, double>> params;
+    bool bypass = false;            // passes its input through (crossfaded) and stops processing
+    bool hasState = false;          // `state` holds what the component's save_state wrote
+    bool lenient = false;           // a rebuild: values the new build lacks and a state it refuses are dropped
+    uint32_t stateVersion = 1;
+    std::vector<uint8_t> state;
+};
+
 struct ClipSpec {
     std::string id;
     std::string pattern;
@@ -31,8 +43,9 @@ struct AutomationPointSpec { double step = 0, value = 0; };
 struct AutomationLaneSpec { std::string target; std::vector<AutomationPointSpec> points; };
 
 struct ProjectAutomationLaneSpec {
-    std::string targetType;  // param or global
-    std::string moduleId;    // required for param
+    std::string targetType;  // param, global or component
+    std::string moduleId;    // param: the module; component: the layer (empty for the master chain)
+    int component = -1;      // component: its index in that chain
     std::string target;      // parameter/global name
     std::vector<AutomationPointSpec> points;
 };
@@ -46,6 +59,7 @@ struct LayerSpec {
     std::string parentId;
     bool folder = false, busEnabled = true;
     std::vector<AutomationLaneSpec> automation;
+    std::vector<ComponentSpec> components;  // native stereo effects after the chain, before volume and pan
     double volume = 0.8, pan = 0.0;
     bool mute = false, solo = false;
 };
@@ -70,7 +84,7 @@ struct ProjectSpec {
     int keyScale = 1;                       // a scale.* id (1 = minor)
     std::vector<DependencyRef> dependencies;
     std::vector<ModuleSpec> modules;
-    std::vector<std::string> masterComponents;  // explicitly loaded native stereo effects, in master-chain order
+    std::vector<ComponentSpec> masterComponents;  // explicitly loaded native stereo effects, in master-chain order
     std::vector<LayerSpec> layers;
     std::vector<ProjectAutomationLaneSpec> automation;
     std::vector<std::string> auditionChain;  // the Builder's preview, if any

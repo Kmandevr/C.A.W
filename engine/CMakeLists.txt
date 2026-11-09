@@ -83,6 +83,11 @@ if(MSVC)
 else()
   set(CAW_FLAGS -Wall -Wextra -ffp-contract=off -fno-fast-math)
 endif()
+# Build speed only (the output is the same): Visual Studio builds compile one file at a time per target
+# unless asked; /MP compiles a target's files in parallel.
+if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_GENERATOR MATCHES "Visual Studio")
+  add_compile_options(/MP)
+endif()
 if(CAW_SANITIZE AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
   add_link_options(-fsanitize=address,undefined)
@@ -149,7 +154,7 @@ ${_lsrcs}nullptr};
 
 add_library(caw_core STATIC
   src/builtins.cpp src/compile.cpp src/docs.cpp src/pattern.cpp
-  src/engine.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
+  src/engine.cpp src/component_chain.cpp src/builtin_components.cpp src/execution.cpp src/module.cpp src/module_registry.cpp src/midi2.cpp src/params.cpp src/graph.cpp src/scheduler.cpp src/dependency.cpp src/hardware.cpp src/json.cpp src/midifile.cpp src/project.cpp
   src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
   "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
 target_include_directories(caw_core PRIVATE src)
@@ -188,7 +193,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_link_libraries(caw_cli PRIVATE caw_core)
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
     tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
-    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp
+    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp tests/track_components_test.cpp
     src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
@@ -232,7 +237,9 @@ target_include_directories(caw_cli PRIVATE src)
                               tests/alloc_counter.cpp)
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
-  target_compile_definitions(caw_rt_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
+  add_dependencies(caw_rt_tests caw_test_component)
+  target_compile_definitions(caw_rt_tests PRIVATE CAW_ROOT="${CAW_ROOT}"
+    "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\"")
   target_link_libraries(caw_rt_tests PRIVATE caw_core)
   add_test(NAME caw_rt_tests COMMAND caw_rt_tests)
   

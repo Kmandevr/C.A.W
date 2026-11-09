@@ -61,13 +61,19 @@ public:
     // Trust is mandatory. Blocked never opens the library; Isolated is rejected until a real process sandbox exists.
     // The library must export caw_get_component_v3 (caw_component.h); its descriptor is copied into
     // engine-owned storage and validated before anything else of it runs.
-    ModuleLoadResult loadSharedLibrary(const std::string& path, std::string_view expectedId, NativeModuleTrust trust);
+    // With `replace`, a component already loaded under the id is replaced by the new build (a rebuild):
+    // instances made before keep the old library loaded until they are destroyed. A rebuild must have a
+    // new file name: the system loader returns the already-loaded library for the same path.
+    ModuleLoadResult loadSharedLibrary(const std::string& path, std::string_view expectedId, NativeModuleTrust trust,
+                                       bool replace = false);
     // A dynamic library cannot unload while a created processor still holds it.
     bool unload(std::string_view id);
 
     const ModuleDescriptor* find(std::string_view id) const noexcept;
     // Descriptors of the dynamically loaded components, in load order.
     std::vector<const ModuleDescriptor*> loadedComponents() const;
+    // Descriptors of the statically registered (built-in) components, in registration order.
+    std::vector<const ModuleDescriptor*> builtinComponents() const;
     // A new instance. A loaded component's instance is not yet activated: the host calls
     // activate(sampleRate, maxFrames) before processing and destroys it off the audio thread.
     std::unique_ptr<ModuleProcessor> create(std::string_view id) const noexcept;

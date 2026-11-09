@@ -1,5 +1,6 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+#include "builtin_components.h"
 #include "graph.h"
 #include "route_math.h"
 #include "caw/library/stereo.hpp"
@@ -54,6 +55,17 @@ struct Engine::Slot {
     Chain* cur = nullptr;
     Chain* old = nullptr;    // previous chain, fading out after a hot swap
     Chain* pending = nullptr;  // new code waiting for the next beat or bar
+    ComponentChain* inserts = nullptr;  // native stereo effects after the chain, before volume and pan
+    DelayLine* delay = nullptr;         // latency compensation, after volume and pan
+    DelayLine* delayFading = nullptr;   // the delay `delay` replaced, crossfading out (null: no delay)
+    int delayFadeLeft = 0;
+    bool delayStale = false;            // stopped or silent: the delay holds old audio; clear before it runs
+    ComponentChain* insertsFading = nullptr;  // the chain `inserts` replaced, crossfading out (null: the dry signal)
+    int insertsFadeLeft = 0;                  // samples of that crossfade still to run
+    bool insertsIdle = false;  // the inserts stopped running (Silent): reset before they run again
+    bool insertTail = false;   // stopped: the inserts ring out on silence (Mode::Tail) until quiet
+    int tailFade = 0;          // > 0: a tail at its cap, still audible, fading out (frames left); -1: faded
+    int64_t tailCap = 0;       // ... or for at most this many samples
     std::shared_ptr<const Pattern>* pattern = nullptr;  // owned here, freed on the control thread when retired
     int swapLeft = 0;
     int seamLeft = 0;
@@ -87,7 +99,7 @@ struct Engine::Slot {
 
     // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
     // boundary and code swap of a playing track, so one plan covers the whole chunk.
-    enum class Mode : uint8_t { Idle, Bus, Silent, Play };
+    enum class Mode : uint8_t { Idle, Bus, Silent, Play, Tail };  // Tail: only the inserts run, on silence
     Mode mode = Mode::Idle;
     double target = 0;          // mix target (0 while muted or soloed out)
     int64_t n0 = 0, repeat = 0; // sample in the layer's loop, and the pattern repeat
@@ -192,20 +204,55 @@ struct Engine::Chain {
     double tb[kBlock], rateb[kBlock], zero[kBlock];
 };
 
-struct Engine::MasterChain {
-    std::vector<std::unique_ptr<ModuleProcessor>> processors;
-    std::array<std::array<float, kBlock>, 2> stageL{};
-    std::array<std::array<float, kBlock>, 2> stageR{};
+// Delays a track's output so it lines up with the track whose native effects add the most latency.
+struct Engine::DelayLine {
+    std::vector<float> l, r;
+    size_t pos = 0;
+    void clear() noexcept {
+        std::fill(l.begin(), l.end(), 0.0f);
+        std::fill(r.begin(), r.end(), 0.0f);
+    }
+    // Takes over `from`'s recent input, so a changed delay continues the signal instead of a gap of silence.
+    void takeHistory(const DelayLine* from) noexcept {
+        const size_t n = l.size();
+        const size_t m = from ? from->l.size() : 0;
+        for (size_t k = 0; k < n; ++k) {
+            const size_t back = n - k;  // l[k] (k = 0 oldest) holds the input from `back` samples ago
+            if (back <= m) {
+                const size_t at = (from->pos + m - back) % m;
+                l[k] = from->l[at];
+                r[k] = from->r[at];
+            } else {
+                l[k] = r[k] = 0.0f;
+            }
+        }
+        pos = 0;
+    }
+    void run(float* outL, float* outR, int m) noexcept {
+        const size_t n = l.size();
+        for (int i = 0; i < m; ++i) {
+            const float dl = l[pos], dr = r[pos];
+            l[pos] = outL[i];
+            r[pos] = outR[i];
+            outL[i] = dl;
+            outR[i] = dr;
+            pos = pos + 1 == n ? 0 : pos + 1;
+        }
+    }
 };
 
+static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
+
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetComponentAutomation, SetDelay, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
     int slot = 0;
     Chain* chain = nullptr;
-    MasterChain* masterChain = nullptr;
+    ComponentChain* masterChain = nullptr;  // SetMasterChain: the master's; SetInserts: slot's inserts (owned)
+    ComponentAutomation* componentAutomation = nullptr;  // SetComponentAutomation: for slot's inserts, or the master's (slot -1)
+    DelayLine* delay = nullptr;  // SetDelay: the slot's latency compensation (null: none)
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
@@ -230,7 +277,9 @@ struct Engine::Retired {
     AutomationData* automation = nullptr;
     std::vector<int>* order = nullptr;
     SlotTable* table = nullptr;  // a slot table (and its mix graph) a Grow replaced
-    MasterChain* masterChain = nullptr;
+    ComponentChain* masterChain = nullptr;  // a component chain (master or a track's inserts) replaced or freed
+    ComponentAutomation* componentAutomation = nullptr;  // a component chain's automation table replaced
+    DelayLine* delay = nullptr;  // a latency-compensation delay replaced or freed
 };
 
 namespace {
@@ -247,6 +296,8 @@ constexpr double kLimitCeiling = 0.977;  // about -0.2 dBFS
 // Play retires up to two entries per slot and must always find room, even with the retired queue
 // full: the pending list holds 2 * (maxLayers() + 1) entries plus this slack (256 at 64 layers).
 constexpr int kPendingSlack = 126;
+constexpr size_t kMaxProjectComponents = 256;  // native component instances in one project (tracks and master)
+constexpr int64_t kMaxCompensationFrames = 1 << 15;  // latency compensation up to about 0.7 s at 48 kHz
 // What one slot's export segment reserves per buffer: the pointer, the owner, and the buffer.
 constexpr uint64_t kExportBufferBytes = static_cast<uint64_t>(kBlock) * sizeof(double);
 constexpr uint64_t kExportSlotBytes =
@@ -622,6 +673,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
       retired_(new Spsc<Retired, 1024>()),
       masterScope_(new std::atomic<float>[kScopeSize]) {
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
+    registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
     ctlSr_ = sampleRate;
     constexpr int initial = kInitialLayerCapacity;
     auto first = std::make_unique<SlotTable>();
@@ -700,6 +752,8 @@ Engine::~Engine() {
         delete c.orderList;
         delete c.table;
         delete c.masterChain;
+        delete c.componentAutomation;
+        delete c.delay;
     }
     Retired r;
     while (retired_->pop(r)) {
@@ -709,6 +763,8 @@ Engine::~Engine() {
         delete r.order;
         delete r.table;
         delete r.masterChain;
+        delete r.componentAutomation;
+        delete r.delay;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
@@ -717,13 +773,21 @@ Engine::~Engine() {
         delete pending_[i].order;
         delete pending_[i].table;
         delete pending_[i].masterChain;
+        delete pending_[i].componentAutomation;
+        delete pending_[i].delay;
     }
     delete masterChain_;
     masterChain_ = nullptr;
+    delete masterFading_;
+    masterFading_ = nullptr;
     for (const auto& slot : slotStore_) {
         delete slot->cur;
         delete slot->old;
         delete slot->pending;
+        delete slot->inserts;
+        delete slot->insertsFading;
+        delete slot->delayFading;
+        delete slot->delay;
         delete slot->pattern;
         delete slot->automation;
     }
@@ -740,6 +804,8 @@ void Engine::drainRetired() {
         delete r.order;
         delete r.table;
         delete r.masterChain;
+        delete r.componentAutomation;
+        delete r.delay;
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -760,6 +826,8 @@ bool Engine::send(const Cmd& c) {
             delete c.orderList;
             delete c.table;
             delete c.masterChain;
+            delete c.componentAutomation;
+            delete c.delay;
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1015,6 +1083,54 @@ ModuleLoadResult Engine::loadNativeComponent(
     return nativeModules_.loadSharedLibrary(path, expectedId, trust);
 }
 
+ModuleLoadResult Engine::reloadNativeComponent(
+    const std::string& path, const std::string& expectedId, NativeModuleTrust trust) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    drainRetired();
+    // Every chain that uses the component, rebuilt before anything is sent: one that can't be keeps the old build.
+    struct Rebuilt {
+        int slot;  // -1: the master
+        LayerState* layer;
+        std::unique_ptr<ComponentChain> chain;
+    };
+    ModuleLoadResult result = nativeModules_.loadSharedLibrary(path, expectedId, trust, true);
+    if (!result.success) return result;
+    std::vector<Rebuilt> rebuilt;
+    std::string error;
+    auto rebuild = [&](ComponentChain* old, int slot, LayerState* layer, const std::string& layerId) {
+        if (!old || !old->uses(expectedId)) return true;
+        auto chain = ComponentChain::build(nativeModules_, old->currentSpecs(), sr_, error);
+        if (!chain) return false;
+        delete chain->swapAutomation(chain->automationFor(ctlAutomation_, layerId).release());
+        rebuilt.push_back({slot, layer, std::move(chain)});
+        return true;
+    };
+    bool ok = rebuild(ctlMasterChain_, -1, nullptr, "");
+    for (auto& [id, ls] : layers_)
+        if (ok && ls.slot >= 0 && !ls.bus) ok = rebuild(ls.inserts, ls.slot, &ls, id);
+    if (!ok) {
+        // The new build is loaded but can't take over (its ports changed, it failed to activate, ...).
+        result.success = false;
+        result.error = ModuleLoadError::InvalidDescriptor;
+        result.message = "The rebuild is now the loaded build (new instances use it), but the playing project keeps "
+                         "the previous build until it is fixed: " + error;
+        return result;
+    }
+    for (Rebuilt& r : rebuilt) {
+        Cmd c;
+        c.type = r.slot < 0 ? Cmd::SetMasterChain : Cmd::SetInserts;
+        c.slot = r.slot;
+        ComponentChain* sent = r.chain.release();
+        c.masterChain = sent;
+        if (!send(c)) continue;  // send() freed it; the old build plays on there
+        if (r.layer) r.layer->inserts = sent;
+        else ctlMasterChain_ = sent;
+    }
+    std::map<std::string, std::vector<std::string>> warnings;
+    updateCompensation(warnings);  // the rebuild may add a different latency
+    return result;
+}
+
 bool Engine::unloadNativeComponent(const std::string& id) {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
@@ -1025,6 +1141,12 @@ std::string Engine::nativeComponentsJson() {
     std::lock_guard<std::mutex> lock(ctl_);
     std::string json = "{\"ok\":true,\"components\":[";
     bool first = true;
+    // Built-in components first, marked so the app can tell them from loaded ones (they need no trust).
+    for (const ModuleDescriptor* d : nativeModules_.builtinComponents()) {
+        std::string one = moduleDescriptorJson(*d);
+        json += (first ? "{\"builtin\":true," : ",{\"builtin\":true,") + one.substr(1);
+        first = false;
+    }
     for (const ModuleDescriptor* d : nativeModules_.loadedComponents()) {
         json += (first ? "" : ",") + moduleDescriptorJson(*d);
         first = false;
@@ -1054,43 +1176,50 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     } reset{offlineControl_};
     drainRetired();
 
-    // The first native playback slice is a zero-parameter stereo master-effect chain.
-    // Components must already be explicitly loaded through the trust-gated Engine API.
-    std::unique_ptr<MasterChain> nextMasterChain;
-    uint64_t masterChainBytes = 0;
-    if (!p.masterComponents.empty()) {
-        const uint64_t count = static_cast<uint64_t>(p.masterComponents.size());
-        if (count > (std::numeric_limits<uint64_t>::max() - sizeof(MasterChain)) /
-                        sizeof(std::unique_ptr<ModuleProcessor>))
-            return R"({"ok":false,"error":"native master chain size overflows the project memory estimate","modules":{}})";
-        masterChainBytes = sizeof(MasterChain) + count * sizeof(std::unique_ptr<ModuleProcessor>);
+    // Native component chains: the master's and each track's inserts. Components must already be
+    // explicitly loaded through the trust-gated Engine API. Every chain is built (and activated) here,
+    // before anything is sent, so a component that can't run refuses the whole update. A chain with
+    // the same components in the same order is kept, running state and all, and only takes values.
+    std::unique_ptr<ComponentChain> nextMasterChain;
+    const bool keepMasterChain = ctlMasterChain_ && ctlMasterChain_->sameComponents(p.masterComponents, sr_);
+    std::map<std::string, std::unique_ptr<ComponentChain>> nextInserts;
+    uint64_t masterChainBytes = 0;  // every component chain the project holds, for the state budget
+    {
+        auto charge = [&](const std::vector<ComponentSpec>& specs) {
+            size_t parameters = 0;
+            for (const ComponentSpec& c : specs)
+                if (const ModuleDescriptor* d = nativeModules_.find(c.id)) parameters += d->parameterCount;
+            masterChainBytes += ComponentChain::estimateBytes(specs.size(), parameters);
+        };
+        if (!p.masterComponents.empty()) charge(p.masterComponents);
+        size_t total = p.masterComponents.size();
+        for (const LayerSpec& l : p.layers)
+            if (!l.folder && !l.components.empty()) {
+                charge(l.components);
+                total += l.components.size();
+            }
+        // Each instance may allocate what it likes when activated; the cap bounds how many there are.
+        if (total > kMaxProjectComponents)
+            return "{\"ok\":false,\"error\":\"the project uses " + std::to_string(total) +
+                   " native components; at most " + std::to_string(kMaxProjectComponents) + " can run\",\"modules\":{}}";
         if (masterChainBytes > resourceBudget_.projectStateBytes)
-            return R"({"ok":false,"error":"native master chain exceeds this Engine's project-state memory budget","modules":{}})";
-        nextMasterChain = std::make_unique<MasterChain>();
-        nextMasterChain->processors.reserve(p.masterComponents.size());
-        for (const std::string& componentId : p.masterComponents) {
-            const ModuleDescriptor* descriptor = nativeModules_.find(componentId);
-            if (!descriptor)
-                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
-                       "' is not loaded; load it with an explicit trust choice first\",\"modules\":{}}";
-            const bool stereoEffect = descriptor->portCount == 2 && descriptor->ports &&
-                descriptor->ports[0].type == PortType::Audio && descriptor->ports[0].input &&
-                descriptor->ports[0].layout == ChannelLayout::Stereo && portChannelCount(descriptor->ports[0]) == 2 &&
-                descriptor->ports[1].type == PortType::Audio && !descriptor->ports[1].input &&
-                descriptor->ports[1].layout == ChannelLayout::Stereo && portChannelCount(descriptor->ports[1]) == 2 &&
-                descriptor->parameterCount == 0;
-            if (!stereoEffect)
-                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
-                       "' must currently expose one stereo audio input, one stereo audio output and no parameters\",\"modules\":{}}";
-            auto processor = nativeModules_.create(componentId);
-            if (!processor)
-                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
-                       "' could not create a processor instance\",\"modules\":{}}";
-            // Prepared here, on the control thread: the chain processes blocks of at most kBlock.
-            if (!processor->activate(sr_, static_cast<uint32_t>(kBlock)))
-                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
-                       "' could not prepare for playback\",\"modules\":{}}";
-            nextMasterChain->processors.push_back(std::move(processor));
+            return R"({"ok":false,"error":"native component chains exceed this Engine's project-state memory budget","modules":{}})";
+        std::string error;
+        if (!keepMasterChain && !p.masterComponents.empty()) {
+            nextMasterChain = ComponentChain::build(nativeModules_, p.masterComponents, sr_, error);
+            if (!nextMasterChain)
+                return "{\"ok\":false,\"error\":\"master: " + jsonEscape(error) + "\",\"modules\":{}}";
+        }
+        for (const LayerSpec& l : p.layers) {
+            if (l.folder || l.components.empty()) continue;  // folder buses take no inserts yet
+            auto it = layers_.find(l.id);
+            if (it != layers_.end() && it->second.inserts && it->second.inserts->sameComponents(l.components, sr_))
+                continue;
+            auto chain = ComponentChain::build(nativeModules_, l.components, sr_, error);
+            if (!chain)
+                return "{\"ok\":false,\"error\":\"layer '" + jsonEscape(l.id) + "': " + jsonEscape(error) +
+                       "\",\"modules\":{}}";
+            nextInserts[l.id] = std::move(chain);
         }
     }
     // Layer slots: refuse a project the budget cannot hold, then grow before any layer is sent, so
@@ -1138,6 +1267,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
 
     globals_ = p.globals;
     const auto projectAutomation = std::make_shared<const std::vector<ProjectAutomationLaneSpec>>(p.automation);
+    ctlAutomation_ = projectAutomation;
 
     // Project libraries (kind: library) compile first; every other module can call their functions.
     std::vector<std::string_view> moduleSources;
@@ -1233,6 +1363,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         std::vector<AutomationLaneSpec> automation;
         std::string parentId;
         bool bus = false;
+        const std::vector<ComponentSpec>* components = nullptr;  // the layer's native inserts
     };
     std::vector<Want> wants;
     int order = 0;
@@ -1242,7 +1373,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     order_.clear();
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
-        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled});
+        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled, &l.components});
     }
 
     // Pass 1: which modules each layer plays, and its slot.
@@ -1271,6 +1402,25 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         return made;
     };
     std::map<std::string, std::vector<std::string>> warnings;
+    // A native component chain's automation lanes: a chain about to be sent takes its table now (the
+    // audio thread doesn't have it yet); a kept chain gets a new table only when its lanes changed.
+    auto attachAutomation = [&](ComponentChain& chain, const std::string& layer) {
+        delete chain.swapAutomation(chain.automationFor(projectAutomation, layer).release());
+    };
+    auto updateAutomation = [&](int slot, ComponentChain& chain, const std::string& layer, std::string& key) {
+        std::string next = ComponentChain::automationKey(p.automation, layer);
+        if (next == key) return;
+        Cmd c;
+        c.type = Cmd::SetComponentAutomation;
+        c.slot = slot;
+        c.componentAutomation = chain.automationFor(projectAutomation, layer).release();
+        if (send(c)) {
+            key = std::move(next);
+        } else {
+            allOk = false;
+            warnings["project"].push_back("audio command queue rejected a native component automation update");
+        }
+    };
     for (const auto& [id, msg] : synthWarnings) warnings[id].push_back(msg);
     for (const auto& [id, st] : modules_) {
         if (!st.pattern) continue;
@@ -1433,6 +1583,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             pl.ls.sig.clear();
             pl.ls.wiring.clear();
             pl.ls.chain = nullptr;
+            pl.ls.inserts = nullptr;
+            pl.ls.compensation = 0;
             pl.ls.voiced = false;
             pl.ls.pattern = nullptr;
             pl.ls.steps = -1;
@@ -1645,6 +1797,34 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             ls.solo = w.solo;
         }
         if (w.bus) {
+            ls.inserts = nullptr;  // ConfigureBus retires any the slot had, and its delay
+            ls.compensation = 0;
+            if (w.components && !w.components->empty())
+                // Keyed "project": the result reports module and project warnings, not layer ids.
+                warnings["project"].push_back("folder '" + w.id + "': folder buses take no native components yet; they are not played");
+        } else {
+            const bool wantsInserts = w.components && !w.components->empty();
+            auto made = nextInserts.find(w.id);
+            if (made != nextInserts.end() || (!wantsInserts && ls.inserts)) {
+                Cmd inserts;
+                inserts.type = Cmd::SetInserts;
+                inserts.slot = ls.slot;
+                ComponentChain* sent = made != nextInserts.end() ? made->second.release() : nullptr;
+                if (sent) attachAutomation(*sent, w.id);
+                inserts.masterChain = sent;
+                if (send(inserts)) {
+                    ls.inserts = sent;
+                    ls.insertsAutomationKey = ComponentChain::automationKey(p.automation, w.id);
+                } else {
+                    allOk = false;
+                    warnings["project"].push_back("layer '" + w.id + "': audio command queue rejected its native component update");
+                }
+            } else if (wantsInserts && ls.inserts) {
+                ls.inserts->setValues(*w.components);
+                updateAutomation(ls.slot, *ls.inserts, w.id, ls.insertsAutomationKey);
+            }
+        }
+        if (w.bus) {
             Cmd bus;
             bus.type = Cmd::ConfigureBus;
             bus.slot = ls.slot;
@@ -1792,6 +1972,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     }
     layers_ = std::move(nextLayers);
 
+    if (!updateCompensation(warnings)) allOk = false;
+
     // Dependency order: repeatedly take the first layer (in project order) whose sources are all placed. Layers
     // in a loop are placed last in project order; one side of the loop then hears the other a block late.
     {
@@ -1844,12 +2026,22 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         warnings["project"].push_back("audio command queue rejected audition mode update");
     }
 
-    Cmd masterChainCommand;
-    masterChainCommand.type = Cmd::SetMasterChain;
-    masterChainCommand.masterChain = nextMasterChain.release();
-    if (!send(masterChainCommand)) {
-        allOk = false;
-        warnings["project"].push_back("audio command queue rejected native master-chain update");
+    if (keepMasterChain) {
+        ctlMasterChain_->setValues(p.masterComponents);
+        updateAutomation(-1, *ctlMasterChain_, "", ctlMasterAutomationKey_);
+    } else if (nextMasterChain || ctlMasterChain_) {
+        Cmd masterChainCommand;
+        masterChainCommand.type = Cmd::SetMasterChain;
+        ComponentChain* sent = nextMasterChain.release();
+        if (sent) attachAutomation(*sent, "");
+        masterChainCommand.masterChain = sent;
+        if (send(masterChainCommand)) {
+            ctlMasterChain_ = sent;
+            ctlMasterAutomationKey_ = ComponentChain::automationKey(p.automation, "");
+        } else {
+            allOk = false;
+            warnings["project"].push_back("audio command queue rejected native master-chain update");
+        }
     }
 
     std::string mods;
@@ -1931,6 +2123,82 @@ void Engine::setGlobal(const std::string& name, double value) {
             writeParams(*ls.chain);
             markTouched(*ls.chain, nullptr, name);
         }
+}
+
+ComponentChain* Engine::ctlComponentChain(const std::string& layerId) noexcept {
+    if (layerId.empty()) return ctlMasterChain_;
+    auto it = layers_.find(layerId);
+    return it != layers_.end() ? it->second.inserts : nullptr;
+}
+
+// Latency compensation: each track is delayed so it lines up with the track whose native effects add the most
+// latency (the master chain delays everything alike, so it needs none). Control thread, under ctl_.
+bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>& warnings) {
+    bool ok = true;
+    // Each track is delayed so it lines up with the track whose native effects
+    // add the most latency (the master chain delays everything alike, so it needs none).
+    {
+        int64_t most = 0;
+        for (const auto& [id, ls] : layers_)
+            if (ls.slot >= 0 && !ls.bus && ls.inserts)
+                most = std::max<int64_t>(most, static_cast<int64_t>(std::min<uint64_t>(ls.inserts->latencyFrames(), 1u << 30)));
+        if (most > kMaxCompensationFrames) {
+            warnings["project"].push_back("native effects add " + std::to_string(most) + " frames of latency; tracks are kept in time only up to " +
+                                          std::to_string(kMaxCompensationFrames));
+            most = kMaxCompensationFrames;
+        }
+        for (auto& [id, ls] : layers_) {
+            if (ls.slot < 0 || ls.bus) continue;
+            const int64_t own = ls.inserts ? std::min<int64_t>(static_cast<int64_t>(std::min<uint64_t>(ls.inserts->latencyFrames(), 1u << 30)), most) : 0;
+            const int64_t want = most - own;
+            if (want == ls.compensation) continue;
+            Cmd d;
+            d.type = Cmd::SetDelay;
+            d.slot = ls.slot;
+            if (want > 0) {
+                d.delay = new DelayLine();
+                d.delay->l.assign(static_cast<size_t>(want), 0.0f);
+                d.delay->r.assign(static_cast<size_t>(want), 0.0f);
+            }
+            if (send(d)) {
+                ls.compensation = want;
+            } else {
+                ok = false;
+                warnings["project"].push_back("layer '" + id + "': audio command queue rejected its latency compensation");
+            }
+        }
+    }
+    return ok;
+}
+
+bool Engine::setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    ComponentChain* chain = ctlComponentChain(layerId);
+    return chain && chain->setValue(index, param, value);
+}
+
+bool Engine::setComponentBypass(const std::string& layerId, uint32_t index, bool bypass) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    ComponentChain* chain = ctlComponentChain(layerId);
+    if (!chain || !chain->setBypass(index, bypass)) return false;
+    std::map<std::string, std::vector<std::string>> warnings;
+    updateCompensation(warnings);  // a bypassed effect adds no latency
+    return true;
+}
+
+std::string Engine::componentStatesJson(const std::string& layerId) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    ComponentChain* chain = ctlComponentChain(layerId);
+    if (!chain) return R"({"ok":false,"error":"no native components run there","components":[]})";
+    const std::vector<ComponentChain::SavedState> states = chain->saveStates();
+    std::string j = R"({"ok":true,"components":[)";
+    for (size_t i = 0; i < states.size(); ++i) {
+        if (i) j += ",";
+        j += "{\"index\":" + std::to_string(i) + ",\"ok\":" + (states[i].ok ? "true" : "false") +
+             ",\"version\":" + std::to_string(states[i].version) + ",\"state\":\"" +
+             base64Encode(states[i].data.data(), states[i].data.size()) + "\"}";
+    }
+    return j + "]}";
 }
 
 void Engine::setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo) {
@@ -2113,9 +2381,12 @@ bool Engine::canRetire(size_t count) const noexcept {
 
 void Engine::retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern,
                     AutomationData* automation, std::vector<int>* order, SlotTable* table,
-                    MasterChain* masterChain) noexcept {
+                    ComponentChain* masterChain) noexcept {
     if (!c && !freed && !pattern && !automation && !order && !table && !masterChain) return;
-    Retired r{c, freed, pattern, automation, order, table, masterChain};
+    retireEntry(Retired{c, freed, pattern, automation, order, table, masterChain});
+}
+
+void Engine::retireEntry(const Retired& r) noexcept {
     if (pendingCount_ == 0 && retired_->push(r)) return;
     if (pendingCount_ < pendingMax_) pending_[pendingCount_++] = r;
     // All callers reserve queue capacity before changing ownership. This is a
@@ -2191,13 +2462,16 @@ void Engine::applyCommands() noexcept {
         size_t retirementNeed = 0;
         switch (c.type) {
             case Cmd::Install: retirementNeed = 2; break;
-            case Cmd::SetAutomation:
             case Cmd::SetMasterChain:
+            case Cmd::SetInserts:
+            case Cmd::SetDelay: retirementNeed = 2; break;  // the one still crossfading, and the one replaced  // a chain still crossfading, and the one replaced
+            case Cmd::SetAutomation:
+            case Cmd::SetComponentAutomation:
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
             case Cmd::Grow: retirementNeed = 1; break;
-            case Cmd::ConfigureBus: retirementNeed = c.flag ? 4 : 3; break;
+            case Cmd::ConfigureBus: retirementNeed = c.flag ? 7 : 6; break;
             // Every slot may retire its current and old chain. The pending overflow holds that at
             // maxLayers() (pendingMax_), so with the queue drained a Play always finds room.
             case Cmd::Play: retirementNeed = static_cast<size_t>(2 * slotCount_); break;
@@ -2267,6 +2541,23 @@ void Engine::applyCommands() noexcept {
                 retire(s.cur, nullptr, s.pattern);
                 retire(s.old, nullptr);
                 retire(s.pending, nullptr);
+                {
+                    Retired r{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts};  // buses run no inserts yet
+                    r.delay = s.delay;
+                    if (r.masterChain || r.delay) retireEntry(r);
+                }
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                s.insertsFading = nullptr;
+                s.insertsFadeLeft = 0;
+                s.inserts = nullptr;
+                s.delay = nullptr;
+                {
+                    Retired d;
+                    d.delay = s.delayFading;
+                    if (d.delay) retireEntry(d);
+                    s.delayFading = nullptr;
+                    s.delayFadeLeft = 0;
+                }
                 s.cur = s.old = s.pending = nullptr;
                 s.pattern = nullptr;
                 s.peak.store(0, std::memory_order_relaxed);
@@ -2341,11 +2632,76 @@ void Engine::applyCommands() noexcept {
                 masterStep_ = (masterTarget_ - master_) / masterRamp_;
                 break;
             case Cmd::SetMasterChain:
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
+                // The replaced chain crossfades out (a rebuild, an effect added or removed: no click).
+                {
+                    // As for track inserts: keep whichever side of a running crossfade is heard more now.
+                    const int fadeLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                    if (masterFadeLeft_ * 2 > fadeLen) std::swap(masterChain_, masterFading_);
+                }
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
+                masterFading_ = nullptr;
+                masterFadeLeft_ = 0;
+                if (playing_ || previewing_) {  // sounding: crossfade; otherwise the next sound starts on the new chain
+                    masterFading_ = masterChain_;
+                    masterFadeLeft_ = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                } else {
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
+                }
                 masterChain_ = c.masterChain;
                 break;
+            case Cmd::SetDelay: {
+                Slot& s = slotAt(c.slot);
+                Retired r;
+                r.delay = s.delayFading;  // a delay change still crossfading: its old line goes
+                s.delayFading = nullptr;
+                s.delayFadeLeft = 0;
+                if (r.delay) retireEntry(r);
+                if (c.delay && !s.delayStale) c.delay->takeHistory(s.delay);
+                if ((s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail) && !s.delayStale) {
+                    s.delayFading = s.delay;  // sounding: the timing change crossfades
+                    s.delayFadeLeft = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                } else if (s.delay) {
+                    Retired old;
+                    old.delay = s.delay;
+                    retireEntry(old);
+                }
+                s.delay = c.delay;
+                break;
+            }
+            case Cmd::SetComponentAutomation: {
+                ComponentChain* chain = c.slot < 0 ? masterChain_ : slotAt(c.slot).inserts;
+                Retired r;
+                // No chain (it was replaced in the meantime): the table is retired unused.
+                r.componentAutomation = chain ? chain->swapAutomation(c.componentAutomation) : c.componentAutomation;
+                if (r.componentAutomation) retireEntry(r);
+                break;
+            }
+            case Cmd::SetInserts: {
+                Slot& s = slotAt(c.slot);
+                // A swap still crossfading: keep whichever side is heard more now, so nothing is cut short.
+                const int fadeLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                if (s.insertsFadeLeft * 2 > fadeLen) std::swap(s.inserts, s.insertsFading);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                s.insertsFading = nullptr;
+                s.insertsFadeLeft = 0;
+                if (s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail) {
+                    s.insertsFading = s.inserts;  // sounding: crossfades out (null: from the dry signal)
+                    s.insertsFadeLeft = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                } else {
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);
+                }
+                s.inserts = c.masterChain;
+                break;
+            }
             case Cmd::Play:
                 playing_ = true;
+                // Ringing tails play on into the new pass (state kept), as the effects would have.
+                masterTailLeft_ = 0;
+                masterTailFade_ = 0;
+                for (int i = 0; i < slotCount_; ++i) {
+                    slotAt(i).insertTail = false;
+                    slotAt(i).tailFade = 0;
+                }
                 touchEpoch_ = c.playCount;  // chains from before this Play drop their touches at their next chunk
                 touchPlayStamp_ = c.touchStamp;
                 // Resuming starts mid-loop: each track works out its own loop pass from g_ at its next chunk. Code
@@ -2719,10 +3075,38 @@ void Engine::updatePreviewing(int frames) noexcept {
                 else voices = true;
             }
         s.previewTail = voices ? 0 : s.previewTail + frames;
-        const bool live = voices || (!silent && s.cur && s.cur->voiced && s.previewQuiet < static_cast<int64_t>(kPreviewQuietSeconds * sr_) &&
-                                     s.previewTail < static_cast<int64_t>(kPreviewTailSeconds * sr_));
+        const int64_t cap = s.insertTail ? s.tailCap : static_cast<int64_t>(kPreviewTailSeconds * sr_);
+        const bool quiet = s.previewQuiet >= static_cast<int64_t>(kPreviewQuietSeconds * sr_);
+        // A tail still audible at its cap fades out instead of stopping dead.
+        if (s.insertTail && !voices && !silent && !quiet && s.previewTail >= cap && s.tailFade == 0)
+            s.tailFade = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+        const bool fadingOut = s.insertTail && s.tailFade > 0;
+        const bool live = voices || (!silent && s.cur && (s.cur->voiced || s.insertTail) && !quiet &&
+                                     s.tailFade >= 0 && (s.previewTail < cap || fadingOut));
+        if (!live && s.insertTail) {
+            s.insertTail = false;
+            s.tailFade = 0;
+            s.insertsIdle = true;  // rung out: start from silence next time
+        }
         s.previewing = live;
         any = any || live;
+    }
+    if (masterTailLeft_ > 0) {
+        const bool quiet = masterQuiet_ >= static_cast<int64_t>(kPreviewQuietSeconds * sr_);
+        if (quiet || masterTailFade_ < 0) {
+            masterTailLeft_ = 0;
+        } else if (masterTailFade_ == 0) {
+            masterTailLeft_ = std::max<int64_t>(0, masterTailLeft_ - frames);
+            if (masterTailLeft_ == 0) {  // at its cap and still audible: fade out first
+                masterTailFade_ = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                masterTailLeft_ = 1;
+            }
+        }
+        if (masterTailLeft_ == 0) {
+            masterTailFade_ = 0;
+            if (masterChain_) masterChain_->reset();
+        }
+        any = any || masterTailLeft_ > 0;
     }
     previewing_ = any;
 }
@@ -2731,8 +3115,35 @@ void Engine::updatePreviewing(int frames) noexcept {
 // neither the chord that was playing nor a frozen tail. Held previews keep their voices; the master fades them back
 // in. Stopped, a track's time runs on from where it stopped (preview chunks).
 void Engine::endPlayback() noexcept {
+    // Native effects with a tail (a delay, a reverb) ring out on silence until they are quiet, as
+    // in a DAW; the rest start the next play from silence, as a fresh render (an export) does.
+    auto tailCap = [&](const ComponentChain& c) -> int64_t {
+        const uint32_t tail = c.tailFrames();
+        const int64_t most = static_cast<int64_t>(kPreviewTailSeconds * sr_);
+        return tail == kInfiniteTail ? most : std::min<int64_t>(tail, most);
+    };
+    if (masterChain_) {
+        masterTailLeft_ = tailCap(*masterChain_);
+        masterQuiet_ = 0;
+        masterTailFade_ = 0;
+        if (masterTailLeft_ > 0) previewing_ = true;
+        else masterChain_->reset();
+    }
     for (int i = 0; i < slotCount_; ++i) {
         Slot& s = slotAt(i);
+        s.delayStale = true;  // the next play starts from silence, as an export does, not the song's last frames
+        if (s.inserts) {
+            s.tailCap = tailCap(*s.inserts);
+            if (s.tailCap > 0 && s.active && !s.bus && !(slotTarget(s) == 0.0 && s.gain == 0.0)) {
+                s.insertTail = true;
+                s.tailFade = 0;
+                s.previewing = true;
+                s.previewTail = 0;
+                previewing_ = true;
+            } else {
+                s.inserts->reset();
+            }
+        }
         if (!s.cur) continue;
         restartChain(*s.cur);
         if (s.old) {  // a stop during a code swap: the old chain's fade ends too
@@ -3028,8 +3439,15 @@ int Engine::planChunk(int maxFrames) noexcept {
             if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
             if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
             s.target = slotTarget(s);
-            if (!s.previewing || !s.cur->voiced || (s.target == 0.0 && s.gain == 0.0)) {
+            const bool silentMix = s.target == 0.0 && s.gain == 0.0;
+            if (s.previewing && !silentMix && !s.cur->voiced && s.insertTail) {
+                s.mode = Slot::Mode::Tail;  // a generator's loop would play on: only the inserts ring out
+                continue;
+            }
+            if (!s.previewing || !s.cur->voiced || silentMix) {
                 s.mode = Slot::Mode::Silent;
+                s.insertsIdle = true;
+                s.delayStale = true;
                 continue;
             }
             s.mode = Slot::Mode::Play;
@@ -3055,12 +3473,31 @@ int Engine::planChunk(int maxFrames) noexcept {
         if (s.target == 0.0 && s.gain == 0.0) {
             // Silent (muted, soloed out or removed, and faded out): nothing runs; swaps and removal finish.
             s.mode = Slot::Mode::Silent;
+            s.insertsIdle = true;
+            s.delayStale = true;
             s.contiguous = false;
             if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; routingDirty_ = true; }
-            if (s.removing && canRetire(2)) {
+            if (s.removing && canRetire(4)) {
+                {
+                    Retired d;
+                    d.delay = s.delayFading;
+                    if (d.delay) retireEntry(d);
+                    s.delayFading = nullptr;
+                    s.delayFadeLeft = 0;
+                }
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                s.insertsFading = nullptr;
+                s.insertsFadeLeft = 0;
                 retire(s.cur, nullptr, s.pattern);
                 s.pattern = nullptr;
-                retire(s.old, &s);
+                {
+                    // One entry: the slot frees with its inserts and delay.
+                    Retired r{s.old, &s, nullptr, nullptr, nullptr, nullptr, s.inserts};
+                    r.delay = s.delay;
+                    retireEntry(r);
+                }
+                s.inserts = nullptr;
+                s.delay = nullptr;
                 s.cur = s.old = nullptr;
                 s.active = false;
                 s.removing = false;
@@ -3234,14 +3671,57 @@ void Engine::runModuleNode(int slot, int index, const float* const* in, float* c
     if (s.fade) lane(*s.old, 0, false, m, s.n0, nullptr, nullptr, s.k, 2);
 }
 
+// A track's latency compensation, with the crossfade of a delay change.
+void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
+    if (s.delayStale) {  // it held the song's last frames from before a stop or a silence
+        if (s.delay) s.delay->clear();
+        if (s.delayFading && canRetire(1)) {  // a change that was still crossfading is over: the new timing holds
+            Retired r;
+            r.delay = s.delayFading;
+            retireEntry(r);
+            s.delayFading = nullptr;
+            s.delayFadeLeft = 0;
+        } else if (s.delayFading) {
+            s.delayFading->clear();
+        }
+        s.delayStale = false;
+    }
+    const bool fading = s.delayFadeLeft > 0;
+    if (fading) {
+        std::copy_n(outL, m, fadeL_);
+        std::copy_n(outR, m, fadeR_);
+        if (s.delayFading) s.delayFading->run(fadeL_, fadeR_, m);
+    }
+    if (s.delay) s.delay->run(outL, outR, m);
+    if (!fading) return;
+    const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+    for (int i = 0; i < m; ++i) {
+        const float w = s.delayFadeLeft > 0 ? static_cast<float>(len - s.delayFadeLeft + 1) / static_cast<float>(len + 1) : 1.0f;
+        if (s.delayFadeLeft > 0) --s.delayFadeLeft;
+        outL[i] = fadeL_[i] + (outL[i] - fadeL_[i]) * w;
+        outR[i] = fadeR_[i] + (outR[i] - fadeR_[i]) * w;
+    }
+    if (s.delayFadeLeft == 0 && s.delayFading) {
+        if (canRetire(1)) {
+            Retired r;
+            r.delay = s.delayFading;
+            retireEntry(r);
+            s.delayFading = nullptr;
+        } else {
+            s.delayFadeLeft = 1;  // no room to hand it back yet: try again next block
+        }
+    }
+}
+
 // A playing track's output: the seam and swap crossfades of its lanes, then gain and pan.
 void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept {
     Slot& s = slotAt(slot);
-    if (s.mode != Slot::Mode::Play) {
+    if (s.mode != Slot::Mode::Play && s.mode != Slot::Mode::Tail) {
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
         return;
     }
+    const bool tail = s.mode == Slot::Mode::Tail;  // stopped: silence into the inserts, which ring out
     const double target = s.target;
     const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
     const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
@@ -3254,8 +3734,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.gr = g.right;
     }
     double* y = tmp_;
-    for (int i = 0; i < m; ++i) y[i] = static_cast<double>(in[0][i]);
-    if (s.seam) {
+    for (int i = 0; i < m; ++i) y[i] = tail ? 0.0 : static_cast<double>(in[0][i]);
+    if (s.seam && !tail) {
         const int sl = std::min(m, s.seamLeft);
         for (int i = 0; i < sl; ++i) {
             const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
@@ -3264,7 +3744,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.shadowN += sl;
         s.seamLeft -= sl;
     }
-    if (s.fade) {
+    if (s.fade && !tail) {
         const int sl = std::min(m, s.swapLeft);
         for (int i = 0; i < m; ++i) {
             double w = 1.0;
@@ -3277,6 +3757,44 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         retire(s.old, nullptr);
         s.old = nullptr;
         routingDirty_ = true;  // the fade lane's extra module nodes stop running
+    }
+    // Native inserts (#17): the mono chain output enters as two equal channels; what the inserts
+    // make of it stays stereo through volume and pan (the pan law then works per side, as balance).
+    ComponentChain* const inserts = s.inserts;
+    const bool fading = s.insertsFadeLeft > 0;
+    const bool stereo = inserts || fading;  // the inserts' (or the crossfade's) stereo output, not the mono chain
+    if (stereo) {
+        // A tail frozen while the track was silent must not play on when it sounds again.
+        if (s.insertsIdle) {
+            if (inserts) inserts->reset();
+            if (s.insertsFading) s.insertsFading->reset();
+            s.insertsIdle = false;
+        }
+        for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = routeSample(finiteOr0(y[i]));
+        const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
+        const ChainTime* t = &time;
+        if (fading) {
+            std::copy_n(insertL_, m, fadeL_);
+            std::copy_n(insertR_, m, fadeR_);
+            if (s.insertsFading) s.insertsFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
+        }
+        if (inserts) inserts->process(insertL_, insertR_, static_cast<uint32_t>(m), sr_, t);
+        if (fading) {
+            const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+            for (int i = 0; i < m; ++i) {
+                const float w = s.insertsFadeLeft > 0
+                    ? static_cast<float>(len - s.insertsFadeLeft + 1) / static_cast<float>(len + 1) : 1.0f;
+                if (s.insertsFadeLeft > 0) --s.insertsFadeLeft;
+                insertL_[i] = fadeL_[i] + (insertL_[i] - fadeL_[i]) * w;
+                insertR_[i] = fadeR_[i] + (insertR_[i] - fadeR_[i]) * w;
+            }
+            if (s.insertsFadeLeft == 0 && s.insertsFading && canRetire(1)) {
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                s.insertsFading = nullptr;
+            } else if (s.insertsFadeLeft == 0 && s.insertsFading) {
+                s.insertsFadeLeft = 1;  // no room to hand it back yet: hold the new chain at full and try again
+            }
+        }
     }
     float peak = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
@@ -3292,7 +3810,9 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             s.gain += (desired - s.gain) * gainCoef;
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
-        const double v = finiteOr0(y[i]) * s.gain;
+        const double vl = (stereo ? static_cast<double>(insertL_[i]) : finiteOr0(y[i])) * s.gain;
+        const double vr = stereo ? static_cast<double>(insertR_[i]) * s.gain : vl;
+        const double v = stereo ? 0.5 * (vl + vr) : vl;  // the scope and tail test read the mid
         double gl = s.gl, gr = s.gr;
         if (s.automation && !s.automation->pan.empty()) {
             const double automatedPan = automationValue(s.automation->pan, step, pan);
@@ -3300,17 +3820,27 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             gl = g.left; gr = g.right;
         }
         // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
-        outL[i] = routeSample(v * gl);
-        outR[i] = routeSample(v * gr);
+        outL[i] = routeSample(vl * gl);
+        outR[i] = routeSample(vr * gr);
         // The meter reads what the track sends on (after volume and pan), the louder channel's sample peak.
         const float av = std::max(std::fabs(outL[i]), std::fabs(outR[i]));
         if (av > peak) peak = av;
-        sig = std::max(sig, static_cast<float>(std::fabs(v)));  // before pan: a preview's tail test, like the scope
+        sig = std::max(sig, static_cast<float>(std::max(std::fabs(vl), std::fabs(vr))));  // before pan: a preview's tail test, like the scope
         s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
         sp = (sp + 1) % kScopeSize;
     }
     s.scopePos.store(sp, std::memory_order_release);
     storeMax(s.peak, peak);
+    if (tail && s.tailFade != 0) {  // a capped tail fading out (or faded: silence until it is ended)
+        const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+        for (int i = 0; i < m; ++i) {
+            const float g = s.tailFade > 0 ? static_cast<float>(s.tailFade) / static_cast<float>(len) : 0.0f;
+            if (s.tailFade > 0 && --s.tailFade == 0) s.tailFade = -1;
+            outL[i] *= g;
+            outR[i] *= g;
+        }
+    }
+    if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time with the most-delayed track
     s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (previewChunk_) {
         s.previewN += m;  // the transport isn't moving: its place in the loop stays; the preview's time runs on
@@ -3405,7 +3935,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         sp = (sp + 1) % kScopeSize;
     };
 
-    if (!masterChain_) {
+    if (!masterChain_ && masterFadeLeft_ == 0) {
         // Keep the normal Engine path allocation-free and free of extra staging copies.
         for (int i = 0; i < m; ++i) {
             if (masterRamp_ > 0) {
@@ -3423,10 +3953,10 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             finishSample(i, bypass ? xl : yl, bypass ? xr : yr);
         }
     } else {
-        // Scratch buffers live inside MasterChain, so projects without native components pay no
-        // additional Engine-object memory cost. The callback never allocates or locks.
-        float* stage0L = masterChain_->stageL[0].data();
-        float* stage0R = masterChain_->stageR[0].data();
+        // The chain runs in place on the Engine's scratch block; projects without native components
+        // skip this branch and its copies. The callback never allocates or locks.
+        float* stageL = masterStageL_;
+        float* stageR = masterStageR_;
         for (int i = 0; i < m; ++i) {
             if (masterRamp_ > 0) {
                 master_ += masterStep_;
@@ -3440,43 +3970,50 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             const double yr = xr - dcR_[0] + R * dcR_[1];
             dcR_[0] = xr;
             dcR_[1] = yr;
-            stage0L[i] = static_cast<float>(bypass ? xl : yl);
-            stage0R[i] = static_cast<float>(bypass ? xr : yr);
+            stageL[i] = static_cast<float>(bypass ? xl : yl);
+            stageR[i] = static_cast<float>(bypass ? xr : yr);
         }
-
-        const float* currentL = stage0L;
-        const float* currentR = stage0R;
-        for (size_t index = 0; index < masterChain_->processors.size(); ++index) {
-            ModuleProcessor* processor = masterChain_->processors[index].get();
-            const size_t destination = (index & 1u) == 0u ? 1u : 0u;
-            float* destinationL = masterChain_->stageL[destination].data();
-            float* destinationR = masterChain_->stageR[destination].data();
-            std::copy_n(currentL, m, destinationL);
-            std::copy_n(currentR, m, destinationR);
-            const float* inputChannels[2] = {currentL, currentR};
-            float* outputChannels[2] = {destinationL, destinationR};
-            const AudioProcessBlock block{
-                {inputChannels, 2, static_cast<uint32_t>(m)},
-                {outputChannels, 2, static_cast<uint32_t>(m)},
-                static_cast<uint32_t>(m),
-                sr_,
-                nullptr,
-                0,
-            };
-            if (!processor->process(block)) {
-                std::copy_n(currentL, m, destinationL);
-                std::copy_n(currentR, m, destinationR);
-            }
-            for (int frame = 0; frame < m; ++frame) {
-                destinationL[frame] = static_cast<float>(finiteOr0(static_cast<double>(destinationL[frame])));
-                destinationR[frame] = static_cast<float>(finiteOr0(static_cast<double>(destinationR[frame])));
-            }
-            currentL = destinationL;
-            currentR = destinationR;
+        const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
+        const ChainTime* t = &time;
+        const bool fading = masterFadeLeft_ > 0;
+        if (fading) {
+            std::copy_n(stageL, m, fadeL_);
+            std::copy_n(stageR, m, fadeR_);
+            if (masterFading_) masterFading_->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
         }
+        if (masterChain_) masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_, t);
+        if (masterTailFade_ != 0 && previewChunk_) {  // the master's capped tail fading out
+            const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+            for (int i = 0; i < m; ++i) {
+                const float g = masterTailFade_ > 0 ? static_cast<float>(masterTailFade_) / static_cast<float>(len) : 0.0f;
+                if (masterTailFade_ > 0 && --masterTailFade_ == 0) masterTailFade_ = -1;
+                stageL[i] *= g;
+                stageR[i] *= g;
+            }
+        }
+        if (fading) {
+            const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+            for (int i = 0; i < m; ++i) {
+                const float w = masterFadeLeft_ > 0 ? static_cast<float>(len - masterFadeLeft_ + 1) / static_cast<float>(len + 1) : 1.0f;
+                if (masterFadeLeft_ > 0) --masterFadeLeft_;
+                stageL[i] = fadeL_[i] + (stageL[i] - fadeL_[i]) * w;
+                stageR[i] = fadeR_[i] + (stageR[i] - fadeR_[i]) * w;
+            }
+            if (masterFadeLeft_ == 0 && masterFading_) {
+                if (canRetire(1)) {
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
+                    masterFading_ = nullptr;
+                } else {
+                    masterFadeLeft_ = 1;
+                }
+            }
+        }
+        const float* currentL = stageL;
+        const float* currentR = stageR;
         for (int i = 0; i < m; ++i) finishSample(i, currentL[i], currentR[i]);
     }
 
+    masterQuiet_ = std::max(pl, pr) > kPreviewQuiet ? 0 : masterQuiet_ + m;  // for the master chain's tail
     masterScopePos_.store(sp, std::memory_order_release);
     storeMax(peakL_, pl);
     storeMax(peakR_, pr);

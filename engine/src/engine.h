@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "component_chain.h"
 #include "execution.h"
 #include "module_registry.h"
 #include "pattern.h"
@@ -81,11 +82,25 @@ public:
     // Native components are loaded only after an explicit per-component trust decision.
     ModuleLoadResult loadNativeComponent(const std::string& path, const std::string& expectedId, NativeModuleTrust trust);
     bool unloadNativeComponent(const std::string& id);
+    // A rebuild of a loaded component (a new file): it replaces the old build, and every chain that
+    // uses it is rebuilt with the new one, crossfaded, keeping each instance's values, bypass and
+    // (when the new build accepts it) state. On failure the old build keeps playing.
+    ModuleLoadResult reloadNativeComponent(const std::string& path, const std::string& expectedId, NativeModuleTrust trust);
     std::unique_ptr<ModuleProcessor> createNativeComponent(const std::string& id);
     // {"ok":true,"components":[descriptor, ...]} for the loaded native components (moduleDescriptorJson).
     std::string nativeComponentsJson();
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
+    // A native component's parameter while it plays: component `index` of the layer's inserts (an
+    // empty layer id: the master chain). Ramps over the parameter's smoothing. False if there is no
+    // such component or parameter. A later project update sets the values it names again.
+    bool setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value);
+    // Bypasses (or brings back) a playing native component, crossfaded. False if there is none.
+    bool setComponentBypass(const std::string& layerId, uint32_t index, bool bypass);
+    // {"ok":true,"components":[{"index","ok","version","state"(base64)}]} for a layer's chain (empty
+    // id: the master's), as each component's save_state writes it now; store it in the project so a
+    // reload or an export starts from it. {"ok":false,...} if the layer has no chain.
+    std::string componentStatesJson(const std::string& layerId);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
     // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play a pattern
@@ -114,7 +129,6 @@ public:
     void reportLoad(double load) noexcept;  // fraction of the callback's time budget used
 
     struct Chain;
-    struct MasterChain;
 
 private:
     struct Slot;
@@ -124,6 +138,7 @@ private:
     struct ExportPool;
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
     struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
+    struct DelayLine;  // a track's latency-compensation delay (engine.cpp)
 
     void drainRetired();
     bool canRetire(size_t count) const noexcept;
@@ -132,7 +147,8 @@ private:
     void applyCommands() noexcept;
     void retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr, std::vector<int>* order = nullptr,
-                SlotTable* table = nullptr, MasterChain* masterChain = nullptr) noexcept;
+                SlotTable* table = nullptr, ComponentChain* components = nullptr) noexcept;
+    void retireEntry(const Retired& r) noexcept;  // audio thread: to the control thread, to be freed
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
@@ -141,6 +157,7 @@ private:
     // folder bus, and the master stage.
     void runModuleNode(int slot, int index, const float* const* in, float* const* out, int m) noexcept;
     void runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept;
+    void runDelay(Slot& s, float* outL, float* outR, int m) noexcept;
     void runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
@@ -224,6 +241,14 @@ private:
     std::unique_ptr<Retired[]> pending_;
     int pendingCount_ = 0;
     double tmp_[kBlock];
+    int64_t masterTailLeft_ = 0;  // audio thread: stopped, the master chain rings out for at most this long
+    int64_t masterQuiet_ = 0;     // ... ending sooner once its output has been quiet for a moment
+    int masterTailFade_ = 0;      // > 0: at its cap and still audible, fading out (frames left); -1: faded
+    ComponentChain* masterFading_ = nullptr;  // audio thread: the master chain a newer one replaced, crossfading out
+    int masterFadeLeft_ = 0;
+    float insertL_[kBlock], insertR_[kBlock];
+    float fadeL_[kBlock], fadeR_[kBlock];  // audio thread: a replaced chain's output during its crossfade            // audio thread: a track's inserts run here
+    float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
@@ -240,7 +265,12 @@ private:
     // ---- control-thread state ----
     std::mutex ctl_;
     ModuleRegistry nativeModules_;  // control-thread registry; loaded processors keep their library alive
-    MasterChain* masterChain_ = nullptr;  // audio-thread-owned; replaced/retired through commands
+    ComponentChain* masterChain_ = nullptr;  // audio-thread-owned; replaced/retired through commands
+    // Control thread: the master chain last sent (alive until a later command replaces it), so an
+    // update with the same components keeps it and only sets values.
+    ComponentChain* ctlMasterChain_ = nullptr;
+    std::string ctlMasterAutomationKey_;
+    std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> ctlAutomation_;  // the last project's lanes  // the lanes the master chain's automation table was made from
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     struct ModuleState {
         std::string source;
@@ -269,6 +299,9 @@ private:
         std::string automationSig;
         size_t expressionCapacity = 0;
         std::string parameterAutomationSig;
+        ComponentChain* inserts = nullptr;  // the native effects last sent to the slot (alive while it plays)
+        std::string insertsAutomationKey;   // the lanes their automation table was made from
+        int64_t compensation = 0;           // the latency-compensation delay last sent, in frames
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
@@ -296,6 +329,8 @@ private:
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();
+    ComponentChain* ctlComponentChain(const std::string& layerId) noexcept;  // control thread; null: none
+    bool updateCompensation(std::map<std::string, std::vector<std::string>>& warnings);
 };
 
 }  // namespace caw

@@ -9,6 +9,7 @@ import '../engine/engine.dart';
 import '../engine/execution.dart';
 import '../platform/resource_signals.dart';
 import 'poller.dart';
+import 'native_components.dart';
 import 'project.dart';
 import 'history.dart';
 import 'pattern_doc.dart';
@@ -75,6 +76,9 @@ class AppState extends ChangeNotifier {
   final Settings settings;
 
   Engine? engine;
+  /// The project's C++ effects: the in-app build and trust rules (null without an in-app compiler).
+  NativeComponentManager? nativeComponents;
+  NativeComponentsStatus? nativeStatus;
   EngineHardwareProfile? hardwareProfile;
   EngineExecutionPlan? auditionPlan;
   StreamSubscription<EnginePressure>? _resourcePressureSubscription;
@@ -213,6 +217,14 @@ class AppState extends ChangeNotifier {
   /// and Open are in the project menu.
   Future<void> openStorage(ProjectStorage storage) async {
     _storage = storage;
+    final e = engine;
+    if (e != null) {
+      try {
+        nativeComponents = await deviceNativeComponentManager(e, storage);
+      } catch (_) {
+        nativeComponents = null;  // no compiler on this device: projects play without their C++ effects
+      }
+    }
     lastProjectId = await storage.lastOpened();
     savedProjects = await listProjects();
     final id = lastProjectId;
@@ -411,7 +423,8 @@ class AppState extends ChangeNotifier {
         auditionPattern: pv?.pattern,
         auditionOnly: previewOnly,
         voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
-        swap: settings.swapTiming.name);
+        swap: settings.swapTiming.name,
+        playableComponents: nativeComponents?.loaded);
     try {
       info = await e.setProject(json);
       engineError = null;
@@ -500,6 +513,9 @@ class AppState extends ChangeNotifier {
   Future<void> flush() async {
     _saveTimer?.cancel();
     if (starting) return; // the placeholder before the first project opens is never saved
+    // Native effects' running state (save_state) goes into the project, so a reload or an export starts from it.
+    final e = engine;
+    if (e != null) project.storeComponentStates(e.componentStates);
     await _storage?.save(project);
   }
 
@@ -1494,6 +1510,21 @@ class AppState extends ChangeNotifier {
     await flush();
     notifyListeners();
     await _syncNow();
+    unawaited(prepareNativeComponents());
+  }
+
+  /// Builds (or reuses a build of) and loads the project's C++ effects under the trust rules, then sends the
+  /// project again so they play. Runs after the project opens, so the rest of it plays at once. Code from elsewhere
+  /// waits in [nativeStatus.needsTrust] for the user's Trust or Block.
+  Future<void> prepareNativeComponents() async {
+    final manager = nativeComponents;
+    if (manager == null || project.cppComponents.isEmpty) return;
+    final opened = project;
+    final status = await manager.prepare(opened);
+    if (!identical(project, opened) || _disposed) return;  // another project opened meanwhile
+    nativeStatus = status;
+    notifyListeners();
+    if (status.loaded.isNotEmpty) await _syncNow();
   }
 
   Future<void> newProject() => _switchTo(blankProject());

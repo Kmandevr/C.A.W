@@ -15,8 +15,11 @@ extern "C" {
 #endif
 
 /* 2 (2026-11-09): scope() indexes 0..n-1 are project layers at any capacity; the master and the
-   audition are CAW_SCOPE_MASTER and CAW_SCOPE_AUDITION, not fixed slot numbers (F7.3). */
-#define CAW_API_VERSION 2
+   audition are CAW_SCOPE_MASTER and CAW_SCOPE_AUDITION, not fixed slot numbers (F7.3).
+   3 (2026-11-09): native components on tracks ("components" per layer) and parameter values in
+   both chains ({"id","params","bypass","state","state_version"} entries), component automation
+   lanes ("target_type":"component"); caw_engine_set_component_param, _bypass and _states. */
+#define CAW_API_VERSION 3
 
 typedef struct CawEngine CawEngine;
 
@@ -111,6 +114,11 @@ enum { CAW_NATIVE_TRUST_BLOCKED = 0, CAW_NATIVE_TRUST_ISOLATED = 1, CAW_NATIVE_T
 CAW_API char* caw_engine_load_component(CawEngine* e, const char* library_path,
                                         const char* expected_component_id, int32_t trust_level);
 CAW_API int32_t caw_engine_unload_component(CawEngine* e, const char* component_id);
+/* A rebuild of a loaded component, from a new file (the same path would return the old library).
+   It replaces the old build, and every chain using it switches to it, crossfaded, keeping each
+   instance's values, bypass and (if the new build accepts it) state. JSON as for load. */
+CAW_API char* caw_engine_reload_component(CawEngine* e, const char* library_path, const char* expected_component_id,
+                                          int32_t trust_level);
 /* The loaded native components' descriptors as JSON (free with caw_free):
    {"ok":true,"components":[{"id","name","version","role","latency_frames","tail_frames" (null =
    infinite),"max_state_bytes","custom_ui_id","ports":[{"id","type","input","layout","channels",
@@ -119,6 +127,18 @@ CAW_API int32_t caw_engine_unload_component(CawEngine* e, const char* component_
    "ui_controls":[{"id","label","parameter_id","kind","min","max"}]}]} */
 CAW_API char* caw_engine_components(CawEngine* e);
 CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value);
+/* A playing native component's parameter: component `index` (0-based) of a layer's "components"
+   chain, or of "master_components" when layer_id is NULL or empty. It ramps over the parameter's
+   smoothing. 1 on success, 0 if there is no such component or parameter, or value is not finite. */
+CAW_API int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint32_t index,
+                                               const char* param_id, double value);
+/* Bypasses (bypass != 0) or brings back component `index` of the chain, crossfaded over 5 ms; a
+   bypassed component is not run. 1 on success, 0 if there is no such component. */
+CAW_API int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_id, uint32_t index, int32_t bypass);
+/* Each component's state as it saves it now, as JSON (free with caw_free):
+   {"ok":true,"components":[{"index","ok","version","state" (base64)}]}. Store "state" and
+   "version" (as "state_version") in the project's entry so a reload or an export starts from it. */
+CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,

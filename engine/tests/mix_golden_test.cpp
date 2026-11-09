@@ -198,6 +198,19 @@ std::vector<Case> cases() {
         p.layers[2].pattern = "chords";
         out.push_back({"pattern synths through effect chains", p, 0x3eebef32c77d49b9ull});
     }
+    {
+        // The Library's built-in native effects (#121) in track and master chains, tempo-synced delay included.
+        ProjectSpec p = withEffects();
+        p.layers = {chainTrack("b", {"bass"}, 0.7, 0.2), chainTrack("a", {"acid-synth"}, 0.6, -0.3)};
+        p.layers[1].pattern = "acid-line";
+        p.layers[0].components = {{"org.caw.distortion", {{"shape", 0}, {"drive", 6}, {"mix", 0.7}}},
+                                  {"org.caw.stereo.width", {{"width", 1.6}}}};
+        p.layers[1].components = {{"org.caw.chorus", {{"rate", 0.8}, {"depth", 0.6}}},
+                                  {"org.caw.delay.pingpong", {{"sync", 3}, {"feedback", 0.5}, {"mix", 0.4}}},
+                                  {"org.caw.stereo.balance", {{"pan", 0.2}}}};
+        p.masterComponents = {{"org.caw.distortion", {{"shape", 3}, {"bits", 12}, {"mix", 0.3}}}};
+        out.push_back({"built-in library effects on tracks and the master", p, 0x6157a12008143df9ull});
+    }
     return out;
 }
 

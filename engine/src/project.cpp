@@ -35,6 +35,62 @@ std::vector<std::string> idList(const Json* arr) {
     return out;
 }
 
+// A component chain: each entry an id string, or {"id": ..., "params": {name: number}}.
+bool componentList(const Json* arr, const std::string& where, std::vector<ComponentSpec>& out, std::string& error) {
+    out.clear();
+    if (!arr) return true;
+    if (arr->type != Json::Type::Array) {
+        error = where + " must be a list of components";
+        return false;
+    }
+    if (arr->arr.size() > 64) {
+        error = where + " holds more than 64 components";
+        return false;
+    }
+    for (const Json& j : arr->arr) {
+        ComponentSpec c;
+        if (j.type == Json::Type::String) {
+            c.id = j.str;
+        } else if (j.type == Json::Type::Object) {
+            c.id = j.string("id");
+            c.bypass = j.boolean("bypass", false);
+            if (const Json* st = j.get("state"); st && st->type == Json::Type::String) {
+                constexpr size_t kMaxStateText = 16u << 20;  // 12 MB of state; a component's own limit is checked at build
+                if (st->str.size() > kMaxStateText || !base64Decode(st->str, c.state)) {
+                    error = where + ": component '" + c.id + "' state must be base64 of at most 12 MB";
+                    return false;
+                }
+                c.hasState = true;
+                const double version = j.number("state_version", 1);
+                if (!std::isfinite(version) || version < 0 || version > 4294967295.0 || version != std::floor(version)) {
+                    error = where + ": component '" + c.id + "' state_version must be a whole number";
+                    return false;
+                }
+                c.stateVersion = static_cast<uint32_t>(version);
+            }
+            if (const Json* ps = j.get("params")) {
+                if (ps->type != Json::Type::Object) {
+                    error = where + ": component '" + c.id + "' params must be an object of numbers";
+                    return false;
+                }
+                for (const auto& [k, v] : ps->obj) {
+                    if (v.type != Json::Type::Number || !std::isfinite(v.num)) {
+                        error = where + ": component '" + c.id + "' param '" + k + "' must be a finite number";
+                        return false;
+                    }
+                    c.params.emplace_back(k, v.num);
+                }
+            }
+        }
+        if (c.id.empty()) {
+            error = where + ": every component needs an id";
+            return false;
+        }
+        out.push_back(std::move(c));
+    }
+    return true;
+}
+
 }  // namespace
 
 const ModuleSpec* ProjectSpec::module(const std::string& id) const {
@@ -131,7 +187,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         }
     }
 
-    out.masterComponents = idList(root.get("master_components"));
+    if (!componentList(root.get("master_components"), "master_components", out.masterComponents, error)) return false;
     if (const Json* mods = root.get("modules"); mods && mods->type == Json::Type::Array) {
         for (const Json& m : mods->arr) {
             if (m.type != Json::Type::Object) continue;
@@ -158,6 +214,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             if (spec.id.empty()) continue;
             spec.chain = idList(l.get("chain"));
             const std::string layerName = "layer '" + spec.id + "'";
+            if (!componentList(l.get("components"), layerName + " components", spec.components, error)) return false;
             if (!wholeIn(l.number("length_steps", 0), 0, maxSteps, spec.lengthSteps)) {
                 error = layerName + ": length_steps must be a whole number from " + range(0, maxSteps);
                 return false;
@@ -225,8 +282,15 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             lane.targetType = laneJson.string("target_type");
             lane.target = laneJson.string("target");
             lane.moduleId = laneJson.string("module");
-            if ((lane.targetType != "param" && lane.targetType != "global") || lane.target.empty() ||
-                (lane.targetType == "param" && lane.moduleId.empty())) continue;
+            if (lane.targetType == "component") {
+                // {"target_type":"component","layer":id (absent: the master),"component":index,"target":param}
+                lane.moduleId = laneJson.string("layer");
+                const double index = laneJson.number("component", -1);
+                if (!(index >= 0 && index < 64 && index == std::floor(index))) continue;
+                lane.component = static_cast<int>(index);
+            }
+            if ((lane.targetType != "param" && lane.targetType != "global" && lane.targetType != "component") ||
+                lane.target.empty() || (lane.targetType == "param" && lane.moduleId.empty())) continue;
             if (!pointStepsOk(laneJson.get("points"), error, "")) return false;
             if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                 for (const Json& point : points->arr) {

@@ -84,8 +84,10 @@ char* caw_engine_set_project(CawEngine* e, const char* json) try {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"modules\":{}}");
 }
 
-char* caw_engine_load_component(CawEngine* e, const char* library_path,
-                                const char* expected_component_id, int32_t trust_level) try {
+namespace {
+// Load and reload share their checks and their JSON result.
+char* loadComponent(CawEngine* e, const char* library_path, const char* expected_component_id, int32_t trust_level,
+                    bool reload) try {
     using namespace caw;
     if (!e || !e->engine || !library_path || !expected_component_id)
         return dup("{\"ok\":false,\"error\":\"missing engine, library path or component ID\",\"errorCode\":3}");
@@ -97,7 +99,8 @@ char* caw_engine_load_component(CawEngine* e, const char* library_path,
         default:
             return dup("{\"ok\":false,\"error\":\"invalid native component trust level\",\"errorCode\":3}");
     }
-    const ModuleLoadResult result = e->engine->loadNativeComponent(library_path, expected_component_id, trust);
+    const ModuleLoadResult result = reload ? e->engine->reloadNativeComponent(library_path, expected_component_id, trust)
+                                           : e->engine->loadNativeComponent(library_path, expected_component_id, trust);
     return dup(std::string("{\"ok\":") + (result.success ? "true" : "false") +
                ",\"componentId\":\"" + jsonEscape(result.componentId) +
                "\",\"error\":\"" + jsonEscape(result.message) +
@@ -106,6 +109,17 @@ char* caw_engine_load_component(CawEngine* e, const char* library_path,
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"errorCode\":4}");
 } catch (...) {
     return dup("{\"ok\":false,\"error\":\"native component loading failed\",\"errorCode\":4}");
+}
+}  // namespace
+
+char* caw_engine_load_component(CawEngine* e, const char* library_path, const char* expected_component_id,
+                                int32_t trust_level) {
+    return loadComponent(e, library_path, expected_component_id, trust_level, false);
+}
+
+char* caw_engine_reload_component(CawEngine* e, const char* library_path, const char* expected_component_id,
+                                  int32_t trust_level) {
+    return loadComponent(e, library_path, expected_component_id, trust_level, true);
 }
 
 char* caw_engine_components(CawEngine* e) try {
@@ -125,6 +139,28 @@ int32_t caw_engine_unload_component(CawEngine* e, const char* component_id) try 
 
 void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value) {
     if (e && module_id && name) e->engine->setParam(module_id, name, value);
+}
+
+int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint32_t index, const char* param_id,
+                                       double value) try {
+    return e && e->engine && param_id &&
+                   e->engine->setComponentParam(layer_id ? layer_id : "", index, param_id, value)
+               ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
+int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_id, uint32_t index, int32_t bypass) try {
+    return e && e->engine && e->engine->setComponentBypass(layer_id ? layer_id : "", index, bypass != 0) ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
+char* caw_engine_component_states(CawEngine* e, const char* layer_id) try {
+    if (!e || !e->engine) return nullptr;
+    return dup(e->engine->componentStatesJson(layer_id ? layer_id : ""));
+} catch (...) {
+    return nullptr;
 }
 
 void caw_engine_set_global(CawEngine* e, const char* name, double value) {

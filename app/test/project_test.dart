@@ -14,6 +14,78 @@ ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'s
     ]);
 
 void main() {
+  test('a new C++ effect starts from the blank pass-through template with a valid manifest', () {
+    final c = CppComponentDoc.blankEffect(id: 'c1', name: 'My "Delay"');
+    expect(c.componentId, 'local.my-delay.c1');
+    expect(c.files.keys, containsAll(['caw-component.json', 'src/effect.cpp']));
+    final manifest = jsonDecode(c.files['caw-component.json']!) as Map<String, dynamic>;
+    expect(manifest['format'], 'caw.component');
+    expect((manifest['component'] as Map)['id'], c.componentId);
+    expect((manifest['component'] as Map)['name'], 'My "Delay"');
+    expect(manifest['sources'], ['src/effect.cpp']);
+    final source = c.files['src/effect.cpp']!;
+    expect(source, contains('d.id = "local.my-delay.c1";'));
+    expect(source, contains("d.name = \"My 'Delay'\";"));  // safe inside the C++ string
+    expect(source, contains('CAW_EXPORT_COMPONENT(MyDelay, kDescriptor)'));
+  });
+
+  test('native components on tracks and the master round-trip and reach the engine with their values', () {
+    final p = ProjectDoc(id: 'p', name: 'P', bpm: 120, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    p.layers.first.components = [ComponentUseDoc('org.x.gain', {'left': 2})];
+    p.masterComponents = [ComponentUseDoc('org.x.verb')];
+    final again = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(again.layers.first.components.single.id, 'org.x.gain');
+    expect(again.layers.first.components.single.params, {'left': 2.0});
+    expect(again.masterComponents.single.id, 'org.x.verb');
+    final engine = jsonDecode(p.toEngineJson()) as Map<String, dynamic>;
+    expect(engine['master_components'], ['org.x.verb']);  // a bare id, as before
+    expect((engine['layers'] as List).first['components'], [
+      {'id': 'org.x.gain', 'params': {'left': 2.0}},
+    ]);
+    // Bad entries are dropped, not trusted: no id, a non-finite value.
+    final bad = ComponentUseDoc.listFromJson([
+      {'params': {}},
+      {'id': 'org.y', 'params': {'a': 'loud', 'b': 1}},
+      7,
+    ]);
+    expect(bad.single.id, 'org.y');
+    expect(bad.single.params, {'b': 1.0});
+  });
+
+  test('components the engine has not loaded are left out, and their lanes renumbered', () {
+    final p = ProjectDoc(id: 'p', name: 'P', bpm: 120, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    p.layers.first.components = [ComponentUseDoc('org.x.untrusted'), ComponentUseDoc('org.x.gain')];
+    p.automation.addAll([
+      ProjectAutomationLaneDoc(targetType: 'component', target: 'a', layerId: 'l', component: 0, points: [AutomationPointDoc(step: 0, value: 1)]),
+      ProjectAutomationLaneDoc(targetType: 'component', target: 'b', layerId: 'l', component: 1, points: [AutomationPointDoc(step: 0, value: 1)]),
+    ]);
+    final engine = jsonDecode(p.toEngineJson(playableComponents: {'org.x.gain'})) as Map<String, dynamic>;
+    expect((engine['layers'] as List).first['components'], ['org.x.gain']);
+    final lanes = (engine['automation'] as List).cast<Map<String, dynamic>>();
+    expect(lanes.single['target'], 'b');
+    expect(lanes.single['component'], 0);
+  });
+
+  test('component bypass, state and automation lanes reach the engine and come back', () {
+    final p = ProjectDoc(id: 'p', name: 'P', bpm: 120, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    p.layers.first.components = [ComponentUseDoc('org.x.gain', {}, true)];
+    p.automation.add(ProjectAutomationLaneDoc(
+        targetType: 'component', target: 'left', layerId: 'l', component: 0, points: [AutomationPointDoc(step: 0, value: 1)]));
+    p.storeComponentStates((layer) => layer == 'l' ? {0: (state: 'CgAAAAAAAAA=', version: 7)} : const {});
+    final engine = jsonDecode(p.toEngineJson()) as Map<String, dynamic>;
+    expect((engine['layers'] as List).first['components'], [
+      {'id': 'org.x.gain', 'bypass': true, 'state': 'CgAAAAAAAAA=', 'state_version': 7},
+    ]);
+    final lane = (engine['automation'] as List).single as Map<String, dynamic>;
+    expect(lane['target_type'], 'component');
+    expect(lane['layer'], 'l');
+    expect(lane['component'], 0);
+    final again = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(again.layers.first.components.single.bypass, isTrue);
+    expect(again.layers.first.components.single.stateVersion, 7);
+    expect(again.automation.single.component, 0);
+  });
+
   test('a spacer under a track is saved with the project, never sent to the engine, and clamped', () {
     final p = sample();
     p.layers.first.spaceBelow = 40;

@@ -24,8 +24,8 @@ TEST(project_json_preserves_native_master_component_order) {
         project,
         error));
     CHECK_EQ(project.masterComponents.size(), 2u);
-    CHECK_EQ(project.masterComponents[0], std::string("org.caw.fx.first"));
-    CHECK_EQ(project.masterComponents[1], std::string("org.caw.fx.second"));
+    CHECK_EQ(project.masterComponents[0].id, std::string("org.caw.fx.first"));
+    CHECK_EQ(project.masterComponents[1].id, std::string("org.caw.fx.second"));
 }
 
 TEST(c_api_native_component_load_requires_an_explicit_trust_level) {
@@ -191,9 +191,15 @@ TEST(c_api_lists_loaded_component_descriptors_as_json) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine || !path) return;
-    char* empty = caw_engine_components(engine);
-    CHECK(empty && std::string(empty) == "{\"ok\":true,\"components\":[]}");
-    caw_free(empty);
+    char* builtins = caw_engine_components(engine);  // before any load: only the built-in Library components
+    CHECK(builtins != nullptr);
+    if (builtins) {
+        const std::string json(builtins);
+        CHECK(json.find("{\"builtin\":true,\"id\":\"org.caw.stereo.balance\"") != std::string::npos);
+        CHECK(json.find("{\"builtin\":true,\"id\":\"org.caw.stereo.width\"") != std::string::npos);
+        CHECK(json.find(kComponentId) == std::string::npos);
+    }
+    caw_free(builtins);
     char* loaded = caw_engine_load_component(engine, path, kComponentId, CAW_NATIVE_TRUST_TRUSTED);
     caw_free(loaded);
     char* listed = caw_engine_components(engine);
