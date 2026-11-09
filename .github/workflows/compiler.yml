@@ -18,9 +18,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# A newer push doesn't cancel a running build: the first LLVM build takes hours, and it fills the cache.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 env:
   LLVM_VERSION: 23.1.5
   LLVM_SHA256: fb50b1eac93ddeb3aa8dab4cfe324dff74f4a9c2bdee6160c9e36188f8d06a6e
