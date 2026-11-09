@@ -1,7 +1,7 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-06
+updated: 2026-11-09
 ---
 
 # Decisions
@@ -22,11 +22,26 @@ updated: 2026-11-06
 - **Owner decision — safe sharing (2026-11-09):** once .caw is removed, visual-graph components made only of built-in nodes are the safe share format; anything containing C++ needs the user's trust choice.
 - **Owner decision — iOS (2026-11-09):** iOS ships without C++ authoring/compilation (play, arrange, build visually). The App Store rule behind this is an assumption to verify.
 - **Owner decision — nothing external required (2026-11-09):** the app needs no set-up step, PC, charger, network or other connection to work; optional ones may improve things but are never required. The C++ compiler ships inside the one app (no separate edition), with the SDK and C++ standard library; set-up optionally offers Faust libraries and starter instruments/effects ([C++ creation platform](cpp-creation-platform.md) §6).
+- **Owner decision — Android compiler process (2026-11-09):** on Android the bundled Clang/LLD run as a native library hosted in a dedicated `:compiler` process, so a compiler crash cannot take down the app or its audio.
 - **Owner decision — overrun protection (2026-11-09):** a component that repeatedly misses its audio time budget is bypassed with a warning and can be re-enabled.
 - **Owner direction — remote compiling (2026-11-09, future):** besides required on-device offline compiling, allow optional remote compiling through a free service (the user's own GitHub Actions first; research others) or the user's own computer, reachable on the same network or over the internet. Remote-built components go through the trust choice ([C++ creation platform](cpp-creation-platform.md) §6).
 - **Owner decision — Faust timing (2026-11-09):** Faust work starts only after on-device C++ building works; it then uses that same local build step. No CI-only Faust path.
 - **Licensing direction:** C.A.W. is intended to be free/open source, with optional support/donation bundles of prebuilt FX, instruments, presets, samples and sounds; core capabilities are not paywalled. No paid dependency or commercial licence is assumed. **Owner decision (2026-11-09):** C.A.W. is licensed under Apache-2.0, switched from all-rights-reserved on 2026-11-09 (chosen over MIT for its explicit patent grant and because it grants no use of the C.A.W. name). AutoStacc distributes the free app and the optional support bundles. Dependencies stay permissive: no GPL/AGPL code (so no Tracktion Engine or JUCE code). This keeps the iOS App Store, closed-source SDK components and later relicensing possible. Faust's compiler (LGPL) is a build tool, not shipped code, so generated components remain eligible subject to the audit. Verify exact versions and transitive/architecture-file licences before adoption.
 - **Plan ownership:** the canonical [roadmap](roadmap.md) owns sequence and status. Technical detail lives in [visual creation and signal routing](visual-routing-and-library-integration.md), [C++ creation platform](cpp-creation-platform.md) and [architecture](architecture.md). This decision is not an implementation claim.
+
+## 2026-11-08: Native note, voice and channel processing; direct pitch-expression editing
+
+- **Owner decision — one native processing model:** per-note, per-voice and per-channel processing are first-class capabilities across the C++ SDK, component model, instruments, synthesis, effects, routing, automation, mixer and runtime. They are not separate feature islands and must not require users to duplicate signals or build manual workarounds.
+- **Preserve identity until an intentional merge:** note identity, voice identity, per-note expression, channel identity/layout and event timing remain available to components that declare they use them. A component may explicitly transform, aggregate or discard a domain, but the engine must not silently lose note expression, collapse channels or reinterpret a layout.
+- **Components declare their processing scope:** whole-stream, per-channel, per-voice and per-note processing are explicit capabilities alongside typed audio, event, MIDI, control and modulation ports. Components may support more than one scope. Effects and instruments use the same contract; an effect that needs individual note/voice context receives it through the native processing model rather than a special-case workaround.
+- **Native stereo synthesis is required:** instruments can generate genuinely distinct left/right signals, distribute unison voices across the stereo field, and control per-voice phase, detune, gain, pan and modulation. Stereo oscillators, stereo modulation and stereo effects are native Library/SDK building blocks, not mono duplication followed by a widening workaround.
+- **Stereo is the ordinary default; channel capacity follows resources:** new tracks default to stereo. The engine supports explicit mono, stereo and arbitrary N-channel layouts, with practical capacity limited by available CPU, memory, device and host budgets rather than an arbitrary fixed product ceiling. Track layouts are independent of physical output count; any required mapping or downmix is explicit at the output boundary.
+- **No hidden channel or expression loss:** incompatible layouts require a visible, declared conversion. A stereo or multichannel effect must not silently collapse to mono, and a component that cannot preserve a processing domain must make the merge/conversion explicit.
+- **Piano-roll direction — MIDISketch-inspired per-note pitch curves:** pitch slides and bends should primarily be drawn and edited as continuous curves on the note itself, with the curve representing the pitch the engine actually plays. The note remains visible and editable. A separate slide event remains available where it is musically useful, but it is not required for an ordinary glide.
+- **Touch editing must be direct and smooth:** users can select the pitch curve/slide they intend to edit without accidentally selecting the underlying note; move, stretch and reshape it with continuous feedback; keep the underlying note visible; and use accessible handles and helpful snapping without abrupt jumps. Visual editing, note preview and playback use the same expression data.
+- **Simple by default, deep when requested:** compatible components connect and work with sensible defaults. Ordinary stereo, unison, effects, panning and pitch expression must not require obscure routing, duplicated signals or manual channel plumbing. Advanced channel maps and per-note/per-voice controls remain available without burdening basic workflows.
+- **Safety remains mandatory:** richer note/voice/channel processing stays within the resource budget and real-time callback rules; preparation and allocation happen off the audio thread.
+- Detailed SDK contracts and tests: [C++ creation platform](cpp-creation-platform.md). Piano-roll interaction and sequencing: [roadmap](roadmap.md#stage-1-pattern-workflow-and-editing-safety), with current UI design in [UI plan](ui-plan.md#piano-roll).
 
 ## 2026-11-06: Offline-first C++ prototype and delivery requirements
 
@@ -315,3 +330,14 @@ updated: 2026-11-06
 ## 2026-11-02 — Effect-chain length is resource-governed, not a fixed product cap
 
 Project layers and synth patches may describe dynamically sized module/effect chains. Parsing and engine preparation must preserve every authored chain element; no silent truncation or arbitrary eight-effect ceiling is allowed. Memory and processing costs are handled by explicit host resource budgets and clear preparation errors. This change does not remove unrelated limits such as the current project layer-slot model or export-buffer capacity; those remain separate integration work.
+
+
+## 2026-11-06: First native C++ playback slice
+
+**Implementation decision (initial prototype, not the final component limitation):** route explicitly loaded, zero-parameter stereo C++ effects through a project-owned master-effect list (master_components). This uses the existing stereo master stage without forcing stereo processors into the current three-lane VM track chain, which is still mono per module. Keep the master safety limiter after native processing.
+
+- A successful build never loads or authorizes code. The caller must pass an explicit Blocked, Isolated or Trusted value to the Engine C API; Blocked refuses before opening the library, Isolated is rejected until a real separate-process host exists, and Trusted runs in-process.
+- Trust is not serialized into the portable project. The project stores component IDs/order only; each user/device must make its own trust decision before the component can be used.
+- The audio callback uses fixed preallocated stereo stages, performs no host allocation or locking, sanitizes output and publishes/retires master chains through the existing command/retirement path. Component code itself must obey the real-time contract.
+- The known scratch and chain-pointer storage is included in Engine budgets. ABI v1 does not report component-private heap/state size; that remains an explicit measurement gap.
+- Next integration work: parameter mapping, then track-chain support with a deliberate stereo/state design, then the per-component trust UI/store and Android-hosted toolchain.

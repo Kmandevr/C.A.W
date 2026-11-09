@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "execution.h"
+#include "module_registry.h"
 #include "pattern.h"
 #include "program.h"
 #include "project.h"
@@ -71,6 +72,10 @@ public:
     // Offline render only: call while no audio callback can run; project commands are applied synchronously.
     std::string setProjectOffline(const ProjectSpec& p);
     std::string setProjectJson(std::string_view json);
+    // Native components are loaded only after an explicit per-component trust decision.
+    ModuleLoadResult loadNativeComponent(const std::string& path, const std::string& expectedId, NativeModuleTrust trust);
+    bool unloadNativeComponent(const std::string& id);
+    std::unique_ptr<ModuleProcessor> createNativeComponent(const std::string& id);
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
@@ -101,6 +106,7 @@ public:
     void reportLoad(double load) noexcept;  // fraction of the callback's time budget used
 
     struct Chain;
+    struct MasterChain;
 
 private:
     struct Slot;
@@ -118,7 +124,7 @@ private:
     void applyCommands() noexcept;
     void retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr, std::vector<int>* order = nullptr,
-                SlotTable* table = nullptr) noexcept;
+                SlotTable* table = nullptr, MasterChain* masterChain = nullptr) noexcept;
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
@@ -225,6 +231,8 @@ private:
 
     // ---- control-thread state ----
     std::mutex ctl_;
+    ModuleRegistry nativeModules_;  // control-thread registry; loaded processors keep their library alive
+    MasterChain* masterChain_ = nullptr;  // audio-thread-owned; replaced/retired through commands
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     struct ModuleState {
         std::string source;

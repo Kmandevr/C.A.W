@@ -210,13 +210,15 @@ class ProjectDoc {
     List<String>? libraryFolders,
     Map<String, String>? savedLibrarySearches,
     List<CppComponentDoc>? cppComponents,
+    List<String>? masterComponents,
   })  : globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
         automation = automation ?? [],
         libraryFolders = libraryFolders ?? [],
         savedLibrarySearches = savedLibrarySearches ?? {},
-        cppComponents = cppComponents ?? [] {
+        cppComponents = cppComponents ?? [],
+        masterComponents = masterComponents ?? [] {
     // Keep the in-memory model canonical: a track owns clip instances, not a legacy
     // single-pattern pointer. The stable ID makes repeated saves deterministic.
     for (final layer in this.layers) {
@@ -257,6 +259,7 @@ class ProjectDoc {
   List<String> libraryFolders;
   Map<String, String> savedLibrarySearches;
   List<CppComponentDoc> cppComponents;
+  List<String> masterComponents; // native stereo master-effect IDs; this is not a trust grant
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
@@ -324,6 +327,7 @@ class ProjectDoc {
         'modules': [
           for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
         ],
+        'master_components': masterComponents,
         'layers': [
           for (final l in layers)
             {
@@ -371,6 +375,7 @@ class ProjectDoc {
         'library_folders': libraryFolders,
         'saved_library_searches': savedLibrarySearches,
         'cpp_components': [for (final component in cppComponents) component.toJson()],
+        'master_components': masterComponents,
       };
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
@@ -396,6 +401,9 @@ class ProjectDoc {
       },
       cppComponents: ((j['cpp_components'] as List?) ?? const [])
           .map((component) => CppComponentDoc.fromJson(component as Map<String, dynamic>)).toList(),
+      masterComponents: ((j['master_components'] as List?) ?? const [])
+          .whereType<String>().take(64).map((id) => _boundedProjectText(id, 128))
+          .where((id) => id.isNotEmpty).toList(),
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.

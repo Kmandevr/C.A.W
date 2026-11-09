@@ -30,20 +30,20 @@ class CppBuildResult {
     required this.exitCode,
     required this.output,
     required this.diagnostics,
+    this.artifactPath,
   });
 
   final bool success;
   final int exitCode;
   final String output;
   final List<CppBuildDiagnostic> diagnostics;
+  final String? artifactPath;
 }
 
 /// Joins project persistence, safe source materialization and the local CMake runner.
 class CppComponentBuildService {
-  const CppComponentBuildService(
-    this._storage, {
-    this.runner = const CppComponentBuildRunner(),
-  });
+  CppComponentBuildService(this._storage, {CppComponentBuildRunner? runner})
+      : runner = runner ?? CppComponentBuildRunner();
 
   final ProjectStorage _storage;
   final CppComponentBuildRunner runner;
@@ -67,7 +67,7 @@ class CppComponentBuildService {
     await _storage.save(project);
     final sourceDirectory = await _storage.materializeCppComponent(project, component);
     final buildDirectory = await _storage.prepareCppBuildDirectory(project.id, component.id);
-    return runner.build(
+    final result = await runner.build(
       cmakeExecutable: cmakeExecutable,
       projectDirectory: sourceDirectory.path,
       buildDirectory: buildDirectory.path,
@@ -78,6 +78,49 @@ class CppComponentBuildService {
       androidAbi: androidAbi,
       androidPlatform: androidPlatform,
       environment: environment,
+    );
+    if (!result.success) return result;
+
+    final artifactMetadata = File(
+      '${buildDirectory.path}${Platform.pathSeparator}caw-component-artifact-$configuration.txt',
+    );
+    if (!await artifactMetadata.exists()) {
+      return CppBuildResult(
+        success: false,
+        exitCode: 1,
+        output: result.output,
+        diagnostics: [
+          ...result.diagnostics,
+          const CppBuildDiagnostic(
+            severity: 'error',
+            code: 'CAW_ARTIFACT_MISSING',
+            message: 'CMake completed, but no component artifact was exported. Use caw_add_component() in the project CMakeLists.txt.',
+          ),
+        ],
+      );
+    }
+    final artifactPath = (await artifactMetadata.readAsString()).trim();
+    if (artifactPath.isEmpty || !await File(artifactPath).exists()) {
+      return CppBuildResult(
+        success: false,
+        exitCode: 1,
+        output: result.output,
+        diagnostics: [
+          ...result.diagnostics,
+          const CppBuildDiagnostic(
+            severity: 'error',
+            code: 'CAW_ARTIFACT_MISSING',
+            message: 'The component artifact path exported by CMake does not exist.',
+          ),
+        ],
+      );
+    }
+    return CppBuildResult(
+      success: true,
+      exitCode: result.exitCode,
+      output: result.output,
+      diagnostics: result.diagnostics,
+      artifactPath: artifactPath,
     );
   }
 }
@@ -136,9 +179,11 @@ List<CppBuildDiagnostic> parseCppBuildDiagnostics(String output) {
   return diagnostics;
 }
 
-/// Invokes CMake directly (never through a shell). The caller supplies locally installed tools and SDK paths.
+/// Invokes CMake directly on desktop; Android must use its in-process compiler module.
 class CppComponentBuildRunner {
-  const CppComponentBuildRunner();
+  CppComponentBuildRunner({bool? isAndroid}) : _isAndroid = isAndroid ?? Platform.isAndroid;
+
+  final bool _isAndroid;
 
   Future<CppBuildResult> build({
     required String cmakeExecutable,
@@ -153,6 +198,21 @@ class CppComponentBuildRunner {
     Map<String, String>? environment,
   }) async {
     if (parallelJobs < 1) throw ArgumentError.value(parallelJobs, 'parallelJobs', 'Must be at least one.');
+    if (_isAndroid) {
+      const message = 'Android C++ builds require the bundled in-process Clang toolchain; process-based CMake execution is disabled.';
+      return const CppBuildResult(
+        success: false,
+        exitCode: 126,
+        output: message,
+        diagnostics: [
+          CppBuildDiagnostic(
+            severity: 'error',
+            code: 'CAW_ANDROID_TOOLCHAIN_UNAVAILABLE',
+            message: message,
+          ),
+        ],
+      );
+    }
 
     final configureArgs = [
       '-S', projectDirectory,
@@ -165,13 +225,7 @@ class CppComponentBuildRunner {
     if (androidPlatform != null) configureArgs.add('-DANDROID_PLATFORM=$androidPlatform');
 
     final output = StringBuffer();
-    var exitCode = await _run(
-      cmakeExecutable,
-      configureArgs,
-      projectDirectory,
-      environment,
-      output,
-    );
+    var exitCode = await _run(cmakeExecutable, configureArgs, projectDirectory, environment, output);
     if (exitCode == 0) {
       exitCode = await _run(
         cmakeExecutable,
@@ -194,12 +248,7 @@ class CppComponentBuildRunner {
             : lines.last,
       ));
     }
-    return CppBuildResult(
-      success: exitCode == 0,
-      exitCode: exitCode,
-      output: text,
-      diagnostics: diagnostics,
-    );
+    return CppBuildResult(success: exitCode == 0, exitCode: exitCode, output: text, diagnostics: diagnostics);
   }
 
   Future<int> _run(

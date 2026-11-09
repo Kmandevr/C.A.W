@@ -7,8 +7,8 @@
 namespace {
 
 constexpr caw::PortDescriptor kPorts[] = {
-    {"audio_in", caw::PortType::Audio, caw::ChannelLayout::Stereo, true, 2, false, 0.0f},
-    {"audio_out", caw::PortType::Audio, caw::ChannelLayout::Stereo, false, 2, false, 0.0f},
+    {"audio_in", caw::PortType::Audio, caw::ChannelLayout::Stereo, true, 0, false, 0.0f},
+    {"audio_out", caw::PortType::Audio, caw::ChannelLayout::Stereo, false, 0, false, 0.0f},
 };
 
 const caw::ModuleDescriptor kDescriptor{
@@ -49,4 +49,9 @@ caw_component_descriptor() noexcept {
 extern "C" CAW_COMPONENT_EXPORT caw::ModuleProcessor*
 caw_component_create() noexcept {
     return new (std::nothrow) MinimalComponent();
+}
+
+extern "C" CAW_COMPONENT_EXPORT void
+caw_component_destroy(caw::ModuleProcessor* processor) noexcept {
+    delete processor;
 }

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -11,6 +12,7 @@
 
 #include "detmath.h"
 #include "engine.h"
+#include "native_component_test_path.h"
 #include "test.h"
 
 using namespace caw;
@@ -54,6 +56,36 @@ float maxStep(const std::vector<float>& v, size_t from, size_t to) {
 }
 
 }  // namespace
+
+TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) {
+    constexpr const char* componentId = "org.caw.tests.native-loader";
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    CHECK(path && path[0] != 0);
+    if (!path) return;
+
+    Engine e(48000);
+    const ModuleLoadResult loaded = e.loadNativeComponent(path, componentId, NativeModuleTrust::Trusted);
+    CHECK(loaded.success);
+    if (!loaded.success) return;
+
+    ProjectSpec p = project({{"tone", std::string(kFloat) + "sine(220) * 0.8"}});
+    p.masterComponents.push_back(componentId);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> right;
+    const auto left = run(e, 2048, 64, &right);
+    // The component doubles the stereo signal; the master safety limiter still runs after it.
+    CHECK(std::fabs(left[1145]) > 0.9f);
+    CHECK(std::fabs(left[1145]) <= 0.98f);
+    CHECK_NEAR(left[1145], right[1145], 1e-5);
+    CHECK(!e.unloadNativeComponent(componentId)); // the active master chain keeps its library loaded
+
+    p.masterComponents.clear();
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    run(e, 128);
+    CHECK(e.unloadNativeComponent(componentId));
+}
 
 TEST(meters_read_what_each_track_and_folder_sends_on_after_volume_and_pan) {
     ProjectSpec p;

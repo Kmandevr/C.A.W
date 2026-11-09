@@ -14,12 +14,12 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: \${{ github.workflow }}-\${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   component:
-    name: Component (\${{ matrix.name }})
+    name: Component (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +33,7 @@ jobs:
           - name: Android ARM64
             os: ubuntu-24.04
             android: true
-    runs-on: \${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
@@ -51,7 +51,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/caw-sdk"
           cmake --install "$RUNNER_TEMP/caw-sdk-build" --config Release
       - name: Download Android NDK r30 (Google SDK licence accepted by owner)
-        if: \${{ matrix.android }}
+        if: ${{ matrix.android }}
         run: |
           curl --fail --location --retry 3 \
             https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
@@ -60,7 +60,7 @@ jobs:
           unzip -q "$RUNNER_TEMP/android-ndk.zip" -d "$RUNNER_TEMP"
           echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r30" >> "$GITHUB_ENV"
       - name: Build component for desktop
-        if: \${{ !matrix.android }}
+        if: ${{ !matrix.android }}
         run: |
           node scripts/caw-component-build.js \
             --project examples/cpp/minimal --sdk "$RUNNER_TEMP/caw-sdk" \
@@ -74,21 +74,21 @@ jobs:
             --toolchain "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
             --android-abi arm64-v8a --android-platform android-24
       - name: Test component contract
-        if: \${{ !matrix.android }}
+        if: ${{ !matrix.android }}
         run: ctest --test-dir "$RUNNER_TEMP/caw-component-build" --build-config Release --output-on-failure
       - name: Upload Android component artifact
         if: matrix.android
         uses: actions/upload-artifact@v7
         with:
           name: caw-minimal-component-android-arm64
-          path: \${{ runner.temp }}/caw-component-build/artifacts/*
+          path: ${{ runner.temp }}/caw-component-build/artifacts/*
           if-no-files-found: error
           retention-days: 14
       - name: Upload desktop component artifact
-        if: \${{ !matrix.android }}
+        if: ${{ !matrix.android }}
         uses: actions/upload-artifact@v7
         with:
-          name: caw-minimal-component-\${{ matrix.name }}
-          path: \${{ runner.temp }}/caw-component-build/artifacts/*
+          name: caw-minimal-component-${{ matrix.name }}
+          path: ${{ runner.temp }}/caw-component-build/artifacts/*
           if-no-files-found: error
           retention-days: 14

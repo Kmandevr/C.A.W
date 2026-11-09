@@ -1,13 +1,13 @@
 ---
 title: C++ creation platform
 summary: Owner-approved C++ authoring direction and implementation status for the shared SDK, component model and code, visual and performance interfaces.
-covers: [engine/include/caw/, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
-updated: 2026-11-06
+covers: [engine/include/caw/, engine/cmake/, engine/src/module_registry.*, engine/src/capi.cpp, engine/CMakeLists.txt, app/lib/model/cpp_component.dart, app/lib/model/project.dart, app/lib/model/storage.dart, app/lib/platform/cpp_build.dart, app/lib/platform/cpp_toolchain.dart, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
+updated: 2026-11-09
 ---
 
 # C++ creation platform
 
-**Status (2026-11-06):** The public C++ processor contract is exposed through `engine/include/caw/module.hpp`. The first CP.1 code slice is present: an installable `CAW::SDK` CMake package, a versioned `caw.component` project manifest, a CMake shared-library helper, exported descriptor/factory entry points, a minimal stereo fixture, and a Node build driver with structured diagnostics. The Linux x64, Windows x64 and Android ARM64 GitHub Actions matrix is repository CI only; it tests the component build path and is not a CAW user build service. Its component jobs were still queued at the last status check. **The product requirement is local/offline C++ compilation**; the app-local compiler/toolchain packaging, proactive local dependency manager, project/source storage, app build integration, runtime registration/loading and user-configured trust host are not yet implemented. Full Library coverage, C++ editor, both visual workspaces, generated/custom UI and self-contained project handoff remain incomplete. Faust, Pure Data/libpd and Tracktion Engine are evaluated in [visual creation and signal routing](visual-routing-and-library-integration.md); none is an adopted dependency. This note supports the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
+**Status (2026-11-09):** The public C++ processor contract is exposed through `engine/include/caw/module.hpp`. CP.1 now includes an installable `CAW::SDK` CMake package, versioned `caw.component` manifest/helper, descriptor/create/destroy exports, and a minimal stereo fixture. The app persists component source and exact dependency pins, materializes them into a private workspace, builds locally with CMake, reuses a persistent build directory and returns a verified artifact path. The Engine's `ModuleRegistry` and C API can load a built shared library only with an explicit trust value: Blocked refuses to open it, Isolated is rejected because no process sandbox exists, and Trusted loads it in-process. The first audio playback slice is implemented: `ProjectDoc.masterComponents` routes zero-parameter stereo effects through the live master chain, with the safety limiter after native code. Parameter mapping and track-chain integration remain outstanding. The Dart FFI load/unload wrapper exists; the per-component trust UI/store is still missing. A `caw.toolchain` manifest validator (`app/lib/platform/cpp_toolchain.dart`) describes the bundled compiler, and the CMake runner refuses to run on Android. Bundling the compiler (on Android a native library in a dedicated `:compiler` process, §6), proactive dependency manager, full Library coverage, editor, visual scripting, generated/custom UI and self-contained project handoff remain incomplete. The Linux x64, Windows x64 and Android ARM64 GitHub Actions matrix is repository CI only; it is not a CAW user build service. **The product requirement remains local/offline C++ compilation.** Faust and Tracktion Engine are evaluated in [visual creation and signal routing](visual-routing-and-library-integration.md); neither is an adopted dependency. This note supports the single [C.A.W. roadmap](roadmap.md), not a second feature roadmap.
 
 ## 1. The four distinct layers
 
@@ -29,7 +29,7 @@ A descriptor should cover:
 - **Identity and discovery:** stable component ID, display name, version, description, category, tags, author and capability declarations.
 - **Role:** instrument/voice, generator, effect, utility processor, event processor, analysis tool or other declared role. A component may support more than one role where its behavior genuinely allows it.
 - **Typed ports:** named inputs and outputs, direction, type, channel layout, units, rate, multiplicity, optional/default behavior and sidechain designation.
-- **Parameters:** stable parameter ID, name, description, value type, default, minimum/maximum, step, unit, display format, curve, choices, smoothing and visibility.
+- **Parameters:** stable parameter ID, name, description, value type, default, minimum/maximum, step, unit, display format, curve, choices, smoothing, visibility and control scope (project, track, channel, voice or note).
 - **Parameter capabilities:** whether a parameter supports automation, modulation, MIDI mapping, host exposure, sample-accurate changes or block-rate changes.
 - **Assets and data:** declared sample, wavetable, impulse-response, table, preset and other resource inputs; ownership, lifetime, version and missing-resource behavior.
 - **Events and MIDI:** accepted/emitted event kinds, MIDI 1.0 and MIDI 2.0 UMP support, note identity, per-note expression and timestamp/frame semantics.
@@ -40,7 +40,7 @@ A descriptor should cover:
 
 The descriptor is not a second implementation. It describes the actual C++ component and is validated against it. A component that omits optional UI metadata still works; it receives a useful generated interface.
 
-**Binary boundary (owner decision, 2026-11-09):** compiled components and the host talk through a small, versioned C interface (plain structs, function pointers, fixed-size types; no `std::` types, C++ classes or exceptions across the library boundary), the way CLAP plugins do. The SDK's C++ classes sit on top of it inside the component. This keeps old and shared components working when the app, compiler or C++ standard library changes. **[Fact, checked 2026-11-09]** today's `engine/include/caw/component.hpp` exports `extern "C"` entry points, but they return C++ objects (`caw::ModuleDescriptor` with `std::string_view` fields, the virtual `caw::ModuleProcessor` class from `module.hpp`), so the boundary still has to be converted.
+**Binary boundary (owner decision, 2026-11-09):** compiled components and the host talk through a small, versioned C interface (plain structs, function pointers, fixed-size types; no `std::` types, C++ classes or exceptions across the library boundary), the way CLAP plugins do. The SDK's C++ classes sit on top of it inside the component. This keeps old and shared components working when the app, compiler or C++ standard library changes. **[Fact, checked 2026-11-09]** today's `engine/include/caw/component.hpp` exports `extern "C"` entry points, but they return C++ objects (`caw::ModuleDescriptor` with `std::string_view` fields, the virtual `caw::ModuleProcessor` class from `module.hpp`), and `engine/src/module_registry.cpp` loads components through those C++ entry points (plus `caw_component_destroy`). A C-only interface already exists, `engine/include/caw_module_sdk.h` (ABI v1: no STL, exceptions or C++ ABI across the boundary), but the loader does not use it yet. Next step: load components through that C interface (extending it where needed) and keep `caw/module.hpp` as the C++ layer compiled into each component.
 
 ### Typed connections
 
@@ -53,6 +53,33 @@ The component system must support at least:
 - **Data and tables:** typed buffers, sample data, wavetable data, lookup tables, envelopes, analysis results and other declared data objects.
 
 Connections are type-checked before execution. No silent reinterpretation between domains is allowed. A conversion is an explicit component or adapter with declared cost and semantics. Port contracts define channel layouts, rates, ownership, buffer lifetime and whether a port may fan in or fan out.
+
+### Native note, voice and channel processing
+
+Per-note, per-voice and per-channel processing are native processing scopes in the shared component/runtime contract, not separate APIs that individual instruments or effects must invent.
+
+- **Processing scopes:** a component descriptor declares whether processing applies to a complete stream/buffer, individual channels, individual sounding voices, individual notes, or a supported combination. Instruments, generators, effects and utility processors use the same capability model. A component may offer a simple whole-buffer fast path and a more specific note/voice/channel path.
+- **Preserved context:** where a component declares that it consumes note/voice context, the runtime supplies stable note identity, voice identity, event/frame timing, expression values and channel identity/layout alongside the relevant audio/event data. That context remains correlated until an explicit mix, aggregation or conversion boundary. A component may intentionally combine voices or channels, but the boundary and resulting loss of granularity are explicit.
+- **Per-note expression:** note identity and expression are not limited to the MIDI input edge. Pitch, pressure, timbre, gain, pan/spatial position and other typed expression/automation values can be addressed independently for simultaneous notes. MIDI 1.0, MIDI 2.0 UMP and MPE-style adapters translate at the boundary while the internal model retains stable note identity and higher-resolution values.
+- **Per-voice processing:** synth voices and unison layers can be independently addressed for phase, detune, gain, pan/spread, modulation and processing before they are intentionally combined. The runtime must not force a synth to collapse its voices before a voice-aware processor can act.
+- **Per-channel processing:** components can independently process channels in a declared layout, or operate on the complete layout when their algorithm requires it. Layouts include mono, stereo, standard surround and discrete N-channel configurations. Channel capacity is bounded by measured/declared CPU, memory and host/device budgets, not an arbitrary fixed product ceiling.
+- **Native stereo generation:** instruments and generators can produce genuinely distinct left/right signals at the source. Stereo oscillators, independent or linked L/R modulation, unison voice distribution, phase/detune offsets, stereo effects and width/spatial controls are Library/SDK primitives. Stereo must not mean duplicating a mono signal and adding a workaround afterward.
+- **Effects declare what they do:** descriptors state accepted/produced layouts and whether an effect processes a whole stream, channels independently, voices or notes. A stereo widener, stereo distortion, chorus or delay receives native stereo data; a note-aware effect can receive the relevant note/voice context. No effect silently converts stereo or N-channel audio to mono. Any downmix, channel remap, or loss of note/voice granularity is an explicit conversion/merge with defined semantics.
+- **Track and output defaults:** new tracks use stereo by default. A track may carry more channels than the current physical output device; explicit mapping/downmix happens at the device/output boundary rather than restricting the internal track layout.
+- **Simple connection behavior:** compatible layouts and processing scopes connect directly with sensible defaults. The host performs ordinary compatible wiring and exposes advanced pin/channel maps only when needed. It must explain incompatible layouts and offer an explicit conversion instead of requiring users to duplicate signals or discover obscure routing tricks.
+- **Real-time contract:** note/voice/channel context, buffers and processing plans are prepared off the audio thread. The callback remains bounded and allocation-free; resource limits produce actionable errors rather than silent truncation.
+
+### Native stereo synthesis and unison
+
+A C++ instrument must be able to build stereo sound from its oscillators and voices, not merely pass a mono result through stereo effects. The SDK should make these common operations direct:
+
+- independent or linked left/right oscillator signals and phase;
+- per-voice detune, phase offsets, pan and stereo spread for unison stacks;
+- per-note pitch glide/bend and modulation while other notes continue independently;
+- stereo filters, distortion, chorus, phaser, delay, reverb and mid/side processing; and
+- explicit split, merge, map and recombine operations for more elaborate channel structures.
+
+A typical instrument—multiple detuned voices distributed across stereo, with per-note pitch expression and stereo chorus/distortion—must be straightforward to implement with the SDK's native building blocks. Advanced custom routing remains possible, but is not a prerequisite for ordinary stereo sound design.
 
 ### One parameter definition everywhere
 
@@ -159,11 +186,11 @@ Provide reusable implementations and building blocks for:
 - delay, feedback delay, reverb, convolution, chorus, flanger, phaser and modulation effects;
 - FFT and other spectral/time-frequency analysis;
 - granular, additive, FM/AM, wavetable and physical-modeling building blocks; and
-- stereo and multichannel processing, channel mapping and explicit format conversion.
+- native stereo generation and multichannel processing, per-channel/per-voice/per-note DSP, channel mapping and explicit format conversion.
 
 ### Instruments, samples and musical systems
 
-Provide reusable synth voices, oscillators, envelopes, LFOs, modulation sources, samplers, drum generators, sample buffers, wavetable tools, sample/zone mapping, MIDI event utilities, sequencers, note generators, arpeggiators, chord/scale/rhythm helpers and per-note expression tools.
+Provide reusable synth voices, stereo-capable oscillators, envelopes, LFOs, modulation sources, samplers, drum generators, sample buffers, wavetable tools, sample/zone mapping, MIDI event utilities, sequencers, note generators, arpeggiators, chord/scale/rhythm helpers, unison/voice distribution and per-note expression tools.
 
 Support MIDI 1.0, MIDI 2.0 UMP and MPE-style expression through one event model. Device input/output adapters feed that same model; a C++ component, visual block and performance UI must not each invent separate MIDI routing.
 
@@ -196,7 +223,7 @@ C++ is not restricted by the audio callback's rules. A user can write general-pu
 
 The SDK must distinguish real-time and non-real-time APIs and identify which callbacks may run on which threads. The host validates and prepares a component before activation and defines failure, bypass and recovery behavior.
 
-Native C++ is not sandboxed because it uses the SDK. A native component can access process memory and operating-system services. Apply the existing per-item trust decision: Isolated in a separate process, Trusted in-process, or Blocked. Do not silently load untrusted native code. Sandboxed legacy .caw modules remain constrained only while the old VM still exists.
+Native C++ is not sandboxed because it uses the SDK. A native component can access process memory and operating-system services. The Engine now enforces an explicit trust argument at its loader boundary: Blocked refuses before opening the library; Isolated is rejected until a separate-process host is implemented; Trusted loads in-process. The C API requires the caller to pass one of these values, and build success never invokes the loader. The Dart FFI load/unload wrapper now exists; the Flutter trust UI/store, parameter mapping and track-chain integration are still outstanding. The current adapter supports zero-parameter stereo master effects. Sandboxed legacy .caw modules remain constrained only while the old VM still exists.
 
 **Safe sharing (owner decision, 2026-11-09):** after .caw is removed, the safe format for sharing is a visual-graph component made only of built-in Library nodes: it contains no native code, so it loads without a trust choice. A shared component that contains C++ (source or binary) always goes through the Isolated/Trusted/Blocked choice.
 
@@ -213,7 +240,8 @@ Resource use must be visible and user-configurable: show meaningful CPU, memory,
 **Nothing external is required (owner, 2026-11-09):** the app needs no set-up step, PC, charger, network or other outside connection to work. Optional connections and downloads may make things better or easier, but never required.
 
 - **Compiler in the app (owner: one app, not two editions):** Clang and LLD (Apache-2.0 with LLVM exception), built by GitHub Actions for Android ARM64 and Windows and shipped inside the installer. **[Assumption: about 60–100 MB extra; measure in CI]**. **[Fact, Cxxdroid store listing, checked 2026-11-09]** an existing Android app compiles C/C++ on-device in about 47 MB.
-- **Why it can't be a download:** **[Fact, Android 10 behavior changes, checked 2026-11-09]** apps targeting API 29+ cannot `execve()` files in their own data directory. Executables must ship in the APK as `lib*.so` and run from `nativeLibraryDir`; release builds must keep native libraries extracted (`extractNativeLibs`/`useLegacyPackaging`).
+- **Why it can't be a download:** **[Fact, Android 10 behavior changes, checked 2026-11-09]** apps targeting API 29+ cannot `execve()` files in their own data directory.
+- **How it runs on Android (owner decision, 2026-11-09):** Clang/LLD are built as a native library inside the APK (no executable, so no `execve()`), and the app loads that library in a dedicated Android process (`android:process=":compiler"`), never in the audio/UI process. A compiler crash or `exit()` only fails the build. Desktop runs the compiler as an ordinary process. **[Fact, checked 2026-11-09]** `app/lib/platform/cpp_toolchain.dart` validates a `caw.toolchain` v1 manifest (per-host execution mode, SHA-256 and size per artifact, safe relative paths; Android requires an entry library and forbids executables), and `CppComponentBuildRunner` in `app/lib/platform/cpp_build.dart` refuses the CMake subprocess path on Android. The compiler library and its process host are not built yet.
 - **Bundled with the compiler:** the C.A.W. SDK headers and the C++ standard library, so a first build works offline with no set-up. **[Assumption: the NDK sysroot parts shipped (bionic headers, libc++) are permissively licensed; check their licence files before bundling]**.
 - **Optional packs:** set-up offers (and can be skipped) the Faust libraries and starter instruments/effects; anything else downloads on first use. Packs are data (headers, sources, libraries), versioned, hash-checked, cached and included in project handoff bundles.
 - **Loading the result:** the built `.so` goes in app-private storage, is marked read-only (**[Fact, Android 14 summary, checked 2026-11-09]** dynamically loaded code must be read-only for apps targeting API 34+; whether this covers native libraries is undocumented, so always do it) and loads under the trust choice.
@@ -274,7 +302,7 @@ Plugin export is a later roadmap stage. It must not block the initial SDK or the
 
 ## 10. Prototype-first delivery
 
-The immediate goal is a working prototype, not completion of every architecture layer. The first useful vertical slice should prove that a user can create/open a C++ component project, edit ordinary C++, receive early actionable diagnostics, build locally with the network disabled, register and use the resulting component in the engine, and preserve the project. Start with one minimal real component and the narrowest required path. Add only the code and interfaces needed to make that slice reliable. Keep the larger shared component model, dependency/library strategy, trust choice, resource controls and handoff requirements documented, but defer full visual editing, comprehensive compatibility migration, AutoStacc integration, plugin export and other later systems until the prototype works.
+The immediate goal is a working prototype, not completion of every architecture layer. The first slices now prove project source persistence, safe app-private materialization, a local manifest-driven CMake build with incremental directory reuse, artifact discovery, and explicit-trust dynamic loading through the Engine registry/C API. The first vertical slice now builds, explicitly loads and processes a zero-parameter stereo effect in the live master chain, with the safety limiter still last. Next add parameter mapping and track-chain integration, then the per-component trust UI/store and Android-hosted toolchain validation. Start with one minimal real component and add only what makes that slice reliable. Keep the larger shared component model, dependency/library strategy, trust choice, resource controls and handoff requirements documented, but defer full visual editing, comprehensive compatibility migration, AutoStacc integration, plugin export and other later systems until the prototype works.
 
 ## 11. Verification gates
 
@@ -286,6 +314,11 @@ The design is not complete merely because interfaces exist. Tests and CI should 
 - one parameter definition drives generated controls, automation, modulation, MIDI mapping and host exposure;
 - generated UI works with no custom UI, and custom/hybrid UI does not change processor behavior;
 - MIDI 1.0, MIDI 2.0 UMP, note identity and per-note expression traverse the shared event path;
+- multiple simultaneous notes retain independent pitch, pressure, timbre and other supported expression through note-aware components and the playback path;
+- unison voices retain independent phase, detune, pan/spread and modulation until an explicit voice-mix boundary;
+- a C++ instrument can generate distinct native left/right signals, and stereo effects preserve and process both channels without mono collapse;
+- per-channel processors correctly handle multi-channel layouts within the declared resource budget, with explicit channel maps and conversions;
+- a track defaults to stereo and may carry more channels than the physical output device, with any required output mapping/downmix explicit;
 - state/preset save and restore are versioned and deterministic within the declared contract;
 - real-time processing performs no allocation, blocking lock, I/O or UI call and remains within declared bounds;
 - untrusted native code is never silently loaded in-process;
