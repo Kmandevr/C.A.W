@@ -72,6 +72,8 @@ Predicates and combinators include comparisons/ranges, AND/OR/NOT, rising/fallin
 
 Actions may adjust a parameter, enable/bypass a preloaded path, change a send level or route, select a destination, trigger a component/sample, emit MIDI/control events, start/stop a permitted sequence, or invoke another bounded workflow. Cross-track actions require explicit target references and visible routing; no hidden global side effects.
 
+**First target (owner, 2026-11-09):** the kick-to-bass duck below, built after sends, sidechains and parallel paths.
+
 Examples:
 
 - If a MIDI note/event arrives on the kick track, trigger a ducking envelope on the bass track.
@@ -99,7 +101,7 @@ Preserve per-note, per-voice and per-channel identity and arbitrary channel layo
 
 C++ remains C.A.W.'s primary general-purpose programming language and the native component ABI/runtime target. Faust is an optional specialist DSP authoring language/backend, not a replacement for C++ and not a second mandatory runtime.
 
-**Preferred first integration experiment:** compile Faust source to generated C++ and feed it through the existing local/offline C++ component build pipeline. Adapt generated DSP to the C.A.W. component contract (ports, parameters/UI metadata, lifecycle, process buffers, state and declared capabilities). This reuses the C.A.W. native engine and avoids requiring LLVM JIT in every app installation.
+**Timing (owner, 2026-11-09):** Faust work starts only after on-device C++ building works. **Preferred first integration experiment:** compile Faust source to generated C++ and feed it through the existing local/offline C++ component build pipeline. Adapt generated DSP to the C.A.W. component contract (ports, parameters/UI metadata, lifecycle, process buffers, state and declared capabilities). This reuses the C.A.W. native engine and avoids requiring LLVM JIT in every app installation.
 
 A later optional embedded-libfaust/JIT path may improve rapid auditioning, but only after measuring binary/package size, startup, memory, compile latency, CPU, Android compatibility and trust boundaries. The engine—not Faust's optional parallel scheduler—owns real-time scheduling. Validate channel layout, in-place/buffer semantics, polyphony, MIDI/per-note expression, event timing and live/offline parity before claiming complete integration.
 
