@@ -54,6 +54,55 @@ private:
     double sampleRate_ = 48000.0;
 };
 
+// A stereo chorus: each side reads a short delay swept by its own sine LFO, the right a quarter cycle
+// after the left, so the two sides move apart. prepare() allocates; process() never does.
+class Chorus {
+public:
+    void prepare(double sampleRate) {
+        sampleRate_ = sampleRate;
+        const size_t n = static_cast<size_t>(std::ceil(sampleRate * 0.05)) + 2;  // up to 50 ms
+        left_.assign(n, 0.0f);
+        right_.assign(n, 0.0f);
+        pos_ = 0;
+        phase_ = 0.0;
+    }
+    void clear() noexcept {
+        for (float& v : left_) v = 0.0f;
+        for (float& v : right_) v = 0.0f;
+        phase_ = 0.0;
+    }
+    // One frame: rate in Hz, depth 0..1 (0 to 8 ms of sweep around 12 ms), mix 0..1.
+    void process(double rate, double depth, double mix, float& l, float& r) noexcept {
+        const size_t n = left_.size();
+        if (n < 3) return;
+        const double inL = finiteOr0(l), inR = finiteOr0(r);
+        left_[pos_] = static_cast<float>(inL);
+        right_[pos_] = static_cast<float>(inR);
+        const double sweep = 0.008 * (depth < 0.0 ? 0.0 : (depth > 1.0 ? 1.0 : depth));
+        const double dl = read(left_, (0.012 + sweep * 0.5 * (1.0 + detSin(phase_))) * sampleRate_);
+        const double dr = read(right_, (0.012 + sweep * 0.5 * (1.0 + detCos(phase_))) * sampleRate_);
+        phase_ += 2.0 * kPi * (rate < 0.0 ? 0.0 : rate) / sampleRate_;
+        if (phase_ >= 2.0 * kPi) phase_ -= 2.0 * kPi;
+        pos_ = pos_ + 1 == n ? 0 : pos_ + 1;
+        l = static_cast<float>(inL + (dl - inL) * mix);
+        r = static_cast<float>(inR + (dr - inR) * mix);
+    }
+
+private:
+    double read(const std::vector<float>& line, double samplesBack) const noexcept {
+        const size_t n = line.size();
+        const double d = samplesBack < 1.0 ? 1.0 : (samplesBack > static_cast<double>(n - 2) ? static_cast<double>(n - 2) : samplesBack);
+        const double back = static_cast<double>(pos_) + static_cast<double>(n) - d;
+        const size_t i0 = static_cast<size_t>(back) % n;
+        const double frac = back - std::floor(back);
+        return line[i0] + (line[(i0 + 1) % n] - line[i0]) * frac;
+    }
+
+    std::vector<float> left_, right_;
+    size_t pos_ = 0;
+    double sampleRate_ = 48000.0, phase_ = 0.0;
+};
+
 // A note division in seconds at a tempo: 1 = a whole note, 0.25 = a quarter, 0.375 = a dotted eighth.
 inline double noteSeconds(double tempo, double wholeNotes) noexcept {
     const double t = tempo > 1.0 ? tempo : 1.0;

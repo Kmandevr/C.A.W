@@ -644,3 +644,16 @@ TEST(the_built_in_delay_syncs_to_the_song_tempo) {
     CHECK(std::fabs(out[23990]) < 1e-6f);
     CHECK_NEAR(out[24010], 0.5 * kCentre, 1e-4);
 }
+
+TEST(the_built_in_chorus_moves_the_two_sides_apart) {
+    lib::Chorus c;
+    c.prepare(48000.0);
+    double apart = 0;
+    for (int t = 0; t < 48000; ++t) {
+        const float x = static_cast<float>(std::sin(t * 0.05));
+        float l = x, r = x;
+        c.process(1.0, 1.0, 1.0, l, r);  // a mono input
+        if (t > 4800) apart = std::max(apart, static_cast<double>(std::fabs(l - r)));
+    }
+    CHECK(apart > 0.05);  // the sides differ: a mono signal comes out wide
+}

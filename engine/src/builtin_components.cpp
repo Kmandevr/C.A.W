@@ -197,6 +197,49 @@ private:
     double tempo_ = 120.0;
 };
 
+// Stereo chorus: rate, depth and mix; the two sides sweep a quarter cycle apart.
+const ParameterDescriptor kChorusParams[] = {
+    parameter("rate", "Rate", 0.6, 0.05, 5.0),
+    parameter("depth", "Depth", 0.5, 0.0, 1.0),
+    parameter("mix", "Mix", 0.5, 0.0, 1.0),
+};
+ModuleDescriptor chorusDescriptor() {
+    ModuleDescriptor d = descriptor("org.caw.chorus", "Chorus", kChorusParams);
+    d.role = ModuleRole::Effect;
+    d.parameterCount = 3;
+    d.tailFrames = 2400;  // the 50 ms line empties
+    return d;
+}
+const ModuleDescriptor kChorus = chorusDescriptor();
+
+class ChorusEffect final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kChorus; }
+    bool activate(double sampleRate, uint32_t) noexcept override {
+        try {
+            chorus_.prepare(sampleRate);
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+    void reset() noexcept override { chorus_.clear(); }
+    using ModuleProcessor::process;
+    bool process(const AudioProcessBlock& b) noexcept override {
+        if (!stereo(b)) return false;
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            float l = b.input.channels[0][i], r = b.input.channels[1][i];
+            chorus_.process(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), paramAt(b, 2, i, 0.5), l, r);
+            b.output.channels[0][i] = l;
+            b.output.channels[1][i] = r;
+        }
+        return true;
+    }
+
+private:
+    lib::Chorus chorus_;
+};
+
 template <class T>
 ModuleProcessor* make() noexcept {
     return new (std::nothrow) T();
@@ -209,6 +252,7 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kWidth, &make<Width>);
     registry.add(kDistortion, &make<Distortion>);
     registry.add(kDelay, &make<PingPong>);
+    registry.add(kChorus, &make<ChorusEffect>);
 }
 
 }  // namespace caw
