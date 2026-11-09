@@ -69,3 +69,17 @@ TEST(module_processor_default_state_contract_is_versioned_and_stateless) {
     CHECK(!processor.loadState(nullptr, 1, 1));
     CHECK(!processor.loadState(nullptr, 0, 2));
 }
+
+TEST(descriptor_json_replaces_invalid_utf8_and_keeps_valid_text) {
+    // One component's bad text must not make the whole listing unreadable (the app decodes UTF-8).
+    ModuleDescriptor d{"org.caw.tests.text", 1};
+    d.name = "Caf\xE9 \xC3\xA9";  // a Latin-1 byte, then a valid UTF-8 e-acute
+    const std::string json = moduleDescriptorJson(d);
+    CHECK(json.find("\"name\":\"Caf\xEF\xBF\xBD \xC3\xA9\"") != std::string::npos);
+    ParameterDescriptor p;
+    p.id = "gain";
+    p.maximum = 0.1;  // written shortest-round-trip, not 0.10000000000000001
+    d.parameters = &p;
+    d.parameterCount = 1;
+    CHECK(moduleDescriptorJson(d).find("\"max\":0.1,") != std::string::npos);
+}

@@ -113,7 +113,7 @@ The owner's requirement: code works directly on the bits, so sounds come out cha
 - **No undefined behaviour inside:** bit operations convert through unsigned 32-bit values, so C++'s signed-overflow and oversized-shift traps can't leak into the sound.
 - **Bit tools as built-ins**, using C++20's `<bit>`: rotate (`rotl`, `rotr`), `popcount`, count leading/trailing zeros, bit reverse, byte swap, and reinterpreting a float's bits as an integer and back (`bits(x)`, `float(i)`). Later, the same tools work on the bytes of imported audio (roadmap Stage 3).
 - **Randomness is seeded, never live:** `hash(x)` and `noise(seed, t)` are counter-based hash functions (no hidden state, so jumping to any `t` gives the same value), and a project-level `seed` changes all of them at once. There's no clock or system randomness anywhere in the language.
-- **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits.
+- **Floats are made repeatable too:** compile with strict IEEE behaviour (no fast-math), and use the engine's own `sin`/`exp` approximations rather than each platform's maths library, whose last bits differ between systems. Golden-render tests in CI compare the exact bits. **[Fact, 2026-11-09]** Those maths functions are public SDK code (`engine/include/caw/detmath.hpp`), and `CAW::SDK` passes the strict flags (`-ffp-contract=off -fno-fast-math`, MSVC `/fp:precise`) to every component built against it, so components repeat bit for bit too.
 
 ### Instruments, wavetables and samples — current status and remaining design
 

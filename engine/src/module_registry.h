@@ -27,7 +27,7 @@ enum class ModuleLoadError : uint8_t {
     IsolationUnavailable,
     InvalidArgument,
     LoadFailed,
-    MissingEntryPoint,   // no caw_get_component_v2 export, or it returned nothing
+    MissingEntryPoint,   // no caw_get_component_v3 export, or it returned nothing
     IncompatibleAbi,     // another C interface version, or structs smaller than v2's
     IncompleteTable,     // a required function pointer is missing
     InvalidDescriptor,
@@ -59,7 +59,7 @@ public:
     bool add(const ModuleDescriptor& descriptor, ModuleFactory factory, ModuleDestroy destroy = nullptr);
 
     // Trust is mandatory. Blocked never opens the library; Isolated is rejected until a real process sandbox exists.
-    // The library must export caw_get_component_v2 (caw_component.h); its descriptor is copied into
+    // The library must export caw_get_component_v3 (caw_component.h); its descriptor is copied into
     // engine-owned storage and validated before anything else of it runs.
     ModuleLoadResult loadSharedLibrary(const std::string& path, std::string_view expectedId, NativeModuleTrust trust);
     // A dynamic library cannot unload while a created processor still holds it.

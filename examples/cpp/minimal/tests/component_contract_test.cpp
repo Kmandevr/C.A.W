@@ -4,9 +4,9 @@
 #include <cstring>
 
 int main() {
-    const CawComponentV2* component = caw_get_component_v2(0);
-    if (caw_get_component_v2(1) != nullptr) return 5;  // one component: nothing past index 0
-    if (!component || component->struct_size < sizeof(CawComponentV2) ||
+    const CawComponentV3* component = caw_get_component_v3(0);
+    if (caw_get_component_v3(1) != nullptr) return 5;  // one component: nothing past index 0
+    if (!component || component->struct_size < sizeof(CawComponentV3) ||
         component->abi_version != CAW_COMPONENT_ABI_VERSION)
         return 1;
     const CawComponentDescriptor* d = component->descriptor;

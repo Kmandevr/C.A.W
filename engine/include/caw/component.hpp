@@ -21,10 +21,10 @@
 //
 // MyProcessor derives from caw::ModuleProcessor and is default-constructible; kMyDescriptor is the
 // caw::ModuleDescriptor its descriptor() returns, alive as long as the library. The macro defines
-// the one exported symbol, caw_get_component_v2, whose table forwards every call to MyProcessor
+// the one exported symbol, caw_get_component_v3, whose table forwards every call to MyProcessor
 // and catches any exception at the boundary (it reports failure instead).
 #define CAW_EXPORT_COMPONENT(Type, descriptorExpr)                                                  \
-    extern "C" CAW_COMPONENT_EXPORT const CawComponentV2* caw_get_component_v2(uint32_t index) {   \
+    extern "C" CAW_COMPONENT_EXPORT const CawComponentV3* caw_get_component_v3(uint32_t index) {   \
         if (index != 0) return nullptr;                                                              \
         /* A static in the library: built on the first call, destroyed when the library unloads. */ \
         static ::caw::component_detail::Exported exported;                                          \
@@ -34,8 +34,10 @@
 
 // A bundle: several components in one library, in this order (index 0, 1, ...). Each Type's
 // descriptor() must return a descriptor that lives as long as the library.
+// Listing builds one temporary instance of each Type up to the one a host asks for, so keep
+// constructors cheap: allocate large buffers in activate(), not in the constructor.
 #define CAW_EXPORT_COMPONENTS(...)                                                                  \
-    extern "C" CAW_COMPONENT_EXPORT const CawComponentV2* caw_get_component_v2(uint32_t index) {   \
+    extern "C" CAW_COMPONENT_EXPORT const CawComponentV3* caw_get_component_v3(uint32_t index) {   \
         return ::caw::component_detail::bundleAt<__VA_ARGS__>(index);                               \
     }
 
@@ -49,7 +51,7 @@ struct Exported {
     std::vector<std::vector<const char*>> choices;
     std::vector<CawUiControlInfo> uiControls;
     CawComponentDescriptor descriptor{};
-    CawComponentV2 table{};
+    CawComponentV3 table{};
 
     const char* text(std::string_view value) {
         strings.emplace_back(value);
@@ -292,8 +294,8 @@ bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
         c.ui_controls = e->uiControls.empty() ? nullptr : e->uiControls.data();
         c.custom_ui_id = e->text(d.customUiId);
 
-        CawComponentV2& t = e->table;
-        t.struct_size = sizeof(CawComponentV2);
+        CawComponentV3& t = e->table;
+        t.struct_size = sizeof(CawComponentV3);
         t.abi_version = CAW_COMPONENT_ABI_VERSION;
         t.descriptor = &e->descriptor;
         t.create = &create<Type>;
@@ -313,7 +315,7 @@ bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
 
 // One bundle entry: its table, built on first use from a temporary instance's descriptor.
 template <class Type>
-const CawComponentV2* bundled() noexcept {
+const CawComponentV3* bundled() noexcept {
     static Exported exported;
     static const bool ready = [] {
         try {
@@ -327,11 +329,11 @@ const CawComponentV2* bundled() noexcept {
 }
 
 template <class... Types>
-const CawComponentV2* bundleAt(uint32_t index) noexcept {
-    const CawComponentV2* (*const entries[])() noexcept = {&bundled<Types>...};
+const CawComponentV3* bundleAt(uint32_t index) noexcept {
+    const CawComponentV3* (*const entries[])() noexcept = {&bundled<Types>...};
     return index < sizeof...(Types) ? entries[index]() : nullptr;
 }
 
 }  // namespace caw::component_detail
 
-extern "C" CAW_COMPONENT_EXPORT const CawComponentV2* caw_get_component_v2(uint32_t index);
+extern "C" CAW_COMPONENT_EXPORT const CawComponentV3* caw_get_component_v3(uint32_t index);

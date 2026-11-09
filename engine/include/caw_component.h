@@ -1,4 +1,4 @@
-/* C.A.W component interface v2: the stable C boundary between the host and a compiled component.
+/* C.A.W component interface v3: the stable C boundary between the host and a compiled component.
  *
  * Plain C: no C++ types, exceptions or STL cross it, so a component built with one compiler or C++
  * standard library loads into a host built with another. Component authors normally write C++
@@ -12,7 +12,7 @@
  *   (port_info_size, ...), each at least the sizeof() in this header; extra trailing fields are
  *   ignored.
  * - New capabilities arrive as extensions: CawHost.get_extension (host to component) and
- *   CawComponentV2.get_extension (component to host), each looked up by a string id. An unknown id
+ *   CawComponentV3.get_extension (component to host), each looked up by a string id. An unknown id
  *   returns NULL.
  *
  * Threads:
@@ -36,8 +36,8 @@
 extern "C" {
 #endif
 
-#define CAW_COMPONENT_ABI_VERSION 2u
-#define CAW_COMPONENT_ENTRY_SYMBOL "caw_get_component_v2"
+#define CAW_COMPONENT_ABI_VERSION 3u
+#define CAW_COMPONENT_ENTRY_SYMBOL "caw_get_component_v3"
 
 /* Numeric values match the C++ enums in caw/module.hpp (checked there with static_assert). */
 enum {
@@ -207,7 +207,7 @@ typedef struct CawHost {
     const void* (*get_extension)(const struct CawHost* host, const char* id); /* NULL if unknown */
 } CawHost;
 
-typedef struct CawComponentV2 {
+typedef struct CawComponentV3 {
     uint32_t struct_size;
     uint32_t abi_version;
     const CawComponentDescriptor* descriptor;
@@ -226,11 +226,11 @@ typedef struct CawComponentV2 {
                           uint32_t* version);
     int32_t (*load_state)(void* instance, const uint8_t* source, uint32_t size, uint32_t version);
     const void* (*get_extension)(void* instance, const char* id); /* NULL if unknown */
-} CawComponentV2;
+} CawComponentV3;
 
 /* The one symbol a component library exports. A library may hold several components (a bundle):
    index 0, 1, ... returns each, and NULL past the last. Hosts stop at the first NULL. */
-typedef const CawComponentV2* (*CawGetComponentV2Fn)(uint32_t index);
+typedef const CawComponentV3* (*CawGetComponentV3Fn)(uint32_t index);
 
 #ifdef __cplusplus
 }
