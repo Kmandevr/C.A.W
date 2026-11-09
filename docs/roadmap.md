@@ -8,14 +8,15 @@ updated: 2026-11-06
 
 This is the **permanent, canonical roadmap** for C.A.W. It records the product direction, the order of work and the capabilities intended for the long term. Keep it as a living document: update implementation status only after code, tests and CI establish that a feature works.
 
-The roadmap is the single source for feature sequencing. [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md) remain the factual sources for what is implemented today. The [native engine refactor plan](engine-next.md) is the detailed technical plan for the current engine-foundation workstream. The [music workflow feature-gap note](music-workflow-feature-gap-plan.md) is a factual gap reference, not a second roadmap. The [lightweight creative audio systems note](lightweight-creative-audio-systems.md) contains supporting technical designs for its roadmap stage.
+The roadmap is the single source for feature sequencing. [App](app.md), [Engine](engine.md) and [Engine implementation status](engine-build-status.md) remain the factual sources for what is implemented today. The [native engine refactor plan](engine-next.md) is the detailed technical plan for the current engine-foundation workstream. The [music workflow feature-gap note](music-workflow-feature-gap-plan.md) is a factual gap reference, not a second roadmap. The [lightweight creative audio systems note](lightweight-creative-audio-systems.md) contains supporting DSP designs. [Visual creation and signal routing](visual-routing-and-library-integration.md) details the two visual workspaces, typed routing/conditions and reuse candidates.
 
 ## Product direction
 
 C.A.W. is a phone-first, code-driven sound-design and music-production workspace. It is not a conventional DAW and needn't work like one, but it must be able to do everything a good DAW can do, because there is no good DAW for mobile ([vision](vision.md), owner 2026-11-03). That covers arrangement, recording, editing, instruments, mixing and delivery, without a heavyweight conventional-DAW architecture.
 
 - **One product and project model:** C++ source, visual composition, instruments, patterns, audio assets, parameters, automation and performance controls share the same component, project and engine state.
-- **Ordinary C++ and one SDK:** C++ is the general-purpose authoring language; the C.A.W. Library/SDK supplies reusable building blocks without restricting the language to audio. The current .caw DSL/VM is transitional and will be removed after its useful capabilities have migrated.
+- **Ordinary C++ and one SDK:** C++ is the primary general-purpose authoring language; the C.A.W. Library/SDK supplies reusable building blocks without restricting the language to audio. Faust is an optional specialist DSP authoring/backend that should compile to native C++ components; it does not replace C++. The current .caw DSL/VM is transitional and will be removed after its useful capabilities have migrated.
+- **Two visual workspaces, one framework:** a component workspace builds instruments/effects/processors using C++, Faust and visual DSP composition; a project/track workspace visually edits track parameters, effect chains, sends, routing and conditional behaviors. The normal arrangement and piano-roll workflow remains the primary song-making surface.
 - **Extensible without rewrites:** new components, algorithms, ports, parameters, UI controls, MIDI capabilities, formats and platform/plugin adapters plug into stable contracts rather than requiring unrelated systems to be rewritten.
 - **Phone-first, desktop-capable:** practical touch workflows on phones, with full keyboard/mouse access on desktop.
 - **Local and offline first:** core creation, playback, editing and rendering work locally. Optional collaboration or synchronization must never make the core application cloud-dependent.
@@ -45,7 +46,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | Engine | Portable C++20 engine, current constrained .caw module VM, stereo playback/mixer, offline renderer, worker pool and adaptive workload policy | The C++ authoring toolchain, shared component SDK and Library are not built; the typed graph and N-channel contract have integration gaps (Foundation, issue #28) |
 | Patterns | Piano roll, drum grid, note expressions, lane curves, generators, MIDI file import/export | Kit-row routing, code-generated procedural patterns/Freeze and advanced groove/quantize extensions |
 | Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
-| Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths and master effect chain |
+| Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths, master effect chain and integrated visual track/routing inspector |
 | Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
 | MIDI | MIDI pattern import/export and MIDI 2.0 UMP decoder/input-queue primitive | USB/Bluetooth device I/O, controller learn, clock and live Engine voice routing |
 | Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | SFZ multisample workflow, stems, persistent queue and broader batch delivery |
@@ -101,7 +102,10 @@ These are three interfaces to the same C++ components and project state, not sep
 |---|---|---|---|---|---|
 | UI.1 | Practical C++ code editor: project tree, tabs, highlighting, SDK-aware completion/docs, diagnostics, navigation, formatting, refactoring, build/run/preview and debugging | Planned | app | CP.1–CP.3 | The current editor targets .caw syntax and has no C++ IDE/toolchain integration |
 | UI.2 | Import/drop existing C++ source and projects with supported build configuration/dependencies; register valid components automatically | Planned | both | CP.1, CP.2, UI.1 | Not built |
-| UI.3 | Typed visual scripting using built-in Library functions and user C++ components as automatically generated blocks; reusable subgraphs | Planned | both | CP.2–CP.3, Foundation F1–F6 | Not built; the visual graph must compile/prepare into the native runtime, not a separate interpreter |
+| UI.3 | Component visual editor: typed DSP composition using built-in Library operations, Faust-generated components and user C++ components; reusable subgraphs and visual editing of DSP behavior | Planned | both | CP.2–CP.3, Foundation F1–F6 | Not built; graphs must compile/prepare into the native runtime, not a separate interpreter |
+| UI.3a | Shared visual framework and component workspace: touch/desktop canvas, typed ports, conversion nodes, groups, inspectors, undo/redo and reusable DSP sections | Planned | app | UI.3, CP.2–CP.4 | Not built; component graph remains distinct from project routing graph |
+| UI.3b | Project/track visual workspace: track inspector, parameters, sends/destinations, buses, sidechains, channel maps and draggable effect chains alongside conventional mixer/arrangement views | Planned | both | Foundation F1–F6, Stage 2 routing, UI.3a | Not built; must edit the real project/engine routing model rather than maintain a UI-only graph |
+| UI.3c | Conditional routing/workflow editor: event sources, predicates, branches, region/clip/note context and actions across tracks/components | Planned | both | UI.3b, Foundation F5–F6, Stage 2, Stage 5 | Not built; requires bounded event/control scheduling, prepared routes, persistence, diagnostics and deterministic offline parity |
 | UI.4 | Generated performance UI from parameter metadata: knobs, sliders, switches, selectors, pads, keyboards, XY controls and meters | Planned | app | CP.2, CP.4 | Existing parameter descriptors and framework-neutral generated-control metadata are partial foundations; full component UI generation is not integrated |
 | UI.5 | Optional custom and hybrid component interfaces, with processing/UI separation | Planned | both | UI.4 | Not built |
 | UI.6 | Mixer/component browser integration: load components like plugins, expose selected controls, change parameters live and reuse the same processors in tracks/chains/graphs | Planned | both | CP.2, UI.4, Foundation | Existing Mixer and native module/graph foundations are partial; the shared C++ component workflow is not built |
@@ -146,10 +150,11 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 | 2.2 | General sidechain routing and modulation connections | Planned | both | F4, F5 | Not built |
 | 2.3 | Parallel routing and effect paths | Planned | both | F4 | Effects run in a fixed serial chain today |
 | 2.4 | Master effect chain and master controls | Partial | both | F4 | Master output level exists; no master effect chain |
-| 2.5 | Track, folder, bus and master routing view | Partial | app | 2.1–2.3 | Signal-chain inspection with live signal pulses exists; no routing editor for sends/sidechains |
+| 2.5 | Integrated track/routing workspace and inspector for track controls, sends, destinations, effect-chain order, channel maps and bus/master flow | Planned | app | 2.1–2.4, UI.3a | Existing signal-chain inspection with live signal pulses is partial; no complete editable routing workspace |
 | 2.6 | Metering: level, peak, clipping, stereo width/correlation, phase, loudness where cost is justified | Partial | both | F4 | Master and per-layer peak meters and a scope exist; no correlation, phase or loudness meters |
+| 2.7 | Typed conditional routing paths and regional processing: event/condition/action rules, cross-track MIDI/audio triggers, clip/region/note context, preloaded effect paths and route actions | Planned | both | F4–F6, 2.1–2.5, Stage 5 | Not built; design and real-time scheduling requirements are in [visual routing design](visual-routing-and-library-integration.md) |
 
-**Exit gate:** tests prove actual audio routing, send levels, sidechain behavior, parallel paths, master processing, channel isolation, stereo behavior and overload handling.
+**Exit gate:** tests prove actual audio routing, send levels, sidechain behavior, parallel paths, master processing, channel isolation, stereo behavior and overload handling. Conditional routes must prove MIDI-triggered ducking, threshold-triggered preloaded effects, regional activation, bounded rule execution, cycle handling, persistence and identical live/offline semantics.
 
 ### Stage 3 — Audio assets and non-destructive arrangement clips
 
@@ -274,6 +279,8 @@ These stages ship as updates. Their order still holds.
 | 10.5 | Interchange and delivery improvements from real production use | Later | both | — | Driven by use |
 
 **Exit gate:** offline projects remain fully usable, sync conflicts are recoverable, shared assets are versioned safely, and multichannel processing is tested end-to-end. Stereo remains the default low-overhead path.
+
+See [visual creation and signal routing](visual-routing-and-library-integration.md) for the detailed component/project/condition graph separation, Faust integration path, optional Pure Data evaluation, Tracktion Engine reference strategy and open-source reuse/licence criteria.
 
 ## Cross-cutting performance and quality requirements
 
