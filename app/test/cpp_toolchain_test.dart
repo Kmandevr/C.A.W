@@ -19,9 +19,9 @@ void main() {
     'execution_mode': mode,
     'compiler_version': 'clang-20.1.0',
     'sdk_version': '1.0.0',
-    if (androidMinApi != null) 'android_min_api': androidMinApi,
-    if (entryLibrary != null) 'entry_library': entryLibrary,
-    if (executable != null) 'compiler_executable': executable,
+    'android_min_api': ?androidMinApi,
+    'entry_library': ?entryLibrary,
+    'compiler_executable': ?executable,
     'artifacts': artifacts ?? [
       {'path': 'lib/libcaw_clang.so', 'sha256': 'a' * 64, 'size_bytes': 1024},
     ],
