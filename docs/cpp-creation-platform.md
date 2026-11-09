@@ -108,7 +108,7 @@ This is a second visual workspace using the same canvas, node/port, connection, 
 - Support audio, MIDI/event, control, modulation, analysis and logic connections through typed contracts and explicit conversion nodes.
 - Allow conditional branches and regional routes: e.g. MIDI from the kick track triggers a bass duck; a track's RMS crossing a threshold blends in a preloaded distortion path; entering a clip/region activates a parallel effect route.
 - Project routes can connect component endpoints, but the project graph remains distinct from the component's internal DSP graph. The condition graph is a third model that selects/actions routes through declared endpoints.
-- Track state such as highlight/selection may be an explicit UI event source, isolated from musical playback and offline rendering unless the user opts into that behavior.
+- Track state such as highlight/selection may be an explicit UI event source for auditioning only; it never changes an export (owner, 2026-11-09).
 
 ### D. Performance and mixer interface
 

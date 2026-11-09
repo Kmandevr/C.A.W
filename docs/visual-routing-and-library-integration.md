@@ -14,8 +14,8 @@ The normal song-making workflow remains the arrangement, piano roll, clips, reco
 
 C.A.W. has two visual workspaces built on one reusable visual framework:
 
-1. **Component workspace — build a thing.** Create instruments, effects, generators, processors and reusable operations. A component can be authored in ordinary C++, in Faust for specialist DSP, or assembled visually from typed operations and existing components. Its DSP behavior can be edited visually; its source remains available where applicable. Parameter metadata generates a useful control surface by default, with optional custom/hybrid UI design.
-2. **Project/track workspace — make the song behave.** Inspect and edit a selected track's parameters, input/output, sends and destinations, buses, sidechains, channel mapping, effect-chain order and conditional behaviors together. A track inspector can expose this view without forcing the user to leave the arrangement. Conventional mixer controls remain available.
+1. **Component workspace — build a thing.** An ordinary, always-visible workspace for everyone (owner, 2026-11-09). Create instruments, effects, generators, processors and reusable operations. A component can be authored in ordinary C++, in Faust for specialist DSP, or assembled visually from typed operations and existing components. Its DSP behavior can be edited visually; its source remains available where applicable. Parameter metadata generates a useful control surface by default, with optional custom/hybrid UI design.
+2. **Project/track workspace — make the song behave.** Inspect and edit a selected track's parameters, input/output, sends and destinations, buses, sidechains, channel mapping, effect-chain order and conditional behaviors together. It opens two ways (owner, 2026-11-09): a slide-up panel for the selected track over the arrangement, and a full page for the whole project. Conventional mixer controls remain available.
 
 The shared framework supplies canvas navigation, touch/desktop gestures, nodes, ports, connection drawing, grouping, selection, parameter inspectors, undo/redo and accessible controls. The workspaces do not share one undifferentiated graph model: each graph has its own domain rules and persistence.
 
@@ -80,7 +80,7 @@ Examples:
 - If a track's RMS exceeds a threshold, blend in a preloaded distortion path.
 - If playback enters a region or clip, activate a parallel effect path only for that region, without drawing a traditional automation lane.
 - If a particular note/velocity is played, trigger another instrument or alter a parameter.
-- If a track is highlighted, temporarily route it to an audition/monitor path; this is UI state, not a musical event, and must not alter offline render unless explicitly configured.
+- If a track is highlighted, temporarily route it to an audition/monitor path. This is UI state, not a musical event: it only changes what is heard while working and never changes an export (owner, 2026-11-09).
 - If a clip ends, switch to a declared next route or trigger a bounded action.
 
 Regional behavior can be attached to clips, time selections, arrangement sections, notes or track contexts. Effects and alternate routes are prepared before activation; no plugin loading, graph compilation, memory allocation or destruction occurs in the audio callback.
@@ -115,13 +115,13 @@ Evaluate existing open-source technology at every scale, from algorithms and lib
 |---|---|---|
 | Faust | Optional DSP authoring/compiler; generated native C++ components first, embedded JIT later if justified | Strong candidate. Prototype generated-C++ adapter and audit exact compiler, library and architecture-file licences. Keep C++ first-class. |
 | Pure Data / libpd | Optional compatibility/runtime for existing Pd patches and experiments | Prototype only. Not the primary engine or required workflow. Benchmark 64-frame tick adaptation, latency, CPU/RAM on weak Android, multi-instance behavior, external objects and real-time safety against equivalent native C++ components. Keep patches/components optional and clearly bounded. |
-| Tracktion Engine | Engineering reference and possible selective subsystem adoption | Study graph scheduling, plugin delay compensation, lock-free recording/file access, arrangement, automation, MIDI and background rendering. Do not wholesale replace C.A.W.'s engine/project model. Its GPL-3.0-or-later terms and JUCE dependency/licensing require a deliberate source-licence compatibility review; no paid licence route. |
-| JUCE | Tracktion dependency / optional framework candidate | Do not assume a free permissive licence. Current JUCE 9 AGPLv3/commercial terms require a separate compatibility decision; avoid adopting merely because Tracktion uses it. |
+| Tracktion Engine | Engineering reference only | Study graph scheduling, plugin delay compensation, lock-free recording/file access, arrangement, automation, MIDI and background rendering. GPL-3.0-or-later and depends on JUCE, so no code is taken (permissive licence, owner 2026-11-09). |
+| JUCE | Reference only | JUCE 9 is AGPLv3/commercial, so it is not used. |
 | LMMS | Readable source-code and implementation reference | Reference only; not a dependency or foundation. |
 | VCV Rack | Inspiration for modular interaction and patch readability | Inspiration only; do not copy its rack-specific workflow as C.A.W.'s overall song-making model. |
 | Existing C.A.W. engine, .caw built-ins and code | Reusable algorithms, DSP, MIDI, parameter, graph and synthesis behavior | Audit and migrate useful capabilities into the C++ Library/SDK; preserve behavior where valuable, not the legacy language or architecture. Verify each retained path with tests and audio comparisons. |
 
-The owner's current direction is that C.A.W. itself is free/open source, with optional support/donation bundles of prebuilt FX, instruments, presets, samples and sounds. Core functionality is not paywalled. The exact project source licence and compatibility of copyleft dependencies remain explicit decisions to resolve; free/open-source status does not make all licences automatically compatible. No paid dependency or commercial licence may be assumed. A candidate with obligations that C.A.W. cannot meet is rejected or used only as a reference.
+The owner's current direction is that C.A.W. itself is free/open source, with optional support/donation bundles of prebuilt FX, instruments, presets, samples and sounds. Core functionality is not paywalled. C.A.W. will use a permissive licence (MIT or Apache-2.0, not yet chosen) and permissive dependencies only (owner, 2026-11-09). No paid dependency or commercial licence may be assumed. A candidate with obligations that C.A.W. cannot meet is rejected or used only as a reference.
 
 ## 8. Relationship to the canonical roadmap
 

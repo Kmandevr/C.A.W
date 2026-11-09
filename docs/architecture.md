@@ -72,7 +72,7 @@ The C++ language and compiler are ordinary toolchain facilities; the C.A.W. Libr
 | VST3, AUv2, AUv3 (macOS and iOS) and standalone builds from one CLAP plugin | [clap-wrapper](https://github.com/free-audio/clap-wrapper) | MIT (skip its AAX and ASIO options: GPL or commercial) | Stage 4b |
 | VST3 itself | VST 3 SDK, MIT since version 3.8 ([Steinberg, October 2025](https://sonicstate.com/news/2025/10/30/vst-3-now-available-under-mit-license)) | MIT | Stage 4b |
 
-Do not adopt JUCE or Tracktion Engine wholesale without a deliberate source-licence compatibility review: current JUCE 9 terms are AGPLv3/commercial and Tracktion Engine is GPL-3.0-or-later/commercial and depends on JUCE. The owner now permits evaluating copyleft open-source technology when C.A.W. can comply with its obligations, but no paid licence route is assumed. See [visual creation and signal routing](visual-routing-and-library-integration.md) for candidate roles and evaluation gates. DaisySP-LGPL and Cmajor remain subject to exact licence/version review before use.
+JUCE (9: AGPLv3/commercial) and Tracktion Engine (GPL-3.0-or-later/commercial, depends on JUCE) are references only; C.A.W. takes no code from them, because it will use a permissive licence and permissive dependencies (owner, 2026-11-09). See [visual creation and signal routing](visual-routing-and-library-integration.md) for candidate roles and evaluation gates. DaisySP-LGPL and Cmajor remain subject to exact licence/version review before use.
 
 ### Rejected alternatives
 

@@ -90,9 +90,9 @@ GitHub-based library synchronization and source selection are also not implement
 
 ## Commercial and licensing direction
 
-**Owner direction (2026-11-09):** C.A.W. is intended to be free and open source. Until the owner chooses a source licence, the repository stays under its current all-rights-reserved [LICENSE](../LICENSE). Whether AutoStacc (earlier described as the commercial distribution channel) still has a role, for example for support bundles, is open. Core functionality is not paywalled. Optional support/donation bundles may provide prebuilt libraries of FX, instruments, presets, samples and sounds; they use the same component/content formats as free and creator-made content. The exact source licence and any distribution mechanism remain open decisions; do not claim an AutoStacc purchase/unlock flow is implemented.
+**Owner direction (2026-11-09):** C.A.W. is intended to be free and open source. It will use a permissive licence (MIT or Apache-2.0, not yet chosen); until then the repository stays under its current all-rights-reserved [LICENSE](../LICENSE). Whether AutoStacc (earlier described as the commercial distribution channel) still has a role, for example for support bundles, is open. Core functionality is not paywalled. Optional support/donation bundles may provide prebuilt libraries of FX, instruments, presets, samples and sounds; they use the same component/content formats as free and creator-made content. The distribution mechanism remains open; do not claim an AutoStacc purchase/unlock flow is implemented.
 
-New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Open-source reuse may include copyleft projects when C.A.W. can meet their obligations; no paid licence is assumed. See [visual creation and signal routing](visual-routing-and-library-integration.md) for the current candidate evaluation.
+New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Dependencies must be permissive (no GPL/AGPL); no paid licence is assumed. See [visual creation and signal routing](visual-routing-and-library-integration.md) for the current candidate evaluation.
 
 ## Open owner decisions
 
