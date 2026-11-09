@@ -164,7 +164,8 @@ jobs:
           echo "CAW_COMPILER_PACKAGE=$RUNNER_TEMP/compiler-package" >> "$GITHUB_ENV"
       - name: Note a build without the compiler
         if: steps.llvm-cache.outputs.cache-hit != 'true'
-        run: echo "::warning::This APK has no C++ compiler yet: the Compiler workflow has not cached its LLVM build. Re-run this job when it has."
+        run: |
+          echo "::warning::This APK has no C++ compiler yet: the Compiler workflow has not cached its LLVM build. Re-run this job when it has."
       - name: Build
         working-directory: app
         env:
