@@ -1,7 +1,7 @@
 ---
 title: Core development plan
 summary: Pointer to the permanent C.A.W. roadmap; current implementation facts remain in app and engine references.
-updated: 2026-11-02
+updated: 2026-11-09
 ---
 
 # Core development plan
@@ -16,4 +16,4 @@ For factual implementation status, consult:
 - [Engine implementation status](engine-build-status.md)
 - [Music workflow feature-gap note](music-workflow-feature-gap-plan.md)
 
-Detailed technical designs may support a roadmap stage, but the roadmap remains the single place for owner-approved scope and ordering.
+Detailed technical designs may support a roadmap stage, but the roadmap remains the single place for owner-approved scope and ordering. Current design references include [C++ creation platform](cpp-creation-platform.md), [visual creation and signal routing](visual-routing-and-library-integration.md), and [lightweight creative audio systems](lightweight-creative-audio-systems.md).
