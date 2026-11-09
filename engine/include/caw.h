@@ -14,7 +14,9 @@ extern "C" {
 #define CAW_API __attribute__((visibility("default")))
 #endif
 
-#define CAW_API_VERSION 1
+/* 2 (2026-11-09): scope() indexes 0..n-1 are project layers at any capacity; the master and the
+   audition are CAW_SCOPE_MASTER and CAW_SCOPE_AUDITION, not fixed slot numbers (F7.3). */
+#define CAW_API_VERSION 2
 
 typedef struct CawEngine CawEngine;
 

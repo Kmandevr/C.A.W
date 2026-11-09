@@ -1244,7 +1244,62 @@ TEST(engine_rejects_export_layout_above_memory_budget) {
     Engine e(8000, makeEngineResourceBudget(hardware));
     const std::string result = e.setProject(p);
     CHECK(result.find("\"ok\":false") != std::string::npos);
-    CHECK(result.find("hardware-derived graph working-memory budget") != std::string::npos);
+    // The layer is skipped (#133: refused per layer, before its slot is kept), and the result says why.
+    CHECK(result.find("exports more values than one layer may hold") != std::string::npos);
+}
+
+TEST(engine_bounds_total_export_buffers_by_the_budget_across_layers) {
+    // #133 (from #94): each layer may hold exportBuffersPerLayer() buffers, but the whole project
+    // only exportBufferBudget(), so a project that uses the per-layer allowance on many layers is
+    // refused before allocating past the budget, instead of using several times its memory.
+    EngineResourceBudget budget;
+    budget.graphWorkingBytes = 24ull << 20;
+    budget.projectStateBytes = 64ull << 20;
+    budget.compileWorkingBytes = 64ull << 20;
+    budget.retirementBytes = 64ull << 20;
+    budget.totalBytes = budget.graphWorkingBytes + budget.projectStateBytes + budget.compileWorkingBytes +
+                        budget.retirementBytes;
+    Engine e(8000, budget);
+    const size_t perLayer = e.exportBuffersPerLayer();
+    CHECK(perLayer > 0);
+    CHECK_EQ(e.exportBufferBudget(), perLayer * static_cast<size_t>(kExportBudgetSlots));
+    CHECK(e.maxLayers() > kExportBudgetSlots);
+    std::string source = "---\nmode: float\n---\n";
+    for (size_t i = 0; i < perLayer; ++i) source += "export let v" + std::to_string(i) + " = 1\n";
+    source += "1";
+    auto project = [&](int layers) {
+        ProjectSpec p;
+        p.modules.push_back({"wide", source, {}, "wide"});
+        for (int l = 0; l < layers; ++l) {
+            LayerSpec layer;
+            layer.id = "t" + std::to_string(l);
+            layer.chain = {"wide"};
+            p.layers.push_back(layer);
+        }
+        return p;
+    };
+    // Exactly the budget: accepted.
+    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
+    // One layer more needs perLayer buffers past it: refused, naming the budget.
+    const std::string over = e.setProject(project(kExportBudgetSlots + 1));
+    CHECK(over.find("\"ok\":false") != std::string::npos);
+    CHECK(over.find("export buffer budget") != std::string::npos);
+    // Only that layer was skipped, and its slot was not kept: the fitting project still installs,
+    // and the same refusal repeats instead of the slots running out.
+    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
+    const std::string again = e.setProject(project(kExportBudgetSlots + 1));
+    CHECK(again.find("export buffer budget") != std::string::npos);
+    CHECK(again.find("no free engine layer slot") == std::string::npos);
+    // A playing layer whose new chain exports more than one layer may hold is stopped, not left
+    // playing outside the plan (stale routing and exports).
+    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
+    ProjectSpec grown = project(kExportBudgetSlots);
+    grown.modules.push_back({"extra", "---\nmode: float\n---\nexport let more = 1\n1", {}, "extra"});
+    grown.layers[0].chain = {"wide", "extra"};
+    const std::string stopped = e.setProject(grown);
+    CHECK(stopped.find("\"ok\":false") != std::string::npos);
+    CHECK(stopped.find("layer 't0' not installed: its chain exports more values than one layer may hold") != std::string::npos);
+    CHECK(stopped.find("it was stopped") != std::string::npos);
 }
 
 TEST(routing_saturates_out_of_float_range_tracks_instead_of_silencing_the_mix) {

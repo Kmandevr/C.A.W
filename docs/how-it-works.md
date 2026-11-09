@@ -66,7 +66,7 @@ The synth and built-in language also gained concrete capabilities in this branch
 | Language syntax (statements, params, operators) | `engine/src/compile.cpp`, `ops.h` for operators | [engine](engine.md) language section; `language_test.cpp` or `variables_test.cpp` |
 | Pattern text format | `engine/src/pattern.cpp` and the app's `app/lib/model/pattern_doc.dart`, which must agree | `pattern_test.cpp`, `app/test/pattern_doc_test.dart` |
 | Playback, mixing, voices, hot swap | `engine/src/engine.cpp` (real-time rules: `.claude/rules/engine.md`) | `engine_test.cpp`; ask `audio-reviewer` |
-| A new C API call | `engine/include/caw.h`, `engine/src/capi.cpp` or `engine/src/worker_api.cpp`, `app/lib/engine/bindings.dart`, `app/lib/engine/engine.dart`, `app/lib/engine/execution.dart` | [engine](engine.md#c-api-engineincludecawh) |
+| A new C API call | `engine/include/caw.h`, `engine/src/capi.cpp` or `engine/src/worker_api.cpp`, `app/lib/engine/bindings.dart`, `app/lib/engine/engine.dart`, `app/lib/engine/execution.dart`; when a call's meaning changes, bump `CAW_API_VERSION` and the app's `cawApiVersion` together | [engine](engine.md#c-api-engineincludecawh) |
 | Something the app keeps (projects, settings) | `app/lib/model/` | [app](app.md) |
 | A screen | `app/lib/ui/<screen>.dart`; a new command also gets an action in `app/lib/actions/catalogue.dart` | [app](app.md), [actions](actions.md) |
 | A starter module | `examples/*.caw` | `caw_tests --update-golden` only for an intended sound change |

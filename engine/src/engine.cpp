@@ -72,8 +72,16 @@ struct Engine::Slot {
 
     bool ctlBusy = false;  // control thread only: a layer holds this slot, or it is still fading out
 
-    std::array<double, kBlock>** exportBuf = nullptr;  // stable slice in Engine::ExportPool
-    size_t exportCapacity = 0;
+    // Stable slice in Engine::ExportPool. Atomic (#133): the control thread sets both when the pool is
+    // first made, on slots the audio thread is already playing; elements a chain reads are written
+    // before the chain is installed (the command queue orders that).
+    std::atomic<std::array<double, kBlock>**> exportBuf{nullptr};
+    std::atomic<size_t> exportCapacity{0};
+    bool hasExports() const noexcept { return exportBuf.load(std::memory_order_relaxed) != nullptr; }
+    std::array<double, kBlock>* exportAt(size_t b) const noexcept {
+        std::array<double, kBlock>** table = exportBuf.load(std::memory_order_relaxed);
+        return table && b < exportCapacity.load(std::memory_order_relaxed) ? table[b] : nullptr;
+    }
     size_t exportCount = 0;  // grows to the largest active chain export count; audio-thread owned
 
     // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
@@ -1239,6 +1247,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     };
     std::vector<Planned> plan;
     std::map<std::string, LayerState> nextLayers;
+    // Export buffers (#133): charged per layer here, while a layer that doesn't fit can still be
+    // skipped like one without a free slot, so nothing later refuses a project after slots were
+    // claimed or commands sent. Buffers once made stay with their slot and are reused.
+    size_t exportBuffersPlanned = exportPool_ ? exportPool_->buffers.size() : 0;
+    auto exportBuffersIn = [&](int slot) {
+        std::array<double, kBlock>** table = ctlSlot(slot).exportBuf.load(std::memory_order_relaxed);
+        const size_t capacity = ctlSlot(slot).exportCapacity.load(std::memory_order_relaxed);
+        size_t made = 0;  // made from index 0 up, so the first empty entry ends them
+        while (table && made < capacity && table[made]) ++made;
+        return made;
+    };
     std::map<std::string, std::vector<std::string>> warnings;
     for (const auto& [id, msg] : synthWarnings) warnings[id].push_back(msg);
     for (const auto& [id, st] : modules_) {
@@ -1388,6 +1407,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             }
             continue;
         }
+        const bool hadSlot = pl.ls.slot >= 0;
         if (pl.ls.slot < 0) {
             pl.ls.slot = isAudition ? auditionSlot : freeSlot();
             if (isAudition) ctlSlot(auditionSlot).ctlBusy = true;
@@ -1405,6 +1425,46 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             pl.ls.pattern = nullptr;
             pl.ls.steps = -1;
             pl.ls.volume = -1;
+        }
+        {
+            size_t exports = 0;
+            for (const std::string& id : pl.ids) {
+                auto module = modules_.find(id);
+                if (module != modules_.end() && module->second.program) exports += module->second.program->exports.size();
+            }
+            const size_t made = exportBuffersIn(pl.ls.slot);
+            const size_t adds = exports > made ? exports - made : 0;
+            const char* why = nullptr;
+            if (exports > exportPerSlot_)
+                why = "its chain exports more values than one layer may hold within this device's memory budget";
+            else if (exportBuffersPlanned + adds > exportBufferBudget())
+                why = "the project's exports would exceed this device's export buffer budget (if another song is "
+                      "still fading out, try again when it has)";
+            if (why) {
+                allOk = false;
+                projectStateBytes -= layerStateBytes;  // charged above for a layer that now won't run
+                // Keyed by the chain's first module, like the other chain warnings, so the result shows it.
+                std::string& message = warnings[pl.ids.empty() ? std::string("project") : pl.ids.front()]
+                    .emplace_back(std::string("layer '") + w.id + "' not installed: " + why);
+                if (!hadSlot) {
+                    ctlSlot(pl.ls.slot).ctlBusy = false;  // just claimed above; nothing was sent for it
+                    pl.ls.slot = -1;
+                    nextLayers[w.id] = pl.ls;
+                } else {
+                    // A playing layer can't keep its old chain outside the plan (its routing, order
+                    // and exports would go stale), so it stops, the way an invalid layer is removed.
+                    message += "; it was stopped";
+                    Cmd c;
+                    c.type = Cmd::Remove;
+                    c.slot = pl.ls.slot;
+                    if (!send(c)) {
+                        message += " (the audio command queue was full, so it keeps playing unchanged)";
+                        nextLayers[w.id] = pl.ls;
+                    }
+                }
+                continue;
+            }
+            exportBuffersPlanned += adds;
         }
         plan.push_back(std::move(pl));
     }
@@ -1496,12 +1556,12 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             for (int slot = 0; slot < slotCount; ++slot) {
                 const size_t required = requiredExportsPerSlot[static_cast<size_t>(slot)];
                 for (size_t index = 0; index < required; ++index) {
-                    if (ctlSlot(slot).exportBuf[index]) continue;
+                    if (ctlSlot(slot).exportBuf.load(std::memory_order_relaxed)[index]) continue;
                     auto buffer = std::make_unique<std::array<double, kBlock>>();
                     buffer->fill(0.0);
                     auto* stable = buffer.get();
                     exportPool_->buffers.push_back(std::move(buffer));
-                    ctlSlot(slot).exportBuf[index] = stable;
+                    ctlSlot(slot).exportBuf.load(std::memory_order_relaxed)[index] = stable;
                 }
             }
         } catch (const std::bad_alloc&) {
@@ -1522,7 +1582,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (size_t k = 0; k < pl.ids.size(); ++k) {
             const ModuleState& m = modules_.at(pl.ids[k]);
             for (const ExportDef& e : m.program->exports) {
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, ctlSlot(pl.ls.slot).exportBuf[buf]->data()});
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, ctlSlot(pl.ls.slot).exportBuf.load(std::memory_order_relaxed)[buf]->data()});
                 ++buf;
             }
         }
@@ -2515,10 +2575,10 @@ const double* Engine::runModule(Chain& c, int lane, bool shadow, size_t idx, int
     ctx.vars[static_cast<int>(Var::Rate)] = c.rateb;
     ctx.vars[static_cast<int>(Var::In)] = input;
     const double* y = inst->process(ctx);
-    if (exportTo && exportTo->exportBuf)
+    if (exportTo && exportTo->hasExports())
         for (const auto& [reg, buf] : c.exportMap[idx])
-            if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
-                std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf]->data());
+            if (exportTo->exportAt(buf))
+                std::copy_n(inst->reg(reg), len, exportTo->exportAt(buf)->data());
     return y;
 }
 
@@ -2768,10 +2828,10 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         int newest = -1;
         for (int v = 0; v < c.voiceCount; ++v)
             if (c.voices[v].active && (newest < 0 || c.voices[v].started > c.voices[newest].started)) newest = v;
-        if (exportTo && exportTo->exportBuf)
+        if (exportTo && exportTo->hasExports())
             for (const auto& [reg, buf] : c.exportMap[0])
-                if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
-                    std::fill_n(exportTo->exportBuf[buf]->data() + offset + o, n, 0.0);
+                if (exportTo->exportAt(buf))
+                    std::fill_n(exportTo->exportAt(buf)->data() + offset + o, n, 0.0);
         BlockCtx ctx = base;
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
@@ -2857,10 +2917,10 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
                 v.lastY = s;
                 if (!v.gate) v.quiet = std::fabs(s) < kQuietLevel ? v.quiet + 1 : 0;
             }
-            if (exportTo && exportTo->exportBuf && vi == newest)
+            if (exportTo && exportTo->hasExports() && vi == newest)
                 for (const auto& [reg, buf] : c.exportMap[0])
-                    if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
-                        std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf]->data() + offset + o);
+                    if (exportTo->exportAt(buf))
+                        std::copy_n(v.inst->reg(reg), n, exportTo->exportAt(buf)->data() + offset + o);
             if (!v.gate && (v.quiet >= quietMax || v.rel >= relMax || (engineFade && v.rel >= fadeLen))) {
                 c.declick += v.lastY;  // ending a voice that is still sounding: smooth over the jump
                 v.active = false;
@@ -3006,10 +3066,10 @@ int Engine::planChunk(int maxFrames) noexcept {
 int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     for (int i = 0; i < slotCount_; ++i) {
         Slot& slot = slotAt(i);
-        if (slot.exportBuf && slot.exportCount > 0 &&
+        if (slot.hasExports() && slot.exportCount > 0 &&
             (!slot.active || !slot.cur || (slotTarget(slot) == 0.0 && slot.gain == 0.0))) {
             for (size_t b = 0; b < slot.exportCount; ++b)
-                if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), maxFrames, 0.0);
+                if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), maxFrames, 0.0);
             if (!slot.active || (!slot.cur && !slot.pending)) slot.exportCount = 0;
         }
     }
@@ -3018,9 +3078,9 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         // Stopped, a track that isn't previewing exports silence, not the last block it played.
         for (int i = 0; i < slotCount_; ++i) {
             Slot& slot = slotAt(i);
-            if (slot.mode == Slot::Mode::Play || !slot.exportBuf) continue;
+            if (slot.mode == Slot::Mode::Play || !slot.hasExports()) continue;
             for (size_t b = 0; b < slot.exportCount; ++b)
-                if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), m, 0.0);
+                if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), m, 0.0);
         }
     ++chunkId_;
     // One graph runs the mix: each track's modules as a chain of nodes then its track node, in

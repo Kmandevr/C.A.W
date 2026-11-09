@@ -199,7 +199,7 @@ No one can promise bugs are impossible. The engineering commitment is explicit i
 - Audio-thread safety and sanitizer coverage.
 - Graph validation, cycle handling, bounded resources and safe graph swaps.
 - Stable project/asset serialization tests, and migration tests from Release 1 on (before it there are no projects to keep, owner 2026-11-03).
-- C ABI/module API version compatibility.
+- C ABI/module API version compatibility: the app refuses an engine whose `CAW_API_VERSION` differs (now 2), and the registry refuses components without the component interface v2 entry point (`caw_component.h`).
 - Benchmarks for low-end-like budgets and larger desktop workloads.
 - Stress tests for voices, unison, module count, modulation fan-out, long renders and live edits.
 - Cancellation/failure tests for compilation and export.
