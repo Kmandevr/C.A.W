@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `a94476ccf74d65ae02036d7613ee8bb9dd2c275a` on the default branch at 2026-11-08T18:00:24Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `e2e2320f7bfa242d6a3a6c761cb0f37cac94b56e` on the default branch at 2026-11-09T17:11:35Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`a94476c`).
+1. The commit this file was generated from (`e2e2320`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -186,7 +186,7 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 - Never invent facts about libraries, versions, licences, platform behaviour or devices. Check a primary source and date it, or label it an assumption.
 - The audio callback never allocates, locks, logs, does I/O or calls into the UI layer (details: `.claude/rules/engine.md`).
 - Downloaded `.caw` modules are untrusted: the constrained language has no filesystem/network/system calls and is bounded. Native SDK modules are in-process code, not sandboxed; third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.
-- Dependencies must have permissive licences (no GPL) unless the owner decides otherwise. Record each new one in `docs/decisions.md`.
+- Dependencies must have permissive licences (no GPL/AGPL; C.A.W. itself is Apache-2.0). Record each new one in `docs/decisions.md`.
 - The owner works from Android (Galaxy S22+): every build, test and installable comes from GitHub Actions; do not assume a PC/IDE.
 - Record decisions and new facts in `docs/` before ending a session, and rewrite superseded text where it stands instead of appending (details: `.claude/rules/docs.md`).
 
@@ -321,9 +321,9 @@ GitHub-based library synchronization and source selection are also not implement
 
 ## Commercial and licensing direction
 
-The owner has described AutoStacc as the intended commercial distribution channel. The repository is public but proprietary; public source visibility does not grant reuse rights. Do not claim that an AutoStacc purchase/unlock flow or commercial release pipeline is implemented.
+**Owner direction (2026-11-09):** C.A.W. is intended to be free and open source. It is licensed under [Apache-2.0](../LICENSE). AutoStacc distributes the free app and the optional support bundles. Core functionality is not paywalled. Optional support/donation bundles may provide prebuilt libraries of FX, instruments, presets, samples and sounds; they use the same component/content formats as free and creator-made content. Do not claim AutoStacc distribution or bundle delivery is implemented.
 
-New dependencies require licence review and an entry in [decisions](decisions.md).
+New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Dependencies must be permissive (no GPL/AGPL); no paid licence is assumed. See [visual creation and signal routing](visual-routing-and-library-integration.md) for the current candidate evaluation.
 
 ## Open owner decisions
 
@@ -331,9 +331,9 @@ Only the owner can settle these questions. Do not silently convert them into imp
 
 | Question | Current status |
 |---|---|
-| iOS distribution: App Store exception or no iOS release | Open |
+| iOS distribution | Decided 2026-11-09: iOS ships through the App Store without C++ authoring ([decisions](decisions.md)) |
 | Licence for user-created/shared sound modules | Open |
-| How a future AutoStacc purchase would deliver/unlock the app | Open |
+| How AutoStacc delivers the free app and the support bundles | Open |
 | Initial trust state for a newly encountered native component | Open; each component's trust level must be explicitly chosen by the user; no silent trust assignment ([decisions](decisions.md), 2026-11-06) |
 | How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
