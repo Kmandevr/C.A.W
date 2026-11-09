@@ -12,7 +12,7 @@ Tasks and bugs live in GitHub Issues: use the `tasks` skill to find, claim and f
 - Never invent facts about libraries, versions, licences, platform behaviour or devices. Check a primary source and date it, or label it an assumption.
 - The audio callback never allocates, locks, logs, does I/O or calls into the UI layer (details: `.claude/rules/engine.md`).
 - Downloaded `.caw` modules are untrusted: the constrained language has no filesystem/network/system calls and is bounded. Native SDK modules are in-process code, not sandboxed; third-party binaries load only under the user's per-item choice of Isolated, Trusted or Blocked (`docs/decisions.md`), never silently. Never ship a GitHub token or other secret.
-- Dependencies must have permissive licences (no GPL/AGPL; owner, 2026-11-09: C.A.W. itself will be MIT or Apache-2.0). Record each new one in `docs/decisions.md`.
+- Dependencies must have permissive licences (no GPL/AGPL; C.A.W. itself is Apache-2.0). Record each new one in `docs/decisions.md`.
 - The owner works from Android (Galaxy S22+): every build, test and installable comes from GitHub Actions; do not assume a PC/IDE.
 - Record decisions and new facts in `docs/` before ending a session, and rewrite superseded text where it stands instead of appending (details: `.claude/rules/docs.md`).
 

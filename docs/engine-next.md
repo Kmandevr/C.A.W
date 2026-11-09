@@ -29,7 +29,7 @@ CAW should natively create bytebeat and deterministic mathematical audio; proced
 8. **Starter content is a starting point.** The current repository ships starter modules under examples/. A separate factory asset hierarchy is a proposed future organization, not an existing caw/factory path. Users can start blank, modify a template, write code or use the current visual editors.
 9. **Local/global assets are explicit.** Local assets belong to a project; global assets are reusable across projects. Stable IDs and versions prevent path changes breaking projects.
 10. **Other applications are a destination.** C.A.W. creates portable content for DAWs, games and custom software. External plugin formats/hosting remain future work, not a current capability.
-11. **Permissive dependencies only** unless the owner approves an exception. C.A.W. itself will move from its current proprietary licence to MIT or Apache-2.0 (owner, 2026-11-09).
+11. **Permissive dependencies only** unless the owner approves an exception. C.A.W. itself is Apache-2.0 (owner, 2026-11-09).
 12. **Low-end hardware is a first-class target.** Every feature needs a resource budget and graceful behavior on weak devices. The floor is budget phones (Galaxy A1x-class, 3–4 GB RAM, Android 10+; owner, 2026-11-03).
 
 ## 3. Engine architecture

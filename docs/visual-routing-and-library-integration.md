@@ -121,7 +121,7 @@ Evaluate existing open-source technology at every scale, from algorithms and lib
 | VCV Rack | Inspiration for modular interaction and patch readability | Inspiration only; do not copy its rack-specific workflow as C.A.W.'s overall song-making model. |
 | Existing C.A.W. engine, .caw built-ins and code | Reusable algorithms, DSP, MIDI, parameter, graph and synthesis behavior | Audit and migrate useful capabilities into the C++ Library/SDK; preserve behavior where valuable, not the legacy language or architecture. Verify each retained path with tests and audio comparisons. |
 
-The owner's current direction is that C.A.W. itself is free/open source, with optional support/donation bundles of prebuilt FX, instruments, presets, samples and sounds. Core functionality is not paywalled. C.A.W. will use a permissive licence (MIT or Apache-2.0, not yet chosen) and permissive dependencies only (owner, 2026-11-09). No paid dependency or commercial licence may be assumed. A candidate with obligations that C.A.W. cannot meet is rejected or used only as a reference.
+The owner's current direction is that C.A.W. itself is free/open source, with optional support/donation bundles of prebuilt FX, instruments, presets, samples and sounds. Core functionality is not paywalled. C.A.W. is Apache-2.0 and uses permissive dependencies only (owner, 2026-11-09). No paid dependency or commercial licence may be assumed. A candidate with obligations that C.A.W. cannot meet is rejected or used only as a reference.
 
 ## 8. Relationship to the canonical roadmap
 

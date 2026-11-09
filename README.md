@@ -36,4 +36,4 @@ Tasks and bugs are GitHub Issues. Security problems: [SECURITY.md](SECURITY.md).
 
 ## Licence
 
-Proprietary: the source is visible, but all rights are reserved ([LICENSE](LICENSE)).
+[Apache License 2.0](LICENSE). Third-party libraries keep their own licences, listed in [architecture](docs/architecture.md).

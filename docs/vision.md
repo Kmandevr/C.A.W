@@ -90,7 +90,7 @@ GitHub-based library synchronization and source selection are also not implement
 
 ## Commercial and licensing direction
 
-**Owner direction (2026-11-09):** C.A.W. is intended to be free and open source. It will use a permissive licence (MIT or Apache-2.0, not yet chosen); until then the repository stays under its current all-rights-reserved [LICENSE](../LICENSE). Whether AutoStacc (earlier described as the commercial distribution channel) still has a role, for example for support bundles, is open. Core functionality is not paywalled. Optional support/donation bundles may provide prebuilt libraries of FX, instruments, presets, samples and sounds; they use the same component/content formats as free and creator-made content. The distribution mechanism remains open; do not claim an AutoStacc purchase/unlock flow is implemented.
+**Owner direction (2026-11-09):** C.A.W. is intended to be free and open source. It is licensed under [Apache-2.0](../LICENSE). AutoStacc distributes the free app and the optional support bundles. Core functionality is not paywalled. Optional support/donation bundles may provide prebuilt libraries of FX, instruments, presets, samples and sounds; they use the same component/content formats as free and creator-made content. Do not claim AutoStacc distribution or bundle delivery is implemented.
 
 New dependencies require exact version, transitive dependency and licence review and an entry in [decisions](decisions.md). Dependencies must be permissive (no GPL/AGPL); no paid licence is assumed. See [visual creation and signal routing](visual-routing-and-library-integration.md) for the current candidate evaluation.
 
@@ -102,7 +102,7 @@ Only the owner can settle these questions. Do not silently convert them into imp
 |---|---|
 | iOS distribution: App Store exception or no iOS release | Open |
 | Licence for user-created/shared sound modules | Open |
-| How a future AutoStacc purchase would deliver/unlock the app | Open |
+| How AutoStacc delivers the free app and the support bundles | Open |
 | Initial trust state for a newly encountered native component | Open; each component's trust level must be explicitly chosen by the user; no silent trust assignment ([decisions](decisions.md), 2026-11-06) |
 | How the optional AutoStacc cloud library syncs with project folders and the global library | Open; compatibility is required ([decisions](decisions.md), 2026-11-03) |
 | Whether effect tails should carry across a layer loop restart in every case | Open; see [engine playback](engine.md#playback) |
