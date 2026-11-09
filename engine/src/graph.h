@@ -79,7 +79,11 @@ enum class GraphError : uint8_t {
     RoutingUnavailable,
     InvalidParameterLink,
     InvalidAutomationLane,
-    InvalidCcMapping
+    InvalidCcMapping,
+    // The parameter's descriptor does not allow this kind of control (CP.2 capability flags).
+    ParameterNotModulatable,
+    ParameterNotAutomatable,
+    ParameterNotMidiMappable
 };
 
 // An automation lane (F6.4) for one node parameter. `points` are borrowed: they must stay valid
@@ -219,14 +223,16 @@ public:
     // per parameter, ops and depths as ParameterResolver::setLinks accepts. Not available once
     // routing is reserved (the order can change). On an error nothing changes. Errors:
     // NodeIndexOutOfRange, PortIndexOutOfRange (port or parameter), PortTypeMismatch (not a
-    // modulation output), Cycle (source does not run first), InvalidParameterLink, RoutingUnavailable,
+    // modulation output), Cycle (source does not run first), InvalidParameterLink, ParameterNotModulatable
+    // (its descriptor says modulatable = false), RoutingUnavailable,
     // InvalidOutputNode (not prepared), OutOfMemory (its control-thread scratch).
     GraphError setModulationLinks(const ParameterLink* links, uint32_t count);
     // Control thread, only while process() is not running: replace every automation lane (at most
     // one per parameter). While the transport plays, a lane is the parameter's base each frame
     // unless the parameter is touched (F6.1 rules). On an error nothing changes. Errors:
     // NodeIndexOutOfRange, PortIndexOutOfRange (parameter), InvalidAutomationLane (no or
-    // unsorted or non-finite points, or a second lane on one parameter), InvalidOutputNode.
+    // unsorted or non-finite points, or a second lane on one parameter), ParameterNotAutomatable
+    // (automatable = false), InvalidOutputNode.
     GraphError setAutomationLanes(const ParameterLane* lanes, uint32_t count);
     // Audio thread, before process(): the song position of the next block's first frame, in
     // samples, the samples per step (> 0, finite) and whether the song plays. Frame i of a block
@@ -244,7 +250,7 @@ public:
     // block (decoded once per block, at most maxEventsPerPort). prepare() clears the mappings. On an error nothing
     // changes. Errors: NodeIndexOutOfRange, PortIndexOutOfRange (parameter), InvalidCcMapping (a
     // group, channel or controller out of range, or a second mapping on one parameter),
-    // InvalidOutputNode (not prepared), OutOfMemory (its control-thread scratch).
+    // ParameterNotMidiMappable (midiMappable = false), InvalidOutputNode (not prepared), OutOfMemory (its control-thread scratch).
     GraphError setCcMappings(const ParameterCcMapping* mappings, uint32_t count);
     bool setTransport(int64_t sample, double samplesPerStep, bool playing) noexcept;
     // Control thread, only while process() is not running (after prepare(), before the audio

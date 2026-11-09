@@ -2,7 +2,7 @@
 title: How it works
 summary: The path a sound takes from a .caw file to the speaker and to a WAV, the file that owns each step, and where to make each kind of change.
 covers: [engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/compile.h, engine/src/vm.h, engine/src/engine.h, engine/src/capi.cpp, engine/src/builtins.cpp, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/dependency.*, engine/src/execution.*, engine/src/hardware.*, engine/src/scheduler.*, engine/src/worker_api.cpp, engine/src/midi2.*, app/lib/engine/engine.dart, app/lib/engine/execution.dart, app/lib/engine/bindings.dart, app/lib/model/app_state.dart]
-updated: 2026-11-06
+updated: 2026-11-09
 ---
 
 # How it works
@@ -30,7 +30,7 @@ The modular foundation is real native C++ code, but it is not yet the active pla
 
 | Area | Implementation | What is true today |
 | --- | --- | --- |
-| Module contract | `engine/include/caw/module.hpp`, `engine/src/module.cpp` | Public canonical C++ contract for typed audio, control, modulation and event ports; the `Event` record (note id, raw UMP); parameter metadata; generated/custom UI metadata; descriptor validation; and the processor interface (`process`, `processPorts`). Internal `engine/src/module.h` forwards to this header. |
+| Module contract | `engine/include/caw/module.hpp`, `engine/src/module.cpp` | Public canonical C++ contract for typed audio, control, modulation and event ports; the `Event` record (note id, raw UMP); the component's identity, role, latency, tail and state size; parameter metadata with choices and modulation/automation/MIDI flags (the graph executor enforces them); generated/custom UI metadata; descriptor validation; and the processor interface (`process`, `processPorts`). Internal `engine/src/module.h` forwards to this header. |
 | C++ SDK build target | `engine/CMakeLists.txt`, `engine/cmake/`, `app/lib/platform/cpp_build.dart` | `CAW::SDK` is installable; the `caw.component` helper creates shared libraries and emits a configuration-specific artifact path. The app persists source/dependency pins, invokes local CMake in a private workspace and returns the verified artifact. GitHub Actions is repository CI only, not the user's build service. |
 | Parameter resolver | `engine/src/params.h`, `params.cpp` | One parameter's value per block from its manual/MIDI base (smoothed), automation (unless touched) and modulation links in id order, on the descriptor's curve, then clamped and stepped (F6.1). The graph executor resolves every node's parameters each block, with modulation links from other nodes' modulation outputs (F6.3), automation lanes at the transport position (F6.4) and MIDI CC mappings from host events (F6.5), and passes them to processors (F6.2). The Engine's .caw params and globals resolve the same way (F6.6). |
 | Module registry | `engine/src/module_registry.h`, `module_registry.cpp`, `engine/src/capi.cpp` | Static and dynamic registry. Windows uses `LoadLibraryW`; POSIX uses `dlopen`. Explicit trust is mandatory: Blocked refuses, Isolated is rejected until process isolation exists, Trusted loads in-process. Descriptor/ID validation and component-owned destruction protect ABI/library lifetime. |

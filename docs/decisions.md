@@ -6,6 +6,11 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: Claude takes over engine building
+
+- **Owner decision:** Claude builds the engine for now (replacing the 2026-10-31 split where GPT built features and Claude reviewed). GPT's merged work is the baseline where it applies; Claude asks the owner about open questions instead of deciding them.
+- **Owner decisions (same day):** GPT is paused on the engine (Claude only). Work order stays #120 → #17 → #121 → #122 (issue #123), with the stable C interface built as part of #120. Claude merges its own engine PRs once CI is green and its independent audio review finds nothing blocking. The stereo-only C interface v1 (`caw_module_sdk.h`) is replaced by a full v2 with no v1 compatibility.
+
 ## 2026-11-09: Two visual workspaces and conditional signal/event routing
 
 - **Owner decision — song workflow:** keep the ordinary arrangement, piano roll, clips and conventional mixer workflow for making songs. Visual routing is an additional workspace, not a replacement for arranging or note editing.

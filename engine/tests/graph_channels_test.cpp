@@ -2046,3 +2046,43 @@ TEST(graph_cc_mappings_resolve_without_allocating) {
     CHECK(ok);
     CHECK_EQ(operations, 0u);
 }
+
+TEST(graph_refuses_modulation_automation_or_cc_a_parameter_does_not_allow) {
+    // CP.2: one parameter definition carries its capability flags; the executor enforces them.
+    {
+        LinkGraph g;
+        g.m.gain.modulatable = false;
+        ModSource lfo(g.t.mod, 0, 1.0f, true);
+        OffsetGenerator mono(g.t.mono, 0);
+        ParamGain gain(g.m.plain), after(g.m.plain);
+        GraphExecutor executor;
+        CHECK(executor.prepare({{"lfo", &g.t.mod}, {"g", &g.m.plain}, {"mono", &g.t.mono}, {"h", &g.m.plain}},
+                               {{1, 1, 3, 0}}, {&lfo, &gain, &mono, &after}, 3, 8, 48000.0, kBudget) == GraphError::Ok);
+        const ParameterLink link{1, 0, 0, 3, 0, ModulationOp::Replace, 1.0};
+        CHECK(executor.setModulationLinks(&link, 1) == GraphError::ParameterNotModulatable);
+        CHECK_EQ(run(executor, 8, 0), 0.5f * 0.5f);  // nothing changed: both gains at their default
+    }
+    const AutomationPoint flat[] = {{0.0, 0.25}};
+    const ParameterLane lane{0, 0, flat, 1};
+    const ParameterCcMapping mapping{0, 0, 0, 0, 1};
+    {
+        ParamModules m;
+        m.gain.automatable = false;
+        ParamGain gain(m.plain);
+        GraphExecutor executor;
+        CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+        CHECK(executor.setAutomationLanes(&lane, 1) == GraphError::ParameterNotAutomatable);
+        CHECK(executor.setCcMappings(&mapping, 1) == GraphError::Ok);  // only automation is refused
+    }
+    {
+        ParamModules m;
+        m.gain.midiMappable = false;
+        ParamGain gain(m.plain);
+        GraphExecutor executor;
+        CHECK(executor.prepare({{"g", &m.plain}}, {}, {&gain}, 0, 8, 48000.0, kBudget) == GraphError::Ok);
+        CHECK(executor.setCcMappings(&mapping, 1) == GraphError::ParameterNotMidiMappable);
+        CHECK(executor.setAutomationLanes(&lane, 1) == GraphError::Ok);
+        const Event cc[] = {umpEvent(0, 0x20B0017Fu)};
+        CHECK_EQ(runEvents(executor, 8, cc, 1).at(0), 0.5f);  // the CC has no effect
+    }
+}

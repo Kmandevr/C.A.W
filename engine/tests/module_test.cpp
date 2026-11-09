@@ -279,3 +279,103 @@ TEST(module_descriptor_allows_summing_only_on_audio_inputs) {
     CHECK(!moduleDescriptorsMatch(ModuleDescriptor{"caw.test.sum", 1, input, 1, nullptr, 0},
                                   ModuleDescriptor{"caw.test.sum", 1, plain, 1, nullptr, 0}));
 }
+
+TEST(module_descriptor_carries_identity_role_timing_and_stereo_default_ports) {
+    // CP.2: the one descriptor holds everything the mixer, automation and generated UI read.
+    const PortDescriptor ports[] = {stereoInput("in"), stereoOutput("out"),
+                                    audioPort("side", true, ChannelLayout::Mono)};
+    CHECK(ports[0].layout == ChannelLayout::Stereo && ports[0].input && portChannelCount(ports[0]) == 2);
+    CHECK(ports[1].layout == ChannelLayout::Stereo && !ports[1].input);
+    CHECK(portChannelCount(ports[2]) == 1);
+    static constexpr std::string_view modes[] = {"Clean", "Warm", "Crush"};
+    ParameterDescriptor params[2];
+    params[0].id = "drive";
+    params[0].name = "Drive";
+    params[0].unit = "dB";
+    params[0].minimum = 0.0;
+    params[0].maximum = 24.0;
+    params[0].smoothingFrames = 64;
+    params[0].midiMappable = false;
+    params[1].id = "mode";
+    params[1].name = "Mode";
+    params[1].minimum = 0.0;
+    params[1].maximum = 2.0;
+    params[1].step = 1.0;
+    params[1].choices = modes;
+    params[1].choiceCount = 3;
+    params[1].modulatable = false;
+    const UiControlDescriptor controls[] = {
+        {"drive", "Drive", "drive", UiControlKind::Slider, 0.0, 24.0},
+        {"mode", "Mode", "mode", UiControlKind::Dropdown, 0.0, 2.0},
+    };
+    ModuleDescriptor d{"org.caw.test.drive", 1, ports, 3, params, 2, controls, 2, {}};
+    d.name = "Drive";
+    d.version = 3;
+    d.role = ModuleRole::Effect;
+    d.latencyFrames = 32;
+    d.tailFrames = 480;
+    d.maxStateBytes = 16;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+    CHECK(moduleDescriptorsMatch(d, d));
+    // Generated controls and automation read the same definition: the dropdown's labels and the
+    // flags come from the parameter itself.
+    CHECK(d.parameters[1].choices[2] == "Crush");
+    CHECK(!d.parameters[1].modulatable && d.parameters[1].automatable && d.parameters[1].midiMappable);
+
+    ModuleDescriptor other = d;
+    other.version = 4;
+    CHECK(!moduleDescriptorsMatch(d, other));
+    other = d;
+    other.latencyFrames = 0;
+    CHECK(!moduleDescriptorsMatch(d, other));
+    other = d;
+    other.name = "Renamed";  // display text: not part of the match
+    CHECK(moduleDescriptorsMatch(d, other));
+    d.tailFrames = kInfiniteTail;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+}
+
+TEST(module_descriptor_rejects_bad_identity_role_and_choices) {
+    ModuleDescriptor d{"org.caw.test.bad", 1};
+    d.version = 0;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidModuleVersion);
+    d.version = 1;
+    d.role = static_cast<ModuleRole>(200);
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidModuleRole);
+    d.role = ModuleRole::Instrument;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+
+    static constexpr std::string_view two[] = {"Off", "On"};
+    static constexpr std::string_view blank[] = {"Off", ""};
+    ParameterDescriptor p;
+    p.id = "switch";
+    p.minimum = 0.0;
+    p.maximum = 1.0;
+    p.step = 1.0;
+    p.choices = two;
+    p.choiceCount = 2;
+    d.parameters = &p;
+    d.parameterCount = 1;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
+    p.choiceCount = 3;  // the range has two values
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidParameterChoices);
+    p.choiceCount = 2;
+    p.step = 0.5;  // choices are whole steps
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidParameterChoices);
+    p.step = 1.0;
+    p.minimum = 0.5;
+    p.maximum = 1.5;  // not on whole numbers
+    p.defaultValue = 0.5;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidParameterChoices);
+    p.minimum = 0.0;
+    p.maximum = 1.0;
+    p.defaultValue = 0.0;
+    p.choices = nullptr;  // a count without labels
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidParameterChoices);
+    p.choices = two;
+    p.choiceCount = 0;  // labels without a count
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidParameterChoices);
+    p.choices = blank;
+    p.choiceCount = 2;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::EmptyParameterChoice);
+}
