@@ -72,8 +72,16 @@ struct Engine::Slot {
 
     bool ctlBusy = false;  // control thread only: a layer holds this slot, or it is still fading out
 
-    std::array<double, kBlock>** exportBuf = nullptr;  // stable slice in Engine::ExportPool
-    size_t exportCapacity = 0;
+    // Stable slice in Engine::ExportPool. Atomic (#133): the control thread sets both when the pool is
+    // first made, on slots the audio thread is already playing; elements a chain reads are written
+    // before the chain is installed (the command queue orders that).
+    std::atomic<std::array<double, kBlock>**> exportBuf{nullptr};
+    std::atomic<size_t> exportCapacity{0};
+    bool hasExports() const noexcept { return exportBuf.load(std::memory_order_relaxed) != nullptr; }
+    std::array<double, kBlock>* exportAt(size_t b) const noexcept {
+        std::array<double, kBlock>** table = exportBuf.load(std::memory_order_relaxed);
+        return table && b < exportCapacity.load(std::memory_order_relaxed) ? table[b] : nullptr;
+    }
     size_t exportCount = 0;  // grows to the largest active chain export count; audio-thread owned
 
     // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
@@ -1492,16 +1500,30 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         } else if (maxExportsPerSlot > exportPool_->capacityPerSlot) {
             return R"({"ok":false,"error":"project requires more exports per layer than the hardware-derived stable export pool supports"})";
         }
+        // Charge the buffers this project adds against the project-wide budget before allocating
+        // any (#133): each layer may hold up to capacityPerSlot, but all layers together only
+        // exportBufferBudget(). Buffers already made stay (the audio thread may read them).
+        size_t added = 0;
+        for (int slot = 0; slot < slotCount; ++slot) {
+            const size_t required = requiredExportsPerSlot[static_cast<size_t>(slot)];
+            for (size_t index = 0; index < required; ++index)
+                if (!ctlSlot(slot).exportBuf.load(std::memory_order_relaxed)[index]) ++added;
+        }
+        if (exportPool_->buffers.size() + added > exportBufferBudget())
+            return "{\"ok\":false,\"error\":\"project exports need " +
+                   std::to_string(exportPool_->buffers.size() + added) + " export buffers (" +
+                   std::to_string(static_cast<uint64_t>(exportPool_->buffers.size() + added) * kExportBufferBytes) +
+                   " bytes); this device's export buffer budget holds " + std::to_string(exportBufferBudget()) + "\"}";
         try {
             for (int slot = 0; slot < slotCount; ++slot) {
                 const size_t required = requiredExportsPerSlot[static_cast<size_t>(slot)];
                 for (size_t index = 0; index < required; ++index) {
-                    if (ctlSlot(slot).exportBuf[index]) continue;
+                    if (ctlSlot(slot).exportBuf.load(std::memory_order_relaxed)[index]) continue;
                     auto buffer = std::make_unique<std::array<double, kBlock>>();
                     buffer->fill(0.0);
                     auto* stable = buffer.get();
                     exportPool_->buffers.push_back(std::move(buffer));
-                    ctlSlot(slot).exportBuf[index] = stable;
+                    ctlSlot(slot).exportBuf.load(std::memory_order_relaxed)[index] = stable;
                 }
             }
         } catch (const std::bad_alloc&) {
@@ -1522,7 +1544,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (size_t k = 0; k < pl.ids.size(); ++k) {
             const ModuleState& m = modules_.at(pl.ids[k]);
             for (const ExportDef& e : m.program->exports) {
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, ctlSlot(pl.ls.slot).exportBuf[buf]->data()});
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, ctlSlot(pl.ls.slot).exportBuf.load(std::memory_order_relaxed)[buf]->data()});
                 ++buf;
             }
         }
@@ -2515,10 +2537,10 @@ const double* Engine::runModule(Chain& c, int lane, bool shadow, size_t idx, int
     ctx.vars[static_cast<int>(Var::Rate)] = c.rateb;
     ctx.vars[static_cast<int>(Var::In)] = input;
     const double* y = inst->process(ctx);
-    if (exportTo && exportTo->exportBuf)
+    if (exportTo && exportTo->hasExports())
         for (const auto& [reg, buf] : c.exportMap[idx])
-            if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
-                std::copy_n(inst->reg(reg), len, exportTo->exportBuf[buf]->data());
+            if (exportTo->exportAt(buf))
+                std::copy_n(inst->reg(reg), len, exportTo->exportAt(buf)->data());
     return y;
 }
 
@@ -2768,10 +2790,10 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
         int newest = -1;
         for (int v = 0; v < c.voiceCount; ++v)
             if (c.voices[v].active && (newest < 0 || c.voices[v].started > c.voices[newest].started)) newest = v;
-        if (exportTo && exportTo->exportBuf)
+        if (exportTo && exportTo->hasExports())
             for (const auto& [reg, buf] : c.exportMap[0])
-                if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
-                    std::fill_n(exportTo->exportBuf[buf]->data() + offset + o, n, 0.0);
+                if (exportTo->exportAt(buf))
+                    std::fill_n(exportTo->exportAt(buf)->data() + offset + o, n, 0.0);
         BlockCtx ctx = base;
         ctx.n = n;
         for (int k = 0; k < static_cast<int>(Var::Count); ++k)
@@ -2857,10 +2879,10 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
                 v.lastY = s;
                 if (!v.gate) v.quiet = std::fabs(s) < kQuietLevel ? v.quiet + 1 : 0;
             }
-            if (exportTo && exportTo->exportBuf && vi == newest)
+            if (exportTo && exportTo->hasExports() && vi == newest)
                 for (const auto& [reg, buf] : c.exportMap[0])
-                    if (buf < exportTo->exportCapacity && exportTo->exportBuf[buf])
-                        std::copy_n(v.inst->reg(reg), n, exportTo->exportBuf[buf]->data() + offset + o);
+                    if (exportTo->exportAt(buf))
+                        std::copy_n(v.inst->reg(reg), n, exportTo->exportAt(buf)->data() + offset + o);
             if (!v.gate && (v.quiet >= quietMax || v.rel >= relMax || (engineFade && v.rel >= fadeLen))) {
                 c.declick += v.lastY;  // ending a voice that is still sounding: smooth over the jump
                 v.active = false;
@@ -3006,10 +3028,10 @@ int Engine::planChunk(int maxFrames) noexcept {
 int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     for (int i = 0; i < slotCount_; ++i) {
         Slot& slot = slotAt(i);
-        if (slot.exportBuf && slot.exportCount > 0 &&
+        if (slot.hasExports() && slot.exportCount > 0 &&
             (!slot.active || !slot.cur || (slotTarget(slot) == 0.0 && slot.gain == 0.0))) {
             for (size_t b = 0; b < slot.exportCount; ++b)
-                if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), maxFrames, 0.0);
+                if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), maxFrames, 0.0);
             if (!slot.active || (!slot.cur && !slot.pending)) slot.exportCount = 0;
         }
     }
@@ -3018,9 +3040,9 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
         // Stopped, a track that isn't previewing exports silence, not the last block it played.
         for (int i = 0; i < slotCount_; ++i) {
             Slot& slot = slotAt(i);
-            if (slot.mode == Slot::Mode::Play || !slot.exportBuf) continue;
+            if (slot.mode == Slot::Mode::Play || !slot.hasExports()) continue;
             for (size_t b = 0; b < slot.exportCount; ++b)
-                if (slot.exportBuf[b]) std::fill_n(slot.exportBuf[b]->data(), m, 0.0);
+                if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), m, 0.0);
         }
     ++chunkId_;
     // One graph runs the mix: each track's modules as a chain of nodes then its track node, in

@@ -1247,6 +1247,44 @@ TEST(engine_rejects_export_layout_above_memory_budget) {
     CHECK(result.find("hardware-derived graph working-memory budget") != std::string::npos);
 }
 
+TEST(engine_bounds_total_export_buffers_by_the_budget_across_layers) {
+    // #133 (from #94): each layer may hold exportBuffersPerLayer() buffers, but the whole project
+    // only exportBufferBudget(), so a project that uses the per-layer allowance on many layers is
+    // refused before allocating past the budget, instead of using several times its memory.
+    EngineResourceBudget budget;
+    budget.graphWorkingBytes = 24ull << 20;
+    budget.projectStateBytes = 64ull << 20;
+    budget.compileWorkingBytes = 64ull << 20;
+    budget.retirementBytes = 64ull << 20;
+    budget.totalBytes = budget.graphWorkingBytes + budget.projectStateBytes + budget.compileWorkingBytes +
+                        budget.retirementBytes;
+    Engine e(8000, budget);
+    const size_t perLayer = e.exportBuffersPerLayer();
+    CHECK(perLayer > 0);
+    CHECK_EQ(e.exportBufferBudget(), perLayer * static_cast<size_t>(kExportBudgetSlots));
+    CHECK(e.maxLayers() > kExportBudgetSlots);
+    std::string source = "---\nmode: float\n---\n";
+    for (size_t i = 0; i < perLayer; ++i) source += "export let v" + std::to_string(i) + " = 1\n";
+    source += "1";
+    auto project = [&](int layers) {
+        ProjectSpec p;
+        p.modules.push_back({"wide", source, {}, "wide"});
+        for (int l = 0; l < layers; ++l) {
+            LayerSpec layer;
+            layer.id = "t" + std::to_string(l);
+            layer.chain = {"wide"};
+            p.layers.push_back(layer);
+        }
+        return p;
+    };
+    // Exactly the budget: accepted.
+    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
+    // One layer more needs perLayer buffers past it: refused, naming the budget.
+    const std::string over = e.setProject(project(kExportBudgetSlots + 1));
+    CHECK(over.find("\"ok\":false") != std::string::npos);
+    CHECK(over.find("export buffer budget") != std::string::npos);
+}
+
 TEST(routing_saturates_out_of_float_range_tracks_instead_of_silencing_the_mix) {
     // A runaway module can output finite doubles beyond float range. Routing carries float (F4.2),
     // so those samples must saturate at the largest float: inf (or NaN after a zero gain) would make

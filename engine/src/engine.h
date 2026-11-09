@@ -28,6 +28,8 @@ constexpr int kMaxTrackModules = 32;
 // Layer slots a new Engine starts with. It grows past them (setProject) up to maxLayers(), which
 // its memory budget sets; this many are always available.
 constexpr int kInitialLayerCapacity = 64;
+// The export-buffer budget is a share sized for this many slots (the initial layers plus the audition).
+constexpr int kExportBudgetSlots = kInitialLayerCapacity + 1;
 
 struct Meters {
     float cpu = 0, peakL = 0, peakR = 0;
@@ -60,12 +62,16 @@ public:
     const EngineResourceBudget& resourceBudget() const noexcept { return resourceBudget_; }
     // Layer slots the engine holds: kInitialLayerCapacity at first, growing (never shrinking) when
     // a project needs more. The Builder's audition is the slot after them, so auditionSlot() ==
-    // layerCapacity() and moves when the Engine grows (scope() takes it as the audition's index).
+    // layerCapacity() and moves when the Engine grows; scope() takes kScopeAudition for it, never this index.
     int layerCapacity() const noexcept { return ctlCapacity_.load(std::memory_order_relaxed); }
     int auditionSlot() const noexcept { return layerCapacity(); }
     // The most layer slots this Engine's graph-working budget allows (at least kInitialLayerCapacity):
     // a project with more layers is refused by setProject.
     int maxLayers() const noexcept { return maxLayers_; }
+    // Export buffers one layer may hold, and how many the whole project may allocate (a 65-slot share
+    // of the graph-working budget, so growing past 64 layers spreads it rather than multiplying it).
+    size_t exportBuffersPerLayer() const noexcept { return exportPerSlot_; }
+    size_t exportBufferBudget() const noexcept { return exportPerSlot_ * static_cast<size_t>(kExportBudgetSlots); }
 
     // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
     std::string setProject(const ProjectSpec& p);  // live: commands are applied by the audio callback
