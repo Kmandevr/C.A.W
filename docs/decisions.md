@@ -55,6 +55,10 @@ updated: 2026-11-09
 
 ## 2026-11-09: The app's layout (owner, #137, #139)
 
+**A full DAW, closest to REAPER (owner):** dense and practical. Every track header has record-arm and input, mute, solo and FX. There are mixer strips, long-press menus everywhere, and the layout can be customised.
+
+**Desktop, landscape and phone differ.** On desktop and in landscape, the mixer, a track inspector and the file browser dock beside the arrangement. On the phone they become cards or menus that float over the tracks (the mixer as a card over the tracks, for example), not docked panels.
+
 **The frame.**
 - A bottom bar holds the three main tab types: **Build** (C++ Builder), **Files** and **Arrange**.
 - Several tabs of one type, such as two Builders, switch from a small selector at the top of that section.
@@ -63,7 +67,9 @@ updated: 2026-11-09
 - The other workspaces fold into these three (#139).
 
 **Arrange.**
-- A track's FX button slides up a sheet over the lower half of the timeline. That sheet is the track's **routing**, the project/track workspace of the visual plan (`docs/visual-routing-and-library-integration.md`).
+- A track's FX button slides up a sheet over the lower half of the timeline.
+- The sheet opens on a plain **FX stack**, a normal top-to-bottom insert list: cards with knobs, drag to reorder, "+ effect" and bypass.
+- A **Routing** toggle at the top switches to the free canvas, the project/track workspace of the visual plan (`docs/visual-routing-and-library-integration.md`). Both views edit the same chain.
 - Tabs in the sheet: Effects/routing, Mixer, Automation, Export (Export is also in the project menu).
 - Automation is edited as lanes under each track, REAPER-style: volume, pan and any effect knob, aligned with the clips. A long-press on a knob offers "Automate".
 
@@ -78,10 +84,10 @@ updated: 2026-11-09
 - Tapping an effect inserts it there; it can also be dragged onto a wire.
 - A finished build is listed there at once. Tracks already using it switch to the new build while playing.
 
-**Files.**
-- Fixed sections: Effects & instruments (built-in, mine, packs), Code (C++ sources), Audio & MIDI, and Packs.
-- Each section has folders, tags, search and favourites, as the Library has today.
-- Tapping a source opens it in a Builder.
+**Files (like Unity's Project window).**
+- In landscape and on desktop: a folder tree on the left (Favourites, the project's Effects & instruments, Code, Audio & MIDI, and Packs) and an asset grid on the right. The grid shows icons with type badges and has a size slider, a breadcrumb and search with type filters.
+- In portrait the tree becomes a drawer and the breadcrumb leads.
+- Drag an asset onto a track or an effect slot. Tapping a C++ source opens it in a Builder.
 
 **Build (the C++ Builder).**
 - **Layout:** a side-drawer file tree, the editor at full width, and a Build button in its top bar. A setting adds build-on-pause, which builds a moment after typing stops.
