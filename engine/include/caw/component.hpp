@@ -25,9 +25,10 @@
 // and catches any exception at the boundary (it reports failure instead).
 #define CAW_EXPORT_COMPONENT(Type, descriptorExpr)                                                  \
     extern "C" CAW_COMPONENT_EXPORT const CawComponentV2* caw_get_component_v2(void) {             \
-        static const ::caw::component_detail::Exported* exported =                                  \
-            ::caw::component_detail::exportComponent<Type>(descriptorExpr);                         \
-        return exported ? &exported->table : nullptr;                                               \
+        /* A static in the library: built on the first call, destroyed when the library unloads. */ \
+        static ::caw::component_detail::Exported exported;                                          \
+        static const bool ready = ::caw::component_detail::exportComponent<Type>(descriptorExpr, exported); \
+        return ready ? &exported.table : nullptr;                                                   \
     }
 
 namespace caw::component_detail {
@@ -209,9 +210,9 @@ int32_t loadState(void* p, const uint8_t* source, uint32_t size, uint32_t versio
 inline const void* noExtension(void*, const char*) noexcept { return nullptr; }
 
 template <class Type>
-const Exported* exportComponent(const ModuleDescriptor& d) noexcept {
+bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
     try {
-        auto* e = new Exported();
+        Exported* e = &exported;
         e->ports.reserve(d.portCount);
         for (uint32_t i = 0; i < d.portCount; ++i) {
             const PortDescriptor& p = d.ports[i];
@@ -292,9 +293,9 @@ const Exported* exportComponent(const ModuleDescriptor& d) noexcept {
         t.save_state = &saveState<Type>;
         t.load_state = &loadState<Type>;
         t.get_extension = &noExtension;
-        return e;  // kept for the library's lifetime, like the descriptor it mirrors
+        return true;
     } catch (...) {
-        return nullptr;
+        return false;
     }
 }
 
