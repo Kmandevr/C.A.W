@@ -425,6 +425,19 @@ class Engine {
     calloc.free(n);
   }
 
+  /// A playing native component's parameter: component [index] of the layer's components, or of the
+  /// master chain when [layerId] is null. It ramps over the parameter's smoothing; false if there is no
+  /// such component or parameter. Store the value in the project too, so the next update keeps it.
+  bool setComponentParam(String? layerId, int index, String param, double value) {
+    final l = (layerId ?? '').toNativeUtf8(), p = param.toNativeUtf8();
+    try {
+      return _b.setComponentParam(_handle, l, index, p, value) == 1;
+    } finally {
+      calloc.free(l);
+      calloc.free(p);
+    }
+  }
+
   void setGlobal(String name, double value) {
     final n = name.toNativeUtf8();
     _b.setGlobal(_handle, n, value);

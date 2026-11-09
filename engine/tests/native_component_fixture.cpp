@@ -51,9 +51,45 @@ public:
     }
 };
 
+// The bundle's third component: separate left and right gains, so tests can tell the sides apart
+// and set parameters. "left" ramps over 8 frames; "right" jumps.
+caw::ParameterDescriptor gainParameter(std::string_view id, uint32_t smoothing) {
+    caw::ParameterDescriptor p;
+    p.id = id;
+    p.defaultValue = 1.0;
+    p.minimum = 0.0;
+    p.maximum = 4.0;
+    p.smoothingFrames = smoothing;
+    return p;
+}
+const caw::ParameterDescriptor kGainParameters[] = {gainParameter("left", 8), gainParameter("right", 0)};
+const caw::ModuleDescriptor kGainDescriptor{"org.caw.tests.native-loader.gain", 1, kPorts, 2, kGainParameters, 2,
+                                            nullptr, 0, {}};
+
+class GainProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kGainDescriptor; }
+    using caw::ModuleProcessor::process;
+    bool process(const caw::AudioProcessBlock& block) noexcept override {
+        if (block.input.channelCount != 2 || block.output.channelCount != 2) return false;
+        for (uint32_t c = 0; c < 2; ++c) {
+            double fixed = 1.0;
+            const double* samples = nullptr;
+            if (block.parameterCount == 2) {
+                fixed = block.parameters[c].value;
+                samples = block.parameters[c].samples;
+            }
+            for (uint32_t i = 0; i < block.frames; ++i)
+                block.output.channels[c][i] =
+                    static_cast<float>(block.input.channels[c][i] * (samples ? samples[i] : fixed));
+        }
+        return true;
+    }
+};
+
 }  // namespace
 
 #ifndef CAW_TEST_OMIT_ENTRY  // the second fixture plays a library without the v2 entry point
 // A bundle of two components (owner, 2026-11-09: a package may hold several).
-CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor)
+CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor)
 #endif

@@ -14,6 +14,29 @@ ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'s
     ]);
 
 void main() {
+  test('native components on tracks and the master round-trip and reach the engine with their values', () {
+    final p = ProjectDoc(id: 'p', name: 'P', bpm: 120, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    p.layers.first.components = [ComponentUseDoc('org.x.gain', {'left': 2})];
+    p.masterComponents = [ComponentUseDoc('org.x.verb')];
+    final again = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(again.layers.first.components.single.id, 'org.x.gain');
+    expect(again.layers.first.components.single.params, {'left': 2.0});
+    expect(again.masterComponents.single.id, 'org.x.verb');
+    final engine = jsonDecode(p.toEngineJson()) as Map<String, dynamic>;
+    expect(engine['master_components'], ['org.x.verb']);  // a bare id, as before
+    expect((engine['layers'] as List).first['components'], [
+      {'id': 'org.x.gain', 'params': {'left': 2.0}},
+    ]);
+    // Bad entries are dropped, not trusted: no id, a non-finite value.
+    final bad = ComponentUseDoc.listFromJson([
+      {'params': {}},
+      {'id': 'org.y', 'params': {'a': 'loud', 'b': 1}},
+      7,
+    ]);
+    expect(bad.single.id, 'org.y');
+    expect(bad.single.params, {'b': 1.0});
+  });
+
   test('a spacer under a track is saved with the project, never sent to the engine, and clamped', () {
     final p = sample();
     p.layers.first.spaceBelow = 40;

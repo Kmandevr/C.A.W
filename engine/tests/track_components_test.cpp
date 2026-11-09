@@ -1,0 +1,232 @@
+// Native components on tracks and the master: stereo kept, parameters set and changed, chains kept or rebuilt.
+#include <cmath>
+#include <string>
+#include <vector>
+
+#include "caw.h"
+#include "engine.h"
+#include "native_component_test_path.h"
+#include "project.h"
+#include "test.h"
+
+using namespace caw;
+
+namespace {
+
+constexpr const char* kGain = "org.caw.tests.native-loader.gain";
+constexpr const char* kDouble = "org.caw.tests.native-loader";
+const double kCentre = std::cos(3.14159265358979323846 / 4.0);  // the pan law at centre
+
+bool ok(const std::string& result) { return result.find("\"ok\":true") != std::string::npos; }
+
+// One track playing a constant 0.5 through `components`, volume 1, centred, master bypassed.
+ProjectSpec constantTrack(std::vector<ComponentSpec> components) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"dc", "---\nmode: float\n---\n0.5", {}});
+    LayerSpec l;
+    l.id = "t";
+    l.name = "t";
+    l.chain = {"dc"};
+    l.volume = 1.0;
+    l.components = std::move(components);
+    p.layers.push_back(l);
+    return p;
+}
+
+bool loadFixture(Engine& e, const char* id) {
+    const char* path = caw::test::nativeComponentPath();
+    return path && e.loadNativeComponent(path, id, NativeModuleTrust::Trusted).success;
+}
+
+// The last left and right samples after `frames` more frames.
+void runLast(Engine& e, int frames, float& left, float& right) {
+    std::vector<float> l(64), r(64);
+    for (int done = 0; done < frames; done += 64) e.process(l.data(), r.data(), 64);
+    left = l.back();
+    right = r.back();
+}
+
+}  // namespace
+
+TEST(project_json_reads_track_and_master_components_with_parameters) {
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,
+        "master_components":["org.a",{"id":"org.b","params":{"mix":0.25}}],
+        "layers":[{"id":"t","chain":["x"],"components":[{"id":"org.c","params":{"left":2,"right":0.5}}]}]})",
+                       p, error));
+    CHECK_EQ(p.masterComponents.size(), 2u);
+    CHECK_EQ(p.masterComponents[0].id, std::string("org.a"));
+    CHECK(p.masterComponents[0].params.empty());
+    CHECK_EQ(p.masterComponents[1].params.size(), 1u);
+    CHECK_EQ(p.masterComponents[1].params[0].first, std::string("mix"));
+    CHECK_EQ(p.layers.size(), 1u);
+    CHECK_EQ(p.layers[0].components.size(), 1u);
+    CHECK_EQ(p.layers[0].components[0].id, std::string("org.c"));
+    CHECK_EQ(p.layers[0].components[0].params.size(), 2u);
+
+    ProjectSpec bad;
+    CHECK(!parseProject(R"({"caw_project":1,"layers":[{"id":"t","components":[{"id":"org.c","params":{"x":"loud"}}]}]})",
+                        bad, error));
+    CHECK(error.find("finite number") != std::string::npos);
+    CHECK(!parseProject(R"({"caw_project":1,"master_components":[{"params":{}}]})", bad, error));
+    CHECK(error.find("needs an id") != std::string::npos);
+}
+
+TEST(a_track_insert_keeps_its_left_and_right_apart_through_volume_and_pan) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(constantTrack({{kGain, {{"left", 2.0}, {"right", 0.5}}}}))));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 4096, l, r);
+    CHECK_NEAR(l, 0.5 * 2.0 * kCentre, 1e-5);
+    CHECK_NEAR(r, 0.5 * 0.5 * kCentre, 1e-5);
+    LayerMeter meter;
+    CHECK(e.layerMeter(0, meter) && meter.active);
+    CHECK_NEAR(meter.peak, 0.5 * 2.0 * kCentre, 1e-4);  // the louder side
+}
+
+TEST(a_track_without_inserts_pans_its_mono_signal_as_before) {
+    Engine plain(48000);
+    plain.setMasterBypass(true);
+    CHECK(ok(plain.setProject(constantTrack({}))));
+    plain.play();
+    float l = 0, r = 0;
+    runLast(plain, 4096, l, r);
+    CHECK_EQ(l, static_cast<float>(0.5 * kCentre));
+    CHECK_EQ(l, r);
+}
+
+TEST(component_parameters_change_while_playing_and_through_project_updates) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({{kGain, {}}});  // defaults: both gains 1
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 4096, l, r);
+    CHECK_NEAR(l, 0.5 * kCentre, 1e-5);
+    CHECK_NEAR(r, 0.5 * kCentre, 1e-5);
+
+    CHECK(e.setComponentParam("t", 0, "right", 0.0));
+    CHECK(e.setComponentParam("t", 0, "left", 3.0));  // ramps over 8 frames, inside one block
+    runLast(e, 128, l, r);
+    CHECK_NEAR(l, 1.5 * kCentre, 1e-5);
+    CHECK_EQ(r, 0.0f);
+    CHECK(e.setComponentParam("t", 0, "left", 99.0));  // constrained to the range (0..4)
+    runLast(e, 128, l, r);
+    CHECK_NEAR(l, 2.0 * kCentre, 1e-5);
+
+    CHECK(!e.setComponentParam("t", 0, "nope", 1.0));
+    CHECK(!e.setComponentParam("t", 1, "left", 1.0));
+    CHECK(!e.setComponentParam("missing", 0, "left", 1.0));
+    CHECK(!e.setComponentParam("t", 0, "left", std::nan("")));
+
+    // An update with the same components keeps the chain and sets the values it names.
+    p.layers[0].components[0].params = {{"right", 1.0}};
+    CHECK(ok(e.setProject(p)));
+    runLast(e, 128, l, r);
+    CHECK_NEAR(r, 0.5 * kCentre, 1e-5);
+    CHECK_NEAR(l, 2.0 * kCentre, 1e-5);  // left keeps its live value: the update didn't name it
+}
+
+TEST(changing_a_tracks_components_rebuilds_its_chain_and_removing_them_frees_the_library) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    CHECK(loadFixture(e, kDouble));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({{kGain, {{"right", 0.0}}}});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 2048, l, r);
+    CHECK_EQ(r, 0.0f);
+    p.layers[0].components = {{kDouble, {}}, {kGain, {{"left", 0.5}}}};  // doubled, then left halved
+    CHECK(ok(e.setProject(p)));
+    runLast(e, 2048, l, r);
+    CHECK_NEAR(l, 0.5 * kCentre, 1e-5);
+    CHECK_NEAR(r, 1.0 * kCentre, 1e-5);
+    CHECK(!e.unloadNativeComponent(kDouble));  // the playing chain keeps its library loaded
+    p.layers[0].components.clear();
+    CHECK(ok(e.setProject(p)));
+    runLast(e, 2048, l, r);
+    CHECK_EQ(l, r);
+    CHECK(e.unloadNativeComponent(kDouble));
+    CHECK(e.unloadNativeComponent(kGain));
+}
+
+TEST(a_removed_track_frees_its_inserts) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    ProjectSpec p = constantTrack({{kGain, {}}});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 1024, l, r);
+    p.layers.clear();
+    CHECK(ok(e.setProject(p)));
+    runLast(e, 4096, l, r);  // the layer fades out and its slot (with the inserts) is retired
+    e.setProject(p);         // drains what the audio thread retired
+    CHECK(e.unloadNativeComponent(kGain));
+}
+
+TEST(a_component_that_cannot_run_refuses_the_whole_update) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    const std::string missing = e.setProject(constantTrack({{"org.caw.tests.not-loaded", {}}}));
+    CHECK(missing.find("\"ok\":false") != std::string::npos);
+    CHECK(missing.find("layer 't'") != std::string::npos);
+    CHECK(missing.find("not loaded") != std::string::npos);
+    const std::string badParam = e.setProject(constantTrack({{kGain, {{"volume", 1.0}}}}));
+    CHECK(badParam.find("\"ok\":false") != std::string::npos);
+    CHECK(badParam.find("no parameter 'volume'") != std::string::npos);
+    ProjectSpec master = constantTrack({});
+    master.masterComponents = {{"org.caw.tests.not-loaded", {}}};
+    const std::string masterMissing = e.setProject(master);
+    CHECK(masterMissing.find("\"ok\":false") != std::string::npos);
+    CHECK(masterMissing.find("master:") != std::string::npos);
+}
+
+TEST(master_components_take_parameters_and_live_changes) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({});
+    p.masterComponents = {{kGain, {{"left", 0.0}}}};
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 4096, l, r);
+    CHECK_EQ(l, 0.0f);
+    CHECK(r > 0.3f);
+    CHECK(e.setComponentParam("", 0, "left", 1.0));
+    runLast(e, 256, l, r);
+    CHECK(l > 0.3f);
+    CHECK_NEAR(l, r, 1e-6);
+}
+
+TEST(c_api_sets_a_component_parameter) {
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    if (!path) return;
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine) return;
+    char* loaded = caw_engine_load_component(engine, path, kGain, CAW_NATIVE_TRUST_TRUSTED);
+    caw_free(loaded);
+    char* result = caw_engine_set_project(engine,
+        R"({"caw_project":1,"bpm":120,"modules":[{"id":"dc","source":"---\nmode: float\n---\n0.5"}],
+            "layers":[{"id":"t","chain":["dc"],"components":[{"id":"org.caw.tests.native-loader.gain","params":{"left":2}}]}]})");
+    CHECK(result && std::string(result).find("\"ok\":true") != std::string::npos);
+    caw_free(result);
+    CHECK_EQ(caw_engine_set_component_param(engine, "t", 0, "right", 0.5), 1);
+    CHECK_EQ(caw_engine_set_component_param(engine, nullptr, 0, "right", 0.5), 0);  // no master chain
+    CHECK_EQ(caw_engine_set_component_param(engine, "t", 0, nullptr, 0.5), 0);
+    caw_engine_destroy(engine);
+}

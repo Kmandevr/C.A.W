@@ -35,6 +35,47 @@ std::vector<std::string> idList(const Json* arr) {
     return out;
 }
 
+// A component chain: each entry an id string, or {"id": ..., "params": {name: number}}.
+bool componentList(const Json* arr, const std::string& where, std::vector<ComponentSpec>& out, std::string& error) {
+    out.clear();
+    if (!arr) return true;
+    if (arr->type != Json::Type::Array) {
+        error = where + " must be a list of components";
+        return false;
+    }
+    if (arr->arr.size() > 64) {
+        error = where + " holds more than 64 components";
+        return false;
+    }
+    for (const Json& j : arr->arr) {
+        ComponentSpec c;
+        if (j.type == Json::Type::String) {
+            c.id = j.str;
+        } else if (j.type == Json::Type::Object) {
+            c.id = j.string("id");
+            if (const Json* ps = j.get("params")) {
+                if (ps->type != Json::Type::Object) {
+                    error = where + ": component '" + c.id + "' params must be an object of numbers";
+                    return false;
+                }
+                for (const auto& [k, v] : ps->obj) {
+                    if (v.type != Json::Type::Number || !std::isfinite(v.num)) {
+                        error = where + ": component '" + c.id + "' param '" + k + "' must be a finite number";
+                        return false;
+                    }
+                    c.params.emplace_back(k, v.num);
+                }
+            }
+        }
+        if (c.id.empty()) {
+            error = where + ": every component needs an id";
+            return false;
+        }
+        out.push_back(std::move(c));
+    }
+    return true;
+}
+
 }  // namespace
 
 const ModuleSpec* ProjectSpec::module(const std::string& id) const {
@@ -131,7 +172,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         }
     }
 
-    out.masterComponents = idList(root.get("master_components"));
+    if (!componentList(root.get("master_components"), "master_components", out.masterComponents, error)) return false;
     if (const Json* mods = root.get("modules"); mods && mods->type == Json::Type::Array) {
         for (const Json& m : mods->arr) {
             if (m.type != Json::Type::Object) continue;
@@ -158,6 +199,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             if (spec.id.empty()) continue;
             spec.chain = idList(l.get("chain"));
             const std::string layerName = "layer '" + spec.id + "'";
+            if (!componentList(l.get("components"), layerName + " components", spec.components, error)) return false;
             if (!wholeIn(l.number("length_steps", 0), 0, maxSteps, spec.lengthSteps)) {
                 error = layerName + ": length_steps must be a whole number from " + range(0, maxSteps);
                 return false;

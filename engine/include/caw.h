@@ -15,8 +15,10 @@ extern "C" {
 #endif
 
 /* 2 (2026-11-09): scope() indexes 0..n-1 are project layers at any capacity; the master and the
-   audition are CAW_SCOPE_MASTER and CAW_SCOPE_AUDITION, not fixed slot numbers (F7.3). */
-#define CAW_API_VERSION 2
+   audition are CAW_SCOPE_MASTER and CAW_SCOPE_AUDITION, not fixed slot numbers (F7.3).
+   3 (2026-11-09): native components on tracks ("components" per layer) and parameter values in
+   both chains ({"id","params"} entries); caw_engine_set_component_param. */
+#define CAW_API_VERSION 3
 
 typedef struct CawEngine CawEngine;
 
@@ -119,6 +121,11 @@ CAW_API int32_t caw_engine_unload_component(CawEngine* e, const char* component_
    "ui_controls":[{"id","label","parameter_id","kind","min","max"}]}]} */
 CAW_API char* caw_engine_components(CawEngine* e);
 CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value);
+/* A playing native component's parameter: component `index` (0-based) of a layer's "components"
+   chain, or of "master_components" when layer_id is NULL or empty. It ramps over the parameter's
+   smoothing. 1 on success, 0 if there is no such component or parameter, or value is not finite. */
+CAW_API int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint32_t index,
+                                               const char* param_id, double value);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,

@@ -350,12 +350,15 @@ updated: 2026-11-09
 Project layers and synth patches may describe dynamically sized module/effect chains. Parsing and engine preparation must preserve every authored chain element; no silent truncation or arbitrary eight-effect ceiling is allowed. Memory and processing costs are handled by explicit host resource budgets and clear preparation errors. This change does not remove unrelated limits such as the current project layer-slot model or export-buffer capacity; those remain separate integration work.
 
 
-## 2026-11-06: First native C++ playback slice
+## 2026-11-06: Native C++ effects in playback (updated 2026-11-09)
 
-**Implementation decision (initial prototype, not the final component limitation):** route explicitly loaded, zero-parameter stereo C++ effects through a project-owned master-effect list (master_components). This uses the existing stereo master stage without forcing stereo processors into the current three-lane VM track chain, which is still mono per module. Keep the master safety limiter after native processing.
+**Implementation decision:** explicitly loaded stereo C++ effects run in two kinds of project-owned chain: a track's (`components` on a layer) and the master's (`master_components`), each entry an id or `{"id", "params"}`. A track's chain runs after its .caw modules, whose mono output enters as two equal channels, and before volume and pan; what the effects make of it stays stereo, and the pan law then works per side. The master's runs before the safety limiter, which stays last. Components between .caw modules wait for the dual-mono rule (#17). Folder buses take no components yet.
+
+- One type, `ComponentChain`, serves both. It is built and activated on the control thread before anything is sent, so a component that is not loaded, has other ports or names a parameter it lacks refuses the whole update. An update with the same components in the same order keeps the chain, and its running state (a reverb's tail), and only sets values; any other change rebuilds it.
+- Parameter values ramp through the F6 resolver. `caw_engine_set_component_param` changes one while playing; the app stores it in the project too. Automation lanes for component parameters are not wired yet.
 
 - A successful build never loads or authorizes code. The caller must pass an explicit Blocked, Isolated or Trusted value to the Engine C API; Blocked refuses before opening the library, Isolated is rejected until a real separate-process host exists, and Trusted runs in-process.
-- Trust is not serialized into the portable project. The project stores component IDs/order only; each user/device must make its own trust decision before the component can be used.
+- Trust is not serialized into the portable project. The project stores component IDs, order and values only; each user/device must make its own trust decision before the component can be used.
 - The audio callback uses fixed preallocated stereo stages, performs no host allocation or locking, sanitizes output and publishes/retires master chains through the existing command/retirement path. Component code itself must obey the real-time contract.
 - The known scratch and chain-pointer storage is included in Engine budgets. ABI v1 does not report component-private heap/state size; that remains an explicit measurement gap.
-- Next integration work: parameter mapping, then track-chain support with a deliberate stereo/state design, then the per-component trust UI/store and Android-hosted toolchain.
+- Next (issue #137): the Android-hosted compiler, the per-component trust UI/store and the in-app C++ editor.

@@ -127,6 +127,15 @@ void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name,
     if (e && module_id && name) e->engine->setParam(module_id, name, value);
 }
 
+int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint32_t index, const char* param_id,
+                                       double value) try {
+    return e && e->engine && param_id &&
+                   e->engine->setComponentParam(layer_id ? layer_id : "", index, param_id, value)
+               ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
 void caw_engine_set_global(CawEngine* e, const char* name, double value) {
     if (e && name) e->engine->setGlobal(name, value);
 }

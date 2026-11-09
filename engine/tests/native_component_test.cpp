@@ -24,8 +24,8 @@ TEST(project_json_preserves_native_master_component_order) {
         project,
         error));
     CHECK_EQ(project.masterComponents.size(), 2u);
-    CHECK_EQ(project.masterComponents[0], std::string("org.caw.fx.first"));
-    CHECK_EQ(project.masterComponents[1], std::string("org.caw.fx.second"));
+    CHECK_EQ(project.masterComponents[0].id, std::string("org.caw.fx.first"));
+    CHECK_EQ(project.masterComponents[1].id, std::string("org.caw.fx.second"));
 }
 
 TEST(c_api_native_component_load_requires_an_explicit_trust_level) {

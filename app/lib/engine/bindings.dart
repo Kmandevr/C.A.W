@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 2;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 3;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -128,6 +128,8 @@ class Bindings {
             'caw_engine_components'),
         setParam = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Double),
             void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double)>('caw_engine_set_param'),
+        setComponentParam = lib.lookupFunction<Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Utf8>, Double),
+            int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double)>('caw_engine_set_component_param'),
         setGlobal = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double),
             void Function(Pointer<Void>, Pointer<Utf8>, double)>('caw_engine_set_global'),
         setLayerMix = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Utf8>, Double, Double, Int32, Int32),
@@ -229,6 +231,7 @@ class Bindings {
   final int Function(Pointer<Void>, Pointer<Utf8>) unloadComponent;
   final Pointer<Utf8> Function(Pointer<Void>) components;
   final void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setParam;
+  final int Function(Pointer<Void>, Pointer<Utf8>, int, Pointer<Utf8>, double) setComponentParam;
   final void Function(Pointer<Void>, Pointer<Utf8>, double) setGlobal;
   final void Function(Pointer<Void>, Pointer<Utf8>, double, double, int, int) setLayerMix;
   final void Function(Pointer<Void>, double) setMaster;

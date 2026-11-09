@@ -6,6 +6,7 @@
 #include "alloc_counter.h"
 #include "capi_internal.h"
 #include "engine.h"
+#include "native_component_test_path.h"
 #include "params.h"
 #include "test.h"
 
@@ -176,5 +177,34 @@ TEST(note_previews_never_allocate_on_the_audio_thread_playing_or_stopped) {
         }
     }
     CHECK(sum > 0.0);
+    CHECK_EQ(operations, 0u);
+}
+
+TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_changes) {
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    if (!path) return;
+    Engine e(48000);
+    const char* gain = "org.caw.tests.native-loader.gain";
+    CHECK(e.loadNativeComponent(path, gain, NativeModuleTrust::Trusted).success);
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"bass", templateSource("bass.caw"), {}});
+    p.layers = {layer("b", {"bass"})};
+    p.layers[0].components = {{gain, {{"left", 2.0}}}};
+    p.masterComponents = {{gain, {{"right", 0.5}}}};
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 50; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    for (int round = 0; round < 10; ++round) {
+        e.setComponentParam("b", 0, "left", 0.5 + 0.1 * round);  // control thread, outside the count
+        e.setComponentParam("", 0, "right", 0.1 * round);
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);  // the ramps run in here
+        operations += scope.count();
+    }
     CHECK_EQ(operations, 0u);
 }

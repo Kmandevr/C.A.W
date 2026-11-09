@@ -54,6 +54,7 @@ struct Engine::Slot {
     Chain* cur = nullptr;
     Chain* old = nullptr;    // previous chain, fading out after a hot swap
     Chain* pending = nullptr;  // new code waiting for the next beat or bar
+    ComponentChain* inserts = nullptr;  // native stereo effects after the chain, before volume and pan
     std::shared_ptr<const Pattern>* pattern = nullptr;  // owned here, freed on the control thread when retired
     int swapLeft = 0;
     int seamLeft = 0;
@@ -192,20 +193,16 @@ struct Engine::Chain {
     double tb[kBlock], rateb[kBlock], zero[kBlock];
 };
 
-struct Engine::MasterChain {
-    std::vector<std::unique_ptr<ModuleProcessor>> processors;
-    std::array<std::array<float, kBlock>, 2> stageL{};
-    std::array<std::array<float, kBlock>, 2> stageR{};
-};
+static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
     int slot = 0;
     Chain* chain = nullptr;
-    MasterChain* masterChain = nullptr;
+    ComponentChain* masterChain = nullptr;  // SetMasterChain: the master's; SetInserts: slot's inserts (owned)
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
@@ -230,7 +227,7 @@ struct Engine::Retired {
     AutomationData* automation = nullptr;
     std::vector<int>* order = nullptr;
     SlotTable* table = nullptr;  // a slot table (and its mix graph) a Grow replaced
-    MasterChain* masterChain = nullptr;
+    ComponentChain* masterChain = nullptr;  // a component chain (master or a track's inserts) replaced or freed
 };
 
 namespace {
@@ -724,6 +721,7 @@ Engine::~Engine() {
         delete slot->cur;
         delete slot->old;
         delete slot->pending;
+        delete slot->inserts;
         delete slot->pattern;
         delete slot->automation;
     }
@@ -1054,43 +1052,42 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     } reset{offlineControl_};
     drainRetired();
 
-    // The first native playback slice is a zero-parameter stereo master-effect chain.
-    // Components must already be explicitly loaded through the trust-gated Engine API.
-    std::unique_ptr<MasterChain> nextMasterChain;
-    uint64_t masterChainBytes = 0;
-    if (!p.masterComponents.empty()) {
-        const uint64_t count = static_cast<uint64_t>(p.masterComponents.size());
-        if (count > (std::numeric_limits<uint64_t>::max() - sizeof(MasterChain)) /
-                        sizeof(std::unique_ptr<ModuleProcessor>))
-            return R"({"ok":false,"error":"native master chain size overflows the project memory estimate","modules":{}})";
-        masterChainBytes = sizeof(MasterChain) + count * sizeof(std::unique_ptr<ModuleProcessor>);
+    // Native component chains: the master's and each track's inserts. Components must already be
+    // explicitly loaded through the trust-gated Engine API. Every chain is built (and activated) here,
+    // before anything is sent, so a component that can't run refuses the whole update. A chain with
+    // the same components in the same order is kept, running state and all, and only takes values.
+    std::unique_ptr<ComponentChain> nextMasterChain;
+    const bool keepMasterChain = ctlMasterChain_ && ctlMasterChain_->sameComponents(p.masterComponents, sr_);
+    std::map<std::string, std::unique_ptr<ComponentChain>> nextInserts;
+    uint64_t masterChainBytes = 0;  // every component chain the project holds, for the state budget
+    {
+        auto charge = [&](const std::vector<ComponentSpec>& specs) {
+            size_t parameters = 0;
+            for (const ComponentSpec& c : specs)
+                if (const ModuleDescriptor* d = nativeModules_.find(c.id)) parameters += d->parameterCount;
+            masterChainBytes += ComponentChain::estimateBytes(specs.size(), parameters);
+        };
+        if (!p.masterComponents.empty()) charge(p.masterComponents);
+        for (const LayerSpec& l : p.layers)
+            if (!l.folder && !l.components.empty()) charge(l.components);
         if (masterChainBytes > resourceBudget_.projectStateBytes)
-            return R"({"ok":false,"error":"native master chain exceeds this Engine's project-state memory budget","modules":{}})";
-        nextMasterChain = std::make_unique<MasterChain>();
-        nextMasterChain->processors.reserve(p.masterComponents.size());
-        for (const std::string& componentId : p.masterComponents) {
-            const ModuleDescriptor* descriptor = nativeModules_.find(componentId);
-            if (!descriptor)
-                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
-                       "' is not loaded; load it with an explicit trust choice first\",\"modules\":{}}";
-            const bool stereoEffect = descriptor->portCount == 2 && descriptor->ports &&
-                descriptor->ports[0].type == PortType::Audio && descriptor->ports[0].input &&
-                descriptor->ports[0].layout == ChannelLayout::Stereo && portChannelCount(descriptor->ports[0]) == 2 &&
-                descriptor->ports[1].type == PortType::Audio && !descriptor->ports[1].input &&
-                descriptor->ports[1].layout == ChannelLayout::Stereo && portChannelCount(descriptor->ports[1]) == 2 &&
-                descriptor->parameterCount == 0;
-            if (!stereoEffect)
-                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
-                       "' must currently expose one stereo audio input, one stereo audio output and no parameters\",\"modules\":{}}";
-            auto processor = nativeModules_.create(componentId);
-            if (!processor)
-                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
-                       "' could not create a processor instance\",\"modules\":{}}";
-            // Prepared here, on the control thread: the chain processes blocks of at most kBlock.
-            if (!processor->activate(sr_, static_cast<uint32_t>(kBlock)))
-                return "{\"ok\":false,\"error\":\"native component '" + jsonEscape(componentId) +
-                       "' could not prepare for playback\",\"modules\":{}}";
-            nextMasterChain->processors.push_back(std::move(processor));
+            return R"({"ok":false,"error":"native component chains exceed this Engine's project-state memory budget","modules":{}})";
+        std::string error;
+        if (!keepMasterChain && !p.masterComponents.empty()) {
+            nextMasterChain = ComponentChain::build(nativeModules_, p.masterComponents, sr_, error);
+            if (!nextMasterChain)
+                return "{\"ok\":false,\"error\":\"master: " + jsonEscape(error) + "\",\"modules\":{}}";
+        }
+        for (const LayerSpec& l : p.layers) {
+            if (l.folder || l.components.empty()) continue;  // folder buses take no inserts yet
+            auto it = layers_.find(l.id);
+            if (it != layers_.end() && it->second.inserts && it->second.inserts->sameComponents(l.components, sr_))
+                continue;
+            auto chain = ComponentChain::build(nativeModules_, l.components, sr_, error);
+            if (!chain)
+                return "{\"ok\":false,\"error\":\"layer '" + jsonEscape(l.id) + "': " + jsonEscape(error) +
+                       "\",\"modules\":{}}";
+            nextInserts[l.id] = std::move(chain);
         }
     }
     // Layer slots: refuse a project the budget cannot hold, then grow before any layer is sent, so
@@ -1233,6 +1230,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         std::vector<AutomationLaneSpec> automation;
         std::string parentId;
         bool bus = false;
+        const std::vector<ComponentSpec>* components = nullptr;  // the layer's native inserts
     };
     std::vector<Want> wants;
     int order = 0;
@@ -1242,7 +1240,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     order_.clear();
     for (const LayerSpec& l : p.layers) {
         order_.push_back(l.id);
-        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled});
+        wants.push_back({l.id, l.chain, l.pattern, l.lengthSteps, l.volume, l.pan, l.mute, l.solo, ++order, l.clips, l.automation, l.parentId, l.folder && l.busEnabled, &l.components});
     }
 
     // Pass 1: which modules each layer plays, and its slot.
@@ -1433,6 +1431,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             pl.ls.sig.clear();
             pl.ls.wiring.clear();
             pl.ls.chain = nullptr;
+            pl.ls.inserts = nullptr;
             pl.ls.voiced = false;
             pl.ls.pattern = nullptr;
             pl.ls.steps = -1;
@@ -1645,6 +1644,27 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             ls.solo = w.solo;
         }
         if (w.bus) {
+            ls.inserts = nullptr;  // ConfigureBus retires any the slot had
+        } else {
+            const bool wantsInserts = w.components && !w.components->empty();
+            auto made = nextInserts.find(w.id);
+            if (made != nextInserts.end() || (!wantsInserts && ls.inserts)) {
+                Cmd inserts;
+                inserts.type = Cmd::SetInserts;
+                inserts.slot = ls.slot;
+                ComponentChain* sent = made != nextInserts.end() ? made->second.release() : nullptr;
+                inserts.masterChain = sent;
+                if (send(inserts)) {
+                    ls.inserts = sent;
+                } else {
+                    allOk = false;
+                    warnings[w.id].push_back("audio command queue rejected the layer's native component update");
+                }
+            } else if (wantsInserts && ls.inserts) {
+                ls.inserts->setValues(*w.components);
+            }
+        }
+        if (w.bus) {
             Cmd bus;
             bus.type = Cmd::ConfigureBus;
             bus.slot = ls.slot;
@@ -1844,12 +1864,19 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         warnings["project"].push_back("audio command queue rejected audition mode update");
     }
 
-    Cmd masterChainCommand;
-    masterChainCommand.type = Cmd::SetMasterChain;
-    masterChainCommand.masterChain = nextMasterChain.release();
-    if (!send(masterChainCommand)) {
-        allOk = false;
-        warnings["project"].push_back("audio command queue rejected native master-chain update");
+    if (keepMasterChain) {
+        ctlMasterChain_->setValues(p.masterComponents);
+    } else if (nextMasterChain || ctlMasterChain_) {
+        Cmd masterChainCommand;
+        masterChainCommand.type = Cmd::SetMasterChain;
+        ComponentChain* sent = nextMasterChain.release();
+        masterChainCommand.masterChain = sent;
+        if (send(masterChainCommand)) {
+            ctlMasterChain_ = sent;
+        } else {
+            allOk = false;
+            warnings["project"].push_back("audio command queue rejected native master-chain update");
+        }
     }
 
     std::string mods;
@@ -1931,6 +1958,18 @@ void Engine::setGlobal(const std::string& name, double value) {
             writeParams(*ls.chain);
             markTouched(*ls.chain, nullptr, name);
         }
+}
+
+bool Engine::setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    drainRetired();
+    ComponentChain* chain = nullptr;
+    if (layerId.empty()) {
+        chain = ctlMasterChain_;
+    } else if (auto it = layers_.find(layerId); it != layers_.end()) {
+        chain = it->second.inserts;
+    }
+    return chain && chain->setValue(index, param, value);
 }
 
 void Engine::setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo) {
@@ -2113,7 +2152,7 @@ bool Engine::canRetire(size_t count) const noexcept {
 
 void Engine::retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern,
                     AutomationData* automation, std::vector<int>* order, SlotTable* table,
-                    MasterChain* masterChain) noexcept {
+                    ComponentChain* masterChain) noexcept {
     if (!c && !freed && !pattern && !automation && !order && !table && !masterChain) return;
     Retired r{c, freed, pattern, automation, order, table, masterChain};
     if (pendingCount_ == 0 && retired_->push(r)) return;
@@ -2193,11 +2232,12 @@ void Engine::applyCommands() noexcept {
             case Cmd::Install: retirementNeed = 2; break;
             case Cmd::SetAutomation:
             case Cmd::SetMasterChain:
+            case Cmd::SetInserts:
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
             case Cmd::Grow: retirementNeed = 1; break;
-            case Cmd::ConfigureBus: retirementNeed = c.flag ? 4 : 3; break;
+            case Cmd::ConfigureBus: retirementNeed = c.flag ? 5 : 4; break;
             // Every slot may retire its current and old chain. The pending overflow holds that at
             // maxLayers() (pendingMax_), so with the queue drained a Play always finds room.
             case Cmd::Play: retirementNeed = static_cast<size_t>(2 * slotCount_); break;
@@ -2267,6 +2307,8 @@ void Engine::applyCommands() noexcept {
                 retire(s.cur, nullptr, s.pattern);
                 retire(s.old, nullptr);
                 retire(s.pending, nullptr);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);  // buses run no inserts yet
+                s.inserts = nullptr;
                 s.cur = s.old = s.pending = nullptr;
                 s.pattern = nullptr;
                 s.peak.store(0, std::memory_order_relaxed);
@@ -2344,6 +2386,12 @@ void Engine::applyCommands() noexcept {
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
                 masterChain_ = c.masterChain;
                 break;
+            case Cmd::SetInserts: {
+                Slot& s = slotAt(c.slot);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);
+                s.inserts = c.masterChain;
+                break;
+            }
             case Cmd::Play:
                 playing_ = true;
                 touchEpoch_ = c.playCount;  // chains from before this Play drop their touches at their next chunk
@@ -3060,7 +3108,8 @@ int Engine::planChunk(int maxFrames) noexcept {
             if (s.removing && canRetire(2)) {
                 retire(s.cur, nullptr, s.pattern);
                 s.pattern = nullptr;
-                retire(s.old, &s);
+                retire(s.old, &s, nullptr, nullptr, nullptr, nullptr, s.inserts);  // one entry: the slot frees with them
+                s.inserts = nullptr;
                 s.cur = s.old = nullptr;
                 s.active = false;
                 s.removing = false;
@@ -3278,6 +3327,13 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.old = nullptr;
         routingDirty_ = true;  // the fade lane's extra module nodes stop running
     }
+    // Native inserts (#17): the mono chain output enters as two equal channels; what the inserts
+    // make of it stays stereo through volume and pan (the pan law then works per side, as balance).
+    ComponentChain* const inserts = s.inserts;
+    if (inserts) {
+        for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = static_cast<float>(finiteOr0(y[i]));
+        inserts->process(insertL_, insertR_, static_cast<uint32_t>(m), sr_);
+    }
     float peak = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
     for (int i = 0; i < m; ++i) {
@@ -3292,7 +3348,9 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             s.gain += (desired - s.gain) * gainCoef;
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
-        const double v = finiteOr0(y[i]) * s.gain;
+        const double vl = (inserts ? static_cast<double>(insertL_[i]) : finiteOr0(y[i])) * s.gain;
+        const double vr = inserts ? static_cast<double>(insertR_[i]) * s.gain : vl;
+        const double v = inserts ? 0.5 * (vl + vr) : vl;  // the scope and tail test read the mid
         double gl = s.gl, gr = s.gr;
         if (s.automation && !s.automation->pan.empty()) {
             const double automatedPan = automationValue(s.automation->pan, step, pan);
@@ -3300,8 +3358,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             gl = g.left; gr = g.right;
         }
         // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
-        outL[i] = routeSample(v * gl);
-        outR[i] = routeSample(v * gr);
+        outL[i] = routeSample(vl * gl);
+        outR[i] = routeSample(vr * gr);
         // The meter reads what the track sends on (after volume and pan), the louder channel's sample peak.
         const float av = std::max(std::fabs(outL[i]), std::fabs(outR[i]));
         if (av > peak) peak = av;
@@ -3423,10 +3481,10 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             finishSample(i, bypass ? xl : yl, bypass ? xr : yr);
         }
     } else {
-        // Scratch buffers live inside MasterChain, so projects without native components pay no
-        // additional Engine-object memory cost. The callback never allocates or locks.
-        float* stage0L = masterChain_->stageL[0].data();
-        float* stage0R = masterChain_->stageR[0].data();
+        // The chain runs in place on the Engine's scratch block; projects without native components
+        // skip this branch and its copies. The callback never allocates or locks.
+        float* stageL = masterStageL_;
+        float* stageR = masterStageR_;
         for (int i = 0; i < m; ++i) {
             if (masterRamp_ > 0) {
                 master_ += masterStep_;
@@ -3440,40 +3498,12 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             const double yr = xr - dcR_[0] + R * dcR_[1];
             dcR_[0] = xr;
             dcR_[1] = yr;
-            stage0L[i] = static_cast<float>(bypass ? xl : yl);
-            stage0R[i] = static_cast<float>(bypass ? xr : yr);
+            stageL[i] = static_cast<float>(bypass ? xl : yl);
+            stageR[i] = static_cast<float>(bypass ? xr : yr);
         }
-
-        const float* currentL = stage0L;
-        const float* currentR = stage0R;
-        for (size_t index = 0; index < masterChain_->processors.size(); ++index) {
-            ModuleProcessor* processor = masterChain_->processors[index].get();
-            const size_t destination = (index & 1u) == 0u ? 1u : 0u;
-            float* destinationL = masterChain_->stageL[destination].data();
-            float* destinationR = masterChain_->stageR[destination].data();
-            std::copy_n(currentL, m, destinationL);
-            std::copy_n(currentR, m, destinationR);
-            const float* inputChannels[2] = {currentL, currentR};
-            float* outputChannels[2] = {destinationL, destinationR};
-            const AudioProcessBlock block{
-                {inputChannels, 2, static_cast<uint32_t>(m)},
-                {outputChannels, 2, static_cast<uint32_t>(m)},
-                static_cast<uint32_t>(m),
-                sr_,
-                nullptr,
-                0,
-            };
-            if (!processor->process(block)) {
-                std::copy_n(currentL, m, destinationL);
-                std::copy_n(currentR, m, destinationR);
-            }
-            for (int frame = 0; frame < m; ++frame) {
-                destinationL[frame] = static_cast<float>(finiteOr0(static_cast<double>(destinationL[frame])));
-                destinationR[frame] = static_cast<float>(finiteOr0(static_cast<double>(destinationR[frame])));
-            }
-            currentL = destinationL;
-            currentR = destinationR;
-        }
+        masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_);
+        const float* currentL = stageL;
+        const float* currentR = stageR;
         for (int i = 0; i < m; ++i) finishSample(i, currentL[i], currentR[i]);
     }
 

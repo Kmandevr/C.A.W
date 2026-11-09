@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "component_chain.h"
 #include "execution.h"
 #include "module_registry.h"
 #include "pattern.h"
@@ -86,6 +87,10 @@ public:
     std::string nativeComponentsJson();
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
+    // A native component's parameter while it plays: component `index` of the layer's inserts (an
+    // empty layer id: the master chain). Ramps over the parameter's smoothing. False if there is no
+    // such component or parameter. A later project update sets the values it names again.
+    bool setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
     // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play a pattern
@@ -114,7 +119,6 @@ public:
     void reportLoad(double load) noexcept;  // fraction of the callback's time budget used
 
     struct Chain;
-    struct MasterChain;
 
 private:
     struct Slot;
@@ -132,7 +136,7 @@ private:
     void applyCommands() noexcept;
     void retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr, std::vector<int>* order = nullptr,
-                SlotTable* table = nullptr, MasterChain* masterChain = nullptr) noexcept;
+                SlotTable* table = nullptr, ComponentChain* components = nullptr) noexcept;
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
@@ -224,6 +228,8 @@ private:
     std::unique_ptr<Retired[]> pending_;
     int pendingCount_ = 0;
     double tmp_[kBlock];
+    float insertL_[kBlock], insertR_[kBlock];            // audio thread: a track's inserts run here
+    float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
 
     // ---- shared ----
     std::unique_ptr<Spsc<Cmd, 1024>> cmds_;
@@ -240,7 +246,10 @@ private:
     // ---- control-thread state ----
     std::mutex ctl_;
     ModuleRegistry nativeModules_;  // control-thread registry; loaded processors keep their library alive
-    MasterChain* masterChain_ = nullptr;  // audio-thread-owned; replaced/retired through commands
+    ComponentChain* masterChain_ = nullptr;  // audio-thread-owned; replaced/retired through commands
+    // Control thread: the master chain last sent (alive until a later command replaces it), so an
+    // update with the same components keeps it and only sets values.
+    ComponentChain* ctlMasterChain_ = nullptr;
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     struct ModuleState {
         std::string source;
@@ -269,6 +278,7 @@ private:
         std::string automationSig;
         size_t expressionCapacity = 0;
         std::string parameterAutomationSig;
+        ComponentChain* inserts = nullptr;  // the native effects last sent to the slot (alive while it plays)
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
