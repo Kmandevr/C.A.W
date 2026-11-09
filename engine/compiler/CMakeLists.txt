@@ -33,4 +33,6 @@ endif()
 
 add_executable(caw-compile caw_compile_main.c)
 target_link_libraries(caw-compile PRIVATE caw_compiler)
+# Installed next to the library (bin/ and lib/): find it there, wherever the install lands.
+set_target_properties(caw-compile PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
 install(TARGETS caw_compiler caw-compile)
