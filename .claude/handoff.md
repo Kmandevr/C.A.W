@@ -1,40 +1,34 @@
 # Handoff
 
-Commit: ceb873f
+Commit: 54f57c8 (on branch wt-133, based on PR #132's head)
 
-Branch: claude/caw-engine-foundation-skpirb (on Main ceb873f; key bindings editor, review pending)
+Branch: ccr-56285e11-0xrj3h (the session branch). #133's commit is on the local worktree branch `wt-133` until PR #132 merges; then reset the session branch to Main, cherry-pick it and open its PR.
 
 ## Goal
-Owner (2026-11-04): Claude does the UI from `docs/ui-plan.md`, in small PRs to `Main`. Claude merges each once CI is green.
-- Claude makes the small engine changes the UI needs (the note preview C API is built, #103). The large ones wait for GPT: several instruments per track, parent tracks with their own sound, and Bezier curves.
-- GPT owns the rest of the engine (#94, F7.3 part C, F7.4, F8, F10; #28).
+Owner (2026-11-09): Claude builds the engine; GPT is paused. The order is #120 → #17 → #121 → #122 (issue #123). Claude merges its own engine PRs once CI is green and an independent audio review finds nothing blocking. Decisions are in `docs/decisions.md` (2026-11-09).
 
 ## Done and verified
-- U0, U1 PRs 1–3 (#98–#101), piano roll parts 1 and 2 (#102, #104: stretch, bypass, auto-scroll, ghost, snap magnet).
-- Note previews (#103):
-  - Engine: `caw_engine_note_on` and the pitch/off calls in `engine/include/caw.h`, stopped preview chunks, `endPlayback`, `restartChain`.
-  - App: `previewOn` in `app/lib/model/app_state.dart`, and the "hearing notes" section in `app/lib/ui/pattern_editor.dart`.
-  - Tests: `app/test/roll_preview_test.dart`, plus the engine preview tests. Merged in #105.
-- Accurate meters and the phone arrangement (#106): dB `PeakMeter`, track and folder peaks after pan, a one-row phone toolbar, compact track headers.
-- Phone cleanup of the panels (#107): no repeated titles or developer notes, held dB readouts (`PeakReadout`), compact Automation, a one-row Code track card.
-- Mixer strips, U6 part 1 (#108): upright Reaper-style strips with chain slots, typed level and pan, `PeakMeter(vertical:)`.
-- Typed parameter values, U6 part 2 (#109): `typeValue`, `parseParam` in `app/lib/ui/widgets.dart`.
-- U1 PR4 (#110): no startup screen; `openStorage` in `app/lib/model/app_state.dart` opens the last project.
-- U1 PR5 (#111, #112): transport tempo (#19) and bar.beat in `app/lib/ui/shell.dart`; undo/redo, `app/lib/model/history.dart`.
-- Space pause (#113): `caw_engine_play_at` (steps), `togglePlay`/`stopPlayback` in `app/lib/model/app_state.dart`.
+- PR #132 (#120, CP.2 parts 1 and 2):
+  - The descriptor gains identity, role, latency/tail, state size, choice parameters and modulation/automation/MIDI flags, which the graph executor enforces.
+  - Components cross the plain-C interface v2 in `engine/include/caw_component.h`, through one export, `caw_get_component_v2`.
+  - `CAW_EXPORT_COMPONENT` (`engine/include/caw/component.hpp`) builds that interface from C++.
+  - The registry (`engine/src/module_registry.cpp`) copies the descriptor and wraps instances.
+  - Release and ASan/UBSan CTest pass 5/5. The architect review and two audio reviews are applied.
+- #133 part 1 (commit 54f57c8): export buffers are held to `exportBufferBudget()`, the slot export table fields are atomic, and `CAW_API_VERSION` is 2 (the app's `cawApiVersion` too). Release and ASan pass 5/5. The audio review is not run yet.
 
 ## Next
-- Key bindings editor (owner, 2026-11-05; this branch): `app/lib/ui/key_bindings.dart`. Apply the code review, then open its PR.
-- Piano roll still to build: bend handles with detents, freehand curves, the context toolbar middle, scale highlight, snap to scale, ghost notes.
-- Arrangement automation-lane snapping (U3).
+- Merge #132 when green, then ship #133 part 1 as its own PR, after an audio review.
+- #133 items 2 and 3, per-callback loops over active slots only and right-sized export pointer segments, need callgrind before and after.
+- #17, stereo end to end. Blocked on an owner question (below).
+- The C API that lists descriptors for the app (#38 item 3).
 
 ## Open (owner)
-- Should chance stay at 5% steps, or follow the value grid? It follows the value grid now.
-- Holding a note opens its extras sheet, which ends its preview. Should the extras open on the lift instead?
-- How several instruments on one track combine.
-- The code-editor component: custom, or a package?
+- #17: a `.caw` module is mono (the VM makes one signal). On a stereo track, should a mono effect run once per channel with its own state ("dual mono", double the CPU), or be refused? Generators duplicate to both channels either way.
+- One component per library, or bundles (`caw_get_component_v2(index)`)?
+- The docs guard makes README change on every PR (README covers the whole repo). Narrow it?
+- Old branches to delete by hand (session git deletes are blocked); the list is in the session summary.
 
 ## Read first
-- `docs/ui-plan.md`
-- `docs/app.md`
-- `app/lib/ui/pattern_editor.dart`
+- `docs/native-module-sdk.md` (C interface v2)
+- `docs/engine-build-status.md`
+- `engine/src/engine.cpp` (`runModuleNode`/`runTrackNode` for #17)
