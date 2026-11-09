@@ -493,6 +493,47 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
   });
 
+  testWidgets('seed field keeps edits, including Backspace, across rebuilds until Enter (#20)', (tester) async {
+    state.editProject((p) => p.seed = 0xabc);
+    // The shell rebuilds the screen on every app change; do the same here.
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: ListenableBuilder(listenable: state, builder: (_, _) => ArrangerScreen(state: state))),
+    ));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    final shown = find.widgetWithText(TextField, 'abc');
+    expect(shown, findsOneWidget);
+    final ctrl = tester.widget<TextField>(shown).controller!;
+    // Found by its controller, since the text it shows changes during the test.
+    final seed = find.byWidgetPredicate((w) => w is TextField && identical(w.controller, ctrl));
+    TextEditingController controller() => tester.widget<TextField>(seed).controller!;
+
+    // Backspace through an on-screen keyboard arrives as a new editing value, not a key press.
+    await tester.enterText(seed, 'ab');
+    state.editProject((p) => p.bpm = p.bpm + 1); // any app change rebuilds the settings
+    await tester.pump();
+    expect(controller().text, 'ab');
+    expect(state.project.seed, 0xabc);
+
+    await tester.enterText(seed, '');
+    state.editProject((p) => p.bpm = p.bpm + 1);
+    await tester.pump();
+    expect(controller().text, '');
+
+    await tester.enterText(seed, '1f');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(state.project.seed, 0x1f);
+    expect(controller().text, '1f');
+
+    // A seed changed elsewhere (an undo, another project) still shows in the field.
+    state.editProject((p) => p.seed = 0x77);
+    await tester.pump();
+    expect(controller().text, '77');
+    await tester.pump(const Duration(milliseconds: 600));
+  });
+
   testWidgets('Arranger playhead updates from meter ticks without rebuilding the grid', (tester) async {
     final layer = LayerDoc(id: 'layer-1', name: 'Lead', color: 0);
     state.project = ProjectDoc(id: 'project-1', name: 'Timeline test', layers: [layer]);

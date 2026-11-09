@@ -162,6 +162,7 @@ class _ProjectSettings extends StatefulWidget {
 
 class _ProjectSettingsState extends State<_ProjectSettings> {
   late final TextEditingController _seed;
+  late int _syncedSeed;
 
   static const keys = [
     'C major', 'C minor', 'C# minor', 'D major', 'D minor', 'Eb major', 'E minor', 'F major', 'F minor', //
@@ -171,14 +172,19 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
   @override
   void initState() {
     super.initState();
-    _seed = TextEditingController(text: widget.state.project.seed.toRadixString(16));
+    _syncedSeed = widget.state.project.seed;
+    _seed = TextEditingController(text: _syncedSeed.toRadixString(16));
   }
 
   @override
   void didUpdateWidget(covariant _ProjectSettings old) {
     super.didUpdateWidget(old);
-    final hex = widget.state.project.seed.toRadixString(16);
-    if (int.tryParse(_seed.text, radix: 16) != widget.state.project.seed) _seed.text = hex;
+    // Re-sync only when the project's seed changed (Enter, undo, another project). Comparing against the
+    // typed text instead would put the old seed back on every rebuild while it is being edited (#20).
+    final seed = widget.state.project.seed;
+    if (seed == _syncedSeed) return;
+    _syncedSeed = seed;
+    _seed.text = seed.toRadixString(16);
   }
 
   @override
