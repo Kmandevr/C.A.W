@@ -14,7 +14,7 @@ Project automation supports song-time lanes for module parameters and shared glo
 | `engine/` | The C++20 native sound engine, public C++ component SDK (`CAW::SDK`), current transitional .caw VM, mixer, WAV exports, C API, the `caw` CLI and tests ([reference](docs/engine.md), [current functions](docs/library.md), [agent guide](docs/agent-guide.md)) |
 | `app/` | Flutter app for Android and Windows with eight workspaces ([app](docs/app.md)) |
 | `examples/` | Current starter sound modules (`.caw`), built into the engine as templates; these are legacy authoring inputs scheduled for C++ migration |
-| `docs/` | Project documentation: current app/engine facts, decisions, architecture, the C++ creation-platform design and the permanent roadmap ([index](docs/index.md)) |
+| `docs/` | Project documentation: current app/engine facts, decisions, architecture, the C++ creation-platform and visual-routing designs and the permanent roadmap ([index](docs/index.md)) |
 | `scripts/` | Repository tooling. `node scripts/docs-test.js` checks that the docs match the repository; `agent-run.js` runs a chat agent's requested commands and writes its report, `agent-context.js` its start file |
 | `.github/` | Issue and PR templates, CODEOWNERS, Dependabot, and the workflows below |
 | `.claude/` | Setup for Claude Code sessions: rules, skills, review agents, and hooks that make Graphify and Serena the default way to navigate code ([.claude/README.md](.claude/README.md)) |
