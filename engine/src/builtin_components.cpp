@@ -1,6 +1,7 @@
 // Built-in stereo components (the C.A.W. Library, #121), registered in every Engine like a loaded component.
 #include "builtin_components.h"
 
+#include "caw/library/distortion.hpp"
 #include "caw/library/stereo.hpp"
 
 namespace caw {
@@ -76,6 +77,63 @@ public:
     }
 };
 
+// Distortion: one of four shapes per channel (so a stereo signal stays stereo), then a dry/wet mix and
+// an output level.
+constexpr std::string_view kShapes[] = {"Drive", "Hard clip", "Fold", "Crush"};
+ParameterDescriptor shapeParameter() {
+    ParameterDescriptor p = parameter("shape", "Shape", 0.0, 0.0, 3.0);
+    p.step = 1.0;
+    p.choices = kShapes;
+    p.choiceCount = 4;
+    p.smoothingFrames = 0;  // a choice jumps
+    return p;
+}
+const ParameterDescriptor kDistortionParams[] = {
+    shapeParameter(),
+    parameter("drive", "Drive", 4.0, 1.0, 20.0),
+    parameter("bits", "Bits", 8.0, 1.0, 24.0),
+    parameter("mix", "Mix", 1.0, 0.0, 1.0),
+    parameter("output", "Output", 1.0, 0.0, 2.0),
+};
+ModuleDescriptor distortionDescriptor() {
+    ModuleDescriptor d = descriptor("org.caw.distortion", "Distortion", kDistortionParams);
+    d.role = ModuleRole::Effect;
+    d.parameterCount = 5;
+    return d;
+}
+const ModuleDescriptor kDistortion = distortionDescriptor();
+
+double paramAt(const AudioProcessBlock& b, uint32_t k, uint32_t i, double fallback) noexcept {
+    if (k >= b.parameterCount || !b.parameters) return fallback;
+    return b.parameters[k].samples ? b.parameters[k].samples[i] : b.parameters[k].value;
+}
+
+class Distortion final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kDistortion; }
+    using ModuleProcessor::process;
+    bool process(const AudioProcessBlock& b) noexcept override {
+        if (!stereo(b)) return false;
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            const int shape = static_cast<int>(paramAt(b, 0, i, 0.0));
+            const double amount = paramAt(b, 1, i, 4.0), bits = paramAt(b, 2, i, 8.0);
+            const double mix = paramAt(b, 3, i, 1.0), out = paramAt(b, 4, i, 1.0);
+            for (uint32_t c = 0; c < 2; ++c) {
+                const double x = b.input.channels[c][i];
+                double y = 0.0;
+                switch (shape) {
+                    case 1: y = lib::hardClip(x, amount); break;
+                    case 2: y = lib::fold(x, amount); break;
+                    case 3: y = lib::crush(x, bits); break;
+                    default: y = lib::drive(x, amount); break;
+                }
+                b.output.channels[c][i] = static_cast<float>((x + (y - x) * mix) * out);
+            }
+        }
+        return true;
+    }
+};
+
 template <class T>
 ModuleProcessor* make() noexcept {
     return new (std::nothrow) T();
@@ -86,6 +144,7 @@ ModuleProcessor* make() noexcept {
 void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kBalance, &make<Balance>);
     registry.add(kWidth, &make<Width>);
+    registry.add(kDistortion, &make<Distortion>);
 }
 
 }  // namespace caw

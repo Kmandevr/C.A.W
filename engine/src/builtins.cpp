@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "caw/library/distortion.hpp"
 #include "detmath.h"
 #include "tables.h"
 
@@ -461,15 +462,10 @@ void runOnePole(const CallArgs& c) {
 
 // ---------- effects ----------
 
-double fDrive(double x, double amount) {
-    const double a = amount < 0.01 ? 0.01 : amount;
-    return detTanh(finiteOr0(x) * a) / detTanh(a);
-}
-double fCrush(double x, double bits) {
-    const double q = detPow(2.0, std::floor(clampd(bits, 1.0, 24.0)) - 1.0);
-    return std::floor(finiteOr0(x) * q + 0.5) / q;
-}
-double fFoldFx(double x, double drive) { return detSin(finiteOr0(x) * drive * (kPi / 2.0)); }
+// One implementation of each, in the Library (#121): .caw modules and C++ components sound the same.
+double fDrive(double x, double amount) { return lib::drive(x, amount); }
+double fCrush(double x, double bits) { return lib::crush(x, bits); }
+double fFoldFx(double x, double drive) { return lib::fold(x, drive); }
 
 // fx.delay(x, time, feedback, mix): up to 2 seconds at 96 kHz (1 s at 192 kHz), with linear interpolation.
 // Only the header is cleared at a loop start; a slot not written since then reads as 0, as if the buffer were

@@ -8,6 +8,7 @@
 #include "caw.h"
 #include "engine.h"
 #include "json.h"
+#include "caw/library/distortion.hpp"
 #include "caw/library/stereo.hpp"
 #include "native_component_test_path.h"
 #include "project.h"
@@ -570,4 +571,25 @@ TEST(width_keeps_a_mono_signal_as_it_is_at_every_setting) {
     CHECK_EQ(hardLeft.right, 0.0);
     CHECK_EQ(beyond.left, 0.0);  // out of range clamps to hard right
     CHECK_EQ(beyond.right, 1.0);
+}
+
+TEST(the_built_in_distortion_shapes_each_channel_with_mix_and_output) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.nativeComponentsJson().find("\"id\":\"org.caw.distortion\"") != std::string::npos);  // it registered
+    ProjectSpec p = constantTrack({{"org.caw.distortion", {{"shape", 0}, {"drive", 4}}}});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 4096, l, r);
+    CHECK_NEAR(l, lib::drive(0.5, 4) * kCentre, 1e-5);
+    p.layers[0].components[0].params = {{"shape", 1}, {"drive", 4}};  // hard clip: 0.5 * 4 clips at 1
+    CHECK(ok(e.setProject(p)));
+    runLast(e, 4096, l, r);
+    CHECK_NEAR(l, 1.0 * kCentre, 1e-5);
+    p.layers[0].components[0].params = {{"shape", 3}, {"bits", 2}, {"mix", 0.5}, {"output", 2}};  // crush, half wet
+    CHECK(ok(e.setProject(p)));
+    runLast(e, 4096, l, r);
+    CHECK_NEAR(l, (0.5 + (lib::crush(0.5, 2) - 0.5) * 0.5) * 2 * kCentre, 1e-5);
+    CHECK_NEAR(l, r, 1e-6);
 }
