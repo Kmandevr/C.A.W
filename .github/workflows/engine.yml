@@ -5,7 +5,17 @@ on:
   # (gpt/** branches get the Quick check until they open one).
   push:
     branches: [Main]
+    paths:
+      - "engine/**"
+      - "!engine/compiler/**"  # the compiler wrapper has its own workflow
+      - "examples/**"          # templates are built in and checked by golden renders
+      - ".github/workflows/engine.yml"
   pull_request:
+    paths:
+      - "engine/**"
+      - "!engine/compiler/**"  # the compiler wrapper has its own workflow
+      - "examples/**"          # templates are built in and checked by golden renders
+      - ".github/workflows/engine.yml"
   workflow_dispatch:
 permissions:
   contents: read

@@ -12,6 +12,16 @@ updated: 2026-11-09
   - Pull requests run Dart analysis and tests, the engine tests on every platform, the C++ component builds, the compiler test and the docs checks.
   - The Android APK and the Windows app are built on Main, or on any branch with Run workflow.
 - A branch's own pushes no longer start the App, Engine and Docs workflows next to its pull request, so each commit is checked once. `gpt/**` branches keep the Quick check.
+- **Owner decision:** run only the checks a change relates to, quickly and in parallel. Path filters:
+  - Engine tests: engine code, not the compiler wrapper, plus `examples/`.
+  - App checks: app code and the engine code the app embeds, not engine tests, benchmarks, CLI or compiler. On Main the APK also rebuilds for a compiler change.
+  - Components and compiler: as before.
+  - Docs checks run on everything (about 10 s).
+- Jobs within a workflow already run in parallel. Measured on 2026-11-09:
+  - Windows engine tests: 2–3 min;
+  - Dart tests: about 2 min;
+  - the rest: under 1 min;
+  - the compiler test: minutes once its LLVM build is cached (built once per LLVM version).
 
 ## 2026-11-09: A C++ effect behaves like a CLAP plugin in REAPER (owner, #137)
 

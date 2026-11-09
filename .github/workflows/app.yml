@@ -6,9 +6,32 @@ on:
   # everything on any branch (an APK to try before merging).
   push:
     branches: [Main]
-    paths: [app/**, engine/**, examples/**, .github/workflows/app.yml]
+    paths:
+      - "app/**"
+      # The engine code the app embeds (not its tests, benchmarks, CLI or the compiler wrapper).
+      - "engine/CMakeLists.txt"
+      - "engine/cmake/**"
+      - "engine/include/**"
+      - "engine/src/**"
+      - "engine/platform/**"
+      - "engine/lib/**"
+      - "engine/third_party/**"
+      - "examples/**"
+      - ".github/workflows/app.yml"
+      - "engine/compiler/**"  # the APK carries the compiler
   pull_request:
-    paths: [app/**, engine/**, examples/**, .github/workflows/app.yml]
+    paths:
+      - "app/**"
+      # The engine code the app embeds (not its tests, benchmarks, CLI or the compiler wrapper).
+      - "engine/CMakeLists.txt"
+      - "engine/cmake/**"
+      - "engine/include/**"
+      - "engine/src/**"
+      - "engine/platform/**"
+      - "engine/lib/**"
+      - "engine/third_party/**"
+      - "examples/**"
+      - ".github/workflows/app.yml"
   workflow_dispatch:
 permissions:
   contents: read
