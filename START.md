@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `89346d3b329c21fa6a317e029ac96f5c05865fc3` on the default branch at 2026-11-09T19:18:03Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `edd84d607977b73410d74fa919e926c91a1fc5de` on the default branch at 2026-11-09T19:50:54Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`89346d3`).
+1. The commit this file was generated from (`edd84d6`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -206,7 +206,7 @@ Don't read every file. Go deeper only when the layer above doesn't answer, and n
 
 ## Workflow
 
-**Roles (owner, 2026-11-09):** Claude builds the engine for now, using GPT's work as the baseline where it applies, and asks the owner about open questions ([docs/decisions.md](docs/decisions.md)). Treat this as a workflow preference, not a product or architecture requirement.
+**Roles (owner, 2026-11-09):** Claude builds the engine, using GPT's work as the baseline where it applies ([docs/decisions.md](docs/decisions.md)). Follow these rules, but stretch them or make small assumptions where that is best for the app; never change a whole direction without the owner. Fix hooks or tooling that get in the way. **Before any UI work, ask the owner how it should look.**
 
 
 One-file changes: just do them. Every file (code, notes, Claude config) has one purpose; change only the files the task needs. Independent review goes to an agent in `.claude/agents/` (`architect` before structural changes, the reviewers after), asking for findings only. Changes across areas: the saved workflow `change` (plan, build in parallel on disjoint files, verify, update docs; never commits).
