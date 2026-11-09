@@ -77,7 +77,7 @@ Do not adopt JUCE or Tracktion Engine wholesale without a deliberate source-lice
 ### Rejected alternatives
 
 - **Compose Multiplatform:** stable on Android, iOS and desktop, with the web in beta ([kotlinlang.org](https://kotlinlang.org/docs/multiplatform/supported-platforms.html), 2026-10-28). It's the strongest alternative to Flutter, but it needs two engine bridges (JNI on Android and desktop, cinterop on iOS) and ships a JVM on desktop.
-- **JUCE:** built for audio apps on every platform, but its free Starter tier only covers up to $20,000 a year in revenue ([JUCE forum](https://forum.juce.com/t/important-changes-to-the-juce-end-user-licence-agreement-for-juce-8/61265)). Its touch text editing is weak, and the code editor is the heart of this app.
+- **JUCE:** built for audio apps on every platform, but JUCE 8 and 9 are AGPLv3 or commercial, and JUCE 9 kept the JUCE 8 terms ([JUCE forum](https://forum.juce.com/t/juce-9-no-pricing-or-eula-changes/69000), checked 2026-11-09). Its touch text editing is weak, and the code editor is the heart of this app.
 - **Qt:** LGPL or commercial. LGPL obligations are awkward for a closed app on iOS.
 - **WebView or browser-only app:** latency is higher and less predictable, and garbage collection sits on the audio path. The web stays a later extra (engine as WASM in an AudioWorklet), not the main app.
 - **Embedded JS or Lua running user code:** both have garbage collection, unbounded loops and a large attack surface. They can't run safely on the audio thread.
