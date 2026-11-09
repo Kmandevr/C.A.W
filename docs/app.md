@@ -194,7 +194,7 @@ The in-app build and toolchain install exist (see the C++ platform note). When a
   - `path_provider` 2.1.6 (BSD-3-Clause)
   - `file_picker` 13.1.0 (MIT)
   - JetBrains Mono 2.304 (SIL Open Font License 1.1), the font files in `assets/fonts/` with `OFL.txt`
-- **Android:** `android/app/build.gradle.kts` builds `engine/CMakeLists.txt` into `libcaw.so` for arm64-v8a and x86_64, with `minSdk` 26.
+- **Android:** `android/app/build.gradle.kts` builds `engine/CMakeLists.txt` into `libcaw.so` for arm64-v8a only (the phones C.A.W targets; CI builds the APK with `--target-platform android-arm64`), with `minSdk` 26. When CI supplies `CAW_COMPILER_PACKAGE`, the on-device compiler library and its data bundle are packed in too, and `CAW_CCACHE` reuses compiled engine files.
   - The application id is `com.kmandevr.caw`. It becomes permanent once a release is installed, because updates only install over the same id and key.
 - **Windows and Linux:** `windows/CMakeLists.txt` and `linux/CMakeLists.txt` add the engine and bundle `caw.dll` or `libcaw.so` next to the app. The Linux folder is for local testing; it isn't shipped in v1.
 - **CI** (`.github/workflows/app.yml`) runs on changes to `app/`, `engine/` or `examples/`, or on demand. Pushes to `gpt/**` branches skip it until they open a pull request; their Dart analysis and tests run in the Quick check (`README.md`). It runs:

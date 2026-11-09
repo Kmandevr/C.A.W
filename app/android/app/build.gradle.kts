@@ -33,6 +33,9 @@ android {
         }
         externalNativeBuild {
             cmake {
+                // Only arm64 for the engine too: Flutter's plugin adds the other ABIs back to ndk.abiFilters,
+                // which built and packed libcaw.so for them (unused on the phones C.A.W targets).
+                abiFilters += listOf("arm64-v8a")
                 arguments += listOf("-DCAW_TOOLS=OFF", "-DANDROID_STL=c++_static")
                 // CI sets CAW_CCACHE so unchanged engine sources aren't compiled again.
                 if (System.getenv("CAW_CCACHE") == "1") {

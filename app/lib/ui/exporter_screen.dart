@@ -83,7 +83,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final bpm = p.bpm.toStringAsFixed(p.bpm == p.bpm.roundToDouble() ? 0 : 1);
     switch (_kind) {
       case ExportKind.loop:
-        return '${base}_${bpm}bpm_${p.loopBars}bars.wav';
+        return '${base}_${bpm}bpm_${p.engineLoopSteps ~/ p.stepsPerBar}bars.wav';
       case ExportKind.free:
         return '${base}_${bpm}bpm_${_seconds.toStringAsFixed(0)}s.wav';
       case ExportKind.oneShot:
@@ -817,8 +817,8 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final p = s.project;
     switch (_kind) {
       case ExportKind.loop:
-        return 'The whole mix, exactly ${p.loopBars} bars at ${p.bpm.toStringAsFixed(1)} BPM '
-            '(${p.loopSeconds.toStringAsFixed(3)} s), with loop points. Drops onto Reaper\'s grid.';
+        return 'The whole mix, exactly ${p.engineLoopSteps ~/ p.stepsPerBar} bars at ${p.bpm.toStringAsFixed(1)} BPM '
+            '(${p.songSeconds.toStringAsFixed(3)} s), with loop points. Drops onto Reaper\'s grid.';
       case ExportKind.free:
         return 'The whole mix from the start, for as long as you like.';
       case ExportKind.oneShot:

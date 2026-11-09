@@ -284,6 +284,7 @@ void main() {
     p.layers.first.clips.add(ClipDoc(id: 'c', patternId: 'pat', startSteps: 70, lengthSteps: 3));
     expect(p.arrangementEndSteps, 73);
     expect(p.engineLoopSteps, 80);  // whole bars, as toEngineJson sends them
+    expect(p.songSeconds, closeTo(80 * 15.0 / p.bpm, 1e-9));  // the seconds readout and export follow the song end
     expect(jsonDecode(p.toEngineJson())['loop_bars'], 5);
   });
 

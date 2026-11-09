@@ -53,13 +53,73 @@ updated: 2026-11-09
 - Also built: a rebuild switches in while playing, crossfaded, keeping values and state; any chain swap crossfades. Still to come: custom GUIs.
 - **Interface rule changed:** `save_state` may now run on the control thread while the instance processes (as in CLAP), so a playing project can be saved. A component that keeps state must make that safe; one without state needs nothing. `caw_component.h` says so.
 
-## 2026-11-09: How writing and using a C++ effect looks (owner, #137)
+## 2026-11-09: The app's layout (owner, #137, #139)
 
-- **A C++ workspace of its own** (the ninth, docked like the others): a side-drawer file tree, the editor at full width and Build. A new effect always starts from one blank pass-through template.
-- **Errors:** red marks on their lines and the first error on one line under the code; a tap lists them all, and a tap on one jumps to it.
-- **Trust:** effects the user built on this device are Trusted without a prompt. Effects from elsewhere ask Trust or Block once, remembered per effect and changeable in its settings. "Built here" means sources the user created or edited here (a shared project's sources count as from elsewhere until the user edits them). A choice is remembered for exactly that code (a SHA-256 fingerprint of the sources or library), so changed code from elsewhere asks again; `NativeTrustStore` holds it, app-private.
-- **A test strip under the editor:** a source (a track, a loop, a sine, noise), Play and the effect's generated knobs. Build swaps the new version in while it plays.
-- **Using it:** "+ C++ effect" in a track's or the master's effect chain lists the built effects; a placed effect is a card with knobs generated from its parameters.
+**A full DAW, closest to REAPER (owner):** dense and practical, "a DAW but better and more specialized". Every track header has record-arm and input, mute, solo and FX. There are mixer strips and long-press menus everywhere, and the layout can be customised. Research behind this layout (DAW conventions, Android window size classes, thumb reach, phone code editors) was presented to the owner on 2026-11-09; sources are in the session, not repeated here.
+
+**Principles (owner-approved 2026-11-09).**
+- Never lose your place: the tracks and playhead stay visible; a panel covers part of them, never all of them.
+- Same thing, same place, same name on every screen size, so habits carry over.
+- Select first, then act: the selection drives the inspector, FX and editors.
+- Simple first, more on demand (an FX stack before the routing canvas).
+- **Compact, not "grandma-sized":** rows 32-36 dp, code text 12-13 sp, icons about 18 dp, each control's touch area padded to about 40 dp without drawing it bigger. Icons over words; hold an icon for its name. Show only what matters now (no error count without errors). The neon theme stays, calmer: fewer glows and borders. The glass look and its transparency stay as they are (owner: "it works well"): see-through panels, sheets, cards and the transport over the ambient background (`docs/ui.md`, Glass). When the audio is under strain (overruns, thermal or power pressure, which the app already reads), the app lightens the blur on its own to protect the audio, and restores it after. The selected track, clip or effect glows in its track's own colour, brighter; errors stay pink and "built" green. Light haptics: a tick on grid snaps, a knob reaching centre and a long-press menu opening.
+
+**The frame.**
+- Three main tab types: **Build** (C++ Builder), **Files** and **Arrange**. Several tabs of one type (two Builders) switch from a small selector at the top of that section. The other workspaces fold into these three (#139).
+- **Phone portrait:** a bottom bar holds the three; the transport (play, stop, record, undo) sits just above it, in thumb reach; the top shows only the song position and CPU. Dragging on the transport scrubs the playhead. Pulling down on the screen brings the top row within reach.
+- **Landscape and desktop:** a slim icon rail on the left replaces the bottom bar, saving track height. Dragging a tab to the edge shows it beside the current one.
+- **Desktop docking (owner: full docking, REAPER-style):** the mixer, inspector, browser and editors can dock to any side, share a dock as tabs, or float. The default dock is the inspector left, the browser right and the editor/mixer dock at the bottom.
+- **Long-press menus:** a compact list near the finger by default; a Bitwig-style ring is a setting.
+- **Tablets** use the desktop layout with touch: rail, docked panels, and the key row only without a hardware keyboard.
+- **First run** and a missing last project open the "First loop" template, as now.
+- **Undo is per area:** code undo is separate from project undo (tracks, clips, mixer).
+- **Hardware:** Bluetooth/USB keyboard shortcuts work on the phone, USB and Bluetooth MIDI keyboards play and record notes, and the S Pen gives finer clip and note editing. [Fact, 2026-11-09] the engine has no MIDI device input or audio recording yet (`docs/engine-build-status.md`), so record-arm and MIDI input need engine work first.
+
+**Arrange.**
+- **Track headers (phone):** mute, solo and the FX button always show; record-arm, input and the rest are in the long-press menu.
+- **Focus view (phone):** tapping a track moves it to the top of the screen and the lower ~80% becomes its panel, with tabs: FX, Mixer, Clip and Automation. Swipe sideways on the pinned track for the next or previous track; swipe the panel down, tap the pinned track or press Back to return to all tracks. In landscape the panel is a right side panel (about 40% wide) so the tracks keep their full height; on desktop it is docked.
+- **Clip editing:** a clip's notes open in the Clip tab of the focus view.
+- **Mixer (phone):** a card over the tracks with narrow strips you swipe through; tap a strip to widen it.
+- **FX tab:** opens on a plain **FX stack**, a normal top-to-bottom insert list: cards with knobs, drag to reorder, "+ effect" and bypass. A **Routing** toggle switches to the free canvas, the project/track workspace of the visual plan (`docs/visual-routing-and-library-integration.md`). Both views edit the same chain.
+- Export is in the project menu. Automation is edited as lanes under each track, REAPER-style: volume, pan and any effect knob, aligned with the clips. A long-press on a knob offers "Automate".
+- **Song length:** no cap; the song ends at its last clip or automation point and playback loops back there, as in REAPER (built, `docs/ui.md`).
+
+**The routing canvas.**
+- **Layout:** a free canvas. A new effect is placed where its signal goes (after the chosen node, or on the chosen wire) and wired automatically; it can then be dragged anywhere. A light grid snap applies (hold to move freely), and "Tidy up" lays the graph out again.
+- **Wiring:** drag from an output port to an input port. Ports are large touch targets coloured by type (audio, MIDI, control). Tap a wire to select it, then delete it or insert an effect on it.
+- **Editing nodes:** tap a node to show its knobs.
+- **Full page:** ⤢ expands the canvas to the whole project (every track, bus, send and the master) with the selected track centred. It is also in the Arrangement's menu.
+
+**Adding an effect.**
+- "+ effect", or + on a wire, slides up the file browser, filtered to effects: Built-in, My effects and Packs, with search and a ▶ preview.
+- Tapping an effect inserts it there; it can also be dragged onto a wire or a track.
+- A finished build is listed there at once. Tracks already using it switch to the new build while playing.
+
+**Files (like Unity's Project window).**
+- In landscape and on desktop: a folder tree on the left (Favourites, the project's Effects & instruments, Code, Audio & MIDI, and Packs) and an asset grid on the right. The grid shows icons with type badges and has a size slider, a breadcrumb and search with type filters.
+- In portrait the tree becomes a drawer and the breadcrumb leads.
+- **Tap selects** and shows the item's details and preview in the inspector; **double-tap opens** it (C++ source in a Builder, audio previews).
+- Drag an asset onto a track or an effect slot, from the split view or from a browser sheet.
+
+**Build (the C++ Builder).**
+- **Editor core:** try an existing Flutter editor package first (re_editor or code_forge, both MIT; claims of large-file speed are the authors' own), benchmarked on the owner's S22+; write our own only if they fall short. The dependency is recorded here when adopted. The current `.caw` editor (`app/lib/ui/code_editor.dart`) stays for `.caw` modules.
+- **Phone layout:** one thin top row (~36 dp): the file name ▾ (switches between open files), an error count only when there are errors (tap: next error) and ▶ Build. The app's bottom bar hides while the keyboard is open. Wide screens can split two files side by side.
+- **Key row** above the keyboard, one row, swipe for more. First screen: a cursor key ⌖ (drag like a trackpad to move, hold and drag to select), `⇥ { } ( ) ;` and `= < > "`, with undo and redo at the right edge. Holding a key offers its variants (`=`: `==` `!=`; `<`: `<=` `<<` `->`). The other symbols (`:: & * [ ]`, arithmetic) are on the swipe page.
+- **Keyboard closed:** a slim bar with Problems (count), Ref, Snippets and ♪ Test, each a half sheet with the code visible above. Landscape and desktop show Problems and Ref in a narrow side panel; with a hardware keyboard the key row hides (Ctrl+B builds, Ctrl+Space completes).
+- **Checking:** a check-only compile (`-fsyntax-only`) runs about a second after typing stops and is cancelled by more typing; Build makes the library. Errors are a squiggle on their line with a one-line message under it. **Problems** lists errors and warnings (warnings dimmed) grouped by file; tap one to jump.
+- **Completion:** automatic, after a short pause or after `.`, `::` or `->`, in a small box near the cursor (at most four rows) that shows a parameter's range and unit beside it. It comes from the in-app Clang (`-code-completion-at`), so it knows the SDK headers. [Assumption] this gives most of clangd's benefit without a separate server; to be measured on the phone.
+- **Editor help:** syntax colours, a pull-up quick reference of the SDK and Library with an insert button for each, and snippets (a knob, a delay line, a tempo-synced time, a state save).
+- **Saving:** autosave always, with an undo history; each successful build also keeps a named version to go back to.
+- **Specialized extras (first version):** each parameter shows its current knob value in the code and editing the default moves the knob; a failed build marks that effect in the FX stack; the **test strip** plays the effect on the audio of the track it is on (or a track you choose) with A/B bypass and the effect's knobs; with nothing to play it plays nothing (owner: no default test sound); tapping an effect in a track's FX stack opens its source in Build.
+- **New effects** start from one blank pass-through template.
+
+**Build order (owner):** the frame and Arrange first (rail and bottom bar, bottom transport, focus view, mixer card), then Files, then the C++ Builder. Each step is a GitHub Issue under #139.
+
+**Trust.**
+- Effects the user wrote on this device are Trusted without asking.
+- An effect from elsewhere shows as a greyed node on the canvas with "Native code from <source>: Trust / Block", while the rest of the song plays. The choice is remembered per exact code and can be changed in its settings.
+
+**[Fact, 2026-11-09]** The engine routes each track as a linear chain into a folder bus or the master, without sends or sidechains (roadmap Stage 2). The canvas shows and edits what the engine supports; arbitrary connections arrive with the routing model.
 
 ## 2026-11-09: The on-device compiler is LLVM 23.1.5 as one library (#137)
 
