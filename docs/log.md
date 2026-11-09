@@ -1,10 +1,12 @@
 ---
 title: Log
 summary: Dated history of changes, newest first.
-updated: 2026-11-06
+updated: 2026-11-09
 ---
 
 # Log
+
+- 2026-11-09: Owner-approved the two-workspace visual direction (component/DSP creation and project/track routing), native conditional signal/event workflows and regional FX, while retaining arrangement/piano-roll song-making. Recorded Faust as an optional specialist DSP backend (generated C++ first), Pure Data/libpd as an optional benchmarked compatibility path, Tracktion Engine as a technical reference/selective-adoption candidate, and the broader open-source reuse/licensing policy. Cross-referenced the canonical roadmap, C++ platform, architecture, vision and index; all new capabilities remain planned/proposed. See [visual creation and signal routing](visual-routing-and-library-integration.md), [decisions](decisions.md) and issue #128.
 
 - 2026-11-06: Began CP.1 after the owner approved GitHub Actions as the required/default C++ component build path, desktop builds as optional and Android NDK use for CI-only cross-compilation. Added an installable `CAW::SDK` CMake package (standalone engine builds only), `caw.component` v1 manifest helper, exported component entry points, minimal external component fixture, Node build driver with structured diagnostics and Linux/Windows/Android CI matrix. CI also exposed the offline-export test sampling the initial master-gain ramp; the fixture now checks after the ramp settles. CI verification is pending. App project storage, remote build service integration, runtime loading and trust-mode enforcement remain incomplete. See [C++ creation platform](cpp-creation-platform.md) and issue #119.
 
