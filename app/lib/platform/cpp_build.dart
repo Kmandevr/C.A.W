@@ -40,10 +40,8 @@ class CppBuildResult {
 
 /// Joins project persistence, safe source materialization and the local CMake runner.
 class CppComponentBuildService {
-  const CppComponentBuildService(
-    this._storage, {
-    this.runner = const CppComponentBuildRunner(),
-  });
+  CppComponentBuildService(this._storage, {CppComponentBuildRunner? runner})
+      : runner = runner ?? CppComponentBuildRunner();
 
   final ProjectStorage _storage;
   final CppComponentBuildRunner runner;
@@ -136,9 +134,11 @@ List<CppBuildDiagnostic> parseCppBuildDiagnostics(String output) {
   return diagnostics;
 }
 
-/// Invokes CMake directly (never through a shell). The caller supplies locally installed tools and SDK paths.
+/// Invokes CMake directly on desktop; Android must use its in-process compiler module.
 class CppComponentBuildRunner {
-  const CppComponentBuildRunner();
+  CppComponentBuildRunner({bool? isAndroid}) : _isAndroid = isAndroid ?? Platform.isAndroid;
+
+  final bool _isAndroid;
 
   Future<CppBuildResult> build({
     required String cmakeExecutable,
@@ -153,6 +153,21 @@ class CppComponentBuildRunner {
     Map<String, String>? environment,
   }) async {
     if (parallelJobs < 1) throw ArgumentError.value(parallelJobs, 'parallelJobs', 'Must be at least one.');
+    if (_isAndroid) {
+      const message = 'Android C++ builds require the bundled in-process Clang toolchain; process-based CMake execution is disabled.';
+      return const CppBuildResult(
+        success: false,
+        exitCode: 126,
+        output: message,
+        diagnostics: [
+          CppBuildDiagnostic(
+            severity: 'error',
+            code: 'CAW_ANDROID_TOOLCHAIN_UNAVAILABLE',
+            message: message,
+          ),
+        ],
+      );
+    }
 
     final configureArgs = [
       '-S', projectDirectory,
@@ -165,13 +180,7 @@ class CppComponentBuildRunner {
     if (androidPlatform != null) configureArgs.add('-DANDROID_PLATFORM=$androidPlatform');
 
     final output = StringBuffer();
-    var exitCode = await _run(
-      cmakeExecutable,
-      configureArgs,
-      projectDirectory,
-      environment,
-      output,
-    );
+    var exitCode = await _run(cmakeExecutable, configureArgs, projectDirectory, environment, output);
     if (exitCode == 0) {
       exitCode = await _run(
         cmakeExecutable,
@@ -194,12 +203,7 @@ class CppComponentBuildRunner {
             : lines.last,
       ));
     }
-    return CppBuildResult(
-      success: exitCode == 0,
-      exitCode: exitCode,
-      output: text,
-      diagnostics: diagnostics,
-    );
+    return CppBuildResult(success: exitCode == 0, exitCode: exitCode, output: text, diagnostics: diagnostics);
   }
 
   Future<int> _run(
