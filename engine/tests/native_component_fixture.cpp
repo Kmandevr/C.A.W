@@ -181,9 +181,26 @@ private:
     uint32_t pos_ = 0;
 };
 
+// The bundle's sixth component: a drone that never goes quiet, declaring a 0.1 s tail, so tests can
+// see a tail reach its cap while still audible.
+caw::ModuleDescriptor droneDescriptor() {
+    caw::ModuleDescriptor d{"org.caw.tests.native-loader.drone", 1, kPorts, 2, nullptr, 0, nullptr, 0, {}};
+    d.tailFrames = 4800;
+    return d;
+}
+const caw::ModuleDescriptor kDroneDescriptor = droneDescriptor();
+
+class DroneProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kDroneDescriptor; }
+    void process(const caw::StereoProcessBlock& block) noexcept override {
+        for (uint32_t i = 0; i < block.frames; ++i) block.outputLeft[i] = block.outputRight[i] = 0.5f;
+    }
+};
+
 }  // namespace
 
 #ifndef CAW_TEST_OMIT_ENTRY  // the second fixture plays a library without the v2 entry point
 // A bundle of two components (owner, 2026-11-09: a package may hold several).
-CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor, EchoProcessor, LateProcessor)
+CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor, EchoProcessor, LateProcessor, DroneProcessor)
 #endif

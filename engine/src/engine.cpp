@@ -63,6 +63,7 @@ struct Engine::Slot {
     int insertsFadeLeft = 0;                  // samples of that crossfade still to run
     bool insertsIdle = false;  // the inserts stopped running (Silent): reset before they run again
     bool insertTail = false;   // stopped: the inserts ring out on silence (Mode::Tail) until quiet
+    int tailFade = 0;          // > 0: a tail at its cap, still audible, fading out (frames left); -1: faded
     int64_t tailCap = 0;       // ... or for at most this many samples
     std::shared_ptr<const Pattern>* pattern = nullptr;  // owned here, freed on the control thread when retired
     int swapLeft = 0;
@@ -2688,7 +2689,11 @@ void Engine::applyCommands() noexcept {
                 playing_ = true;
                 // Ringing tails play on into the new pass (state kept), as the effects would have.
                 masterTailLeft_ = 0;
-                for (int i = 0; i < slotCount_; ++i) slotAt(i).insertTail = false;
+                masterTailFade_ = 0;
+                for (int i = 0; i < slotCount_; ++i) {
+                    slotAt(i).insertTail = false;
+                    slotAt(i).tailFade = 0;
+                }
                 touchEpoch_ = c.playCount;  // chains from before this Play drop their touches at their next chunk
                 touchPlayStamp_ = c.touchStamp;
                 // Resuming starts mid-loop: each track works out its own loop pass from g_ at its next chunk. Code
@@ -3063,19 +3068,36 @@ void Engine::updatePreviewing(int frames) noexcept {
             }
         s.previewTail = voices ? 0 : s.previewTail + frames;
         const int64_t cap = s.insertTail ? s.tailCap : static_cast<int64_t>(kPreviewTailSeconds * sr_);
-        const bool live = voices || (!silent && s.cur && (s.cur->voiced || s.insertTail) &&
-                                     s.previewQuiet < static_cast<int64_t>(kPreviewQuietSeconds * sr_) && s.previewTail < cap);
+        const bool quiet = s.previewQuiet >= static_cast<int64_t>(kPreviewQuietSeconds * sr_);
+        // A tail still audible at its cap fades out instead of stopping dead.
+        if (s.insertTail && !voices && !silent && !quiet && s.previewTail >= cap && s.tailFade == 0)
+            s.tailFade = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+        const bool fadingOut = s.insertTail && s.tailFade > 0;
+        const bool live = voices || (!silent && s.cur && (s.cur->voiced || s.insertTail) && !quiet &&
+                                     s.tailFade >= 0 && (s.previewTail < cap || fadingOut));
         if (!live && s.insertTail) {
             s.insertTail = false;
+            s.tailFade = 0;
             s.insertsIdle = true;  // rung out: start from silence next time
         }
         s.previewing = live;
         any = any || live;
     }
     if (masterTailLeft_ > 0) {
-        masterTailLeft_ = masterQuiet_ >= static_cast<int64_t>(kPreviewQuietSeconds * sr_) ? 0
-                          : std::max<int64_t>(0, masterTailLeft_ - frames);
-        if (masterTailLeft_ == 0 && masterChain_) masterChain_->reset();
+        const bool quiet = masterQuiet_ >= static_cast<int64_t>(kPreviewQuietSeconds * sr_);
+        if (quiet || masterTailFade_ < 0) {
+            masterTailLeft_ = 0;
+        } else if (masterTailFade_ == 0) {
+            masterTailLeft_ = std::max<int64_t>(0, masterTailLeft_ - frames);
+            if (masterTailLeft_ == 0) {  // at its cap and still audible: fade out first
+                masterTailFade_ = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                masterTailLeft_ = 1;
+            }
+        }
+        if (masterTailLeft_ == 0) {
+            masterTailFade_ = 0;
+            if (masterChain_) masterChain_->reset();
+        }
         any = any || masterTailLeft_ > 0;
     }
     previewing_ = any;
@@ -3095,6 +3117,7 @@ void Engine::endPlayback() noexcept {
     if (masterChain_) {
         masterTailLeft_ = tailCap(*masterChain_);
         masterQuiet_ = 0;
+        masterTailFade_ = 0;
         if (masterTailLeft_ > 0) previewing_ = true;
         else masterChain_->reset();
     }
@@ -3105,6 +3128,7 @@ void Engine::endPlayback() noexcept {
             s.tailCap = tailCap(*s.inserts);
             if (s.tailCap > 0 && s.active && !s.bus && !(slotTarget(s) == 0.0 && s.gain == 0.0)) {
                 s.insertTail = true;
+                s.tailFade = 0;
                 s.previewing = true;
                 s.previewTail = 0;
                 previewing_ = true;
@@ -3799,6 +3823,15 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     }
     s.scopePos.store(sp, std::memory_order_release);
     storeMax(s.peak, peak);
+    if (tail && s.tailFade != 0) {  // a capped tail fading out (or faded: silence until it is ended)
+        const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+        for (int i = 0; i < m; ++i) {
+            const float g = s.tailFade > 0 ? static_cast<float>(s.tailFade) / static_cast<float>(len) : 0.0f;
+            if (s.tailFade > 0 && --s.tailFade == 0) s.tailFade = -1;
+            outL[i] *= g;
+            outR[i] *= g;
+        }
+    }
     if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time with the most-delayed track
     s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (previewChunk_) {
@@ -3941,6 +3974,15 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             if (masterFading_) masterFading_->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
         }
         if (masterChain_) masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_, t);
+        if (masterTailFade_ != 0 && previewChunk_) {  // the master's capped tail fading out
+            const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+            for (int i = 0; i < m; ++i) {
+                const float g = masterTailFade_ > 0 ? static_cast<float>(masterTailFade_) / static_cast<float>(len) : 0.0f;
+                if (masterTailFade_ > 0 && --masterTailFade_ == 0) masterTailFade_ = -1;
+                stageL[i] *= g;
+                stageR[i] *= g;
+            }
+        }
         if (fading) {
             const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
             for (int i = 0; i < m; ++i) {

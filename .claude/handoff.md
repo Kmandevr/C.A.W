@@ -24,7 +24,7 @@ Owner (2026-11-09): write, compile and use a C++ effect in the app, offline, wit
   - re-run the APK job so the compiler is in the APK.
 - Cancel duplicate Compiler runs started before the host cache existed. A check-in is set for 22:50 UTC.
 - Merge #138 when all CI is green.
-- Follow-ups: a tail that hits its cap should fade out (`docs/decisions.md`); #17 dual mono; #121.
+- Follow-ups: #17 dual mono; #121.
 
 ## Open (owner)
 - UI pass (#137, #139), #20 phone check, deleting old branches.

@@ -500,3 +500,32 @@ TEST(a_latency_delay_starts_each_play_from_silence_and_a_bypassed_effect_adds_no
     e.process(left.data(), right.data(), 64);
     CHECK(left[0] > 0.4f);
 }
+
+TEST(a_tail_still_sounding_at_its_cap_fades_out_instead_of_stopping_dead) {
+    constexpr const char* kDrone = "org.caw.tests.native-loader.drone";
+    Engine e(48000);
+    CHECK(loadFixture(e, kDrone));
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(constantTrack({{kDrone, {}}}))));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 4096, l, r);
+    e.stop();
+    std::vector<float> out;
+    std::vector<float> left(64), right(64);
+    for (int k = 0; k < 200; ++k) {  // about 0.27 s: the stop fade, the 0.1 s tail, its fade, then silence
+        e.process(left.data(), right.data(), 64);
+        out.insert(out.end(), left.begin(), left.end());
+    }
+    // It rang on after the stop fade, and ended in silence.
+    size_t last = 0;
+    for (size_t i = 0; i < out.size(); ++i)
+        if (out[i] != 0.0f) last = i;
+    CHECK(last > 4800);
+    CHECK_EQ(out.back(), 0.0f);
+    // No step at the end: the last loud samples ramp down.
+    float biggest = 0;
+    for (size_t i = last > 2000 ? last - 2000 : 1; i <= last + 1 && i < out.size(); ++i)
+        biggest = std::max(biggest, std::fabs(out[i] - out[i - 1]));
+    CHECK(biggest < 0.01f);
+}

@@ -243,6 +243,7 @@ private:
     double tmp_[kBlock];
     int64_t masterTailLeft_ = 0;  // audio thread: stopped, the master chain rings out for at most this long
     int64_t masterQuiet_ = 0;     // ... ending sooner once its output has been quiet for a moment
+    int masterTailFade_ = 0;      // > 0: at its cap and still audible, fading out (frames left); -1: faded
     ComponentChain* masterFading_ = nullptr;  // audio thread: the master chain a newer one replaced, crossfading out
     int masterFadeLeft_ = 0;
     float insertL_[kBlock], insertR_[kBlock];

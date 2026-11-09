@@ -21,7 +21,7 @@ updated: 2026-11-09
     - A bypassed effect adds no latency.
     - A delay change while playing continues from the old line and crossfades.
     - Delays start each play from silence.
-  - Known gap: a tail that reaches its cap while still audible stops without a fade.
+  - A tail that reaches its cap while still audible fades out over 20 ms.
 - Also built: a rebuild switches in while playing, crossfaded, keeping values and state; any chain swap crossfades. Still to come: custom GUIs.
 - **Interface rule changed:** `save_state` may now run on the control thread while the instance processes (as in CLAP), so a playing project can be saved. A component that keeps state must make that safe; one without state needs nothing. `caw_component.h` says so.
 
