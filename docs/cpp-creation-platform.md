@@ -40,6 +40,8 @@ A descriptor should cover:
 
 The descriptor is not a second implementation. It describes the actual C++ component and is validated against it. A component that omits optional UI metadata still works; it receives a useful generated interface.
 
+**Binary boundary (owner decision, 2026-11-09):** compiled components and the host talk through a small, versioned C interface (plain structs, function pointers, fixed-size types; no `std::` types, C++ classes or exceptions across the library boundary), the way CLAP plugins do. The SDK's C++ classes sit on top of it inside the component. This keeps old and shared components working when the app, compiler or C++ standard library changes. **[Fact, checked 2026-11-09]** today's `engine/include/caw/component.hpp` exports `extern "C"` entry points, but they return C++ objects (`caw::ModuleDescriptor` with `std::string_view` fields, the virtual `caw::ModuleProcessor` class from `module.hpp`), so the boundary still has to be converted.
+
 ### Typed connections
 
 The component system must support at least:
@@ -179,7 +181,7 @@ Library functions should have clear input/output contracts, units, defaults, err
 
 Faust is an optional specialist DSP language/compiler, not a replacement for general-purpose C++. The preferred first prototype compiles Faust source to generated C++ and passes that source through the existing local/offline C++ component build pipeline. An adapter maps Faust inputs/outputs, UI metadata, parameters, state, lifecycle and processing buffers to the C.A.W. component descriptor. The native C.A.W. engine remains the only runtime/scheduler.
 
-An embedded libfaust/LLVM JIT path is a later option only if package size, startup, RAM, compile latency, CPU and Android measurements justify it. Validate Faust's buffer/in-place semantics, vectorization, channel layouts, polyphony, MIDI/per-note expression and real-time behavior. Do not enable a parallel scheduler inside the audio callback. Audit the exact compiler, standard-library and architecture-file licences: the compiler is LGPL-2.1-or-later, while generated-code obligations depend on included inputs/libraries/architecture files. No integration or licence compatibility is assumed complete. Details and Pure Data/Tracktion evaluations: [visual routing design](visual-routing-and-library-integration.md).
+There is no embedded libfaust/LLVM JIT path (owner, 2026-11-09): the bundled C++ compiler already builds Faust-generated code. Validate Faust's buffer/in-place semantics, vectorization, channel layouts, polyphony, MIDI/per-note expression and real-time behavior. Do not enable a parallel scheduler inside the audio callback. Audit the exact compiler, standard-library and architecture-file licences: the compiler is LGPL-2.1-or-later, while generated-code obligations depend on included inputs/libraries/architecture files. No integration or licence compatibility is assumed complete. Details and reuse evaluations: [visual routing design](visual-routing-and-library-integration.md).
 
 ## 6. Runtime, performance and trust boundaries
 
@@ -196,9 +198,28 @@ The SDK must distinguish real-time and non-real-time APIs and identify which cal
 
 Native C++ is not sandboxed because it uses the SDK. A native component can access process memory and operating-system services. Apply the existing per-item trust decision: Isolated in a separate process, Trusted in-process, or Blocked. Do not silently load untrusted native code. Sandboxed legacy .caw modules remain constrained only while the old VM still exists.
 
+**Safe sharing (owner decision, 2026-11-09):** after .caw is removed, the safe format for sharing is a visual-graph component made only of built-in Library nodes: it contains no native code, so it loads without a trust choice. A shared component that contains C++ (source or binary) always goes through the Isolated/Trusted/Blocked choice.
+
+**Overrun protection (owner decision, 2026-11-09):** the host cannot stop user C++ from breaking the real-time contract, but it measures each component's processing time against its block budget; a component that repeatedly misses it is bypassed (silenced or passed through) with a visible warning, and the user can re-enable it.
+
+**iOS (owner decision, 2026-11-09):** iOS ships without C++ authoring or compilation: playing, arranging and visual building only, using components made elsewhere. **[Assumption: App Store rules forbid apps from downloading or compiling and running new executable code; verify against Apple's current App Review Guidelines before iOS work starts]**.
+
 Performance requirements apply from the start: prepared execution, direct native processing, borrowed/zero-copy buffers where ownership permits, bounded pools, explicit lifetimes, lazy loading, serial fast paths for small workloads, adaptive scheduling for independent work, and SIMD/accelerators only when measurement shows a net benefit. Avoid unnecessary virtual dispatch, pointer chasing, copies, locks and abstractions on hot paths. Benchmark realistic low-end and desktop workloads; do not trade worse end-to-end performance for architectural neatness.
 
 Resource use must be visible and user-configurable: show meaningful CPU, memory, audio and build usage, explain consequences, and allow users to override advisory budgets. Do not hide arbitrary caps behind the UI. Preserve real format/representation limits and the explicit real-time audio safety contract. Each native component's trust mode is chosen by the user; build success or package installation never changes it.
+
+### On-device toolchain [Proposal; owner decisions marked]
+
+**Nothing external is required (owner, 2026-11-09):** the app needs no set-up step, PC, charger, network or other outside connection to work. Optional connections and downloads may make things better or easier, but never required.
+
+- **Compiler in the app (owner: one app, not two editions):** Clang and LLD (Apache-2.0 with LLVM exception), built by GitHub Actions for Android ARM64 and Windows and shipped inside the installer. **[Assumption: about 60–100 MB extra; measure in CI]**. **[Fact, Cxxdroid store listing, checked 2026-11-09]** an existing Android app compiles C/C++ on-device in about 47 MB.
+- **Why it can't be a download:** **[Fact, Android 10 behavior changes, checked 2026-11-09]** apps targeting API 29+ cannot `execve()` files in their own data directory. Executables must ship in the APK as `lib*.so` and run from `nativeLibraryDir`; release builds must keep native libraries extracted (`extractNativeLibs`/`useLegacyPackaging`).
+- **Bundled with the compiler:** the C.A.W. SDK headers and the C++ standard library, so a first build works offline with no set-up. **[Assumption: the NDK sysroot parts shipped (bionic headers, libc++) are permissively licensed; check their licence files before bundling]**.
+- **Optional packs:** set-up offers (and can be skipped) the Faust libraries and starter instruments/effects; anything else downloads on first use. Packs are data (headers, sources, libraries), versioned, hash-checked, cached and included in project handoff bundles.
+- **Loading the result:** the built `.so` goes in app-private storage, is marked read-only (**[Fact, Android 14 summary, checked 2026-11-09]** dynamically loaded code must be read-only for apps targeting API 34+; whether this covers native libraries is undocumented, so always do it) and loads under the trust choice.
+- **Cheap builds:** precompiled SDK headers, incremental rebuilds, a fast unoptimised audition build and an optimised build on export or request, at low priority so audio never stutters.
+
+**Remote compiling (owner direction, 2026-11-09; future, [Proposal] for the details):** on-device compiling stays the default and must work offline. Later, a project may optionally be compiled elsewhere: on a free service if a suitable one exists, or on the user's own computer (for example a PC on the same network running a small C.A.W. build helper). The result comes back as a component like any other: it is checked against the descriptor and the C interface, and because it was built outside the app it goes through the user's Isolated/Trusted/Blocked choice. No C.A.W.-run paid build server and no shipped secret is assumed. Free services: the user's own GitHub account (Actions in their repository, through the existing GitHub sign-in) is the first candidate; other free build services are to be researched. The user's computer can be reached on the same network or over the internet. Open: which other free services can return a built Android/Windows library, and how the phone and computer pair and connect securely over the internet (relay or direct connection).
 
 ## 7. Extensibility and versioning without rewrites
 

@@ -100,7 +100,7 @@ Only the owner can settle these questions. Do not silently convert them into imp
 
 | Question | Current status |
 |---|---|
-| iOS distribution: App Store exception or no iOS release | Open |
+| iOS distribution | Decided 2026-11-09: iOS ships through the App Store without C++ authoring ([decisions](decisions.md)) |
 | Licence for user-created/shared sound modules | Open |
 | How AutoStacc delivers the free app and the support bundles | Open |
 | Initial trust state for a newly encountered native component | Open; each component's trust level must be explicitly chosen by the user; no silent trust assignment ([decisions](decisions.md), 2026-11-06) |

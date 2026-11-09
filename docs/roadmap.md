@@ -263,7 +263,7 @@ These stages ship as updates. Their order still holds.
 | 9.1 | Native module host and lifecycle with three user-chosen modes per plugin/module: Isolated (separate process), Trusted (in-process) or Blocked (owner, 2026-11-03) | Partial | engine | F4 | The native SDK, static registry and module lifecycle contract exist; no dynamic loading, isolation or trust modes. The default mode for unseen code is an open owner question |
 | 9.2 | External CLAP hosting, then VST3 and AU where licensing and platforms allow | Conditional | engine | 9.1 | Not built. **[Assumption]** Out-of-process isolation on Android is unverified and may be desktop-first |
 | 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Planned | engine | CP.2–CP.4, F4 | Not built; the processor implementation must be reused rather than duplicated per format |
-| 9.4 | iOS, macOS and Linux app builds with platform audio/device testing | Conditional | both | — | Not configured in CI; iOS distribution is an open owner question |
+| 9.4 | iOS, macOS and Linux app builds with platform audio/device testing | Conditional | both | — | Not configured in CI; iOS ships without C++ authoring (owner, 2026-11-09) |
 | 9.5 | Plugin Builder packages C++ components; binary plugin hosting/export remains a separate adapter workflow | Partial | app | CP.1–CP.4, UI.1 | The current Plugin Builder validates/packages .caw source; it must move to the shared C++ component build and descriptor contract |
 
 **Exit gate:** each claimed plugin format and platform has real build, host/device and lifecycle tests; all three trust modes work and a crash in an Isolated plugin cannot take down the app.
@@ -280,7 +280,7 @@ These stages ship as updates. Their order still holds.
 
 **Exit gate:** offline projects remain fully usable, sync conflicts are recoverable, shared assets are versioned safely, and multichannel processing is tested end-to-end. Stereo remains the default low-overhead path.
 
-See [visual creation and signal routing](visual-routing-and-library-integration.md) for the detailed component/project/condition graph separation, Faust integration path, optional Pure Data evaluation, Tracktion Engine reference strategy and open-source reuse/licence criteria.
+See [visual creation and signal routing](visual-routing-and-library-integration.md) for the detailed component/project/condition graph separation, Faust integration path, Tracktion Engine reference strategy and open-source reuse/licence criteria.
 
 ## Cross-cutting performance and quality requirements
 

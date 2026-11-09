@@ -103,7 +103,7 @@ C++ remains C.A.W.'s primary general-purpose programming language and the native
 
 **Timing (owner, 2026-11-09):** Faust work starts only after on-device C++ building works. **Preferred first integration experiment:** compile Faust source to generated C++ and feed it through the existing local/offline C++ component build pipeline. Adapt generated DSP to the C.A.W. component contract (ports, parameters/UI metadata, lifecycle, process buffers, state and declared capabilities). This reuses the C.A.W. native engine and avoids requiring LLVM JIT in every app installation.
 
-A later optional embedded-libfaust/JIT path may improve rapid auditioning, but only after measuring binary/package size, startup, memory, compile latency, CPU, Android compatibility and trust boundaries. The engine—not Faust's optional parallel scheduler—owns real-time scheduling. Validate channel layout, in-place/buffer semantics, polyphony, MIDI/per-note expression, event timing and live/offline parity before claiming complete integration.
+There is no embedded libfaust/JIT path (owner, 2026-11-09). The engine—not Faust's optional parallel scheduler—owns real-time scheduling. Validate channel layout, in-place/buffer semantics, polyphony, MIDI/per-note expression, event timing and live/offline parity before claiming complete integration.
 
 Faust compiler and generated-code licensing are separate questions. The compiler is LGPL-2.1-or-later; generated code's obligations depend on source, libraries and architecture files used. Audit the exact version, standard library and architecture files included in each distribution. Record notices/source obligations and confirm compatibility with C.A.W.'s chosen source and distribution licences before bundling. See [Faust](https://github.com/grame-cncm/faust), [documentation](https://faustdoc.grame.fr/) and its [licensing FAQ](https://faustdoc.grame.fr/manual/faq/).
 
@@ -113,8 +113,7 @@ Evaluate existing open-source technology at every scale, from algorithms and lib
 
 | Candidate | Intended role in C.A.W. | Decision / next evaluation |
 |---|---|---|
-| Faust | Optional DSP authoring/compiler; generated native C++ components first, embedded JIT later if justified | Strong candidate. Prototype generated-C++ adapter and audit exact compiler, library and architecture-file licences. Keep C++ first-class. |
-| Pure Data / libpd | Optional compatibility/runtime for existing Pd patches and experiments | Prototype only. Not the primary engine or required workflow. Benchmark 64-frame tick adaptation, latency, CPU/RAM on weak Android, multi-instance behavior, external objects and real-time safety against equivalent native C++ components. Keep patches/components optional and clearly bounded. |
+| Faust | Optional DSP authoring/compiler; generated native C++ components only (no JIT) | Strong candidate. Prototype generated-C++ adapter and audit exact compiler, library and architecture-file licences. Keep C++ first-class. |
 | Tracktion Engine | Engineering reference only | Study graph scheduling, plugin delay compensation, lock-free recording/file access, arrangement, automation, MIDI and background rendering. GPL-3.0-or-later and depends on JUCE, so no code is taken (permissive licence, owner 2026-11-09). |
 | JUCE | Reference only | JUCE 9 is AGPLv3/commercial, so it is not used. |
 | LMMS | Readable source-code and implementation reference | Reference only; not a dependency or foundation. |
