@@ -178,6 +178,15 @@ jobs:
           path: ~/.pub-cache
           key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
           restore-keys: pub-linux-
+      # The Android SDK packages Gradle installs for the engine build (the pinned CMake and NDK), so they
+      # aren't installed again every time.
+      - name: Restore Android SDK packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/cmake/3.22.1
+            /usr/local/lib/android/sdk/ndk/28.2.13676358
+          key: android-sdk-cmake-3.22.1-ndk-28.2.13676358
       # The engine's native build (libcaw.so) reuses compiled files: only changed sources recompile.
       - name: Install ccache
         run: |
