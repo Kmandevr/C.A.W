@@ -72,12 +72,12 @@ The C++ language and compiler are ordinary toolchain facilities; the C.A.W. Libr
 | VST3, AUv2, AUv3 (macOS and iOS) and standalone builds from one CLAP plugin | [clap-wrapper](https://github.com/free-audio/clap-wrapper) | MIT (skip its AAX and ASIO options: GPL or commercial) | Stage 4b |
 | VST3 itself | VST 3 SDK, MIT since version 3.8 ([Steinberg, October 2025](https://sonicstate.com/news/2025/10/30/vst-3-now-available-under-mit-license)) | MIT | Stage 4b |
 
-Avoid: JUCE (revenue-capped free tier), Tracktion Engine (GPL or commercial, needs JUCE), DaisySP-LGPL, and Cmajor (**[Assumption: GPL or commercial; check before reconsidering]**).
+JUCE (9: AGPLv3/commercial) and Tracktion Engine (GPL-3.0-or-later/commercial, depends on JUCE) are references only; C.A.W. takes no code from them, because it will use a permissive licence and permissive dependencies (owner, 2026-11-09). See [visual creation and signal routing](visual-routing-and-library-integration.md) for candidate roles and evaluation gates. DaisySP-LGPL and Cmajor remain subject to exact licence/version review before use.
 
 ### Rejected alternatives
 
 - **Compose Multiplatform:** stable on Android, iOS and desktop, with the web in beta ([kotlinlang.org](https://kotlinlang.org/docs/multiplatform/supported-platforms.html), 2026-10-28). It's the strongest alternative to Flutter, but it needs two engine bridges (JNI on Android and desktop, cinterop on iOS) and ships a JVM on desktop.
-- **JUCE:** built for audio apps on every platform, but its free Starter tier only covers up to $20,000 a year in revenue ([JUCE forum](https://forum.juce.com/t/important-changes-to-the-juce-end-user-licence-agreement-for-juce-8/61265)). Its touch text editing is weak, and the code editor is the heart of this app.
+- **JUCE:** built for audio apps on every platform, but JUCE 8 and 9 are AGPLv3 or commercial, and JUCE 9 kept the JUCE 8 terms ([JUCE forum](https://forum.juce.com/t/juce-9-no-pricing-or-eula-changes/69000), checked 2026-11-09). Its touch text editing is weak, and the code editor is the heart of this app.
 - **Qt:** LGPL or commercial. LGPL obligations are awkward for a closed app on iOS.
 - **WebView or browser-only app:** latency is higher and less predictable, and garbage collection sits on the audio path. The web stays a later extra (engine as WASM in an AudioWorklet), not the main app.
 - **Embedded JS or Lua running user code:** both have garbage collection, unbounded loops and a large attack surface. They can't run safely on the audio thread.
@@ -171,7 +171,7 @@ The shared component descriptor defines stable identity, role/capabilities, type
 
 The Library should include waveform and wavetable generation, oscillators, noise, interpolation, filters, EQ, distortion, saturation, dynamics, delay, reverb, modulation effects, FFT, convolution and resampling; synth voices, envelopes, LFOs, FM/AM, additive, granular and physical-modeling building blocks; samplers and sample buffers; MIDI 1.0, MIDI 2.0 UMP, MPE/per-note expression, sequencing and music-theory utilities; tables, windows, random distributions, vectors, matrices, complex math, transforms, bit operations and data utilities. Functions accept declared parameters, tables, buffers, events or other data and return audio, waveforms, transformed data, analysis results or events. Use the standard C++ library for standard facilities rather than duplicating it.
 
-The full proposed scope and contracts are in [C++ creation platform](cpp-creation-platform.md). The current built-in function inventory remains [Function library](library.md); do not mark planned SDK functionality as built.
+The full proposed scope and contracts are in [C++ creation platform](cpp-creation-platform.md). The [visual creation and signal routing design](visual-routing-and-library-integration.md) defines the component editor, project/track workspace, conditional routing and reuse candidates. The current built-in function inventory remains [Function library](library.md); do not mark planned SDK functionality as built.
 
 ### Shared MIDI and event routing [Proposal]
 
@@ -231,9 +231,9 @@ The GitHub library-sync/source-picker workflow described in earlier proposals is
 | Device audio differences | miniaudio's per-platform backends, float output, restart on disconnect, early testing on the S22+ and each new platform; Oboe as an Android fallback |
 | Touch code editing is clumsy | Symbol row (`t >> << & \| ^ ( ) ? :`), short files, live error line, a Flutter code editor with lightweight highlighting (pick a permissively licensed package, or write a small one) |
 | Token leakage or over-broad access | Device flow, GitHub App limited to selected repos, platform secure storage (Android Keystore, Apple Keychain, Windows Credential Manager, Linux Secret Service), no shipped secrets |
-| Licensing | Use only permissive dependencies (miniaudio public domain/MIT-0, Flutter BSD-3, any NKIDO use MIT), avoid GPL. Don't bundle community bytebeat formulas without permission. Choose the app license and library license (e.g. CC0/MIT for modules) **before** accepting outside contributions |
-| Selling only through AutoStacc (owner) | **[Proposal]** Android: one release signing key kept for good in repository secrets (every update must be signed with it), plus clear install steps on the AutoStacc page. Windows: code-sign installers so SmartScreen doesn't block them. macOS: sign and notarize with an Apple Developer account. A privacy policy is needed everywhere (the app stores GitHub tokens) |
-| iOS can't be sold only through AutoStacc | **[Fact]** Outside the App Store, iOS apps can only be distributed through alternative marketplaces in the EU (and now Japan). That requires Apple's approval, notarization and an organization account ([Apple](https://developer.apple.com/support/alternative-app-marketplace-in-the-eu), 2026-10-28). iOS realistically means the App Store, so it's an open question in [vision](vision.md#open-questions) |
+| Licensing | Use only permissive dependencies (miniaudio public domain/MIT-0, Flutter BSD-3, any NKIDO use MIT), avoid GPL. Don't bundle community bytebeat formulas without permission. The app is Apache-2.0 (owner, 2026-11-09); choose the licence for shared modules and bundle content **before** accepting outside contributions |
+| Distributing through AutoStacc (owner) | **[Proposal]** Android: one release signing key kept for good in repository secrets (every update must be signed with it), plus clear install steps on the AutoStacc page. Windows: code-sign installers so SmartScreen doesn't block them. macOS: sign and notarize with an Apple Developer account. A privacy policy is needed everywhere (the app stores GitHub tokens) |
+| iOS can't be distributed only through AutoStacc | **[Fact]** Outside the App Store, iOS apps can only be distributed through alternative marketplaces in the EU (and now Japan). That requires Apple's approval, notarization and an organization account ([Apple](https://developer.apple.com/support/alternative-app-marketplace-in-the-eu), 2026-10-28). iOS realistically means the App Store, so it's an open question in [vision](vision.md#open-questions) |
 
 ## C++ creation platform architecture
 
