@@ -21,7 +21,8 @@ Project memory for C.A.W. Open this docs/ folder as a vault in Obsidian, or read
 - [Master development design](CAW_MASTER_DEVELOPMENT_PLAN.md): approved UI and engine design specification; it is not a separate roadmap or a current implementation report.
 - [Vision](vision.md): owner-approved product direction, actual platform support, current scope boundaries and open decisions.
 - [Architecture](architecture.md): verified technical architecture plus explicitly labelled future design proposals
-- [C++ creation platform](cpp-creation-platform.md): owner-approved C++ language direction and proposed Library/SDK, shared component model, three authoring interfaces, real-time boundaries and migration gates
+- [C++ creation platform](cpp-creation-platform.md): owner-approved C++ language direction and proposed Library/SDK, shared component model, code/visual/performance interfaces, real-time boundaries and migration gates
+- [Visual creation and signal routing](visual-routing-and-library-integration.md): two visual workspaces, typed project routing, conditional workflows, Faust/Pd/Tracktion evaluations and open-source reuse strategy
 - [Native engine refactor plan](engine-next.md): owner-approved refactor strategy, DSP/precomputation, hardware acceleration, permissive dependency candidates, migration phases and verification gates.
 - [Engine integration contract](engine-integration.md): how projects, add-ons, the app, library and CLI share native capabilities and assets
 - [How it works](how-it-works.md): the path from a .caw file to sound and to a WAV, the file that owns each step, and where to change what; start here in a new session
