@@ -1,0 +1,115 @@
+# Builds the on-device C++ compiler (Clang and LLD as one library) and its offline data bundle, and
+# tests it by compiling components for Android arm64 on Linux. LLVM itself is built once per version
+# and cached; only the small wrapper rebuilds on a change.
+name: Compiler
+on:
+  pull_request:
+    paths:
+      - "engine/compiler/**"
+      - "engine/include/caw/**"
+      - "engine/include/caw_component.h"
+      - "examples/cpp/**"
+      - ".github/workflows/compiler.yml"
+  push:
+    branches: [Main]
+    paths:
+      - "engine/compiler/**"
+      - ".github/workflows/compiler.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  LLVM_VERSION: 23.1.5
+  LLVM_SHA256: fb50b1eac93ddeb3aa8dab4cfe324dff74f4a9c2bdee6160c9e36188f8d06a6e
+
+jobs:
+  compiler:
+    name: Compiler (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux host test, target: host }
+          - { name: Android ARM64, target: android-arm64 }
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Ninja
+        run: sudo apt-get update -q && sudo apt-get install -y -q ninja-build
+      - name: Download Android NDK r30 (Google SDK licence accepted by owner)
+        run: |
+          curl --fail --location --retry 3 \
+            https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
+            --output "$RUNNER_TEMP/android-ndk.zip"
+          echo "5107f898313790e449e87eee2183d9a20602dee9  $RUNNER_TEMP/android-ndk.zip" | sha1sum --check
+          unzip -q "$RUNNER_TEMP/android-ndk.zip" -d "$RUNNER_TEMP"
+          rm "$RUNNER_TEMP/android-ndk.zip"
+          echo "NDK=$RUNNER_TEMP/android-ndk-r30" >> "$GITHUB_ENV"
+      - name: Restore the LLVM build
+        id: llvm-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/llvm-install
+          key: llvm-${{ env.LLVM_VERSION }}-${{ matrix.target }}-${{ hashFiles('engine/compiler/build-llvm.sh') }}
+      - name: Download the LLVM source
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/llvm-project-$LLVM_VERSION.src.tar.xz" \
+            --output "$RUNNER_TEMP/llvm.tar.xz"
+          echo "$LLVM_SHA256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum --check
+          tar xf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
+          rm "$RUNNER_TEMP/llvm.tar.xz"
+          echo "LLVM_SRC=$RUNNER_TEMP/llvm-project-$LLVM_VERSION.src" >> "$GITHUB_ENV"
+      - name: Build LLVM, Clang and LLD libraries (cache miss only; about two hours)
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: engine/compiler/build-llvm.sh ${{ matrix.target }} "$LLVM_SRC" "$RUNNER_TEMP/llvm-install" "$NDK"
+      - name: Save the LLVM build
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/llvm-install
+          key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
+      - name: Build the compiler library
+        run: |
+          extra=()
+          if [ "${{ matrix.target }}" = android-arm64 ]; then
+            extra=(-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a
+                   -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_static -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH)
+          fi
+          cmake -S engine/compiler -B "$RUNNER_TEMP/compiler-build" -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/llvm-install" -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/compiler" "${extra[@]}"
+          ninja -C "$RUNNER_TEMP/compiler-build" install
+          strip_tool=$(echo "$NDK"/toolchains/llvm/prebuilt/*/bin/llvm-strip)
+          "$strip_tool" --strip-unneeded "$RUNNER_TEMP"/compiler/lib/libcaw_compiler.so
+          ls -l "$RUNNER_TEMP"/compiler/lib/
+      - name: Install the C.A.W SDK headers
+        if: matrix.target == 'host'
+        run: |
+          cmake -S engine -B "$RUNNER_TEMP/caw-sdk-build" -DCAW_AUDIO=OFF -DCAW_TOOLS=OFF -DCAW_INSTALL_SDK=ON \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/caw-sdk"
+          cmake --install "$RUNNER_TEMP/caw-sdk-build" --config Release
+      - name: Assemble the offline toolchain data
+        if: matrix.target == 'host'
+        run: |
+          engine/compiler/bundle.sh "$NDK" "$RUNNER_TEMP/llvm-install" "$RUNNER_TEMP/caw-sdk" "$RUNNER_TEMP/toolchain"
+          cp "$LLVM_SRC/llvm/LICENSE.TXT" "$RUNNER_TEMP/toolchain/licenses/LLVM-LICENSE.txt"
+          cp "$LLVM_SRC/libcxx/LICENSE.TXT" "$RUNNER_TEMP/toolchain/licenses/libcxx-LICENSE.txt"
+      - name: Compile components with the library
+        if: matrix.target == 'host'
+        run: engine/compiler/test.sh "$RUNNER_TEMP/compiler/bin/caw-compile" "$RUNNER_TEMP/toolchain" "$NDK" "$GITHUB_WORKSPACE"
+      - name: Upload the toolchain data
+        if: matrix.target == 'host'
+        uses: actions/upload-artifact@v7
+        with:
+          name: caw-toolchain-data
+          path: ${{ runner.temp }}/toolchain
+      - name: Upload the Android compiler library
+        if: matrix.target == 'android-arm64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: caw-compiler-android-arm64
+          path: ${{ runner.temp }}/compiler/lib/libcaw_compiler.so

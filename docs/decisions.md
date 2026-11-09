@@ -6,6 +6,14 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: The on-device compiler is LLVM 23.1.5 as one library (#137)
+
+- **Dependency:** LLVM, Clang and LLD 23.1.5 (`llvm-project-23.1.5.src.tar.xz`, SHA-256 `fb50b1ea…6a6e`, release checked 2026-11-09), Apache-2.0 with LLVM exception. Built by `.github/workflows/compiler.yml` with AArch64 code generation only; the build is cached per version.
+- **Shape:** `engine/compiler/` wraps them as `libcaw_compiler.so` with three C functions (`caw_compiler_run`, `_free`, `_version`). Clang's driver plans each build; its compile steps run through cc1 and its link step through LLD, all in the calling process. So no executable is ever started, which Android forbids for app files. The Android app loads it in the `:compiler` process (§6 of the C++ platform note).
+- **Offline data bundle** (`engine/compiler/bundle.sh`): Clang's headers, the NDK r30 sysroot for arm64 at API 26 (headers, `crtbegin_so.o`/`crtend_so.o`, `libc`/`libm`/`libdl`/`liblog` stubs, `libc++_static.a`, `libc++abi.a`), compiler-rt builtins and `libunwind.a`, the C.A.W SDK headers, and licence texts.
+  - **[Assumption]** the redistributed NDK parts are permissive: bionic is BSD/Apache, while libc++, libunwind and compiler-rt are Apache-2.0 with LLVM exception. The bundle carries the NDK `NOTICE`, which must be read before the APK ships them.
+- Components link the C++ library statically (`-static-libstdc++`), so a built `.so` needs only libc, libm and libdl.
+
 ## 2026-11-09: Where the C++ Library lives (#121, architect review)
 
 - **Library kernels are public, header-only SDK code** in `engine/include/caw/library/` (installed with `CAW::SDK`), so built-in components and third-party components use one implementation, compiled into each; only `caw_component.h` crosses a binary boundary. Built-in components are thin wrappers in the engine (to come with #121). The first kernel is the pan law, `caw::lib::constantPowerPan` (`library/stereo.hpp`), which the mixer's track pan now calls.
