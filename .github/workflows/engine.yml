@@ -1,10 +1,12 @@
 # Engine tests on every push and pull request: Linux x64 and Arm64, Windows, and a sanitizer build. Same golden hashes everywhere.
 name: Engine
 on:
+  # Main and pull requests; a branch's own pushes run only through its pull request, so nothing runs twice
+  # (gpt/** branches get the Quick check until they open one).
   push:
-    # gpt/** branches get the Quick check until they open a pull request; agent-results holds only reports.
-    branches-ignore: ["gpt/**", agent-results]
+    branches: [Main]
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 

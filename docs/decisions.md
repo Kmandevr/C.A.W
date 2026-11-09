@@ -6,6 +6,13 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: Faster CI: pull requests test, Main builds (owner)
+
+- **Owner decision:** "we don't need to build the whole app in a PR, but we do need to test it."
+  - Pull requests run Dart analysis and tests, the engine tests on every platform, the C++ component builds, the compiler test and the docs checks.
+  - The Android APK and the Windows app are built on Main, or on any branch with Run workflow.
+- A branch's own pushes no longer start the App, Engine and Docs workflows next to its pull request, so each commit is checked once. `gpt/**` branches keep the Quick check.
+
 ## 2026-11-09: A C++ effect behaves like a CLAP plugin in REAPER (owner, #137)
 
 - **Owner decision:** "the code will run like a CLAP does in REAPER": the same behaviour, in C.A.W's own component format; adopting the CLAP format is not part of this work. Effects run in-process for now; Isolated (a separate process) comes later.

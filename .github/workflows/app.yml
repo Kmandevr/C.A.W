@@ -1,9 +1,11 @@
-# App builds: analysis, tests, Android APK and Windows app run independently.
+# App checks: analysis and tests on every pull request; the Android APK and Windows app on Main or on demand.
 name: App
 on:
+  # Pull requests test the app (analysis, tests); Main also builds the installable APK and Windows app.
+  # A branch's own pushes run nothing here, so a PR's commits aren't checked twice; "Run workflow" builds
+  # everything on any branch (an APK to try before merging).
   push:
-    # gpt/** branches get the Quick check until they open a pull request; agent-results holds only reports.
-    branches-ignore: ["gpt/**", agent-results]
+    branches: [Main]
     paths: [app/**, engine/**, examples/**, .github/workflows/app.yml]
   pull_request:
     paths: [app/**, engine/**, examples/**, .github/workflows/app.yml]
@@ -105,6 +107,7 @@ jobs:
 
   android:
     name: Android APK
+    if: github.event_name != 'pull_request'  # installables come from Main (or Run workflow), not every PR push
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -184,6 +187,7 @@ jobs:
 
   windows:
     name: Windows app
+    if: github.event_name != 'pull_request'  # as for the APK
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v7

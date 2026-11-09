@@ -45,7 +45,7 @@ Keep context while it helps; clean up only at a task boundary (task done, PR ope
 
 ## Checking changes
 
-Run `node scripts/docs-test.js` after touching any note, `README.md`, `CLAUDE.md` or `.claude/`. Before calling a change ready, run the `release-check` skill. CI (`.github/workflows/docs.yml`) runs the same checks on every push and pull request. Engine: build `engine/` with CMake and run `caw_tests` (commands in [docs/engine.md](docs/engine.md); golden hashes change only with an intended sound change: `--update-golden`). App: `flutter analyze` and `flutter test` in `app/` (`CAW_LIB=<built libcaw.so>` adds the engine integration test). CI (`engine.yml`, `app.yml`) runs both.
+Run `node scripts/docs-test.js` after touching any note, `README.md`, `CLAUDE.md` or `.claude/`. Before calling a change ready, run the `release-check` skill. CI (`.github/workflows/docs.yml`) runs the same checks on Main and every pull request. Engine: build `engine/` with CMake and run `caw_tests` (commands in [docs/engine.md](docs/engine.md); golden hashes change only with an intended sound change: `--update-golden`). App: `flutter analyze` and `flutter test` in `app/` (`CAW_LIB=<built libcaw.so>` adds the engine integration test). CI (`engine.yml`, `app.yml`) runs both.
 
 ## Git
 
