@@ -82,6 +82,17 @@ function run(command, args, cwd) {
   return { status: result.status === null ? 1 : result.status, output };
 }
 
+// The installed SDK's CMake package folder. Cross-compiling toolchains (the Android NDK's) limit
+// package searches to the target sysroot, so CMAKE_PREFIX_PATH alone can't find a host-installed SDK;
+// CAW_DIR names the folder directly, which find_package uses without re-rooting.
+function sdkPackageDir(sdk) {
+  for (const lib of ['lib', 'lib64']) {
+    const dir = path.join(sdk, lib, 'cmake', 'CAW');
+    if (fs.existsSync(path.join(dir, 'CAWConfig.cmake'))) return dir;
+  }
+  return null;
+}
+
 function build(options) {
   fs.mkdirSync(options.build, { recursive: true });
   const configureArgs = [
@@ -90,6 +101,8 @@ function build(options) {
     '-DCMAKE_PREFIX_PATH=' + options.sdk,
     '-DCMAKE_BUILD_TYPE=' + options.config,
   ];
+  const packageDir = sdkPackageDir(options.sdk);
+  if (packageDir) configureArgs.push('-DCAW_DIR=' + packageDir);
   if (options.toolchain) configureArgs.push('-DCMAKE_TOOLCHAIN_FILE=' + options.toolchain);
   if (options.androidAbi) configureArgs.push('-DANDROID_ABI=' + options.androidAbi);
   if (options.androidPlatform) configureArgs.push('-DANDROID_PLATFORM=' + options.androidPlatform);
