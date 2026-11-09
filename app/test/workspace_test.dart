@@ -757,7 +757,7 @@ void main() {
 
     expect(find.text('Guided'), findsOneWidget);
     expect(find.text('Advanced'), findsOneWidget);
-    expect(find.text('Build boundary: native .caw module validation and source packaging are available. CLAP/VST3 binary builds, plugin sandboxing, host I/O tests and per-plugin CPU/memory profiling require a native plugin SDK/host backend that is not present in this repository. No unavailable binary target is advertised.'), findsOneWidget);
+    expect(find.textContaining('This screen edits and validates .caw modules.'), findsOneWidget);
 
     await tester.tap(find.text('Blank effect'));
     await tester.pump();

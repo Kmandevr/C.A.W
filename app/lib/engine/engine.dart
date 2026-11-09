@@ -362,24 +362,7 @@ class Engine {
     final trustValue = trust.nativeValue;
     _queue = _queue.then((_) async {
       try {
-        final text = await Isolate.run(() {
-          final bindings = Bindings.instance;
-          final engine = Pointer<Void>.fromAddress(engineAddress);
-          final path = artifactPath.toNativeUtf8();
-          final id = expectedComponentId.toNativeUtf8();
-          try {
-            final result = bindings.loadComponent(engine, path, id, trustValue);
-            if (result == nullptr) throw StateError('native component loader returned no result');
-            try {
-              return result.toDartString();
-            } finally {
-              bindings.free(result);
-            }
-          } finally {
-            calloc.free(path);
-            calloc.free(id);
-          }
-        });
+        final text = await _loadComponentOffThread(engineAddress, artifactPath, expectedComponentId, trustValue);
         done.complete(NativeComponentLoadResult.fromJson(jsonDecode(text) as Map<String, dynamic>));
       } catch (error, stack) {
         done.completeError(error, stack);
@@ -400,16 +383,7 @@ class Engine {
     final engineAddress = _handle.address;
     _queue = _queue.then((_) async {
       try {
-        final unloaded = await Isolate.run(() {
-          final bindings = Bindings.instance;
-          final engine = Pointer<Void>.fromAddress(engineAddress);
-          final id = componentId.toNativeUtf8();
-          try {
-            return bindings.unloadComponent(engine, id) == 1;
-          } finally {
-            calloc.free(id);
-          }
-        });
+        final unloaded = await _unloadComponentOffThread(engineAddress, componentId);
         done.complete(unloaded);
       } catch (error, stack) {
         done.completeError(error, stack);
@@ -617,3 +591,36 @@ class RenderJob {
     return RenderJob._(job);
   }
 }
+
+// Isolate.run sends its closure's whole captured context to the new isolate. These top-level
+// helpers keep that context to sendable values only (the Engine method's Completer is not).
+Future<String> _loadComponentOffThread(int engineAddress, String artifactPath, String componentId, int trust) =>
+    Isolate.run(() {
+      final bindings = Bindings.instance;
+      final engine = Pointer<Void>.fromAddress(engineAddress);
+      final path = artifactPath.toNativeUtf8();
+      final id = componentId.toNativeUtf8();
+      try {
+        final result = bindings.loadComponent(engine, path, id, trust);
+        if (result == nullptr) throw StateError('native component loader returned no result');
+        try {
+          return result.toDartString();
+        } finally {
+          bindings.free(result);
+        }
+      } finally {
+        calloc.free(path);
+        calloc.free(id);
+      }
+    });
+
+Future<bool> _unloadComponentOffThread(int engineAddress, String componentId) => Isolate.run(() {
+      final bindings = Bindings.instance;
+      final engine = Pointer<Void>.fromAddress(engineAddress);
+      final id = componentId.toNativeUtf8();
+      try {
+        return bindings.unloadComponent(engine, id) == 1;
+      } finally {
+        calloc.free(id);
+      }
+    });
