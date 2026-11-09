@@ -6,6 +6,14 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: How writing and using a C++ effect looks (owner, #137)
+
+- **A C++ workspace of its own** (the ninth, docked like the others): a side-drawer file tree, the editor at full width and Build. A new effect always starts from one blank pass-through template.
+- **Errors:** red marks on their lines and the first error on one line under the code; a tap lists them all, and a tap on one jumps to it.
+- **Trust:** effects the user built on this device are Trusted without a prompt. Effects from elsewhere ask Trust or Block once, remembered per effect and changeable in its settings.
+- **A test strip under the editor:** a source (a track, a loop, a sine, noise), Play and the effect's generated knobs. Build swaps the new version in while it plays.
+- **Using it:** "+ C++ effect" in a track's or the master's effect chain lists the built effects; a placed effect is a card with knobs generated from its parameters.
+
 ## 2026-11-09: The on-device compiler is LLVM 23.1.5 as one library (#137)
 
 - **Dependency:** LLVM, Clang and LLD 23.1.5 (`llvm-project-23.1.5.src.tar.xz`, SHA-256 `fb50b1ea…6a6e`, release checked 2026-11-09), Apache-2.0 with LLVM exception. Built by `.github/workflows/compiler.yml` with AArch64 code generation only; the build is cached per version.
