@@ -17,7 +17,8 @@ extern "C" {
 /* 2 (2026-11-09): scope() indexes 0..n-1 are project layers at any capacity; the master and the
    audition are CAW_SCOPE_MASTER and CAW_SCOPE_AUDITION, not fixed slot numbers (F7.3).
    3 (2026-11-09): native components on tracks ("components" per layer) and parameter values in
-   both chains ({"id","params"} entries); caw_engine_set_component_param. */
+   both chains ({"id","params","bypass","state","state_version"} entries), component automation
+   lanes ("target_type":"component"); caw_engine_set_component_param, _bypass and _states. */
 #define CAW_API_VERSION 3
 
 typedef struct CawEngine CawEngine;
@@ -126,6 +127,13 @@ CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const cha
    smoothing. 1 on success, 0 if there is no such component or parameter, or value is not finite. */
 CAW_API int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint32_t index,
                                                const char* param_id, double value);
+/* Bypasses (bypass != 0) or brings back component `index` of the chain, crossfaded over 5 ms; a
+   bypassed component is not run. 1 on success, 0 if there is no such component. */
+CAW_API int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_id, uint32_t index, int32_t bypass);
+/* Each component's state as it saves it now, as JSON (free with caw_free):
+   {"ok":true,"components":[{"index","ok","version","state" (base64)}]}. Store "state" and
+   "version" (as "state_version") in the project's entry so a reload or an export starts from it. */
+CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,

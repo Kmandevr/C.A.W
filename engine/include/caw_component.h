@@ -19,7 +19,9 @@
  * - The host calls create, activate, deactivate, save_state, load_state, get_extension and destroy
  *   on a control thread, never concurrently for one instance.
  * - process and reset run on the audio thread, only between activate and deactivate, and never at
- *   the same time as a control-thread call on the same instance.
+ *   the same time as a control-thread call on the same instance, except save_state: the host may
+ *   save state while the instance processes (to store a playing project), so a component that
+ *   keeps state makes save_state safe against process (as CLAP plugins do).
  * - process must not allocate, lock, block or do I/O. A component allocates in create or activate.
  *
  * Bundles: one library may export several components through the same entry point, by index.

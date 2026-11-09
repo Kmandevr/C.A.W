@@ -197,13 +197,14 @@ struct Engine::Chain {
 static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetComponentAutomation, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
     int slot = 0;
     Chain* chain = nullptr;
     ComponentChain* masterChain = nullptr;  // SetMasterChain: the master's; SetInserts: slot's inserts (owned)
+    ComponentAutomation* componentAutomation = nullptr;  // SetComponentAutomation: for slot's inserts, or the master's (slot -1)
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
@@ -229,6 +230,7 @@ struct Engine::Retired {
     std::vector<int>* order = nullptr;
     SlotTable* table = nullptr;  // a slot table (and its mix graph) a Grow replaced
     ComponentChain* masterChain = nullptr;  // a component chain (master or a track's inserts) replaced or freed
+    ComponentAutomation* componentAutomation = nullptr;  // a component chain's automation table replaced
 };
 
 namespace {
@@ -699,6 +701,7 @@ Engine::~Engine() {
         delete c.orderList;
         delete c.table;
         delete c.masterChain;
+        delete c.componentAutomation;
     }
     Retired r;
     while (retired_->pop(r)) {
@@ -708,6 +711,7 @@ Engine::~Engine() {
         delete r.order;
         delete r.table;
         delete r.masterChain;
+        delete r.componentAutomation;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
@@ -716,6 +720,7 @@ Engine::~Engine() {
         delete pending_[i].order;
         delete pending_[i].table;
         delete pending_[i].masterChain;
+        delete pending_[i].componentAutomation;
     }
     delete masterChain_;
     masterChain_ = nullptr;
@@ -740,6 +745,7 @@ void Engine::drainRetired() {
         delete r.order;
         delete r.table;
         delete r.masterChain;
+        delete r.componentAutomation;
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -760,6 +766,8 @@ bool Engine::send(const Cmd& c) {
             delete c.orderList;
             delete c.table;
             delete c.masterChain;
+            delete c.componentAutomation;
+        delete c.componentAutomation;
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1279,6 +1287,25 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         return made;
     };
     std::map<std::string, std::vector<std::string>> warnings;
+    // A native component chain's automation lanes: a chain about to be sent takes its table now (the
+    // audio thread doesn't have it yet); a kept chain gets a new table only when its lanes changed.
+    auto attachAutomation = [&](ComponentChain& chain, const std::string& layer) {
+        delete chain.swapAutomation(chain.automationFor(projectAutomation, layer).release());
+    };
+    auto updateAutomation = [&](int slot, ComponentChain& chain, const std::string& layer, std::string& key) {
+        std::string next = ComponentChain::automationKey(p.automation, layer);
+        if (next == key) return;
+        Cmd c;
+        c.type = Cmd::SetComponentAutomation;
+        c.slot = slot;
+        c.componentAutomation = chain.automationFor(projectAutomation, layer).release();
+        if (send(c)) {
+            key = std::move(next);
+        } else {
+            allOk = false;
+            warnings["project"].push_back("audio command queue rejected a native component automation update");
+        }
+    };
     for (const auto& [id, msg] : synthWarnings) warnings[id].push_back(msg);
     for (const auto& [id, st] : modules_) {
         if (!st.pattern) continue;
@@ -1666,15 +1693,18 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 inserts.type = Cmd::SetInserts;
                 inserts.slot = ls.slot;
                 ComponentChain* sent = made != nextInserts.end() ? made->second.release() : nullptr;
+                if (sent) attachAutomation(*sent, w.id);
                 inserts.masterChain = sent;
                 if (send(inserts)) {
                     ls.inserts = sent;
+                    ls.insertsAutomationKey = ComponentChain::automationKey(p.automation, w.id);
                 } else {
                     allOk = false;
                     warnings["project"].push_back("layer '" + w.id + "': audio command queue rejected its native component update");
                 }
             } else if (wantsInserts && ls.inserts) {
                 ls.inserts->setValues(*w.components);
+                updateAutomation(ls.slot, *ls.inserts, w.id, ls.insertsAutomationKey);
             }
         }
         if (w.bus) {
@@ -1879,13 +1909,16 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
 
     if (keepMasterChain) {
         ctlMasterChain_->setValues(p.masterComponents);
+        updateAutomation(-1, *ctlMasterChain_, "", ctlMasterAutomationKey_);
     } else if (nextMasterChain || ctlMasterChain_) {
         Cmd masterChainCommand;
         masterChainCommand.type = Cmd::SetMasterChain;
         ComponentChain* sent = nextMasterChain.release();
+        if (sent) attachAutomation(*sent, "");
         masterChainCommand.masterChain = sent;
         if (send(masterChainCommand)) {
             ctlMasterChain_ = sent;
+            ctlMasterAutomationKey_ = ComponentChain::automationKey(p.automation, "");
         } else {
             allOk = false;
             warnings["project"].push_back("audio command queue rejected native master-chain update");
@@ -1973,16 +2006,37 @@ void Engine::setGlobal(const std::string& name, double value) {
         }
 }
 
+ComponentChain* Engine::ctlComponentChain(const std::string& layerId) noexcept {
+    if (layerId.empty()) return ctlMasterChain_;
+    auto it = layers_.find(layerId);
+    return it != layers_.end() ? it->second.inserts : nullptr;
+}
+
 bool Engine::setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value) {
     std::lock_guard<std::mutex> lock(ctl_);
-    drainRetired();
-    ComponentChain* chain = nullptr;
-    if (layerId.empty()) {
-        chain = ctlMasterChain_;
-    } else if (auto it = layers_.find(layerId); it != layers_.end()) {
-        chain = it->second.inserts;
-    }
+    ComponentChain* chain = ctlComponentChain(layerId);
     return chain && chain->setValue(index, param, value);
+}
+
+bool Engine::setComponentBypass(const std::string& layerId, uint32_t index, bool bypass) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    ComponentChain* chain = ctlComponentChain(layerId);
+    return chain && chain->setBypass(index, bypass);
+}
+
+std::string Engine::componentStatesJson(const std::string& layerId) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    ComponentChain* chain = ctlComponentChain(layerId);
+    if (!chain) return R"({"ok":false,"error":"no native components run there","components":[]})";
+    const std::vector<ComponentChain::SavedState> states = chain->saveStates();
+    std::string j = R"({"ok":true,"components":[)";
+    for (size_t i = 0; i < states.size(); ++i) {
+        if (i) j += ",";
+        j += "{\"index\":" + std::to_string(i) + ",\"ok\":" + (states[i].ok ? "true" : "false") +
+             ",\"version\":" + std::to_string(states[i].version) + ",\"state\":\"" +
+             base64Encode(states[i].data.data(), states[i].data.size()) + "\"}";
+    }
+    return j + "]}";
 }
 
 void Engine::setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo) {
@@ -2246,6 +2300,7 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetAutomation:
             case Cmd::SetMasterChain:
             case Cmd::SetInserts:
+            case Cmd::SetComponentAutomation:
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
@@ -2399,6 +2454,18 @@ void Engine::applyCommands() noexcept {
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
                 masterChain_ = c.masterChain;
                 break;
+            case Cmd::SetComponentAutomation: {
+                ComponentChain* chain = c.slot < 0 ? masterChain_ : slotAt(c.slot).inserts;
+                Retired r;
+                // No chain (it was replaced in the meantime): the table is retired unused.
+                r.componentAutomation = chain ? chain->swapAutomation(c.componentAutomation) : c.componentAutomation;
+                if (r.componentAutomation) {
+                    if (pendingCount_ != 0 || !retired_->push(r)) {
+                        if (pendingCount_ < pendingMax_) pending_[pendingCount_++] = r;
+                    }
+                }
+                break;
+            }
             case Cmd::SetInserts: {
                 Slot& s = slotAt(c.slot);
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);
@@ -3355,7 +3422,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             s.insertsIdle = false;
         }
         for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = routeSample(finiteOr0(y[i]));
-        inserts->process(insertL_, insertR_, static_cast<uint32_t>(m), sr_);
+        const ChainTime time{g_, stepLen_, touchEpoch_};
+        inserts->process(insertL_, insertR_, static_cast<uint32_t>(m), sr_, playing_ && !previewChunk_ ? &time : nullptr);
     }
     float peak = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
@@ -3524,7 +3592,8 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             stageL[i] = static_cast<float>(bypass ? xl : yl);
             stageR[i] = static_cast<float>(bypass ? xr : yr);
         }
-        masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_);
+        const ChainTime time{g_, stepLen_, touchEpoch_};
+        masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_, playing_ && !previewChunk_ ? &time : nullptr);
         const float* currentL = stageL;
         const float* currentR = stageR;
         for (int i = 0; i < m; ++i) finishSample(i, currentL[i], currentR[i]);

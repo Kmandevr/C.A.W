@@ -438,6 +438,31 @@ class Engine {
     }
   }
 
+  /// Bypasses (or brings back) a playing native component, crossfaded; null [layerId] is the master chain.
+  bool setComponentBypass(String? layerId, int index, bool bypass) {
+    final l = (layerId ?? '').toNativeUtf8();
+    try {
+      return _b.setComponentBypass(_handle, l, index, bypass ? 1 : 0) == 1;
+    } finally {
+      calloc.free(l);
+    }
+  }
+
+  /// Each playing component's state in a chain (null [layerId]: the master), by chain index, as its save_state
+  /// writes it now. Stored in [ComponentUseDoc.state] it makes a reload or an export start from it.
+  Map<int, ({String state, int version})> componentStates(String? layerId) {
+    final l = (layerId ?? '').toNativeUtf8();
+    final r = _b.componentStates(_handle, l);
+    calloc.free(l);
+    if (r == nullptr) return const {};
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    _b.free(r);
+    return {
+      for (final c in (j['components'] as List? ?? const []).cast<Map<String, dynamic>>())
+        if (c['ok'] == true) (c['index'] as num).toInt(): (state: c['state'] as String, version: (c['version'] as num).toInt()),
+    };
+  }
+
   void setGlobal(String name, double value) {
     final n = name.toNativeUtf8();
     _b.setGlobal(_handle, n, value);

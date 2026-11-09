@@ -91,6 +91,12 @@ public:
     // empty layer id: the master chain). Ramps over the parameter's smoothing. False if there is no
     // such component or parameter. A later project update sets the values it names again.
     bool setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value);
+    // Bypasses (or brings back) a playing native component, crossfaded. False if there is none.
+    bool setComponentBypass(const std::string& layerId, uint32_t index, bool bypass);
+    // {"ok":true,"components":[{"index","ok","version","state"(base64)}]} for a layer's chain (empty
+    // id: the master's), as each component's save_state writes it now; store it in the project so a
+    // reload or an export starts from it. {"ok":false,...} if the layer has no chain.
+    std::string componentStatesJson(const std::string& layerId);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
     // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play a pattern
@@ -250,6 +256,7 @@ private:
     // Control thread: the master chain last sent (alive until a later command replaces it), so an
     // update with the same components keeps it and only sets values.
     ComponentChain* ctlMasterChain_ = nullptr;
+    std::string ctlMasterAutomationKey_;  // the lanes the master chain's automation table was made from
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     struct ModuleState {
         std::string source;
@@ -279,6 +286,7 @@ private:
         size_t expressionCapacity = 0;
         std::string parameterAutomationSig;
         ComponentChain* inserts = nullptr;  // the native effects last sent to the slot (alive while it plays)
+        std::string insertsAutomationKey;   // the lanes their automation table was made from
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;
@@ -306,6 +314,7 @@ private:
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();
+    ComponentChain* ctlComponentChain(const std::string& layerId) noexcept;  // control thread; null: none
 };
 
 }  // namespace caw

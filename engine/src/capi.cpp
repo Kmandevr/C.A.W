@@ -136,6 +136,19 @@ int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint3
     return 0;
 }
 
+int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_id, uint32_t index, int32_t bypass) try {
+    return e && e->engine && e->engine->setComponentBypass(layer_id ? layer_id : "", index, bypass != 0) ? 1 : 0;
+} catch (...) {
+    return 0;
+}
+
+char* caw_engine_component_states(CawEngine* e, const char* layer_id) try {
+    if (!e || !e->engine) return nullptr;
+    return dup(e->engine->componentStatesJson(layer_id ? layer_id : ""));
+} catch (...) {
+    return nullptr;
+}
+
 void caw_engine_set_global(CawEngine* e, const char* name, double value) {
     if (e && name) e->engine->setGlobal(name, value);
 }

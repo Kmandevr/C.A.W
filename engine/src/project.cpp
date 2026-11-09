@@ -53,6 +53,21 @@ bool componentList(const Json* arr, const std::string& where, std::vector<Compon
             c.id = j.str;
         } else if (j.type == Json::Type::Object) {
             c.id = j.string("id");
+            c.bypass = j.boolean("bypass", false);
+            if (const Json* st = j.get("state"); st && st->type == Json::Type::String) {
+                constexpr size_t kMaxStateText = 16u << 20;  // 12 MB of state; a component's own limit is checked at build
+                if (st->str.size() > kMaxStateText || !base64Decode(st->str, c.state)) {
+                    error = where + ": component '" + c.id + "' state must be base64 of at most 12 MB";
+                    return false;
+                }
+                c.hasState = true;
+                const double version = j.number("state_version", 1);
+                if (!std::isfinite(version) || version < 0 || version > 4294967295.0 || version != std::floor(version)) {
+                    error = where + ": component '" + c.id + "' state_version must be a whole number";
+                    return false;
+                }
+                c.stateVersion = static_cast<uint32_t>(version);
+            }
             if (const Json* ps = j.get("params")) {
                 if (ps->type != Json::Type::Object) {
                     error = where + ": component '" + c.id + "' params must be an object of numbers";
@@ -267,8 +282,15 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             lane.targetType = laneJson.string("target_type");
             lane.target = laneJson.string("target");
             lane.moduleId = laneJson.string("module");
-            if ((lane.targetType != "param" && lane.targetType != "global") || lane.target.empty() ||
-                (lane.targetType == "param" && lane.moduleId.empty())) continue;
+            if (lane.targetType == "component") {
+                // {"target_type":"component","layer":id (absent: the master),"component":index,"target":param}
+                lane.moduleId = laneJson.string("layer");
+                const double index = laneJson.number("component", -1);
+                if (!(index >= 0 && index < 64 && index == std::floor(index))) continue;
+                lane.component = static_cast<int>(index);
+            }
+            if ((lane.targetType != "param" && lane.targetType != "global" && lane.targetType != "component") ||
+                lane.target.empty() || (lane.targetType == "param" && lane.moduleId.empty())) continue;
             if (!pointStepsOk(laneJson.get("points"), error, "")) return false;
             if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {
                 for (const Json& point : points->arr) {

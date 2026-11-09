@@ -274,6 +274,7 @@ public:
     virtual void deactivate() noexcept {}
     virtual void reset() noexcept {}
     virtual uint32_t stateVersion() const noexcept { return 1; }
+    // Called on the control thread, possibly while process() runs: keep it safe against processing.
     virtual bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept {
         (void)destination; (void)capacity; written = 0; return true;
     }

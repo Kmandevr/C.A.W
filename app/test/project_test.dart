@@ -37,6 +37,26 @@ void main() {
     expect(bad.single.params, {'b': 1.0});
   });
 
+  test('component bypass, state and automation lanes reach the engine and come back', () {
+    final p = ProjectDoc(id: 'p', name: 'P', bpm: 120, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    p.layers.first.components = [ComponentUseDoc('org.x.gain', {}, true)];
+    p.automation.add(ProjectAutomationLaneDoc(
+        targetType: 'component', target: 'left', layerId: 'l', component: 0, points: [AutomationPointDoc(step: 0, value: 1)]));
+    p.storeComponentStates((layer) => layer == 'l' ? {0: (state: 'CgAAAAAAAAA=', version: 7)} : const {});
+    final engine = jsonDecode(p.toEngineJson()) as Map<String, dynamic>;
+    expect((engine['layers'] as List).first['components'], [
+      {'id': 'org.x.gain', 'bypass': true, 'state': 'CgAAAAAAAAA=', 'state_version': 7},
+    ]);
+    final lane = (engine['automation'] as List).single as Map<String, dynamic>;
+    expect(lane['target_type'], 'component');
+    expect(lane['layer'], 'l');
+    expect(lane['component'], 0);
+    final again = ProjectDoc.fromJson(jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(again.layers.first.components.single.bypass, isTrue);
+    expect(again.layers.first.components.single.stateVersion, 7);
+    expect(again.automation.single.component, 0);
+  });
+
   test('a spacer under a track is saved with the project, never sent to the engine, and clamped', () {
     final p = sample();
     p.layers.first.spaceBelow = 40;

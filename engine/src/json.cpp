@@ -271,4 +271,51 @@ std::string jsonEscape(std::string_view s) {
     return o;
 }
 
+namespace {
+constexpr char kBase64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+int base64Value(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+}  // namespace
+
+std::string base64Encode(const uint8_t* data, size_t size) {
+    std::string out;
+    out.reserve((size + 2) / 3 * 4);
+    for (size_t i = 0; i < size; i += 3) {
+        const uint32_t n = static_cast<uint32_t>(data[i]) << 16 |
+                           (i + 1 < size ? static_cast<uint32_t>(data[i + 1]) << 8 : 0) |
+                           (i + 2 < size ? static_cast<uint32_t>(data[i + 2]) : 0);
+        out += kBase64[n >> 18 & 63];
+        out += kBase64[n >> 12 & 63];
+        out += i + 1 < size ? kBase64[n >> 6 & 63] : '=';
+        out += i + 2 < size ? kBase64[n & 63] : '=';
+    }
+    return out;
+}
+
+bool base64Decode(std::string_view text, std::vector<uint8_t>& out) {
+    if (text.size() % 4 != 0) return false;
+    std::vector<uint8_t> bytes;
+    bytes.reserve(text.size() / 4 * 3);
+    for (size_t i = 0; i < text.size(); i += 4) {
+        int v[4];
+        for (int k = 0; k < 4; ++k) v[k] = base64Value(text[i + k]);
+        const bool last = i + 4 == text.size();
+        const int pad = last ? (text[i + 3] == '=') + (text[i + 2] == '=' && text[i + 3] == '=') : 0;
+        if (v[0] < 0 || v[1] < 0 || (pad < 2 && v[2] < 0) || (pad < 1 && v[3] < 0)) return false;
+        const uint32_t n = static_cast<uint32_t>(v[0]) << 18 | static_cast<uint32_t>(v[1]) << 12 |
+                           static_cast<uint32_t>(pad < 2 ? v[2] : 0) << 6 | static_cast<uint32_t>(pad < 1 ? v[3] : 0);
+        bytes.push_back(static_cast<uint8_t>(n >> 16));
+        if (pad < 2) bytes.push_back(static_cast<uint8_t>(n >> 8 & 255));
+        if (pad < 1) bytes.push_back(static_cast<uint8_t>(n & 255));
+    }
+    out = std::move(bytes);
+    return true;
+}
+
 }  // namespace caw

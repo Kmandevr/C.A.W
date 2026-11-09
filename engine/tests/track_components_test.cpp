@@ -256,3 +256,93 @@ TEST(c_api_sets_a_component_parameter) {
     CHECK_EQ(caw_engine_set_component_param(engine, "t", 0, nullptr, 0.5), 0);
     caw_engine_destroy(engine);
 }
+
+TEST(a_bypassed_component_crossfades_to_its_input_and_back) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({{kGain, {{"left", 2.0}}}});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 2048, l, r);
+    CHECK_NEAR(l, 1.0 * kCentre, 1e-5);
+    CHECK(e.setComponentBypass("t", 0, true));
+    std::vector<float> left(64), right(64);
+    e.process(left.data(), right.data(), 64);
+    CHECK(left[63] < 1.0f * kCentre && left[63] > 0.5f * kCentre);  // mid-crossfade: no jump
+    runLast(e, 1024, l, r);
+    CHECK_NEAR(l, 0.5 * kCentre, 1e-5);  // the input, untouched
+    CHECK(!e.setComponentBypass("t", 3, true));
+    // The project can say it too, and an export of it starts bypassed.
+    p.layers[0].components[0].bypass = true;
+    CHECK(ok(e.setProject(p)));
+    CHECK(e.setComponentBypass("t", 0, false));
+    runLast(e, 1024, l, r);
+    CHECK_NEAR(l, 1.0 * kCentre, 1e-5);
+}
+
+TEST(component_state_is_saved_and_restored_through_the_project) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    ProjectSpec p = constantTrack({{kGain, {}}});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 64 * 10, l, r);
+    const std::string states = e.componentStatesJson("t");
+    CHECK(states.find("\"ok\":true") != std::string::npos);
+    CHECK(states.find("\"version\":7") != std::string::npos);
+    CHECK(e.componentStatesJson("missing").find("\"ok\":false") != std::string::npos);
+    // A fresh Engine (an export, a reload) restores what was saved: 10 blocks, as 8 little-endian bytes.
+    ProjectSpec restored = p;
+    std::string json = R"({"caw_project":1,"layers":[{"id":"t","chain":["dc"],"components":[)"
+                       R"({"id":"org.caw.tests.native-loader.gain","state":"CgAAAAAAAAA=","state_version":7}]}]})";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json, parsed, error));
+    CHECK(parsed.layers[0].components[0].hasState);
+    CHECK_EQ(parsed.layers[0].components[0].state.size(), 8u);
+    CHECK_EQ(static_cast<int>(parsed.layers[0].components[0].state[0]), 10);
+    restored.layers[0].components = parsed.layers[0].components;
+    Engine fresh(48000);
+    CHECK(loadFixture(fresh, kGain));
+    CHECK(ok(fresh.setProject(restored)));
+    CHECK(fresh.componentStatesJson("t").find("\"state\":\"CgAAAAAAAAA=\"") != std::string::npos);
+    // A state the component refuses refuses the update.
+    restored.layers[0].components[0].stateVersion = 3;
+    Engine other(48000);
+    CHECK(loadFixture(other, kGain));
+    CHECK(other.setProject(restored).find("refused its saved state") != std::string::npos);
+}
+
+TEST(an_automation_lane_drives_a_component_parameter_until_a_knob_moves_it) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({{kGain, {}}});
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "component";
+    lane.moduleId = "t";
+    lane.component = 0;
+    lane.target = "right";
+    lane.points = {{0, 0.0}, {16, 2.0}};  // 0 to 2 over the bar
+    p.automation.push_back(lane);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 64 * 4, l, r);  // the bar's start: right near 0
+    CHECK(r < 0.05f);
+    runLast(e, 48000 - 64 * 4, l, r);  // half a bar at 120 bpm (96000 samples per bar at 48 kHz)
+    CHECK_NEAR(r, 0.5 * 1.0 * kCentre, 0.02);
+    CHECK(e.setComponentParam("t", 0, "right", 0.0));  // a touch: overrides the lane until the next Play
+    runLast(e, 2048, l, r);
+    CHECK_EQ(r, 0.0f);
+    // The lane changes while the chain plays on (it is kept: same components).
+    p.automation[0].points = {{0, 1.0}};
+    CHECK(ok(e.setProject(p)));
+    e.stop();
+    e.play();  // a new Play ends the touch
+    runLast(e, 1024, l, r);
+    CHECK_NEAR(r, 0.5 * kCentre, 1e-4);
+}

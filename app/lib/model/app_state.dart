@@ -500,6 +500,9 @@ class AppState extends ChangeNotifier {
   Future<void> flush() async {
     _saveTimer?.cancel();
     if (starting) return; // the placeholder before the first project opens is never saved
+    // Native effects' running state (save_state) goes into the project, so a reload or an export starts from it.
+    final e = engine;
+    if (e != null) project.storeComponentStates(e.componentStates);
     await _storage?.save(project);
   }
 

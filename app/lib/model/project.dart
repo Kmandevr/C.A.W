@@ -95,18 +95,64 @@ class AutomationLaneDoc {
       .map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList());
 }
 
-class ProjectAutomationLaneDoc { ProjectAutomationLaneDoc({required this.targetType, required this.target, this.moduleId, List<AutomationPointDoc>? points}) : points = points ?? []; String targetType; String target; String? moduleId; List<AutomationPointDoc> points; Map<String, dynamic> toJson() => {'target_type': targetType, 'target': target, if (moduleId != null) 'module': moduleId, 'points': [for (final p in points) p.toJson()]}; static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(targetType: j['target_type'] as String? ?? 'global', target: j['target'] as String? ?? '', moduleId: j['module'] as String?, points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList()); }
+/// A project-level automation lane: a module parameter (`param`), a global (`global`), or a native component's
+/// parameter (`component`: [layerId] null for the master chain, [component] its index in that chain).
+class ProjectAutomationLaneDoc {
+  ProjectAutomationLaneDoc(
+      {required this.targetType, required this.target, this.moduleId, this.layerId, this.component, List<AutomationPointDoc>? points})
+      : points = points ?? [];
+  String targetType;
+  String target;
+  String? moduleId;
+  String? layerId;
+  int? component;
+  List<AutomationPointDoc> points;
+
+  Map<String, dynamic> toJson() => {
+        'target_type': targetType,
+        'target': target,
+        if (moduleId != null) 'module': moduleId,
+        if (layerId != null) 'layer': layerId,
+        if (component != null) 'component': component,
+        'points': [for (final p in points) p.toJson()],
+      };
+
+  static ProjectAutomationLaneDoc fromJson(Map<String, dynamic> j) => ProjectAutomationLaneDoc(
+        targetType: j['target_type'] as String? ?? 'global',
+        target: j['target'] as String? ?? '',
+        moduleId: j['module'] as String?,
+        layerId: j['layer'] as String?,
+        component: (j['component'] as num?)?.toInt(),
+        points: ((j['points'] as List?) ?? const []).map((p) => AutomationPointDoc.fromJson(p as Map<String, dynamic>)).toList(),
+      );
+}
 
 /// A native C++ component placed in a chain (a track's inserts or the master's), with the parameter
 /// values the project sets. Placing one is not a trust grant: the component must be loaded first.
 class ComponentUseDoc {
-  ComponentUseDoc(this.id, [Map<String, double>? params]) : params = params ?? {};
+  ComponentUseDoc(this.id, [Map<String, double>? params, this.bypass = false, this.state, this.stateVersion = 1])
+      : params = params ?? {};
 
   final String id;
   Map<String, double> params;
 
-  /// A bare id when no value is set, as older projects stored it.
-  Object toJson() => params.isEmpty ? id : {'id': id, 'params': params};
+  /// Passes its input through and is not run.
+  bool bypass;
+
+  /// What the component's save_state wrote, base64 (`Engine.componentStates`), so a reload or an export starts
+  /// from it; null for none.
+  String? state;
+  int stateVersion;
+
+  /// A bare id when nothing else is set, as older projects stored it.
+  Object toJson() => params.isEmpty && !bypass && state == null
+      ? id
+      : {
+          'id': id,
+          if (params.isNotEmpty) 'params': params,
+          if (bypass) 'bypass': true,
+          if (state != null) ...{'state': state, 'state_version': stateVersion},
+        };
 
   /// Null for an entry without a usable id. Ids and parameter names are bounded; values must be finite.
   static ComponentUseDoc? fromJson(Object? j) {
@@ -126,7 +172,15 @@ class ComponentUseDoc {
         }
       }
     }
-    return ComponentUseDoc(id, params);
+    final state = j['state'];
+    final version = j['state_version'];
+    return ComponentUseDoc(
+      id,
+      params,
+      j['bypass'] == true,
+      state is String && state.length <= (16 << 20) && RegExp(r'^[A-Za-z0-9+/]*={0,2}$').hasMatch(state) ? state : null,
+      version is int && version >= 0 && version <= 0xFFFFFFFF ? version : 1,
+    );
   }
 
   static List<ComponentUseDoc> listFromJson(Object? raw) => [
@@ -314,6 +368,25 @@ class ProjectDoc {
         layer.clips.fold<int>(end, (value, clip) => max(value, clip.startSteps + clip.lengthSteps)));
     return automation.fold<int>(clipsEnd, (end, lane) =>
         lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
+  }
+
+  /// Stores what [states] reports (Engine.componentStates, per layer id; null for the master) into the
+  /// component entries, so the saved project carries each effect's state. Entries it doesn't name keep theirs.
+  void storeComponentStates(Map<int, ({String state, int version})> Function(String? layerId) states) {
+    void store(List<ComponentUseDoc> chain, String? layerId) {
+      if (chain.isEmpty) return;
+      states(layerId).forEach((index, s) {
+        if (index < 0 || index >= chain.length) return;
+        // An empty state is no state: the component keeps nothing beyond its parameters.
+        chain[index].state = s.state.isEmpty ? null : s.state;
+        chain[index].stateVersion = s.version;
+      });
+    }
+
+    store(masterComponents, null);
+    for (final l in layers) {
+      if (!l.isFolder) store(l.components, l.id);
+    }
   }
 
   /// The loop the engine plays: whole bars reaching [arrangementEndSteps], as [toEngineJson] sends it.

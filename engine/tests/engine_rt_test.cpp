@@ -194,6 +194,13 @@ TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_chang
     p.layers = {layer("b", {"bass"})};
     p.layers[0].components = {{gain, {{"left", 2.0}}}};
     p.masterComponents = {{gain, {{"right", 0.5}}}};
+    ProjectAutomationLaneSpec lane;  // a lane on the track's component: resolved per sample
+    lane.targetType = "component";
+    lane.moduleId = "b";
+    lane.component = 0;
+    lane.target = "right";
+    lane.points = {{0, 0.0}, {8, 2.0}, {16, 0.5}};
+    p.automation.push_back(lane);
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
     e.play();
     std::vector<float> l(192), r(192);
@@ -202,6 +209,11 @@ TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_chang
     for (int round = 0; round < 10; ++round) {
         e.setComponentParam("b", 0, "left", 0.5 + 0.1 * round);  // control thread, outside the count
         e.setComponentParam("", 0, "right", 0.1 * round);
+        e.setComponentBypass("b", 0, round % 2 == 1);  // crossfades in and out on the audio thread
+        if (round == 5) {
+            p.automation[0].points = {{0, 1.0}};  // a new lane table, swapped in and the old one retired
+            e.setProject(p);
+        }
         cawtest::AllocationScope scope;
         for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);  // the ramps run in here
         operations += scope.count();

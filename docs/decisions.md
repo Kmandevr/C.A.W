@@ -6,6 +6,18 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: A C++ effect behaves like a CLAP plugin in REAPER (owner, #137)
+
+- **Owner decision:** "the code will run like a CLAP does in REAPER": the same behaviour, in C.A.W's own component format; adopting the CLAP format is not part of this work. Effects run in-process for now; Isolated (a separate process) comes later.
+- So an effect has, as built (2026-11-09):
+  - an FX-chain place;
+  - live, smoothed values;
+  - automation lanes (a knob move overrides its lane until the next Play);
+  - a click-free bypass that stops processing;
+  - state saved into the project, read on every save.
+- Still to come: latency compensation, tails after Stop, a rebuild swapped in while playing, and custom GUIs.
+- **Interface rule changed:** `save_state` may now run on the control thread while the instance processes (as in CLAP), so a playing project can be saved. A component that keeps state must make that safe; one without state needs nothing. `caw_component.h` says so.
+
 ## 2026-11-09: How writing and using a C++ effect looks (owner, #137)
 
 - **A C++ workspace of its own** (the ninth, docked like the others): a side-drawer file tree, the editor at full width and Build. A new effect always starts from one blank pass-through template.
@@ -372,7 +384,7 @@ Project layers and synth patches may describe dynamically sized module/effect ch
 
 - One type, `ComponentChain`, serves both. It is built and activated on the control thread before anything is sent, so a component that is not loaded, has other ports or names a parameter it lacks refuses the whole update. An update with the same components in the same order keeps the chain, and its running state (a reverb's tail), and only sets values; any other change rebuilds it.
 - Native effects start each play from silence (reset on Stop, and when a silent track sounds again), and a kept chain takes the project's values with the rest at their defaults, so playback matches a fresh render (export). A project runs at most 256 native component instances. Adding, removing or reordering a component still rebuilds the whole chain without a crossfade (follow-up in #137).
-- Parameter values ramp through the F6 resolver. `caw_engine_set_component_param` changes one while playing; the app stores it in the project too. Automation lanes for component parameters are not wired yet.
+- Parameter values ramp through the F6 resolver. `caw_engine_set_component_param` changes one while playing; the app stores it in the project too. Project automation lanes drive component parameters too (`target_type: component`).
 
 - A successful build never loads or authorizes code. The caller must pass an explicit Blocked, Isolated or Trusted value to the Engine C API; Blocked refuses before opening the library, Isolated is rejected until a real separate-process host exists, and Trusted runs in-process.
 - Trust is not serialized into the portable project. The project stores component IDs, order and values only; each user/device must make its own trust decision before the component can be used.

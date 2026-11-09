@@ -23,6 +23,10 @@ struct ModuleSpec {
 struct ComponentSpec {
     std::string id;
     std::vector<std::pair<std::string, double>> params;
+    bool bypass = false;            // passes its input through (crossfaded) and stops processing
+    bool hasState = false;          // `state` holds what the component's save_state wrote
+    uint32_t stateVersion = 1;
+    std::vector<uint8_t> state;
 };
 
 struct ClipSpec {
@@ -38,8 +42,9 @@ struct AutomationPointSpec { double step = 0, value = 0; };
 struct AutomationLaneSpec { std::string target; std::vector<AutomationPointSpec> points; };
 
 struct ProjectAutomationLaneSpec {
-    std::string targetType;  // param or global
-    std::string moduleId;    // required for param
+    std::string targetType;  // param, global or component
+    std::string moduleId;    // param: the module; component: the layer (empty for the master chain)
+    int component = -1;      // component: its index in that chain
     std::string target;      // parameter/global name
     std::vector<AutomationPointSpec> points;
 };
