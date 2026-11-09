@@ -75,7 +75,10 @@ void main() {
     }
     expect(blocked.ok, isFalse);
     expect(blocked.error, contains('blocked'), reason: 'Blocked result: ${blocked.error}');
-    expect(await engine.nativeComponents(), isEmpty);  // a blocked component is never listed
+    // A blocked component is never listed; only the engine's built-in Library components are.
+    final listed = await engine.nativeComponents();
+    expect(listed.where((c) => c.id == 'org.caw.tests.blocked'), isEmpty);
+    expect(listed.every((c) => c.builtin), isTrue);
 
     final isolated = await engine.loadNativeComponent(
       artifactPath: '/not/opened/while/isolated.so',
