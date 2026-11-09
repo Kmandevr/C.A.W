@@ -173,6 +173,12 @@ TEST(module_registry_copies_the_c_descriptor_and_runs_the_component_through_it) 
     CHECK(processor->process(block));
     CHECK_EQ(outL[2], -0.6f);  // the fixture doubles its input
     CHECK_EQ(outR[0], 1.0f);
+    const float* mono[1] = {inL};
+    AudioProcessBlock wrongChannels = block;
+    wrongChannels.input = {mono, 1, 4};  // one channel into a stereo port
+    CHECK(!processor->process(wrongChannels));
+    CHECK(processor->activate(48000.0, 2));  // prepared for 2-frame blocks now
+    CHECK(!processor->process(block));        // a 4-frame block is refused, never run
     CHECK(!registry.unload(kComponentId));  // an instance still holds it
     processor->deactivate();
     processor.reset();

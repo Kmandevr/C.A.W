@@ -59,6 +59,7 @@ struct Instance {
     std::vector<EventInput> eventIn;
     std::vector<EventOutput> eventOut;
     std::vector<ParameterValue> parameters;
+    uint32_t maxFrames = 0;  // from activate; longer blocks are refused
 };
 
 template <class Type>
@@ -96,7 +97,10 @@ void destroy(void* p) noexcept {
 template <class Type>
 int32_t activate(void* p, double sampleRate, uint32_t maxFrames) noexcept {
     try {
-        return instance<Type>(p)->processor.activate(sampleRate, maxFrames) ? 1 : 0;
+        Instance<Type>& self = *instance<Type>(p);
+        const bool ok = maxFrames > 0 && self.processor.activate(sampleRate, maxFrames);
+        self.maxFrames = ok ? maxFrames : 0;
+        return ok ? 1 : 0;
     } catch (...) {
         return 0;
     }
@@ -123,7 +127,7 @@ int32_t process(void* p, const CawProcessBlock* block) noexcept {
     try {
         if (!p || !block || block->struct_size < sizeof(CawProcessBlock)) return 0;
         Instance<Type>& self = *instance<Type>(p);
-        if (block->audio_in_count > self.audioIn.size() || block->audio_out_count > self.audioOut.size() ||
+        if (block->frames == 0 || block->frames > self.maxFrames || block->audio_in_count > self.audioIn.size() || block->audio_out_count > self.audioOut.size() ||
             block->event_in_count > self.eventIn.size() || block->event_out_count > self.eventOut.size() ||
             block->parameter_count > self.parameters.size())
             return 0;

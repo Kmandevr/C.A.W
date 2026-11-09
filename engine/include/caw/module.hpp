@@ -289,6 +289,7 @@ private:
 // The C interface (caw_component.h) is the binary boundary; these C++ types must match it exactly,
 // so the SDK and host can pass process blocks across it without converting each field.
 #include <cstddef>
+#include <type_traits>
 #include "../caw_component.h"
 namespace caw::detail {
 static_assert(static_cast<uint32_t>(PortType::Event) == CAW_PORT_EVENT);
@@ -302,4 +303,6 @@ static_assert(sizeof(Event) == sizeof(CawEvent) && offsetof(Event, frame) == off
               offsetof(Event, kind) == offsetof(CawEvent, kind) && offsetof(Event, flags) == offsetof(CawEvent, flags) &&
               offsetof(Event, noteId) == offsetof(CawEvent, note_id) && offsetof(Event, data) == offsetof(CawEvent, data));
 static_assert(kInfiniteTail == CAW_INFINITE_TAIL);
+static_assert(alignof(Event) == alignof(CawEvent) && std::is_standard_layout_v<Event> &&
+              std::is_trivially_copyable_v<Event> && std::is_standard_layout_v<CawEvent>);
 }  // namespace caw::detail

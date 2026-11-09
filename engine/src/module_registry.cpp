@@ -80,13 +80,25 @@ struct LoadedComponent {
     std::vector<UiControlDescriptor> uiControls;
     ModuleDescriptor descriptor;
 
-    std::string_view text(const char* value) {
-        strings.emplace_back(value ? value : "");
-        return strings.back();
+    // Copies a component string, at most kMaxComponentText bytes (a longer one is refused, so a
+    // missing terminator cannot run far). False for an over-long string.
+    bool text(const char* value, std::string_view& out) {
+        const size_t length = value ? strnlen(value, kMaxComponentText + 1) : 0;
+        if (length > kMaxComponentText) return false;
+        strings.emplace_back(value ? value : "", length);
+        out = strings.back();
+        return true;
     }
+    static constexpr size_t kMaxComponentText = 4096;
 };
 
 namespace {
+
+// Upper bounds checked before a component's arrays are read, so a bad count is refused rather
+// than walked past the end of its array.
+constexpr uint32_t kMaxComponentPorts = 1024;
+constexpr uint32_t kMaxComponentParameters = 4096;
+constexpr uint32_t kMaxComponentUiControls = 4096;
 
 void destroyWithDelete(ModuleProcessor* processor) noexcept {
     delete processor;
@@ -117,11 +129,22 @@ bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::
         error = "The component descriptor has a missing array or an element stride smaller than v2's.";
         return false;
     }
+    if (c.port_count > kMaxComponentPorts || c.parameter_count > kMaxComponentParameters ||
+        c.ui_control_count > kMaxComponentUiControls) {
+        error = "The component declares more ports, parameters or UI controls than the host accepts.";
+        return false;
+    }
+    bool textOk = true;
+    auto text = [&](const char* value) {
+        std::string_view view;
+        if (!out.text(value, view)) textOk = false;
+        return view;
+    };
     out.ports.reserve(c.port_count);
     for (uint32_t i = 0; i < c.port_count; ++i) {
         const CawPortInfo& p = *element<CawPortInfo>(c.ports, c.port_info_size, i);
         PortDescriptor d;
-        d.id = out.text(p.id);
+        d.id = text(p.id);
         d.type = enumFrom<PortType>(p.type);
         d.layout = enumFrom<ChannelLayout>(p.layout);
         d.input = p.is_input != 0;
@@ -135,9 +158,9 @@ bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::
     for (uint32_t i = 0; i < c.parameter_count; ++i) {
         const CawParameterInfo& p = *element<CawParameterInfo>(c.parameters, c.parameter_info_size, i);
         ParameterDescriptor d;
-        d.id = out.text(p.id);
-        d.name = out.text(p.name);
-        d.unit = out.text(p.unit);
+        d.id = text(p.id);
+        d.name = text(p.name);
+        d.unit = text(p.unit);
         d.defaultValue = p.default_value;
         d.minimum = p.minimum;
         d.maximum = p.maximum;
@@ -153,7 +176,7 @@ bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::
                 error = "A choice parameter has no labels or more than the limit.";
                 return false;
             }
-            for (uint32_t k = 0; k < p.choice_count; ++k) out.choices[i].push_back(out.text(p.choices[k]));
+            for (uint32_t k = 0; k < p.choice_count; ++k) out.choices[i].push_back(text(p.choices[k]));
             d.choices = out.choices[i].data();
             d.choiceCount = p.choice_count;
         }
@@ -163,16 +186,16 @@ bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::
     for (uint32_t i = 0; i < c.ui_control_count; ++i) {
         const CawUiControlInfo& u = *element<CawUiControlInfo>(c.ui_controls, c.ui_control_info_size, i);
         UiControlDescriptor d;
-        d.id = out.text(u.id);
-        d.label = out.text(u.label);
-        d.parameterId = out.text(u.parameter_id);
+        d.id = text(u.id);
+        d.label = text(u.label);
+        d.parameterId = text(u.parameter_id);
         d.kind = enumFrom<UiControlKind>(u.kind);
         d.minimum = u.minimum;
         d.maximum = u.maximum;
         out.uiControls.push_back(d);
     }
     ModuleDescriptor& d = out.descriptor;
-    d.id = out.text(c.id);
+    d.id = text(c.id);
     d.apiVersion = 1;
     d.ports = out.ports.empty() ? nullptr : out.ports.data();
     d.portCount = c.port_count;
@@ -180,13 +203,17 @@ bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::
     d.parameterCount = c.parameter_count;
     d.uiControls = out.uiControls.empty() ? nullptr : out.uiControls.data();
     d.uiControlCount = c.ui_control_count;
-    d.customUiId = out.text(c.custom_ui_id);
-    d.name = out.text(c.name);
+    d.customUiId = text(c.custom_ui_id);
+    d.name = text(c.name);
     d.version = c.version;
     d.role = enumFrom<ModuleRole>(c.role);
     d.latencyFrames = c.latency_frames;
     d.tailFrames = c.tail_frames;
     d.maxStateBytes = c.max_state_bytes;
+    if (!textOk) {
+        error = "A component string is longer than the host accepts.";
+        return false;
+    }
     return true;
 }
 
@@ -210,6 +237,8 @@ public:
         eventOut_.resize(eventOut);
         parameters_.resize(d.parameterCount);
         portsPath_ = other != 0 || audioIn > 1 || audioOut > 1;
+        for (uint32_t p = 0; p < d.portCount; ++p)
+            if (d.ports[p].type == PortType::Audio) (d.ports[p].input ? inChannels_ : outChannels_) = portChannelCount(d.ports[p]);
     }
     ~ComponentProcessor() override {
         const CawComponentV2& t = *component_->table;
@@ -223,7 +252,8 @@ public:
     bool activate(double sampleRate, uint32_t maxFrames) noexcept override {
         const CawComponentV2& t = *component_->table;
         if (active_) t.deactivate(instance_);
-        active_ = t.activate(instance_, sampleRate, maxFrames) == 1;
+        active_ = maxFrames > 0 && t.activate(instance_, sampleRate, maxFrames) == 1;
+        maxFrames_ = active_ ? maxFrames : 0;
         return active_;
     }
     void deactivate() noexcept override {
@@ -235,7 +265,11 @@ public:
     }
 
     bool process(const AudioProcessBlock& block) noexcept override {
-        if (!active_ || portsPath_ || !audioProcessBlockValid(block)) return false;
+        if (!active_ || portsPath_ || !audioProcessBlockValid(block) || block.frames > maxFrames_) return false;
+        // A side the component has is passed with exactly its port's channels, or not at all.
+        if ((block.input.channelCount && (audioIn_.empty() || block.input.channelCount != inChannels_)) ||
+            (block.output.channelCount && (audioOut_.empty() || block.output.channelCount != outChannels_)))
+            return false;
         CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount);
         if (!audioIn_.empty() && block.input.channelCount) {
             audioIn_[0] = {block.input.channels, block.input.channelCount, block.input.frames};
@@ -262,7 +296,8 @@ public:
     }
 
     bool processPorts(const ProcessBlock& block) noexcept override {
-        if (!active_ || block.audioInCount > audioIn_.size() || block.audioOutCount > audioOut_.size() ||
+        if (!active_ || block.frames == 0 || block.frames > maxFrames_ || block.audioInCount > audioIn_.size() ||
+            block.audioOutCount > audioOut_.size() ||
             block.eventInCount > eventIn_.size() || block.eventOutCount > eventOut_.size())
             return false;
         CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount);
@@ -291,9 +326,17 @@ public:
         c.event_in_count = block.eventInCount;
         c.event_out = eventOut_.data();
         c.event_out_count = block.eventOutCount;
-        const bool ok = component_->table->process(instance_, &c) == 1;
-        for (uint32_t k = 0; k < block.eventOutCount; ++k)
-            block.eventOut[k].count = eventOut_[k].count <= eventOut_[k].capacity ? eventOut_[k].count : eventOut_[k].capacity;
+        bool ok = component_->table->process(instance_, &c) == 1;
+        // The EventOutput rule (caw/module.hpp): at most capacity, frames in order and inside the
+        // block; anything else fails the block (and reports no events).
+        for (uint32_t k = 0; k < block.eventOutCount; ++k) {
+            const CawEventOutput& out = eventOut_[k];
+            bool valid = out.count <= out.capacity;
+            for (uint32_t e = 0; valid && e < out.count; ++e)
+                valid = out.events[e].frame < block.frames && (e == 0 || out.events[e].frame >= out.events[e - 1].frame);
+            if (!valid) ok = false;
+            block.eventOut[k].count = valid ? out.count : 0;
+        }
         return ok;
     }
 
@@ -320,7 +363,8 @@ private:
         c.struct_size = sizeof(CawProcessBlock);
         c.frames = frames;
         c.sample_rate = sampleRate;
-        const uint32_t count = parameterCount < parameters_.size() ? parameterCount : static_cast<uint32_t>(parameters_.size());
+        uint32_t count = parameterCount < parameters_.size() ? parameterCount : static_cast<uint32_t>(parameters_.size());
+        if (!parameters) count = 0;
         for (uint32_t k = 0; k < count; ++k) parameters_[k] = {parameters[k].samples, parameters[k].value};
         c.parameters = parameters_.data();
         c.parameter_count = count;
@@ -331,6 +375,8 @@ private:
     void* instance_ = nullptr;
     bool active_ = false;
     bool portsPath_ = false;
+    uint32_t maxFrames_ = 0;  // the block size the component prepared for at activate
+    uint32_t inChannels_ = 0, outChannels_ = 0;  // the single audio in/out port's channels (non-port path)
     mutable uint32_t stateVersion_ = 1;  // the version the component last saved with
     std::vector<CawConstAudio> audioIn_;
     std::vector<CawAudio> audioOut_;
@@ -385,8 +431,11 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         auto component = std::make_shared<LoadedComponent>();
         std::string copyError;
         if (!copyDescriptor(*table->descriptor, *component, copyError))
-            return {false, table->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION ? ModuleLoadError::IncompatibleAbi
-                                                                                         : ModuleLoadError::InvalidDescriptor,
+            return {false,
+                    table->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION ||
+                            table->descriptor->struct_size < sizeof(CawComponentDescriptor)
+                        ? ModuleLoadError::IncompatibleAbi
+                        : ModuleLoadError::InvalidDescriptor,
                     std::string(expectedId), std::move(copyError)};
         if (validateModuleDescriptor(component->descriptor) != ModuleValidation::Ok)
             return {false, ModuleLoadError::InvalidDescriptor, std::string(expectedId),
