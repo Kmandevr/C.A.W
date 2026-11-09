@@ -32,7 +32,7 @@ Don't read every file. Go deeper only when the layer above doesn't answer, and n
 
 ## Workflow
 
-**Roles (owner, 2026-11-09):** Claude builds the engine for now, using GPT's work as the baseline where it applies, and asks the owner about open questions ([docs/decisions.md](docs/decisions.md)). Treat this as a workflow preference, not a product or architecture requirement.
+**Roles (owner, 2026-11-09):** Claude builds the engine, using GPT's work as the baseline where it applies ([docs/decisions.md](docs/decisions.md)). Follow these rules, but stretch them or make small assumptions where that is best for the app; never change a whole direction without the owner. Fix hooks or tooling that get in the way. **Before any UI work, ask the owner how it should look.**
 
 
 One-file changes: just do them. Every file (code, notes, Claude config) has one purpose; change only the files the task needs. Independent review goes to an agent in `.claude/agents/` (`architect` before structural changes, the reviewers after), asking for findings only. Changes across areas: the saved workflow `change` (plan, build in parallel on disjoint files, verify, update docs; never commits).

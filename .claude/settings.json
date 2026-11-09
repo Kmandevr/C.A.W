@@ -25,7 +25,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Read|Grep|Bash|mcp__serena__.*",
+        "matcher": "Read|Grep|mcp__serena__.*",
         "hooks": [
           {
             "type": "command",
