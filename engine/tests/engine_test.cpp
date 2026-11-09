@@ -1244,7 +1244,8 @@ TEST(engine_rejects_export_layout_above_memory_budget) {
     Engine e(8000, makeEngineResourceBudget(hardware));
     const std::string result = e.setProject(p);
     CHECK(result.find("\"ok\":false") != std::string::npos);
-    CHECK(result.find("hardware-derived graph working-memory budget") != std::string::npos);
+    // The layer is skipped (#133: refused per layer, before its slot is kept), and the result says why.
+    CHECK(result.find("exports more values than one layer may hold") != std::string::npos);
 }
 
 TEST(engine_bounds_total_export_buffers_by_the_budget_across_layers) {
@@ -1283,6 +1284,12 @@ TEST(engine_bounds_total_export_buffers_by_the_budget_across_layers) {
     const std::string over = e.setProject(project(kExportBudgetSlots + 1));
     CHECK(over.find("\"ok\":false") != std::string::npos);
     CHECK(over.find("export buffer budget") != std::string::npos);
+    // Only that layer was skipped, and its slot was not kept: the fitting project still installs,
+    // and the same refusal repeats instead of the slots running out.
+    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
+    const std::string again = e.setProject(project(kExportBudgetSlots + 1));
+    CHECK(again.find("export buffer budget") != std::string::npos);
+    CHECK(again.find("no free engine layer slot") == std::string::npos);
 }
 
 TEST(routing_saturates_out_of_float_range_tracks_instead_of_silencing_the_mix) {

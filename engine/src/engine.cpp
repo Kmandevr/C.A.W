@@ -1247,6 +1247,17 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     };
     std::vector<Planned> plan;
     std::map<std::string, LayerState> nextLayers;
+    // Export buffers (#133): charged per layer here, while a layer that doesn't fit can still be
+    // skipped like one without a free slot, so nothing later refuses a project after slots were
+    // claimed or commands sent. Buffers once made stay with their slot and are reused.
+    size_t exportBuffersPlanned = exportPool_ ? exportPool_->buffers.size() : 0;
+    auto exportBuffersIn = [&](int slot) {
+        std::array<double, kBlock>** table = ctlSlot(slot).exportBuf.load(std::memory_order_relaxed);
+        const size_t capacity = ctlSlot(slot).exportCapacity.load(std::memory_order_relaxed);
+        size_t made = 0;  // made from index 0 up, so the first empty entry ends them
+        while (table && made < capacity && table[made]) ++made;
+        return made;
+    };
     std::map<std::string, std::vector<std::string>> warnings;
     for (const auto& [id, msg] : synthWarnings) warnings[id].push_back(msg);
     for (const auto& [id, st] : modules_) {
@@ -1396,6 +1407,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             }
             continue;
         }
+        const bool hadSlot = pl.ls.slot >= 0;
         if (pl.ls.slot < 0) {
             pl.ls.slot = isAudition ? auditionSlot : freeSlot();
             if (isAudition) ctlSlot(auditionSlot).ctlBusy = true;
@@ -1413,6 +1425,34 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             pl.ls.pattern = nullptr;
             pl.ls.steps = -1;
             pl.ls.volume = -1;
+        }
+        {
+            size_t exports = 0;
+            for (const std::string& id : pl.ids) {
+                auto module = modules_.find(id);
+                if (module != modules_.end() && module->second.program) exports += module->second.program->exports.size();
+            }
+            const size_t made = exportBuffersIn(pl.ls.slot);
+            const size_t adds = exports > made ? exports - made : 0;
+            const char* why = nullptr;
+            if (exports > exportPerSlot_)
+                why = "its chain exports more values than one layer may hold within this device's memory budget";
+            else if (exportBuffersPlanned + adds > exportBufferBudget())
+                why = "the project's exports would exceed this device's export buffer budget (if another song is "
+                      "still fading out, try again when it has)";
+            if (why) {
+                allOk = false;
+                // Keyed by the chain's first module, like the other chain warnings, so the result shows it.
+                warnings[pl.ids.empty() ? std::string("project") : pl.ids.front()].push_back(
+                    std::string("layer '") + w.id + (hadSlot ? "' not updated: " : "' not installed: ") + why);
+                if (!hadSlot) {
+                    ctlSlot(pl.ls.slot).ctlBusy = false;  // just claimed above; nothing was sent for it
+                    pl.ls.slot = -1;
+                }
+                nextLayers[w.id] = pl.ls;  // a playing layer keeps its current chain
+                continue;
+            }
+            exportBuffersPlanned += adds;
         }
         plan.push_back(std::move(pl));
     }
@@ -1500,20 +1540,6 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         } else if (maxExportsPerSlot > exportPool_->capacityPerSlot) {
             return R"({"ok":false,"error":"project requires more exports per layer than the hardware-derived stable export pool supports"})";
         }
-        // Charge the buffers this project adds against the project-wide budget before allocating
-        // any (#133): each layer may hold up to capacityPerSlot, but all layers together only
-        // exportBufferBudget(). Buffers already made stay (the audio thread may read them).
-        size_t added = 0;
-        for (int slot = 0; slot < slotCount; ++slot) {
-            const size_t required = requiredExportsPerSlot[static_cast<size_t>(slot)];
-            for (size_t index = 0; index < required; ++index)
-                if (!ctlSlot(slot).exportBuf.load(std::memory_order_relaxed)[index]) ++added;
-        }
-        if (exportPool_->buffers.size() + added > exportBufferBudget())
-            return "{\"ok\":false,\"error\":\"project exports need " +
-                   std::to_string(exportPool_->buffers.size() + added) + " export buffers (" +
-                   std::to_string(static_cast<uint64_t>(exportPool_->buffers.size() + added) * kExportBufferBytes) +
-                   " bytes); this device's export buffer budget holds " + std::to_string(exportBufferBudget()) + "\"}";
         try {
             for (int slot = 0; slot < slotCount; ++slot) {
                 const size_t required = requiredExportsPerSlot[static_cast<size_t>(slot)];

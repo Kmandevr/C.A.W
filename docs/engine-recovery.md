@@ -22,7 +22,7 @@ updated: 2026-11-09
 1. Inspect PR #125's Docs, Engine, App and C++ components checks for the exact head commit; fix every failure and re-run the full required CI.
 2. Keep #119 open until its acceptance criteria include a buildable and registered component, structured diagnostics, target coverage and the required native-code trust boundary.
 3. Continue with app-private project/source storage and the app-to-build-service submission/download path, then implement registration/loading only behind explicit Trusted or genuinely process-isolated Isolated modes. Never silently load native code.
-4. Keep issue #94 open and resume it after the current C++ platform work is verified; do not work on Main or revive stale branches.
+4. Issue #94 is closed (PR #124 fixed offline exports); its remaining items are #133 (export buffers now held to a project-wide budget; per-callback loop cost and export pointer segments still open). Do not work on Main or revive stale branches.
 
 ## Immediate continuation — native C++ integration
 

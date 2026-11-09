@@ -11,6 +11,8 @@ The owner's requirement (2026-10-28): run as light as possible, down to low-end 
 
 ## How it's measured
 
+**Callback cost at large layer counts (#133, open):** several per-callback loops (`applyCommands`, `planChunk`, `updateSolo`) still run over the whole layer capacity, which never shrinks, so a project that grew to many layers keeps paying for them after it shrinks. Bounding them to the active slots needs callgrind before and after.
+
 **Native component measurement still required:** add a `caw_bench` scenario that runs a trusted test component in `ProjectDoc.masterComponents`, then record mean/p99/max callback time, component-chain count scaling, project-state memory and retained memory after clearing/unloading the chain. The two preallocated stereo scratch stages live inside MasterChain and are included in the project-state estimate, so projects without native effects do not pay their baseline memory cost. ABI v1 does not report plugin-private heap/state size, so that portion is currently unknown rather than silently treated as zero.
 
 - **`caw_bench`** (`engine/bench/caw_bench.cpp`, built with the engine tools) plays scenarios through `Engine::process` in 192-frame callbacks at 48 kHz, a common Android low-latency burst. The budget is 4,000 µs per callback. For each scenario it reports:
