@@ -231,15 +231,9 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
           ),
         ),
         _Labeled(
-          'Loop',
-          DropdownButton<int>(
-            value: p.loopBars,
-            items: [
-              for (final b in {1, 2, 4, 8, 16, p.loopBars}.toList()..sort())
-                DropdownMenuItem(value: b, child: Text(b == 1 ? '1 bar' : '$b bars')),
-            ],
-            onChanged: (v) => s.editProject((p) => p.loopBars = v!),
-          ),
+          'Length',
+          BarsField(value: p.loopBars, max: p.maxLoopBars, title: 'Shortest song length',
+            onChanged: (v) => s.editProject((p) => p.loopBars = v)),
         ),
         _Labeled(
           'Key',
@@ -249,7 +243,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
             onChanged: (v) => s.editProject((p) => p.key = v!),
           ),
         ),
-        Text('${p.loopSeconds.toStringAsFixed(2)} s loop', style: const TextStyle(color: Neon.dim)),
+        Text('${p.songSeconds.toStringAsFixed(2)} s song', style: const TextStyle(color: Neon.dim)),
       ]),
       Row(children: [
         const SizedBox(width: 56, child: Text('Master', style: TextStyle(color: Neon.dim))),

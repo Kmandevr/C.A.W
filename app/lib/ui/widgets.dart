@@ -515,3 +515,34 @@ String formatParam(double v, ParamInfo p) {
   if (span >= 10) return v.toStringAsFixed(1);
   return v.toStringAsFixed(2);
 }
+
+/// A whole number of bars from 1 to [max]: − and + step it, tapping the number types any value (no fixed list of
+/// lengths; owner, 2026-11-09: a project's length has no cap).
+class BarsField extends StatelessWidget {
+  const BarsField({super.key, required this.value, required this.max, required this.onChanged, this.title = 'Bars'});
+  final int value, max;
+  final ValueChanged<int> onChanged;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    void set(int v) {
+      final c = v.clamp(1, max).toInt();
+      if (c != value) onChanged(c);
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      IconButton(onPressed: value > 1 ? () => set(value - 1) : null, icon: const Icon(Icons.remove, size: 16),
+        tooltip: 'One bar less', visualDensity: VisualDensity.compact),
+      TextButton(
+        onPressed: () => typeValue(context, title: title, initial: '$value', keyboardType: TextInputType.number,
+          parse: (t) {
+            final n = int.tryParse(t.trim());
+            return n == null || n < 1 ? null : n.toDouble();
+          },
+          apply: (v) => set(v.toInt())),
+        child: Text(value == 1 ? '1 bar' : '$value bars')),
+      IconButton(onPressed: value < max ? () => set(value + 1) : null, icon: const Icon(Icons.add, size: 16),
+        tooltip: 'One bar more', visualDensity: VisualDensity.compact),
+    ]);
+  }
+}

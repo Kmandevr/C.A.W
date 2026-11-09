@@ -56,8 +56,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     // The gap between tracks (Settings, chosen from the track height menu), so tracks don't sit on each other.
     final gap = s.settings.trackGap;
     final headW = Neon.compact(context) ? 158.0 : 184.0;
+    // The song ends at its last clip or automation point (or the shortest length) and playback loops back there,
+    // as in Reaper. The timeline always reaches 64 bars past it, so a clip can go anywhere and the song grows with it.
     final end = p.engineLoopSteps;
-    final width = math.max(560.0, end * stepW);
+    final width = math.max(560.0, math.min(p.maxArrangementSteps, math.max(p.timelineSteps, end + 64 * p.stepsPerBar)) * stepW);
     final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();
     final visible = s.visibleLayers;
     final selectedLayer = p.layers.where((l) => l.id == s.selectedLayerId).firstOrNull;
@@ -165,6 +167,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
                   // below the last track (owner: like Reaper).
                   Positioned(left: 0, right: 0, top: 30, bottom: 0, child: IgnorePointer(child: CustomPaint(
                     painter: _ArrangementGrid(stepW, p.stepsPerBar, _hScroll)))),
+                  // Where the song ends and playback loops back to the start.
+                  Positioned(left: end * stepW - 1, top: 0, bottom: 0, width: 2, child: IgnorePointer(
+                    child: Tooltip(message: 'Song end: playback loops back to the start',
+                      child: Container(color: Neon.pink.withValues(alpha: 0.7))))),
                   ConstrainedBox(constraints: BoxConstraints(minHeight: view.maxHeight), child: Column(children: [
                     SizedBox(height: 30, width: width,
                       child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll))),
@@ -773,15 +779,9 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
             ),
           ),
           _Labeled(
-            'Loop',
-            DropdownButton<int>(
-              value: p.loopBars,
-              items: [
-                for (final b in {1, 2, 4, 8, 16, p.loopBars}.toList()..sort())
-                  DropdownMenuItem(value: b, child: Text(b == 1 ? '1 bar' : '$b bars')),
-              ],
-              onChanged: (v) => s.editProject((p) => p.loopBars = v!),
-            ),
+            'Length',
+            BarsField(value: p.loopBars, max: p.maxLoopBars, title: 'Shortest song length',
+              onChanged: (v) => s.editProject((p) => p.loopBars = v)),
           ),
           _Labeled(
             'Key',
@@ -806,7 +806,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
               ),
             ),
           ),
-          Text('${p.loopSeconds.toStringAsFixed(2)} s loop', style: const TextStyle(color: Neon.dim)),
+          Text('${p.songSeconds.toStringAsFixed(2)} s song', style: const TextStyle(color: Neon.dim)),
         ]),
         Row(children: [
           const SizedBox(width: 56, child: Text('Master', style: TextStyle(color: Neon.dim))),

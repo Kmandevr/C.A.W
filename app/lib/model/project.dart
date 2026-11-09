@@ -400,6 +400,8 @@ class ProjectDoc {
     return min(maxArrangementSteps, max(max(64 * stepsPerBar, arrangementEndSteps), trackEnd.ceil()));
   }
   double get loopSeconds => loopSteps * 15.0 / bpm;
+  /// How long the song plays before it loops back: [engineLoopSteps] at the tempo.
+  double get songSeconds => engineLoopSteps * 15.0 / bpm;
 
   /// The key as the engine's numbers: root 0..11 from C, scale 0 = major or 1 = minor (scale.* order).
   /// Null for "None", so the engine uses its default (A minor).
