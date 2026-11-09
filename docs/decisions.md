@@ -53,13 +53,48 @@ updated: 2026-11-09
 - Also built: a rebuild switches in while playing, crossfaded, keeping values and state; any chain swap crossfades. Still to come: custom GUIs.
 - **Interface rule changed:** `save_state` may now run on the control thread while the instance processes (as in CLAP), so a playing project can be saved. A component that keeps state must make that safe; one without state needs nothing. `caw_component.h` says so.
 
-## 2026-11-09: How writing and using a C++ effect looks (owner, #137)
+## 2026-11-09: The app's layout (owner, #137, #139)
 
-- **A C++ workspace of its own** (the ninth, docked like the others): a side-drawer file tree, the editor at full width and Build. A new effect always starts from one blank pass-through template.
-- **Errors:** red marks on their lines and the first error on one line under the code; a tap lists them all, and a tap on one jumps to it.
-- **Trust:** effects the user built on this device are Trusted without a prompt. Effects from elsewhere ask Trust or Block once, remembered per effect and changeable in its settings. "Built here" means sources the user created or edited here (a shared project's sources count as from elsewhere until the user edits them). A choice is remembered for exactly that code (a SHA-256 fingerprint of the sources or library), so changed code from elsewhere asks again; `NativeTrustStore` holds it, app-private.
-- **A test strip under the editor:** a source (a track, a loop, a sine, noise), Play and the effect's generated knobs. Build swaps the new version in while it plays.
-- **Using it:** "+ C++ effect" in a track's or the master's effect chain lists the built effects; a placed effect is a card with knobs generated from its parameters.
+**The frame.**
+- A bottom bar holds the three main tab types: **Build** (C++ Builder), **Files** and **Arrange**.
+- Several tabs of one type, such as two Builders, switch from a small selector at the top of that section.
+- A thin transport bar (play, stop, record, BPM, position) is on every tab.
+- In landscape and on desktop, dragging a tab to the edge shows it beside the current one; portrait shows one at a time.
+- The other workspaces fold into these three (#139).
+
+**Arrange.**
+- A track's FX button slides up a sheet over the lower half of the timeline. That sheet is the track's **routing**, the project/track workspace of the visual plan (`docs/visual-routing-and-library-integration.md`).
+- Tabs in the sheet: Effects/routing, Mixer, Automation, Export (Export is also in the project menu).
+- Automation is edited as lanes under each track, REAPER-style: volume, pan and any effect knob, aligned with the clips. A long-press on a knob offers "Automate".
+
+**The routing canvas.**
+- **Layout:** a free canvas. A new effect is placed where its signal goes (after the chosen node, or on the chosen wire) and wired automatically; it can then be dragged anywhere. A light grid snap applies (hold to move freely), and "Tidy up" lays the graph out again.
+- **Wiring:** drag from an output port to an input port. Ports are large touch targets coloured by type (audio, MIDI, control). Tap a wire to select it, then delete it or insert an effect on it.
+- **Editing nodes:** tap a node to show its knobs.
+- **Full page:** ⤢ expands the canvas to the whole project (every track, bus, send and the master) with the selected track centred. It is also in the Arrangement's menu.
+
+**Adding an effect.**
+- "+ effect", or + on a wire, slides up the file browser over the canvas, filtered to effects: Built-in, My effects and Packs, with search and a ▶ preview.
+- Tapping an effect inserts it there; it can also be dragged onto a wire.
+- A finished build is listed there at once. Tracks already using it switch to the new build while playing.
+
+**Files.**
+- Fixed sections: Effects & instruments (built-in, mine, packs), Code (C++ sources), Audio & MIDI, and Packs.
+- Each section has folders, tags, search and favourites, as the Library has today.
+- Tapping a source opens it in a Builder.
+
+**Build (the C++ Builder).**
+- **Layout:** a side-drawer file tree, the editor at full width, and a Build button in its top bar. A setting adds build-on-pause, which builds a moment after typing stops.
+- **Errors:** red marks on their lines, and the first error on one line under the code; a tap lists them all.
+- **Editor help:** syntax colours, completion for SDK names and the file's own names, a pull-up quick reference of the SDK and Library with an insert button for each, and snippets (a knob, a delay line, a tempo-synced time, a state save).
+- **Test strip:** under the editor: a source (a track, a loop, a sine, noise), Play and the effect's generated knobs.
+- **New effects** start from one blank pass-through template.
+
+**Trust.**
+- Effects the user wrote on this device are Trusted without asking.
+- An effect from elsewhere shows as a greyed node on the canvas with "Native code from <source>: Trust / Block", while the rest of the song plays. The choice is remembered per exact code and can be changed in its settings.
+
+**[Fact, 2026-11-09]** The engine routes each track as a linear chain into a folder bus or the master, without sends or sidechains (roadmap Stage 2). The canvas shows and edits what the engine supports; arbitrary connections arrive with the routing model.
 
 ## 2026-11-09: The on-device compiler is LLVM 23.1.5 as one library (#137)
 
