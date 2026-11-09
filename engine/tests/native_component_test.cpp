@@ -184,3 +184,24 @@ TEST(module_registry_copies_the_c_descriptor_and_runs_the_component_through_it) 
     processor.reset();
     CHECK(registry.unload(kComponentId));
 }
+
+TEST(c_api_lists_loaded_component_descriptors_as_json) {
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine || !path) return;
+    char* empty = caw_engine_components(engine);
+    CHECK(empty && std::string(empty) == "{\"ok\":true,\"components\":[]}");
+    caw_free(empty);
+    char* loaded = caw_engine_load_component(engine, path, kComponentId, CAW_NATIVE_TRUST_TRUSTED);
+    caw_free(loaded);
+    char* listed = caw_engine_components(engine);
+    CHECK(listed != nullptr);
+    const std::string json = listed ? listed : "";
+    caw_free(listed);
+    CHECK(json.find("\"id\":\"org.caw.tests.native-loader\"") != std::string::npos);
+    CHECK(json.find("{\"id\":\"audio_in\",\"type\":\"audio\",\"input\":true,\"layout\":\"stereo\",\"channels\":2") != std::string::npos);
+    CHECK(json.find("\"version\":1,\"role\":\"unspecified\"") != std::string::npos);
+    caw_engine_destroy(engine);
+}

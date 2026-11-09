@@ -75,6 +75,7 @@ void main() {
     }
     expect(blocked.ok, isFalse);
     expect(blocked.error, contains('blocked'), reason: 'Blocked result: ${blocked.error}');
+    expect(await engine.nativeComponents(), isEmpty);  // a blocked component is never listed
 
     final isolated = await engine.loadNativeComponent(
       artifactPath: '/not/opened/while/isolated.so',

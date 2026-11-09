@@ -1,6 +1,8 @@
 // Native module registry: static factories, and components loaded through the C interface (caw_component.h).
 #include "module_registry.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -17,6 +19,7 @@
 #endif
 
 #include "caw_component.h"
+#include "json.h"
 
 namespace caw {
 
@@ -474,6 +477,107 @@ const ModuleDescriptor* ModuleRegistry::find(std::string_view id) const noexcept
         if (registration.descriptor && registration.descriptor->id == id)
             return registration.descriptor;
     return nullptr;
+}
+
+std::vector<const ModuleDescriptor*> ModuleRegistry::loadedComponents() const {
+    std::vector<const ModuleDescriptor*> out;
+    for (const ModuleRegistration& registration : registrations_)
+        if (registration.component && registration.descriptor) out.push_back(registration.descriptor);
+    return out;
+}
+
+namespace {
+const char* layoutName(ChannelLayout layout) noexcept {
+    switch (layout) {
+        case ChannelLayout::None: return "none";
+        case ChannelLayout::Mono: return "mono";
+        case ChannelLayout::Stereo: return "stereo";
+        case ChannelLayout::Quad: return "quad";
+        case ChannelLayout::Surround51: return "5.1";
+        case ChannelLayout::Surround71: return "7.1";
+        case ChannelLayout::Discrete: return "discrete";
+    }
+    return "none";
+}
+const char* portTypeName(PortType type) noexcept {
+    switch (type) {
+        case PortType::Audio: return "audio";
+        case PortType::Control: return "control";
+        case PortType::Modulation: return "modulation";
+        case PortType::Event: return "event";
+    }
+    return "audio";
+}
+const char* roleName(ModuleRole role) noexcept {
+    switch (role) {
+        case ModuleRole::Unspecified: return "unspecified";
+        case ModuleRole::Instrument: return "instrument";
+        case ModuleRole::Generator: return "generator";
+        case ModuleRole::Effect: return "effect";
+        case ModuleRole::Utility: return "utility";
+        case ModuleRole::EventProcessor: return "event_processor";
+        case ModuleRole::Analyzer: return "analyzer";
+    }
+    return "unspecified";
+}
+const char* uiKindName(UiControlKind kind) noexcept {
+    switch (kind) {
+        case UiControlKind::Slider: return "slider";
+        case UiControlKind::Toggle: return "toggle";
+        case UiControlKind::Dropdown: return "dropdown";
+        case UiControlKind::XYPad: return "xy_pad";
+        case UiControlKind::Button: return "button";
+        case UiControlKind::Curve: return "curve";
+    }
+    return "slider";
+}
+std::string quoted(std::string_view text) { return "\"" + jsonEscape(std::string(text)) + "\""; }
+// The shortest text that reads back as the same double (descriptor values are validated finite).
+std::string number(double value) {
+    char text[32];
+    for (int digits = 1; digits <= 17; ++digits) {
+        std::snprintf(text, sizeof text, "%.*g", digits, value);
+        if (std::strtod(text, nullptr) == value) break;
+    }
+    return text;
+}
+}  // namespace
+
+std::string moduleDescriptorJson(const ModuleDescriptor& d) {
+    std::string j = "{\"id\":" + quoted(d.id) + ",\"name\":" + quoted(d.name) +
+                    ",\"version\":" + std::to_string(d.version) + ",\"role\":\"" + roleName(d.role) +
+                    "\",\"latency_frames\":" + std::to_string(d.latencyFrames) +
+                    ",\"tail_frames\":" + (d.tailFrames == kInfiniteTail ? std::string("null") : std::to_string(d.tailFrames)) +
+                    ",\"max_state_bytes\":" + std::to_string(d.maxStateBytes) + ",\"custom_ui_id\":" + quoted(d.customUiId) +
+                    ",\"ports\":[";
+    for (uint32_t i = 0; i < d.portCount; ++i) {
+        const PortDescriptor& p = d.ports[i];
+        j += std::string(i ? "," : "") + "{\"id\":" + quoted(p.id) + ",\"type\":\"" + portTypeName(p.type) +
+             "\",\"input\":" + (p.input ? "true" : "false") + ",\"layout\":\"" + layoutName(p.layout) +
+             "\",\"channels\":" + std::to_string(portChannelCount(p)) + ",\"summing\":" + (p.summing ? "true" : "false") + "}";
+    }
+    j += "],\"parameters\":[";
+    for (uint32_t i = 0; i < d.parameterCount; ++i) {
+        const ParameterDescriptor& p = d.parameters[i];
+        j += std::string(i ? "," : "") + "{\"id\":" + quoted(p.id) + ",\"name\":" + quoted(p.name) +
+             ",\"unit\":" + quoted(p.unit) + ",\"default\":" + number(p.defaultValue) +
+             ",\"min\":" + number(p.minimum) + ",\"max\":" + number(p.maximum) + ",\"step\":" + number(p.step) +
+             ",\"curve\":\"" + (p.curve == ParameterCurve::Exponential ? "exponential" : "linear") +
+             "\",\"smoothing_frames\":" + std::to_string(p.smoothingFrames) +
+             ",\"automatable\":" + (p.automatable ? "true" : "false") +
+             ",\"modulatable\":" + (p.modulatable ? "true" : "false") +
+             ",\"midi_mappable\":" + (p.midiMappable ? "true" : "false") + ",\"choices\":[";
+        for (uint32_t c = 0; c < p.choiceCount; ++c) j += std::string(c ? "," : "") + quoted(p.choices[c]);
+        j += "]}";
+    }
+    j += "],\"ui_controls\":[";
+    for (uint32_t i = 0; i < d.uiControlCount; ++i) {
+        const UiControlDescriptor& u = d.uiControls[i];
+        j += std::string(i ? "," : "") + "{\"id\":" + quoted(u.id) + ",\"label\":" + quoted(u.label) +
+             ",\"parameter_id\":" + quoted(u.parameterId) + ",\"kind\":\"" + uiKindName(u.kind) +
+             "\",\"min\":" + number(u.minimum) + ",\"max\":" + number(u.maximum) + "}";
+    }
+    return j + "]}";
 }
 
 std::unique_ptr<ModuleProcessor> ModuleRegistry::create(std::string_view id) const noexcept {

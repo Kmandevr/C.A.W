@@ -108,6 +108,13 @@ char* caw_engine_load_component(CawEngine* e, const char* library_path,
     return dup("{\"ok\":false,\"error\":\"native component loading failed\",\"errorCode\":4}");
 }
 
+char* caw_engine_components(CawEngine* e) try {
+    if (!e || !e->engine) return dup("{\"ok\":false,\"error\":\"no engine\",\"components\":[]}");
+    return dup(e->engine->nativeComponentsJson());
+} catch (const std::bad_alloc&) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"components\":[]}");
+}
+
 int32_t caw_engine_unload_component(CawEngine* e, const char* component_id) try {
     return e && e->engine && component_id && e->engine->unloadNativeComponent(component_id) ? 1 : 0;
 } catch (...) {

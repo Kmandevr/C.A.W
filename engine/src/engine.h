@@ -82,6 +82,8 @@ public:
     ModuleLoadResult loadNativeComponent(const std::string& path, const std::string& expectedId, NativeModuleTrust trust);
     bool unloadNativeComponent(const std::string& id);
     std::unique_ptr<ModuleProcessor> createNativeComponent(const std::string& id);
+    // {"ok":true,"components":[descriptor, ...]} for the loaded native components (moduleDescriptorJson).
+    std::string nativeComponentsJson();
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
