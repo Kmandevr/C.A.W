@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
-updated: 2026-11-06
+updated: 2026-11-09
 ---
 
 # App
@@ -17,7 +17,7 @@ Settings shows the detected logical cores, conservative work-memory budget, SIMD
 
 ## C++ project sources
 
-The project model stores C++ component entries alongside the existing project modules. Each entry keeps its project-relative `CMakeLists.txt`, `caw.component`, source/header files and exact dependency-version pins in the project JSON. Paths are validated as safe relative paths before materialization. This preserves source and dependency metadata through project save/restore and handoff; it does **not** yet compile locally, resolve/install dependencies, load a native library or register a component with the running engine. Those are the next CP.1 integration steps.
+The project model stores C++ component entries alongside the existing project modules. Each entry keeps its project-relative `CMakeLists.txt`, `caw.component`, source/header files and exact dependency-version pins in the project JSON. Paths are validated as safe relative paths before materialization. This preserves source and dependency metadata through project save/restore and handoff. On desktop, `CppComponentBuildRunner` (`lib/platform/cpp_build.dart`) runs an already installed CMake/compiler with structured diagnostics; on Android it refuses with `CAW_ANDROID_TOOLCHAIN_UNAVAILABLE`, because Android needs the bundled compiler library ([C++ creation platform](cpp-creation-platform.md) §6). `lib/platform/cpp_toolchain.dart` validates `caw.toolchain` manifests for that bundled compiler. No compiler is bundled yet, and the app does not yet resolve/install dependencies, load a native library or register a component with the running engine.
 
 ## Areas
 

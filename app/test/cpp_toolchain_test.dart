@@ -79,7 +79,7 @@ void main() {
   });
 
   test('rejects traversal, absolute paths and duplicate artifact paths', () {
-    for (final unsafe in ['../clang', '/data/clang', r'bin\clang', 'C:clang']) {
+    for (final unsafe in ['../clang', '/data/clang', r'bin\clang', 'C:clang', 'lib/clang\u0000.so']) {
       expect(
         () => CppToolchainManifest.fromJson(manifest(
           entryLibrary: unsafe,

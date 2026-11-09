@@ -1,6 +1,8 @@
 // Describes locally provisioned C++ toolchains and validates their host-specific execution contract.
 import 'dart:convert';
 
+/// [inProcess]: the compiler is a native library, not an executable (Android forbids running
+/// files from app storage). It is hosted in a dedicated compiler process so a crash only fails the build.
 enum CppToolchainExecutionMode { process, inProcess }
 
 class CppToolchainArtifact {
@@ -131,5 +133,5 @@ class CppToolchainManifest {
 
 bool _isSafeRelativePath(String path) =>
     path.isNotEmpty && !path.startsWith('/') && !path.contains(String.fromCharCode(92)) &&
-    !path.contains(':') && !path.contains('\\u0000') &&
+    !path.contains(':') && !path.contains('\u0000') &&
     path.split('/').every((part) => part.isNotEmpty && part != '.' && part != '..');
