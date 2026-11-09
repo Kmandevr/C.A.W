@@ -10,6 +10,7 @@
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/Stack.h"
 #include "clang/CodeGen/ObjectFilePCHContainerWriter.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
@@ -24,6 +25,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/Config/llvm-config.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
@@ -77,6 +79,8 @@ extern "C" int caw_compiler_run(int argc, const char* const* argv, char** output
     llvm::raw_string_ostream out(text);
     int code = 1;
     if (argc >= 1 && argv && argv[0]) {
+        // Clang recurses deeply; with this it moves deep work onto a thread with 8 MB of stack when needed.
+        clang::noteBottomOfStack();
         llvm::InitializeAllTargets();
         llvm::InitializeAllTargetMCs();
         llvm::InitializeAllAsmPrinters();
@@ -96,8 +100,9 @@ extern "C" int caw_compiler_run(int argc, const char* const* argv, char** output
                 const llvm::opt::ArgStringList& jobArgs = job.getArguments();
                 bool ok = false;
                 if (!jobArgs.empty() && std::strcmp(jobArgs[0], "-cc1") == 0) {
-                    llvm::opt::ArgStringList cc1(jobArgs.begin() + 1, jobArgs.end());
-                    ok = runCc1(cc1, argv[0], out);
+                    // As clang's own driver does (ExecuteCC1Tool): the arguments from "-cc1" on.
+                    llvm::cl::ResetAllOptionOccurrences();
+                    ok = runCc1(jobArgs, argv[0], out);
                 } else if (job.getCreator().isLinkJob()) {
                     ok = runLld(jobArgs, out);
                 } else {

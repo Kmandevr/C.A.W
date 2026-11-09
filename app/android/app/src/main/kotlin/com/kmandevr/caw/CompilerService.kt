@@ -21,11 +21,17 @@ class CompilerService : Service() {
         // Clang's temporary objects go to the app's own cache.
         val tmp = java.io.File(cacheDir, "compiler-tmp").apply { mkdirs() }
         android.system.Os.setenv("TMPDIR", tmp.absolutePath, true)
-        // Builds run below the UI and audio: a long compile never takes their time.
         thread = HandlerThread("caw-compiler", Process.THREAD_PRIORITY_BACKGROUND).apply { start() }
         messenger = Messenger(object : Handler(thread.looper) {
             override fun handleMessage(msg: Message) {
-                if (msg.what == MSG_RUN) run(msg)
+                if (msg.what != MSG_RUN) return
+                val copy = Message.obtain(msg)
+                if (!busy.compareAndSet(false, true)) {  // one build per process: LLVM's state is global
+                    reply(copy, CODE_BUSY, "error: another C++ build is still running")
+                    return
+                }
+                // Clang recurses deeply (it wants 8 MB of stack); a background thread has about 1 MB.
+                Thread(null, { run(copy) }, "caw-compiler-build", 64L shl 20).start()
             }
         })
     }
@@ -33,6 +39,8 @@ class CompilerService : Service() {
     override fun onBind(intent: Intent?): IBinder = messenger.binder
 
     private fun run(msg: Message) {
+        // Builds run below the UI and audio: a long compile never takes their time.
+        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
         val replyTo = msg.replyTo ?: return
         val data = msg.data
         val args = data.getStringArray(KEY_ARGS) ?: emptyArray()
@@ -47,17 +55,32 @@ class CompilerService : Service() {
             reply.putInt(KEY_CODE, CODE_UNAVAILABLE)
             reply.putString(KEY_OUTPUT, "error: this build of C.A.W does not include the C++ compiler")
         }
-        try {
-            replyTo.send(Message.obtain(null, MSG_RESULT).apply { this.data = reply })
-        } catch (_: RemoteException) {
-            // The app went away; nothing waits for this build.
-        }
+        send(replyTo, reply)
         // LLVM keeps global state between runs: every build starts in a fresh process. The short wait
         // lets the reply reach the app before it sees this process end.
         Handler(thread.looper).postDelayed({ Process.killProcess(Process.myPid()) }, 300)
     }
 
+    private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun reply(msg: Message, code: Int, output: String) {
+        val replyTo = msg.replyTo ?: return
+        send(replyTo, Bundle().apply {
+            putInt(KEY_CODE, code)
+            putString(KEY_OUTPUT, output)
+        })
+    }
+
+    private fun send(replyTo: Messenger, data: Bundle) {
+        try {
+            replyTo.send(Message.obtain(null, MSG_RESULT).apply { this.data = data })
+        } catch (_: RemoteException) {
+            // The app went away; nothing waits for this build.
+        }
+    }
+
     companion object {
+        const val CODE_BUSY = -3
         const val MSG_RUN = 1
         const val MSG_RESULT = 2
         const val KEY_ARGS = "args"
