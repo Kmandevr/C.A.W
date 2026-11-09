@@ -72,7 +72,7 @@ The C++ language and compiler are ordinary toolchain facilities; the C.A.W. Libr
 | VST3, AUv2, AUv3 (macOS and iOS) and standalone builds from one CLAP plugin | [clap-wrapper](https://github.com/free-audio/clap-wrapper) | MIT (skip its AAX and ASIO options: GPL or commercial) | Stage 4b |
 | VST3 itself | VST 3 SDK, MIT since version 3.8 ([Steinberg, October 2025](https://sonicstate.com/news/2025/10/30/vst-3-now-available-under-mit-license)) | MIT | Stage 4b |
 
-Avoid: JUCE (revenue-capped free tier), Tracktion Engine (GPL or commercial, needs JUCE), DaisySP-LGPL, and Cmajor (**[Assumption: GPL or commercial; check before reconsidering]**).
+Do not adopt JUCE or Tracktion Engine wholesale without a deliberate source-licence compatibility review: current JUCE 9 terms are AGPLv3/commercial and Tracktion Engine is GPL-3.0-or-later/commercial and depends on JUCE. The owner now permits evaluating copyleft open-source technology when C.A.W. can comply with its obligations, but no paid licence route is assumed. See [visual creation and signal routing](visual-routing-and-library-integration.md) for candidate roles and evaluation gates. DaisySP-LGPL and Cmajor remain subject to exact licence/version review before use.
 
 ### Rejected alternatives
 
@@ -171,7 +171,7 @@ The shared component descriptor defines stable identity, role/capabilities, type
 
 The Library should include waveform and wavetable generation, oscillators, noise, interpolation, filters, EQ, distortion, saturation, dynamics, delay, reverb, modulation effects, FFT, convolution and resampling; synth voices, envelopes, LFOs, FM/AM, additive, granular and physical-modeling building blocks; samplers and sample buffers; MIDI 1.0, MIDI 2.0 UMP, MPE/per-note expression, sequencing and music-theory utilities; tables, windows, random distributions, vectors, matrices, complex math, transforms, bit operations and data utilities. Functions accept declared parameters, tables, buffers, events or other data and return audio, waveforms, transformed data, analysis results or events. Use the standard C++ library for standard facilities rather than duplicating it.
 
-The full proposed scope and contracts are in [C++ creation platform](cpp-creation-platform.md). The current built-in function inventory remains [Function library](library.md); do not mark planned SDK functionality as built.
+The full proposed scope and contracts are in [C++ creation platform](cpp-creation-platform.md). The [visual creation and signal routing design](visual-routing-and-library-integration.md) defines the component editor, project/track workspace, conditional routing and reuse candidates. The current built-in function inventory remains [Function library](library.md); do not mark planned SDK functionality as built.
 
 ### Shared MIDI and event routing [Proposal]
 
