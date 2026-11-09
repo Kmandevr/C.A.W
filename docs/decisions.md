@@ -22,6 +22,10 @@ updated: 2026-11-09
   - Dart tests: about 2 min;
   - the rest: under 1 min;
   - the compiler test: minutes once its LLVM build is cached (built once per LLVM version).
+- **Owner direction:** checks can run on a branch while it is being worked on, not only through a pull request.
+  - Every workflow has Run workflow. The Quick check runs chosen commands on any branch. The App workflow's run can skip the installables for a quick test-only run.
+  - Agents also run the engine tests and the Dart analysis and tests locally before pushing.
+- **The APK and the compiler cache:** GitHub scopes a cache to the branch (or pull request) that saved it, so Main's APK can only use an LLVM build cached on Main. When the Compiler workflow finishes on Main, the App workflow builds the APK again (only that job), so Main's APK always carries the compiler.
 - **Owner direction:** split a job into parallel parts where the parts are really independent, keeping it readable and reliable.
   - Where it helps: the Windows build compiles each target's files in parallel (`/MP`), because nearly all of the Windows engine job was compiling.
   - Where it doesn't: the engine tests already run as 4 parallel shards. The Dart tests take under a minute themselves, so splitting them would add more runner setup than it saves.

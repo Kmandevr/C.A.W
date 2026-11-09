@@ -33,11 +33,23 @@ on:
       - "examples/**"
       - ".github/workflows/app.yml"
   workflow_dispatch:
+    inputs:
+      installables:
+        description: Also build the Android APK and the Windows app (off for a quick test-only run)
+        type: boolean
+        default: true
+  # The APK carries the on-device compiler, whose LLVM build the Compiler workflow caches on Main. When that
+  # workflow finishes there, the APK is built again so Main's APK always has the compiler (only the APK runs).
+  workflow_run:
+    workflows: [Compiler]
+    types: [completed]
+    branches: [Main]
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # By trigger too: the APK run after the Compiler workflow never cancels Main's own checks.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 env:
   FLUTTER_VERSION: 3.47.7
@@ -47,6 +59,7 @@ env:
 jobs:
   analyze:
     name: Dart analysis
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -79,6 +92,7 @@ jobs:
 
   tests:
     name: Dart tests
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -130,7 +144,12 @@ jobs:
 
   android:
     name: Android APK
-    if: github.event_name != 'pull_request'  # installables come from Main (or Run workflow), not every PR push
+    # Installables come from Main, from Run workflow (unless switched off) and after the Compiler workflow
+    # succeeds on Main; never from a pull request.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.installables) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -210,7 +229,7 @@ jobs:
 
   windows:
     name: Windows app
-    if: github.event_name != 'pull_request'  # as for the APK
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.installables)
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v7
