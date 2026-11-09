@@ -114,9 +114,76 @@ private:
     std::atomic<uint64_t> blocks_{0};
 };
 
+// The bundle's fourth component: a feedback echo (240 frames, feedback 0.5) with a declared tail, so
+// tests can hear it ring out after Stop.
+caw::ModuleDescriptor echoDescriptor() {
+    caw::ModuleDescriptor d{"org.caw.tests.native-loader.echo", 1, kPorts, 2, nullptr, 0, nullptr, 0, {}};
+    d.tailFrames = 48000;
+    return d;
+}
+const caw::ModuleDescriptor kEchoDescriptor = echoDescriptor();
+
+class EchoProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kEchoDescriptor; }
+    using caw::ModuleProcessor::process;
+    bool process(const caw::AudioProcessBlock& block) noexcept override {
+        if (block.input.channelCount != 2 || block.output.channelCount != 2) return false;
+        for (uint32_t i = 0; i < block.frames; ++i) {
+            for (uint32_t c = 0; c < 2; ++c) {
+                const float delayed = line_[c][pos_];
+                const float y = block.input.channels[c][i] + 0.5f * delayed;
+                line_[c][pos_] = y;
+                block.output.channels[c][i] = y;
+            }
+            pos_ = (pos_ + 1) % kLength;
+        }
+        return true;
+    }
+    void reset() noexcept override {
+        for (auto& l : line_) for (float& v : l) v = 0.0f;
+        pos_ = 0;
+    }
+
+private:
+    static constexpr uint32_t kLength = 240;
+    float line_[2][kLength] = {};
+    uint32_t pos_ = 0;
+};
+
+// The bundle's fifth component: delays its input by 100 frames and declares that latency.
+caw::ModuleDescriptor lateDescriptor() {
+    caw::ModuleDescriptor d{"org.caw.tests.native-loader.late", 1, kPorts, 2, nullptr, 0, nullptr, 0, {}};
+    d.latencyFrames = 100;
+    return d;
+}
+const caw::ModuleDescriptor kLateDescriptor = lateDescriptor();
+
+class LateProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kLateDescriptor; }
+    using caw::ModuleProcessor::process;
+    bool process(const caw::AudioProcessBlock& block) noexcept override {
+        if (block.input.channelCount != 2 || block.output.channelCount != 2) return false;
+        for (uint32_t i = 0; i < block.frames; ++i) {
+            for (uint32_t c = 0; c < 2; ++c) {
+                const float x = block.input.channels[c][i];
+                block.output.channels[c][i] = line_[c][pos_];
+                line_[c][pos_] = x;
+            }
+            pos_ = (pos_ + 1) % 100;
+        }
+        return true;
+    }
+
+private:
+    float line_[2][100] = {};
+    uint32_t pos_ = 0;
+};
+
 }  // namespace
 
 #ifndef CAW_TEST_OMIT_ENTRY  // the second fixture plays a library without the v2 entry point
 // A bundle of two components (owner, 2026-11-09: a package may hold several).
-CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor)
+CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor, EchoProcessor, LateProcessor)
 #endif

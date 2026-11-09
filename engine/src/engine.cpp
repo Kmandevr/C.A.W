@@ -55,7 +55,10 @@ struct Engine::Slot {
     Chain* old = nullptr;    // previous chain, fading out after a hot swap
     Chain* pending = nullptr;  // new code waiting for the next beat or bar
     ComponentChain* inserts = nullptr;  // native stereo effects after the chain, before volume and pan
+    DelayLine* delay = nullptr;         // latency compensation, after volume and pan
     bool insertsIdle = false;  // the inserts stopped running (Silent): reset before they run again
+    bool insertTail = false;   // stopped: the inserts ring out on silence (Mode::Tail) until quiet
+    int64_t tailCap = 0;       // ... or for at most this many samples
     std::shared_ptr<const Pattern>* pattern = nullptr;  // owned here, freed on the control thread when retired
     int swapLeft = 0;
     int seamLeft = 0;
@@ -89,7 +92,7 @@ struct Engine::Slot {
 
     // This chunk's plan (planChunk), read by the slot's graph nodes. Chunks end at every loop
     // boundary and code swap of a playing track, so one plan covers the whole chunk.
-    enum class Mode : uint8_t { Idle, Bus, Silent, Play };
+    enum class Mode : uint8_t { Idle, Bus, Silent, Play, Tail };  // Tail: only the inserts run, on silence
     Mode mode = Mode::Idle;
     double target = 0;          // mix target (0 while muted or soloed out)
     int64_t n0 = 0, repeat = 0; // sample in the layer's loop, and the pattern repeat
@@ -194,10 +197,27 @@ struct Engine::Chain {
     double tb[kBlock], rateb[kBlock], zero[kBlock];
 };
 
+// Delays a track's output so it lines up with the track whose native effects add the most latency.
+struct Engine::DelayLine {
+    std::vector<float> l, r;
+    size_t pos = 0;
+    void run(float* outL, float* outR, int m) noexcept {
+        const size_t n = l.size();
+        for (int i = 0; i < m; ++i) {
+            const float dl = l[pos], dr = r[pos];
+            l[pos] = outL[i];
+            r[pos] = outR[i];
+            outL[i] = dl;
+            outR[i] = dr;
+            pos = pos + 1 == n ? 0 : pos + 1;
+        }
+    }
+};
+
 static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetComponentAutomation, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetComponentAutomation, SetDelay, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
@@ -205,6 +225,7 @@ struct Engine::Cmd {
     Chain* chain = nullptr;
     ComponentChain* masterChain = nullptr;  // SetMasterChain: the master's; SetInserts: slot's inserts (owned)
     ComponentAutomation* componentAutomation = nullptr;  // SetComponentAutomation: for slot's inserts, or the master's (slot -1)
+    DelayLine* delay = nullptr;  // SetDelay: the slot's latency compensation (null: none)
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
@@ -231,6 +252,7 @@ struct Engine::Retired {
     SlotTable* table = nullptr;  // a slot table (and its mix graph) a Grow replaced
     ComponentChain* masterChain = nullptr;  // a component chain (master or a track's inserts) replaced or freed
     ComponentAutomation* componentAutomation = nullptr;  // a component chain's automation table replaced
+    DelayLine* delay = nullptr;  // a latency-compensation delay replaced or freed
 };
 
 namespace {
@@ -247,7 +269,8 @@ constexpr double kLimitCeiling = 0.977;  // about -0.2 dBFS
 // Play retires up to two entries per slot and must always find room, even with the retired queue
 // full: the pending list holds 2 * (maxLayers() + 1) entries plus this slack (256 at 64 layers).
 constexpr int kPendingSlack = 126;
-constexpr size_t kMaxProjectComponents = 256;  // native component instances in one project (tracks and master)
+constexpr size_t kMaxProjectComponents = 256;
+constexpr int64_t kMaxCompensationFrames = 1 << 15;  // latency compensation up to about 0.7 s at 48 kHz  // native component instances in one project (tracks and master)
 // What one slot's export segment reserves per buffer: the pointer, the owner, and the buffer.
 constexpr uint64_t kExportBufferBytes = static_cast<uint64_t>(kBlock) * sizeof(double);
 constexpr uint64_t kExportSlotBytes =
@@ -702,6 +725,7 @@ Engine::~Engine() {
         delete c.table;
         delete c.masterChain;
         delete c.componentAutomation;
+        delete c.delay;
     }
     Retired r;
     while (retired_->pop(r)) {
@@ -712,6 +736,7 @@ Engine::~Engine() {
         delete r.table;
         delete r.masterChain;
         delete r.componentAutomation;
+        delete r.delay;
     }
     for (int i = 0; i < pendingCount_; ++i) {
         delete pending_[i].chain;
@@ -721,6 +746,7 @@ Engine::~Engine() {
         delete pending_[i].table;
         delete pending_[i].masterChain;
         delete pending_[i].componentAutomation;
+        delete pending_[i].delay;
     }
     delete masterChain_;
     masterChain_ = nullptr;
@@ -729,6 +755,7 @@ Engine::~Engine() {
         delete slot->old;
         delete slot->pending;
         delete slot->inserts;
+        delete slot->delay;
         delete slot->pattern;
         delete slot->automation;
     }
@@ -746,6 +773,7 @@ void Engine::drainRetired() {
         delete r.table;
         delete r.masterChain;
         delete r.componentAutomation;
+        delete r.delay;
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -767,7 +795,10 @@ bool Engine::send(const Cmd& c) {
             delete c.table;
             delete c.masterChain;
             delete c.componentAutomation;
+            delete c.delay;
+        delete c.delay;
         delete c.componentAutomation;
+        delete c.delay;
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1469,6 +1500,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             pl.ls.wiring.clear();
             pl.ls.chain = nullptr;
             pl.ls.inserts = nullptr;
+            pl.ls.compensation = 0;
             pl.ls.voiced = false;
             pl.ls.pattern = nullptr;
             pl.ls.steps = -1;
@@ -1681,7 +1713,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             ls.solo = w.solo;
         }
         if (w.bus) {
-            ls.inserts = nullptr;  // ConfigureBus retires any the slot had
+            ls.inserts = nullptr;  // ConfigureBus retires any the slot had, and its delay
+            ls.compensation = 0;
             if (w.components && !w.components->empty())
                 // Keyed "project": the result reports module and project warnings, not layer ids.
                 warnings["project"].push_back("folder '" + w.id + "': folder buses take no native components yet; they are not played");
@@ -1854,6 +1887,40 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
     layers_ = std::move(nextLayers);
+
+    // Latency compensation: each track is delayed so it lines up with the track whose native effects
+    // add the most latency (the master chain delays everything alike, so it needs none).
+    {
+        int64_t most = 0;
+        for (const auto& [id, ls] : layers_)
+            if (ls.slot >= 0 && !ls.bus && ls.inserts)
+                most = std::max<int64_t>(most, static_cast<int64_t>(std::min<uint64_t>(ls.inserts->latencyFrames(), 1u << 30)));
+        if (most > kMaxCompensationFrames) {
+            warnings["project"].push_back("native effects add " + std::to_string(most) + " frames of latency; tracks are kept in time only up to " +
+                                          std::to_string(kMaxCompensationFrames));
+            most = kMaxCompensationFrames;
+        }
+        for (auto& [id, ls] : layers_) {
+            if (ls.slot < 0 || ls.bus) continue;
+            const int64_t own = ls.inserts ? std::min<int64_t>(static_cast<int64_t>(std::min<uint64_t>(ls.inserts->latencyFrames(), 1u << 30)), most) : 0;
+            const int64_t want = most - own;
+            if (want == ls.compensation) continue;
+            Cmd d;
+            d.type = Cmd::SetDelay;
+            d.slot = ls.slot;
+            if (want > 0) {
+                d.delay = new DelayLine();
+                d.delay->l.assign(static_cast<size_t>(want), 0.0f);
+                d.delay->r.assign(static_cast<size_t>(want), 0.0f);
+            }
+            if (send(d)) {
+                ls.compensation = want;
+            } else {
+                allOk = false;
+                warnings["project"].push_back("layer '" + id + "': audio command queue rejected its latency compensation");
+            }
+        }
+    }
 
     // Dependency order: repeatedly take the first layer (in project order) whose sources are all placed. Layers
     // in a loop are placed last in project order; one side of the loop then hears the other a block late.
@@ -2221,7 +2288,10 @@ void Engine::retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* patte
                     AutomationData* automation, std::vector<int>* order, SlotTable* table,
                     ComponentChain* masterChain) noexcept {
     if (!c && !freed && !pattern && !automation && !order && !table && !masterChain) return;
-    Retired r{c, freed, pattern, automation, order, table, masterChain};
+    retireEntry(Retired{c, freed, pattern, automation, order, table, masterChain});
+}
+
+void Engine::retireEntry(const Retired& r) noexcept {
     if (pendingCount_ == 0 && retired_->push(r)) return;
     if (pendingCount_ < pendingMax_) pending_[pendingCount_++] = r;
     // All callers reserve queue capacity before changing ownership. This is a
@@ -2301,6 +2371,7 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetMasterChain:
             case Cmd::SetInserts:
             case Cmd::SetComponentAutomation:
+            case Cmd::SetDelay:
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
@@ -2375,8 +2446,13 @@ void Engine::applyCommands() noexcept {
                 retire(s.cur, nullptr, s.pattern);
                 retire(s.old, nullptr);
                 retire(s.pending, nullptr);
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);  // buses run no inserts yet
+                {
+                    Retired r{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts};  // buses run no inserts yet
+                    r.delay = s.delay;
+                    if (r.masterChain || r.delay) retireEntry(r);
+                }
                 s.inserts = nullptr;
+                s.delay = nullptr;
                 s.cur = s.old = s.pending = nullptr;
                 s.pattern = nullptr;
                 s.peak.store(0, std::memory_order_relaxed);
@@ -2454,16 +2530,20 @@ void Engine::applyCommands() noexcept {
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
                 masterChain_ = c.masterChain;
                 break;
+            case Cmd::SetDelay: {
+                Slot& s = slotAt(c.slot);
+                Retired r;
+                r.delay = s.delay;
+                s.delay = c.delay;
+                if (r.delay) retireEntry(r);
+                break;
+            }
             case Cmd::SetComponentAutomation: {
                 ComponentChain* chain = c.slot < 0 ? masterChain_ : slotAt(c.slot).inserts;
                 Retired r;
                 // No chain (it was replaced in the meantime): the table is retired unused.
                 r.componentAutomation = chain ? chain->swapAutomation(c.componentAutomation) : c.componentAutomation;
-                if (r.componentAutomation) {
-                    if (pendingCount_ != 0 || !retired_->push(r)) {
-                        if (pendingCount_ < pendingMax_) pending_[pendingCount_++] = r;
-                    }
-                }
+                if (r.componentAutomation) retireEntry(r);
                 break;
             }
             case Cmd::SetInserts: {
@@ -2474,6 +2554,9 @@ void Engine::applyCommands() noexcept {
             }
             case Cmd::Play:
                 playing_ = true;
+                // Ringing tails play on into the new pass (state kept), as the effects would have.
+                masterTailLeft_ = 0;
+                for (int i = 0; i < slotCount_; ++i) slotAt(i).insertTail = false;
                 touchEpoch_ = c.playCount;  // chains from before this Play drop their touches at their next chunk
                 touchPlayStamp_ = c.touchStamp;
                 // Resuming starts mid-loop: each track works out its own loop pass from g_ at its next chunk. Code
@@ -2847,10 +2930,21 @@ void Engine::updatePreviewing(int frames) noexcept {
                 else voices = true;
             }
         s.previewTail = voices ? 0 : s.previewTail + frames;
-        const bool live = voices || (!silent && s.cur && s.cur->voiced && s.previewQuiet < static_cast<int64_t>(kPreviewQuietSeconds * sr_) &&
-                                     s.previewTail < static_cast<int64_t>(kPreviewTailSeconds * sr_));
+        const int64_t cap = s.insertTail ? s.tailCap : static_cast<int64_t>(kPreviewTailSeconds * sr_);
+        const bool live = voices || (!silent && s.cur && (s.cur->voiced || s.insertTail) &&
+                                     s.previewQuiet < static_cast<int64_t>(kPreviewQuietSeconds * sr_) && s.previewTail < cap);
+        if (!live && s.insertTail) {
+            s.insertTail = false;
+            s.insertsIdle = true;  // rung out: start from silence next time
+        }
         s.previewing = live;
         any = any || live;
+    }
+    if (masterTailLeft_ > 0) {
+        masterTailLeft_ = masterQuiet_ >= static_cast<int64_t>(kPreviewQuietSeconds * sr_) ? 0
+                          : std::max<int64_t>(0, masterTailLeft_ - frames);
+        if (masterTailLeft_ == 0 && masterChain_) masterChain_->reset();
+        any = any || masterTailLeft_ > 0;
     }
     previewing_ = any;
 }
@@ -2859,11 +2953,32 @@ void Engine::updatePreviewing(int frames) noexcept {
 // neither the chord that was playing nor a frozen tail. Held previews keep their voices; the master fades them back
 // in. Stopped, a track's time runs on from where it stopped (preview chunks).
 void Engine::endPlayback() noexcept {
-    // Native effects start the next play from silence, as a fresh render (an export) does.
-    if (masterChain_) masterChain_->reset();
+    // Native effects with a tail (a delay, a reverb) ring out on silence until they are quiet, as
+    // in a DAW; the rest start the next play from silence, as a fresh render (an export) does.
+    auto tailCap = [&](const ComponentChain& c) -> int64_t {
+        const uint32_t tail = c.tailFrames();
+        const int64_t most = static_cast<int64_t>(kPreviewTailSeconds * sr_);
+        return tail == kInfiniteTail ? most : std::min<int64_t>(tail, most);
+    };
+    if (masterChain_) {
+        masterTailLeft_ = tailCap(*masterChain_);
+        masterQuiet_ = 0;
+        if (masterTailLeft_ > 0) previewing_ = true;
+        else masterChain_->reset();
+    }
     for (int i = 0; i < slotCount_; ++i) {
         Slot& s = slotAt(i);
-        if (s.inserts) s.inserts->reset();
+        if (s.inserts) {
+            s.tailCap = tailCap(*s.inserts);
+            if (s.tailCap > 0 && s.active && !s.bus && !(slotTarget(s) == 0.0 && s.gain == 0.0)) {
+                s.insertTail = true;
+                s.previewing = true;
+                s.previewTail = 0;
+                previewing_ = true;
+            } else {
+                s.inserts->reset();
+            }
+        }
         if (!s.cur) continue;
         restartChain(*s.cur);
         if (s.old) {  // a stop during a code swap: the old chain's fade ends too
@@ -3159,7 +3274,12 @@ int Engine::planChunk(int maxFrames) noexcept {
             if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
             if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
             s.target = slotTarget(s);
-            if (!s.previewing || !s.cur->voiced || (s.target == 0.0 && s.gain == 0.0)) {
+            const bool silentMix = s.target == 0.0 && s.gain == 0.0;
+            if (s.previewing && !silentMix && !s.cur->voiced && s.insertTail) {
+                s.mode = Slot::Mode::Tail;  // a generator's loop would play on: only the inserts ring out
+                continue;
+            }
+            if (!s.previewing || !s.cur->voiced || silentMix) {
                 s.mode = Slot::Mode::Silent;
                 s.insertsIdle = true;
                 continue;
@@ -3193,8 +3313,14 @@ int Engine::planChunk(int maxFrames) noexcept {
             if (s.removing && canRetire(2)) {
                 retire(s.cur, nullptr, s.pattern);
                 s.pattern = nullptr;
-                retire(s.old, &s, nullptr, nullptr, nullptr, nullptr, s.inserts);  // one entry: the slot frees with them
+                {
+                    // One entry: the slot frees with its inserts and delay.
+                    Retired r{s.old, &s, nullptr, nullptr, nullptr, nullptr, s.inserts};
+                    r.delay = s.delay;
+                    retireEntry(r);
+                }
                 s.inserts = nullptr;
+                s.delay = nullptr;
                 s.cur = s.old = nullptr;
                 s.active = false;
                 s.removing = false;
@@ -3371,11 +3497,12 @@ void Engine::runModuleNode(int slot, int index, const float* const* in, float* c
 // A playing track's output: the seam and swap crossfades of its lanes, then gain and pan.
 void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept {
     Slot& s = slotAt(slot);
-    if (s.mode != Slot::Mode::Play) {
+    if (s.mode != Slot::Mode::Play && s.mode != Slot::Mode::Tail) {
         std::fill_n(outL, m, 0.0f);
         std::fill_n(outR, m, 0.0f);
         return;
     }
+    const bool tail = s.mode == Slot::Mode::Tail;  // stopped: silence into the inserts, which ring out
     const double target = s.target;
     const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
     const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
@@ -3388,8 +3515,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.gr = g.right;
     }
     double* y = tmp_;
-    for (int i = 0; i < m; ++i) y[i] = static_cast<double>(in[0][i]);
-    if (s.seam) {
+    for (int i = 0; i < m; ++i) y[i] = tail ? 0.0 : static_cast<double>(in[0][i]);
+    if (s.seam && !tail) {
         const int sl = std::min(m, s.seamLeft);
         for (int i = 0; i < sl; ++i) {
             const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
@@ -3398,7 +3525,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.shadowN += sl;
         s.seamLeft -= sl;
     }
-    if (s.fade) {
+    if (s.fade && !tail) {
         const int sl = std::min(m, s.swapLeft);
         for (int i = 0; i < m; ++i) {
             double w = 1.0;
@@ -3460,6 +3587,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     }
     s.scopePos.store(sp, std::memory_order_release);
     storeMax(s.peak, peak);
+    if (s.delay) s.delay->run(outL, outR, m);  // in time with the most-delayed track
     s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (previewChunk_) {
         s.previewN += m;  // the transport isn't moving: its place in the loop stays; the preview's time runs on
@@ -3599,6 +3727,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         for (int i = 0; i < m; ++i) finishSample(i, currentL[i], currentR[i]);
     }
 
+    masterQuiet_ = std::max(pl, pr) > kPreviewQuiet ? 0 : masterQuiet_ + m;  // for the master chain's tail
     masterScopePos_.store(sp, std::memory_order_release);
     storeMax(peakL_, pl);
     storeMax(peakR_, pr);

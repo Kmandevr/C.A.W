@@ -223,6 +223,18 @@ std::unique_ptr<ComponentAutomation> ComponentChain::automationFor(
     return table;
 }
 
+uint32_t ComponentChain::tailFrames() const noexcept {
+    uint32_t tail = 0;
+    for (const auto& e : entries_) tail = std::max(tail, e->processor->descriptor().tailFrames);
+    return tail;
+}
+
+uint64_t ComponentChain::latencyFrames() const noexcept {
+    uint64_t latency = 0;
+    for (const auto& e : entries_) latency += e->processor->descriptor().latencyFrames;
+    return latency;
+}
+
 void ComponentChain::reset() noexcept {
     for (auto& e : entries_) e->processor->reset();
 }

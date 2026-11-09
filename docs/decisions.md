@@ -15,7 +15,10 @@ updated: 2026-11-09
   - automation lanes (a knob move overrides its lane until the next Play);
   - a click-free bypass that stops processing;
   - state saved into the project, read on every save.
-- Still to come: latency compensation, tails after Stop, a rebuild swapped in while playing, and custom GUIs.
+- Also built: tails after Stop and latency compensation.
+  - Effects with a declared tail ring out until quiet. They reuse the note-preview path, so the 10 ms stop fade dips the tail briefly.
+  - The other tracks are delayed to match the most-delayed track, up to 32,768 frames.
+- Still to come: a rebuild swapped in while playing, and custom GUIs.
 - **Interface rule changed:** `save_state` may now run on the control thread while the instance processes (as in CLAP), so a playing project can be saved. A component that keeps state must make that safe; one without state needs nothing. `caw_component.h` says so.
 
 ## 2026-11-09: How writing and using a C++ effect looks (owner, #137)
@@ -383,7 +386,7 @@ Project layers and synth patches may describe dynamically sized module/effect ch
 **Implementation decision:** explicitly loaded stereo C++ effects run in two kinds of project-owned chain: a track's (`components` on a layer) and the master's (`master_components`), each entry an id or `{"id", "params"}`. A track's chain runs after its .caw modules, whose mono output enters as two equal channels, and before volume and pan; what the effects make of it stays stereo, and the pan law then works per side. The master's runs before the safety limiter, which stays last. Components between .caw modules wait for the dual-mono rule (#17). Folder buses take no components yet.
 
 - One type, `ComponentChain`, serves both. It is built and activated on the control thread before anything is sent, so a component that is not loaded, has other ports or names a parameter it lacks refuses the whole update. An update with the same components in the same order keeps the chain, and its running state (a reverb's tail), and only sets values; any other change rebuilds it.
-- Native effects start each play from silence (reset on Stop, and when a silent track sounds again), and a kept chain takes the project's values with the rest at their defaults, so playback matches a fresh render (export). A project runs at most 256 native component instances. Adding, removing or reordering a component still rebuilds the whole chain without a crossfade (follow-up in #137).
+- Native effects without a tail start each play from silence (reset on Stop, and when a silent track sounds again), and a kept chain takes the project's values with the rest at their defaults, so playback matches a fresh render (export). A project runs at most 256 native component instances. Adding, removing or reordering a component still rebuilds the whole chain without a crossfade (follow-up in #137).
 - Parameter values ramp through the F6 resolver. `caw_engine_set_component_param` changes one while playing; the app stores it in the project too. Project automation lanes drive component parameters too (`target_type: component`).
 
 - A successful build never loads or authorizes code. The caller must pass an explicit Blocked, Isolated or Trusted value to the Engine C API; Blocked refuses before opening the library, Isolated is rejected until a real separate-process host exists, and Trusted runs in-process.

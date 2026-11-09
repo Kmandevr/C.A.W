@@ -134,6 +134,7 @@ private:
     struct ExportPool;
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
     struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
+    struct DelayLine;  // a track's latency-compensation delay (engine.cpp)
 
     void drainRetired();
     bool canRetire(size_t count) const noexcept;
@@ -143,6 +144,7 @@ private:
     void retire(Chain* c, Slot* freed, std::shared_ptr<const Pattern>* pattern = nullptr,
                 AutomationData* automation = nullptr, std::vector<int>* order = nullptr,
                 SlotTable* table = nullptr, ComponentChain* components = nullptr) noexcept;
+    void retireEntry(const Retired& r) noexcept;  // audio thread: to the control thread, to be freed
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
@@ -234,6 +236,8 @@ private:
     std::unique_ptr<Retired[]> pending_;
     int pendingCount_ = 0;
     double tmp_[kBlock];
+    int64_t masterTailLeft_ = 0;  // audio thread: stopped, the master chain rings out for at most this long
+    int64_t masterQuiet_ = 0;     // ... ending sooner once its output has been quiet for a moment
     float insertL_[kBlock], insertR_[kBlock];            // audio thread: a track's inserts run here
     float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
 
@@ -287,6 +291,7 @@ private:
         std::string parameterAutomationSig;
         ComponentChain* inserts = nullptr;  // the native effects last sent to the slot (alive while it plays)
         std::string insertsAutomationKey;   // the lanes their automation table was made from
+        int64_t compensation = 0;           // the latency-compensation delay last sent, in frames
     };
     std::map<std::string, ModuleState> modules_;
     std::map<std::string, LayerState> layers_;

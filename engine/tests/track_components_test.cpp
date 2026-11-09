@@ -346,3 +346,76 @@ TEST(an_automation_lane_drives_a_component_parameter_until_a_knob_moves_it) {
     runLast(e, 1024, l, r);
     CHECK_NEAR(r, 0.5 * kCentre, 1e-4);
 }
+
+TEST(after_stop_an_effect_with_a_tail_rings_out_then_goes_quiet) {
+    constexpr const char* kEcho = "org.caw.tests.native-loader.echo";
+    Engine e(48000);
+    CHECK(loadFixture(e, kEcho));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({{kEcho, {}}});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 9600, l, r);
+    CHECK(l > 0.5f);  // the echo builds on the constant input
+    e.stop();
+    runLast(e, 1024, l, r);  // past the 10 ms stop fade: the echo rings on, from silence in
+    std::vector<float> left(64), right(64);
+    float peak = 0;
+    for (int k = 0; k < 20; ++k) {
+        e.process(left.data(), right.data(), 64);
+        for (float v : left) peak = std::max(peak, std::fabs(v));
+    }
+    CHECK(peak > 0.01f);
+    runLast(e, 48000, l, r);  // halving every 5 ms: long since below -80 dB, and the tail has ended
+    CHECK_EQ(l, 0.0f);
+    CHECK_EQ(r, 0.0f);
+}
+
+TEST(an_effect_without_a_tail_stops_with_the_transport) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));  // declares no tail
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(constantTrack({{kGain, {}}}))));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 4096, l, r);
+    e.stop();
+    runLast(e, 2048, l, r);
+    CHECK_EQ(l, 0.0f);
+}
+
+TEST(tracks_stay_in_time_with_a_track_whose_effect_adds_latency) {
+    constexpr const char* kLate = "org.caw.tests.native-loader.late";
+    Engine e(48000);
+    CHECK(loadFixture(e, kLate));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({});  // track "t": no effects, hard left
+    p.layers[0].pan = -1.0;
+    LayerSpec late = p.layers[0];  // track "u": the 100-frame effect, hard right
+    late.id = "u";
+    late.name = "u";
+    late.pan = 1.0;
+    late.components = {{kLate, {}}};
+    p.layers.push_back(late);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    std::vector<float> l(256), r(256);
+    e.process(l.data(), r.data(), 64);
+    e.process(l.data() + 64, r.data() + 64, 64);
+    // Both start together, 100 frames in: the plain track is delayed to match the late one.
+    CHECK_EQ(l[99], 0.0f);
+    CHECK_EQ(r[99], 0.0f);
+    CHECK(l[100] > 0.4f);
+    CHECK(r[100] > 0.4f);
+    // Without the late effect, nothing is delayed.
+    p.layers[1].components.clear();
+    CHECK(ok(e.setProject(p)));
+    e.stop();
+    std::vector<float> scratch(64);
+    for (int k = 0; k < 20; ++k) e.process(scratch.data(), scratch.data(), 64);
+    e.play();
+    e.process(l.data(), r.data(), 64);
+    CHECK(l[0] > 0.4f);
+    CHECK(r[0] > 0.4f);
+}

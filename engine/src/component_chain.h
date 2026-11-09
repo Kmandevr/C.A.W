@@ -71,6 +71,10 @@ public:
     // A key for the lanes `automationFor` would pick, so an unchanged table is not resent.
     static std::string automationKey(const std::vector<ProjectAutomationLaneSpec>& lanes, const std::string& layer);
     std::size_t size() const noexcept { return entries_.size(); }
+    // The longest tail any component declares, in frames (kInfiniteTail for an endless one); 0: none.
+    uint32_t tailFrames() const noexcept;
+    // The delay the components add, in frames: the sum of their declared latencies.
+    uint64_t latencyFrames() const noexcept;
     // An estimate of the memory the chain holds, for the project-state budget.
     static uint64_t estimateBytes(std::size_t components, std::size_t parameters) noexcept;
 
