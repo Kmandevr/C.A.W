@@ -62,7 +62,7 @@ updated: 2026-11-09
 - Same thing, same place, same name on every screen size, so habits carry over.
 - Select first, then act: the selection drives the inspector, FX and editors.
 - Simple first, more on demand (an FX stack before the routing canvas).
-- **Compact, not "grandma-sized":** rows 32-36 dp, code text 12-13 sp, icons about 18 dp, each control's touch area padded to about 40 dp without drawing it bigger. Icons over words; hold an icon for its name. Show only what matters now (no error count without errors). The neon theme stays, calmer: fewer glows and borders. The glass look and its transparency stay as they are (owner: "it works well"): see-through panels, sheets, cards and the transport over the ambient background (`docs/ui.md`, Glass).
+- **Compact, not "grandma-sized":** rows 32-36 dp, code text 12-13 sp, icons about 18 dp, each control's touch area padded to about 40 dp without drawing it bigger. Icons over words; hold an icon for its name. Show only what matters now (no error count without errors). The neon theme stays, calmer: fewer glows and borders. The glass look and its transparency stay as they are (owner: "it works well"): see-through panels, sheets, cards and the transport over the ambient background (`docs/ui.md`, Glass). When the audio is under strain (overruns, thermal or power pressure, which the app already reads), the app lightens the blur on its own to protect the audio, and restores it after. The selected track, clip or effect glows in its track's own colour, brighter; errors stay pink and "built" green. Light haptics: a tick on grid snaps, a knob reaching centre and a long-press menu opening.
 
 **The frame.**
 - Three main tab types: **Build** (C++ Builder), **Files** and **Arrange**. Several tabs of one type (two Builders) switch from a small selector at the top of that section. The other workspaces fold into these three (#139).
@@ -70,11 +70,14 @@ updated: 2026-11-09
 - **Landscape and desktop:** a slim icon rail on the left replaces the bottom bar, saving track height. Dragging a tab to the edge shows it beside the current one.
 - **Desktop docking (owner: full docking, REAPER-style):** the mixer, inspector, browser and editors can dock to any side, share a dock as tabs, or float. The default dock is the inspector left, the browser right and the editor/mixer dock at the bottom.
 - **Long-press menus:** a compact list near the finger by default; a Bitwig-style ring is a setting.
+- **Tablets** use the desktop layout with touch: rail, docked panels, and the key row only without a hardware keyboard.
+- **First run** and a missing last project open the "First loop" template, as now.
 - **Undo is per area:** code undo is separate from project undo (tracks, clips, mixer).
 - **Hardware:** Bluetooth/USB keyboard shortcuts work on the phone, USB and Bluetooth MIDI keyboards play and record notes, and the S Pen gives finer clip and note editing. [Fact, 2026-11-09] the engine has no MIDI device input or audio recording yet (`docs/engine-build-status.md`), so record-arm and MIDI input need engine work first.
 
 **Arrange.**
-- **Focus view (phone):** tapping a track moves it to the top of the screen and the lower ~80% becomes its panel, with tabs: FX, Mixer, Clip and Automation. Swipe sideways on the pinned track for the next or previous track; swipe the panel down, tap the pinned track or press Back to return to all tracks. Landscape and desktop show the same panel docked.
+- **Track headers (phone):** mute, solo and the FX button always show; record-arm, input and the rest are in the long-press menu.
+- **Focus view (phone):** tapping a track moves it to the top of the screen and the lower ~80% becomes its panel, with tabs: FX, Mixer, Clip and Automation. Swipe sideways on the pinned track for the next or previous track; swipe the panel down, tap the pinned track or press Back to return to all tracks. In landscape the panel is a right side panel (about 40% wide) so the tracks keep their full height; on desktop it is docked.
 - **Clip editing:** a clip's notes open in the Clip tab of the focus view.
 - **Mixer (phone):** a card over the tracks with narrow strips you swipe through; tap a strip to widen it.
 - **FX tab:** opens on a plain **FX stack**, a normal top-to-bottom insert list: cards with knobs, drag to reorder, "+ effect" and bypass. A **Routing** toggle switches to the free canvas, the project/track workspace of the visual plan (`docs/visual-routing-and-library-integration.md`). Both views edit the same chain.
@@ -107,7 +110,7 @@ updated: 2026-11-09
 - **Completion:** automatic, after a short pause or after `.`, `::` or `->`, in a small box near the cursor (at most four rows) that shows a parameter's range and unit beside it. It comes from the in-app Clang (`-code-completion-at`), so it knows the SDK headers. [Assumption] this gives most of clangd's benefit without a separate server; to be measured on the phone.
 - **Editor help:** syntax colours, a pull-up quick reference of the SDK and Library with an insert button for each, and snippets (a knob, a delay line, a tempo-synced time, a state save).
 - **Saving:** autosave always, with an undo history; each successful build also keeps a named version to go back to.
-- **Specialized extras (first version):** each parameter shows its current knob value in the code and editing the default moves the knob; a failed build marks that effect in the FX stack; the **test strip** plays the effect on a chosen track's audio (or a loop, a sine, noise) with A/B bypass and the effect's knobs; tapping an effect in a track's FX stack opens its source in Build.
+- **Specialized extras (first version):** each parameter shows its current knob value in the code and editing the default moves the knob; a failed build marks that effect in the FX stack; the **test strip** plays the effect on the audio of the track it is on (or a track you choose) with A/B bypass and the effect's knobs; with nothing to play it plays nothing (owner: no default test sound); tapping an effect in a track's FX stack opens its source in Build.
 - **New effects** start from one blank pass-through template.
 
 **Build order (owner):** the frame and Arrange first (rail and bottom bar, bottom transport, focus view, mixer card), then Files, then the C++ Builder. Each step is a GitHub Issue under #139.
