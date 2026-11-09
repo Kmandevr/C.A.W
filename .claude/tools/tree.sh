@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 
-SKIP='(^|/)\.|^(CLAUDE|README|SECURITY)\.md$|^LICENSE$|package-lock\.json$|gradle-wrapper\.jar$'
+SKIP='(^|/)\.|^(CLAUDE|README|SECURITY)\.md$|^(LICENSE|NOTICE)$|package-lock\.json$|gradle-wrapper\.jar$'
 
 purpose() {
   case "$1" in
