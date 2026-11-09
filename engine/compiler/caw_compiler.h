@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /* Runs one clang driver command line. argv[0] is the driver's path as if it were an executable
- * ("<toolchain>/bin/clang"); the default resource directory is found from it, and -resource-dir
+ * ("<toolchain>/bin/clang++", so it links the C++ library); the default resource directory is found from it, and -resource-dir
  * overrides it. Compile jobs run through Clang's cc1 in this process; link jobs (ld.lld) run
  * through LLD in this process; any other job fails the run. Temporary files go to $TMPDIR.
  * Returns the exit code (0 success). *output, when output is not NULL, receives every diagnostic

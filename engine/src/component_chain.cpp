@@ -2,6 +2,7 @@
 #include "component_chain.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 
@@ -222,7 +223,10 @@ std::string ComponentChain::automationKey(const std::vector<ProjectAutomationLan
     for (const ProjectAutomationLaneSpec& lane : lanes) {
         if (lane.targetType != "component" || lane.moduleId != layer) continue;
         key += std::to_string(lane.component) + "|" + lane.target + "|";
-        for (const AutomationPointSpec& p : lane.points) key += std::to_string(p.step) + ":" + std::to_string(p.value) + ";";
+        for (const AutomationPointSpec& p : lane.points) {
+            // Exact: the bits, so the smallest edit gives a new key.
+            key += std::to_string(std::bit_cast<uint64_t>(p.step)) + ":" + std::to_string(std::bit_cast<uint64_t>(p.value)) + ";";
+        }
     }
     return key;
 }
@@ -254,13 +258,15 @@ std::unique_ptr<ComponentAutomation> ComponentChain::automationFor(
 
 uint32_t ComponentChain::tailFrames() const noexcept {
     uint32_t tail = 0;
-    for (const auto& e : entries_) tail = std::max(tail, e->processor->descriptor().tailFrames);
+    for (const auto& e : entries_)
+        if (!e->bypass.load(std::memory_order_relaxed)) tail = std::max(tail, e->processor->descriptor().tailFrames);
     return tail;
 }
 
 uint64_t ComponentChain::latencyFrames() const noexcept {
     uint64_t latency = 0;
-    for (const auto& e : entries_) latency += e->processor->descriptor().latencyFrames;
+    for (const auto& e : entries_)  // a bypassed effect passes its input on undelayed
+        if (!e->bypass.load(std::memory_order_relaxed)) latency += e->processor->descriptor().latencyFrames;
     return latency;
 }
 
@@ -306,6 +312,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         }
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
         if (e.mix == 0.0 && target == 0.0) continue;  // bypassed: not run, input passes on untouched
+        if (e.mix == 0.0) e.processor->reset();  // back from a bypass: no audio from before it
         std::copy_n(left, m, stageL_.data());
         std::copy_n(right, m, stageR_.data());
         const float* in[2] = {stageL_.data(), stageR_.data()};

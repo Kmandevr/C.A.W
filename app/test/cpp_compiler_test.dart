@@ -64,7 +64,7 @@ void main() {
     final result = await CppSourceBuilder(compiler).build(sourceDirectory: source, outputDirectory: out);
     expect(result.success, isTrue, reason: result.output);
     final args = compiler.lastArgs!;
-    expect(args.first, '$toolchain/bin/clang');
+    expect(args.first, '$toolchain/bin/clang++');
     expect(args, containsAll(['--target=aarch64-linux-android26', '--sysroot=$toolchain/sysroot', '-shared', '-static-libstdc++',
         '-ffp-contract=off', '-fno-fast-math', '-resource-dir=$toolchain/lib/clang/23', '-I$toolchain/caw-sdk/include',
         '-I$source/include', '-DTAPS=4', '$source/src/delay.cpp']));

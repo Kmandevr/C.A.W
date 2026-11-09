@@ -25,10 +25,9 @@ for arch in arm-linux-androideabi i686-linux-android x86_64-linux-android riscv6
 done
 lib="$sysroot/usr/lib/aarch64-linux-android"
 # libc++.a is a linker script (-lc++ with -static-libstdc++ reads it) naming the static libraries.
-for f in libc++.a libc++_static.a libc++abi.a; do
-  [ -f "$lib/$f" ] && cp "$lib/$f" "$out/sysroot/usr/lib/aarch64-linux-android/"
-done
-for f in crtbegin_so.o crtend_so.o libc.so libm.so libdl.so liblog.so; do
+cp "$lib"/libc++_static.a "$lib"/libc++abi.a "$out/sysroot/usr/lib/aarch64-linux-android/"
+# libc++.a here is a linker script (-lc++ with -static-libstdc++ reads it) naming the static libraries.
+for f in crtbegin_so.o crtend_so.o libc.so libm.so libdl.so liblog.so libc++.a; do
   cp "$lib/$api/$f" "$out/sysroot/usr/lib/aarch64-linux-android/$api/"
 done
 

@@ -157,6 +157,7 @@ private:
     // folder bus, and the master stage.
     void runModuleNode(int slot, int index, const float* const* in, float* const* out, int m) noexcept;
     void runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept;
+    void runDelay(Slot& s, float* outL, float* outR, int m) noexcept;
     void runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
@@ -328,6 +329,7 @@ private:
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();
     ComponentChain* ctlComponentChain(const std::string& layerId) noexcept;  // control thread; null: none
+    bool updateCompensation(std::map<std::string, std::vector<std::string>>& warnings);
 };
 
 }  // namespace caw

@@ -466,3 +466,37 @@ TEST(a_rebuilt_component_takes_over_while_playing_with_its_values_and_state) {
     CHECK(!e.reloadNativeComponent(rebuild, "org.caw.tests.nothing", NativeModuleTrust::Trusted).success);
     std::remove(rebuild.c_str());
 }
+
+TEST(a_latency_delay_starts_each_play_from_silence_and_a_bypassed_effect_adds_none) {
+    constexpr const char* kLate = "org.caw.tests.native-loader.late";
+    Engine e(48000);
+    CHECK(loadFixture(e, kLate));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({});
+    p.layers[0].pan = -1.0;
+    LayerSpec late = p.layers[0];
+    late.id = "u";
+    late.name = "u";
+    late.pan = 1.0;
+    late.components = {{kLate, {}}};
+    p.layers.push_back(late);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 4096, l, r);
+    e.stop();
+    runLast(e, 2048, l, r);
+    e.play();
+    std::vector<float> left(64), right(64);
+    e.process(left.data(), right.data(), 64);
+    // The plain track's delay doesn't replay the song's last frames: silence until its 100 frames have passed.
+    CHECK(std::fabs(left[0]) < 1e-6f);  // (the hard-right track leaks ~1e-16 through the pan law)
+    CHECK(std::fabs(left[63]) < 1e-6f);
+    // Bypassing the late effect removes its latency: the plain track is no longer delayed.
+    CHECK(e.setComponentBypass("u", 0, true));
+    e.stop();
+    runLast(e, 2048, l, r);
+    e.play();
+    e.process(left.data(), right.data(), 64);
+    CHECK(left[0] > 0.4f);
+}

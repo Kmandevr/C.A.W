@@ -18,6 +18,10 @@ updated: 2026-11-09
 - Also built: tails after Stop and latency compensation.
   - Effects with a declared tail ring out until quiet. They reuse the note-preview path, so the 10 ms stop fade dips the tail briefly.
   - The other tracks are delayed to match the most-delayed track, up to 32,768 frames.
+    - A bypassed effect adds no latency.
+    - A delay change while playing continues from the old line and crossfades.
+    - Delays start each play from silence.
+  - Known gap: a tail that reaches its cap while still audible stops without a fade.
 - Also built: a rebuild switches in while playing, crossfaded, keeping values and state; any chain swap crossfades. Still to come: custom GUIs.
 - **Interface rule changed:** `save_state` may now run on the control thread while the instance processes (as in CLAP), so a playing project can be saved. A component that keeps state must make that safe; one without state needs nothing. `caw_component.h` says so.
 

@@ -8,16 +8,19 @@ work=$(mktemp -d)
 export TMPDIR="$work"
 build() {  # build <output .so> <sources...>
   local out="$1"; shift
-  "$cc" "$tc/bin/clang" --target=aarch64-linux-android26 --sysroot="$tc/sysroot" \
+  "$cc" "$tc/bin/clang++" --target=aarch64-linux-android26 --sysroot="$tc/sysroot" \
     -resource-dir="$tc/lib/clang/$(ls "$tc/lib/clang")" -std=c++20 -O2 -fPIC -shared -static-libstdc++ \
     -ffp-contract=off -fno-fast-math -fvisibility=hidden -I"$tc/caw-sdk/include" "$@" -o "$out"
 }
 check() {  # check <.so>
-  "$readelf" --dyn-syms --wide "$1" | grep -q " caw_get_component_v3$" || { echo "FAIL: $1 does not export caw_get_component_v3"; exit 1; }
+  # Whole outputs first: grep -q stopping early would fail the pipe under pipefail.
+  syms=$("$readelf" --dyn-syms --wide "$1")
+  echo "$syms" | grep -q " caw_get_component_v3$" || { echo "FAIL: $1 does not export caw_get_component_v3"; exit 1; }
   needed=$("$readelf" --dynamic "$1" | grep NEEDED || true)
   echo "$needed"
   if echo "$needed" | grep -q "c++_shared"; then echo "FAIL: $1 needs libc++_shared.so"; exit 1; fi
-  "$readelf" --file-header "$1" | grep -q "AArch64" || { echo "FAIL: $1 is not AArch64"; exit 1; }
+  header=$("$readelf" --file-header "$1")
+  echo "$header" | grep -q "AArch64" || { echo "FAIL: $1 is not AArch64"; exit 1; }
 }
 
 echo "== the minimal example"

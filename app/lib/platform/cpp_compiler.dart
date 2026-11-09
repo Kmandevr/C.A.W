@@ -15,7 +15,7 @@ abstract class CppCompiler {
   /// this build of the app has no compiler.
   Future<String> toolchainDirectory();
 
-  /// Runs one clang command line (argv[0] is `<toolchain>/bin/clang`): the exit code and every diagnostic.
+  /// Runs one clang command line (argv[0] is `<toolchain>/bin/clang++`): the exit code and every diagnostic.
   Future<({int code, String output})> run(List<String> args);
 }
 
@@ -109,7 +109,7 @@ class CppSourceBuilder {
     final clangVersion =
         clangDir.existsSync() ? clangDir.listSync().whereType<Directory>().map((d) => d.path.split('/').last).firstOrNull : null;
     return [
-      '$toolchain/bin/clang',
+      '$toolchain/bin/clang++', // the C++ driver: it links the C++ library
       '--target=aarch64-linux-android26',
       '--sysroot=$toolchain/sysroot',
       if (clangVersion != null) '-resource-dir=$toolchain/lib/clang/$clangVersion',
