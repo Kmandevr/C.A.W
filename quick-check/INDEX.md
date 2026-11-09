@@ -9,4 +9,5 @@
 | [gpt--119-cpp-build-pipeline](gpt--119-cpp-build-pipeline.md) | FINISHED | PASS | 0032a8c51d74 | 2026-11-06T23:14:25Z |
 | [gpt--119-native-component-host](gpt--119-native-component-host.md) | FINISHED | FAIL | 4ca76c0d20be | 2026-11-07T02:23:41Z |
 | [gpt--127-native-expression-channel-model](gpt--127-native-expression-channel-model.md) | FINISHED | PASS | 5f9a16f37bfe | 2026-11-08T17:21:59Z |
+| [gpt--128-visual-routing-plan](gpt--128-visual-routing-plan.md) | RUNNING |  | a94476ccf74d | 2026-11-09T16:10:01Z |
 | [gpt--94-export-fixes](gpt--94-export-fixes.md) | FINISHED | FAIL | 38820aded14a | 2026-11-08T17:29:52Z |
