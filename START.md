@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `f017e46251dabd6a6d8f8d7515ef1c1a072ccb65` on the default branch at 2026-11-09T22:21:06Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `3c9666c1db2d0dee536d8146b818dece2110b5dc` on the default branch at 2026-11-09T23:49:04Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`f017e46`).
+1. The commit this file was generated from (`3c9666c`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -232,7 +232,7 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # Vision and principles
@@ -245,7 +245,7 @@ This note records product direction, not a list of shipped features. The permane
 
 C.A.W. is a code-driven sound-design and music-production workspace for creating, shaping, auditioning, arranging, recording, editing, mixing and exporting sounds, instruments, patterns and reusable musical content.
 
-**Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design.
+**Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design. **Owner (2026-11-09):** it should *feel* like a full DAW, closest to REAPER, "but better and more specialized": the familiar workflow (tracks, mixer, FX stacks, automation, a browser) with C.A.W.'s own strengths built in, such as writing, building and hearing your own effects inside the song. The layout is in [decisions](decisions.md) ("The app's layout").
 
 **Owner decision (2026-11-05):** ordinary C++ is C.A.W.'s programming language. It is general-purpose, not a music-only DSL; users can write anything ordinary C++ allows. The C.A.W. Library/SDK supplies reusable audio, music, math, bit-manipulation, data and general-purpose building blocks. One shared component model makes each component available to the C++ editor, visual composition, generated/custom performance UI, mixer and later plugin/standalone adapters. These are coordinated views of one project and runtime, not parallel implementations. See [C++ creation platform](cpp-creation-platform.md).
 
@@ -284,10 +284,10 @@ The repository currently includes:
 Important boundaries:
 - USB/Bluetooth MIDI device discovery, connection and live Engine voice routing are not implemented.
 - Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
-- Sends, general sidechain routing, parallel mixer paths and master effect chains are not complete.
+- Sends, general sidechain routing and parallel mixer paths are not complete. Native effect chains on tracks and the master are built (engine).
 - Module/global parameter automation and stems export remain approved v2 work.
-- Audio/MIDI recording, input monitoring, latency compensation, take lanes and comping are not implemented; they are planned later in the permanent roadmap.
-- The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting and dynamic native-module loading are not implemented.
+- Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are not implemented; they are planned later in the permanent roadmap. (Plugin delay compensation for native effects is built.)
+- The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting is not implemented. Dynamic loading of C.A.W. native components, under the user's explicit trust choice, is built in the engine; no screen uses it yet.
 - Video synchronization is not planned at this time.
 - See [engine implementation status](engine-build-status.md) for the complete native boundary and paused work.
 
