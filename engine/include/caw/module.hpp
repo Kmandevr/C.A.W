@@ -18,6 +18,11 @@ constexpr uint32_t channelCountForLayout(ChannelLayout layout, uint32_t discrete
     }
     return 0;
 }
+// The component header revision. A host refuses a library built against any other revision:
+// revision 2 (CP.2) grew ModuleDescriptor and ParameterDescriptor, so an older library's
+// descriptor cannot be read safely. Older libraries lack the export and are refused before
+// their descriptor is touched. The stable C interface (v2) will replace this check.
+inline constexpr uint32_t kComponentHeaderRevision = 2;
 // Hard ceiling on channels per audio port, for every layout including Discrete. It bounds
 // pointer tables and buffer sizes; hosts may set a lower limit in their graph budget.
 inline constexpr uint32_t kMaxPortChannels = 64;
@@ -78,6 +83,8 @@ struct EventOutput {
 // Exponential needs minimum > 0 and suits frequencies and times.
 enum class ParameterCurve : uint8_t { Linear, Exponential };
 inline constexpr uint32_t kMaxParameterSmoothingFrames = 1u << 20;  // about 22 s at 48 kHz
+inline constexpr uint32_t kMaxParameterChoices = 4096;     // labels per choice parameter
+inline constexpr double kMaxChoiceValue = 2147483648.0;    // |minimum| and |maximum| of a choice parameter (2^31)
 struct ParameterDescriptor {
     std::string_view id;
     double defaultValue = 0.0;
@@ -92,7 +99,8 @@ struct ParameterDescriptor {
     std::string_view name;
     // A choice parameter (a dropdown or a switch): `choiceCount` labels for the integer values
     // minimum, minimum + 1, ..., maximum. Requires step 1, an integer minimum and
-    // maximum - minimum + 1 == choiceCount; every label non-empty. 0 = a plain numeric parameter.
+    // maximum - minimum + 1 == choiceCount, the linear curve, at most kMaxParameterChoices labels and
+    // |minimum|, |maximum| <= kMaxChoiceValue; every label non-empty. 0 = a plain numeric parameter.
     const std::string_view* choices = nullptr;
     uint32_t choiceCount = 0;
     // What may drive the parameter besides a manual value. Hosts refuse a modulation link, an

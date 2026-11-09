@@ -124,6 +124,12 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
     if (!library->open(path, loadError))
         return {false, ModuleLoadError::LoadFailed, std::string(expectedId), std::move(loadError)};
 
+    // Check the header revision first: an older library's descriptor has another layout.
+    using RevisionFn = uint32_t (*)() noexcept;
+    const RevisionFn revisionFn = library->resolve<RevisionFn>("caw_component_header_revision");
+    if (!revisionFn || revisionFn() != kComponentHeaderRevision)
+        return {false, ModuleLoadError::IncompatibleHeader, std::string(expectedId),
+                "The component was built against another C.A.W. SDK revision; rebuild it with this version."};
     const DescriptorFn descriptorFn = library->resolve<DescriptorFn>("caw_component_descriptor");
     if (!descriptorFn)
         return {false, ModuleLoadError::MissingDescriptor, std::string(expectedId),

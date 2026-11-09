@@ -41,6 +41,8 @@ public:
 
 }  // namespace
 
+CAW_COMPONENT_DEFINE_HEADER_REVISION()
+
 extern "C" CAW_COMPONENT_EXPORT const caw::ModuleDescriptor*
 caw_component_descriptor() noexcept {
     return &kDescriptor;

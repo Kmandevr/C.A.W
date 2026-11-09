@@ -37,6 +37,10 @@ public:
 
 }  // namespace
 
+#ifndef CAW_TEST_OMIT_HEADER_REVISION  // the second fixture plays a library built before revisions
+CAW_COMPONENT_DEFINE_HEADER_REVISION()
+#endif
+
 extern "C" CAW_COMPONENT_EXPORT const caw::ModuleDescriptor*
 caw_component_descriptor() noexcept {
     return &kDescriptor;

@@ -33,6 +33,7 @@ enum class ModuleLoadError : uint8_t {
     InvalidDescriptor,
     ComponentIdMismatch,
     DuplicateId,
+    IncompatibleHeader,  // built against another component header revision (or before revisions)
 };
 
 struct ModuleLoadResult {

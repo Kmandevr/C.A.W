@@ -1,4 +1,6 @@
 // Contract tests for first-class native modules and typed stereo ports.
+#include <vector>
+
 #include "test.h"
 
 #include "module.h"
@@ -378,4 +380,25 @@ TEST(module_descriptor_rejects_bad_identity_role_and_choices) {
     p.choices = blank;
     p.choiceCount = 2;
     CHECK(validateModuleDescriptor(d) == ModuleValidation::EmptyParameterChoice);
+    p.choices = two;
+    p.minimum = 1.0;
+    p.maximum = 2.0;
+    p.defaultValue = 1.0;
+    p.curve = ParameterCurve::Exponential;  // choices step evenly: linear only
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidParameterChoices);
+    p.curve = ParameterCurve::Linear;
+    p.minimum = 9007199254740992.0;  // 2^53: the values past it are not exact doubles
+    p.maximum = p.minimum + 1.0;
+    p.defaultValue = p.minimum;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidParameterChoices);
+    std::vector<std::string_view> many(kMaxParameterChoices + 1, "x");
+    p.choices = many.data();
+    p.choiceCount = kMaxParameterChoices + 1;
+    p.minimum = 0.0;
+    p.maximum = kMaxParameterChoices;
+    p.defaultValue = 0.0;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::InvalidParameterChoices);
+    p.choiceCount = kMaxParameterChoices;
+    p.maximum = kMaxParameterChoices - 1;
+    CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
 }

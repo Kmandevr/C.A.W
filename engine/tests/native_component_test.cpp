@@ -127,3 +127,14 @@ TEST(module_registry_loads_native_components_only_after_explicit_trust) {
     CHECK(registry.find(kComponentId) == nullptr);
     CHECK_EQ(registry.size(), 0u);
 }
+
+TEST(module_registry_refuses_a_component_built_against_another_header_revision) {
+    // A library built before the CP.2 descriptor changes has no revision export; its descriptor
+    // has the old layout, so the registry must refuse it before reading the descriptor.
+    ModuleRegistry registry;
+    const ModuleLoadResult old =
+        registry.loadSharedLibrary(CAW_TEST_UNREVISIONED_COMPONENT_PATH, kComponentId, NativeModuleTrust::Trusted);
+    CHECK(!old.success);
+    CHECK(old.error == ModuleLoadError::IncompatibleHeader);
+    CHECK(registry.find(kComponentId) == nullptr);
+}

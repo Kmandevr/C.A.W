@@ -82,7 +82,11 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
         }
         if (p.choiceCount != 0) {
             // Labels for minimum, minimum + 1, ..., maximum (so the range is small and exact).
-            if (!p.choices || p.step != 1.0 || std::floor(p.minimum) != p.minimum ||
+            // Bounded so every value is an exact double and the label checks stay cheap; on the
+            // linear curve so modulation and snapping step evenly through the choices.
+            if (!p.choices || p.choiceCount > kMaxParameterChoices || p.step != 1.0 ||
+                p.curve != ParameterCurve::Linear || std::floor(p.minimum) != p.minimum ||
+                std::fabs(p.minimum) > kMaxChoiceValue || std::fabs(p.maximum) > kMaxChoiceValue ||
                 p.maximum - p.minimum + 1.0 != static_cast<double>(p.choiceCount))
                 return ModuleValidation::InvalidParameterChoices;
             for (uint32_t c = 0; c < p.choiceCount; ++c)
