@@ -23,7 +23,7 @@ Owner (2026-11-09): Claude builds the engine; GPT is paused. The order is #120 â
 - The C API that lists descriptors for the app (#38 item 3).
 
 ## Open (owner)
-- #17: a `.caw` module is mono (the VM makes one signal). On a stereo track, should a mono effect run once per channel with its own state ("dual mono", double the CPU), or be refused? Generators duplicate to both channels either way.
+- #17: a .caw module is mono (the VM makes one signal). On a stereo track, should a mono effect run once per channel with its own state ("dual mono", double the CPU), or be refused? Generators duplicate to both channels either way.
 - One component per library, or bundles (`caw_get_component_v2(index)`)?
 - The docs guard makes README change on every PR (README covers the whole repo). Narrow it?
 - Old branches to delete by hand (session git deletes are blocked); the list is in the session summary.
