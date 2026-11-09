@@ -133,7 +133,33 @@ TEST(component_parameters_change_while_playing_and_through_project_updates) {
     CHECK(ok(e.setProject(p)));
     runLast(e, 128, l, r);
     CHECK_NEAR(r, 0.5 * kCentre, 1e-5);
-    CHECK_NEAR(l, 2.0 * kCentre, 1e-5);  // left keeps its live value: the update didn't name it
+    // Left goes back to its default: the update didn't name it, and a fresh render (an export) of
+    // this project would play the default too. The app writes live values into the project.
+    CHECK_NEAR(l, 0.5 * kCentre, 1e-5);
+}
+
+TEST(a_folder_with_components_warns_that_they_are_not_played) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    ProjectSpec p = constantTrack({});
+    LayerSpec folder;
+    folder.id = "f";
+    folder.name = "f";
+    folder.folder = true;
+    folder.components = {{kGain, {}}};
+    p.layers.push_back(folder);
+    const std::string result = e.setProject(p);
+    CHECK(result.find("folder buses take no native components") != std::string::npos);
+}
+
+TEST(a_project_with_too_many_components_is_refused) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    std::vector<ComponentSpec> many(257, ComponentSpec{kGain, {}});
+    ProjectSpec p = constantTrack({});
+    p.masterComponents = many;
+    const std::string result = e.setProject(p);
+    CHECK(result.find("at most 256") != std::string::npos);
 }
 
 TEST(changing_a_tracks_components_rebuilds_its_chain_and_removing_them_frees_the_library) {

@@ -33,7 +33,8 @@ public:
     // Whether this chain was built from the same components, in the same order, at this rate, so a
     // project update keeps it (and its running state, such as a reverb's tail) and only sets values.
     bool sameComponents(const std::vector<ComponentSpec>& specs, double sampleRate) const noexcept;
-    // Control thread. Sets every value the specs name; values they leave out keep what they hold.
+    // Control thread. Sets every value the specs name and puts the rest back to their defaults, so a
+    // kept chain sounds as a freshly built one would (an export builds afresh).
     void setValues(const std::vector<ComponentSpec>& specs) noexcept;
     // Control thread. False for an index or parameter id the chain does not have, or a non-finite value.
     bool setValue(std::size_t index, const std::string& parameterId, double value) noexcept;
@@ -44,6 +45,8 @@ public:
     // Audio thread: runs every component over left/right in place (m <= kMaxFrames). A component
     // that fails a block passes its input through; non-finite output becomes 0.
     void process(float* left, float* right, uint32_t m, double sampleRate) noexcept;
+    // Audio thread: clears every component's running state (tails, delay lines), as after activate.
+    void reset() noexcept;
 
 private:
     struct Entry {

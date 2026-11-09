@@ -55,6 +55,7 @@ struct Engine::Slot {
     Chain* old = nullptr;    // previous chain, fading out after a hot swap
     Chain* pending = nullptr;  // new code waiting for the next beat or bar
     ComponentChain* inserts = nullptr;  // native stereo effects after the chain, before volume and pan
+    bool insertsIdle = false;  // the inserts stopped running (Silent): reset before they run again
     std::shared_ptr<const Pattern>* pattern = nullptr;  // owned here, freed on the control thread when retired
     int swapLeft = 0;
     int seamLeft = 0;
@@ -244,6 +245,7 @@ constexpr double kLimitCeiling = 0.977;  // about -0.2 dBFS
 // Play retires up to two entries per slot and must always find room, even with the retired queue
 // full: the pending list holds 2 * (maxLayers() + 1) entries plus this slack (256 at 64 layers).
 constexpr int kPendingSlack = 126;
+constexpr size_t kMaxProjectComponents = 256;  // native component instances in one project (tracks and master)
 // What one slot's export segment reserves per buffer: the pointer, the owner, and the buffer.
 constexpr uint64_t kExportBufferBytes = static_cast<uint64_t>(kBlock) * sizeof(double);
 constexpr uint64_t kExportSlotBytes =
@@ -1068,8 +1070,16 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             masterChainBytes += ComponentChain::estimateBytes(specs.size(), parameters);
         };
         if (!p.masterComponents.empty()) charge(p.masterComponents);
+        size_t total = p.masterComponents.size();
         for (const LayerSpec& l : p.layers)
-            if (!l.folder && !l.components.empty()) charge(l.components);
+            if (!l.folder && !l.components.empty()) {
+                charge(l.components);
+                total += l.components.size();
+            }
+        // Each instance may allocate what it likes when activated; the cap bounds how many there are.
+        if (total > kMaxProjectComponents)
+            return "{\"ok\":false,\"error\":\"the project uses " + std::to_string(total) +
+                   " native components; at most " + std::to_string(kMaxProjectComponents) + " can run\",\"modules\":{}}";
         if (masterChainBytes > resourceBudget_.projectStateBytes)
             return R"({"ok":false,"error":"native component chains exceed this Engine's project-state memory budget","modules":{}})";
         std::string error;
@@ -1645,6 +1655,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
         if (w.bus) {
             ls.inserts = nullptr;  // ConfigureBus retires any the slot had
+            if (w.components && !w.components->empty())
+                // Keyed "project": the result reports module and project warnings, not layer ids.
+                warnings["project"].push_back("folder '" + w.id + "': folder buses take no native components yet; they are not played");
         } else {
             const bool wantsInserts = w.components && !w.components->empty();
             auto made = nextInserts.find(w.id);
@@ -1658,7 +1671,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                     ls.inserts = sent;
                 } else {
                     allOk = false;
-                    warnings[w.id].push_back("audio command queue rejected the layer's native component update");
+                    warnings["project"].push_back("layer '" + w.id + "': audio command queue rejected its native component update");
                 }
             } else if (wantsInserts && ls.inserts) {
                 ls.inserts->setValues(*w.components);
@@ -2779,8 +2792,11 @@ void Engine::updatePreviewing(int frames) noexcept {
 // neither the chord that was playing nor a frozen tail. Held previews keep their voices; the master fades them back
 // in. Stopped, a track's time runs on from where it stopped (preview chunks).
 void Engine::endPlayback() noexcept {
+    // Native effects start the next play from silence, as a fresh render (an export) does.
+    if (masterChain_) masterChain_->reset();
     for (int i = 0; i < slotCount_; ++i) {
         Slot& s = slotAt(i);
+        if (s.inserts) s.inserts->reset();
         if (!s.cur) continue;
         restartChain(*s.cur);
         if (s.old) {  // a stop during a code swap: the old chain's fade ends too
@@ -3078,6 +3094,7 @@ int Engine::planChunk(int maxFrames) noexcept {
             s.target = slotTarget(s);
             if (!s.previewing || !s.cur->voiced || (s.target == 0.0 && s.gain == 0.0)) {
                 s.mode = Slot::Mode::Silent;
+                s.insertsIdle = true;
                 continue;
             }
             s.mode = Slot::Mode::Play;
@@ -3103,6 +3120,7 @@ int Engine::planChunk(int maxFrames) noexcept {
         if (s.target == 0.0 && s.gain == 0.0) {
             // Silent (muted, soloed out or removed, and faded out): nothing runs; swaps and removal finish.
             s.mode = Slot::Mode::Silent;
+            s.insertsIdle = true;
             s.contiguous = false;
             if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; routingDirty_ = true; }
             if (s.removing && canRetire(2)) {
@@ -3331,7 +3349,12 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     // make of it stays stereo through volume and pan (the pan law then works per side, as balance).
     ComponentChain* const inserts = s.inserts;
     if (inserts) {
-        for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = static_cast<float>(finiteOr0(y[i]));
+        // A tail frozen while the track was silent must not play on when it sounds again.
+        if (s.insertsIdle) {
+            inserts->reset();
+            s.insertsIdle = false;
+        }
+        for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = routeSample(finiteOr0(y[i]));
         inserts->process(insertL_, insertR_, static_cast<uint32_t>(m), sr_);
     }
     float peak = 0, sig = 0;
@@ -3363,7 +3386,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         // The meter reads what the track sends on (after volume and pan), the louder channel's sample peak.
         const float av = std::max(std::fabs(outL[i]), std::fabs(outR[i]));
         if (av > peak) peak = av;
-        sig = std::max(sig, static_cast<float>(std::fabs(v)));  // before pan: a preview's tail test, like the scope
+        sig = std::max(sig, static_cast<float>(std::max(std::fabs(vl), std::fabs(vr))));  // before pan: a preview's tail test, like the scope
         s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
         sp = (sp + 1) % kScopeSize;
     }

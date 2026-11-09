@@ -125,8 +125,19 @@ bool ComponentChain::sameComponents(const std::vector<ComponentSpec>& specs, dou
 }
 
 void ComponentChain::setValues(const std::vector<ComponentSpec>& specs) noexcept {
-    for (std::size_t i = 0; i < specs.size() && i < entries_.size(); ++i)
-        for (const auto& [name, value] : specs[i].params) setValue(i, name, value);
+    for (std::size_t i = 0; i < specs.size() && i < entries_.size(); ++i) {
+        const ModuleDescriptor& d = entries_[i].processor->descriptor();
+        for (uint32_t k = 0; k < d.parameterCount; ++k) {
+            double value = d.parameters[k].defaultValue;
+            for (const auto& [name, v] : specs[i].params)
+                if (d.parameters[k].id == name) value = v;
+            entries_[i].held[k].store(toBits(constrainParameter(d.parameters[k], value)), std::memory_order_relaxed);
+        }
+    }
+}
+
+void ComponentChain::reset() noexcept {
+    for (Entry& e : entries_) e.processor->reset();
 }
 
 bool ComponentChain::setValue(std::size_t index, const std::string& parameterId, double value) noexcept {
