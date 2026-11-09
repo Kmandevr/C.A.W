@@ -112,6 +112,7 @@ class NativeComponentInfo {
     this.ports = const [],
     this.parameters = const [],
     this.uiControls = const [],
+    this.builtin = false,
   });
 
   final String id, name;
@@ -124,6 +125,9 @@ class NativeComponentInfo {
   final List<ComponentPortInfo> ports;
   final List<ComponentParameterInfo> parameters;
   final List<ComponentUiControlInfo> uiControls;
+
+  /// Part of the engine (the Library's stereo tools): always there, no trust choice, can't be unloaded.
+  final bool builtin;
 
   String get label => name.isEmpty ? id : name;
 
@@ -143,6 +147,7 @@ class NativeComponentInfo {
         uiControls: [
           for (final u in (j['ui_controls'] as List? ?? const [])) ComponentUiControlInfo.fromJson(u as Map<String, dynamic>)
         ],
+        builtin: j['builtin'] == true,
       );
 
   /// Parses the whole caw_engine_components result; an error result gives an empty list.

@@ -18,4 +18,20 @@ inline PanGains constantPowerPan(double pan) noexcept {
     return {detCos(theta), detSin(theta)};
 }
 
+// Balance for a stereo signal: pan -1 keeps only the left, +1 only the right, 0 leaves both at unity.
+// The side being turned down falls linearly; the other side stays at unity (no boost).
+inline PanGains balanceGains(double pan) noexcept {
+    const double p = pan < -1.0 ? -1.0 : pan > 1.0 ? 1.0 : pan;
+    return {p > 0.0 ? 1.0 - p : 1.0, p < 0.0 ? 1.0 + p : 1.0};
+}
+
+// Stereo width by mid/side: width 0 is the mono sum (mid) on both sides, 1 leaves the signal as it is,
+// 2 doubles the side. A mono signal (left == right) stays exactly as it is at every width.
+inline void applyWidth(double width, double& left, double& right) noexcept {
+    const double mid = 0.5 * (left + right);
+    const double side = 0.5 * (left - right) * width;
+    left = mid + side;
+    right = mid - side;
+}
+
 }  // namespace caw::lib

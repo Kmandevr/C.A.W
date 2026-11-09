@@ -8,6 +8,7 @@
 #include "caw.h"
 #include "engine.h"
 #include "json.h"
+#include "caw/library/stereo.hpp"
 #include "native_component_test_path.h"
 #include "project.h"
 #include "test.h"
@@ -528,4 +529,45 @@ TEST(a_tail_still_sounding_at_its_cap_fades_out_instead_of_stopping_dead) {
     for (size_t i = last > 2000 ? last - 2000 : 1; i <= last + 1 && i < out.size(); ++i)
         biggest = std::max(biggest, std::fabs(out[i] - out[i - 1]));
     CHECK(biggest < 0.01f);
+}
+
+TEST(the_built_in_balance_and_width_shape_a_tracks_stereo_without_a_trust_choice) {
+    constexpr const char* kEcho = "org.caw.tests.native-loader.gain";
+    Engine e(48000);
+    CHECK(loadFixture(e, kEcho));
+    e.setMasterBypass(true);
+    // gain makes left and right differ (2 and 0.5); width 0 sums them to mono, balance then moves them.
+    ProjectSpec p = constantTrack({{kGain, {{"left", 2.0}, {"right", 0.5}}}, {"org.caw.stereo.width", {{"width", 0.0}}}});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 4096, l, r);
+    CHECK_NEAR(l, r, 1e-6);  // width 0: mono
+    CHECK_NEAR(l, 0.5 * 1.25 * kCentre, 1e-5);  // the mid of 1.0 and 0.25
+    p.layers[0].components[1].params = {{"width", 2.0}};  // twice the side
+    CHECK(ok(e.setProject(p)));
+    runLast(e, 4096, l, r);
+    CHECK_NEAR(l, (0.625 + 2 * 0.375) * kCentre, 1e-5);
+    CHECK_NEAR(r, (0.625 - 2 * 0.375) * kCentre, 1e-5);
+    p.layers[0].components = {{"org.caw.stereo.balance", {{"pan", -0.5}}}};  // the right side halves
+    CHECK(ok(e.setProject(p)));
+    runLast(e, 4096, l, r);
+    CHECK_NEAR(l, 0.5 * kCentre, 1e-5);
+    CHECK_NEAR(r, 0.25 * kCentre, 1e-5);
+    CHECK(!e.unloadNativeComponent("org.caw.stereo.balance"));  // part of the engine
+}
+
+TEST(width_keeps_a_mono_signal_as_it_is_at_every_setting) {
+    for (double width : {0.0, 0.5, 1.0, 2.0}) {
+        double l = 0.3, r = 0.3;
+        lib::applyWidth(width, l, r);
+        CHECK_EQ(l, 0.3);
+        CHECK_EQ(r, 0.3);
+    }
+    const lib::PanGains centre = lib::balanceGains(0.0), hardLeft = lib::balanceGains(-1.0), beyond = lib::balanceGains(7.0);
+    CHECK_EQ(centre.left, 1.0);
+    CHECK_EQ(centre.right, 1.0);
+    CHECK_EQ(hardLeft.right, 0.0);
+    CHECK_EQ(beyond.left, 0.0);  // out of range clamps to hard right
+    CHECK_EQ(beyond.right, 1.0);
 }

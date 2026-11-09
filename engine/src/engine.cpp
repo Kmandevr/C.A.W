@@ -1,5 +1,6 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+#include "builtin_components.h"
 #include "graph.h"
 #include "route_math.h"
 #include "caw/library/stereo.hpp"
@@ -672,6 +673,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
       retired_(new Spsc<Retired, 1024>()),
       masterScope_(new std::atomic<float>[kScopeSize]) {
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
+    registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
     ctlSr_ = sampleRate;
     constexpr int initial = kInitialLayerCapacity;
     auto first = std::make_unique<SlotTable>();
@@ -1139,6 +1141,12 @@ std::string Engine::nativeComponentsJson() {
     std::lock_guard<std::mutex> lock(ctl_);
     std::string json = "{\"ok\":true,\"components\":[";
     bool first = true;
+    // Built-in components first, marked so the app can tell them from loaded ones (they need no trust).
+    for (const ModuleDescriptor* d : nativeModules_.builtinComponents()) {
+        std::string one = moduleDescriptorJson(*d);
+        json += (first ? "{\"builtin\":true," : ",{\"builtin\":true,") + one.substr(1);
+        first = false;
+    }
     for (const ModuleDescriptor* d : nativeModules_.loadedComponents()) {
         json += (first ? "" : ",") + moduleDescriptorJson(*d);
         first = false;

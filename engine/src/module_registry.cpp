@@ -523,6 +523,13 @@ std::vector<const ModuleDescriptor*> ModuleRegistry::loadedComponents() const {
     return out;
 }
 
+std::vector<const ModuleDescriptor*> ModuleRegistry::builtinComponents() const {
+    std::vector<const ModuleDescriptor*> out;
+    for (const ModuleRegistration& registration : registrations_)
+        if (!registration.component && registration.factory && registration.descriptor) out.push_back(registration.descriptor);
+    return out;
+}
+
 namespace {
 const char* layoutName(ChannelLayout layout) noexcept {
     switch (layout) {

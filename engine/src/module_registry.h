@@ -72,6 +72,8 @@ public:
     const ModuleDescriptor* find(std::string_view id) const noexcept;
     // Descriptors of the dynamically loaded components, in load order.
     std::vector<const ModuleDescriptor*> loadedComponents() const;
+    // Descriptors of the statically registered (built-in) components, in registration order.
+    std::vector<const ModuleDescriptor*> builtinComponents() const;
     // A new instance. A loaded component's instance is not yet activated: the host calls
     // activate(sampleRate, maxFrames) before processing and destroys it off the audio thread.
     std::unique_ptr<ModuleProcessor> create(std::string_view id) const noexcept;

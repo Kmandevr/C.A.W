@@ -42,4 +42,16 @@ void main() {
   test('an error result lists no components', () {
     expect(NativeComponentInfo.listFromJson({'ok': false, 'error': 'no engine', 'components': []}), isEmpty);
   });
+
+  test('built-in components are marked', () {
+    final list = NativeComponentInfo.listFromJson({
+      'ok': true,
+      'components': [
+        {'builtin': true, 'id': 'org.caw.stereo.width', 'name': 'Width'},
+        {'id': 'org.me.delay'},
+      ],
+    });
+    expect(list.first.builtin, isTrue);
+    expect(list.last.builtin, isFalse);
+  });
 }
