@@ -1442,14 +1442,26 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                       "still fading out, try again when it has)";
             if (why) {
                 allOk = false;
+                projectStateBytes -= layerStateBytes;  // charged above for a layer that now won't run
                 // Keyed by the chain's first module, like the other chain warnings, so the result shows it.
-                warnings[pl.ids.empty() ? std::string("project") : pl.ids.front()].push_back(
-                    std::string("layer '") + w.id + (hadSlot ? "' not updated: " : "' not installed: ") + why);
+                std::string& message = warnings[pl.ids.empty() ? std::string("project") : pl.ids.front()]
+                    .emplace_back(std::string("layer '") + w.id + "' not installed: " + why);
                 if (!hadSlot) {
                     ctlSlot(pl.ls.slot).ctlBusy = false;  // just claimed above; nothing was sent for it
                     pl.ls.slot = -1;
+                    nextLayers[w.id] = pl.ls;
+                } else {
+                    // A playing layer can't keep its old chain outside the plan (its routing, order
+                    // and exports would go stale), so it stops, the way an invalid layer is removed.
+                    message += "; it was stopped";
+                    Cmd c;
+                    c.type = Cmd::Remove;
+                    c.slot = pl.ls.slot;
+                    if (!send(c)) {
+                        message += " (the audio command queue was full, so it keeps playing unchanged)";
+                        nextLayers[w.id] = pl.ls;
+                    }
                 }
-                nextLayers[w.id] = pl.ls;  // a playing layer keeps its current chain
                 continue;
             }
             exportBuffersPlanned += adds;

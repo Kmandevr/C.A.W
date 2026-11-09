@@ -1290,6 +1290,16 @@ TEST(engine_bounds_total_export_buffers_by_the_budget_across_layers) {
     const std::string again = e.setProject(project(kExportBudgetSlots + 1));
     CHECK(again.find("export buffer budget") != std::string::npos);
     CHECK(again.find("no free engine layer slot") == std::string::npos);
+    // A playing layer whose new chain exports more than one layer may hold is stopped, not left
+    // playing outside the plan (stale routing and exports).
+    CHECK(e.setProject(project(kExportBudgetSlots)).find("\"ok\":true") != std::string::npos);
+    ProjectSpec grown = project(kExportBudgetSlots);
+    grown.modules.push_back({"extra", "---\nmode: float\n---\nexport let more = 1\n1", {}, "extra"});
+    grown.layers[0].chain = {"wide", "extra"};
+    const std::string stopped = e.setProject(grown);
+    CHECK(stopped.find("\"ok\":false") != std::string::npos);
+    CHECK(stopped.find("layer 't0' not installed: its chain exports more values than one layer may hold") != std::string::npos);
+    CHECK(stopped.find("it was stopped") != std::string::npos);
 }
 
 TEST(routing_saturates_out_of_float_range_tracks_instead_of_silencing_the_mix) {
