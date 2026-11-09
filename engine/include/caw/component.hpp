@@ -137,7 +137,8 @@ void reset(void* p) noexcept {
 template <class Type>
 int32_t process(void* p, const CawProcessBlock* block) noexcept {
     try {
-        if (!p || !block || block->struct_size < sizeof(CawProcessBlock)) return 0;
+        // The fields up to the transport are required; a host without the transport field is fine.
+        if (!p || !block || block->struct_size < offsetof(CawProcessBlock, transport)) return 0;
         Instance<Type>& self = *instance<Type>(p);
         if (block->frames == 0 || block->frames > self.maxFrames || block->audio_in_count > self.audioIn.size() || block->audio_out_count > self.audioOut.size() ||
             block->event_in_count > self.eventIn.size() || block->event_out_count > self.eventOut.size() ||

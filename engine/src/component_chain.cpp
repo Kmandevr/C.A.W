@@ -276,10 +276,11 @@ void ComponentChain::reset() noexcept {
 
 void ComponentChain::process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept {
     if (m == 0 || m > kMaxFrames) return;
-    const bool newPlay = time && time->playEpoch != playEpoch_;
-    if (time) playEpoch_ = time->playEpoch;
-    Transport transport;  // what each component sees of the song (none while stopped)
-    if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, true};
+    const bool playing = time && time->playing;
+    const bool newPlay = playing && time->playEpoch != playEpoch_;
+    if (playing) playEpoch_ = time->playEpoch;
+    Transport transport;  // what each component sees of the song: the tempo always, the position while playing
+    if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, playing};
     const double bypassStep = 1.0 / std::max(1.0, kBypassSeconds * sampleRate);
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         Entry& e = *entries_[index];
@@ -301,7 +302,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
             }
             const double* automation = nullptr;
             const ProjectAutomationLaneSpec* lane =
-                time && automation_ && index < automation_->byParam.size() && k < automation_->byParam[index].size()
+                playing && automation_ && index < automation_->byParam.size() && k < automation_->byParam[index].size()
                     ? automation_->byParam[index][k] : nullptr;
             if (lane) {
                 for (uint32_t i = 0; i < m; ++i)

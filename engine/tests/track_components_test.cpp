@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -656,4 +657,22 @@ TEST(the_built_in_chorus_moves_the_two_sides_apart) {
         if (t > 4800) apart = std::max(apart, static_cast<double>(std::fabs(l - r)));
     }
     CHECK(apart > 0.05);  // the sides differ: a mono signal comes out wide
+}
+
+TEST(an_extreme_input_cannot_latch_the_delay_silent) {
+    lib::PingPongDelay d;
+    d.prepare(1000.0, 1.0);
+    float l = std::numeric_limits<float>::max(), r = -std::numeric_limits<float>::max();
+    d.process(0.010, 0.95, 1.0, 0.5, l, r);  // a runaway effect upstream hands it FLT_MAX
+    float last = 0;
+    for (int t = 0; t < 20000; ++t) {  // 20 s at 0.95 feedback: the echoes die away
+        float a = 0.0f, b = 0.0f;
+        d.process(0.010, 0.95, 1.0, 0.5, a, b);
+        CHECK(std::isfinite(a));
+        last = a;
+    }
+    CHECK_EQ(last, 0.0f);  // decayed all the way (no stuck subnormal), and dry input passes again:
+    float a = 0.25f, b = 0.25f;
+    d.process(0.010, 0.95, 1.0, 0.5, a, b);
+    CHECK_NEAR(a, 0.125, 1e-6);
 }

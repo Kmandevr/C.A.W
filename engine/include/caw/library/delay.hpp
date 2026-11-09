@@ -41,14 +41,22 @@ public:
         const double dl = left_[i0] + (left_[i1] - left_[i0]) * frac;
         const double dr = right_[i0] + (right_[i1] - right_[i0]) * frac;
         const double inL = finiteOr0(l), inR = finiteOr0(r);
-        left_[pos_] = static_cast<float>(inL + fb * ((1.0 - x) * dl + x * dr));
-        right_[pos_] = static_cast<float>(inR + fb * ((1.0 - x) * dr + x * dl));
+        left_[pos_] = store(inL + fb * ((1.0 - x) * dl + x * dr));
+        right_[pos_] = store(inR + fb * ((1.0 - x) * dr + x * dl));
         pos_ = pos_ + 1 == n ? 0 : pos_ + 1;
         l = static_cast<float>(inL + (dl - inL) * mix);
         r = static_cast<float>(inR + (dr - inR) * mix);
     }
 
 private:
+    // What goes back into the loop: bounded (an extreme input can't overflow to inf and latch the line
+    // silent) and flushed to 0 when tiny (a decaying loop never sticks in slow subnormal numbers).
+    static float store(double v) noexcept {
+        if (!(v > -1e4)) return v != v ? 0.0f : -1e4f;  // NaN reads 0
+        if (v > 1e4) return 1e4f;
+        return (v < 1e-20 && v > -1e-20) ? 0.0f : static_cast<float>(v);
+    }
+
     std::vector<float> left_, right_;
     size_t pos_ = 0;
     double sampleRate_ = 48000.0;

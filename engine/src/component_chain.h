@@ -29,6 +29,7 @@ struct ChainTime {
     uint64_t playEpoch = 0; // changes on every Play: touches end
     double tempo = 120;     // beats per minute, for the components' transport
     uint32_t beatsPerBar = 4;
+    bool playing = true;    // false: stopped (lanes hold; components still learn the tempo)
 };
 
 // Built and configured on the control thread, then handed to the audio thread, which alone calls
@@ -84,8 +85,8 @@ public:
     // An estimate of the memory the chain holds, for the project-state budget.
     static uint64_t estimateBytes(std::size_t components, std::size_t parameters) noexcept;
 
-    // Audio thread: runs every component over left/right in place (m <= kMaxFrames). `time` is null
-    // while stopped (lanes then hold). A component that fails a block passes its input through;
+    // Audio thread: runs every component over left/right in place (m <= kMaxFrames). Lanes are read
+    // only while `time->playing` (they hold while stopped); null time: no transport at all. A component that fails a block passes its input through;
     // non-finite output becomes 0. A bypassed component crossfades to its input over 5 ms, then
     // is not run at all.
     void process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept;
