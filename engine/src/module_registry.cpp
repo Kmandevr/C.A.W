@@ -1,6 +1,8 @@
 // Native module registry: static factories, and components loaded through the C interface (caw_component.h).
 #include "module_registry.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -17,6 +19,7 @@
 #endif
 
 #include "caw_component.h"
+#include "json.h"
 
 namespace caw {
 
@@ -96,6 +99,7 @@ namespace {
 
 // Upper bounds checked before a component's arrays are read, so a bad count is refused rather
 // than walked past the end of its array.
+constexpr uint32_t kMaxComponentsPerLibrary = 4096;  // entries a bundle may list
 constexpr uint32_t kMaxComponentPorts = 1024;
 constexpr uint32_t kMaxComponentParameters = 4096;
 constexpr uint32_t kMaxComponentUiControls = 4096;
@@ -415,14 +419,35 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
             return {false, ModuleLoadError::LoadFailed, std::string(expectedId), std::move(loadError)};
 
         const auto entry = library->resolve<CawGetComponentV2Fn>(CAW_COMPONENT_ENTRY_SYMBOL);
-        const CawComponentV2* table = entry ? entry() : nullptr;
-        if (!table)
+        if (!entry)
             return {false, ModuleLoadError::MissingEntryPoint, std::string(expectedId),
                     "The library does not export caw_get_component_v2 (build it with this C.A.W. SDK)."};
-        if (table->struct_size < sizeof(CawComponentV2) || table->abi_version != CAW_COMPONENT_ABI_VERSION ||
-            !table->descriptor)
-            return {false, ModuleLoadError::IncompatibleAbi, std::string(expectedId),
-                    "The component uses another C interface version; rebuild it with this C.A.W. SDK."};
+        // A library may be a bundle: take the component with the expected id, checking each entry's
+        // version and sizes before reading its id.
+        const CawComponentV2* table = nullptr;
+        bool listsAny = false;
+        for (uint32_t index = 0; index < kMaxComponentsPerLibrary; ++index) {
+            const CawComponentV2* candidate = entry(index);
+            if (!candidate) break;
+            listsAny = true;
+            if (candidate->struct_size < sizeof(CawComponentV2) || candidate->abi_version != CAW_COMPONENT_ABI_VERSION ||
+                !candidate->descriptor || candidate->descriptor->struct_size < sizeof(CawComponentDescriptor) ||
+                candidate->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION)
+                return {false, ModuleLoadError::IncompatibleAbi, std::string(expectedId),
+                        "The component uses another C interface version; rebuild it with this C.A.W. SDK."};
+            const char* id = candidate->descriptor->id;
+            if (id && strnlen(id, expectedId.size() + 1) == expectedId.size() &&
+                std::memcmp(id, expectedId.data(), expectedId.size()) == 0) {
+                table = candidate;
+                break;
+            }
+        }
+        if (!listsAny)
+            return {false, ModuleLoadError::MissingEntryPoint, std::string(expectedId),
+                    "The library's caw_get_component_v2 lists no components."};
+        if (!table)
+            return {false, ModuleLoadError::ComponentIdMismatch, std::string(expectedId),
+                    "The library has no component with the project manifest ID."};
         if (!table->create || !table->destroy || !table->activate || !table->deactivate || !table->reset ||
             !table->process || !table->save_state || !table->load_state)
             return {false, ModuleLoadError::IncompleteTable, std::string(expectedId),
@@ -474,6 +499,107 @@ const ModuleDescriptor* ModuleRegistry::find(std::string_view id) const noexcept
         if (registration.descriptor && registration.descriptor->id == id)
             return registration.descriptor;
     return nullptr;
+}
+
+std::vector<const ModuleDescriptor*> ModuleRegistry::loadedComponents() const {
+    std::vector<const ModuleDescriptor*> out;
+    for (const ModuleRegistration& registration : registrations_)
+        if (registration.component && registration.descriptor) out.push_back(registration.descriptor);
+    return out;
+}
+
+namespace {
+const char* layoutName(ChannelLayout layout) noexcept {
+    switch (layout) {
+        case ChannelLayout::None: return "none";
+        case ChannelLayout::Mono: return "mono";
+        case ChannelLayout::Stereo: return "stereo";
+        case ChannelLayout::Quad: return "quad";
+        case ChannelLayout::Surround51: return "5.1";
+        case ChannelLayout::Surround71: return "7.1";
+        case ChannelLayout::Discrete: return "discrete";
+    }
+    return "none";
+}
+const char* portTypeName(PortType type) noexcept {
+    switch (type) {
+        case PortType::Audio: return "audio";
+        case PortType::Control: return "control";
+        case PortType::Modulation: return "modulation";
+        case PortType::Event: return "event";
+    }
+    return "audio";
+}
+const char* roleName(ModuleRole role) noexcept {
+    switch (role) {
+        case ModuleRole::Unspecified: return "unspecified";
+        case ModuleRole::Instrument: return "instrument";
+        case ModuleRole::Generator: return "generator";
+        case ModuleRole::Effect: return "effect";
+        case ModuleRole::Utility: return "utility";
+        case ModuleRole::EventProcessor: return "event_processor";
+        case ModuleRole::Analyzer: return "analyzer";
+    }
+    return "unspecified";
+}
+const char* uiKindName(UiControlKind kind) noexcept {
+    switch (kind) {
+        case UiControlKind::Slider: return "slider";
+        case UiControlKind::Toggle: return "toggle";
+        case UiControlKind::Dropdown: return "dropdown";
+        case UiControlKind::XYPad: return "xy_pad";
+        case UiControlKind::Button: return "button";
+        case UiControlKind::Curve: return "curve";
+    }
+    return "slider";
+}
+std::string quoted(std::string_view text) { return "\"" + jsonEscape(std::string(text)) + "\""; }
+// The shortest text that reads back as the same double (descriptor values are validated finite).
+std::string number(double value) {
+    char text[32];
+    for (int digits = 1; digits <= 17; ++digits) {
+        std::snprintf(text, sizeof text, "%.*g", digits, value);
+        if (std::strtod(text, nullptr) == value) break;
+    }
+    return text;
+}
+}  // namespace
+
+std::string moduleDescriptorJson(const ModuleDescriptor& d) {
+    std::string j = "{\"id\":" + quoted(d.id) + ",\"name\":" + quoted(d.name) +
+                    ",\"version\":" + std::to_string(d.version) + ",\"role\":\"" + roleName(d.role) +
+                    "\",\"latency_frames\":" + std::to_string(d.latencyFrames) +
+                    ",\"tail_frames\":" + (d.tailFrames == kInfiniteTail ? std::string("null") : std::to_string(d.tailFrames)) +
+                    ",\"max_state_bytes\":" + std::to_string(d.maxStateBytes) + ",\"custom_ui_id\":" + quoted(d.customUiId) +
+                    ",\"ports\":[";
+    for (uint32_t i = 0; i < d.portCount; ++i) {
+        const PortDescriptor& p = d.ports[i];
+        j += std::string(i ? "," : "") + "{\"id\":" + quoted(p.id) + ",\"type\":\"" + portTypeName(p.type) +
+             "\",\"input\":" + (p.input ? "true" : "false") + ",\"layout\":\"" + layoutName(p.layout) +
+             "\",\"channels\":" + std::to_string(portChannelCount(p)) + ",\"summing\":" + (p.summing ? "true" : "false") + "}";
+    }
+    j += "],\"parameters\":[";
+    for (uint32_t i = 0; i < d.parameterCount; ++i) {
+        const ParameterDescriptor& p = d.parameters[i];
+        j += std::string(i ? "," : "") + "{\"id\":" + quoted(p.id) + ",\"name\":" + quoted(p.name) +
+             ",\"unit\":" + quoted(p.unit) + ",\"default\":" + number(p.defaultValue) +
+             ",\"min\":" + number(p.minimum) + ",\"max\":" + number(p.maximum) + ",\"step\":" + number(p.step) +
+             ",\"curve\":\"" + (p.curve == ParameterCurve::Exponential ? "exponential" : "linear") +
+             "\",\"smoothing_frames\":" + std::to_string(p.smoothingFrames) +
+             ",\"automatable\":" + (p.automatable ? "true" : "false") +
+             ",\"modulatable\":" + (p.modulatable ? "true" : "false") +
+             ",\"midi_mappable\":" + (p.midiMappable ? "true" : "false") + ",\"choices\":[";
+        for (uint32_t c = 0; c < p.choiceCount; ++c) j += std::string(c ? "," : "") + quoted(p.choices[c]);
+        j += "]}";
+    }
+    j += "],\"ui_controls\":[";
+    for (uint32_t i = 0; i < d.uiControlCount; ++i) {
+        const UiControlDescriptor& u = d.uiControls[i];
+        j += std::string(i ? "," : "") + "{\"id\":" + quoted(u.id) + ",\"label\":" + quoted(u.label) +
+             ",\"parameter_id\":" + quoted(u.parameterId) + ",\"kind\":\"" + uiKindName(u.kind) +
+             "\",\"min\":" + number(u.minimum) + ",\"max\":" + number(u.maximum) + "}";
+    }
+    return j + "]}";
 }
 
 std::unique_ptr<ModuleProcessor> ModuleRegistry::create(std::string_view id) const noexcept {

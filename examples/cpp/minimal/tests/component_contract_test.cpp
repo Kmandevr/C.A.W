@@ -4,7 +4,8 @@
 #include <cstring>
 
 int main() {
-    const CawComponentV2* component = caw_get_component_v2();
+    const CawComponentV2* component = caw_get_component_v2(0);
+    if (caw_get_component_v2(1) != nullptr) return 5;  // one component: nothing past index 0
     if (!component || component->struct_size < sizeof(CawComponentV2) ||
         component->abi_version != CAW_COMPONENT_ABI_VERSION)
         return 1;

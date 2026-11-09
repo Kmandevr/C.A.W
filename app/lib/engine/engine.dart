@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'bindings.dart';
+import 'component_info.dart';
 import 'execution.dart';
 
 enum ParamKind { number, toggle, choice }
@@ -395,6 +396,28 @@ class Engine {
     return done.future;
   }
 
+  /// The descriptors of the loaded native components (ports, parameters with choices and capability
+  /// flags, UI controls). Runs off the UI isolate, in order with loads and unloads.
+  Future<List<NativeComponentInfo>> nativeComponents() {
+    if (_disposed) return Future.error(StateError('engine is disposed'));
+    if (Platform.isIOS) return Future.value(const <NativeComponentInfo>[]);
+    _pendingNativeOps++;
+    final done = Completer<List<NativeComponentInfo>>();
+    final engineAddress = _handle.address;
+    _queue = _queue.then((_) async {
+      try {
+        final text = await _componentsOffThread(engineAddress);
+        done.complete(NativeComponentInfo.listFromJson(jsonDecode(text) as Map<String, dynamic>));
+      } catch (error, stack) {
+        done.completeError(error, stack);
+      } finally {
+        _pendingNativeOps--;
+        if (_destroyRequested && _pendingNativeOps == 0) _destroyNative();
+      }
+    });
+    return done.future;
+  }
+
   void setParam(String moduleId, String name, double value) {
     final m = moduleId.toNativeUtf8(), n = name.toNativeUtf8();
     _b.setParam(_handle, m, n, value);
@@ -622,5 +645,16 @@ Future<bool> _unloadComponentOffThread(int engineAddress, String componentId) =>
         return bindings.unloadComponent(engine, id) == 1;
       } finally {
         calloc.free(id);
+      }
+    });
+
+Future<String> _componentsOffThread(int engineAddress) => Isolate.run(() {
+      final bindings = Bindings.instance;
+      final result = bindings.components(Pointer<Void>.fromAddress(engineAddress));
+      if (result == nullptr) throw StateError('native component listing returned no result');
+      try {
+        return result.toDartString();
+      } finally {
+        bindings.free(result);
       }
     });

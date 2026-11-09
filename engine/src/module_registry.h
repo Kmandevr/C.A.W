@@ -66,6 +66,8 @@ public:
     bool unload(std::string_view id);
 
     const ModuleDescriptor* find(std::string_view id) const noexcept;
+    // Descriptors of the dynamically loaded components, in load order.
+    std::vector<const ModuleDescriptor*> loadedComponents() const;
     // A new instance. A loaded component's instance is not yet activated: the host calls
     // activate(sampleRate, maxFrames) before processing and destroys it off the audio thread.
     std::unique_ptr<ModuleProcessor> create(std::string_view id) const noexcept;
@@ -74,5 +76,9 @@ public:
 private:
     std::vector<ModuleRegistration> registrations_;
 };
+
+// One descriptor as JSON for hosts (the app): identity, role, timing, ports, parameters with their
+// choices and capability flags, and UI controls. Field names are stable (snake_case).
+std::string moduleDescriptorJson(const ModuleDescriptor& descriptor);
 
 }  // namespace caw

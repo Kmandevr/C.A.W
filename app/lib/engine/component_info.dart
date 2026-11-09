@@ -1,0 +1,152 @@
+// Typed descriptors of loaded native components, parsed from caw_engine_components (engine/include/caw.h).
+class ComponentPortInfo {
+  const ComponentPortInfo({
+    required this.id,
+    required this.type,
+    required this.input,
+    required this.layout,
+    required this.channels,
+    this.summing = false,
+  });
+
+  final String id;
+  final String type; // audio, control, modulation, event
+  final bool input;
+  final String layout; // none, mono, stereo, quad, 5.1, 7.1, discrete
+  final int channels;
+  final bool summing;
+
+  bool get isAudio => type == 'audio';
+
+  factory ComponentPortInfo.fromJson(Map<String, dynamic> j) => ComponentPortInfo(
+        id: j['id'] as String? ?? '',
+        type: j['type'] as String? ?? 'audio',
+        input: j['input'] == true,
+        layout: j['layout'] as String? ?? 'none',
+        channels: (j['channels'] as num?)?.toInt() ?? 0,
+        summing: j['summing'] == true,
+      );
+}
+
+class ComponentParameterInfo {
+  const ComponentParameterInfo({
+    required this.id,
+    this.name = '',
+    this.unit = '',
+    required this.defaultValue,
+    required this.min,
+    required this.max,
+    this.step = 0,
+    this.exponential = false,
+    this.smoothingFrames = 0,
+    this.automatable = true,
+    this.modulatable = true,
+    this.midiMappable = true,
+    this.choices = const [],
+  });
+
+  final String id;
+  final String name;
+  final String unit;
+  final double defaultValue, min, max, step;
+  final bool exponential;
+  final int smoothingFrames;
+  final bool automatable, modulatable, midiMappable;
+  final List<String> choices; // labels for min, min + 1, ..., max
+
+  /// The name to show: the display name, or the id when there is none.
+  String get label => name.isEmpty ? id : name;
+  bool get isChoice => choices.isNotEmpty;
+
+  factory ComponentParameterInfo.fromJson(Map<String, dynamic> j) => ComponentParameterInfo(
+        id: j['id'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        unit: j['unit'] as String? ?? '',
+        defaultValue: (j['default'] as num?)?.toDouble() ?? 0,
+        min: (j['min'] as num?)?.toDouble() ?? 0,
+        max: (j['max'] as num?)?.toDouble() ?? 1,
+        step: (j['step'] as num?)?.toDouble() ?? 0,
+        exponential: j['curve'] == 'exponential',
+        smoothingFrames: (j['smoothing_frames'] as num?)?.toInt() ?? 0,
+        automatable: j['automatable'] != false,
+        modulatable: j['modulatable'] != false,
+        midiMappable: j['midi_mappable'] != false,
+        choices: [for (final c in (j['choices'] as List? ?? const [])) c as String],
+      );
+}
+
+class ComponentUiControlInfo {
+  const ComponentUiControlInfo({
+    required this.id,
+    this.label = '',
+    this.parameterId = '',
+    required this.kind,
+    required this.min,
+    required this.max,
+  });
+
+  final String id, label, parameterId;
+  final String kind; // slider, toggle, dropdown, xy_pad, button, curve
+  final double min, max;
+
+  factory ComponentUiControlInfo.fromJson(Map<String, dynamic> j) => ComponentUiControlInfo(
+        id: j['id'] as String? ?? '',
+        label: j['label'] as String? ?? '',
+        parameterId: j['parameter_id'] as String? ?? '',
+        kind: j['kind'] as String? ?? 'slider',
+        min: (j['min'] as num?)?.toDouble() ?? 0,
+        max: (j['max'] as num?)?.toDouble() ?? 1,
+      );
+}
+
+class NativeComponentInfo {
+  const NativeComponentInfo({
+    required this.id,
+    this.name = '',
+    this.version = 1,
+    this.role = 'unspecified',
+    this.latencyFrames = 0,
+    this.tailFrames,
+    this.maxStateBytes = 0,
+    this.customUiId = '',
+    this.ports = const [],
+    this.parameters = const [],
+    this.uiControls = const [],
+  });
+
+  final String id, name;
+  final int version;
+  final String role; // unspecified, instrument, generator, effect, utility, event_processor, analyzer
+  final int latencyFrames;
+  final int? tailFrames; // null: the output may never fall silent
+  final int maxStateBytes;
+  final String customUiId;
+  final List<ComponentPortInfo> ports;
+  final List<ComponentParameterInfo> parameters;
+  final List<ComponentUiControlInfo> uiControls;
+
+  String get label => name.isEmpty ? id : name;
+
+  factory NativeComponentInfo.fromJson(Map<String, dynamic> j) => NativeComponentInfo(
+        id: j['id'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        version: (j['version'] as num?)?.toInt() ?? 1,
+        role: j['role'] as String? ?? 'unspecified',
+        latencyFrames: (j['latency_frames'] as num?)?.toInt() ?? 0,
+        tailFrames: (j['tail_frames'] as num?)?.toInt(),
+        maxStateBytes: (j['max_state_bytes'] as num?)?.toInt() ?? 0,
+        customUiId: j['custom_ui_id'] as String? ?? '',
+        ports: [for (final p in (j['ports'] as List? ?? const [])) ComponentPortInfo.fromJson(p as Map<String, dynamic>)],
+        parameters: [
+          for (final p in (j['parameters'] as List? ?? const [])) ComponentParameterInfo.fromJson(p as Map<String, dynamic>)
+        ],
+        uiControls: [
+          for (final u in (j['ui_controls'] as List? ?? const [])) ComponentUiControlInfo.fromJson(u as Map<String, dynamic>)
+        ],
+      );
+
+  /// Parses the whole caw_engine_components result; an error result gives an empty list.
+  static List<NativeComponentInfo> listFromJson(Map<String, dynamic> j) => j['ok'] == true
+      ? [for (final c in (j['components'] as List? ?? const [])) NativeComponentInfo.fromJson(c as Map<String, dynamic>)]
+      : const [];
+}

@@ -1020,6 +1020,17 @@ bool Engine::unloadNativeComponent(const std::string& id) {
     return nativeModules_.unload(id);
 }
 
+std::string Engine::nativeComponentsJson() {
+    std::lock_guard<std::mutex> lock(ctl_);
+    std::string json = "{\"ok\":true,\"components\":[";
+    bool first = true;
+    for (const ModuleDescriptor* d : nativeModules_.loadedComponents()) {
+        json += (first ? "" : ",") + moduleDescriptorJson(*d);
+        first = false;
+    }
+    return json + "]}";
+}
+
 std::unique_ptr<ModuleProcessor> Engine::createNativeComponent(const std::string& id) {
     std::lock_guard<std::mutex> lock(ctl_);
     return nativeModules_.create(id);

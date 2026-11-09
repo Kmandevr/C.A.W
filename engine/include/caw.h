@@ -111,6 +111,13 @@ enum { CAW_NATIVE_TRUST_BLOCKED = 0, CAW_NATIVE_TRUST_ISOLATED = 1, CAW_NATIVE_T
 CAW_API char* caw_engine_load_component(CawEngine* e, const char* library_path,
                                         const char* expected_component_id, int32_t trust_level);
 CAW_API int32_t caw_engine_unload_component(CawEngine* e, const char* component_id);
+/* The loaded native components' descriptors as JSON (free with caw_free):
+   {"ok":true,"components":[{"id","name","version","role","latency_frames","tail_frames" (null =
+   infinite),"max_state_bytes","custom_ui_id","ports":[{"id","type","input","layout","channels",
+   "summing"}],"parameters":[{"id","name","unit","default","min","max","step","curve",
+   "smoothing_frames","automatable","modulatable","midi_mappable","choices":[...]}],
+   "ui_controls":[{"id","label","parameter_id","kind","min","max"}]}]} */
+CAW_API char* caw_engine_components(CawEngine* e);
 CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);

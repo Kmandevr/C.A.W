@@ -6,6 +6,13 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: Mono stays mono until it becomes stereo; packages; narrower doc coverage
+
+- **Owner decision — mono processing (#17):** a mono source or effect is processed once and copied to both channels while its signal is mono. Once the signal has actually become stereo (a stereo source, pan or width upstream), a mono effect processes each channel separately ("dual mono"), from that point on. Mono work therefore costs one channel until something makes it stereo; there is no silent downmix.
+- **Owner decision — packages:** a package is one of three things, of any size: a library that adds code functionality, a sample/MIDI pack, or built plugins/effects. So one component library may hold several components; the C interface lists them by index (`caw_get_component_v2(index)`).
+- **Owner decision — how Claude works:** follow `CLAUDE.md` for the most part, but stretch the rules or make small assumptions where that is best for the app (never a whole change of direction). Hooks and tooling that cause more problems than they solve may be changed to fit their intended use; first one: the Serena search reminder no longer fires on Bash commands (builds, tests, git), only on Read/Grep. Before building anything that needs UI work, ask the owner how it should look.
+- **Owner decision — doc coverage:** notes that describe plans or the whole system no longer `covers:` all of `engine/`, so a code change requires re-checking only the notes that describe the changed files.
+
 ## 2026-11-09: Claude takes over engine building
 
 - **Owner decision:** Claude builds the engine for now (replacing the 2026-10-31 split where GPT built features and Claude reviewed). GPT's merged work is the baseline where it applies; Claude asks the owner about open questions instead of deciding them.

@@ -184,3 +184,56 @@ TEST(module_registry_copies_the_c_descriptor_and_runs_the_component_through_it) 
     processor.reset();
     CHECK(registry.unload(kComponentId));
 }
+
+TEST(c_api_lists_loaded_component_descriptors_as_json) {
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine || !path) return;
+    char* empty = caw_engine_components(engine);
+    CHECK(empty && std::string(empty) == "{\"ok\":true,\"components\":[]}");
+    caw_free(empty);
+    char* loaded = caw_engine_load_component(engine, path, kComponentId, CAW_NATIVE_TRUST_TRUSTED);
+    caw_free(loaded);
+    char* listed = caw_engine_components(engine);
+    CHECK(listed != nullptr);
+    const std::string json = listed ? listed : "";
+    caw_free(listed);
+    CHECK(json.find("\"id\":\"org.caw.tests.native-loader\"") != std::string::npos);
+    CHECK(json.find("{\"id\":\"audio_in\",\"type\":\"audio\",\"input\":true,\"layout\":\"stereo\",\"channels\":2") != std::string::npos);
+    CHECK(json.find("\"version\":1,\"role\":\"unspecified\"") != std::string::npos);
+    caw_engine_destroy(engine);
+}
+
+TEST(module_registry_loads_a_component_from_a_bundle_by_id) {
+    // The fixture library is a bundle (owner, 2026-11-09): the doubler at index 0, a halver at 1.
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    if (!path) return;
+    ModuleRegistry registry;
+    const ModuleLoadResult half = registry.loadSharedLibrary(path, "org.caw.tests.native-loader.half", NativeModuleTrust::Trusted);
+    CHECK(half.success);
+    CHECK(registry.find("org.caw.tests.native-loader") == nullptr);  // only what was asked for loads
+    const ModuleLoadResult both = registry.loadSharedLibrary(path, kComponentId, NativeModuleTrust::Trusted);
+    CHECK(both.success);
+    CHECK_EQ(registry.size(), 2u);
+    const ModuleLoadResult missing = registry.loadSharedLibrary(path, "org.caw.tests.absent", NativeModuleTrust::Trusted);
+    CHECK(!missing.success);
+    CHECK(missing.error == ModuleLoadError::ComponentIdMismatch);
+    std::unique_ptr<ModuleProcessor> processor = registry.create("org.caw.tests.native-loader.half");
+    CHECK(processor != nullptr);
+    if (!processor) return;
+    CHECK(processor->activate(48000.0, 4));
+    const float inL[4] = {1.0f, -1.0f, 0.5f, 0.0f}, inR[4] = {0.25f, 0.0f, -0.5f, 2.0f};
+    float outL[4] = {}, outR[4] = {};
+    const float* in[2] = {inL, inR};
+    float* out[2] = {outL, outR};
+    AudioProcessBlock block;
+    block.input = {in, 2, 4};
+    block.output = {out, 2, 4};
+    block.frames = 4;
+    CHECK(processor->process(block));
+    CHECK_EQ(outL[0], 0.5f);
+    CHECK_EQ(outR[3], 1.0f);
+}
