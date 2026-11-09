@@ -1,8 +1,7 @@
 // Native module registry: static factories, and components loaded through the C interface (caw_component.h).
 #include "module_registry.h"
 
-#include <cstdio>
-#include <cstdlib>
+#include <charconv>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -74,7 +73,7 @@ struct NativeLibrary {
 // outlives them all; the library is released after it.
 struct LoadedComponent {
     std::shared_ptr<NativeLibrary> library;
-    const CawComponentV2* table = nullptr;
+    const CawComponentV3* table = nullptr;
     CawHost host{};
     std::deque<std::string> strings;  // stable addresses for the string_views below
     std::vector<PortDescriptor> ports;
@@ -130,7 +129,7 @@ bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::
     if ((c.port_count && (!c.ports || c.port_info_size < sizeof(CawPortInfo))) ||
         (c.parameter_count && (!c.parameters || c.parameter_info_size < sizeof(CawParameterInfo))) ||
         (c.ui_control_count && (!c.ui_controls || c.ui_control_info_size < sizeof(CawUiControlInfo)))) {
-        error = "The component descriptor has a missing array or an element stride smaller than v2's.";
+        error = "The component descriptor has a missing array or an element stride smaller than this interface's.";
         return false;
     }
     if (c.port_count > kMaxComponentPorts || c.parameter_count > kMaxComponentParameters ||
@@ -245,7 +244,7 @@ public:
             if (d.ports[p].type == PortType::Audio) (d.ports[p].input ? inChannels_ : outChannels_) = portChannelCount(d.ports[p]);
     }
     ~ComponentProcessor() override {
-        const CawComponentV2& t = *component_->table;
+        const CawComponentV3& t = *component_->table;
         if (active_) t.deactivate(instance_);
         t.destroy(instance_);
     }
@@ -254,7 +253,7 @@ public:
     bool usesProcessPorts() const noexcept override { return portsPath_; }
 
     bool activate(double sampleRate, uint32_t maxFrames) noexcept override {
-        const CawComponentV2& t = *component_->table;
+        const CawComponentV3& t = *component_->table;
         if (active_) t.deactivate(instance_);
         active_ = maxFrames > 0 && t.activate(instance_, sampleRate, maxFrames) == 1;
         maxFrames_ = active_ ? maxFrames : 0;
@@ -418,36 +417,45 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         if (!library->open(path, loadError))
             return {false, ModuleLoadError::LoadFailed, std::string(expectedId), std::move(loadError)};
 
-        const auto entry = library->resolve<CawGetComponentV2Fn>(CAW_COMPONENT_ENTRY_SYMBOL);
+        const auto entry = library->resolve<CawGetComponentV3Fn>(CAW_COMPONENT_ENTRY_SYMBOL);
         if (!entry)
             return {false, ModuleLoadError::MissingEntryPoint, std::string(expectedId),
-                    "The library does not export caw_get_component_v2 (build it with this C.A.W. SDK)."};
+                    "The library does not export caw_get_component_v3 (build it with this C.A.W. SDK)."};
         // A library may be a bundle: take the component with the expected id, checking each entry's
         // version and sizes before reading its id.
-        const CawComponentV2* table = nullptr;
-        bool listsAny = false;
+        const CawComponentV3* table = nullptr;
+        // Entries from another interface version are skipped (a bundle may mix them); the
+        // expected id must appear exactly once among the usable ones.
+        bool listsAny = false, skippedIncompatible = false, duplicate = false;
         for (uint32_t index = 0; index < kMaxComponentsPerLibrary; ++index) {
-            const CawComponentV2* candidate = entry(index);
+            const CawComponentV3* candidate = entry(index);
             if (!candidate) break;
             listsAny = true;
-            if (candidate->struct_size < sizeof(CawComponentV2) || candidate->abi_version != CAW_COMPONENT_ABI_VERSION ||
+            if (candidate->struct_size < sizeof(CawComponentV3) || candidate->abi_version != CAW_COMPONENT_ABI_VERSION ||
                 !candidate->descriptor || candidate->descriptor->struct_size < sizeof(CawComponentDescriptor) ||
-                candidate->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION)
-                return {false, ModuleLoadError::IncompatibleAbi, std::string(expectedId),
-                        "The component uses another C interface version; rebuild it with this C.A.W. SDK."};
+                candidate->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION) {
+                skippedIncompatible = true;
+                continue;
+            }
             const char* id = candidate->descriptor->id;
             if (id && strnlen(id, expectedId.size() + 1) == expectedId.size() &&
                 std::memcmp(id, expectedId.data(), expectedId.size()) == 0) {
-                table = candidate;
-                break;
+                if (table) duplicate = true;
+                else table = candidate;
             }
         }
         if (!listsAny)
             return {false, ModuleLoadError::MissingEntryPoint, std::string(expectedId),
-                    "The library's caw_get_component_v2 lists no components."};
+                    "The library's caw_get_component_v3 lists no components."};
+        if (duplicate)
+            return {false, ModuleLoadError::InvalidDescriptor, std::string(expectedId),
+                    "The library lists this component ID more than once."};
         if (!table)
-            return {false, ModuleLoadError::ComponentIdMismatch, std::string(expectedId),
-                    "The library has no component with the project manifest ID."};
+            return {false, skippedIncompatible ? ModuleLoadError::IncompatibleAbi : ModuleLoadError::ComponentIdMismatch,
+                    std::string(expectedId),
+                    skippedIncompatible ? "The library has no usable component with this ID: some entries use another C "
+                                          "interface version (rebuild with this C.A.W. SDK)."
+                                        : "The library has no component with the project manifest ID."};
         if (!table->create || !table->destroy || !table->activate || !table->deactivate || !table->reset ||
             !table->process || !table->save_state || !table->load_state)
             return {false, ModuleLoadError::IncompleteTable, std::string(expectedId),
@@ -553,15 +561,36 @@ const char* uiKindName(UiControlKind kind) noexcept {
     }
     return "slider";
 }
-std::string quoted(std::string_view text) { return "\"" + jsonEscape(std::string(text)) + "\""; }
-// The shortest text that reads back as the same double (descriptor values are validated finite).
+// Valid UTF-8 kept; any invalid byte becomes U+FFFD, so one component's text can't break the list.
+std::string validUtf8(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    const auto* p = reinterpret_cast<const unsigned char*>(text.data());
+    const size_t n = text.size();
+    for (size_t i = 0; i < n;) {
+        const unsigned char c = p[i];
+        size_t len = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+        bool ok = len != 0 && i + len <= n;
+        for (size_t k = 1; ok && k < len; ++k) ok = (p[i + k] & 0xC0) == 0x80;
+        if (ok && len == 2) ok = c >= 0xC2;                                   // no overlong forms
+        if (ok && len == 3) ok = !(c == 0xE0 && p[i + 1] < 0xA0) && !(c == 0xED && p[i + 1] >= 0xA0);
+        if (ok && len == 4) ok = c <= 0xF4 && !(c == 0xF0 && p[i + 1] < 0x90) && !(c == 0xF4 && p[i + 1] >= 0x90);
+        if (ok) {
+            out.append(text.data() + i, len);
+            i += len;
+        } else {
+            out += "\xEF\xBF\xBD";
+            ++i;
+        }
+    }
+    return out;
+}
+std::string quoted(std::string_view text) { return "\"" + jsonEscape(validUtf8(text)) + "\""; }
+// The shortest text that reads back as the same double, independent of the C locale.
 std::string number(double value) {
     char text[32];
-    for (int digits = 1; digits <= 17; ++digits) {
-        std::snprintf(text, sizeof text, "%.*g", digits, value);
-        if (std::strtod(text, nullptr) == value) break;
-    }
-    return text;
+    const auto result = std::to_chars(text, text + sizeof text, value);
+    return std::string(text, result.ptr);
 }
 }  // namespace
 

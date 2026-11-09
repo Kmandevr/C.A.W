@@ -6,10 +6,16 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: Where the C++ Library lives (#121, architect review)
+
+- **Library kernels are public, header-only SDK code** in `engine/include/caw/library/` (installed with `CAW::SDK`), so built-in components and third-party components use one implementation, compiled into each; only `caw_component.h` crosses a binary boundary. Built-in components are thin wrappers in the engine (to come with #121). The first kernel is the pan law, `caw::lib::constantPowerPan` (`library/stereo.hpp`), which the mixer's track pan now calls.
+- **The deterministic maths is public too** (`engine/include/caw/detmath.hpp`; `engine/src/detmath.h` forwards), moved unchanged: every golden render still matches.
+- **Every component built against the SDK gets the engine's floating-point flags** (`-ffp-contract=off -fno-fast-math`; MSVC `/fp:precise`; clang-cl `/fp:precise /clang:-ffp-contract=off`, since its precise mode still fuses multiply-adds) as `CAW::SDK` interface options, chosen for the consumer's compiler in the installed `CAWConfig.cmake`, so Library code gives the same bits in components as in the engine.
+
 ## 2026-11-09: Mono stays mono until it becomes stereo; packages; narrower doc coverage
 
 - **Owner decision — mono processing (#17):** a mono source or effect is processed once and copied to both channels while its signal is mono. Once the signal has actually become stereo (a stereo source, pan or width upstream), a mono effect processes each channel separately ("dual mono"), from that point on. Mono work therefore costs one channel until something makes it stereo; there is no silent downmix.
-- **Owner decision — packages:** a package is one of three things, of any size: a library that adds code functionality, a sample/MIDI pack, or built plugins/effects. So one component library may hold several components; the C interface lists them by index (`caw_get_component_v2(index)`).
+- **Owner decision — packages:** a package is one of three things, of any size: a library that adds code functionality, a sample/MIDI pack, or built plugins/effects. So one component library may hold several components; the C interface lists them by index (`caw_get_component_v3(index)`; the version went to 3 for that signature change, so a library built against v2 is refused cleanly rather than called with an argument it ignores).
 - **Owner decision — how Claude works:** follow `CLAUDE.md` for the most part, but stretch the rules or make small assumptions where that is best for the app (never a whole change of direction). Hooks and tooling that cause more problems than they solve may be changed to fit their intended use; first one: the Serena search reminder no longer fires on Bash commands (builds, tests, git), only on Read/Grep. Before building anything that needs UI work, ask the owner how it should look.
 - **Owner decision — doc coverage:** notes that describe plans or the whole system no longer `covers:` all of `engine/`, so a code change requires re-checking only the notes that describe the changed files.
 

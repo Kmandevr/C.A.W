@@ -113,6 +113,8 @@ char* caw_engine_components(CawEngine* e) try {
     return dup(e->engine->nativeComponentsJson());
 } catch (const std::bad_alloc&) {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"components\":[]}");
+} catch (...) {
+    return dup("{\"ok\":false,\"error\":\"native component listing failed\",\"components\":[]}");
 }
 
 int32_t caw_engine_unload_component(CawEngine* e, const char* component_id) try {

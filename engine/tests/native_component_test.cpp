@@ -131,7 +131,7 @@ TEST(module_registry_loads_native_components_only_after_explicit_trust) {
 
 TEST(module_registry_refuses_a_library_without_the_v2_entry_point) {
     // A library built against the old C++ entry points (or not a component) exports no
-    // caw_get_component_v2: refused before anything of it runs.
+    // caw_get_component_v3: refused before anything of it runs.
     ModuleRegistry registry;
     const ModuleLoadResult old =
         registry.loadSharedLibrary(CAW_TEST_NO_ENTRY_COMPONENT_PATH, kComponentId, NativeModuleTrust::Trusted);
