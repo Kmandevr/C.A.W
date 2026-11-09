@@ -25,7 +25,7 @@ updated: 2026-11-09
 
 - **A C++ workspace of its own** (the ninth, docked like the others): a side-drawer file tree, the editor at full width and Build. A new effect always starts from one blank pass-through template.
 - **Errors:** red marks on their lines and the first error on one line under the code; a tap lists them all, and a tap on one jumps to it.
-- **Trust:** effects the user built on this device are Trusted without a prompt. Effects from elsewhere ask Trust or Block once, remembered per effect and changeable in its settings.
+- **Trust:** effects the user built on this device are Trusted without a prompt. Effects from elsewhere ask Trust or Block once, remembered per effect and changeable in its settings. "Built here" means sources the user created or edited here (a shared project's sources count as from elsewhere until the user edits them). A choice is remembered for exactly that code (a SHA-256 fingerprint of the sources or library), so changed code from elsewhere asks again; `NativeTrustStore` holds it, app-private.
 - **A test strip under the editor:** a source (a track, a loop, a sine, noise), Play and the effect's generated knobs. Build swaps the new version in while it plays.
 - **Using it:** "+ C++ effect" in a track's or the master's effect chain lists the built effects; a placed effect is a card with knobs generated from its parameters.
 
