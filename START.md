@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `e2e2320f7bfa242d6a3a6c761cb0f37cac94b56e` on the default branch at 2026-11-09T17:11:35Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `89346d3b329c21fa6a317e029ac96f5c05865fc3` on the default branch at 2026-11-09T19:18:03Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`e2e2320`).
+1. The commit this file was generated from (`89346d3`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -206,7 +206,7 @@ Don't read every file. Go deeper only when the layer above doesn't answer, and n
 
 ## Workflow
 
-**Roles (owner, 2026-10-31):** GPT does long-running optimisation and feature work; Claude's main job is to check that GPT's work is implemented correctly and to fix or report what it finds when asked ([docs/decisions.md](docs/decisions.md)). Treat this as a workflow preference, not a product or architecture requirement.
+**Roles (owner, 2026-11-09):** Claude builds the engine for now, using GPT's work as the baseline where it applies, and asks the owner about open questions ([docs/decisions.md](docs/decisions.md)). Treat this as a workflow preference, not a product or architecture requirement.
 
 
 One-file changes: just do them. Every file (code, notes, Claude config) has one purpose; change only the files the task needs. Independent review goes to an agent in `.claude/agents/` (`architect` before structural changes, the reviewers after), asking for findings only. Changes across areas: the saved workflow `change` (plan, build in parallel on disjoint files, verify, update docs; never commits).
