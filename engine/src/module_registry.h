@@ -28,7 +28,7 @@ enum class ModuleLoadError : uint8_t {
     InvalidArgument,
     LoadFailed,
     MissingEntryPoint,   // no caw_get_component_v3 export, or it returned nothing
-    IncompatibleAbi,     // another C interface version, or structs smaller than v2's
+    IncompatibleAbi,     // another C interface version, or structs smaller than this interface's
     IncompleteTable,     // a required function pointer is missing
     InvalidDescriptor,
     ComponentIdMismatch,

@@ -23,9 +23,19 @@ target_compile_features(caw_sdk INTERFACE cxx_std_20)
 # The SDK's deterministic maths (caw/detmath.hpp, caw/library/) gives the same bits on every
 # platform only without fused multiply-add contraction or fast-math, so every component built
 # against the SDK gets the engine's floating-point flags too.
+# Clang is either clang or clang-cl (MSVC-style flags, which ignore -ffp-contract and still fuse
+# multiply-adds under /fp:precise), so its flags are chosen from the consuming build's frontend:
+# here for the build tree, and in CAWConfig.cmake for installed consumers.
 target_compile_options(caw_sdk INTERFACE
-  "$<$<CXX_COMPILER_ID:MSVC>:/fp:precise>"
-  "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffp-contract=off;-fno-fast-math>")
+  "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/fp:precise>"
+  "$<$<COMPILE_LANG_AND_ID:CXX,GNU,AppleClang>:-ffp-contract=off;-fno-fast-math>")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:/fp:precise;/clang:-ffp-contract=off>")
+  else()
+    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:-ffp-contract=off;-fno-fast-math>")
+  endif()
+endif()
 set_target_properties(caw_sdk PROPERTIES EXPORT_NAME SDK)
 
 # Install the SDK package only when engine is configured as the top-level project.
@@ -63,9 +73,13 @@ if(CAW_INSTALL_SDK)
   )
 endif()
 
-# Determinism: no fast-math and no fused multiply-add contraction (MSVC /fp:precise never contracts), so every platform rounds alike.
+# Determinism: no fast-math and no fused multiply-add contraction, so every platform rounds alike.
+# MSVC's /fp:precise never contracts; clang-cl's does, so it also gets /clang:-ffp-contract=off.
 if(MSVC)
   set(CAW_FLAGS /W4 /fp:precise /utf-8 /EHsc)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    list(APPEND CAW_FLAGS /clang:-ffp-contract=off)
+  endif()
 else()
   set(CAW_FLAGS -Wall -Wextra -ffp-contract=off -fno-fast-math)
 endif()

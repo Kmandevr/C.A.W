@@ -80,24 +80,17 @@ constexpr double kLn2 = 0.69314718055994530942;
 constexpr double kHalfPi = 1.57079632679489661923;
 
 }  // namespace detail
-using detail::sinPoly;
-using detail::kTwoPiHi;
-using detail::kTwoPiLo;
-using detail::kLn2Hi;
-using detail::kLn2Lo;
-using detail::kLn2;
-using detail::kHalfPi;
 
 inline double detSin(double x) {
     if (!std::isfinite(x)) return 0.0;
     const double k = std::floor(x / kTwoPi + 0.5);
-    double r = (x - k * kTwoPiHi) - k * kTwoPiLo;  // now in [-pi, pi]
-    if (r > kHalfPi) r = kPi - r;
-    else if (r < -kHalfPi) r = -kPi - r;
-    return sinPoly(r);
+    double r = (x - k * detail::kTwoPiHi) - k * detail::kTwoPiLo;  // now in [-pi, pi]
+    if (r > detail::kHalfPi) r = kPi - r;
+    else if (r < -detail::kHalfPi) r = -kPi - r;
+    return detail::sinPoly(r);
 }
 
-inline double detCos(double x) { return detSin(x + kHalfPi); }
+inline double detCos(double x) { return detSin(x + detail::kHalfPi); }
 
 inline double detTan(double x) {
     const double c = detCos(x);
@@ -108,8 +101,8 @@ inline double detExp(double x) {
     if (std::isnan(x)) return 0.0;
     if (x > 709.0) x = 709.0;
     if (x < -745.0) return 0.0;
-    const double k = std::floor(x / kLn2 + 0.5);
-    const double r = (x - k * kLn2Hi) - k * kLn2Lo;  // |r| <= 0.35
+    const double k = std::floor(x / detail::kLn2 + 0.5);
+    const double r = (x - k * detail::kLn2Hi) - k * detail::kLn2Lo;  // |r| <= 0.35
     double p = 1.0 / 6227020800.0;                    // 1/13!
     p = p * r + 1.0 / 479001600.0;
     p = p * r + 1.0 / 39916800.0;
@@ -141,7 +134,7 @@ inline double detLog(double x) {
     double p = 1.0 / 23.0;
     for (int d = 21; d >= 3; d -= 2) p = p * s2 + 1.0 / d;
     p = p * s2 + 1.0;
-    return static_cast<double>(e) * kLn2 + 2.0 * s * p;
+    return static_cast<double>(e) * detail::kLn2 + 2.0 * s * p;
 }
 
 inline double detPow(double x, double y) {
