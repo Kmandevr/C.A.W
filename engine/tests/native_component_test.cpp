@@ -114,6 +114,7 @@ TEST(module_registry_loads_native_components_only_after_explicit_trust) {
         float outputLeft[4] = {};
         float outputRight[4] = {};
         const StereoProcessBlock block{inputLeft, inputRight, outputLeft, outputRight, 4, 48000.0};
+        CHECK(instance->activate(48000.0, 4));  // hosts prepare an instance before its first block
         instance->process(block);
         CHECK_NEAR(outputLeft[0], 0.5, 1e-7);
         CHECK_NEAR(outputLeft[1], -1.0, 1e-7);
@@ -126,4 +127,60 @@ TEST(module_registry_loads_native_components_only_after_explicit_trust) {
     CHECK(registry.unload(kComponentId));
     CHECK(registry.find(kComponentId) == nullptr);
     CHECK_EQ(registry.size(), 0u);
+}
+
+TEST(module_registry_refuses_a_library_without_the_v2_entry_point) {
+    // A library built against the old C++ entry points (or not a component) exports no
+    // caw_get_component_v2: refused before anything of it runs.
+    ModuleRegistry registry;
+    const ModuleLoadResult old =
+        registry.loadSharedLibrary(CAW_TEST_NO_ENTRY_COMPONENT_PATH, kComponentId, NativeModuleTrust::Trusted);
+    CHECK(!old.success);
+    CHECK(old.error == ModuleLoadError::MissingEntryPoint);
+    CHECK(registry.find(kComponentId) == nullptr);
+}
+
+TEST(module_registry_copies_the_c_descriptor_and_runs_the_component_through_it) {
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    if (!path) return;
+    ModuleRegistry registry;
+    const ModuleLoadResult loaded = registry.loadSharedLibrary(path, kComponentId, NativeModuleTrust::Trusted);
+    CHECK(loaded.success);
+    if (!loaded.success) return;
+    const ModuleDescriptor* d = registry.find(kComponentId);
+    CHECK(d != nullptr);
+    if (!d) return;
+    CHECK(d->id == kComponentId);
+    CHECK_EQ(d->portCount, 2u);
+    CHECK(d->ports[0].layout == ChannelLayout::Stereo && d->ports[0].input);
+    CHECK(d->ports[1].layout == ChannelLayout::Stereo && !d->ports[1].input);
+    CHECK(validateModuleDescriptor(*d) == ModuleValidation::Ok);
+
+    std::unique_ptr<ModuleProcessor> processor = registry.create(kComponentId);
+    CHECK(processor != nullptr);
+    if (!processor) return;
+    const float inL[4] = {0.1f, 0.2f, -0.3f, 0.4f}, inR[4] = {0.5f, -0.5f, 0.25f, 0.0f};
+    float outL[4] = {}, outR[4] = {};
+    const float* in[2] = {inL, inR};
+    float* out[2] = {outL, outR};
+    AudioProcessBlock block;
+    block.input = {in, 2, 4};
+    block.output = {out, 2, 4};
+    block.frames = 4;
+    CHECK(!processor->process(block));  // not activated yet: refused, never run
+    CHECK(processor->activate(48000.0, 64));
+    CHECK(processor->process(block));
+    CHECK_EQ(outL[2], -0.6f);  // the fixture doubles its input
+    CHECK_EQ(outR[0], 1.0f);
+    const float* mono[1] = {inL};
+    AudioProcessBlock wrongChannels = block;
+    wrongChannels.input = {mono, 1, 4};  // one channel into a stereo port
+    CHECK(!processor->process(wrongChannels));
+    CHECK(processor->activate(48000.0, 2));  // prepared for 2-frame blocks now
+    CHECK(!processor->process(block));        // a 4-frame block is refused, never run
+    CHECK(!registry.unload(kComponentId));  // an instance still holds it
+    processor->deactivate();
+    processor.reset();
+    CHECK(registry.unload(kComponentId));
 }

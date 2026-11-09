@@ -8,6 +8,17 @@ namespace caw {
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
     if (d.id.empty()) return ModuleValidation::MissingId;
     if (d.apiVersion != 1) return ModuleValidation::UnsupportedApiVersion;
+    if (d.version == 0) return ModuleValidation::InvalidModuleVersion;
+    switch (d.role) {
+        case ModuleRole::Unspecified:
+        case ModuleRole::Instrument:
+        case ModuleRole::Generator:
+        case ModuleRole::Effect:
+        case ModuleRole::Utility:
+        case ModuleRole::EventProcessor:
+        case ModuleRole::Analyzer: break;
+        default: return ModuleValidation::InvalidModuleRole;
+    }
     if (d.portCount && !d.ports) return ModuleValidation::MissingPortArray;
     if (d.parameterCount && !d.parameters) return ModuleValidation::MissingParameterArray;
 
@@ -69,6 +80,20 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
                 break;
             default: return ModuleValidation::InvalidParameterCurve;
         }
+        if (p.choiceCount != 0) {
+            // Labels for minimum, minimum + 1, ..., maximum (so the range is small and exact).
+            // Bounded so every value is an exact double and the label checks stay cheap; on the
+            // linear curve so modulation and snapping step evenly through the choices.
+            if (!p.choices || p.choiceCount > kMaxParameterChoices || p.step != 1.0 ||
+                p.curve != ParameterCurve::Linear || std::floor(p.minimum) != p.minimum ||
+                std::fabs(p.minimum) > kMaxChoiceValue || std::fabs(p.maximum) > kMaxChoiceValue ||
+                p.maximum - p.minimum + 1.0 != static_cast<double>(p.choiceCount))
+                return ModuleValidation::InvalidParameterChoices;
+            for (uint32_t c = 0; c < p.choiceCount; ++c)
+                if (p.choices[c].empty()) return ModuleValidation::EmptyParameterChoice;
+        } else if (p.choices) {
+            return ModuleValidation::InvalidParameterChoices;
+        }
         for (uint32_t j = 0; j < i; ++j)
             if (d.parameters[j].id == p.id) return ModuleValidation::DuplicateParameterId;
     }
@@ -109,7 +134,9 @@ bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b
         return false;
     if (a.id != b.id || a.apiVersion != b.apiVersion ||
         a.portCount != b.portCount || a.parameterCount != b.parameterCount ||
-        a.uiControlCount != b.uiControlCount || a.customUiId != b.customUiId)
+        a.uiControlCount != b.uiControlCount || a.customUiId != b.customUiId ||
+        a.version != b.version || a.role != b.role || a.latencyFrames != b.latencyFrames ||
+        a.tailFrames != b.tailFrames || a.maxStateBytes != b.maxStateBytes)
         return false;
 
     for (uint32_t i = 0; i < a.portCount; ++i) {
@@ -124,8 +151,9 @@ bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b
         const ParameterDescriptor& y = b.parameters[i];
         if (x.id != y.id || x.defaultValue != y.defaultValue || x.minimum != y.minimum ||
             x.maximum != y.maximum || x.automatable != y.automatable || x.curve != y.curve ||
-            x.step != y.step || x.smoothingFrames != y.smoothingFrames)
-            return false;
+            x.step != y.step || x.smoothingFrames != y.smoothingFrames ||
+            x.modulatable != y.modulatable || x.midiMappable != y.midiMappable || x.choiceCount != y.choiceCount)
+            return false;  // unit, name and choice labels are display text: not part of the match
     }
     for (uint32_t i = 0; i < a.uiControlCount; ++i) {
         const UiControlDescriptor& x = a.uiControls[i];

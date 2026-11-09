@@ -78,6 +78,8 @@ struct EventOutput {
 // Exponential needs minimum > 0 and suits frequencies and times.
 enum class ParameterCurve : uint8_t { Linear, Exponential };
 inline constexpr uint32_t kMaxParameterSmoothingFrames = 1u << 20;  // about 22 s at 48 kHz
+inline constexpr uint32_t kMaxParameterChoices = 4096;     // labels per choice parameter
+inline constexpr double kMaxChoiceValue = 2147483648.0;    // |minimum| and |maximum| of a choice parameter (2^31)
 struct ParameterDescriptor {
     std::string_view id;
     double defaultValue = 0.0;
@@ -88,6 +90,18 @@ struct ParameterDescriptor {
     double step = 0.0;             // > 0: values snap to minimum + k * step; 0: continuous
     uint32_t smoothingFrames = 0;  // a manual or MIDI change ramps linearly over this many frames (at most kMaxParameterSmoothingFrames)
     std::string_view unit;         // display only ("Hz", "dB"); never interpreted or matched
+    // Display name; empty shows the id.
+    std::string_view name;
+    // A choice parameter (a dropdown or a switch): `choiceCount` labels for the integer values
+    // minimum, minimum + 1, ..., maximum. Requires step 1, an integer minimum and
+    // maximum - minimum + 1 == choiceCount, the linear curve, at most kMaxParameterChoices labels and
+    // |minimum|, |maximum| <= kMaxChoiceValue; every label non-empty. 0 = a plain numeric parameter.
+    const std::string_view* choices = nullptr;
+    uint32_t choiceCount = 0;
+    // What may drive the parameter besides a manual value. Hosts refuse a modulation link, an
+    // automation lane (`automatable`, above) or a MIDI CC mapping the parameter does not allow.
+    bool modulatable = true;
+    bool midiMappable = true;
 };
 enum class UiControlKind : uint8_t { Slider, Toggle, Dropdown, XYPad, Button, Curve };
 struct UiControlDescriptor {
@@ -98,9 +112,15 @@ struct UiControlDescriptor {
     double minimum = 0.0;
     double maximum = 1.0;
 };
+// What a component is for: where browsers list it and how a host may insert it. A component
+// that fits several roles picks its main one.
+enum class ModuleRole : uint8_t { Unspecified, Instrument, Generator, Effect, Utility, EventProcessor, Analyzer };
+// tailFrames value of a component whose output may never fall silent after its input does
+// (an oscillator, a feedback delay at full feedback).
+inline constexpr uint32_t kInfiniteTail = UINT32_MAX;
 struct ModuleDescriptor {
-    std::string_view id;
-    uint32_t apiVersion = 1;
+    std::string_view id;           // stable, unique identity (reverse-DNS style, "org.example.delay")
+    uint32_t apiVersion = 1;       // the contract version this descriptor follows
     const PortDescriptor* ports = nullptr;
     uint32_t portCount = 0;
     const ParameterDescriptor* parameters = nullptr;
@@ -108,14 +128,35 @@ struct ModuleDescriptor {
     const UiControlDescriptor* uiControls = nullptr;
     uint32_t uiControlCount = 0;
     std::string_view customUiId;
+    std::string_view name;         // display name; empty shows the id
+    uint32_t version = 1;          // the component's own version (at least 1), separate from apiVersion
+    ModuleRole role = ModuleRole::Unspecified;
+    uint32_t latencyFrames = 0;    // processing delay a host compensates for, in frames
+    uint32_t tailFrames = 0;       // frames of output after the input goes silent, or kInfiniteTail
+    uint32_t maxStateBytes = 0;    // most bytes saveState writes; hosts size the buffer from it
 };
+// Audio ports with an explicit layout. Stereo is the ordinary default for audio in and out;
+// a layout change between connected ports is never implicit (the graph refuses a mismatch).
+constexpr PortDescriptor audioPort(std::string_view id, bool input, ChannelLayout layout = ChannelLayout::Stereo,
+                                   uint32_t discreteChannels = 0) noexcept {
+    PortDescriptor port;
+    port.id = id;
+    port.type = PortType::Audio;
+    port.layout = layout;
+    port.input = input;
+    port.channelCount = layout == ChannelLayout::Discrete ? discreteChannels : 0;
+    return port;
+}
+constexpr PortDescriptor stereoInput(std::string_view id) noexcept { return audioPort(id, true); }
+constexpr PortDescriptor stereoOutput(std::string_view id) noexcept { return audioPort(id, false); }
 enum class ModuleValidation : uint8_t {
     Ok, MissingId, UnsupportedApiVersion, MissingPortArray, MissingParameterArray,
     EmptyPortId, DuplicatePortId, InvalidPortType, InvalidPortLayout, EmptyParameterId,
     DuplicateParameterId, InvalidParameterRange, DefaultOutsideRange, MissingUiControlArray,
     EmptyUiControlId, InvalidUiControlKind, DuplicateUiControlId, UiControlMissingParameter,
     InvalidUiControlRange, TooManyChannels, InvalidSummingPort, InvalidPortDefault,
-    InvalidParameterStep, InvalidParameterCurve, InvalidParameterSmoothing
+    InvalidParameterStep, InvalidParameterCurve, InvalidParameterSmoothing,
+    InvalidModuleVersion, InvalidModuleRole, InvalidParameterChoices, EmptyParameterChoice
 };
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& descriptor) noexcept;
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept;
@@ -224,6 +265,13 @@ public:
         process(stereo);
         return stereoImplemented_;
     }
+    // Control thread, before the first block and again after a deactivate: prepare for this sample
+    // rate and blocks of at most maxFrames (allocate here, never in process). False refuses the
+    // instance. Hosts call deactivate before activating again and before destroying it.
+    virtual bool activate(double sampleRate, uint32_t maxFrames) noexcept {
+        (void)sampleRate; (void)maxFrames; return true;
+    }
+    virtual void deactivate() noexcept {}
     virtual void reset() noexcept {}
     virtual uint32_t stateVersion() const noexcept { return 1; }
     virtual bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept {
@@ -237,3 +285,24 @@ private:
     bool stereoImplemented_ = true;  // cleared only by the default stereo overload
 };
 }  // namespace caw
+
+// The C interface (caw_component.h) is the binary boundary; these C++ types must match it exactly,
+// so the SDK and host can pass process blocks across it without converting each field.
+#include <cstddef>
+#include <type_traits>
+#include "../caw_component.h"
+namespace caw::detail {
+static_assert(static_cast<uint32_t>(PortType::Event) == CAW_PORT_EVENT);
+static_assert(static_cast<uint32_t>(ChannelLayout::Stereo) == CAW_LAYOUT_STEREO);
+static_assert(static_cast<uint32_t>(ChannelLayout::Discrete) == CAW_LAYOUT_DISCRETE);
+static_assert(static_cast<uint32_t>(ModuleRole::Analyzer) == CAW_ROLE_ANALYZER);
+static_assert(static_cast<uint32_t>(ParameterCurve::Exponential) == CAW_CURVE_EXPONENTIAL);
+static_assert(static_cast<uint32_t>(UiControlKind::Curve) == CAW_UI_CURVE);
+static_assert(static_cast<uint32_t>(EventKind::Midi) == CAW_EVENT_MIDI);
+static_assert(sizeof(Event) == sizeof(CawEvent) && offsetof(Event, frame) == offsetof(CawEvent, frame) &&
+              offsetof(Event, kind) == offsetof(CawEvent, kind) && offsetof(Event, flags) == offsetof(CawEvent, flags) &&
+              offsetof(Event, noteId) == offsetof(CawEvent, note_id) && offsetof(Event, data) == offsetof(CawEvent, data));
+static_assert(kInfiniteTail == CAW_INFINITE_TAIL);
+static_assert(alignof(Event) == alignof(CawEvent) && std::is_standard_layout_v<Event> &&
+              std::is_trivially_copyable_v<Event> && std::is_standard_layout_v<CawEvent>);
+}  // namespace caw::detail

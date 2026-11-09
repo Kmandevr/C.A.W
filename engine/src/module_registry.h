@@ -27,9 +27,9 @@ enum class ModuleLoadError : uint8_t {
     IsolationUnavailable,
     InvalidArgument,
     LoadFailed,
-    MissingDescriptor,
-    MissingFactory,
-    MissingDestroy,
+    MissingEntryPoint,   // no caw_get_component_v2 export, or it returned nothing
+    IncompatibleAbi,     // another C interface version, or structs smaller than v2's
+    IncompleteTable,     // a required function pointer is missing
     InvalidDescriptor,
     ComponentIdMismatch,
     DuplicateId,
@@ -43,12 +43,14 @@ struct ModuleLoadResult {
 };
 
 struct NativeLibrary;
+struct LoadedComponent;  // a component's C table plus the engine-owned copy of its descriptor
 
 struct ModuleRegistration {
     const ModuleDescriptor* descriptor = nullptr;
     ModuleFactory factory = nullptr;
     ModuleDestroy destroy = nullptr;
     std::shared_ptr<NativeLibrary> library;
+    std::shared_ptr<const LoadedComponent> component;  // set for dynamically loaded components
 };
 
 class ModuleRegistry {
@@ -57,11 +59,15 @@ public:
     bool add(const ModuleDescriptor& descriptor, ModuleFactory factory, ModuleDestroy destroy = nullptr);
 
     // Trust is mandatory. Blocked never opens the library; Isolated is rejected until a real process sandbox exists.
+    // The library must export caw_get_component_v2 (caw_component.h); its descriptor is copied into
+    // engine-owned storage and validated before anything else of it runs.
     ModuleLoadResult loadSharedLibrary(const std::string& path, std::string_view expectedId, NativeModuleTrust trust);
     // A dynamic library cannot unload while a created processor still holds it.
     bool unload(std::string_view id);
 
     const ModuleDescriptor* find(std::string_view id) const noexcept;
+    // A new instance. A loaded component's instance is not yet activated: the host calls
+    // activate(sampleRate, maxFrames) before processing and destroys it off the audio thread.
     std::unique_ptr<ModuleProcessor> create(std::string_view id) const noexcept;
     std::size_t size() const noexcept { return registrations_.size(); }
 

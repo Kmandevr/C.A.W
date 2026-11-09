@@ -6,6 +6,11 @@ updated: 2026-11-09
 
 # Decisions
 
+## 2026-11-09: Claude takes over engine building
+
+- **Owner decision:** Claude builds the engine for now (replacing the 2026-10-31 split where GPT built features and Claude reviewed). GPT's merged work is the baseline where it applies; Claude asks the owner about open questions instead of deciding them.
+- **Owner decisions (same day):** GPT is paused on the engine (Claude only). Work order stays #120 → #17 → #121 → #122 (issue #123), with the stable C interface built as part of #120. Claude merges its own engine PRs once CI is green and its independent audio review finds nothing blocking. The stereo-only C interface v1 (`caw_module_sdk.h`) is replaced by a full v2 with no v1 compatibility.
+
 ## 2026-11-09: Two visual workspaces and conditional signal/event routing
 
 - **Owner decision — song workflow:** keep the ordinary arrangement, piano roll, clips and conventional mixer workflow for making songs. Visual routing is an additional workspace, not a replacement for arranging or note editing.
@@ -174,7 +179,7 @@ updated: 2026-11-09
 
 ## 2026-11-03: Seeded randomness everywhere, per project and per module
 
-- **Every random source is seeded (owner).** Any randomness in `.caw` modules, built-in nodes and native plugins comes from a seed, so the same project gives the same result every time. **[Fact, 2026-11-03]** `.caw` already works this way for `rand`, `randi`, `hash`, `noise` and pattern note probability, all from the single project seed; there is no per-module seed, and the native SDK (`caw_module_sdk.h` v1) passes plugins no seed and offers no random source.
+- **Every random source is seeded (owner).** Any randomness in `.caw` modules, built-in nodes and native plugins comes from a seed, so the same project gives the same result every time. **[Fact, 2026-11-03]** `.caw` already works this way for `rand`, `randi`, `hash`, `noise` and pattern note probability, all from the single project seed; there is no per-module seed, and the component C interface v2 (`caw_component.h`, 2026-11-09) passes components no seed and offers no random source yet (a seed would be a host extension).
 - **Per-module seeds follow the project unless pinned (owner).** By default a module's seed is derived from the project seed with a per-module offset, so modules differ but all move when the project seed changes. A module can be pinned to its own seed, which then ignores project seed changes.
 - **Seeding can be switched off per module or per project (owner).** Off means fresh randomness on each play or export.
 - **[Proposal]** When seeding is off, the seed actually used is still recorded (shown and saved with each export), so a take you like can be pinned and reproduced; exports with seeding on stay bit-identical across platforms.

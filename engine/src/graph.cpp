@@ -1077,6 +1077,8 @@ GraphError GraphExecutor::setModulationLinks(const ParameterLink* links, uint32_
             link.parameter >= blocks_[link.destinationNode].paramCount) return GraphError::PortIndexOutOfRange;
         const Port& from = ports_[nodePortBase_[link.sourceNode] + link.sourcePort];
         if (from.input || from.type != PortType::Modulation) return GraphError::PortTypeMismatch;
+        if (!resolvers_[blocks_[link.destinationNode].paramBase + link.parameter].descriptor().modulatable)
+            return GraphError::ParameterNotModulatable;
         if (position[link.sourceNode] >= position[link.destinationNode]) return GraphError::Cycle;
         if (++perParameter[blocks_[link.destinationNode].paramBase + link.parameter] > kMaxParameterLinks)
             return GraphError::InvalidParameterLink;
@@ -1158,6 +1160,8 @@ GraphError GraphExecutor::setCcMappings(const ParameterCcMapping* mappings, uint
         if (m.node >= blocks_.size()) return GraphError::NodeIndexOutOfRange;
         if (m.parameter >= blocks_[m.node].paramCount) return GraphError::PortIndexOutOfRange;
         if (m.group >= 16 || m.channel >= 16 || m.controller >= 128) return GraphError::InvalidCcMapping;
+        if (!resolvers_[blocks_[m.node].paramBase + m.parameter].descriptor().midiMappable)
+            return GraphError::ParameterNotMidiMappable;
         uint32_t& key = keys[blocks_[m.node].paramBase + m.parameter];
         if (key != kNoCc) return GraphError::InvalidCcMapping;
         key = static_cast<uint32_t>(m.group) << 11 | static_cast<uint32_t>(m.channel) << 7 | m.controller;
@@ -1178,6 +1182,8 @@ GraphError GraphExecutor::setAutomationLanes(const ParameterLane* lanes, uint32_
         if (lane.node >= blocks_.size()) return GraphError::NodeIndexOutOfRange;
         if (lane.parameter >= blocks_[lane.node].paramCount) return GraphError::PortIndexOutOfRange;
         if (!lane.points || lane.pointCount == 0) return GraphError::InvalidAutomationLane;
+        if (!resolvers_[blocks_[lane.node].paramBase + lane.parameter].descriptor().automatable)
+            return GraphError::ParameterNotAutomatable;
         for (uint32_t i = 0; i < lane.pointCount; ++i) {
             const AutomationPoint& point = lane.points[i];
             if (!std::isfinite(point.step) || !std::isfinite(point.value) || (i && point.step < lane.points[i - 1].step))
