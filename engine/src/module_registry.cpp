@@ -273,7 +273,7 @@ public:
         if ((block.input.channelCount && (audioIn_.empty() || block.input.channelCount != inChannels_)) ||
             (block.output.channelCount && (audioOut_.empty() || block.output.channelCount != outChannels_)))
             return false;
-        CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount);
+        CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount, block.transport);
         if (!audioIn_.empty() && block.input.channelCount) {
             audioIn_[0] = {block.input.channels, block.input.channelCount, block.input.frames};
             c.audio_in = audioIn_.data();
@@ -303,7 +303,7 @@ public:
             block.audioOutCount > audioOut_.size() ||
             block.eventInCount > eventIn_.size() || block.eventOutCount > eventOut_.size())
             return false;
-        CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount);
+        CawProcessBlock c = baseBlock(block.frames, block.sampleRate, block.parameters, block.parameterCount, block.transport);
         for (uint32_t k = 0; k < block.audioInCount; ++k)
             audioIn_[k] = {block.audioIn[k].channels, block.audioIn[k].channelCount, block.audioIn[k].frames};
         for (uint32_t k = 0; k < block.audioOutCount; ++k)
@@ -361,7 +361,7 @@ public:
 
 private:
     CawProcessBlock baseBlock(uint32_t frames, double sampleRate, const ParameterValue* parameters,
-                              uint32_t parameterCount) noexcept {
+                              uint32_t parameterCount, const Transport* transport) noexcept {
         CawProcessBlock c{};
         c.struct_size = sizeof(CawProcessBlock);
         c.frames = frames;
@@ -371,6 +371,11 @@ private:
         for (uint32_t k = 0; k < count; ++k) parameters_[k] = {parameters[k].samples, parameters[k].value};
         c.parameters = parameters_.data();
         c.parameter_count = count;
+        if (transport) {
+            transport_ = {sizeof(CawTransport), transport->playing ? CAW_TRANSPORT_PLAYING : 0u, transport->tempo,
+                          transport->beat, transport->beatsPerBar, 0};
+            c.transport = &transport_;
+        }
         return c;
     }
 
@@ -381,6 +386,7 @@ private:
     uint32_t maxFrames_ = 0;  // the block size the component prepared for at activate
     uint32_t inChannels_ = 0, outChannels_ = 0;  // the single audio in/out port's channels (non-port path)
     mutable uint32_t stateVersion_ = 1;  // the version the component last saved with
+    CawTransport transport_{};           // the block's transport as the C interface carries it
     std::vector<CawConstAudio> audioIn_;
     std::vector<CawAudio> audioOut_;
     std::vector<CawEventInput> eventIn_;

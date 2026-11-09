@@ -278,6 +278,8 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     if (m == 0 || m > kMaxFrames) return;
     const bool newPlay = time && time->playEpoch != playEpoch_;
     if (time) playEpoch_ = time->playEpoch;
+    Transport transport;  // what each component sees of the song (none while stopped)
+    if (time) transport = {time->tempo, static_cast<double>(time->start) / time->stepLength / 4.0, time->beatsPerBar, true};
     const double bypassStep = 1.0 / std::max(1.0, kBypassSeconds * sampleRate);
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         Entry& e = *entries_[index];
@@ -324,6 +326,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         block.sampleRate = sampleRate;
         block.parameters = count ? e.values.data() : nullptr;
         block.parameterCount = static_cast<uint32_t>(count);
+        block.transport = time ? &transport : nullptr;
         if (!e.processor->process(block)) {
             std::copy_n(stageL_.data(), m, left);
             std::copy_n(stageR_.data(), m, right);

@@ -189,6 +189,13 @@ struct ChannelBufferView {
 // is its per-channel capacity and must be at least `frames`; a view with no channels needs none.
 // `parameters` lists the module's resolved parameters in descriptor order (parameterCount equals
 // the descriptor's parameterCount when a host resolves them; 0 when it does not).
+// The host's transport for a block (null while stopped): tempo and song position, to sync to the song.
+struct Transport {
+    double tempo = 120.0;      // beats (quarter notes) per minute
+    double beat = 0.0;         // song position of the block's first frame, in beats
+    uint32_t beatsPerBar = 4;
+    bool playing = false;
+};
 struct AudioProcessBlock {
     ConstChannelBufferView input;
     ChannelBufferView output;
@@ -196,6 +203,7 @@ struct AudioProcessBlock {
     double sampleRate = 48000.0;
     const ParameterValue* parameters = nullptr;
     uint32_t parameterCount = 0;
+    const Transport* transport = nullptr;
 };
 inline bool audioProcessBlockValid(const AudioProcessBlock& block) noexcept {
     if (block.frames == 0 || !block.input.valid() || !block.output.valid()) return false;
@@ -229,6 +237,7 @@ struct ProcessBlock {
     uint32_t eventOutCount = 0;
     const ParameterValue* parameters = nullptr;  // as in AudioProcessBlock
     uint32_t parameterCount = 0;
+    const Transport* transport = nullptr;        // as in AudioProcessBlock
 };
 struct StereoProcessBlock {
     const float* inputLeft = nullptr;

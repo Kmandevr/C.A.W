@@ -1,6 +1,7 @@
 // Exports a C++ ModuleProcessor as a C.A.W component through the stable C interface (caw_component.h).
 #pragma once
 
+#include <cstddef>
 #include <deque>
 #include <new>
 #include <string>
@@ -69,6 +70,7 @@ struct Instance {
     std::vector<EventInput> eventIn;
     std::vector<EventOutput> eventOut;
     std::vector<ParameterValue> parameters;
+    Transport transport;  // the block's transport, converted (preallocated with the instance)
     uint32_t maxFrames = 0;  // from activate; longer blocks are refused
 };
 
@@ -156,6 +158,13 @@ int32_t process(void* p, const CawProcessBlock* block) noexcept {
             self.eventOut[k] = {reinterpret_cast<Event*>(block->event_out[k].events), block->event_out[k].capacity, 0};
         for (uint32_t k = 0; k < block->parameter_count; ++k)
             self.parameters[k] = {block->parameters[k].samples, block->parameters[k].value};
+        const Transport* transport = nullptr;
+        if (block->struct_size >= offsetof(CawProcessBlock, transport) + sizeof(block->transport) && block->transport &&
+            block->transport->struct_size >= sizeof(CawTransport)) {
+            const CawTransport& t = *block->transport;
+            self.transport = {t.tempo, t.beat, t.beats_per_bar, (t.flags & CAW_TRANSPORT_PLAYING) != 0};
+            transport = &self.transport;
+        }
 
         ModuleProcessor& processor = self.processor;
         bool ok;
@@ -181,6 +190,7 @@ int32_t process(void* p, const CawProcessBlock* block) noexcept {
             ports.eventOutCount = block->event_out_count;
             ports.parameters = self.parameters.data();
             ports.parameterCount = block->parameter_count;
+            ports.transport = transport;
             ok = processor.processPorts(ports);
         } else {
             if (block->audio_in_count > 1 || block->audio_out_count > 1) return 0;
@@ -191,6 +201,7 @@ int32_t process(void* p, const CawProcessBlock* block) noexcept {
             audio.sampleRate = block->sample_rate;
             audio.parameters = self.parameters.data();
             audio.parameterCount = block->parameter_count;
+            audio.transport = transport;
             ok = processor.process(audio);
         }
         for (uint32_t k = 0; k < block->event_out_count; ++k) block->event_out[k].count = self.eventOut[k].count;

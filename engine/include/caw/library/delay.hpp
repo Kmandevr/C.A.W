@@ -1,0 +1,63 @@
+// C.A.W. Library: delay lines (the ping-pong delay), header-only; memory is set aside before processing.
+#pragma once
+
+#include <cmath>
+#include <cstddef>
+#include <vector>
+
+#include "../detmath.hpp"
+
+namespace caw::lib {
+
+// A stereo ping-pong delay: each channel's echo can feed the other (cross 0: two plain echoes, 1: full
+// ping-pong). prepare() allocates (call it off the audio thread); process() never does.
+class PingPongDelay {
+public:
+    // Room for delays up to maxSeconds at sampleRate.
+    void prepare(double sampleRate, double maxSeconds) {
+        sampleRate_ = sampleRate;
+        const size_t n = static_cast<size_t>(std::ceil(sampleRate * maxSeconds)) + 2;
+        left_.assign(n, 0.0f);
+        right_.assign(n, 0.0f);
+        pos_ = 0;
+    }
+    void clear() noexcept {
+        for (float& v : left_) v = 0.0f;
+        for (float& v : right_) v = 0.0f;
+    }
+    // One frame: delaySeconds (clamped to the room), feedback 0..0.98, cross 0..1, mix 0..1 (dry/wet).
+    void process(double delaySeconds, double feedback, double cross, double mix, float& l, float& r) noexcept {
+        const size_t n = left_.size();
+        if (n < 3) return;
+        double d = finiteOr0(delaySeconds) * sampleRate_;
+        d = d < 1.0 ? 1.0 : (d > static_cast<double>(n - 2) ? static_cast<double>(n - 2) : d);
+        const double fb = feedback < 0.0 ? 0.0 : (feedback > 0.98 ? 0.98 : feedback);
+        const double x = cross < 0.0 ? 0.0 : (cross > 1.0 ? 1.0 : cross);
+        // Read d samples back, linearly between the two nearest.
+        const double back = static_cast<double>(pos_) + static_cast<double>(n) - d;
+        const size_t i0 = static_cast<size_t>(back) % n;
+        const size_t i1 = (i0 + 1) % n;
+        const double frac = back - std::floor(back);
+        const double dl = left_[i0] + (left_[i1] - left_[i0]) * frac;
+        const double dr = right_[i0] + (right_[i1] - right_[i0]) * frac;
+        const double inL = finiteOr0(l), inR = finiteOr0(r);
+        left_[pos_] = static_cast<float>(inL + fb * ((1.0 - x) * dl + x * dr));
+        right_[pos_] = static_cast<float>(inR + fb * ((1.0 - x) * dr + x * dl));
+        pos_ = pos_ + 1 == n ? 0 : pos_ + 1;
+        l = static_cast<float>(inL + (dl - inL) * mix);
+        r = static_cast<float>(inR + (dr - inR) * mix);
+    }
+
+private:
+    std::vector<float> left_, right_;
+    size_t pos_ = 0;
+    double sampleRate_ = 48000.0;
+};
+
+// A note division in seconds at a tempo: 1 = a whole note, 0.25 = a quarter, 0.375 = a dotted eighth.
+inline double noteSeconds(double tempo, double wholeNotes) noexcept {
+    const double t = tempo > 1.0 ? tempo : 1.0;
+    return wholeNotes * 4.0 * 60.0 / t;
+}
+
+}  // namespace caw::lib

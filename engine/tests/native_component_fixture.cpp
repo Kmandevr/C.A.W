@@ -198,9 +198,28 @@ public:
     }
 };
 
+// The bundle's seventh component: reports the transport it sees, left the tempo / 1000 and right the
+// song position in beats / 100 (-1 on both without a transport).
+const caw::ModuleDescriptor kTransportDescriptor{"org.caw.tests.native-loader.transport", 1, kPorts, 2, nullptr, 0,
+                                                 nullptr, 0, {}};
+
+class TransportProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kTransportDescriptor; }
+    using caw::ModuleProcessor::process;
+    bool process(const caw::AudioProcessBlock& block) noexcept override {
+        const caw::Transport* t = block.transport;
+        for (uint32_t i = 0; i < block.frames; ++i) {
+            block.output.channels[0][i] = t ? static_cast<float>(t->tempo / 1000.0) : -1.0f;
+            block.output.channels[1][i] = t ? static_cast<float>(t->beat / 100.0) : -1.0f;
+        }
+        return true;
+    }
+};
+
 }  // namespace
 
 #ifndef CAW_TEST_OMIT_ENTRY  // the second fixture plays a library without the v2 entry point
 // A bundle of two components (owner, 2026-11-09: a package may hold several).
-CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor, EchoProcessor, LateProcessor, DroneProcessor)
+CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor, EchoProcessor, LateProcessor, DroneProcessor, TransportProcessor)
 #endif

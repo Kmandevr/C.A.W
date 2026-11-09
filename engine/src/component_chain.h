@@ -27,6 +27,8 @@ struct ChainTime {
     int64_t start = 0;      // the block's first sample in the song
     double stepLength = 1;  // samples per sixteenth step
     uint64_t playEpoch = 0; // changes on every Play: touches end
+    double tempo = 120;     // beats per minute, for the components' transport
+    uint32_t beatsPerBar = 4;
 };
 
 // Built and configured on the control thread, then handed to the audio thread, which alone calls

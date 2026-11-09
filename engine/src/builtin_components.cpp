@@ -1,6 +1,7 @@
 // Built-in stereo components (the C.A.W. Library, #121), registered in every Engine like a loaded component.
 #include "builtin_components.h"
 
+#include "caw/library/delay.hpp"
 #include "caw/library/distortion.hpp"
 #include "caw/library/stereo.hpp"
 
@@ -134,6 +135,68 @@ public:
     }
 };
 
+// Ping-pong delay: synced to the song's tempo (a note division) or free (milliseconds), with feedback,
+// cross-feed between the sides and a dry/wet mix. Up to 4 s of delay, allocated at activate.
+constexpr std::string_view kDivisions[] = {"Free", "1/16", "1/8", "Dotted 1/8", "1/4", "Dotted 1/4", "1/2", "1 bar"};
+constexpr double kDivisionWholeNotes[] = {0.0, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 1.0};
+ParameterDescriptor syncParameter() {
+    ParameterDescriptor p = parameter("sync", "Sync", 3.0, 0.0, 7.0);
+    p.step = 1.0;
+    p.choices = kDivisions;
+    p.choiceCount = 8;
+    p.smoothingFrames = 0;
+    return p;
+}
+const ParameterDescriptor kDelayParams[] = {
+    syncParameter(),
+    parameter("time", "Time (free)", 375.0, 1.0, 4000.0),
+    parameter("feedback", "Feedback", 0.45, 0.0, 0.95),
+    parameter("cross", "Ping-pong", 1.0, 0.0, 1.0),
+    parameter("mix", "Mix", 0.35, 0.0, 1.0),
+};
+ModuleDescriptor delayDescriptor() {
+    ModuleDescriptor d = descriptor("org.caw.delay.pingpong", "Ping-pong delay", kDelayParams);
+    d.role = ModuleRole::Effect;
+    d.parameterCount = 5;
+    d.tailFrames = kInfiniteTail;  // with feedback it rings until it is quiet
+    return d;
+}
+const ModuleDescriptor kDelay = delayDescriptor();
+
+class PingPong final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kDelay; }
+    bool activate(double sampleRate, uint32_t) noexcept override {
+        try {
+            delay_.prepare(sampleRate, 4.0);
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+    void reset() noexcept override { delay_.clear(); }
+    using ModuleProcessor::process;
+    bool process(const AudioProcessBlock& b) noexcept override {
+        if (!stereo(b)) return false;
+        // Without a transport (stopped: a tail ringing out) a synced delay keeps the last tempo it saw.
+        if (b.transport) tempo_ = b.transport->tempo;
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            const int sync = static_cast<int>(paramAt(b, 0, i, 3.0));
+            const double seconds = sync > 0 && sync < 8 ? lib::noteSeconds(tempo_, kDivisionWholeNotes[sync])
+                                                        : paramAt(b, 1, i, 375.0) / 1000.0;
+            float l = b.input.channels[0][i], r = b.input.channels[1][i];
+            delay_.process(seconds, paramAt(b, 2, i, 0.45), paramAt(b, 3, i, 1.0), paramAt(b, 4, i, 0.35), l, r);
+            b.output.channels[0][i] = l;
+            b.output.channels[1][i] = r;
+        }
+        return true;
+    }
+
+private:
+    lib::PingPongDelay delay_;
+    double tempo_ = 120.0;
+};
+
 template <class T>
 ModuleProcessor* make() noexcept {
     return new (std::nothrow) T();
@@ -145,6 +208,7 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kBalance, &make<Balance>);
     registry.add(kWidth, &make<Width>);
     registry.add(kDistortion, &make<Distortion>);
+    registry.add(kDelay, &make<PingPong>);
 }
 
 }  // namespace caw

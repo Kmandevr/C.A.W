@@ -3771,7 +3771,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             s.insertsIdle = false;
         }
         for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = routeSample(finiteOr0(y[i]));
-        const ChainTime time{g_, stepLen_, touchEpoch_};
+        const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_)};
         const ChainTime* t = playing_ && !previewChunk_ ? &time : nullptr;
         if (fading) {
             std::copy_n(insertL_, m, fadeL_);
@@ -3973,7 +3973,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             stageL[i] = static_cast<float>(bypass ? xl : yl);
             stageR[i] = static_cast<float>(bypass ? xr : yr);
         }
-        const ChainTime time{g_, stepLen_, touchEpoch_};
+        const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_)};
         const ChainTime* t = playing_ && !previewChunk_ ? &time : nullptr;
         const bool fading = masterFadeLeft_ > 0;
         if (fading) {

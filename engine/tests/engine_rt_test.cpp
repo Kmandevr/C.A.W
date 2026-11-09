@@ -192,7 +192,8 @@ TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_chang
     p.loopBars = 1;
     p.modules.push_back({"bass", templateSource("bass.caw"), {}});
     p.layers = {layer("b", {"bass"})};
-    p.layers[0].components = {{gain, {{"left", 2.0}}}};
+    p.layers[0].components = {{gain, {{"left", 2.0}}}, {"org.caw.distortion", {{"shape", 2}}},
+                              {"org.caw.delay.pingpong", {{"sync", 2}}}, {"org.caw.stereo.width", {{"width", 1.5}}}};
     p.masterComponents = {{gain, {{"right", 0.5}}}};
     ProjectAutomationLaneSpec lane;  // a lane on the track's component: resolved per sample
     lane.targetType = "component";

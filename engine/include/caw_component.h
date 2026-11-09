@@ -176,6 +176,18 @@ typedef struct CawParameterValue {
     double value;
 } CawParameterValue;
 
+/* The host's transport for a block, as a CLAP host gives it: tempo and position, so a component can
+ * sync to the song (a tempo-synced delay, an LFO). */
+#define CAW_TRANSPORT_PLAYING 1u
+typedef struct CawTransport {
+    uint32_t struct_size;
+    uint32_t flags;          /* CAW_TRANSPORT_* */
+    double tempo;            /* beats (quarter notes) per minute */
+    double beat;             /* song position of the block's first frame, in beats */
+    uint32_t beats_per_bar;
+    uint32_t reserved;       /* 0 */
+} CawTransport;
+
 typedef struct CawProcessBlock {
     uint32_t struct_size;
     uint32_t frames;
@@ -198,6 +210,8 @@ typedef struct CawProcessBlock {
     uint32_t event_out_count;
     const CawParameterValue* parameters; /* descriptor order */
     uint32_t parameter_count;
+    /* NULL when there is none (stopped, or a host without one). Read it only when struct_size covers it. */
+    const CawTransport* transport;
 } CawProcessBlock;
 
 typedef struct CawHost {

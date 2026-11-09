@@ -8,6 +8,7 @@
 #include "caw.h"
 #include "engine.h"
 #include "json.h"
+#include "caw/library/delay.hpp"
 #include "caw/library/distortion.hpp"
 #include "caw/library/stereo.hpp"
 #include "native_component_test_path.h"
@@ -592,4 +593,54 @@ TEST(the_built_in_distortion_shapes_each_channel_with_mix_and_output) {
     runLast(e, 4096, l, r);
     CHECK_NEAR(l, (0.5 + (lib::crush(0.5, 2) - 0.5) * 0.5) * 2 * kCentre, 1e-5);
     CHECK_NEAR(l, r, 1e-6);
+}
+
+TEST(a_compiled_component_sees_the_songs_tempo_and_position) {
+    constexpr const char* kTransport = "org.caw.tests.native-loader.transport";
+    Engine e(48000);
+    CHECK(loadFixture(e, kTransport));
+    e.setMasterBypass(true);
+    ProjectSpec p = constantTrack({});
+    p.bpm = 90;
+    p.loopBars = 4;
+    p.masterComponents = {{kTransport, {}}};  // the master: its output is exactly what the component wrote
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 64 * 500, l, r);  // 32000 samples in: at 90 bpm and 48 kHz a beat is 32000 samples
+    CHECK_NEAR(l, 0.09, 1e-6);
+    CHECK_NEAR(r, (32000.0 - 64) / 32000.0 / 100.0, 1e-6);  // the last block started one block before 1 beat
+}
+
+TEST(the_ping_pong_delay_crosses_each_echo_to_the_other_side) {
+    lib::PingPongDelay d;
+    d.prepare(1000.0, 1.0);
+    std::vector<float> L, R;
+    for (int t = 0; t < 40; ++t) {
+        float l = t == 0 ? 1.0f : 0.0f, r = 0.0f;  // one click on the left
+        d.process(0.010, 0.5, 1.0, 1.0, l, r);       // 10 ms (10 samples), feedback 0.5, full ping-pong, all wet
+        L.push_back(l);
+        R.push_back(r);
+    }
+    CHECK_NEAR(L[10], 1.0, 1e-6);  // the first echo on its own side
+    CHECK_EQ(R[10], 0.0f);
+    CHECK_NEAR(R[20], 0.5, 1e-6);  // then it crosses
+    CHECK_EQ(L[20], 0.0f);
+    CHECK_NEAR(L[30], 0.25, 1e-6);  // and back
+}
+
+TEST(the_built_in_delay_syncs_to_the_song_tempo) {
+    Engine e(48000);
+    e.setMasterBypass(true);
+    // 120 bpm: a quarter note is 0.5 s = 24000 samples. All wet, so nothing is heard before the first echo.
+    ProjectSpec p = constantTrack({{"org.caw.delay.pingpong", {{"sync", 4}, {"mix", 1.0}, {"feedback", 0.0}, {"cross", 0.0}}}});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    std::vector<float> l(64), r(64), out;
+    for (int k = 0; k < 400; ++k) {
+        e.process(l.data(), r.data(), 64);
+        out.insert(out.end(), l.begin(), l.end());
+    }
+    CHECK(std::fabs(out[23990]) < 1e-6f);
+    CHECK_NEAR(out[24010], 0.5 * kCentre, 1e-4);
 }
