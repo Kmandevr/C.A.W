@@ -44,6 +44,16 @@ android {
         }
     }
 
+    // The on-device C++ compiler, when CI packaged it (engine/compiler/package-android.sh): the library and its
+    // offline data. Without it the app works and says the compiler isn't in this build.
+    val compilerPackage = System.getenv("CAW_COMPILER_PACKAGE")
+    if (compilerPackage != null) {
+        sourceSets.getByName("main") {
+            jniLibs.srcDir("$compilerPackage/jniLibs")
+            assets.srcDir("$compilerPackage/assets")
+        }
+    }
+
     // CI signs every build with one fixed key from repository secrets, so each APK installs over the last.
     // Without those secrets (a local build) the standard debug key is used.
     val keystorePath = System.getenv("CAW_KEYSTORE_PATH")

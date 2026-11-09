@@ -56,7 +56,8 @@ jobs:
         with:
           path: ${{ runner.temp }}/llvm-install
           key: llvm-${{ env.LLVM_VERSION }}-${{ matrix.target }}-${{ hashFiles('engine/compiler/build-llvm.sh') }}
-      - name: Download the LLVM source
+      - name: Download the LLVM source (cache miss only)
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
         run: |
           curl --fail --location --retry 3 \
             "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/llvm-project-$LLVM_VERSION.src.tar.xz" \
@@ -74,19 +75,17 @@ jobs:
         with:
           path: ${{ runner.temp }}/llvm-install
           key: ${{ steps.llvm-cache.outputs.cache-primary-key }}
-      - name: Build the compiler library
+      - name: Build the compiler library (host)
+        if: matrix.target == 'host'
         run: |
-          extra=()
-          if [ "${{ matrix.target }}" = android-arm64 ]; then
-            extra=(-DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a
-                   -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_static -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH)
-          fi
           cmake -S engine/compiler -B "$RUNNER_TEMP/compiler-build" -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel \
-            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/llvm-install" -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/compiler" "${extra[@]}"
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/llvm-install" -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/compiler"
           ninja -C "$RUNNER_TEMP/compiler-build" install
-          strip_tool=$(echo "$NDK"/toolchains/llvm/prebuilt/*/bin/llvm-strip)
-          "$strip_tool" --strip-unneeded "$RUNNER_TEMP"/compiler/lib/libcaw_compiler.so
-          ls -l "$RUNNER_TEMP"/compiler/lib/
+      - name: Package the compiler for the APK (as the app build does)
+        if: matrix.target == 'android-arm64'
+        run: |
+          sudo apt-get install -y -q zip
+          engine/compiler/package-android.sh "$RUNNER_TEMP/llvm-install" "$NDK" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/compiler-package"
       - name: Install the C.A.W SDK headers
         if: matrix.target == 'host'
         run: |
@@ -97,8 +96,6 @@ jobs:
         if: matrix.target == 'host'
         run: |
           engine/compiler/bundle.sh "$NDK" "$RUNNER_TEMP/llvm-install" "$RUNNER_TEMP/caw-sdk" "$RUNNER_TEMP/toolchain"
-          cp "$LLVM_SRC/llvm/LICENSE.TXT" "$RUNNER_TEMP/toolchain/licenses/LLVM-LICENSE.txt"
-          cp "$LLVM_SRC/libcxx/LICENSE.TXT" "$RUNNER_TEMP/toolchain/licenses/libcxx-LICENSE.txt"
       - name: Compile components with the library
         if: matrix.target == 'host'
         run: engine/compiler/test.sh "$RUNNER_TEMP/compiler/bin/caw-compile" "$RUNNER_TEMP/toolchain" "$NDK" "$GITHUB_WORKSPACE"
@@ -108,9 +105,9 @@ jobs:
         with:
           name: caw-toolchain-data
           path: ${{ runner.temp }}/toolchain
-      - name: Upload the Android compiler library
+      - name: Upload the Android compiler package
         if: matrix.target == 'android-arm64'
         uses: actions/upload-artifact@v7
         with:
           name: caw-compiler-android-arm64
-          path: ${{ runner.temp }}/compiler/lib/libcaw_compiler.so
+          path: ${{ runner.temp }}/compiler-package

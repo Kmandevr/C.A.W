@@ -36,6 +36,17 @@ class MainActivity : FlutterActivity() {
                     CompilerClient(applicationContext).run(args) { code, output ->
                         result.success(mapOf("code" to code, "output" to output))
                     }
+                } else if (call.method == "installToolchain") {
+                    // Unpacking takes seconds the first time: off the main thread.
+                    val main = android.os.Handler(mainLooper)
+                    Thread {
+                        try {
+                            val dir = ToolchainInstaller.install(applicationContext)
+                            main.post { result.success(dir.absolutePath) }
+                        } catch (e: Exception) {
+                            main.post { result.error("unavailable", e.message, null) }
+                        }
+                    }.start()
                 } else {
                     result.notImplemented()
                 }

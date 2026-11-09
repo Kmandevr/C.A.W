@@ -5,6 +5,7 @@ import 'dart:io';
 import '../model/cpp_component.dart';
 import '../model/project.dart';
 import '../model/storage.dart';
+import 'cpp_compiler.dart';
 
 class CppBuildDiagnostic {
   const CppBuildDiagnostic({
@@ -122,6 +123,24 @@ class CppComponentBuildService {
       diagnostics: result.diagnostics,
       artifactPath: artifactPath,
     );
+  }
+}
+
+/// The in-app, offline build (Android): the same save and materialization, then [builder] compiles the sources
+/// with the bundled compiler into the component's build directory. The result's artifact is ready to load.
+extension InAppCppBuild on CppComponentBuildService {
+  Future<CppBuildResult> buildInApp({
+    required ProjectDoc project,
+    required CppComponentDoc component,
+    required CppSourceBuilder builder,
+  }) async {
+    if (!project.cppComponents.any((candidate) => identical(candidate, component))) {
+      throw ArgumentError.value(component.id, 'component', 'Must belong to the project being built.');
+    }
+    await _storage.save(project);
+    final sourceDirectory = await _storage.materializeCppComponent(project, component);
+    final buildDirectory = await _storage.prepareCppBuildDirectory(project.id, component.id);
+    return builder.build(sourceDirectory: sourceDirectory.path, outputDirectory: buildDirectory.path);
   }
 }
 

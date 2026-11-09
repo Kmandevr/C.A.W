@@ -143,6 +143,28 @@ jobs:
           else
             echo "No ANDROID_KEYSTORE_BASE64 secret: signing with a throwaway debug key (uninstall before installing the next build)."
           fi
+      # The on-device C++ compiler goes in the APK. Its LLVM libraries come from the Compiler workflow's cache
+      # (built once per LLVM version); until that cache exists the APK is built without the compiler, and says so.
+      - name: Restore the compiler's LLVM build
+        id: llvm-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/llvm-install
+          key: llvm-23.1.5-android-arm64-${{ hashFiles('engine/compiler/build-llvm.sh') }}
+      - name: Package the on-device compiler
+        if: steps.llvm-cache.outputs.cache-hit == 'true'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip
+          curl --fail --location --retry 3 https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
+            --output "$RUNNER_TEMP/android-ndk.zip"
+          echo "5107f898313790e449e87eee2183d9a20602dee9  $RUNNER_TEMP/android-ndk.zip" | sha1sum --check
+          unzip -q "$RUNNER_TEMP/android-ndk.zip" -d "$RUNNER_TEMP" && rm "$RUNNER_TEMP/android-ndk.zip"
+          engine/compiler/package-android.sh "$RUNNER_TEMP/llvm-install" "$RUNNER_TEMP/android-ndk-r30" \
+            "$GITHUB_WORKSPACE" "$RUNNER_TEMP/compiler-package"
+          echo "CAW_COMPILER_PACKAGE=$RUNNER_TEMP/compiler-package" >> "$GITHUB_ENV"
+      - name: Note a build without the compiler
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: echo "::warning::This APK has no C++ compiler yet: the Compiler workflow has not cached its LLVM build. Re-run this job when it has."
       - name: Build
         working-directory: app
         env:

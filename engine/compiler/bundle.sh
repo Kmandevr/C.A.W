@@ -33,5 +33,6 @@ done
 cp -R "$sdk/include" "$out/caw-sdk/"
 
 mkdir -p "$out/licenses"
+cp "$(dirname "$0")"/licenses/*.txt "$out/licenses/"
 [ -f "$ndk/NOTICE" ] && cp "$ndk/NOTICE" "$out/licenses/NDK-NOTICE.txt"
 du -sh "$out" "$out"/* "$out/sysroot/usr/include" | sort -k2
