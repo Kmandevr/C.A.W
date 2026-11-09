@@ -22,6 +22,8 @@
  *   the same time as a control-thread call on the same instance.
  * - process must not allocate, lock, block or do I/O. A component allocates in create or activate.
  *
+ * Bundles: one library may export several components through the same entry point, by index.
+ *
  * Return codes: process, activate, save_state and load_state return 1 for success and 0 for failure.
  * A process that fails leaves its outputs undefined; the host substitutes its own (the master chain
  * passes the input through). */
@@ -226,8 +228,9 @@ typedef struct CawComponentV2 {
     const void* (*get_extension)(void* instance, const char* id); /* NULL if unknown */
 } CawComponentV2;
 
-/* The one symbol a component library exports. */
-typedef const CawComponentV2* (*CawGetComponentV2Fn)(void);
+/* The one symbol a component library exports. A library may hold several components (a bundle):
+   index 0, 1, ... returns each, and NULL past the last. Hosts stop at the first NULL. */
+typedef const CawComponentV2* (*CawGetComponentV2Fn)(uint32_t index);
 
 #ifdef __cplusplus
 }

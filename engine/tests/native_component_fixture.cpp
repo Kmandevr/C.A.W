@@ -35,8 +35,25 @@ public:
     }
 };
 
+// The bundle's second component: halves its input.
+const caw::ModuleDescriptor kHalfDescriptor{"org.caw.tests.native-loader.half", 1, kPorts, 2, nullptr, 0, nullptr, 0, {}};
+
+class HalfProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kHalfDescriptor; }
+
+    void process(const caw::StereoProcessBlock& block) noexcept override {
+        if (!block.outputLeft || !block.outputRight) return;
+        for (uint32_t frame = 0; frame < block.frames; ++frame) {
+            block.outputLeft[frame] = block.inputLeft ? block.inputLeft[frame] * 0.5f : 0.0f;
+            block.outputRight[frame] = block.inputRight ? block.inputRight[frame] * 0.5f : 0.0f;
+        }
+    }
+};
+
 }  // namespace
 
 #ifndef CAW_TEST_OMIT_ENTRY  // the second fixture plays a library without the v2 entry point
-CAW_EXPORT_COMPONENT(TestNativeProcessor, kDescriptor)
+// A bundle of two components (owner, 2026-11-09: a package may hold several).
+CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor)
 #endif
