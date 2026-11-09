@@ -343,10 +343,14 @@ class Engine {
 
   /// Loads a built component only after the caller supplies its explicit trust decision.
   /// The blocking library load runs on a background isolate, never on the UI or audio thread.
+  ///
+  /// With [reload], the artifact is a rebuild of a component already loaded (a new file): every chain using it
+  /// switches to the new build while playing, crossfaded, keeping its values and, if the new build takes it, state.
   Future<NativeComponentLoadResult> loadNativeComponent({
     required String artifactPath,
     required String expectedComponentId,
     required NativeComponentTrust trust,
+    bool reload = false,
   }) {
     if (_disposed) return Future.error(StateError('engine is disposed'));
     if (Platform.isIOS) {
@@ -363,7 +367,7 @@ class Engine {
     final trustValue = trust.nativeValue;
     _queue = _queue.then((_) async {
       try {
-        final text = await _loadComponentOffThread(engineAddress, artifactPath, expectedComponentId, trustValue);
+        final text = await _loadComponentOffThread(engineAddress, artifactPath, expectedComponentId, trustValue, reload);
         done.complete(NativeComponentLoadResult.fromJson(jsonDecode(text) as Map<String, dynamic>));
       } catch (error, stack) {
         done.completeError(error, stack);
@@ -655,14 +659,14 @@ class RenderJob {
 
 // Isolate.run sends its closure's whole captured context to the new isolate. These top-level
 // helpers keep that context to sendable values only (the Engine method's Completer is not).
-Future<String> _loadComponentOffThread(int engineAddress, String artifactPath, String componentId, int trust) =>
+Future<String> _loadComponentOffThread(int engineAddress, String artifactPath, String componentId, int trust, bool reload) =>
     Isolate.run(() {
       final bindings = Bindings.instance;
       final engine = Pointer<Void>.fromAddress(engineAddress);
       final path = artifactPath.toNativeUtf8();
       final id = componentId.toNativeUtf8();
       try {
-        final result = bindings.loadComponent(engine, path, id, trust);
+        final result = (reload ? bindings.reloadComponent : bindings.loadComponent)(engine, path, id, trust);
         if (result == nullptr) throw StateError('native component loader returned no result');
         try {
           return result.toDartString();

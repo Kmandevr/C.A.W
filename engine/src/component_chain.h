@@ -64,6 +64,10 @@ public:
         std::vector<uint8_t> data;
     };
     std::vector<SavedState> saveStates() const;
+    // Control thread: the chain as specs, with every current value, bypass and (optional) state, so a
+    // rebuilt component can take over where this one is.
+    std::vector<ComponentSpec> currentSpecs() const;
+    bool uses(const std::string& id) const noexcept;
     // Control thread: the automation table for `lanes` (component lanes of this chain's `layer`;
     // empty for the master). Null when no lane targets the chain.
     std::unique_ptr<ComponentAutomation> automationFor(

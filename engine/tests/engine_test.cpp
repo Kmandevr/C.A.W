@@ -83,7 +83,7 @@ TEST(engine_runs_trusted_native_stereo_master_effect_before_the_safety_limiter) 
 
     p.masterComponents.clear();
     CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
-    run(e, 128);
+    run(e, 2048);  // the removed chain crossfades out over 20 ms, then goes back to the control thread
     CHECK(e.unloadNativeComponent(componentId));
 }
 

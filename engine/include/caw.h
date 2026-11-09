@@ -114,6 +114,11 @@ enum { CAW_NATIVE_TRUST_BLOCKED = 0, CAW_NATIVE_TRUST_ISOLATED = 1, CAW_NATIVE_T
 CAW_API char* caw_engine_load_component(CawEngine* e, const char* library_path,
                                         const char* expected_component_id, int32_t trust_level);
 CAW_API int32_t caw_engine_unload_component(CawEngine* e, const char* component_id);
+/* A rebuild of a loaded component, from a new file (the same path would return the old library).
+   It replaces the old build, and every chain using it switches to it, crossfaded, keeping each
+   instance's values, bypass and (if the new build accepts it) state. JSON as for load. */
+CAW_API char* caw_engine_reload_component(CawEngine* e, const char* library_path, const char* expected_component_id,
+                                          int32_t trust_level);
 /* The loaded native components' descriptors as JSON (free with caw_free):
    {"ok":true,"components":[{"id","name","version","role","latency_frames","tail_frames" (null =
    infinite),"max_state_bytes","custom_ui_id","ports":[{"id","type","input","layout","channels",

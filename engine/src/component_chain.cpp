@@ -102,6 +102,7 @@ std::unique_ptr<ComponentChain> ComponentChain::build(const ModuleRegistry& regi
         }
         for (const auto& [name, value] : spec.params) {
             const int k = chain->parameterIndex(*e, name);
+            if (k < 0 && spec.lenient) continue;  // a rebuild dropped the parameter
             if (k < 0) {
                 error = "native component " + quoted(spec.id) + " has no parameter " + quoted(name);
                 return nullptr;
@@ -123,14 +124,15 @@ std::unique_ptr<ComponentChain> ComponentChain::build(const ModuleRegistry& regi
             return nullptr;
         }
         if (spec.hasState) {
-            if (spec.state.size() > own.maxStateBytes) {
-                error = "native component " + quoted(spec.id) + " saved state is larger than it allows";
+            const bool fits = spec.state.size() <= own.maxStateBytes;
+            const bool loaded = fits && e->processor->loadState(spec.state.data(), static_cast<uint32_t>(spec.state.size()),
+                                                               spec.stateVersion);
+            if (!loaded && !spec.lenient) {
+                error = "native component " + quoted(spec.id) +
+                        (fits ? " refused its saved state" : " saved state is larger than it allows");
                 return nullptr;
             }
-            if (!e->processor->loadState(spec.state.data(), static_cast<uint32_t>(spec.state.size()), spec.stateVersion)) {
-                error = "native component " + quoted(spec.id) + " refused its saved state";
-                return nullptr;
-            }
+            if (!loaded) e->processor->reset();  // a rebuild that can't take the old state starts clean
         }
         chain->entries_.push_back(std::move(e));
     }
@@ -186,6 +188,33 @@ std::vector<ComponentChain::SavedState> ComponentChain::saveStates() const {
         out[i].version = p.stateVersion();
     }
     return out;
+}
+
+std::vector<ComponentSpec> ComponentChain::currentSpecs() const {
+    const std::vector<SavedState> states = saveStates();
+    std::vector<ComponentSpec> specs(entries_.size());
+    for (std::size_t i = 0; i < entries_.size(); ++i) {
+        const Entry& e = *entries_[i];
+        const ModuleDescriptor& d = e.processor->descriptor();
+        specs[i].id = e.id;
+        specs[i].lenient = true;
+        for (uint32_t k = 0; k < d.parameterCount; ++k)
+            specs[i].params.emplace_back(std::string(d.parameters[k].id), fromBits(e.held[k].load(std::memory_order_relaxed)));
+        specs[i].bypass = e.bypass.load(std::memory_order_relaxed);
+        if (states[i].ok && !states[i].data.empty()) {
+            specs[i].hasState = true;
+            
+            specs[i].stateVersion = states[i].version;
+            specs[i].state = states[i].data;
+        }
+    }
+    return specs;
+}
+
+bool ComponentChain::uses(const std::string& id) const noexcept {
+    for (const auto& e : entries_)
+        if (e->id == id) return true;
+    return false;
 }
 
 std::string ComponentChain::automationKey(const std::vector<ProjectAutomationLaneSpec>& lanes, const std::string& layer) {

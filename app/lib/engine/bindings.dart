@@ -121,6 +121,9 @@ class Bindings {
         loadComponent = lib.lookupFunction<
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32),
             Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_engine_load_component'),
+        reloadComponent = lib.lookupFunction<
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32),
+            Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int)>('caw_engine_reload_component'),
         unloadComponent = lib.lookupFunction<
             Int32 Function(Pointer<Void>, Pointer<Utf8>),
             int Function(Pointer<Void>, Pointer<Utf8>)>('caw_engine_unload_component'),
@@ -232,6 +235,7 @@ class Bindings {
   final void Function(Pointer<Void>) destroy;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>) setProject;
   final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) loadComponent;
+  final Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int) reloadComponent;
   final int Function(Pointer<Void>, Pointer<Utf8>) unloadComponent;
   final Pointer<Utf8> Function(Pointer<Void>) components;
   final void Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double) setParam;

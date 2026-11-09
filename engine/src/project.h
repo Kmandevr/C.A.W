@@ -25,6 +25,7 @@ struct ComponentSpec {
     std::vector<std::pair<std::string, double>> params;
     bool bypass = false;            // passes its input through (crossfaded) and stops processing
     bool hasState = false;          // `state` holds what the component's save_state wrote
+    bool lenient = false;           // a rebuild: values the new build lacks and a state it refuses are dropped
     uint32_t stateVersion = 1;
     std::vector<uint8_t> state;
 };

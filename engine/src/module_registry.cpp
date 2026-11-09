@@ -400,7 +400,7 @@ bool ModuleRegistry::add(const ModuleDescriptor& descriptor, ModuleFactory facto
 }
 
 ModuleLoadResult ModuleRegistry::loadSharedLibrary(
-    const std::string& path, std::string_view expectedId, NativeModuleTrust trust) {
+    const std::string& path, std::string_view expectedId, NativeModuleTrust trust, bool replace) {
     if (trust == NativeModuleTrust::Blocked)
         return {false, ModuleLoadError::Blocked, std::string(expectedId), "Native component is blocked by the user's trust setting."};
     if (trust == NativeModuleTrust::Isolated)
@@ -476,7 +476,10 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         if (component->descriptor.id != expectedId)
             return {false, ModuleLoadError::ComponentIdMismatch, std::string(expectedId),
                     "The built component ID does not match the project manifest ID."};
-        if (find(component->descriptor.id))
+        ModuleRegistration* existing = nullptr;
+        for (ModuleRegistration& r : registrations_)
+            if (r.descriptor && r.descriptor->id == component->descriptor.id) existing = &r;
+        if (existing && (!replace || !existing->component))
             return {false, ModuleLoadError::DuplicateId, std::string(component->descriptor.id),
                     "A component with this stable ID is already loaded."};
 
@@ -484,7 +487,11 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         component->host = CawHost{sizeof(CawHost), CAW_COMPONENT_ABI_VERSION, "C.A.W", "1", nullptr, &noHostExtension};
         component->library = std::move(library);
         const std::string id(component->descriptor.id);
-        registrations_.push_back({&component->descriptor, nullptr, nullptr, component->library, std::move(component)});
+        if (existing) {
+            *existing = {&component->descriptor, nullptr, nullptr, component->library, std::move(component)};
+        } else {
+            registrations_.push_back({&component->descriptor, nullptr, nullptr, component->library, std::move(component)});
+        }
         return {true, ModuleLoadError::None, id, {}};
     } catch (const std::bad_alloc&) {
         return {false, ModuleLoadError::LoadFailed, std::string(expectedId), "Out of memory while loading the component."};

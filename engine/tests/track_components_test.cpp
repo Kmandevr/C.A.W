@@ -1,10 +1,13 @@
 // Native components on tracks and the master: stereo kept, parameters set and changed, chains kept or rebuilt.
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "caw.h"
 #include "engine.h"
+#include "json.h"
 #include "native_component_test_path.h"
 #include "project.h"
 #include "test.h"
@@ -418,4 +421,48 @@ TEST(tracks_stay_in_time_with_a_track_whose_effect_adds_latency) {
     e.process(l.data(), r.data(), 64);
     CHECK(l[0] > 0.4f);
     CHECK(r[0] > 0.4f);
+}
+
+TEST(a_rebuilt_component_takes_over_while_playing_with_its_values_and_state) {
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    if (!path) return;
+    // The rebuild is a new file, as a real build is.
+    const std::string rebuild = std::string(path) + ".rebuild-test";
+    {
+        std::FILE* in = std::fopen(path, "rb");
+        std::FILE* out = std::fopen(rebuild.c_str(), "wb");
+        CHECK(in && out);
+        if (!in || !out) return;
+        char buffer[65536];
+        size_t n;
+        while ((n = std::fread(buffer, 1, sizeof buffer, in)) > 0) std::fwrite(buffer, 1, n, out);
+        std::fclose(in);
+        std::fclose(out);
+    }
+    Engine e(48000);
+    CHECK(loadFixture(e, kGain));
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(constantTrack({{kGain, {}}}))));
+    e.play();
+    float l = 0, r = 0;
+    runLast(e, 64 * 50, l, r);
+    CHECK(e.setComponentParam("t", 0, "left", 3.0));  // a live value the project doesn't know yet
+    runLast(e, 128, l, r);
+    const ModuleLoadResult reloaded = e.reloadNativeComponent(rebuild, kGain, NativeModuleTrust::Trusted);
+    CHECK(reloaded.success);
+    runLast(e, 4096, l, r);  // past the 20 ms crossfade
+    CHECK_NEAR(l, 1.5 * kCentre, 1e-5);  // the value carried over
+    // The state carried over too: the block count goes on from where the old build was.
+    const std::string states = e.componentStatesJson("t");
+    std::vector<uint8_t> bytes;
+    const size_t at = states.find("\"state\":\"");
+    CHECK(at != std::string::npos);
+    CHECK(base64Decode(states.substr(at + 9, 12), bytes));
+    uint64_t blocks = 0;
+    std::memcpy(&blocks, bytes.data(), 8);
+    CHECK(blocks > 100);
+    // A rebuild for a component that isn't loaded is an ordinary load error.
+    CHECK(!e.reloadNativeComponent(rebuild, "org.caw.tests.nothing", NativeModuleTrust::Trusted).success);
+    std::remove(rebuild.c_str());
 }

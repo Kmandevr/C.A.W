@@ -84,8 +84,10 @@ char* caw_engine_set_project(CawEngine* e, const char* json) try {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"modules\":{}}");
 }
 
-char* caw_engine_load_component(CawEngine* e, const char* library_path,
-                                const char* expected_component_id, int32_t trust_level) try {
+namespace {
+// Load and reload share their checks and their JSON result.
+char* loadComponent(CawEngine* e, const char* library_path, const char* expected_component_id, int32_t trust_level,
+                    bool reload) try {
     using namespace caw;
     if (!e || !e->engine || !library_path || !expected_component_id)
         return dup("{\"ok\":false,\"error\":\"missing engine, library path or component ID\",\"errorCode\":3}");
@@ -97,7 +99,8 @@ char* caw_engine_load_component(CawEngine* e, const char* library_path,
         default:
             return dup("{\"ok\":false,\"error\":\"invalid native component trust level\",\"errorCode\":3}");
     }
-    const ModuleLoadResult result = e->engine->loadNativeComponent(library_path, expected_component_id, trust);
+    const ModuleLoadResult result = reload ? e->engine->reloadNativeComponent(library_path, expected_component_id, trust)
+                                           : e->engine->loadNativeComponent(library_path, expected_component_id, trust);
     return dup(std::string("{\"ok\":") + (result.success ? "true" : "false") +
                ",\"componentId\":\"" + jsonEscape(result.componentId) +
                "\",\"error\":\"" + jsonEscape(result.message) +
@@ -106,6 +109,17 @@ char* caw_engine_load_component(CawEngine* e, const char* library_path,
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\",\"errorCode\":4}");
 } catch (...) {
     return dup("{\"ok\":false,\"error\":\"native component loading failed\",\"errorCode\":4}");
+}
+}  // namespace
+
+char* caw_engine_load_component(CawEngine* e, const char* library_path, const char* expected_component_id,
+                                int32_t trust_level) {
+    return loadComponent(e, library_path, expected_component_id, trust_level, false);
+}
+
+char* caw_engine_reload_component(CawEngine* e, const char* library_path, const char* expected_component_id,
+                                  int32_t trust_level) {
+    return loadComponent(e, library_path, expected_component_id, trust_level, true);
 }
 
 char* caw_engine_components(CawEngine* e) try {

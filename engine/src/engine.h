@@ -82,6 +82,10 @@ public:
     // Native components are loaded only after an explicit per-component trust decision.
     ModuleLoadResult loadNativeComponent(const std::string& path, const std::string& expectedId, NativeModuleTrust trust);
     bool unloadNativeComponent(const std::string& id);
+    // A rebuild of a loaded component (a new file): it replaces the old build, and every chain that
+    // uses it is rebuilt with the new one, crossfaded, keeping each instance's values, bypass and
+    // (when the new build accepts it) state. On failure the old build keeps playing.
+    ModuleLoadResult reloadNativeComponent(const std::string& path, const std::string& expectedId, NativeModuleTrust trust);
     std::unique_ptr<ModuleProcessor> createNativeComponent(const std::string& id);
     // {"ok":true,"components":[descriptor, ...]} for the loaded native components (moduleDescriptorJson).
     std::string nativeComponentsJson();
@@ -238,7 +242,10 @@ private:
     double tmp_[kBlock];
     int64_t masterTailLeft_ = 0;  // audio thread: stopped, the master chain rings out for at most this long
     int64_t masterQuiet_ = 0;     // ... ending sooner once its output has been quiet for a moment
-    float insertL_[kBlock], insertR_[kBlock];            // audio thread: a track's inserts run here
+    ComponentChain* masterFading_ = nullptr;  // audio thread: the master chain a newer one replaced, crossfading out
+    int masterFadeLeft_ = 0;
+    float insertL_[kBlock], insertR_[kBlock];
+    float fadeL_[kBlock], fadeR_[kBlock];  // audio thread: a replaced chain's output during its crossfade            // audio thread: a track's inserts run here
     float masterStageL_[kBlock], masterStageR_[kBlock];  // audio thread: the master chain runs here
 
     // ---- shared ----
@@ -260,7 +267,8 @@ private:
     // Control thread: the master chain last sent (alive until a later command replaces it), so an
     // update with the same components keeps it and only sets values.
     ComponentChain* ctlMasterChain_ = nullptr;
-    std::string ctlMasterAutomationKey_;  // the lanes the master chain's automation table was made from
+    std::string ctlMasterAutomationKey_;
+    std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>> ctlAutomation_;  // the last project's lanes  // the lanes the master chain's automation table was made from
     bool offlineControl_ = false;  // control thread only; true only when no audio callback can run
     struct ModuleState {
         std::string source;

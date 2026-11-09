@@ -56,6 +56,8 @@ struct Engine::Slot {
     Chain* pending = nullptr;  // new code waiting for the next beat or bar
     ComponentChain* inserts = nullptr;  // native stereo effects after the chain, before volume and pan
     DelayLine* delay = nullptr;         // latency compensation, after volume and pan
+    ComponentChain* insertsFading = nullptr;  // the chain `inserts` replaced, crossfading out (null: the dry signal)
+    int insertsFadeLeft = 0;                  // samples of that crossfade still to run
     bool insertsIdle = false;  // the inserts stopped running (Silent): reset before they run again
     bool insertTail = false;   // stopped: the inserts ring out on silence (Mode::Tail) until quiet
     int64_t tailCap = 0;       // ... or for at most this many samples
@@ -750,11 +752,14 @@ Engine::~Engine() {
     }
     delete masterChain_;
     masterChain_ = nullptr;
+    delete masterFading_;
+    masterFading_ = nullptr;
     for (const auto& slot : slotStore_) {
         delete slot->cur;
         delete slot->old;
         delete slot->pending;
         delete slot->inserts;
+        delete slot->insertsFading;
         delete slot->delay;
         delete slot->pattern;
         delete slot->automation;
@@ -1054,6 +1059,51 @@ ModuleLoadResult Engine::loadNativeComponent(
     return nativeModules_.loadSharedLibrary(path, expectedId, trust);
 }
 
+ModuleLoadResult Engine::reloadNativeComponent(
+    const std::string& path, const std::string& expectedId, NativeModuleTrust trust) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    drainRetired();
+    // Every chain that uses the component, rebuilt before anything is sent: one that can't be keeps the old build.
+    struct Rebuilt {
+        int slot;  // -1: the master
+        LayerState* layer;
+        std::unique_ptr<ComponentChain> chain;
+    };
+    ModuleLoadResult result = nativeModules_.loadSharedLibrary(path, expectedId, trust, true);
+    if (!result.success) return result;
+    std::vector<Rebuilt> rebuilt;
+    std::string error;
+    auto rebuild = [&](ComponentChain* old, int slot, LayerState* layer, const std::string& layerId) {
+        if (!old || !old->uses(expectedId)) return true;
+        auto chain = ComponentChain::build(nativeModules_, old->currentSpecs(), sr_, error);
+        if (!chain) return false;
+        delete chain->swapAutomation(chain->automationFor(ctlAutomation_, layerId).release());
+        rebuilt.push_back({slot, layer, std::move(chain)});
+        return true;
+    };
+    bool ok = rebuild(ctlMasterChain_, -1, nullptr, "");
+    for (auto& [id, ls] : layers_)
+        if (ok && ls.slot >= 0 && !ls.bus) ok = rebuild(ls.inserts, ls.slot, &ls, id);
+    if (!ok) {
+        // The new build is loaded but can't take over (its ports changed, it failed to activate, ...).
+        result.success = false;
+        result.error = ModuleLoadError::InvalidDescriptor;
+        result.message = "The rebuilt component is loaded, but the playing project could not switch to it: " + error;
+        return result;
+    }
+    for (Rebuilt& r : rebuilt) {
+        Cmd c;
+        c.type = r.slot < 0 ? Cmd::SetMasterChain : Cmd::SetInserts;
+        c.slot = r.slot;
+        ComponentChain* sent = r.chain.release();
+        c.masterChain = sent;
+        if (!send(c)) continue;  // send() freed it; the old build plays on there
+        if (r.layer) r.layer->inserts = sent;
+        else ctlMasterChain_ = sent;
+    }
+    return result;
+}
+
 bool Engine::unloadNativeComponent(const std::string& id) {
     std::lock_guard<std::mutex> lock(ctl_);
     drainRetired();
@@ -1184,6 +1234,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
 
     globals_ = p.globals;
     const auto projectAutomation = std::make_shared<const std::vector<ProjectAutomationLaneSpec>>(p.automation);
+    ctlAutomation_ = projectAutomation;
 
     // Project libraries (kind: library) compile first; every other module can call their functions.
     std::vector<std::string_view> moduleSources;
@@ -2367,16 +2418,16 @@ void Engine::applyCommands() noexcept {
         size_t retirementNeed = 0;
         switch (c.type) {
             case Cmd::Install: retirementNeed = 2; break;
-            case Cmd::SetAutomation:
             case Cmd::SetMasterChain:
-            case Cmd::SetInserts:
+            case Cmd::SetInserts: retirementNeed = 2; break;  // a chain still crossfading, and the one replaced
+            case Cmd::SetAutomation:
             case Cmd::SetComponentAutomation:
             case Cmd::SetDelay:
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
             case Cmd::Grow: retirementNeed = 1; break;
-            case Cmd::ConfigureBus: retirementNeed = c.flag ? 5 : 4; break;
+            case Cmd::ConfigureBus: retirementNeed = c.flag ? 6 : 5; break;
             // Every slot may retire its current and old chain. The pending overflow holds that at
             // maxLayers() (pendingMax_), so with the queue drained a Play always finds room.
             case Cmd::Play: retirementNeed = static_cast<size_t>(2 * slotCount_); break;
@@ -2451,6 +2502,9 @@ void Engine::applyCommands() noexcept {
                     r.delay = s.delay;
                     if (r.masterChain || r.delay) retireEntry(r);
                 }
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                s.insertsFading = nullptr;
+                s.insertsFadeLeft = 0;
                 s.inserts = nullptr;
                 s.delay = nullptr;
                 s.cur = s.old = s.pending = nullptr;
@@ -2527,7 +2581,16 @@ void Engine::applyCommands() noexcept {
                 masterStep_ = (masterTarget_ - master_) / masterRamp_;
                 break;
             case Cmd::SetMasterChain:
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
+                // The replaced chain crossfades out (a rebuild, an effect added or removed: no click).
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
+                masterFading_ = nullptr;
+                masterFadeLeft_ = 0;
+                if (playing_ || previewing_) {  // sounding: crossfade; otherwise the next sound starts on the new chain
+                    masterFading_ = masterChain_;
+                    masterFadeLeft_ = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                } else {
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterChain_);
+                }
                 masterChain_ = c.masterChain;
                 break;
             case Cmd::SetDelay: {
@@ -2548,7 +2611,15 @@ void Engine::applyCommands() noexcept {
             }
             case Cmd::SetInserts: {
                 Slot& s = slotAt(c.slot);
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                s.insertsFading = nullptr;
+                s.insertsFadeLeft = 0;
+                if (s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail) {
+                    s.insertsFading = s.inserts;  // sounding: crossfades out (null: from the dry signal)
+                    s.insertsFadeLeft = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                } else {
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts);
+                }
                 s.inserts = c.masterChain;
                 break;
             }
@@ -3310,7 +3381,10 @@ int Engine::planChunk(int maxFrames) noexcept {
             s.insertsIdle = true;
             s.contiguous = false;
             if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; routingDirty_ = true; }
-            if (s.removing && canRetire(2)) {
+            if (s.removing && canRetire(3)) {
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                s.insertsFading = nullptr;
+                s.insertsFadeLeft = 0;
                 retire(s.cur, nullptr, s.pattern);
                 s.pattern = nullptr;
                 {
@@ -3542,15 +3616,40 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     // Native inserts (#17): the mono chain output enters as two equal channels; what the inserts
     // make of it stays stereo through volume and pan (the pan law then works per side, as balance).
     ComponentChain* const inserts = s.inserts;
-    if (inserts) {
+    const bool fading = s.insertsFadeLeft > 0;
+    const bool stereo = inserts || fading;  // the inserts' (or the crossfade's) stereo output, not the mono chain
+    if (stereo) {
         // A tail frozen while the track was silent must not play on when it sounds again.
         if (s.insertsIdle) {
-            inserts->reset();
+            if (inserts) inserts->reset();
+            if (s.insertsFading) s.insertsFading->reset();
             s.insertsIdle = false;
         }
         for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = routeSample(finiteOr0(y[i]));
         const ChainTime time{g_, stepLen_, touchEpoch_};
-        inserts->process(insertL_, insertR_, static_cast<uint32_t>(m), sr_, playing_ && !previewChunk_ ? &time : nullptr);
+        const ChainTime* t = playing_ && !previewChunk_ ? &time : nullptr;
+        if (fading) {
+            std::copy_n(insertL_, m, fadeL_);
+            std::copy_n(insertR_, m, fadeR_);
+            if (s.insertsFading) s.insertsFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
+        }
+        if (inserts) inserts->process(insertL_, insertR_, static_cast<uint32_t>(m), sr_, t);
+        if (fading) {
+            const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+            for (int i = 0; i < m; ++i) {
+                const float w = s.insertsFadeLeft > 0
+                    ? static_cast<float>(len - s.insertsFadeLeft + 1) / static_cast<float>(len + 1) : 1.0f;
+                if (s.insertsFadeLeft > 0) --s.insertsFadeLeft;
+                insertL_[i] = fadeL_[i] + (insertL_[i] - fadeL_[i]) * w;
+                insertR_[i] = fadeR_[i] + (insertR_[i] - fadeR_[i]) * w;
+            }
+            if (s.insertsFadeLeft == 0 && s.insertsFading && canRetire(1)) {
+                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+                s.insertsFading = nullptr;
+            } else if (s.insertsFadeLeft == 0 && s.insertsFading) {
+                s.insertsFadeLeft = 1;  // no room to hand it back yet: hold the new chain at full and try again
+            }
+        }
     }
     float peak = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
@@ -3566,9 +3665,9 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             s.gain += (desired - s.gain) * gainCoef;
             if (std::fabs(desired - s.gain) < 1e-6) s.gain = desired;
         }
-        const double vl = (inserts ? static_cast<double>(insertL_[i]) : finiteOr0(y[i])) * s.gain;
-        const double vr = inserts ? static_cast<double>(insertR_[i]) * s.gain : vl;
-        const double v = inserts ? 0.5 * (vl + vr) : vl;  // the scope and tail test read the mid
+        const double vl = (stereo ? static_cast<double>(insertL_[i]) : finiteOr0(y[i])) * s.gain;
+        const double vr = stereo ? static_cast<double>(insertR_[i]) * s.gain : vl;
+        const double v = stereo ? 0.5 * (vl + vr) : vl;  // the scope and tail test read the mid
         double gl = s.gl, gr = s.gr;
         if (s.automation && !s.automation->pan.empty()) {
             const double automatedPan = automationValue(s.automation->pan, step, pan);
@@ -3682,7 +3781,7 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
         sp = (sp + 1) % kScopeSize;
     };
 
-    if (!masterChain_) {
+    if (!masterChain_ && masterFadeLeft_ == 0) {
         // Keep the normal Engine path allocation-free and free of extra staging copies.
         for (int i = 0; i < m; ++i) {
             if (masterRamp_ > 0) {
@@ -3721,7 +3820,31 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
             stageR[i] = static_cast<float>(bypass ? xr : yr);
         }
         const ChainTime time{g_, stepLen_, touchEpoch_};
-        masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_, playing_ && !previewChunk_ ? &time : nullptr);
+        const ChainTime* t = playing_ && !previewChunk_ ? &time : nullptr;
+        const bool fading = masterFadeLeft_ > 0;
+        if (fading) {
+            std::copy_n(stageL, m, fadeL_);
+            std::copy_n(stageR, m, fadeR_);
+            if (masterFading_) masterFading_->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
+        }
+        if (masterChain_) masterChain_->process(stageL, stageR, static_cast<uint32_t>(m), sr_, t);
+        if (fading) {
+            const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+            for (int i = 0; i < m; ++i) {
+                const float w = masterFadeLeft_ > 0 ? static_cast<float>(len - masterFadeLeft_ + 1) / static_cast<float>(len + 1) : 1.0f;
+                if (masterFadeLeft_ > 0) --masterFadeLeft_;
+                stageL[i] = fadeL_[i] + (stageL[i] - fadeL_[i]) * w;
+                stageR[i] = fadeR_[i] + (stageR[i] - fadeR_[i]) * w;
+            }
+            if (masterFadeLeft_ == 0 && masterFading_) {
+                if (canRetire(1)) {
+                    retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, masterFading_);
+                    masterFading_ = nullptr;
+                } else {
+                    masterFadeLeft_ = 1;
+                }
+            }
+        }
         const float* currentL = stageL;
         const float* currentR = stageR;
         for (int i = 0; i < m; ++i) finishSample(i, currentL[i], currentR[i]);
