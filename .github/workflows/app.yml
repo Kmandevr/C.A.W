@@ -157,6 +157,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle  # Gradle's dependencies and wrapper, so a build doesn't fetch them again
       - name: Restore Flutter SDK
         id: flutter-cache
         uses: actions/cache@v4
@@ -177,6 +178,18 @@ jobs:
           path: ~/.pub-cache
           key: pub-linux-${{ hashFiles('app/pubspec.lock') }}
           restore-keys: pub-linux-
+      # The engine's native build (libcaw.so) reuses compiled files: only changed sources recompile.
+      - name: Install ccache
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then sudo apt-get update -q && sudo apt-get install -y -q ccache; fi
+          ccache --max-size=500M
+          echo "CAW_CCACHE=1" >> "$GITHUB_ENV"
+      - name: Restore the native compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-android-${{ hashFiles('engine/CMakeLists.txt', 'engine/src/**', 'engine/include/**', 'engine/platform/**') }}
+          restore-keys: ccache-android-
       - name: Signing key (when the repository has one)
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -188,16 +201,24 @@ jobs:
           else
             echo "No ANDROID_KEYSTORE_BASE64 secret: signing with a throwaway debug key (uninstall before installing the next build)."
           fi
-      # The on-device C++ compiler goes in the APK. Its LLVM libraries come from the Compiler workflow's cache
-      # (built once per LLVM version); until that cache exists the APK is built without the compiler, and says so.
+      # The on-device C++ compiler goes in the APK. The finished package is cached and rebuilt only when the
+      # compiler or the SDK changes; building it needs the Compiler workflow's cached LLVM build. Until that
+      # exists the APK is built without the compiler, and says so.
+      - name: Restore the packaged compiler
+        id: package-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/compiler-package
+          key: caw-compiler-package-llvm-23.1.5-${{ hashFiles('engine/compiler/**', 'engine/include/**', 'engine/CMakeLists.txt', 'engine/cmake/**') }}
       - name: Restore the compiler's LLVM build
         id: llvm-cache
+        if: steps.package-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/llvm-install
           key: llvm-23.1.5-android-arm64-${{ hashFiles('engine/compiler/build-llvm.sh') }}
       - name: Package the on-device compiler
-        if: steps.llvm-cache.outputs.cache-hit == 'true'
+        if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit == 'true'
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q ninja-build zip
           curl --fail --location --retry 3 https://dl.google.com/android/repository/android-ndk-r30-linux.zip \
@@ -206,9 +227,17 @@ jobs:
           unzip -q "$RUNNER_TEMP/android-ndk.zip" -d "$RUNNER_TEMP" && rm "$RUNNER_TEMP/android-ndk.zip"
           engine/compiler/package-android.sh "$RUNNER_TEMP/llvm-install" "$RUNNER_TEMP/android-ndk-r30" \
             "$GITHUB_WORKSPACE" "$RUNNER_TEMP/compiler-package"
-          echo "CAW_COMPILER_PACKAGE=$RUNNER_TEMP/compiler-package" >> "$GITHUB_ENV"
+      - name: Save the packaged compiler
+        if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/compiler-package
+          key: ${{ steps.package-cache.outputs.cache-primary-key }}
+      - name: Use the packaged compiler
+        if: steps.package-cache.outputs.cache-hit == 'true' || steps.llvm-cache.outputs.cache-hit == 'true'
+        run: echo "CAW_COMPILER_PACKAGE=$RUNNER_TEMP/compiler-package" >> "$GITHUB_ENV"
       - name: Note a build without the compiler
-        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        if: steps.package-cache.outputs.cache-hit != 'true' && steps.llvm-cache.outputs.cache-hit != 'true'
         run: |
           echo "::warning::This APK has no C++ compiler yet: the Compiler workflow has not cached its LLVM build. Re-run this job when it has."
       - name: Build
@@ -219,7 +248,10 @@ jobs:
           CAW_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           flutter --disable-analytics
-          flutter build apk --release
+          # arm64 only: the phones C.A.W targets (the owner's Galaxy S22+). Each extra ABI builds the engine and
+          # the Dart code again.
+          flutter build apk --release --target-platform android-arm64
+          ccache --show-stats || true
           mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
       - uses: actions/upload-artifact@v7
         with:

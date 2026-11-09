@@ -25,6 +25,9 @@ updated: 2026-11-09
 - **Owner direction:** checks can run on a branch while it is being worked on, not only through a pull request.
   - Every workflow has Run workflow. The Quick check runs chosen commands on any branch. The App workflow's run can skip the installables for a quick test-only run.
   - Agents also run the engine tests and the Dart analysis and tests locally before pushing.
+- **Faster app builds (owner: "builds are fast, not 10 min"):**
+  - The APK is built for arm64 only, the owner's Galaxy S22+ and the phones C.A.W targets. Before, every build compiled the engine and the Dart code for 32-bit ARM and x86_64 too. **[Assumption]** No one needs a 32-bit or emulator build; one can be made on demand by adding a target platform.
+  - Gradle's dependencies are cached, the engine's native build reuses compiled files (ccache), and the packaged compiler is cached until the compiler or the SDK changes.
 - **The APK and the compiler cache:** GitHub scopes a cache to the branch (or pull request) that saved it, so Main's APK can only use an LLVM build cached on Main. When the Compiler workflow finishes on Main, the App workflow builds the APK again (only that job), so Main's APK always carries the compiler.
 - **Owner direction:** split a job into parallel parts where the parts are really independent, keeping it readable and reliable.
   - Where it helps: the Windows build compiles each target's files in parallel (`/MP`), because nearly all of the Windows engine job was compiling.

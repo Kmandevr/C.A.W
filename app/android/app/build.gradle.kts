@@ -27,12 +27,17 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // 64-bit ARM: the phones C.A.W targets. Every ABI listed builds the engine again.
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
         }
         externalNativeBuild {
             cmake {
                 arguments += listOf("-DCAW_TOOLS=OFF", "-DANDROID_STL=c++_static")
+                // CI sets CAW_CCACHE so unchanged engine sources aren't compiled again.
+                if (System.getenv("CAW_CCACHE") == "1") {
+                    arguments += listOf("-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
+                }
             }
         }
     }
