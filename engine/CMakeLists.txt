@@ -134,7 +134,7 @@ add_library(caw_core STATIC
 target_include_directories(caw_core PRIVATE src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
 find_package(Threads REQUIRED)
-target_link_libraries(caw_core PUBLIC CAW::SDK Threads::Threads)
+target_link_libraries(caw_core PUBLIC CAW::SDK Threads::Threads ${CMAKE_DL_LIBS})
 set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 
 
@@ -167,11 +167,17 @@ target_include_directories(caw_cli PRIVATE src)
   target_link_libraries(caw_cli PRIVATE caw_core)
   add_executable(caw_tests tests/test_main.cpp tests/language_test.cpp tests/engine_test.cpp tests/export_test.cpp
     tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
-    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp
+    tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp
     src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
+  add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
+  target_link_libraries(caw_test_component PRIVATE CAW::SDK)
+  target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
+  set_target_properties(caw_test_component PROPERTIES PREFIX "" OUTPUT_NAME "caw_test_component")
+  add_dependencies(caw_tests caw_test_component)
   target_compile_options(caw_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_tests PRIVATE src)
-  target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}")
+  target_compile_definitions(caw_tests PRIVATE CAW_ROOT="${CAW_ROOT}"
+    "CAW_TEST_COMPONENT_PATH_DEFAULT=\"$<TARGET_FILE:caw_test_component>\"")
   target_link_libraries(caw_tests PRIVATE caw_core)
   # Compile the consumer test with only CAW::SDK's public include path; no engine/src access.
   add_library(caw_sdk_public_compile OBJECT tests/public_cpp_sdk_test.cpp)
@@ -184,7 +190,8 @@ target_include_directories(caw_cli PRIVATE src)
   set(CAW_TEST_SHARDS 4)
   foreach(shard RANGE 0 3)
     add_test(NAME caw_tests_shard_${shard}
-      COMMAND caw_tests --shard-index ${shard} --shard-count ${CAW_TEST_SHARDS})
+      COMMAND ${CMAKE_COMMAND} -E env "CAW_TEST_COMPONENT_PATH=$<TARGET_FILE:caw_test_component>"
+        "$<TARGET_FILE:caw_tests>" --shard-index ${shard} --shard-count ${CAW_TEST_SHARDS})
   endforeach()
   set_tests_properties(caw_tests_shard_0 caw_tests_shard_1 caw_tests_shard_2 caw_tests_shard_3
     PROPERTIES PROCESSORS 1)

@@ -61,6 +61,49 @@ void main() {
     await dir.delete(recursive: true);
   }, skip: skip);
 
+  test('native component loading requires an explicit trust choice', () async {
+    final engine = Engine.create();
+    late final NativeComponentLoadResult blocked;
+    try {
+      blocked = await engine.loadNativeComponent(
+        artifactPath: '/not/opened/while/blocked.so',
+        expectedComponentId: 'org.caw.tests.blocked',
+        trust: NativeComponentTrust.blocked,
+      );
+    } catch (error, stack) {
+      fail('Blocked native component load threw: $error\\n$stack');
+    }
+    expect(blocked.ok, isFalse);
+    expect(blocked.error, contains('blocked'), reason: 'Blocked result: ${blocked.error}');
+
+    final isolated = await engine.loadNativeComponent(
+      artifactPath: '/not/opened/while/isolated.so',
+      expectedComponentId: 'org.caw.tests.isolated',
+      trust: NativeComponentTrust.isolated,
+    );
+    expect(isolated.ok, isFalse);
+    expect(isolated.error, contains('Isolated'), reason: 'Isolated result: ${isolated.error}');
+
+    final pending = engine.loadNativeComponent(
+      artifactPath: '/not/opened/while/dispose-is-pending.so',
+      expectedComponentId: 'org.caw.tests.dispose',
+      trust: NativeComponentTrust.blocked,
+    );
+    engine.dispose();
+    final afterDisposeRequest = await pending;
+    expect(afterDisposeRequest.ok, isFalse);
+    expect(afterDisposeRequest.error, contains('blocked'), reason: 'Disposed-engine result: ${afterDisposeRequest.error}');
+  }, skip: skip);
+
+  test('a project cannot use a native component before an explicit trust load', () async {
+    final engine = Engine.create();
+    await expectLater(
+      engine.setProject('{"caw_project":1,"master_components":["org.caw.tests.not-loaded"]}'),
+      throwsA(predicate((error) => error is StateError && error.message.contains('not loaded'))),
+    );
+    engine.dispose();
+  }, skip: skip);
+
   test('a generator plays the notes of a pattern', () async {
     final templates = Engine.templates();
     final synth = templates.firstWhere((t) => t.file == 'acid-synth.caw');

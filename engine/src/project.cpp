@@ -131,6 +131,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         }
     }
 
+    out.masterComponents = idList(root.get("master_components"));
     if (const Json* mods = root.get("modules"); mods && mods->type == Json::Type::Array) {
         for (const Json& m : mods->arr) {
             if (m.type != Json::Type::Object) continue;

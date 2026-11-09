@@ -103,6 +103,12 @@ CAW_API void caw_engine_destroy(CawEngine* e);
 /* Replaces the whole project (JSON, see docs/architecture.md). Unchanged layers keep playing; changed modules
    hot-swap with a crossfade; a module that fails to compile keeps its last good version. Returns result JSON. */
 CAW_API char* caw_engine_set_project(CawEngine* e, const char* project_json);
+/* Native component loading is never implied by a successful build. The caller must pass an explicit
+   per-component trust level. Isolated is rejected until a separate-process audio host exists. */
+enum { CAW_NATIVE_TRUST_BLOCKED = 0, CAW_NATIVE_TRUST_ISOLATED = 1, CAW_NATIVE_TRUST_TRUSTED = 2 };
+CAW_API char* caw_engine_load_component(CawEngine* e, const char* library_path,
+                                        const char* expected_component_id, int32_t trust_level);
+CAW_API int32_t caw_engine_unload_component(CawEngine* e, const char* component_id);
 CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);

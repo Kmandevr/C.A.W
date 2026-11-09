@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across eight shared-state workspaces, with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-05
+updated: 2026-11-06
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -63,7 +63,7 @@ The Arranger is the main composition view. It is a horizontal song timeline (any
 
 ## Layout
 
-The application shell shows eight workspaces as docking panels: Builder (Code), Arranger (Arrange), Mixer, Engine Lab, Automation, Exporter (Export), Files and Plugin Builder (Plugins). Builder includes shared active-track quick controls; Arranger exposes adjustable track heights and a playhead overlay that repaints independently of clip layout. Mixer shows Reaper-style upright channel strips (chain slots, pan, fader, meter, M and S) in a row that scrolls sideways; a tapped slot's parameters open beside the strips on wide panels (with a draggable split) and in a sheet otherwise. The Files workspace imports/exports portable `.cawproj` and `.caw` files. Plugin Builder validates and packages native `.caw` modules; external CLAP/VST3 binaries remain blocked on a native plugin host/SDK. The Arranger remains the composition workspace; the old session grid is retired. Mixer, Engine Lab and Automation are separate destinations that read and edit the shared project state.
+The application shell shows eight workspaces as docking panels: Builder (Code), Arranger (Arrange), Mixer, Engine Lab, Automation, Exporter (Export), Files and Plugin Builder (Plugins). Builder includes shared active-track quick controls; Arranger exposes adjustable track heights and a playhead overlay that repaints independently of clip layout. Mixer shows Reaper-style upright channel strips (chain slots, pan, fader, meter, M and S) in a row that scrolls sideways; a tapped slot's parameters open beside the strips on wide panels (with a draggable split) and in a sheet otherwise. The Files workspace imports/exports portable `.cawproj` and `.caw` files. Plugin Builder currently validates and packages the constrained native `.caw` modules; it is not yet the ordinary-C++ editor, dependency manager or native-component trust interface. Those C++ workflows are tracked in [C++ creation platform](cpp-creation-platform.md). External CLAP/VST3 binaries remain blocked on a native plugin host/SDK. The Arranger remains the composition workspace; the old session grid is retired. Mixer, Engine Lab and Automation are separate destinations that read and edit the shared project state.
 
 **Docking (all shapes):** each screen shape (phone portrait, phone landscape, desktop) keeps its own saved layout. The Arrange preset puts the arrangement in one group and the other panels as tabs in a second. Tap a tab to show it. Long-press a tab and drag it onto another group to join it or split it, drag a divider to resize, and maximise a panel to fill the view. The layout button in the transport offers the Arrange, Mix and Code presets and shows any panel. Each screen lays out for its panel's size. ([UI plan](ui-plan.md), U1.)
 

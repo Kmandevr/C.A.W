@@ -330,3 +330,14 @@ updated: 2026-11-09
 ## 2026-11-02 — Effect-chain length is resource-governed, not a fixed product cap
 
 Project layers and synth patches may describe dynamically sized module/effect chains. Parsing and engine preparation must preserve every authored chain element; no silent truncation or arbitrary eight-effect ceiling is allowed. Memory and processing costs are handled by explicit host resource budgets and clear preparation errors. This change does not remove unrelated limits such as the current project layer-slot model or export-buffer capacity; those remain separate integration work.
+
+
+## 2026-11-06: First native C++ playback slice
+
+**Implementation decision (initial prototype, not the final component limitation):** route explicitly loaded, zero-parameter stereo C++ effects through a project-owned master-effect list (master_components). This uses the existing stereo master stage without forcing stereo processors into the current three-lane VM track chain, which is still mono per module. Keep the master safety limiter after native processing.
+
+- A successful build never loads or authorizes code. The caller must pass an explicit Blocked, Isolated or Trusted value to the Engine C API; Blocked refuses before opening the library, Isolated is rejected until a real separate-process host exists, and Trusted runs in-process.
+- Trust is not serialized into the portable project. The project stores component IDs/order only; each user/device must make its own trust decision before the component can be used.
+- The audio callback uses fixed preallocated stereo stages, performs no host allocation or locking, sanitizes output and publishes/retires master chains through the existing command/retirement path. Component code itself must obey the real-time contract.
+- The known scratch and chain-pointer storage is included in Engine budgets. ABI v1 does not report component-private heap/state size; that remains an explicit measurement gap.
+- Next integration work: parameter mapping, then track-chain support with a deliberate stereo/state design, then the per-component trust UI/store and Android-hosted toolchain.

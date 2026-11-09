@@ -30,12 +30,14 @@ class CppBuildResult {
     required this.exitCode,
     required this.output,
     required this.diagnostics,
+    this.artifactPath,
   });
 
   final bool success;
   final int exitCode;
   final String output;
   final List<CppBuildDiagnostic> diagnostics;
+  final String? artifactPath;
 }
 
 /// Joins project persistence, safe source materialization and the local CMake runner.
@@ -65,7 +67,7 @@ class CppComponentBuildService {
     await _storage.save(project);
     final sourceDirectory = await _storage.materializeCppComponent(project, component);
     final buildDirectory = await _storage.prepareCppBuildDirectory(project.id, component.id);
-    return runner.build(
+    final result = await runner.build(
       cmakeExecutable: cmakeExecutable,
       projectDirectory: sourceDirectory.path,
       buildDirectory: buildDirectory.path,
@@ -76,6 +78,49 @@ class CppComponentBuildService {
       androidAbi: androidAbi,
       androidPlatform: androidPlatform,
       environment: environment,
+    );
+    if (!result.success) return result;
+
+    final artifactMetadata = File(
+      '${buildDirectory.path}${Platform.pathSeparator}caw-component-artifact-$configuration.txt',
+    );
+    if (!await artifactMetadata.exists()) {
+      return CppBuildResult(
+        success: false,
+        exitCode: 1,
+        output: result.output,
+        diagnostics: [
+          ...result.diagnostics,
+          const CppBuildDiagnostic(
+            severity: 'error',
+            code: 'CAW_ARTIFACT_MISSING',
+            message: 'CMake completed, but no component artifact was exported. Use caw_add_component() in the project CMakeLists.txt.',
+          ),
+        ],
+      );
+    }
+    final artifactPath = (await artifactMetadata.readAsString()).trim();
+    if (artifactPath.isEmpty || !await File(artifactPath).exists()) {
+      return CppBuildResult(
+        success: false,
+        exitCode: 1,
+        output: result.output,
+        diagnostics: [
+          ...result.diagnostics,
+          const CppBuildDiagnostic(
+            severity: 'error',
+            code: 'CAW_ARTIFACT_MISSING',
+            message: 'The component artifact path exported by CMake does not exist.',
+          ),
+        ],
+      );
+    }
+    return CppBuildResult(
+      success: true,
+      exitCode: result.exitCode,
+      output: result.output,
+      diagnostics: result.diagnostics,
+      artifactPath: artifactPath,
     );
   }
 }
