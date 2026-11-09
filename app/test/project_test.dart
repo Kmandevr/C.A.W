@@ -14,6 +14,21 @@ ProjectDoc sample() => ProjectDoc(id: 'p1', name: 'Test', bpm: 140, globals: {'s
     ]);
 
 void main() {
+  test('a new C++ effect starts from the blank pass-through template with a valid manifest', () {
+    final c = CppComponentDoc.blankEffect(id: 'c1', name: 'My "Delay"');
+    expect(c.componentId, 'local.my-delay.c1');
+    expect(c.files.keys, containsAll(['caw-component.json', 'src/effect.cpp']));
+    final manifest = jsonDecode(c.files['caw-component.json']!) as Map<String, dynamic>;
+    expect(manifest['format'], 'caw.component');
+    expect((manifest['component'] as Map)['id'], c.componentId);
+    expect((manifest['component'] as Map)['name'], 'My "Delay"');
+    expect(manifest['sources'], ['src/effect.cpp']);
+    final source = c.files['src/effect.cpp']!;
+    expect(source, contains('d.id = "local.my-delay.c1";'));
+    expect(source, contains("d.name = \"My 'Delay'\";"));  // safe inside the C++ string
+    expect(source, contains('CAW_EXPORT_COMPONENT(MyDelay, kDescriptor)'));
+  });
+
   test('native components on tracks and the master round-trip and reach the engine with their values', () {
     final p = ProjectDoc(id: 'p', name: 'P', bpm: 120, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
     p.layers.first.components = [ComponentUseDoc('org.x.gain', {'left': 2})];
