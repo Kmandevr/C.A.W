@@ -18,6 +18,14 @@ inline float routeSample(double x) noexcept {
     return static_cast<float>(x);
 }
 
+// routeSample for a float already: the same result, in float lanes (four to a vector, not two).
+inline float routeSample(float x) noexcept {
+    x = x == x ? x : 0.0f;
+    x = x < -FLT_MAX ? -FLT_MAX : x;
+    x = x > FLT_MAX ? FLT_MAX : x;
+    return x;
+}
+
 // Accumulates one routed sample into a float sum with the same saturation.
 inline float routeAdd(float sum, float sample) noexcept {
     float s = sum + sample;
