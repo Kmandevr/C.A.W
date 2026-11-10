@@ -10,7 +10,9 @@ import '../model/arrange_fx.dart';
 import '../model/live_midi.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
+import 'arrange/arrange_drag.dart';
 import 'arrange/focus_panel.dart';
+import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
 import 'frame/sections.dart';
@@ -103,9 +105,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   String? _localFocus;
   FocusTab _tab = FocusTab.fx;
 
+  /// Clip and track drags: what they point at, edge scrolling and Escape (REAPER-style, #172).
+  late final ArrangeDrag _drag = ArrangeDrag()..hScroll = _hScroll;
+
   @override
   void dispose() {
     _zoomAnim.dispose();
+    _trackGhost?.remove();
+    _trackGhostAt.dispose();
+    _drag.dispose();
     _hScroll.dispose();
     super.dispose();
   }
@@ -146,7 +154,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   void _touchDown(PointerDownEvent e, double headW) {
     if (e.kind != PointerDeviceKind.touch) return;
+    // During a clip or track drag a second finger toggles copy (the phone's Ctrl) instead of starting a pinch.
+    if (_drag.active) {
+      _drag.copy.value = !_drag.copy.value;
+      Motion.tick();
+      return;
+    }
     _touches[e.pointer] = e.localPosition;
+    _drag.pinching = _touches.length >= 2;
     if (_touches.length == 2) {
       final ps = _touches.values.toList();
       final dx = (ps[0].dx - ps[1].dx).abs(), dy = (ps[0].dy - ps[1].dy).abs();
@@ -177,6 +192,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   void _touchUp(PointerEvent e) {
     if (_touches.remove(e.pointer) == null) return;
+    _drag.pinching = _touches.length >= 2;
     if (_touches.length == 1 && (_pinchX || _pinchY)) {
       _pinchX = _pinchY = false;
       _saveHeaderSize();
@@ -245,9 +261,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   Future<void> _trackMenu(LayerDoc layer, Offset at, List<ModuleDoc> patterns) async {
     final s = widget.state;
     final index = s.project.layers.indexOf(layer);
-    final gens = s.project.modules.where((m) => s.isGenerator(m.id)).toList();
     s.componentCatalog.refreshIfStale();
-    final natives = s.nativeInstruments..sort((a, b) => a.label.compareTo(b.label));
     final hasVolume = layer.automation.any((a) => a.target == 'volume');
     final hasPan = layer.automation.any((a) => a.target == 'pan');
     final canAutomate = !layer.isFolder || layer.busEnabled;
@@ -263,13 +277,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             hint: midi == null || midi.devices.isEmpty ? 'Connect a MIDI keyboard' : null),
         MenuAction('input', 'Input · ${midi == null || midi.devices.isEmpty ? 'none' : midi.devices.join(', ')}', Icons.input,
             enabled: false, hint: 'MIDI keyboards play the selected track; audio input comes later'),
-        for (final g in gens)
-          MenuAction('gen:${g.id}', 'Instrument · ${g.name}', Icons.piano,
-              checked: layer.instrument == null && g.id == layer.generatorId),
-        // C++ instruments: the engine's built-ins and the project's loaded (trusted) ones.
-        for (final c in natives)
-          MenuAction('inst:${c.id}', 'Instrument · ${c.label}', Icons.piano_outlined,
-              checked: layer.instrument?.id == c.id, hint: c.builtin ? 'Built-in C++' : 'Project C++'),
+        // The same browser as the FX stack's (REAPER: instruments are FX), filtered to instruments.
+        MenuAction('instrument', 'Instrument · ${s.instrumentName(layer) ?? 'none'}…', Icons.piano),
         for (final pattern in patterns) MenuAction('clip:${pattern.id}', 'Add clip · ${pattern.name}', Icons.add_box_outlined),
         const MenuAction('midi', 'Import MIDI file…', Icons.file_open_outlined),
       ],
@@ -292,8 +301,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == null || !mounted) return;
     if (v == 'fx') _openTrack(layer, tab: FocusTab.fx);
     if (v == 'arm') midi?.toggleRecord(layer.id);
-    if (v.startsWith('gen:')) s.setCawGenerator(layer, v.substring(4));
-    if (v.startsWith('inst:')) s.setNativeInstrument(layer, v.substring(5));
+    if (v == 'instrument') {
+      await pickInstrument(context, s, layer);
+      return;
+    }
     if (v.startsWith('clip:')) s.addClip(layer, v.substring(5));
     if (v == 'midi') await importMidiFile(context, s, layer: layer);
     if (v == 'rename') await _rename(layer);
@@ -313,6 +324,94 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       if (_focusId == layer.id) _focus(null);
       s.removeLayer(layer);
     }
+  }
+
+  // ---------- a track header dragged (REAPER: drag a track panel up or down, or into a folder's middle) ----------
+
+  LayerDoc? _pressed, _dragged;
+  Offset _pressAt = Offset.zero, _trackAt = Offset.zero;
+  OverlayEntry? _trackGhost;
+  final _trackGhostAt = ValueNotifier<Offset>(Offset.zero);
+
+  void _trackDrag(LayerDoc layer, _HeaderPhase phase, Offset at) {
+    switch (phase) {
+      case _HeaderPhase.press:
+        _pressed = layer;
+        _pressAt = at;
+        Motion.tick();
+      case _HeaderPhase.grab:
+        _pressed = layer;
+        _pressAt = at;
+        _startTrackDrag(layer, at);
+      case _HeaderPhase.move:
+        if (_dragged == null && _pressed == layer && (at - _pressAt).distance > 10) _startTrackDrag(layer, at);
+        if (_dragged != layer) return;
+        _trackAt = at;
+        _trackGhostAt.value = at;
+        _drag.point(at);
+        _trackHover();
+      case _HeaderPhase.release:
+        if (_dragged == layer) {
+          final spot = _drag.hover.value;
+          _endTrackDrag();
+          if (spot == null) return;
+          final target = widget.state.project.layers.where((l) => l.id == spot.layerId).firstOrNull;
+          widget.state.moveTrack(layer, spot.newTrack ? null : target, spot.where);
+        } else if (_pressed == layer) {
+          _pressed = null;
+          _trackMenu(layer, _pressAt, widget.state.project.modules.where((m) => widget.state.isPattern(m.id)).toList());
+        }
+      case _HeaderPhase.cancel:
+        if (_dragged == layer) _endTrackDrag();
+        _pressed = null;
+    }
+  }
+
+  void _startTrackDrag(LayerDoc layer, Offset at) {
+    _dragged = layer;
+    _trackAt = at;
+    _trackGhostAt.value = at;
+    _drag.begin(track: true, onScroll: _trackHover, onCancel: _endTrackDrag);
+    final color = trackColor(widget.state, layer);
+    _trackGhost = OverlayEntry(builder: (context) => ValueListenableBuilder<Offset>(
+      valueListenable: _trackGhostAt,
+      builder: (context, p, _) => Positioned(left: p.dx + 12, top: p.dy - 14, child: IgnorePointer(child: Material(
+        key: const ValueKey('track-drag-ghost'),
+        color: Color.lerp(Neon.panel, color, 0.35)!.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(border: Border(left: BorderSide(color: color, width: 3))),
+          child: Text(layer.name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700))))))));
+    Overlay.of(context).insert(_trackGhost!);
+  }
+
+  void _trackHover() {
+    final layer = _dragged;
+    if (layer == null) return;
+    var spot = _drag.trackSpotAt(_trackAt, widget.state.project);
+    // Onto itself (or into itself, for a folder) it stays where it is.
+    final onto = spot?.layerId == null ? null : widget.state.project.layers.where((l) => l.id == spot!.layerId).firstOrNull;
+    if (onto != null && (identical(onto, layer) || widget.state.folderDepth(onto) > 0 && _inside(onto, layer.id))) {
+      spot = null;
+    }
+    _drag.hover.value = spot;
+  }
+
+  bool _inside(LayerDoc l, String folderId) {
+    var parent = l.parentId;
+    for (var d = 0; parent != null && d <= widget.state.project.layers.length; d++) {
+      if (parent == folderId) return true;
+      parent = widget.state.project.layers.where((x) => x.id == parent).firstOrNull?.parentId;
+    }
+    return false;
+  }
+
+  void _endTrackDrag() {
+    _trackGhost?.remove();
+    _trackGhost = null;
+    _dragged = _pressed = null;
+    _drag.end();
   }
 
   Future<void> _rename(LayerDoc layer) async {
@@ -648,6 +747,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final width = math.max(560.0, math.min(p.maxArrangementSteps, math.max(p.timelineSteps, end + 64 * p.stepsPerBar)) * stepW);
     final ruler = pinned ? 20.0 : 30.0;
     final focusId = _focusId;
+    final drag = pinned ? null : _drag;
+    // The rows' total height, so the New track zone fills the rest of the view below the last track.
+    final rows = layers.fold<double>(0, (h, l) => h + trackHeight + l.automation.length * 34.0
+        + (pinned ? 0 : l.spaceBelow) + gap);
     // Two fingers scroll by their average, so a pinch zooms without dragging the view; the pointers are read raw.
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(multitouchDragStrategy: MultitouchDragStrategy.averageBoundaryPointers),
@@ -656,7 +759,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       onPointerMove: (e) => _touchMove(e, headW),
       onPointerUp: _touchUp,
       onPointerCancel: _touchUp,
-      child: LayoutBuilder(builder: (context, view) => SingleChildScrollView(child: Listener(
+      child: LayoutBuilder(builder: (context, view) {
+        final zoneH = math.max(view.maxHeight - ruler - rows, math.max(80.0, trackHeight * 1.5));
+        return SingleChildScrollView(key: drag?.vViewport, controller: drag?.vScroll, child: Listener(
         onPointerSignal: (e) => _wheel(e, null),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Stack(children: [SizedBox(width: headW, child: Column(children: [
@@ -666,7 +771,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             child: Text(pinned ? 'FOCUS · swipe ‹ ›' : 'TRACKS',
               style: const TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
         for (final layer in layers) ...[
-          _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
+          _TimelineHeader(key: drag?.headerKey(layer.id), state: s, layer: layer, index: p.layers.indexOf(layer),
+            drag: drag, onTrackDrag: drag == null ? null : (phase, at) => _trackDrag(layer, phase, at),
             depth: pinned ? 0 : s.folderDepth(layer), trackHeight: trackHeight,
             focused: layer.id == focusId,
             // The pinned track: a tap goes back to all tracks, a sideways swipe to the next or previous one.
@@ -680,6 +786,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           if (layer.spaceBelow > 0 && !pinned) _SpacerHeader(state: s, layer: layer),
           SizedBox(height: gap),
         ],
+        if (drag != null) NewTrackZone(key: drag.newTrackHeader, state: s, drag: drag, height: zoneH, header: true),
       ])),
         // The headers' right edge: drag it to make the headers narrower or wider (saved).
         Positioned(right: 0, top: 0, bottom: 0, width: 10, child: _ResizeGrip(
@@ -688,7 +795,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
               .clamp(Settings.minHeaderWidth, Settings.maxHeaderWidth).toDouble()),
           onEnd: _saveHeaderSize)),
       ]),
-      Expanded(child: SingleChildScrollView(controller: _hScroll, scrollDirection: Axis.horizontal,
+      Expanded(child: SingleChildScrollView(key: drag?.hViewport, controller: _hScroll, scrollDirection: Axis.horizontal,
         child: Listener(
           onPointerSignal: (e) => _wheel(e, _hScroll.hasClients ? e.localPosition.dx - _hScroll.positions.last.pixels : null),
           child: SizedBox(width: width, child: Stack(children: [
@@ -704,12 +811,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             SizedBox(height: ruler, width: width,
               child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll))),
             for (final layer in layers) ...[
-              _TimelineLane(state: s, layer: layer, width: width, stepW: stepW,
-                trackHeight: trackHeight, selectedIds: s.selectedClipIds, callbacks: callbacks),
+              _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width, stepW: stepW,
+                trackHeight: trackHeight, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag),
               // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
               if (layer.spaceBelow > 0 && !pinned) SizedBox(height: layer.spaceBelow),
               SizedBox(height: gap),
             ],
+            if (drag != null) SizedBox(width: width,
+              child: NewTrackZone(key: drag.newTrackLane, state: s, drag: drag, height: zoneH, stepW: stepW)),
           ])),
           Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
             valueListenable: s.tick,
@@ -720,7 +829,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             },
           ))),
         ]))))),
-    ]))))));
+    ])));
+      })));
   }
 
   Widget _arrangement(BuildContext context, _TrackCallbacks callbacks) {
@@ -752,9 +862,9 @@ class _TrackCallbacks {
 /// the rest are in the long-press menu (right-click on a desktop). A tap opens the track's focus view. The selected
 /// or focused track glows in its own colour, brighter.
 class _TimelineHeader extends StatelessWidget {
-  const _TimelineHeader({required this.state, required this.layer, required this.index, required this.depth,
+  const _TimelineHeader({super.key, required this.state, required this.layer, required this.index, required this.depth,
     required this.trackHeight, required this.onTap, required this.onFx, required this.onMenu,
-    this.focused = false, this.onSwipe, this.onResize, this.onResizeEnd});
+    this.focused = false, this.onSwipe, this.onResize, this.onResizeEnd, this.drag, this.onTrackDrag});
   final AppState state;
   final LayerDoc layer;
   final int index, depth;
@@ -767,6 +877,11 @@ class _TimelineHeader extends StatelessWidget {
   /// A drag on the row's bottom edge, by this many pixels; null on the focus view's pinned track.
   final ValueChanged<double>? onResize;
   final VoidCallback? onResizeEnd;
+
+  /// Dragging the header moves the track (REAPER): a long press then a move on a touch screen (a long press
+  /// released without moving opens the menu), a plain drag with a mouse. Null on the pinned track.
+  final ArrangeDrag? drag;
+  final void Function(_HeaderPhase phase, Offset at)? onTrackDrag;
 
   @override
   Widget build(BuildContext context) {
@@ -859,8 +974,26 @@ class _TimelineHeader extends StatelessWidget {
         ]);
       }),
     );
-    final resizable = onResize == null ? box : Stack(children: [
-      box,
+    // Where a dragged track would land on this one: a line above or below it, or the folder lit up.
+    final target = drag == null ? box : ValueListenableBuilder<DragSpot?>(
+      valueListenable: drag!.hover,
+      builder: (context, spot, child) {
+        final here = drag!.active && spot?.layerId == layer.id && drag!.dragsTrack;
+        if (!here) return child!;
+        final into = spot!.where == TrackDrop.into;
+        return Stack(children: [
+          child!,
+          if (into) Positioned.fill(child: IgnorePointer(child: DecoratedBox(key: const ValueKey('track-drop-into'),
+            decoration: BoxDecoration(border: Border.all(color: Neon.green, width: 2),
+              color: Neon.green.withValues(alpha: 0.10)))))
+          else Positioned(left: 0, right: 0, height: 3, top: spot.where == TrackDrop.above ? 0 : null,
+            bottom: spot.where == TrackDrop.below ? 0 : null,
+            child: IgnorePointer(child: Container(key: const ValueKey('track-drop-line'), color: Neon.green))),
+        ]);
+      },
+      child: box);
+    final resizable = onResize == null ? target : Stack(children: [
+      target,
       // The row's bottom edge: drag it to make every track thinner or taller (saved).
       Positioned(left: 0, right: 0, bottom: 0, height: 8, child: _ResizeGrip(
         key: ValueKey('track-height-grip-${layer.id}'), axis: Axis.vertical, label: 'Resize tracks',
@@ -874,17 +1007,31 @@ class _TimelineHeader extends StatelessWidget {
         key: ValueKey('track-header-${layer.id}'),
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        onLongPressStart: (d) => onMenu(d.globalPosition),
+        onLongPressStart: (d) => onTrackDrag == null ? onMenu(d.globalPosition) : onTrackDrag!(_HeaderPhase.press, d.globalPosition),
+        onLongPressMoveUpdate: onTrackDrag == null ? null : (d) => onTrackDrag!(_HeaderPhase.move, d.globalPosition),
+        onLongPressEnd: onTrackDrag == null ? null : (d) => onTrackDrag!(_HeaderPhase.release, d.globalPosition),
+        onLongPressCancel: onTrackDrag == null ? null : () => onTrackDrag!(_HeaderPhase.cancel, Offset.zero),
         onSecondaryTapUp: (d) => onMenu(d.globalPosition),
         onHorizontalDragEnd: onSwipe == null ? null : (d) {
           final v = d.primaryVelocity ?? 0;
           if (v.abs() > 200) onSwipe!(v < 0 ? 1 : -1);
         },
-        child: resizable,
+        // A mouse drags the header straight away; a finger's vertical drag still scrolls the tracks.
+        child: onTrackDrag == null ? resizable : GestureDetector(
+          supportedDevices: const {PointerDeviceKind.mouse},
+          onVerticalDragStart: (d) => onTrackDrag!(_HeaderPhase.grab, d.globalPosition),
+          onVerticalDragUpdate: (d) => onTrackDrag!(_HeaderPhase.move, d.globalPosition),
+          onVerticalDragEnd: (_) => onTrackDrag!(_HeaderPhase.release, Offset.zero),
+          onVerticalDragCancel: () => onTrackDrag!(_HeaderPhase.cancel, Offset.zero),
+          child: resizable),
       ),
     );
   }
 }
+
+/// A track header's drag, as the header reports it: a long press ([press]) that may become a drag once it moves, or
+/// a mouse drag ([grab]) that is one at once.
+enum _HeaderPhase { press, grab, move, release, cancel }
 
 /// A thin edge that resizes something when dragged: a faint grip line shows where it is, and the mouse cursor
 /// changes over it on a desktop.
@@ -933,38 +1080,95 @@ class _ResizeGripState extends State<_ResizeGrip> {
 /// The space above and below a clip in its row.
 double _clipInset(double trackHeight) => trackHeight < 60 ? 3 : 8;
 
-class _TimelineLane extends StatelessWidget {
-  const _TimelineLane({required this.state, required this.layer, required this.width,
-    required this.stepW, required this.trackHeight, required this.selectedIds, required this.callbacks});
+class _TimelineLane extends StatefulWidget {
+  const _TimelineLane({super.key, required this.state, required this.layer, required this.width,
+    required this.stepW, required this.trackHeight, required this.selectedIds, required this.callbacks, this.drag});
   final AppState state;
   final LayerDoc layer;
   final double width, stepW, trackHeight;
   final Set<String> selectedIds;
   final _TrackCallbacks callbacks;
 
+  /// Null on the pinned track, where clips only move in time.
+  final ArrangeDrag? drag;
+
+  @override
+  State<_TimelineLane> createState() => _TimelineLaneState();
+}
+
+class _TimelineLaneState extends State<_TimelineLane> {
+  /// A Ctrl+drag with the mouse in empty space draws a new empty clip (REAPER): from, to, in steps.
+  (int, int)? _drawing;
+  int? _doubleTapStep;
+
+  AppState get state => widget.state;
+  LayerDoc get layer => widget.layer;
+  int get _snap => state.arrangementSnapSteps;
+  int _snapped(double x, {bool up = false}) {
+    final raw = math.max(0, (x / widget.stepW).floor());
+    if (HardwareKeyboard.instance.isShiftPressed) return raw;
+    return up ? ((raw + _snap) ~/ _snap) * _snap : (raw ~/ _snap) * _snap;
+  }
+
+  void _drawDown(PointerDownEvent e) {
+    if (e.kind != PointerDeviceKind.mouse || e.buttons != kPrimaryMouseButton ||
+        !HardwareKeyboard.instance.isControlPressed) {
+      return;
+    }
+    final at = _snapped(e.localPosition.dx);
+    setState(() => _drawing = (at, at + _snap));
+  }
+
+  void _drawMove(PointerMoveEvent e) {
+    final d = _drawing;
+    if (d == null) return;
+    final to = math.max(d.$1 + 1, _snapped(e.localPosition.dx, up: true));
+    if (to != d.$2) setState(() => _drawing = (d.$1, to));
+  }
+
+  void _drawUp(PointerEvent e) {
+    final d = _drawing;
+    if (d == null) return;
+    setState(() => _drawing = null);
+    if (e is PointerUpEvent) state.addEmptyClip(layer, d.$1, d.$2 - d.$1);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final trackHeight = widget.trackHeight, stepW = widget.stepW;
     final height = trackHeight + layer.automation.length * 34.0;
-    // A dropped effect joins this track's chain; a dropped pattern becomes a clip where it lands.
-    return DragTarget<AssetDrag>(
-      onWillAcceptWithDetails: (_) => !layer.isFolder,
+    final color = trackColor(state, layer);
+    // A dropped effect or instrument goes on this track (an instrument asks before replacing one); a dropped
+    // pattern or MIDI file becomes clips where it lands. On a folder, its first track inside takes it.
+    final lane = DragTarget<AssetDrag>(
       onAcceptWithDetails: (d) {
         final box = context.findRenderObject() as RenderBox?;
         final x = box == null ? 0.0 : box.globalToLocal(d.offset).dx;
-        state.dropAsset(layer, d.data, atStep: math.max(0, (x / stepW).floor()));
+        dropOnTrack(context, state, layer, d.data, atStep: math.max(0, (x / stepW).floor()));
       },
-      builder: (context, hovering, _) => SizedBox(width: width, height: height,
+      builder: (context, hovering, _) => SizedBox(width: widget.width, height: height,
     child: Stack(children: [
-      Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque,
+      Positioned.fill(child: Listener(
+        onPointerDown: _drawDown,
+        onPointerMove: _drawMove,
+        onPointerUp: _drawUp,
+        onPointerCancel: _drawUp,
+        child: GestureDetector(behavior: HitTestBehavior.opaque,
         // A plain horizontal drag belongs to the enclosing scroll view. Long-press
         // drag creates a time selection without stealing normal timeline navigation.
         onTapUp: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
+        // A double-tap in empty space draws a one-bar empty clip there (the touch stand-in for REAPER's Ctrl+drag).
+        onDoubleTapDown: (d) => _doubleTapStep = _snapped(d.localPosition.dx),
+        onDoubleTap: () {
+          final at = _doubleTapStep;
+          if (at != null) state.addEmptyClip(layer, at, state.project.stepsPerBar);
+        },
         onLongPressStart: (d) { state.beginTimeSelection((d.localPosition.dx / stepW).round()); },
         onLongPressMoveUpdate: (d) => state.updateTimeSelection((d.localPosition.dx / stepW).round()),
         onLongPressEnd: (_) => state.endTimeSelection(),
         child: hovering.isEmpty ? const SizedBox.expand()
-            : DecoratedBox(decoration: BoxDecoration(color: trackColor(state, layer).withValues(alpha: 0.12),
-                border: Border.all(color: trackColor(state, layer)))))),
+            : DecoratedBox(decoration: BoxDecoration(color: color.withValues(alpha: 0.12),
+                border: Border.all(color: color)))))),
       if (state.timeSelectionStart != null && state.timeSelectionEnd != null)
         Positioned(left: math.min(state.timeSelectionStart!, state.timeSelectionEnd!) * stepW, top: 0,
           width: math.max(1.0, (state.timeSelectionEnd! - state.timeSelectionStart!).abs() * stepW), height: height,
@@ -973,16 +1177,37 @@ class _TimelineLane extends StatelessWidget {
       for (final clip in layer.clips)
         Positioned(left: clip.startSteps * stepW, top: _clipInset(trackHeight),
           width: math.max(12.0, clip.lengthSteps * stepW), height: trackHeight - 2 * _clipInset(trackHeight),
-          child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW,
-            color: trackColor(state, layer), selected: selectedIds.contains(clip.id), callbacks: callbacks)),
+          child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW, drag: widget.drag,
+            color: color, selected: widget.selectedIds.contains(clip.id), callbacks: widget.callbacks)),
+      if (_drawing case (final from, final to))
+        Positioned(left: from * stepW, top: _clipInset(trackHeight), width: (to - from) * stepW,
+          height: trackHeight - 2 * _clipInset(trackHeight), child: IgnorePointer(child: DecoratedBox(
+            key: const ValueKey('clip-draw-preview'),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), color: color.withValues(alpha: 0.18),
+              border: Border.all(color: color))))),
       if (layer.clips.isEmpty && !layer.isFolder)
-        Positioned(left: 10, top: trackHeight * 0.38, child: const IgnorePointer(child: Text('Hold the track for clips, or drop a pattern here',
-          style: TextStyle(color: Neon.dim, fontSize: 10)))),
+        Positioned(left: 10, top: trackHeight * 0.38, child: const IgnorePointer(child: Text(
+          'Double-tap for a clip, or drop a pattern here', style: TextStyle(color: Neon.dim, fontSize: 10)))),
       for (var i = 0; i < layer.automation.length; i++)
         Positioned(left: 0, right: 0, top: trackHeight + i * 34.0, height: 34,
-          child: _AutomationLaneView(state: state, layer: layer, lane: layer.automation[i], stepW: stepW, width: width)),
+          child: _AutomationLaneView(state: state, layer: layer, lane: layer.automation[i], stepW: stepW, width: widget.width)),
     ]),
   ));
+    final drag = widget.drag;
+    if (drag == null) return lane;
+    // A clip dragged over this lane lights it up (its ghost shows where it lands).
+    return ValueListenableBuilder<DragSpot?>(
+      valueListenable: drag.hover,
+      builder: (context, spot, child) {
+        final here = drag.active && !drag.dragsTrack && spot?.layerId == layer.id;
+        return Stack(children: [
+          child!,
+          if (here) Positioned.fill(child: IgnorePointer(child: DecoratedBox(key: ValueKey('lane-target-${layer.id}'),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.10),
+              border: Border.all(color: color.withValues(alpha: 0.9), width: 1.5))))),
+        ]);
+      },
+      child: lane);
   }
 }
 
@@ -1097,7 +1322,7 @@ class _PlayheadPainter extends CustomPainter {
 
 class _TimelineClip extends StatefulWidget {
   const _TimelineClip({required this.state, required this.layer, required this.clip,
-    required this.stepW, required this.color, required this.selected, required this.callbacks});
+    required this.stepW, required this.color, required this.selected, required this.callbacks, this.drag});
   final AppState state;
   final LayerDoc layer;
   final ClipDoc clip;
@@ -1105,24 +1330,47 @@ class _TimelineClip extends StatefulWidget {
   final Color color;
   final bool selected;
   final _TrackCallbacks callbacks;
+  final ArrangeDrag? drag;
   @override
   State<_TimelineClip> createState() => _TimelineClipState();
 }
 
+/// What a dragged clip's ghost shows: where it lands, in its target's colour, and whether it is a copy.
+typedef _Ghost = ({Rect rect, Rect clip, Color color, bool copy});
+
 class _TimelineClipState extends State<_TimelineClip> {
-  double dx = 0, resizeDx = 0;
-  bool dragging = false, resizing = false, sourceDragging = false;
+  double dx = 0, resizeDx = 0, trimDx = 0;
+  bool dragging = false, resizing = false, trimming = false, sourceDragging = false;
   int? _lastSnap;
+
+  // A body drag (REAPER: drag an item to move it, to another track too; Ctrl-drag copies it).
+  Offset _from = Offset.zero, _pointer = Offset.zero;
+  double _scroll0 = 0;
+  bool _ignored = false;
+  OverlayEntry? _ghost;
+  final _ghostState = ValueNotifier<_Ghost?>(null);
 
   int get _snap => widget.state.arrangementSnapSteps;
   bool get _free => HardwareKeyboard.instance.isShiftPressed;
+  ArrangeDrag? get _drag => widget.drag;
+  bool get _copy => HardwareKeyboard.instance.isControlPressed || (_drag?.copy.value ?? false);
+  double get _scrolled {
+    final h = _drag?.hScroll;
+    return h == null || !h.hasClients ? 0 : h.positions.last.pixels - _scroll0;
+  }
 
   /// Where a move ends, in steps: on the grid unless Shift is held.
   int _moveTarget() {
-    final raw = (dx / widget.stepW).round();
+    final raw = ((dx + _scrolled) / widget.stepW).round();
     if (sourceDragging) return _free ? raw : (raw / _snap).round() * _snap;
     final rawStart = widget.clip.startSteps + raw;
     return _free ? rawStart : (rawStart / _snap).round() * _snap;
+  }
+
+  /// Where a left-edge trim puts the clip's start.
+  int _trimTarget() {
+    final raw = widget.clip.startSteps + (trimDx / widget.stepW).round();
+    return _free ? raw : (raw / _snap).round() * _snap;
   }
 
   /// A light tick each time the clip lands on another grid line (owner: haptics on grid snaps).
@@ -1132,20 +1380,176 @@ class _TimelineClipState extends State<_TimelineClip> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  void dispose() {
+    _removeGhost();
+    _ghostState.dispose();
+    super.dispose();
+  }
+
+  void _removeGhost() {
+    _ghost?.remove();
+    _ghost = null;
+  }
+
+  void _start(DragStartDetails d) {
+    _ignored = _drag?.pinching ?? false;
+    if (_ignored) return;
+    setState(() {
+      dragging = true;
+      sourceDragging = HardwareKeyboard.instance.isAltPressed;
+      dx = 0;
+      _lastSnap = null;
+    });
+    _from = _pointer = d.globalPosition;
+    final h = _drag?.hScroll;
+    _scroll0 = h == null || !h.hasClients ? 0 : h.positions.last.pixels;
+    final drag = _drag;
+    if (drag == null || sourceDragging) return;
+    drag.begin(onScroll: _follow, onCancel: _cancel);
+    _ghost = OverlayEntry(builder: (_) => _GhostView(ghost: _ghostState, name: _name));
+    Overlay.of(context).insert(_ghost!);
+    _follow();
+  }
+
+  String get _name => widget.state.project.module(widget.clip.patternId)?.name ?? 'Missing pattern';
+
+  void _update(DragUpdateDetails d) {
+    if (_ignored || !dragging) return;
+    _pointer = d.globalPosition;
+    dx = _pointer.dx - _from.dx;
+    _drag?.point(_pointer);
+    _follow();
+  }
+
+  /// Follows the pointer (and the view, while it scrolls at an edge): the lane under it, the snapped time, the ghost.
+  void _follow() {
+    if (!mounted || !dragging) return;
+    final at = _moveTarget();
+    _tickOnSnap(at);
+    final drag = _drag;
+    if (drag == null || sourceDragging) {
+      setState(() {});
+      return;
+    }
+    final spot = drag.spotAt(_pointer);
+    drag.hover.value = spot;
+    final lane = spot == null ? drag.laneRect(widget.layer.id)
+        : spot.newTrack ? ArrangeDrag.rectOf(drag.newTrackLane) : drag.laneRect(spot.layerId!);
+    final box = context.findRenderObject() as RenderBox?;
+    final view = ArrangeDrag.rectOf(drag.hViewport);
+    final vview = ArrangeDrag.rectOf(drag.vViewport);
+    if (lane == null || box == null || view == null || vview == null) return;
+    final target = spot?.layerId == null ? null
+        : widget.state.project.layers.where((l) => l.id == spot!.layerId).firstOrNull;
+    // As high in the target lane as the clip sits in its own.
+    final own = drag.laneRect(widget.layer.id);
+    final inset = own == null ? 4.0 : box.localToGlobal(Offset.zero).dy - own.top;
+    _ghostState.value = (
+      rect: Rect.fromLTWH(lane.left + at * widget.stepW, lane.top + (spot?.newTrack ?? false ? 4 : inset),
+          box.size.width, box.size.height),
+      clip: view.intersect(vview),
+      color: spot?.newTrack ?? false ? Neon.green : target == null ? widget.color : trackColor(widget.state, target),
+      copy: _copy,
+    );
+    setState(() {});
+  }
+
+  void _end(DragEndDetails _) {
+    if (_ignored || !dragging) return;
+    final c = widget.clip;
+    final at = _moveTarget();
+    final drag = _drag;
+    if (sourceDragging) {
+      widget.state.shiftClipSource(widget.layer, c, at);
+    } else if (drag == null) {
+      widget.state.moveClip(widget.layer, c, at);
+    } else {
+      final spot = drag.hover.value;
+      final copy = _copy;
+      final target = spot == null || spot.newTrack ? null
+          : widget.state.project.layers.where((l) => l.id == spot.layerId).firstOrNull;
+      if (spot == null || (!spot.newTrack && target == null)) {
+        widget.state.moveClip(widget.layer, c, at);
+      } else {
+        widget.state.moveClipTo(widget.layer, c, target, at, copy: copy);
+      }
+    }
+    _finish();
+  }
+
+  /// Escape (or a cancelled gesture): the clip stays where it was.
+  void _cancel() => _finish();
+
+  void _finish() {
+    _removeGhost();
+    _ghostState.value = null;
+    if (dragging && !sourceDragging) _drag?.end();
+    if (mounted) setState(() { dragging = false; sourceDragging = false; dx = 0; _lastSnap = null; });
+    _ignored = true; // the rest of this gesture does nothing
+  }
+
+  Widget _edge({required bool left}) => Positioned(left: left ? 0 : null, right: left ? null : 0, top: 0, bottom: 0,
+    width: 12,
+    child: MouseRegion(cursor: SystemMouseCursors.resizeColumn, child: GestureDetector(behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: (_) => setState(() {
+        if (left) { trimming = true; trimDx = 0; } else { resizing = true; resizeDx = 0; }
+        _lastSnap = null;
+      }),
+      onHorizontalDragUpdate: (d) => setState(() {
+        final c = widget.clip;
+        if (left) {
+          trimDx += d.delta.dx;
+          _tickOnSnap(_trimTarget());
+        } else {
+          resizeDx += d.delta.dx;
+          final raw = c.lengthSteps + (resizeDx / widget.stepW).round();
+          _tickOnSnap(_free ? raw : (raw / _snap).round() * _snap);
+        }
+      }),
+      onHorizontalDragEnd: (_) {
+        if (left) {
+          widget.state.trimClipStart(widget.layer, widget.clip, _trimTarget());
+        } else {
+          widget.state.resizeClip(widget.layer, widget.clip, _resizedLength());
+        }
+        setState(() { resizing = trimming = false; resizeDx = trimDx = 0; _lastSnap = null; });
+      },
+      child: Center(child: Container(key: ValueKey('clip-${left ? 'start' : 'end'}-${widget.clip.id}'),
+        width: 2, height: 22, color: widget.color)))));
+
+  int _resizedLength() {
     final c = widget.clip;
     final rawLength = c.lengthSteps + (resizing ? (resizeDx / widget.stepW).round() : 0);
-    final length = (resizing && !_free ? math.max(_snap, (rawLength / _snap).round() * _snap) : rawLength)
+    return (resizing && !_free ? math.max(_snap, (rawLength / _snap).round() * _snap) : rawLength)
         .clamp(1, widget.state.project.maxArrangementSteps - c.startSteps).toInt();
-    final name = widget.state.project.module(c.patternId)?.name ?? 'Missing pattern';
-    final shown = dragging && !sourceDragging ? (_moveTarget() - c.startSteps) * widget.stepW : 0.0;
-    return Transform.translate(offset: Offset(shown, 0),
-      child: Transform.scale(scaleX: resizing ? length / c.lengthSteps : 1.0,
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.clip;
+    var start = c.startSteps, length = _resizedLength();
+    if (trimming) {
+      final end = c.startSteps + c.lengthSteps;
+      start = _trimTarget().clamp(math.max(0, c.startSteps - c.sourceOffsetSteps), end - 1).toInt();
+      length = end - start;
+    }
+    final name = _name;
+    // On the pinned track the clip itself slides in time; elsewhere its ghost shows where it goes and it stays dim.
+    final shown = dragging && !sourceDragging && _drag == null ? (_moveTarget() - c.startSteps) * widget.stepW : 0.0;
+    final ghosted = dragging && !sourceDragging && _drag != null && !_copy;
+    // The body drags in any direction from the first few pixels, before the scroll views take the gesture.
+    final mq = MediaQuery.of(context);
+    return Opacity(opacity: ghosted ? 0.35 : 1,
+      child: Transform.translate(offset: Offset(shown + (start - c.startSteps) * widget.stepW, 0),
+      child: Transform.scale(scaleX: length / c.lengthSteps,
         alignment: Alignment.centerLeft,
         child: Material(color: Glass.active ? Colors.transparent : widget.color.withValues(alpha: widget.selected ? .42 : .23),
           borderRadius: BorderRadius.circular(5),
           child: Stack(children: [
-        Positioned.fill(child: GestureDetector(
+        Positioned.fill(child: MediaQuery(
+          data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 2)),
+          child: GestureDetector(
+          key: ValueKey('clip-${c.id}'),
           onLongPressStart: (d) => widget.callbacks.onClipMenu(widget.layer, c, d.globalPosition),
           onSecondaryTapUp: (d) => widget.callbacks.onClipMenu(widget.layer, c, d.globalPosition),
           onTap: () {
@@ -1157,21 +1561,13 @@ class _TimelineClipState extends State<_TimelineClip> {
               widget.state.selectClip(widget.layer, c);
             }
           },
-          // A clip's notes open in the Clip tab of the focus view (owner, 2026-11-09).
+          // A clip's notes open in the Clip tab of the focus view (owner, 2026-11-09; REAPER: a MIDI item's
+          // double-click opens the MIDI editor).
           onDoubleTap: () => widget.callbacks.onClipOpen(widget.layer, c),
-          onHorizontalDragStart: (_) => setState(() {
-            dragging = true; sourceDragging = HardwareKeyboard.instance.isAltPressed; dx = 0; _lastSnap = null;
-          }),
-          onHorizontalDragUpdate: (d) => setState(() { dx += d.delta.dx; _tickOnSnap(_moveTarget()); }),
-          onHorizontalDragEnd: (_) {
-            final target = _moveTarget();
-            if (sourceDragging) {
-              widget.state.shiftClipSource(widget.layer, c, target);
-            } else {
-              widget.state.moveClip(widget.layer, c, target);
-            }
-            setState(() { dragging = false; sourceDragging = false; dx = 0; _lastSnap = null; });
-          },
+          onPanStart: _start,
+          onPanUpdate: _update,
+          onPanEnd: _end,
+          onPanCancel: () { if (dragging) _cancel(); },
           child: Container(
             // Glass: a faint fill that is lighter at the top, and a solid outline in the track's colour; the
             // selected clip glows in that colour, brighter.
@@ -1186,7 +1582,7 @@ class _TimelineClipState extends State<_TimelineClip> {
               border: Border.all(
                 color: Glass.active || widget.selected ? widget.color : widget.color.withValues(alpha: .7),
                 width: widget.selected ? 1.6 : 1)),
-            padding: const EdgeInsets.fromLTRB(7, 4, 13, 3),
+            padding: const EdgeInsets.fromLTRB(13, 4, 13, 3),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: widget.color, fontSize: 10, fontWeight: FontWeight.w800)),
@@ -1195,24 +1591,43 @@ class _TimelineClipState extends State<_TimelineClip> {
                   style: TextStyle(color: widget.color.withValues(alpha: .8), fontSize: 8)))),
             ]),
           ),
-        )),
-        Positioned(right: 0, top: 0, bottom: 0, width: 12,
-          child: GestureDetector(behavior: HitTestBehavior.opaque,
-            onHorizontalDragStart: (_) => setState(() { resizing = true; resizeDx = 0; _lastSnap = null; }),
-            onHorizontalDragUpdate: (d) => setState(() {
-              resizeDx += d.delta.dx;
-              final raw = c.lengthSteps + (resizeDx / widget.stepW).round();
-              _tickOnSnap(_free ? raw : (raw / _snap).round() * _snap);
-            }),
-            onHorizontalDragEnd: (_) {
-              widget.state.resizeClip(widget.layer, c, length);
-              setState(() { resizing = false; resizeDx = 0; _lastSnap = null; });
-            },
-            child: Center(child: Container(width: 2, height: 22, color: widget.color)))),
+        ))),
+        // Both edges trim (REAPER: drag an item's edge): the left one moves the start and keeps the notes in time.
+        _edge(left: true),
+        _edge(left: false),
           ]),
-        )),
+        ))),
     );
   }
+}
+
+/// A dragged clip's ghost, drawn over the tracks (inside their view) where the clip would land, with + for a copy.
+class _GhostView extends StatelessWidget {
+  const _GhostView({required this.ghost, required this.name});
+  final ValueNotifier<_Ghost?> ghost;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<_Ghost?>(
+    valueListenable: ghost,
+    builder: (context, g, _) {
+      if (g == null) return const SizedBox.shrink();
+      return Positioned.fromRect(rect: g.clip, child: IgnorePointer(child: ClipRect(child: Stack(children: [
+        Positioned(left: g.rect.left - g.clip.left, top: g.rect.top - g.clip.top, width: g.rect.width,
+          height: g.rect.height, child: Container(
+            key: const ValueKey('clip-drag-ghost'),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(5),
+              color: g.color.withValues(alpha: 0.30),
+              border: Border.all(color: g.color, width: 1.6),
+              boxShadow: [BoxShadow(color: g.color.withValues(alpha: 0.35), blurRadius: 10)]),
+            padding: const EdgeInsets.fromLTRB(7, 4, 6, 3),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: g.color, fontSize: 10, fontWeight: FontWeight.w800, decoration: TextDecoration.none))),
+              if (g.copy) Icon(Icons.add_circle, key: const ValueKey('clip-drag-copy'), size: 14, color: g.color),
+            ]))),
+      ]))));
+    });
 }
 
 class _AutomationLaneView extends StatelessWidget {
