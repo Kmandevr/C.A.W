@@ -227,19 +227,24 @@ class DelayPage extends StatelessWidget {
         readout: Text(_ms(delaySeconds(scope, 'sync', 'time'))),
         child: const _DelayHero(),
       )),
-      Row(children: [
-        const Text('SYNC', style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim)),
-        const SizedBox(width: 8),
-        const DeviceChoice('sync', maxSegments: 0),
-        if (dual) ...[
-          const SizedBox(width: 12),
-          const Text('R', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Neon.dim)),
-          const SizedBox(width: 6),
-          DeviceChoice('sync_r', maxSegments: 0, color: scope.secondary),
-        ],
-        const Spacer(),
-        const DeviceToggle('freeze', label: 'Freeze', icon: Icons.ac_unit),
-      ]),
+      // The sync pickers and Freeze: one row, or wrapped in a narrow column (inline beside the hero).
+      LayoutBuilder(builder: (context, box) {
+        final sync = [
+          const Text('SYNC', style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim)),
+          const SizedBox(width: 8),
+          const DeviceChoice('sync', maxSegments: 0),
+          if (dual) ...[
+            const SizedBox(width: 12),
+            const Text('R', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Neon.dim)),
+            const SizedBox(width: 6),
+            DeviceChoice('sync_r', maxSegments: 0, color: scope.secondary),
+          ],
+        ];
+        const freeze = DeviceToggle('freeze', label: 'Freeze', icon: Icons.ac_unit);
+        if (box.maxWidth >= 320) return Row(children: [...sync, const Spacer(), freeze]);
+        return Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          Row(mainAxisSize: MainAxisSize.min, children: sync), freeze]);
+      }),
       KnobRow([
         if (free('sync')) 'time',
         if (dual && free('sync_r')) 'time_r',

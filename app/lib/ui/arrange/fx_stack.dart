@@ -1,5 +1,5 @@
-// The FX tab: a track's FX chain like REAPER's (its instrument first, then its .caw chain and native C++ effects) as
-// cards with knobs, and a Routing view.
+// The FX tab: a track's FX chain like REAPER's (its instrument first, then its .caw chain and native C++ effects), built-ins
+// as their plugin UIs inline and the rest as knob cards, and a Routing view.
 import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
@@ -8,7 +8,9 @@ import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/cpp_component.dart';
 import '../../model/project.dart';
+import '../../model/device_target.dart';
 import '../devices/device_editor.dart';
+import '../devices/device_inline.dart';
 import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
@@ -56,6 +58,13 @@ class FxStack extends StatefulWidget {
 
 class _FxStackState extends State<FxStack> {
   bool _routing = false;
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   /// The selected card: ('caw' | 'native' | 'instrument', index).
   (String, int)? _selected;
@@ -111,7 +120,13 @@ class _FxStackState extends State<FxStack> {
 
   Widget _stack(BuildContext context) {
     final glow = trackColor(s, layer);
-    return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 24), children: [
+    // Inline plugin UIs take drags on their heroes and knobs, so the stack also scrolls by its thumb, in a gutter
+    // of its own on the right, and by the devices' headers.
+    return Scrollbar(controller: _scroll, thumbVisibility: true, interactive: true, thickness: 6,
+      radius: const Radius.circular(3), child: ListView(
+      key: const ValueKey('fx-stack-list'),
+      controller: _scroll,
+      padding: const EdgeInsets.fromLTRB(8, 0, 14, 24), children: [
       // The instrument is the chain's first slot (REAPER: an instrument is FX, usually first in the chain).
       if (layer.instrument != null) ...[
         const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),
@@ -170,7 +185,7 @@ class _FxStackState extends State<FxStack> {
         onPressed: () => addEffectTo(context, s, layer),
         icon: const Icon(Icons.add, size: 18),
         label: const Text('FX'))),
-    ]);
+    ]));
   }
 }
 
@@ -389,6 +404,36 @@ class _NativeEffectCard extends StatelessWidget {
       if (v == 'remove') _remove();
     }
     final failed = status == NativeEffectState.buildFailed || status == NativeEffectState.loadFailed;
+    final openKey = ValueKey(instrument ? 'fx-instrument-open' : 'fx-open-$index');
+    final bypassKey = ValueKey(instrument ? 'fx-instrument-bypass' : 'fx-bypass-$index');
+    final target = DeviceTarget(state, layer.id, instrument ? DeviceTarget.instrumentSlot : index);
+    // A built-in with a plugin UI shows it right here (owner, 2026-11-10: "Show the UI right in the FX tab"); ⤢ and
+    // the name open it full screen. Third-party and project C++ keep the knob card.
+    if (status == NativeEffectState.playing && cpp == null && hasInlineDevice(target)) {
+      return DeviceInline(
+        key: ValueKey('fx-device-${instrument ? 'instrument' : index}'),
+        target: target,
+        leading: index < 0
+            ? const SizedBox(width: 32, height: 36, child: Icon(Icons.piano, size: 18, color: Neon.dim))
+            : ReorderableDragStartListener(index: index, child: const Tooltip(message: 'Drag to reorder',
+                child: SizedBox(width: 32, height: 36, child: Icon(Icons.drag_indicator, size: 18, color: Neon.dim)))),
+        titleKey: ValueKey(instrument ? 'fx-instrument-title' : 'fx-native-title-$index'),
+        onTitle: () => openDeviceEditor(context, state, layer, target.slot),
+        onMenu: menu,
+        selected: selected,
+        glow: glow,
+        onSelect: onSelect,
+        actions: [
+          _iconAction(key: openKey, tooltip: 'Open $name full screen', icon: Icons.open_in_full,
+            onPressed: () => openDeviceEditor(context, state, layer, target.slot)),
+          _iconAction(key: bypassKey, tooltip: use.bypass ? 'Turn on $name' : 'Bypass $name',
+            icon: Icons.power_settings_new, color: use.bypass ? Neon.dim : Neon.green,
+            onPressed: () => _bypass(!use.bypass)),
+          // Replace… is in the header's long-press menu, leaving room for the preset on a phone.
+          _iconAction(tooltip: 'Remove $name', icon: Icons.close, onPressed: _remove),
+        ],
+      );
+    }
     return _FxCard(
       index: index,
       title: name,
@@ -402,11 +447,11 @@ class _NativeEffectCard extends StatelessWidget {
       onTitle: cpp == null ? () => openDeviceEditor(context, state, layer, instrument ? -1 : index) : open,
       onMenu: menu,
       actions: [
-        _iconAction(key: ValueKey(instrument ? 'fx-instrument-open' : 'fx-open-$index'), tooltip: 'Open $name',
+        _iconAction(key: openKey, tooltip: 'Open $name',
           icon: Icons.open_in_full, onPressed: () => openDeviceEditor(context, state, layer, instrument ? -1 : index)),
         if (failed) const Tooltip(message: 'Build failed', child: Padding(padding: EdgeInsets.symmetric(horizontal: 6),
           child: Icon(Icons.error, size: 16, color: Neon.pink))),
-        _iconAction(key: ValueKey(instrument ? 'fx-instrument-bypass' : 'fx-bypass-$index'),
+        _iconAction(key: bypassKey,
           tooltip: use.bypass ? 'Turn on $name' : 'Bypass $name',
           icon: Icons.power_settings_new, color: use.bypass ? Neon.dim : Neon.green,
           onPressed: () => _bypass(!use.bypass)),

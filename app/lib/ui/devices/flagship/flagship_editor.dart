@@ -99,8 +99,9 @@ class DevicePicker extends StatelessWidget {
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               if (on != null) Container(width: 6, height: 6, margin: const EdgeInsets.only(right: 5), decoration: BoxDecoration(
                 shape: BoxShape.circle, color: on![i] ? Neon.green : Neon.line)),
-              Text(labels[i], style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8,
-                color: i == selected ? Neon.text : Neon.dim)),
+              Flexible(child: Text(labels[i], maxLines: 1, overflow: TextOverflow.clip, softWrap: false,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.8,
+                  color: i == selected ? Neon.text : Neon.dim))),
             ]),
           ),
         ))),

@@ -67,13 +67,15 @@ class HeroCanvas extends StatelessWidget {
 }
 
 /// A hero's height on this screen: [base], grown toward a third of a tall screen (a phone in portrait), at most
-/// half again; inline in the FX stack, compact (140–176).
+/// half again; inline in the FX stack, compact ([inlineHeroHeight]).
 double heroHeight(BuildContext context, double base) => DeviceScope.isInline(context)
-    ? inlineHeroHeight(base)
+    ? inlineHeroHeight(context, base)
     : math.max(base, math.min(base * 1.45, MediaQuery.sizeOf(context).height * 0.33));
 
-/// A hero's compact height in the FX stack.
-double inlineHeroHeight(double base) => (base * 0.8).clamp(140.0, 176.0);
+/// A hero's compact height in the FX stack: 140–176 dp, lower on a short screen (a phone in landscape) so a whole
+/// device fits the panel.
+double inlineHeroHeight(BuildContext context, double base) =>
+    math.min((base * 0.8).clamp(140.0, 176.0), math.max(100.0, MediaQuery.sizeOf(context).height * 0.3));
 
 class _GridPainter extends CustomPainter {
   _GridPainter(this.color);

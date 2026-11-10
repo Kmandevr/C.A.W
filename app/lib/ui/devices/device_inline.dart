@@ -123,7 +123,12 @@ class _DeviceInlineState extends State<DeviceInline> {
     behavior: HitTestBehavior.opaque,
     onLongPressStart: widget.onMenu == null ? null : (d) => widget.onMenu!(d.globalPosition),
     onSecondaryTapUp: widget.onMenu == null ? null : (d) => widget.onMenu!(d.globalPosition),
-    child: SizedBox(height: 42, child: Row(children: [
+    child: SizedBox(height: 42, child: LayoutBuilder(builder: (context, box) {
+      // The name keeps about 72 dp; the preset chip takes what is left, up to 128, and hides below 64 (the full
+      // screen editor still has it). Each action is a 48 dp touch target.
+      final fixed = (widget.leading == null ? 8 : 32) + 32 + 48.0 * widget.actions.length;
+      final chip = (box.maxWidth - fixed - 72).clamp(0.0, 128.0);
+      return Row(children: [
       widget.leading ?? const SizedBox(width: 8),
       Container(
         width: 26, height: 26,
@@ -143,9 +148,12 @@ class _DeviceInlineState extends State<DeviceInline> {
             style: TextStyle(fontSize: 9, color: color)),
         ]),
       )),
-      DevicePresetChip(target: t, color: color, maxWidth: 112, chipKey: ValueKey('fx-presets-$key')),
+      if (chip >= 64) ConstrainedBox(constraints: BoxConstraints(maxWidth: chip), child: Row(mainAxisSize: MainAxisSize.min, children: [
+        DevicePresetChip(target: t, color: color, maxWidth: chip, chipKey: ValueKey('fx-presets-$key')),
+      ])),
       ...widget.actions,
-    ])),
+    ]);
+    })),
   );
 }
 

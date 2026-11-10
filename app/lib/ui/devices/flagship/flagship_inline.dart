@@ -11,6 +11,7 @@ import '../kit/hero.dart';
 import '../visuals/envelope_view.dart';
 import '../visuals/filter_curve.dart';
 import '../visuals/wavetable_view.dart';
+import '../effects/effect_page.dart' show InlineSplit;
 import 'flagship_editor.dart' show DevicePicker;
 
 /// What the FX tab shows of the flagship: one section at a time, picked by chips (OSC 1–3, FILTER, AMP), so a
@@ -36,19 +37,17 @@ class _FlagshipInlineState extends State<FlagshipInline> {
     final Widget body;
     if (_section < 3) {
       final p = 'osc${_section + 1}_';
-      body = Column(key: ValueKey('flagship-inline-osc${_section + 1}'), crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min, children: [
-          _row([DevicePower('${p}on'), const SizedBox(width: 6), Flexible(child: DeviceChoice('${p}table', maxSegments: 0))]),
+      body = InlineSplit(key: ValueKey('flagship-inline-osc${_section + 1}'), lead:
+          _row([DevicePower('${p}on'), const SizedBox(width: 6), Flexible(child: DeviceChoice('${p}table', maxSegments: 0))]), children: [
           AnimatedOpacity(duration: Motion.fade(Motion.small, Motion.of(context)), opacity: on('${p}on') ? 1 : 0.5,
-            child: WavetableView(prefix: p, height: inlineHeroHeight(150) - 10)),
+            child: WavetableView(prefix: p, height: inlineHeroHeight(context, 150) - 10)),
           KnobRow(['${p}frame', '${p}warp_amt', '${p}level', '${p}unison', '${p}detune'], size: 48,
             labels: {'${p}frame': 'Frame', '${p}warp_amt': 'Warp', '${p}level': 'Level', '${p}unison': 'Voices',
               '${p}detune': 'Detune'}),
         ]);
     } else if (_section == 3) {
       final p = 'flt${_filter}_';
-      body = Column(key: const ValueKey('flagship-inline-filter'), crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min, children: [
+      body = InlineSplit(key: const ValueKey('flagship-inline-filter'), lead:
           _row([
             DevicePower('${p}on'),
             const SizedBox(width: 6),
@@ -57,16 +56,15 @@ class _FlagshipInlineState extends State<FlagshipInline> {
               onTap: () => setState(() => _filter = f))),
             const SizedBox(width: 4),
             Flexible(child: DeviceChoice('${p}type', maxSegments: 0)),
-          ]),
+          ]), children: [
           AnimatedOpacity(duration: Motion.fade(Motion.small, Motion.of(context)), opacity: on('${p}on') ? 1 : 0.5,
-            child: FilterCurve(key: ValueKey('flagship-inline-curve$_filter'), prefix: p, height: inlineHeroHeight(150) - 10)),
+            child: FilterCurve(key: ValueKey('flagship-inline-curve$_filter'), prefix: p, height: inlineHeroHeight(context, 150) - 10)),
           KnobRow(['${p}cutoff', '${p}resonance', '${p}drive', '${p}mix'], size: 50,
             labels: {'${p}cutoff': 'Cutoff', '${p}resonance': 'Reso', '${p}drive': 'Drive', '${p}mix': 'Mix'}),
         ]);
     } else {
-      body = Column(key: const ValueKey('flagship-inline-amp'), crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min, children: [
-          EnvelopeView(prefix: 'env1_', height: inlineHeroHeight(150) - 10, color: modSourceColor(ModSource.env1)),
+      body = InlineSplit(key: const ValueKey('flagship-inline-amp'), children: [
+          EnvelopeView(prefix: 'env1_', height: inlineHeroHeight(context, 150) - 10, color: modSourceColor(ModSource.env1)),
           KnobRow(const ['env1_attack', 'env1_decay', 'env1_sustain', 'env1_release', 'volume'], size: 48,
             labels: const {'env1_attack': 'Attack', 'env1_decay': 'Decay', 'env1_sustain': 'Sustain',
               'env1_release': 'Release', 'volume': 'Volume'}),
