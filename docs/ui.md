@@ -145,7 +145,7 @@ The broader UI specification below records design intent as well as current beha
 - **The audio never depends on the UI.** The C++ engine runs on its own thread ([engine](engine.md)), so a slow frame can't cause a dropout.
 - **Repaint only what moves:** meters, the playhead and scopes use bounded repaint regions. Engine Lab's master scope and spectrum read from the native scope buffer; polling stops when stopped or hidden ([performance](performance.md)). Each peak meter falls on its own ticker only while it shows something, then stops.
 - **Draw grids, not widgets:** use painters for dense grids and lists built lazily; do not create a widget for every note or cell.
-- **No heavy assets:** system fonts, built-in icons and restrained short animations.
+- **No heavy assets:** system fonts, built-in icons and restrained short animations; the only images are the small crow logo (`assets/logo/`) and the launcher icons.
 - **Compact data:** patterns are flat arrays of note events in the engine. A layer's memory is fixed when it is set up, never while playing.
 - **Budgets (targets to measure, not facts yet):**
   - near 0% CPU from the UI when stopped

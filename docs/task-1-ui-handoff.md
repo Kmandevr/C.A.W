@@ -25,7 +25,7 @@ Implemented UI/workflow foundations include:
 - Files: a Unity-style tree, grid and inspector over built-in effects, C++ components, .caw modules and patterns, with drag and the effect picker; project/module import/export, library folders, tags, saved searches and restore points stay in its ⋯ menu.
 - Plugin Builder for validating and packaging native .caw source modules.
 - Motion rules and the Motion, Haptics and Glow settings (`lib/ui/motion.dart`), the Glass setting and the glass look across the app (`lib/ui/glass.dart`: ambient background, see-through panels and tracks, frosted sheets, outlined controls), and golden tests with real fonts (`test/golden_util.dart`). No screen animates with them yet.
-- The frame (`lib/ui/shell.dart`, `lib/ui/frame/`): Build, Files and Arrange as sections on phones (bottom transport and section bar in portrait, a rail in landscape), and docking panels that can float on desktop and tablets ([app](app.md), Frame).
+- The frame (`lib/ui/shell.dart`, `lib/ui/frame/`): Build, Files and Arrange as sections on phones (bottom transport and section bar in portrait, a rail in landscape), and docking panels that can float on desktop and tablets ([app](app.md), Frame). The frame shows the kernel-crow logo, which is also the launcher icon.
 
 The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), with steps U0–U8.
 
