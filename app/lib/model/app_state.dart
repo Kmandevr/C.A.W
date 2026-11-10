@@ -424,7 +424,12 @@ class AppState extends ChangeNotifier {
         auditionOnly: previewOnly,
         voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
         swap: settings.swapTiming.name,
-        playableComponents: nativeComponents?.loaded);
+        // The engine's built-ins (org.caw.*) are always loaded, so they play beside the project's loaded ones.
+        playableComponents: nativeComponents == null ? null : {
+          ...nativeComponents!.loaded,
+          for (final c in [...project.masterComponents, for (final l in project.layers) ...l.components])
+            if (c.id.startsWith('org.caw.')) c.id,
+        });
     try {
       info = await e.setProject(json);
       engineError = null;
