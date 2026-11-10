@@ -69,6 +69,10 @@ class AutomationWriter extends ChangeNotifier {
   bool get writing => _segments.isNotEmpty;
 
   final Map<String, _Segment> _segments = {};
+
+  /// The (step, value) samples being written into the lane [key] names ([automationKey]) in this take, before they
+  /// join the lane; null when it isn't being written. The arranger's lanes draw them live.
+  List<(double, double)>? liveSamples(String key) => _segments[key]?.samples;
   bool _takeOpen = false, _writeStarted = false;
   int _down = 0;
   Timer? _idle;

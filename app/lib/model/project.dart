@@ -316,6 +316,7 @@ class LayerDoc {
     this.collapsed = false,
     this.spaceBelow = 0,
     this.ownColor = false,
+    this.showLanes = false,
   }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [], components = components ?? [];
 
   /// The tallest visual spacer under a track, in logical pixels.
@@ -330,6 +331,10 @@ class LayerDoc {
 
   /// The user chose [color] for this track; without it a track in a folder takes a shade of the folder's colour.
   bool ownColor;
+
+  /// The track's automation lanes are open under it in the arrangement (its envelope button; hidden by default).
+  /// Saved with the project, never sent to the engine.
+  bool showLanes;
   String? generatorId;
   List<String> effectIds;
   String? patternId; // a pattern module whose notes play the generator; it sets the layer's length
@@ -388,6 +393,7 @@ class LayerDoc {
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
         if (spaceBelow > 0) 'space_below': spaceBelow,
         if (ownColor) 'own_color': true,
+        if (showLanes) 'show_lanes': true,
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j) => LayerDoc(
@@ -413,6 +419,7 @@ class LayerDoc {
           _ => 0,
         },
         ownColor: j['own_color'] == true,
+        showLanes: j['show_lanes'] == true,
       );
 }
 
@@ -811,6 +818,8 @@ class ProjectDoc {
     project.automation = project.automation.where((lane) =>
       lane.target.isNotEmpty && (lane.targetType == 'global' ||
         (lane.targetType == 'param' && lane.moduleId?.isNotEmpty == true) ||
+        // A native instrument's parameter, on its track (the Automate button writes these).
+        (lane.targetType == 'instrument' && lane.layerId?.isNotEmpty == true) ||
         // A native component's parameter: its chain index (the layer is optional: absent is the master).
         (lane.targetType == 'component' && (lane.component ?? -1) >= 0 && (lane.component ?? -1) < 64)))
       .toList();
