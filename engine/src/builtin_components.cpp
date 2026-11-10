@@ -136,6 +136,9 @@ public:
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
+        bool steady = true;  // no knob ramps in this block (the usual case)
+        for (uint32_t k = 0; k < 5 && k < b.parameterCount && b.parameters; ++k) steady = steady && !b.parameters[k].samples;
+        if (steady && static_cast<int>(paramAt(b, 0, 0, 0.0)) == 0) return processDrive(b);
         for (uint32_t i = 0; i < b.frames; ++i) {
             const int shape = static_cast<int>(paramAt(b, 0, i, 0.0));
             const double amount = paramAt(b, 1, i, 4.0), bits = paramAt(b, 2, i, 8.0);
@@ -162,6 +165,24 @@ public:
     }
 
 private:
+    // Drive with every knob holding still: the knobs read once, and a sample the same on both sides (a centred
+    // instrument) driven once for both (2026-11-10 second performance pass; the same bits as the loop above).
+    bool processDrive(const AudioProcessBlock& b) noexcept {
+        saturator_.set(paramAt(b, 1, 0, 4.0));
+        const double mix = paramAt(b, 3, 0, 1.0), out = paramAt(b, 4, 0, 1.0);
+        const float* inL = b.input.channels[0];
+        const float* inR = b.input.channels[1];
+        float* outL = b.output.channels[0];
+        float* outR = b.output.channels[1];
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            const double l = inL[i], r = inR[i];
+            const float yl = static_cast<float>((l + (saturator_.process(l) - l) * mix) * out);
+            outL[i] = yl;
+            outR[i] = r == l ? yl : static_cast<float>((r + (saturator_.process(r) - r) * mix) * out);
+        }
+        return true;
+    }
+
     lib::Saturator saturator_;
     double bits_ = -1.0, steps_ = 128.0;
 };
