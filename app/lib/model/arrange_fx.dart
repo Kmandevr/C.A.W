@@ -12,6 +12,7 @@ import 'automation_writer.dart' show AutomationTarget;
 import 'native_trust.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
+import 'user_presets.dart';
 
 /// The engine's built-in stereo tools (`org.caw.*`): always loaded, no trust choice (docs/engine.md).
 bool isBuiltinComponent(String id) => id.startsWith('org.caw.');
@@ -250,6 +251,12 @@ extension ArrangeFx on AppState {
         final f = project.midiFiles.where((f) => f.id == asset.id).firstOrNull;
         final snap = arrangementSnapSteps;
         return f != null && placeMidiFile(this, f, layer, atStep: atStep == null ? null : (atStep / snap).floor() * snap);
+      case AssetKind.devicePreset:
+        final p = userPresets.byId(asset.id);
+        return p != null && applyDevicePresetToTrack(layer, p);
+      case AssetKind.trackPreset:
+        final p = userPresets.byId(asset.id);
+        return p != null && applyTrackPreset(layer, p);
     }
   }
 
@@ -258,6 +265,9 @@ extension ArrangeFx on AppState {
   bool isInstrumentAsset(AssetDrag asset) => switch (asset.kind) {
         AssetKind.nativeEffect => asset.instrument || (componentInfo(asset.id)?.isInstrument ?? false),
         AssetKind.cawModule => asset.instrument || isGenerator(asset.id),
+        AssetKind.devicePreset => asset.instrument ||
+            (componentInfo(userPresets.byId(asset.id)?.componentId ?? '')?.isInstrument ?? false),
+        AssetKind.trackPreset => userPresets.byId(asset.id)?.instrument != null,
         _ => false,
       };
 
@@ -272,6 +282,7 @@ extension ArrangeFx on AppState {
   /// Whether putting [asset] on [layer] would replace the instrument it has (the UI asks first).
   bool replacesInstrument(LayerDoc layer, AssetDrag asset) {
     if (!isInstrumentAsset(asset) || instrumentName(layer) == null) return false;
+    if (asset.kind == AssetKind.trackPreset || asset.kind == AssetKind.devicePreset) return true;
     return asset.kind == AssetKind.nativeEffect ? layer.instrument?.id != asset.id
         : layer.instrument != null || layer.generatorId != asset.id;
   }
