@@ -805,8 +805,9 @@ TEST(the_basic_preset_matches_its_golden_render) {
     // and the ping-pong's left line taking the mono average at full cross, not the sum (fix 2: 6 dB quieter echoes).
     // Re-recorded (one synth, 2026-11-10): the basic synth is now Flagship's Basic preset (perceptually the same,
     // builtin_instruments_test.cpp).
-    // And again: the fixed-point oscillator phase; and (second performance pass) the poly voices' shared filter 1.
-    constexpr uint64_t kGolden = 0x76a82daf1b5586f1ull;
+    // And again: the fixed-point oscillator phase; and (second performance pass) the poly voices' shared filter 1
+    // and the phases moving on in fixed point.
+    constexpr uint64_t kGolden = 0xaa03efa87235874aull;
     if (h != kGolden) {
         char buf[96];
         std::snprintf(buf, sizeof buf, "the Basic preset renders 0x%016llxull", static_cast<unsigned long long>(h));

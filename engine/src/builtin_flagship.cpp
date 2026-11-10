@@ -474,7 +474,7 @@ struct OscVoice {
     int f0 = -1, f1 = -1;                              // the frames a and b read
     double faster = 1.0;                               // how much faster than the note the warp reads the table
     double pitchOffset[3] = {};                        // octave, semitones and fine, in semitones
-    double phase[kMaxCopies] = {};
+    uint32_t phase[kMaxCopies] = {};  // in 32-bit fixed point (2^32 a cycle): it wraps by itself, and steps exactly
     double dt[kMaxCopies] = {};  // cycles per sample; 0 for a copy above Nyquist (silent)
     const float* a[kMaxCopies] = {};
     const float* b[kMaxCopies] = {};
@@ -536,7 +536,7 @@ void addStack(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first)
         for (int c = 0; c < o.count; ++c) {
             if (!o.a[c]) continue;
             const uint32_t step = o.step[c];
-            const uint32_t p0 = static_cast<uint32_t>(static_cast<uint64_t>(o.phase[c] * 4294967296.0)) + first * step;
+            const uint32_t p0 = o.phase[c] + first * step;
             addCopy<Morph, 0>(o.a[c], o.b[c], p0, step, o.shift[c], o.gainL[c], o.gainR[c], o.mix, L, R, n);
         }
         return;
@@ -545,7 +545,7 @@ void addStack(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first)
         if (!o.a[c]) continue;
         const float* A = o.a[c];
         const float* B = o.b[c];
-        const float m = o.size[c], t0 = static_cast<float>(o.phase[c]), dt = static_cast<float>(o.dt[c]);
+        const float m = o.size[c], t0 = static_cast<float>(o.phase[c] * (1.0 / 4294967296.0)), dt = static_cast<float>(o.dt[c]);
         const float gl = o.gainL[c], gr = o.gainR[c], mix = o.mix, w1 = o.w1, w2 = o.w2, w3 = o.w3;
         for (uint32_t i = 0; i < n; ++i) {
             float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
@@ -1050,7 +1050,7 @@ private:
         voices_.forEachActive([&](Voice& v) noexcept {
             for (OscVoice& o : v.osc)
                 for (int c = 0; c < o.count; ++c)
-                    if (o.a[c]) o.phase[c] = lib::wrap01(o.phase[c] + frames * o.dt[c]);
+                    if (o.a[c]) o.phase[c] += n * o.step[c];
             if (uses(kSrcEnv2)) v.env[1].skip(n);
             if (uses(kSrcEnv3)) v.env[2].skip(n);
             for (uint32_t l = 0; l < kLfos; ++l)
@@ -1263,7 +1263,7 @@ private:
             const double start = base_[oscParam(o, kOscPhase)], randomness = base_[oscParam(o, kOscPhaseRand)];
             for (int c = 0; c < kMaxCopies; ++c) {
                 const double r = static_cast<double>(hash32(v.seed ^ ((o * 16U + c + 1U) * 0x85EBCA6BU))) / 4294967296.0;
-                v.osc[o].phase[c] = lib::wrap01(start + randomness * r);
+                v.osc[o].phase[c] = static_cast<uint32_t>(static_cast<uint64_t>(lib::wrap01(start + randomness * r) * 4294967296.0));
             }
         }
         const uint32_t index = static_cast<uint32_t>(&v - voices_.begin());
