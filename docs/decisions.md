@@ -6,6 +6,20 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Polish round, night (owner)
+
+**Decision (owner) (#175):**
+- **User presets:** every effect and instrument gets an easy way to save the user's own presets.
+- **Device screens:** more usable on mobile, with more inspiration from Vital. The EQ is singled out as confusing. "Everything doesn't need to be a separate screen."
+- **Modulation:**
+  - Routing an LFO or envelope to a knob is easy and mobile-friendly.
+  - The amount can always be adjusted.
+  - Several modulators can drive one knob, as in Vital.
+- **Routing:** sends, buses and sidechain are easy and work correctly throughout.
+- **A ducking plug-in** that works well ("there's literally no free one… that works well").
+- **The Builder** is clearer about being for writing code, and easier to navigate.
+- **Every screen** gets a polish pass for missing pieces, missing feedback and hard-to-use spots: super user friendly, and it looks cool.
+
 ## 2026-11-10: Release APK splits its Dart debug info out; no obfuscation (app performance pass)
 
 **Decided on the owner's behalf ("optimize everything", #174), to confirm:** CI builds the APK with `--split-debug-info` and keeps the symbols as an artifact (and a release asset), about 0.73 MB off the download; release stack traces need `flutter symbolize` with them. `--obfuscate` is not used: it saves only 0.13 MB more and garbles type names in error texts users see. Project files are written as compact JSON (the indented form cost a second encode per save). Signing is unchanged. [performance](performance.md#release-build)
