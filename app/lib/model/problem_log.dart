@@ -16,7 +16,10 @@ class ProblemLog {
 
   static void add(Object error, StackTrace? stack) {
     final lines = (stack?.toString() ?? '').split('\n').where((l) => l.trim().isNotEmpty).take(8).join('\n');
-    _entries.addLast('${DateTime.now().toUtc().toIso8601String()} $error${lines.isEmpty ? '' : '\n$lines'}');
+    // An error's text can quote a file's contents or long paths: each entry is cut short.
+    var text = '$error';
+    if (text.length > 500) text = '${text.substring(0, 500)}…';
+    _entries.addLast('${DateTime.now().toUtc().toIso8601String()} $text${lines.isEmpty ? '' : '\n$lines'}');
     while (_entries.length > _max) {
       _entries.removeFirst();
     }

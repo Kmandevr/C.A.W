@@ -169,6 +169,16 @@ class CppWorkbench extends ChangeNotifier {
   int _editGeneration = 0;
   bool _dirty = false;
   late ProjectDoc _project;
+
+  /// Code from elsewhere the user hasn't trusted yet: the compiler doesn't read it at all (no check, no completion),
+  /// so an include can't show app-private files; Build asks first.
+  bool get _untrusted {
+    if (own) return false;
+    final trust = state.nativeComponents?.trust;
+    final c = component;
+    if (trust == null || c == null) return false;
+    return trust.decide(c.componentId, NativeTrustStore.sourceFingerprint(c)) != NativeComponentTrust.trusted;
+  }
   int _workspaces = 0;
 
   Future<void> _removeWorkspace(String path) async {
@@ -292,6 +302,11 @@ class CppWorkbench extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (_untrusted) {
+      checkNote = 'Live checks start once you trust this code (Build asks).';
+      notifyListeners();
+      return;
+    }
     final generation = _editGeneration;
     final manifest = _manifest();
     if (manifest == null) {
@@ -342,7 +357,7 @@ class CppWorkbench extends ChangeNotifier {
   Future<List<CppCompletion>> clangCompletions(String path, int line, int column, {required String prefix}) async {
     final compiler = state.cppServices.compiler;
     final manifest = _manifest();
-    if (compiler == null || manifest == null || !manifest.sources.contains(path)) return const [];
+    if (compiler == null || manifest == null || !manifest.sources.contains(path) || _untrusted) return const [];
     try {
       final toolchain = await compiler.toolchainDirectory();
       // Clang completes the word starting at the column, counted in UTF-8 bytes from 1: the word's start.

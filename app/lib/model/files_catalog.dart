@@ -4,10 +4,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../engine/component_info.dart';
+import '../engine/engine.dart' show NativeComponentTrust;
 import '../ui/frame/sections.dart';
 import 'app_state.dart';
 import 'arrange_fx.dart';
 import 'cpp_component.dart';
+import 'native_trust.dart';
 import 'project.dart';
 
 /// What an asset is. It decides the icon, the type badge, what a drag carries and what double-tap opens.
@@ -430,7 +432,13 @@ extension FilesCatalog on AppState {
           dependencies: {...src.dependencies},
         );
         editProject((p) => p.cppComponents.add(copy));
-        _markAuthored(copy);
+        // A copy is the user's own code only when the original already was trusted: duplicating code from elsewhere
+        // must not get round its Trust / Block question (security review, 2026-11-10).
+        final trust = nativeComponents?.trust;
+        if (trust != null &&
+            trust.decide(src.componentId, NativeTrustStore.sourceFingerprint(src)) == NativeComponentTrust.trusted) {
+          _markAuthored(copy);
+        }
         return 'cpp:${copy.id}';
       case FileAssetType.cppFile:
         final c = a.cpp!;

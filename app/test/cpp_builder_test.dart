@@ -18,6 +18,7 @@ import 'package:caw/model/settings.dart';
 import 'package:caw/platform/cpp_compiler.dart';
 import 'package:caw/ui/cpp/code_style.dart';
 import 'package:flutter/painting.dart';
+import 'package:caw/model/files_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Records each call; answers with [reply] (given the arguments).
@@ -258,6 +259,30 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
       );
       return (state, loads);
     }
+
+    test('code from elsewhere: no live check reads it, and a duplicate of it still asks for trust', () async {
+      final (state, _) = setUpState(fail: false);
+      final compiler = FakeCompiler('/tc');
+      state.cppServices = CppBuilderServices(compiler: compiler, workDirectory: () async => dir);
+      final foreign = CppComponentDoc.blankEffect(id: 'cpp7', name: 'Imported');
+      state.project.cppComponents.add(foreign);
+      final w = CppWorkbench(state, 'cpp7');
+      await w.check();
+      expect(compiler.calls, isEmpty, reason: 'untrusted code is not compiled, even to check it');
+      expect(w.checkNote, contains('trust'));
+      expect(await w.clangCompletions('src/effect.cpp', 0, 0, prefix: ''), isEmpty);
+      final key = state.duplicateAsset(state.cppAssets.single)!;
+      final copy = state.assetByKey(key)!.cpp!;
+      final trust = state.nativeComponents!.trust;
+      expect(trust.decide(copy.componentId, NativeTrustStore.sourceFingerprint(copy)), isNull,
+          reason: 'duplicating does not make code from elsewhere the user\'s own');
+      // A trusted original's copy is the user's own.
+      trust.markAuthored(foreign);
+      final key2 = state.duplicateAsset(state.cppAssets.firstWhere((a) => a.cpp == foreign))!;
+      final copy2 = state.assetByKey(key2)!.cpp!;
+      expect(trust.decide(copy2.componentId, NativeTrustStore.sourceFingerprint(copy2)), NativeComponentTrust.trusted);
+      w.dispose();
+    });
 
     test('a new effect builds and loads as trusted, and the build keeps a version', () async {
       final (state, loads) = setUpState(fail: false);
