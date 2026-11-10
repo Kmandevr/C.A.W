@@ -167,7 +167,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('fx-instrument-open')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('device-editor')), findsOneWidget);
-    expect(find.byKey(const ValueKey('flagship-osc')), findsOneWidget);
+    expect(find.byKey(const ValueKey('flagship-synth')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('device-close')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('device-editor')), findsNothing);
