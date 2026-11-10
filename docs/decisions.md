@@ -19,6 +19,12 @@ updated: 2026-11-10
 - **A ducking plug-in** that works well ("there's literally no free one… that works well").
 - **The Builder** is clearer about being for writing code, and easier to navigate.
 - **Every screen** gets a polish pass for missing pieces, missing feedback and hard-to-use spots: super user friendly, and it looks cool.
+- **Clarified (owner):**
+  - The device that is confusing is the synth (the Flagship editor), not the EQ.
+  - Saved presets live in a global library on the device and can be exported as files.
+  - The public beta ships as a GitHub pre-release tagged `v1.0.0-beta.1` (APK and Windows zip).
+  - The .caw language is removed before the beta (#160), and project files use the .caw extension (#159).
+  - After this round the roadmap continues without the owner, who is asked only where a call is genuinely theirs.
 
 ## 2026-11-10: Release APK splits its Dart debug info out; no obfuscation (app performance pass)
 
