@@ -1,4 +1,5 @@
-// Arrange's track edits on AppState: a track's FX stack (.caw chain and native effects), drops onto a track, trust.
+// Arrange's track edits on AppState: a track's FX stack (instrument, .caw chain, native effects), drops onto a track
+// or below the last one, clips moved between tracks, trust.
 import 'package:flutter/foundation.dart';
 
 import '../engine/component_info.dart';
@@ -8,6 +9,7 @@ import 'app_state.dart';
 import 'midi_clips.dart';
 import 'cpp_component.dart';
 import 'native_trust.dart';
+import 'pattern_doc.dart';
 import 'project.dart';
 
 /// The engine's built-in stereo tools (`org.caw.*`): always loaded, no trust choice (docs/engine.md).
@@ -19,6 +21,10 @@ String builtinComponentName(String id) {
   final text = id.substring('org.caw.'.length).split('.').join(' ');
   return text.isEmpty ? id : text[0].toUpperCase() + text.substring(1);
 }
+
+/// Where a dragged track header lands on another track: above it, inside it (a folder's middle, as REAPER's folder
+/// drop zone), or below it (below a folder: after everything inside it).
+enum TrackDrop { above, into, below }
 
 /// What a native effect in a track's stack is doing now, for its card.
 enum NativeEffectState { playing, needsTrust, blocked, buildFailed, loadFailed, waiting }
@@ -221,7 +227,7 @@ extension ArrangeFx on AppState {
     if (layer.isFolder) return false;
     switch (asset.kind) {
       case AssetKind.nativeEffect:
-        if (componentInfo(asset.id)?.isInstrument ?? false) {  // an instrument plays the track instead
+        if (isInstrumentAsset(asset)) {  // an instrument plays the track instead
           if (layer.instrument?.id == asset.id) return false;
           setNativeInstrument(layer, asset.id);
           return true;
@@ -242,6 +248,180 @@ extension ArrangeFx on AppState {
         final snap = arrangementSnapSteps;
         return f != null && placeMidiFile(this, f, layer, atStep: atStep == null ? null : (atStep / snap).floor() * snap);
     }
+  }
+
+  /// An instrument rather than an effect or a clip: what [AssetDrag.instrument] says, else the engine's descriptor
+  /// (a native component) or the module's kind (.caw).
+  bool isInstrumentAsset(AssetDrag asset) => switch (asset.kind) {
+        AssetKind.nativeEffect => asset.instrument || (componentInfo(asset.id)?.isInstrument ?? false),
+        AssetKind.cawModule => asset.instrument || isGenerator(asset.id),
+        _ => false,
+      };
+
+  /// The name of what plays [layer]'s notes (its C++ instrument or .caw generator), or null when nothing does.
+  String? instrumentName(LayerDoc layer) {
+    final use = layer.instrument;
+    if (use != null) return componentLabel(use.id);
+    final gen = layer.generatorId == null ? null : project.module(layer.generatorId);
+    return gen?.name;
+  }
+
+  /// Whether putting [asset] on [layer] would replace the instrument it has (the UI asks first).
+  bool replacesInstrument(LayerDoc layer, AssetDrag asset) {
+    if (!isInstrumentAsset(asset) || instrumentName(layer) == null) return false;
+    return asset.kind == AssetKind.nativeEffect ? layer.instrument?.id != asset.id
+        : layer.instrument != null || layer.generatorId != asset.id;
+  }
+
+  /// A new track with nothing on it, named [name]: at the end of the list, or with [parentId] as the last track
+  /// inside that folder.
+  LayerDoc addEmptyTrack({String? name, String? parentId}) {
+    final p = project;
+    final track = LayerDoc(id: newId('l'), name: name == null || name.isEmpty ? 'Track ${p.layers.length + 1}' : name,
+        color: p.layers.length % LayerDoc.trackColors, parentId: parentId, lengthSteps: p.stepsPerBar, volume: 1);
+    var at = p.layers.length;
+    if (parentId != null) {
+      final folder = p.layers.indexWhere((l) => l.id == parentId);
+      if (folder >= 0) {
+        at = folder + 1;
+        while (at < p.layers.length && _isInside(p.layers[at], parentId)) {
+          at++;
+        }
+      }
+    }
+    editProject((p) => p.layers.insert(at, track));
+    return track;
+  }
+
+  bool _isInside(LayerDoc layer, String folderId) {
+    var parent = layer.parentId;
+    for (var depth = 0; parent != null && depth <= project.layers.length; depth++) {
+      if (parent == folderId) return true;
+      parent = project.layers.where((l) => l.id == parent).firstOrNull?.parentId;
+    }
+    return false;
+  }
+
+  /// Where a clip or asset dropped on [layer] goes. C.A.W.'s folders have no instrument or inserts (REAPER's folder
+  /// tracks hold items, docs/ui.md), so a folder passes it to its first track inside, in track order, and a folder
+  /// with no track inside gets a new one.
+  LayerDoc dropTrackFor(LayerDoc layer, {String? newName}) {
+    if (!layer.isFolder) return layer;
+    final inside = project.layers.where((l) => !l.isFolder && _isInside(l, layer.id)).firstOrNull;
+    return inside ?? addEmptyTrack(name: newName, parentId: layer.id);
+  }
+
+  /// Moves [clip] from [from] onto [to] at [startSteps], keeping its pattern; [to] null makes a new track for it at
+  /// the end (REAPER: dragged below the last track). With [copy] (REAPER's Ctrl-drag) a copy with its own notes goes
+  /// there and the original stays. All of it is one undo step. Returns the clip that was placed.
+  ClipDoc? moveClipTo(LayerDoc from, ClipDoc clip, LayerDoc? to, int startSteps, {bool copy = false}) {
+    final name = project.module(clip.patternId)?.name;
+    // At the 64-track limit a drop below the tracks stays on the clip's own track.
+    final target = to == null
+        ? (project.layers.length >= 64 ? from : addEmptyTrack(name: name))
+        : dropTrackFor(to, newName: name);
+    final start = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt();
+    if (!copy) {
+      if (identical(target, from)) {
+        moveClip(from, clip, start);
+        return clip;
+      }
+      editProject((_) {
+        from.clips.remove(clip);
+        clip.startSteps = start;
+        target.clips.add(clip);
+      });
+      selectClip(target, clip);
+      return clip;
+    }
+    var patternId = clip.patternId;
+    final original = project.module(patternId);
+    if (original == null) return null;
+    final source = ModuleDoc(id: newId('m'), name: '${original.name} copy',
+        source: original.source, runSource: original.runSource, params: Map.of(original.params));
+    final copied = ClipDoc(id: newId('c'), patternId: source.id, startSteps: start,
+        lengthSteps: clip.lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt(),
+        sourceOffsetSteps: clip.sourceOffsetSteps, loop: clip.loop);
+    editProject((p) {
+      p.modules.add(source);
+      target.clips.add(copied);
+    });
+    selectClip(target, copied);
+    return copied;
+  }
+
+  /// Puts [asset] on a new track at the end, named after it (REAPER: an FX, instrument or file dropped on the empty
+  /// area below the last track). Returns the track, or null (and no track) when the asset couldn't go on one.
+  LayerDoc? dropOnNewTrack(AssetDrag asset, {int? atStep}) {
+    if (project.layers.length >= 64) return null;
+    final track = addEmptyTrack(name: asset.name);
+    if (dropAsset(track, asset, atStep: atStep)) return track;
+    removeLayer(track);
+    return null;
+  }
+
+  /// Moves [track] (a folder with everything inside it) next to or into [target], as a header dragged in REAPER's
+  /// track panel; [target] null puts it at the end, outside any folder. A track can't go into itself. True when it
+  /// moved.
+  bool moveTrack(LayerDoc track, LayerDoc? target, TrackDrop where) {
+    final p = project;
+    if (target != null && (identical(target, track) || _isInside(target, track.id))) return false;
+    if (target != null && where == TrackDrop.into) {
+      if (!target.isFolder || track.parentId == target.id) return false;
+      return moveLayerIntoFolder(track, target.id);
+    }
+    final subtree = [for (final l in p.layers) if (identical(l, track) || _isInside(l, track.id)) l];
+    editProject((p) {
+      p.layers.removeWhere(subtree.contains);
+      var at = p.layers.length;
+      if (target != null) {
+        at = p.layers.indexOf(target);
+        if (where == TrackDrop.below) {
+          at++;
+          while (at < p.layers.length && _isInside(p.layers[at], target.id)) {
+            at++;
+          }
+        }
+      }
+      track.parentId = target?.parentId;
+      p.layers.insertAll(at, subtree);
+    });
+    return true;
+  }
+
+  /// Drags [clip]'s left edge to [startSteps] (REAPER: an item's edge is dragged to trim it): the end stays where it
+  /// is and the notes stay at their times, so the source offset moves with the edge (never before the source's start).
+  void trimClipStart(LayerDoc layer, ClipDoc clip, int startSteps) {
+    final end = clip.startSteps + clip.lengthSteps;
+    final earliest = clip.startSteps - clip.sourceOffsetSteps;
+    final start = startSteps.clamp(earliest < 0 ? 0 : earliest, end - 1).toInt();
+    editLayer(layer, (_) {
+      clip.sourceOffsetSteps += start - clip.startSteps;
+      clip.startSteps = start;
+      clip.lengthSteps = end - start;
+    });
+  }
+
+  /// A new empty pattern in a clip on [layer] from [startSteps], [lengthSteps] long (REAPER: Ctrl+drag in an empty
+  /// area creates an empty item). A folder passes it to its first track inside.
+  ClipDoc? addEmptyClip(LayerDoc layer, int startSteps, int lengthSteps) {
+    final track = dropTrackFor(layer);
+    final start = startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
+    final length = lengthSteps.clamp(1, project.maxArrangementSteps - start).toInt();
+    var n = 1;
+    while (project.modules.any((m) => m.name == 'Pattern $n')) {
+      n++;
+    }
+    final name = 'Pattern $n';
+    final source = PatternDoc.blank(name: name, steps: length).serialize();
+    final module = ModuleDoc(id: newId('m'), name: name, source: source);
+    final clip = ClipDoc(id: newId('c'), patternId: module.id, startSteps: start, lengthSteps: length);
+    editProject((p) {
+      p.modules.add(module);
+      track.clips.add(clip);
+    });
+    selectClip(track, clip);
+    return clip;
   }
 
   bool _dropPattern(LayerDoc layer, String patternId, int? atStep) {

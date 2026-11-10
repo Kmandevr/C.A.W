@@ -108,7 +108,7 @@ class SectionScope extends InheritedNotifier<SectionController> {
 
 /// What can be dragged from Files (or a browser sheet) onto a track or an effect slot.
 enum AssetKind {
-  nativeEffect, // a native stereo effect: a built-in (org.caw.*) or a project C++ component, by component id
+  nativeEffect, // a native component, by component id: a stereo effect or an instrument, built-in (org.caw.*) or the project's C++
   cawModule,    // a project .caw module, by module id
   pattern,      // a MIDI pattern source, by module id
   midiFile,     // an imported MIDI file (its parts are patterns), by MidiFileDoc id
@@ -116,8 +116,12 @@ enum AssetKind {
 
 @immutable
 class AssetDrag {
-  const AssetDrag(this.kind, this.id, this.name);
+  const AssetDrag(this.kind, this.id, this.name, {this.instrument = false});
   final AssetKind kind;
   final String id;
   final String name;
+
+  /// An instrument (a native one, or a .caw generator): it plays a track instead of joining its effects, as REAPER's
+  /// instruments are FX in the chain that come first (docs/ui.md, REAPER reference).
+  final bool instrument;
 }
