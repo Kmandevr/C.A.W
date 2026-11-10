@@ -41,8 +41,15 @@ void main() {
       final playing = await countFrames(tester, 120, onFrame: (i) async {
         if (i % 4 == 0) display.frame.value = fakeFrame(id, tick: i ~/ 4 + 1);
       });
+      // A knob turned: 20 live steps of the device's first parameter, one a frame.
+      final t = targetOf(s, id);
+      final p = t.info!.parameters.first;
+      Motion.setting = MotionLevel.off; // count the knob's own work, not the motion
+      await tester.pump();
+      final knob = await countFrames(tester, 20, onFrame: (i) async => t.setLive(p.id, p.min + (p.max - p.min) * i / 20));
+      t.commit();
       // ignore: avoid_print
-      print('BENCH $id per second: stopped $stopped; playing $playing');
+      print('BENCH $id per second: stopped $stopped; playing $playing; knob 20 steps: $knob');
       // Motion runs at the display data's 30 Hz: a Ticker here asked for every one of the 120 frames.
       expect(stopped.frames, lessThanOrEqualTo(31));
       expect(playing.frames, lessThanOrEqualTo(62));

@@ -267,14 +267,23 @@ jobs:
           flutter --disable-analytics
           # arm64 only: the phones C.A.W targets (the owner's Galaxy S22+). Each extra ABI builds the engine and
           # the Dart code again.
-          flutter build apk --release --target-platform android-arm64
+          # --split-debug-info keeps the Dart stack-trace tables out of the APK (libapp.so 10.2 -> 8.8 MB, docs/
+          # performance.md); a reported trace is decoded with `flutter symbolize -d app.android-arm64.symbols`.
+          # No --obfuscate: it saves only 0.13 MB more and would garble type names in the app's own error texts.
+          flutter build apk --release --target-platform android-arm64 --split-debug-info=build/symbols
           ccache --show-stats || true
           mv build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/caw-android.apk"
+          (cd build/symbols && zip -q "$GITHUB_WORKSPACE/caw-android-symbols.zip" ./*.symbols)
       - uses: actions/upload-artifact@v7
         with:
           name: caw-android-apk
           path: caw-android.apk
           retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          name: caw-android-symbols
+          path: caw-android-symbols.zip
+          retention-days: 90
 
   windows:
     name: Windows app
@@ -341,6 +350,9 @@ jobs:
           name: caw-android-apk
       - uses: actions/download-artifact@v7
         with:
+          name: caw-android-symbols
+      - uses: actions/download-artifact@v7
+        with:
           name: caw-windows-zip
       - name: Publish
         env:
@@ -357,11 +369,13 @@ jobs:
           fi
           mv caw-android.apk "caw-$version-android.apk"
           mv caw-windows.zip "caw-$version-windows.zip"
+          mv caw-android-symbols.zip "caw-$version-android-symbols.zip"
           {
             echo "C.A.W. $version"
             echo
             echo "- Android (arm64): caw-$version-android.apk"
             echo "- Windows (x64): caw-$version-windows.zip, unzip and run caw.exe"
+            echo "- Android debug symbols (for decoding a reported stack trace): caw-$version-android-symbols.zip"
             if [ "$SIGNED" != "true" ]; then
               echo
               echo "This APK is signed with a throwaway key: uninstall the previous C.A.W. before installing it."
@@ -371,4 +385,4 @@ jobs:
           [[ "$version" == *-* ]] && prerelease="--prerelease"
           gh release create "$tag" --target "$GITHUB_SHA" --title "C.A.W. $version" $prerelease \
             --notes-file notes.md --generate-notes \
-            "caw-$version-android.apk" "caw-$version-windows.zip"
+            "caw-$version-android.apk" "caw-$version-windows.zip" "caw-$version-android-symbols.zip"

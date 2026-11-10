@@ -15,7 +15,11 @@ class ProblemLog {
   static List<String> get entries => List.unmodifiable(_entries);
 
   static void add(Object error, StackTrace? stack) {
-    final lines = (stack?.toString() ?? '').split('\n').where((l) => l.trim().isNotEmpty).take(8).join('\n');
+    final all = (stack?.toString() ?? '').split('\n').where((l) => l.trim().isNotEmpty).toList();
+    // Release builds split their debug info out (CI's --split-debug-info): a trace is then addresses after a header
+    // (build id, load bases) that `flutter symbolize` needs, so the header is kept with the first 8 frames.
+    final header = all.isNotEmpty && all.first.startsWith('***') ? all.takeWhile((l) => !l.startsWith('#')).length : 0;
+    final lines = all.take(header + 8).join('\n');
     // An error's text can quote a file's contents or long paths: each entry is cut short.
     var text = '$error';
     if (text.length > 500) text = '${text.substring(0, 500)}…';
