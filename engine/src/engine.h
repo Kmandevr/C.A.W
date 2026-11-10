@@ -197,6 +197,9 @@ private:
     void endPlayback() noexcept;
     static void restartChain(Chain& c) noexcept;
     void takeExpression(struct Voice& v, const Pattern& pat, const PatternNote& n) noexcept;
+    bool noteSpan(const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept;
+    void rebindVoice(struct Voice& v, const Pattern* pat, int64_t n0) noexcept;
+    void rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
     void pickOverloadVictim() noexcept;

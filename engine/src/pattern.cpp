@@ -327,4 +327,59 @@ std::string describePattern(const Pattern& p) {
     return o;
 }
 
+std::vector<int> matchPatternNotes(const Pattern& from, const Pattern& to) {
+    const size_t nf = from.notes.size(), nt = to.notes.size();
+    std::vector<int> map(nf, -1);
+    std::vector<char> taken(nt, 0);
+    auto same = [](const PatternNote& a, const PatternNote& b) {
+        return a.at == b.at && a.len == b.len && a.pitch == b.pitch && a.ratchet == b.ratchet;
+    };
+    // Same notes, in order. Both lists are sorted by start, so a note's equals start at the same time.
+    for (size_t i = 0; i < nf; ++i) {
+        const PatternNote& a = from.notes[i];
+        size_t j = static_cast<size_t>(std::lower_bound(to.notes.begin(), to.notes.end(), a.at,
+            [](const PatternNote& n, double at) { return n.at < at; }) - to.notes.begin());
+        for (; j < nt && to.notes[j].at == a.at; ++j)
+            if (!taken[j] && same(a, to.notes[j])) {
+                map[i] = static_cast<int>(j);
+                taken[j] = 1;
+                break;
+            }
+    }
+    // Changed notes: the best overlapping pairs first.
+    std::vector<size_t> restFrom, restTo;
+    for (size_t i = 0; i < nf; ++i)
+        if (map[i] < 0) restFrom.push_back(i);
+    for (size_t j = 0; j < nt; ++j)
+        if (!taken[j]) restTo.push_back(j);
+    if (restFrom.empty() || restTo.empty() ||
+        static_cast<double>(restFrom.size()) * static_cast<double>(restTo.size()) > 16777216.0)
+        return map;
+    struct Pair {
+        double pitch, start, len;
+        size_t i, j;
+    };
+    std::vector<Pair> pairs;
+    for (size_t i : restFrom) {
+        const PatternNote& a = from.notes[i];
+        for (size_t j : restTo) {
+            const PatternNote& b = to.notes[j];
+            if (b.at >= a.at + a.len || a.at >= b.at + b.len) continue;
+            pairs.push_back({std::fabs(a.pitch - b.pitch), std::fabs(a.at - b.at), std::fabs(a.len - b.len), i, j});
+        }
+    }
+    std::sort(pairs.begin(), pairs.end(), [](const Pair& x, const Pair& y) {
+        if (x.pitch != y.pitch) return x.pitch < y.pitch;
+        if (x.start != y.start) return x.start < y.start;
+        if (x.len != y.len) return x.len < y.len;
+        return x.i != y.i ? x.i < y.i : x.j < y.j;
+    });
+    for (const Pair& p : pairs)
+        if (map[p.i] < 0 && !taken[p.j]) {
+            map[p.i] = static_cast<int>(p.j);
+            taken[p.j] = 1;
+        }
+    return map;
+}
+
 }  // namespace caw
