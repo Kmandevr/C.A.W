@@ -64,6 +64,8 @@ class DevicePresets {
     final name = _current[_key(target)] ?? target.use?.preset;  // a track that opened on a preset shows its name
     final preset = name == null ? null : of(target).where((p) => p.name == name).firstOrNull;
     if (preset != null) return matches(target, preset) ? preset.name : '${preset.name} *';
+    // A preset the list doesn't hold (the engine's list not loaded yet, or a preset from elsewhere): still its name.
+    if (name != null && name != 'Init') return name;
     return matches(target, const DevicePreset('Init', {})) ? 'Init' : 'Custom';
   }
 

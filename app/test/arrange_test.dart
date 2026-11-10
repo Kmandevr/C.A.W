@@ -391,6 +391,31 @@ void main() {
     expect(tester.getTopLeft(panel).dy, lessThan(low - 80), reason: 'a swipe up opens it higher');
   });
 
+  testWidgets('phone portrait: dragging the focus panel\'s header follows the finger and says what letting go does',
+      (tester) async {
+    await pumpArranger(tester, const Size(412, 900));
+    await tester.tap(find.byKey(const ValueKey('track-header-a')));
+    await settle(tester);
+    final panel = find.byKey(const ValueKey('focus-panel'));
+    final rest = tester.getTopLeft(panel).dy;
+    final g = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('focus-panel-header'))));
+    await g.moveBy(const Offset(0, 20));
+    await g.moveBy(const Offset(0, 20));
+    await tester.pump();
+    expect(tester.getTopLeft(panel).dy, greaterThan(rest + 5), reason: 'the panel follows the finger');
+    expect(find.byKey(const ValueKey('focus-panel-hint')), findsNothing, reason: 'not past the threshold yet');
+    await g.moveBy(const Offset(0, 60));
+    await tester.pump();
+    expect(find.text('Let go to close'), findsOneWidget);
+    await g.moveBy(const Offset(0, -90));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('focus-panel-hint')), findsNothing);
+    await g.up();
+    await settle(tester);
+    expect(sections.focusedLayer, 'a', reason: 'let go before the threshold: the panel springs back');
+    expect(tester.getTopLeft(panel).dy, closeTo(rest, 1));
+  });
+
   group('track headers', () {
     testWidgets('drag the headers\' right edge and a row\'s bottom edge to resize them; the sizes are saved',
         (tester) async {

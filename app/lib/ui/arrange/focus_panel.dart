@@ -12,6 +12,7 @@ import '../frame/frame_widgets.dart' show SlideIn;
 import '../glass.dart';
 import '../haptics.dart';
 import '../mixer_screen.dart';
+import '../motion.dart';
 import '../pattern_editor.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
@@ -36,7 +37,7 @@ extension FocusTabInfo on FocusTab {
       };
 }
 
-class FocusPanel extends StatelessWidget {
+class FocusPanel extends StatefulWidget {
   const FocusPanel({
     super.key,
     required this.state,
@@ -74,62 +75,139 @@ class FocusPanel extends StatelessWidget {
   final VoidCallback? onBrowse;
 
   @override
+  State<FocusPanel> createState() => _FocusPanelState();
+}
+
+/// How far the header must be dragged before letting go acts (closes, lowers or opens the panel higher).
+const double _focusPullThreshold = 64;
+
+class _FocusPanelState extends State<FocusPanel> {
+  // The header drag: the panel follows the finger, the grip lights, and past the threshold it says what letting go
+  // will do, with a haptic tick (owner: feedback when you grab a handle and start dragging).
+  double _pull = 0;
+  bool _grabbed = false;
+
+  bool get _past => _pull.abs() >= _focusPullThreshold;
+
+  String? get _hint {
+    if (!_grabbed || !_past) return null;
+    if (_pull > 0) return widget.expanded && widget.onExpand != null ? 'Let go to lower the panel' : 'Let go to close';
+    return widget.onExpand != null && !widget.expanded ? 'Let go to open higher' : null;
+  }
+
+  void _start(DragStartDetails _) {
+    Haptics.grab();
+    setState(() { _grabbed = true; _pull = 0; });
+  }
+
+  void _update(DragUpdateDetails d) {
+    final wasPast = _past;
+    // Upward pulls only mean something when the panel can open higher; resist them otherwise.
+    final canRaise = widget.onExpand != null && !widget.expanded;
+    var next = _pull + d.delta.dy;
+    if (next < 0 && !canRaise) next = next * 0.3;
+    setState(() => _pull = next.clamp(-140.0, 260.0));
+    if (_past != wasPast) Haptics.threshold();
+  }
+
+  void _end(DragEndDetails d) {
+    final v = d.primaryVelocity ?? 0;
+    final down = _pull >= _focusPullThreshold || v > 250;
+    final up = _pull <= -_focusPullThreshold || v < -250;
+    Haptics.drop();
+    setState(() { _grabbed = false; _pull = 0; });
+    if (up && widget.onExpand != null && !widget.expanded) {
+      widget.onExpand!(true);
+    } else if (down) {
+      widget.expanded && widget.onExpand != null ? widget.onExpand!(false) : widget.onClose();
+    }
+  }
+
+  void _cancel() => setState(() { _grabbed = false; _pull = 0; });
+
+  @override
   Widget build(BuildContext context) {
-    final color = trackColor(state, layer);
+    final color = trackColor(widget.state, widget.layer);
     final header = GestureDetector(
       key: const ValueKey('focus-panel-header'),
       behavior: HitTestBehavior.opaque,
-      // Swipe up to open the panel higher (over the pinned track), down to lower it again or close it.
-      onVerticalDragEnd: (d) {
-        final v = d.primaryVelocity ?? 0;
-        if (v < -250 && onExpand != null && !expanded) onExpand!(true);
-        if (v > 250) expanded && onExpand != null ? onExpand!(false) : onClose();
-      },
+      // Drag up to open the panel higher (over the pinned track), down to lower it again or close it. The panel
+      // follows the finger, so it is clear what letting go will do.
+      onVerticalDragStart: _start,
+      onVerticalDragUpdate: _update,
+      onVerticalDragEnd: _end,
+      onVerticalDragCancel: _cancel,
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        if (bottomSheetStyle)
-          Padding(padding: const EdgeInsets.only(top: 5), child: Container(width: 36, height: 4,
-            decoration: BoxDecoration(color: Neon.dim.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(2)))),
+        if (widget.bottomSheetStyle)
+          Padding(padding: const EdgeInsets.only(top: 5), child: Center(child: GripMark(
+            key: const ValueKey('focus-panel-grip'), axis: Axis.vertical, length: 36, grabbed: _grabbed, hot: _past,
+            color: color, restColor: Neon.dim.withValues(alpha: 0.6), restThickness: 4))),
         SizedBox(height: 40, child: Row(children: [
-          IconButton(tooltip: 'Previous track', iconSize: 18, onPressed: onPrevious, icon: const Icon(Icons.chevron_left)),
+          IconButton(tooltip: 'Previous track', iconSize: 18, onPressed: widget.onPrevious, icon: const Icon(Icons.chevron_left)),
           Container(width: 4, height: 16, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
           const SizedBox(width: 6),
-          Flexible(child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+          Flexible(child: Text(widget.layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: color))),
-          IconButton(tooltip: 'Next track', iconSize: 18, onPressed: onNext, icon: const Icon(Icons.chevron_right)),
+          IconButton(tooltip: 'Next track', iconSize: 18, onPressed: widget.onNext, icon: const Icon(Icons.chevron_right)),
           const Spacer(),
-          if (onBrowse != null)
+          if (widget.onBrowse != null)
             IconButton(key: const ValueKey('focus-browse'), tooltip: 'Files: drag effects or patterns here',
-              iconSize: 18, onPressed: onBrowse, color: browsing ? Neon.blue : null, icon: const Icon(Icons.folder_open)),
-          if (onExpand != null)
-            IconButton(key: const ValueKey('focus-expand'), tooltip: expanded ? 'Lower the panel' : 'Open the panel higher',
-              iconSize: 18, onPressed: () => onExpand!(!expanded),
-              icon: Icon(expanded ? Icons.unfold_less : Icons.unfold_more)),
-          IconButton(key: const ValueKey('focus-close'), tooltip: 'All tracks', iconSize: 18, onPressed: onClose,
-            icon: Icon(bottomSheetStyle ? Icons.keyboard_arrow_down : Icons.close)),
+              iconSize: 18, onPressed: widget.onBrowse, color: widget.browsing ? Neon.blue : null, icon: const Icon(Icons.folder_open)),
+          if (widget.onExpand != null)
+            IconButton(key: const ValueKey('focus-expand'), tooltip: widget.expanded ? 'Lower the panel' : 'Open the panel higher',
+              iconSize: 18, onPressed: () => widget.onExpand!(!widget.expanded),
+              icon: Icon(widget.expanded ? Icons.unfold_less : Icons.unfold_more)),
+          IconButton(key: const ValueKey('focus-close'), tooltip: 'All tracks', iconSize: 18, onPressed: widget.onClose,
+            icon: Icon(widget.bottomSheetStyle ? Icons.keyboard_arrow_down : Icons.close)),
         ])),
         SizedBox(height: 36, child: Row(children: [
           for (final t in FocusTab.values)
-            Expanded(child: _TabButton(tab: t, selected: t == tab, color: color, onTap: () => onTab(t))),
+            Expanded(child: _TabButton(tab: t, selected: t == widget.tab, color: color, onTap: () => widget.onTab(t))),
         ])),
       ]),
     );
-    return GlassPanel(
+    final hint = _hint;
+    final follow = _grabbed ? (_pull > 0 ? _pull * 0.55 : _pull * 0.35) : 0.0;
+    final panel = GlassPanel(
       key: const ValueKey('focus-panel'),
       tint: color,
       radius: 12,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         header,
         Container(height: 1, color: Colors.white.withValues(alpha: 0.06)),
-        Expanded(child: switch (tab) {
-          FocusTab.fx => FxStack(key: ValueKey('fx-${layer.id}'), state: state, layer: layer, onOpenModule: onOpenModule),
-          FocusTab.mixer => _MixerTab(state: state, layer: layer),
-          FocusTab.clip => _ClipTab(state: state, layer: layer),
-          FocusTab.automation => TrackAutomationPanel(state: state, layer: layer),
+        Expanded(child: switch (widget.tab) {
+          FocusTab.fx => FxStack(key: ValueKey('fx-${widget.layer.id}'), state: widget.state, layer: widget.layer, onOpenModule: widget.onOpenModule),
+          FocusTab.mixer => _MixerTab(state: widget.state, layer: widget.layer),
+          FocusTab.clip => _ClipTab(state: widget.state, layer: widget.layer),
+          FocusTab.automation => TrackAutomationPanel(state: widget.state, layer: widget.layer),
         }),
       ]),
     );
+    return Stack(clipBehavior: Clip.none, children: [
+      AnimatedContainer(
+          duration: _grabbed ? Duration.zero : Motion.fade(Motion.small, Motion.of(context)),
+          curve: Curves.easeOutCubic,
+          transform: Matrix4.translationValues(0, follow, 0),
+          child: AnimatedOpacity(
+            opacity: _grabbed && _pull > 0 ? (1 - (_pull / 520)).clamp(0.55, 1.0) : 1,
+            duration: Duration.zero,
+            child: panel,
+          ),
+        ),
+      if (hint != null)
+        Positioned(
+          left: 0, right: 0, top: follow + 30,
+          child: IgnorePointer(child: Center(child: Container(
+            key: const ValueKey('focus-panel-hint'),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(10)),
+            child: Text(hint, style: const TextStyle(fontSize: 11, color: Colors.white)),
+          ))),
+        ),
+    ]);
   }
 }
+
 
 class _TabButton extends StatelessWidget {
   const _TabButton({required this.tab, required this.selected, required this.color, required this.onTap});
