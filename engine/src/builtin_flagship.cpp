@@ -1029,6 +1029,9 @@ private:
         if (n == 0) return;
         const double frames = static_cast<double>(n);
         const double done = n >= kControlFrames ? 1.0 : frames / kControlFrames;
+        uint32_t voiceLfos = 0;  // the retriggered LFOs a slot listens to: a voice's own (a free one is the instrument's)
+        for (uint32_t l = 0; l < kLfos; ++l)
+            if (uses(kSrcLfo1 + l) && retriggered(l)) voiceLfos |= 1u << l;
         voices_.forEachActive([&](Voice& v) noexcept {
             for (OscVoice& o : v.osc)
                 for (int c = 0; c < o.count; ++c)
@@ -1036,7 +1039,7 @@ private:
             if (uses(kSrcEnv2)) v.env[1].skip(n);
             if (uses(kSrcEnv3)) v.env[2].skip(n);
             for (uint32_t l = 0; l < kLfos; ++l)
-                if (uses(kSrcLfo1 + l)) v.lfo[l].advance(static_cast<int>(n));
+                if (voiceLfos & (1u << l)) v.lfo[l].advance(static_cast<int>(n));
             if (uses(kSrcRandom)) v.random.advance(static_cast<int>(n));
             v.gain0 += (v.gain1 - v.gain0) * done;
         });
