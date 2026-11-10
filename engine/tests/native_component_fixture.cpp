@@ -4,6 +4,7 @@
 #include <new>
 
 #include <caw/component.hpp>
+#include <caw/instrument.hpp>
 
 namespace {
 
@@ -217,9 +218,104 @@ public:
     }
 };
 
+
+// The bundle's eighth component: an instrument that records every note event it gets (the absolute
+// frame since activate or reset, its type, note id, pitch and velocity) and saves the list as its
+// state, so tests can check what reached it and when. Left plays 0.1 per held note times `level`;
+// right plays the last pitch / 128.
+constexpr caw::PortDescriptor kRecorderPorts[] = {
+    {"notes", caw::PortType::Event, caw::ChannelLayout::None, true, 0, false, 0.0f},
+    caw::stereoOutput("out"),
+};
+caw::ParameterDescriptor levelParameter() {
+    caw::ParameterDescriptor p;
+    p.id = "level";
+    p.defaultValue = 1.0;
+    p.minimum = 0.0;
+    p.maximum = 4.0;
+    return p;
+}
+const caw::ParameterDescriptor kRecorderParameters[] = {levelParameter()};
+struct Recorded {
+    uint64_t frame;
+    uint32_t noteId;
+    uint32_t type;  // caw::NoteMessageType
+    float pitch, velocity;
+};
+constexpr uint32_t kMaxRecorded = 256;
+caw::ModuleDescriptor recorderDescriptor() {
+    caw::ModuleDescriptor d{"org.caw.tests.native-loader.recorder", 1, kRecorderPorts, 2, kRecorderParameters, 1,
+                            nullptr, 0, {}};
+    d.role = caw::ModuleRole::Instrument;
+    d.maxStateBytes = 4 + kMaxRecorded * sizeof(Recorded);
+    return d;
+}
+const caw::ModuleDescriptor kRecorderDescriptor = recorderDescriptor();
+
+class RecorderProcessor final : public caw::ModuleProcessor {
+public:
+    const caw::ModuleDescriptor& descriptor() const noexcept override { return kRecorderDescriptor; }
+    bool usesProcessPorts() const noexcept override { return true; }
+    bool processPorts(const caw::ProcessBlock& b) noexcept override {
+        if (b.audioOutCount != 1 || b.audioOut[0].channelCount != 2) return false;
+        const caw::Event* events = b.eventInCount ? b.eventIn[0].events : nullptr;
+        const uint32_t count = events ? b.eventIn[0].count : 0;
+        const double level = b.parameterCount ? b.parameters[0].value : 1.0;
+        uint32_t e = 0;
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            for (; e < count && events[e].frame <= i; ++e) {
+                caw::NoteMessage m;
+                caw::readNote(events[e], m);
+                if (m.type == caw::NoteMessageType::On) ++held_;
+                if (m.type == caw::NoteMessageType::Off && held_ > 0) --held_;
+                if (m.type == caw::NoteMessageType::On || m.type == caw::NoteMessageType::Pitch) pitch_ = m.pitch;
+                const uint32_t n = recorded_.load(std::memory_order_relaxed);
+                if (n < kMaxRecorded) {
+                    log_[n] = {frames_ + events[e].frame, m.noteId, static_cast<uint32_t>(m.type),
+                               static_cast<float>(m.pitch), static_cast<float>(m.velocity)};
+                    recorded_.store(n + 1, std::memory_order_release);
+                }
+            }
+            b.audioOut[0].channels[0][i] = static_cast<float>(0.1 * held_ * level);
+            b.audioOut[0].channels[1][i] = static_cast<float>(pitch_ / 128.0);
+        }
+        frames_ += b.frames;
+        return true;
+    }
+    void reset() noexcept override {
+        frames_ = 0;
+        held_ = 0;
+    }
+    bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept override {
+        const uint32_t n = recorded_.load(std::memory_order_acquire);
+        if (capacity < 4 + n * sizeof(Recorded)) return false;
+        std::memcpy(destination, &n, 4);
+        std::memcpy(destination + 4, log_, n * sizeof(Recorded));
+        written = 4 + n * static_cast<uint32_t>(sizeof(Recorded));
+        return true;
+    }
+    bool loadState(const uint8_t* source, uint32_t size, uint32_t) noexcept override {
+        uint32_t n = 0;
+        if (size < 4) return false;
+        std::memcpy(&n, source, 4);
+        if (n > kMaxRecorded || size != 4 + n * sizeof(Recorded)) return false;
+        std::memcpy(log_, source + 4, n * sizeof(Recorded));
+        recorded_.store(n, std::memory_order_release);
+        return true;
+    }
+
+private:
+    Recorded log_[kMaxRecorded]{};
+    std::atomic<uint32_t> recorded_{0};
+    uint64_t frames_ = 0;
+    int held_ = 0;
+    double pitch_ = 0;
+};
+
 }  // namespace
 
 #ifndef CAW_TEST_OMIT_ENTRY  // the second fixture plays a library without the v2 entry point
 // A bundle of two components (owner, 2026-11-09: a package may hold several).
-CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor, EchoProcessor, LateProcessor, DroneProcessor, TransportProcessor)
+CAW_EXPORT_COMPONENTS(TestNativeProcessor, HalfProcessor, GainProcessor, EchoProcessor, LateProcessor, DroneProcessor, TransportProcessor,
+                      RecorderProcessor)
 #endif

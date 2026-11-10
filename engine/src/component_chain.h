@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "module_registry.h"
+#include "note_events.h"
 #include "params.h"
 #include "project.h"
 
@@ -46,6 +47,16 @@ public:
     static std::unique_ptr<ComponentChain> build(const ModuleRegistry& registry,
                                                  const std::vector<ComponentSpec>& specs, double sampleRate,
                                                  std::string& error);
+    // A track's instrument: one component with one event input and one stereo audio output (and no
+    // other ports), played by the notes in notes(). Everything else (values, bypass, state,
+    // automation, tails, latency, rebuilds) works as for an effect chain of one.
+    static std::unique_ptr<ComponentChain> buildInstrument(const ModuleRegistry& registry, const ComponentSpec& spec,
+                                                           double sampleRate, std::string& error);
+    // Whether a descriptor has an instrument's ports (one event input, one stereo audio output).
+    static bool isInstrument(const ModuleDescriptor& d) noexcept;
+    bool instrument() const noexcept { return notes_ != nullptr; }
+    // The instrument's notes and this block's events (null for an effect chain). Audio thread.
+    NoteEvents* notes() noexcept { return notes_.get(); }
     ~ComponentChain();
 
     // Whether this chain was built from the same components, in the same order, at this rate, so a
@@ -73,10 +84,12 @@ public:
     bool uses(const std::string& id) const noexcept;
     // Control thread: the automation table for `lanes` (component lanes of this chain's `layer`;
     // empty for the master). Null when no lane targets the chain.
+    // An instrument takes the lanes with target type "instrument" instead.
     std::unique_ptr<ComponentAutomation> automationFor(
         const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& lanes, const std::string& layer) const;
     // A key for the lanes `automationFor` would pick, so an unchanged table is not resent.
-    static std::string automationKey(const std::vector<ProjectAutomationLaneSpec>& lanes, const std::string& layer);
+    static std::string automationKey(const std::vector<ProjectAutomationLaneSpec>& lanes, const std::string& layer,
+                                     const char* targetType = "component");
     std::size_t size() const noexcept { return entries_.size(); }
     // The longest tail any component declares, in frames (kInfiniteTail for an endless one); 0: none.
     uint32_t tailFrames() const noexcept;
@@ -85,7 +98,8 @@ public:
     // An estimate of the memory the chain holds, for the project-state budget.
     static uint64_t estimateBytes(std::size_t components, std::size_t parameters) noexcept;
 
-    // Audio thread: runs every component over left/right in place (m <= kMaxFrames). Lanes are read
+    // Audio thread: runs every component over left/right in place (m <= kMaxFrames). An instrument
+    // writes left/right (their input is ignored) from the events in notes(), which it then clears. Lanes are read
     // only while `time->playing` (they hold while stopped); null time: no transport at all. A component that fails a block passes its input through;
     // non-finite output becomes 0. A bypassed component crossfades to its input over 5 ms, then
     // is not run at all.
@@ -116,7 +130,11 @@ private:
     ComponentChain() = default;
     int parameterIndex(const Entry& e, const std::string& id) const noexcept;
 
+    static std::unique_ptr<ComponentChain> make(const ModuleRegistry& registry, const std::vector<ComponentSpec>& specs,
+                                                double sampleRate, bool instrument, std::string& error);
+
     std::vector<std::unique_ptr<Entry>> entries_;
+    std::unique_ptr<NoteEvents> notes_;  // an instrument's notes; null for an effect chain
     double sampleRate_ = 0;
     ComponentAutomation* automation_ = nullptr;  // owned; swapped and retired by the Engine
     uint64_t playEpoch_ = ~0ull;
