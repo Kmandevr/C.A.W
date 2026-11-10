@@ -15,6 +15,7 @@ import 'package:caw/ui/arrange/track_color.dart';
 import 'package:caw/ui/theme.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -351,6 +352,53 @@ void main() {
           .having((x) => x.headerWidth, 'width', s.settings.headerWidth)
           .having((x) => x.trackHeight, 'height', s.settings.trackHeight));
       await settle(tester);
+    });
+
+    testWidgets('zoom: the zoom bar\'s sliders, a sideways pinch and an upright pinch, Ctrl + wheel', (tester) async {
+      await pumpArranger(tester, const Size(412, 900));
+      await tester.tap(find.byKey(const ValueKey('arrange-zoom')));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('arrange-zoom-bar')), findsOneWidget);
+      double clipW() => tester.getSize(find.text('Hold the track for clips, or drop a pattern here').first).width;
+      expect(clipW(), greaterThan(0));
+      final ruler = find.byWidgetPredicate((w) => w is CustomPaint && w.painter.runtimeType.toString() == '_BarRuler');
+      double barW() => (tester.widget<CustomPaint>(ruler).painter as dynamic).stepW as double;
+      final w0 = barW();
+      await tester.tap(find.byTooltip('Zoom in'));
+      await settle(tester);
+      expect(barW(), closeTo(w0 * 1.4, 0.01));
+      // Sideways pinch: time only.
+      final header = find.byKey(const ValueKey('track-header-a'));
+      final h0 = tester.getSize(header).height;
+      final at = tester.getCenter(find.byKey(const ValueKey('track-header-b'))) + const Offset(200, 0);
+      final a = await tester.startGesture(at - const Offset(40, 0), kind: PointerDeviceKind.touch);
+      final b = await tester.startGesture(at + const Offset(40, 0), kind: PointerDeviceKind.touch);
+      await a.moveBy(const Offset(-40, 0));
+      await b.moveBy(const Offset(40, 0));
+      await a.up();
+      await b.up();
+      await settle(tester);
+      expect(barW(), closeTo(w0 * 2.8, 0.05));
+      expect(tester.getSize(header).height, h0);
+      // Upright pinch: the track height only, saved.
+      final c = await tester.startGesture(at - const Offset(0, 40), kind: PointerDeviceKind.touch);
+      final d = await tester.startGesture(at + const Offset(0, 40), kind: PointerDeviceKind.touch);
+      await c.moveBy(const Offset(0, -20));
+      await d.moveBy(const Offset(0, 20));
+      await c.up();
+      await d.up();
+      await settle(tester);
+      expect(tester.getSize(header).height, closeTo(h0 * 1.5, 1));
+      expect(s.settings.trackHeight, closeTo(h0 * 1.5, 1));
+      // Ctrl + wheel zooms out.
+      final before = barW();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      final mouse = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(mouse.hover(at));
+      await tester.sendEventToBinding(mouse.scroll(const Offset(0, 40)));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settle(tester);
+      expect(barW(), lessThan(before));
     });
 
     test('tracks in a folder take shades of its colour unless they have their own', () {

@@ -1,7 +1,7 @@
 // Arrange: the tracks and clips on a timeline, compact track headers, the focus view (one track and its panel) and the mixer card.
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show DragStartBehavior;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -44,9 +44,23 @@ class ArrangerScreen extends StatefulWidget {
   State<ArrangerScreen> createState() => _ArrangerScreenState();
 }
 
-class _ArrangerScreenState extends State<ArrangerScreen> {
-  bool mixer = false, settings = false, cardsView = false, mixerCard = false;
+class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProviderStateMixin {
+  bool mixer = false, settings = false, cardsView = false, mixerCard = false, zoomBar = false;
+
+  /// Time zoom: pixels per 16th step (× 0.85 at compact density).
   double zoom = 18.0;
+  static const minZoom = 3.0, maxZoom = 64.0;
+
+  // The zoom buttons glide to their new zoom ([Motion.standard]); a pinch, slider or Ctrl + wheel follows at once.
+  late final AnimationController _zoomAnim = AnimationController(vsync: this, duration: Motion.standard)
+    ..addListener(_zoomFrame);
+  double _zoomFrom = 18, _zoomTarget = 18;
+  double? _zoomFocal;
+
+  // Two fingers on the timeline: a sideways pinch zooms time, an up-and-down pinch the track height.
+  final Map<int, Offset> _touches = {};
+  double _pinchDx0 = 0, _pinchDy0 = 0, _pinchZoom0 = 0, _pinchH0 = 0;
+  bool _pinchX = false, _pinchY = false;
   // A header resize in progress, shown before it is saved when the drag ends.
   double? _dragHeaderW, _dragTrackH;
 
@@ -81,8 +95,101 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
 
   @override
   void dispose() {
+    _zoomAnim.dispose();
     _hScroll.dispose();
     super.dispose();
+  }
+
+  /// Sets the time zoom, keeping the timeline point under [focal] (pixels from the lanes' left edge; the middle of
+  /// the view by default) where it is.
+  void _setZoom(double z, {double? focal}) {
+    z = z.clamp(minZoom, maxZoom).toDouble();
+    if (z == zoom) return;
+    final pos = _hScroll.hasClients ? _hScroll.positions.last : null;
+    final f = focal ?? (pos?.viewportDimension ?? 0) / 2;
+    final anchor = pos == null ? null : (pos.pixels + f) / zoom;
+    setState(() => zoom = z);
+    if (anchor == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_hScroll.hasClients) return;
+      final p = _hScroll.positions.last;
+      p.jumpTo((anchor * zoom - f).clamp(0.0, p.maxScrollExtent).toDouble());
+    });
+  }
+
+  /// The zoom buttons: a short glide to [z] (at once when motion is off).
+  void _animateZoom(double z) {
+    _zoomTarget = z.clamp(minZoom, maxZoom).toDouble();
+    if (Motion.of(context) != MotionLevel.full) {
+      _setZoom(_zoomTarget);
+      return;
+    }
+    _zoomFrom = zoom;
+    _zoomFocal = null;
+    _zoomAnim.forward(from: 0);
+  }
+
+  void _zoomFrame() {
+    final t = Curves.easeOutCubic.transform(_zoomAnim.value);
+    _setZoom(_zoomFrom + (_zoomTarget - _zoomFrom) * t, focal: _zoomFocal);
+  }
+
+  void _touchDown(PointerDownEvent e, double headW) {
+    if (e.kind != PointerDeviceKind.touch) return;
+    _touches[e.pointer] = e.localPosition;
+    if (_touches.length == 2) {
+      final ps = _touches.values.toList();
+      final dx = (ps[0].dx - ps[1].dx).abs(), dy = (ps[0].dy - ps[1].dy).abs();
+      _pinchDx0 = dx;
+      _pinchDy0 = dy;
+      _pinchZoom0 = zoom;
+      _pinchH0 = _trackHeight;
+      // Fingers side by side zoom time, one above the other the height; diagonal, both.
+      _pinchX = dx > 24 && dx >= dy * 0.6;
+      _pinchY = dy > 24 && dy >= dx * 0.6;
+      _zoomAnim.stop();
+    }
+  }
+
+  void _touchMove(PointerMoveEvent e, double headW) {
+    if (!_touches.containsKey(e.pointer)) return;
+    _touches[e.pointer] = e.localPosition;
+    if (_touches.length != 2) return;
+    final ps = _touches.values.toList();
+    if (_pinchX) {
+      _setZoom(_pinchZoom0 * (ps[0].dx - ps[1].dx).abs() / _pinchDx0, focal: (ps[0].dx + ps[1].dx) / 2 - headW);
+    }
+    if (_pinchY) {
+      setState(() => _dragTrackH = (_pinchH0 * (ps[0].dy - ps[1].dy).abs() / _pinchDy0)
+          .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble());
+    }
+  }
+
+  void _touchUp(PointerEvent e) {
+    if (_touches.remove(e.pointer) == null) return;
+    if (_touches.length == 1 && (_pinchX || _pinchY)) {
+      _pinchX = _pinchY = false;
+      _saveHeaderSize();
+    }
+  }
+
+  /// Ctrl + wheel zooms time around the mouse; Ctrl + Shift + wheel changes the track height. Registered before the
+  /// scroll views see the wheel, so they don't also scroll.
+  void _wheel(PointerSignalEvent e, double? focal) {
+    if (e is! PointerScrollEvent || !HardwareKeyboard.instance.isControlPressed) return;
+    GestureBinding.instance.pointerSignalResolver.register(e, (event) {
+      final d = (event as PointerScrollEvent).scrollDelta;
+      final amount = d.dy != 0 ? d.dy : d.dx;
+      if (amount == 0) return;
+      final factor = amount > 0 ? 1 / 1.12 : 1.12;
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        setState(() => _dragTrackH = (_trackHeight * factor)
+            .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble());
+        _saveHeaderSize();
+      } else {
+        _setZoom(zoom * factor, focal: focal);
+      }
+    });
   }
 
   SectionController? get _sections => SectionController.maybeOf(context);
@@ -314,6 +421,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       child: Column(children: [
         if (s.meters.overloaded > 0) _OverloadBanner(state: s),
         _toolbar(context, focused),
+        AnimatedSize(duration: Motion.move(Motion.standard, Motion.of(context)), curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: zoomBar ? _zoomBar() : const SizedBox(width: double.infinity)),
         if (settings) _settingsPanel(),
         Expanded(child: body),
         if (mixer) _ArrangementMixer(state: s),
@@ -344,10 +454,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
           if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
             IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt),
               icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0).toDouble()),
-            icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()),
-            icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
+          IconButton(onPressed: () => setState(() => zoomBar = !zoomBar),
+            key: const ValueKey('arrange-zoom'),
+            color: zoomBar ? Neon.blue : null,
+            icon: const Icon(Icons.zoom_in), tooltip: 'Zoom (or pinch; Ctrl + wheel)'),
           PopupMenuButton<String>(
             tooltip: 'Track height',
             onSelected: (v) {
@@ -400,6 +510,30 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     );
   }
 
+  /// Time and height zoom: − and + glide a step, the sliders follow the finger (time on a log scale).
+  Widget _zoomBar() {
+    final ratio = math.log(maxZoom / minZoom);
+    final h = _trackHeight;
+    Widget icon(IconData i, String tip, VoidCallback onTap) => IconButton(onPressed: onTap, tooltip: tip,
+        visualDensity: VisualDensity.compact, iconSize: 18, icon: Icon(i, color: Neon.dim));
+    return SizedBox(height: 36, child: Row(key: const ValueKey('arrange-zoom-bar'), children: [
+      const SizedBox(width: 6),
+      const Tooltip(message: 'Time zoom', child: Icon(Icons.swap_horiz, size: 16, color: Neon.dim)),
+      icon(Icons.remove, 'Zoom out', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget / 1.4 : zoom / 1.4)),
+      Expanded(flex: 3, child: Slider(key: const ValueKey('arrange-zoom-time'),
+        value: (math.log(zoom / minZoom) / ratio).clamp(0.0, 1.0).toDouble(),
+        onChanged: (v) { _zoomAnim.stop(); _setZoom(minZoom * math.exp(v * ratio)); })),
+      icon(Icons.add, 'Zoom in', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget * 1.4 : zoom * 1.4)),
+      const SizedBox(width: 6),
+      const Tooltip(message: 'Track height', child: Icon(Icons.swap_vert, size: 16, color: Neon.dim)),
+      Expanded(flex: 2, child: Slider(key: const ValueKey('arrange-zoom-height'),
+        value: h.clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble(),
+        min: Settings.minTrackHeight, max: Settings.maxTrackHeight,
+        onChanged: (v) => setState(() => _dragTrackH = v),
+        onChangeEnd: (_) => _saveHeaderSize())),
+    ]));
+  }
+
   Widget _settingsPanel() {
     final s = widget.state;
     return Flexible(flex: 0, child: ConstrainedBox(
@@ -444,7 +578,17 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final width = math.max(560.0, math.min(p.maxArrangementSteps, math.max(p.timelineSteps, end + 64 * p.stepsPerBar)) * stepW);
     final ruler = pinned ? 20.0 : 30.0;
     final focusId = _focusId;
-    return LayoutBuilder(builder: (context, view) => SingleChildScrollView(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    // Two fingers scroll by their average, so a pinch zooms without dragging the view; the pointers are read raw.
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(multitouchDragStrategy: MultitouchDragStrategy.averageBoundaryPointers),
+      child: Listener(
+      onPointerDown: (e) => _touchDown(e, headW),
+      onPointerMove: (e) => _touchMove(e, headW),
+      onPointerUp: _touchUp,
+      onPointerCancel: _touchUp,
+      child: LayoutBuilder(builder: (context, view) => SingleChildScrollView(child: Listener(
+        onPointerSignal: (e) => _wheel(e, null),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Stack(children: [SizedBox(width: headW, child: Column(children: [
         SizedBox(height: ruler, child: Padding(
           padding: EdgeInsets.only(left: 10, top: pinned ? 4 : 8),
@@ -475,7 +619,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
           onEnd: _saveHeaderSize)),
       ]),
       Expanded(child: SingleChildScrollView(controller: _hScroll, scrollDirection: Axis.horizontal,
-        child: SizedBox(width: width, child: Stack(children: [
+        child: Listener(
+          onPointerSignal: (e) => _wheel(e, _hScroll.hasClients ? e.localPosition.dx - _hScroll.positions.last.pixels : null),
+          child: SizedBox(width: width, child: Stack(children: [
           // One grid behind every track, through the gaps and spacers and down to the bottom of the view
           // below the last track (owner: like Reaper).
           Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: CustomPaint(
@@ -503,8 +649,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
               return CustomPaint(painter: _PlayheadPainter(stepW, playheadStep));
             },
           ))),
-        ])))),
-    ])));
+        ]))))),
+    ]))))));
   }
 
   Widget _arrangement(BuildContext context, _TrackCallbacks callbacks) {
@@ -825,7 +971,9 @@ class _ArrangementGrid extends CustomPainter {
     final minor = Paint()..color = Neon.line.withValues(alpha: .55)..strokeWidth = .6;
     final major = Paint()..color = Neon.dim.withValues(alpha: .35)..strokeWidth = 1;
     final (from, to) = visibleSpan(scroll, size);
-    for (var n = (from / stepW).floor(); n * stepW <= to; n++) {
+    // Zoomed out, the minor lines thin to beats, then to bars only, so they stay at least 5 px apart.
+    final every = stepW >= 5 ? 1 : stepW * 4 >= 5 ? 4 : barSteps;
+    for (var n = (from / stepW / every).floor() * every; n * stepW <= to; n += every) {
       final x = n * stepW;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
     }
@@ -844,9 +992,14 @@ class _BarRuler extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final barW = barSteps * stepW;
     final (from, to) = visibleSpan(scroll, size);
-    for (var b = (from / barW).floor(); b * barW <= to; b++) {
+    // A label every bar, or every 2, 4, 8… bars when bars are narrower than a label.
+    var every = 1;
+    while (every * barW < 28 && every < 1 << 16) {
+      every *= 2;
+    }
+    for (var b = (from / barW / every).floor() * every; b * barW <= to; b += every) {
       final label = TextPainter(text: TextSpan(text: '${b + 1}', style: Neon.code(size: 10, color: Neon.dim)),
-        textDirection: TextDirection.ltr, maxLines: 1)..layout(maxWidth: math.max(1.0, barW - 2));
+        textDirection: TextDirection.ltr, maxLines: 1)..layout(maxWidth: math.max(1.0, every * barW - 2));
       label.paint(canvas, Offset(b * barW, (size.height - label.height) / 2));
       label.dispose();
     }

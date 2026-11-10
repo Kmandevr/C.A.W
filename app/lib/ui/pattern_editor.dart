@@ -142,7 +142,37 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   static const _keyW = 44.0, _rulerH = 20.0;
   RollLook get _look => s.settings.roll;
-  double get _rowH => _look.rowHeight;
+  // The row height while a pinch or the zoom bar changes it; saved to the roll's look when it ends.
+  double? _rowDrag;
+  double get _rowH => _rowDrag ?? _look.rowHeight;
+  static const _minRow = 10.0, _maxRow = 40.0, _minPx = 4.0, _maxPx = 200.0;
+  bool _zoomBar = false;
+  double _rowStart = 16, _pinchSpanY = 0;
+  bool _pinchX = true, _pinchY = false;
+
+  void _saveRow() {
+    final r = _rowDrag;
+    if (r == null) return;
+    s.settings.update((x) => x.roll = x.roll.copyWith(rowHeight: r)).then((_) {
+      if (mounted) setState(() => _rowDrag = null);
+    });
+  }
+
+  /// Time zoom to [px] per step, keeping the grid point [fx] pixels from the grid's left edge in place.
+  void _zoomX(double px, {double? fx}) {
+    px = px.clamp(_minPx, _maxPx).toDouble();
+    final f = fx ?? _gridW / 2;
+    _scrollX = math.max(0.0, (_scrollX + f) / _pxPerStep * px - f);
+    _pxPerStep = px;
+  }
+
+  /// Row zoom to [row] pixels per note, keeping the pitch [fy] pixels below the grid's top in place.
+  void _zoomY(double row, {double? fy}) {
+    row = row.clamp(_minRow, _maxRow).toDouble();
+    final f = fy ?? _gridH / 2;
+    _scrollY = math.max(0.0, (_scrollY + f) / _rowH * row - f);
+    _rowDrag = row;
+  }
   double get _velH => _look.velocityLane;
   double get _xH => _look.chanceLane;
   double get _lanesH => (_velLane ? _velH : 0) + (_extrasLane ? _xH : 0);
@@ -518,9 +548,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       case 'roll.view.switch':
         setState(() => _grid = !_grid);
       case 'roll.view.zoomIn':
-        setState(() => _pxPerStep = math.min(200, _pxPerStep * 1.25));
+        setState(() => _zoomX(_pxPerStep * 1.25));
       case 'roll.view.zoomOut':
-        setState(() => _pxPerStep = math.max(4, _pxPerStep / 1.25));
+        setState(() => _zoomX(_pxPerStep / 1.25));
       case 'roll.view.fit':
         setState(() {
           _scrollX = 0;
@@ -1106,8 +1136,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _startPinch() {
     final ps = _pointers.values.take(2).toList();
     _pinchSpan = (ps[0].dx - ps[1].dx).abs();
+    _pinchSpanY = (ps[0].dy - ps[1].dy).abs();
     _pinchFocal = (ps[0] + ps[1]) / 2;
     _zoomStart = _pxPerStep;
+    _rowStart = _rowH;
+    // Fingers side by side zoom time, one above the other the rows; diagonal, both.
+    _pinchX = _pinchSpan > 24 && _pinchSpan >= _pinchSpanY * 0.6;
+    _pinchY = _pinchSpanY > 24 && _pinchSpanY >= _pinchSpan * 0.6;
   }
 
   void _pointerMove(PointerMoveEvent e) {
@@ -1128,12 +1163,14 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     }
     if (_pointers.length >= 2) {
       final ps = _pointers.values.take(2).toList();
-      final focal = (ps[0] + ps[1]) / 2, span = (ps[0].dx - ps[1].dx).abs();
+      final focal = (ps[0] + ps[1]) / 2, span = (ps[0].dx - ps[1].dx).abs(), spanY = (ps[0].dy - ps[1].dy).abs();
+      final f = focal - _origin;
       setState(() {
-        // A pinch that starts with the fingers stacked vertically only scrolls.
-        if (_pinchSpan > 24) _pxPerStep = (_zoomStart * span / _pinchSpan).clamp(4.0, 200.0);
-        _scrollX -= focal.dx - _pinchFocal.dx;
-        _scrollY -= focal.dy - _pinchFocal.dy;
+        // Per axis: a sideways pinch zooms time, an upright one the rows, around the fingers.
+        if (_pinchX) _zoomX(_zoomStart * span / _pinchSpan, fx: f.dx);
+        if (_pinchY) _zoomY(_rowStart * spanY / _pinchSpanY, fy: f.dy);
+        _scrollX = math.max(0.0, _scrollX - (focal.dx - _pinchFocal.dx));
+        _scrollY = math.max(0.0, _scrollY - (focal.dy - _pinchFocal.dy));
       });
       _pinchFocal = focal;
       return;
@@ -1262,6 +1299,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       return;
     }
     if (_pointers.length == 1) {
+      _saveRow();
       // Back to one finger after a pinch: it keeps scrolling until it lifts.
       _pending = _pointers.values.first - _origin;
       _panning = true;
@@ -1689,6 +1727,28 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     return Neon.yellow;
   }
 
+  /// The zoom bar: time on a log scale with − and +, and the row height; both follow the finger.
+  Widget _zoomRow() {
+    final ratio = math.log(_maxPx / _minPx);
+    Widget icon(IconData i, String tip, VoidCallback onTap) => IconButton(onPressed: onTap, tooltip: tip,
+        visualDensity: VisualDensity.compact, iconSize: 18, icon: Icon(i, color: Neon.dim));
+    return SizedBox(height: 36, child: Row(key: const ValueKey('roll-zoom-bar'), children: [
+      const SizedBox(width: 6),
+      const Tooltip(message: 'Time zoom', child: Icon(Icons.swap_horiz, size: 16, color: Neon.dim)),
+      icon(Icons.remove, 'Zoom out', () => setState(() => _zoomX(_pxPerStep / 1.25))),
+      Expanded(flex: 3, child: Slider(key: const ValueKey('roll-zoom-time'),
+        value: (math.log(_pxPerStep / _minPx) / ratio).clamp(0.0, 1.0).toDouble(),
+        onChanged: (v) => setState(() => _zoomX(_minPx * math.exp(v * ratio))))),
+      icon(Icons.add, 'Zoom in', () => setState(() => _zoomX(_pxPerStep * 1.25))),
+      const SizedBox(width: 6),
+      const Tooltip(message: 'Row height', child: Icon(Icons.swap_vert, size: 16, color: Neon.dim)),
+      Expanded(flex: 2, child: Slider(key: const ValueKey('roll-zoom-rows'),
+        value: _rowH.clamp(_minRow, _maxRow).toDouble(), min: _minRow, max: _maxRow,
+        onChanged: (v) => setState(() => _zoomY(v)),
+        onChangeEnd: (_) => _saveRow())),
+    ]));
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = _doc;
@@ -1766,6 +1826,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       velLane: _velLane,
       extrasLane: _extrasLane,
       hearNotes: _look.hearNotes,
+      zoomBar: _zoomBar,
+      onZoom: () => setState(() => _zoomBar = !_zoomBar),
       fullScreen: widget.fullScreen,
       onFullScreen: () {
         _flush();
@@ -1804,6 +1866,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
             ])),
         toolbar,
+        AnimatedSize(duration: Motion.move(Motion.standard, Motion.of(context)), curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: _zoomBar ? _zoomRow() : const SizedBox(width: double.infinity)),
         Expanded(
           child: LayoutBuilder(builder: (context, box) {
             final w = box.maxWidth - _keyW, h = box.maxHeight - _lanesH - _rulerH;
@@ -1830,8 +1895,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                 onPointerSignal: (e) {
                   if (e is PointerScrollEvent) {
                     setState(() {
-                      if (HardwareKeyboard.instance.isControlPressed) {
-                        _pxPerStep = (_pxPerStep * (e.scrollDelta.dy > 0 ? 0.9 : 1.1)).clamp(4.0, 200.0);
+                      final f = e.localPosition - _origin;
+                      final factor = e.scrollDelta.dy > 0 ? 0.9 : 1.1;
+                      if (HardwareKeyboard.instance.isControlPressed && HardwareKeyboard.instance.isShiftPressed) {
+                        _zoomY(_rowH * factor, fy: f.dy);
+                        _saveRow();
+                      } else if (HardwareKeyboard.instance.isControlPressed) {
+                        _zoomX(_pxPerStep * factor, fx: f.dx);
                       } else if (HardwareKeyboard.instance.isShiftPressed) {
                         _scrollX += e.scrollDelta.dy;
                       } else {
@@ -1953,7 +2023,11 @@ class _Toolbar extends StatelessWidget {
     required this.extrasLane,
     required this.hearNotes,
     required this.canCustomise,
+    required this.zoomBar,
+    required this.onZoom,
   });
+  final bool zoomBar;
+  final VoidCallback onZoom;
   final List<ActionRef> items;
   final ActionRegistry registry;
   final Keymap? keymap;
@@ -2016,6 +2090,12 @@ class _Toolbar extends StatelessWidget {
             style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
           ),
         ],
+        IconButton(
+          key: const ValueKey('roll-zoom'),
+          tooltip: 'Zoom (or pinch; Ctrl + wheel)',
+          onPressed: onZoom,
+          icon: Icon(Icons.zoom_in, color: zoomBar ? Neon.blue : Neon.dim),
+        ),
         IconButton(
           tooltip: 'Full screen',
           onPressed: onFullScreen,
