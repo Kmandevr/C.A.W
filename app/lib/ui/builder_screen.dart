@@ -12,6 +12,7 @@ import 'library_sheet.dart';
 import 'modulation_panel.dart';
 import 'param_control.dart';
 import 'pattern_editor.dart';
+import 'pattern_fields.dart';
 import 'theme.dart';
 import 'widgets.dart';
 import 'glass.dart';
@@ -118,7 +119,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
     void go(int i) => _code.selection = TextSelection.collapsed(offset: i.clamp(0, t.length));
     void setText(String text, int cursor) {
       _code.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: cursor.clamp(0, text.length)));
-      s.editSource(m.id, text);
+      _write(m, text);
     }
 
     int vertical(int i, int lines) {
@@ -240,12 +241,22 @@ class _BuilderScreenState extends State<BuilderScreen> {
 
   /// Loads the selected module's code: on a new selection, or when its source changed outside the editor (an undo).
   /// Typing writes the source straight back, so the two only differ after such a change.
+  /// A pattern's text hides its header (name and length are fields above it).
   void _syncEditor(ModuleDoc? m) {
     final source = m?.source ?? '';
-    if (m?.id == _shownId && _code.text == source) return;
+    final shown = m != null && s.isPattern(m.id) ? splitPatternHeader(source).$2 : source;
+    if (m?.id == _shownId && _code.text == shown) return;
     _shownId = m?.id;
-    _code.text = source;
+    _code.text = shown;
   }
+
+  /// The editor's text back into the module: a pattern's under its header (a new one for a blank pattern).
+  void _write(ModuleDoc m, String text) =>
+      s.editSource(m.id, s.isPattern(m.id) ? joinPatternHeader(m.source, text, m.name) : text);
+
+  /// Lines the editor doesn't show above its text (a pattern's header).
+  int _hiddenLines(ModuleDoc m) =>
+      s.isPattern(m.id) ? '\n'.allMatches(splitPatternHeader(m.source).$1).length : 0;
 
   /// The built-in functions plus the project's own libraries; null if the engine library can't load.
   Library? get _library {
@@ -258,7 +269,7 @@ class _BuilderScreenState extends State<BuilderScreen> {
 
   void _type(ModuleDoc m, String text, {bool completing = false}) {
     completing ? _code.completeWord(text) : _code.insert(text);
-    s.editSource(m.id, _code.text);
+    _write(m, _code.text);
     _focus.requestFocus();
   }
 
@@ -269,7 +280,10 @@ class _BuilderScreenState extends State<BuilderScreen> {
 
   void _showError(ModuleDoc m, ModuleInfo info) {
     _showCode(m);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _code.jumpTo(info.line, info.col));
+    final hidden = _hiddenLines(m);
+    // An error in a hidden header lands on the first line.
+    final (line, col) = info.line > hidden ? (info.line - hidden, info.col) : (1, 1);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _code.jumpTo(line, col));
   }
 
   void _openLibrary(ModuleDoc m) {
@@ -452,7 +466,12 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ],
       ),
     );
-    if (name != null) s.renameModule(m.id, name);
+    if (name == null || name.trim().isEmpty) return;
+    s.renameModule(m.id, name);
+    if (s.isPattern(m.id)) {
+      final next = editPatternHeader(m.source, name.trim(), name: name.trim());
+      if (next != null) s.editSource(m.id, next);
+    }
   }
 
   Future<void> _delete(ModuleDoc m) async {
@@ -521,8 +540,12 @@ class _BuilderScreenState extends State<BuilderScreen> {
         child: CodeField(
           controller: _code,
           focus: _focus,
-          onChanged: (v) => s.editSource(m.id, v),
-          hint: s.hintKindOf(m.id) == null ? null : codeHint(s.hintKindOf(m.id)!),
+          onChanged: (v) => _write(m, v),
+          hint: s.hintKindOf(m.id) == null
+              ? null
+              : pattern
+                  ? splitPatternHeader(codeHint('pattern')).$2
+                  : codeHint(s.hintKindOf(m.id)!),
         ),
       );
       final status = _StatusLine(
@@ -538,10 +561,21 @@ class _BuilderScreenState extends State<BuilderScreen> {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: GestureDetector(
-            onTap: () => _rename(m),
-            child: Text(m.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          ),
+          child: pattern
+              // A pattern's header is fields here, not text (owner, 2026-11-10).
+              ? PatternFields(
+                  key: ValueKey('fields ${m.id}'),
+                  source: () => m.source,
+                  name: m.name,
+                  stepsPerBar: s.project.stepsPerBar,
+                  onSource: (v) => s.editSource(m.id, v),
+                  onRename: (v) => s.renameModule(m.id, v),
+                )
+              : GestureDetector(
+                  onTap: () => _rename(m),
+                  child: Text(m.name,
+                      overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                ),
         ),
         if (look.soloButton)
           IconButton(
