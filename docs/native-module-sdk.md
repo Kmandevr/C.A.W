@@ -2,7 +2,7 @@
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-10
-covers: [engine/include/caw_component.h, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
+covers: [engine/include/caw_component.h, engine/include/caw/library/, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
@@ -89,7 +89,7 @@ The rules that matter:
   - `maxStateBytes`, together with `saveState`/`loadState` if it keeps state beyond its parameters.
 - **Make `saveState` safe while `process` runs:** the host may save a playing project.
 - **Make `reset()` clear what you hold.** The host calls it so the next play starts from silence.
-- **Use the Library for the same sound everywhere:** `caw/library/` (pan law, width, drive and crush, delays) and `caw/detmath.hpp` give the same bits on every device.
+- **Use the Library for the same sound everywhere:** `caw/library/` ([below](#the-library)) and `caw/detmath.hpp` give the same bits on every device.
 
 ## Testing your effect
 
@@ -113,7 +113,7 @@ Run it at the block sizes and sample rates the app uses (`--block`, `--rate`); a
 
 ## Writing an instrument
 
-An instrument plays a track's notes in place of a .caw generator (#156). Its ports are one event input and one stereo audio output, and nothing else; `role` is `Instrument`. A new one starts from the blank template (`CppComponentDoc.blankInstrument`, "New instrument" in Build and Files): a polyphonic sine with a 10 ms attack and release. `examples/cpp/poly-synth/` is a fuller example (sine or saw, attack, release, volume; CI builds and plays it), and the engine's built-in `org.caw.synth.basic` is a third (`engine/src/builtin_components.cpp`).
+An instrument plays a track's notes in place of a .caw generator (#156). Its ports are one event input and one stereo audio output, and nothing else; `role` is `Instrument`. A new one starts from the blank template (`CppComponentDoc.blankInstrument`, "New instrument" in Build and Files): a polyphonic sine with a 10 ms attack and release. `examples/cpp/poly-synth/` is a fuller example (sine or saw, attack, release, volume; CI builds and plays it), and the engine's built-in instruments are more: `org.caw.synth.basic` (`engine/src/builtin_components.cpp`) and the drums, bass, acid and morph synths (`engine/src/builtin_instruments.cpp`), which are made of [Library](#the-library) kernels you can use the same way.
 
 The instrument owns its polyphony, as a CLAP instrument does: the host sends note events, the instrument decides which voice plays each. `caw/instrument.hpp` makes that short:
 - **`caw::InstrumentProcessor`** implements `processPorts` for you. It calls `onNote(const caw::NoteMessage&)` for each event on its frame and `render(left, right, frames, offset, block)` for the frames between, so a note starts on its exact sample. Read a knob with `caw::parameterAt(block, k, offset + i, fallback)`. A block with more than 64 distinct event frames starts the rest together at the 64th split.
@@ -135,6 +135,23 @@ What the host sends, as `caw::Event` records of kind `Note` (MIDI 2.0 Channel Vo
 - Poly Pressure and Registered Per-Note Controller 74 (timbre) from the note's pressure and timbre curves.
 
 The rules of an effect hold too: allocate in `activate`, make `reset()` silence every voice (the host calls it at Play and after the track was muted), and declare `tailFrames` for the longest release. The host ends every held note at Stop and lets the instrument ring out until it is quiet; the [engine reference](engine.md) has the details.
+
+## The Library
+
+`engine/include/caw/library/` is header-only C++ in `namespace caw::lib`: what the engine's built-ins are made of, for your components to reuse. It uses only the deterministic maths of `caw/detmath.hpp`, so a component built with `CAW::SDK` gets the same bits as the engine, and nothing in it allocates except the delay lines' `prepare()`. Objects with coefficients have a `set()` that costs an exp or a tan (call it when a knob moves, or every 16 frames) and a per-sample call.
+- `stereo.hpp`: `constantPowerPan` (the mixer's pan law), `balanceGains`, `applyWidth`.
+- `distortion.hpp`: `drive`, `hardClip`, `fold`, `crush` (the .caw `fx.*` call the same code).
+- `delay.hpp`: `PingPongDelay`, `Chorus`, `noteSeconds`.
+- `oscillator.hpp`: `noteHz` (MIDI note with fraction to Hz), `wrap01`, `polyBlep`; `sineWave`, `triangleWave`, band-limited `sawWave`, `squareWave` and `pulseWave` (phase 0..1 and cycles per sample), `morphWave` (sine, triangle, saw, square by `shape` 0..1) and `Noise` (seeded white noise, the same sequence everywhere).
+- `filter.hpp`: `Svf` (12 dB state-variable: low, band, high and notch at once; the .caw `lpf`/`hpf`/`bpf`/`notch` maths), `OnePole`, `Ladder` (24 dB low-pass with a soft-clipped input, resonance 0..1), `resonanceQ` (0..1 to a Q) and `shiftCutoff` (a cutoff moved by octaves, held in range).
+- `envelope.hpp`: `AdEnvelope` (as the .caw `ad`), `Adsr` (as `env.adsr`), `Glide` (portamento), `decayCoefficient` and `attackStep`.
+- `drums.hpp`: `KickVoice`, `SnareVoice`, `ClapVoice` and `HatVoice` with their settings structs: `set()`, `trigger(velocity)`, `next()`, `choke()`.
+
+```cpp
+lib::Svf filter;
+filter.set(lib::shiftCutoff(800.0, 3.0 * env.next(), rate), lib::resonanceQ(0.6), rate);
+const double y = filter.lowpass(lib::sawWave(phase, dt));
+```
 
 ## One module system
 

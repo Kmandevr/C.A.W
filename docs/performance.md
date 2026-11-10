@@ -116,7 +116,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 
 ### Bottlenecks, ranked by evidence
 
-1. **Every keystroke and slider step rebuilt the whole app.** Measured with Flutter's own rebuild hook (`debugOnRebuildDirtyWidget`) in `app/test/rebuild_test.dart`, which runs the real app shell with the starter project.
+1. **Every keystroke and slider step rebuilt the whole app.** Measured with Flutter's own rebuild hook (`debugOnRebuildDirtyWidget`) in `app/test/rebuild_test.dart`, which runs the real app shell with the starter project and a .caw kick track (the keystrokes and slider steps edit its code and knobs).
    - About **3,520 widgets** rebuilt per keystroke, per param step and per volume step.
    - Every change called `notifyListeners`, which rebuilt the shell. Its `IndexedStack` builds and lays out all three screens, the Arranger with every layer card included.
    - Slider drags send 60–120 events a second.
