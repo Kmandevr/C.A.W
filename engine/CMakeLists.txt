@@ -204,6 +204,7 @@ target_include_directories(caw_cli PRIVATE src)
     src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
   target_sources(caw_tests PRIVATE tests/component_test_test.cpp)  # the component testing suite (#163)
   target_sources(caw_tests PRIVATE tests/sample_pack_test.cpp)  # the sample-pack maker (#164)
+  target_sources(caw_tests PRIVATE tests/library_kernels_test.cpp)  # Library LFO, wavetable, reverb, smoothers
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
