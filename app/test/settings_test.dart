@@ -17,10 +17,10 @@ void main() {
     Neon.showScopes = true;
   });
 
-  test('defaults: Calm neon, comfortable, auto-update on at 400 ms, swap now', () async {
+  test('defaults: Calm neon, compact, auto-update on at 400 ms, swap now', () async {
     final s = await Settings.open(base: dir);
     expect(s.themeName, 'Calm neon');
-    expect(s.density, Density.comfortable);
+    expect(s.density, Density.compact, reason: "compact by default (owner, 2026-11-09)");
     expect(s.liveUpdate, isTrue);
     expect(s.liveDelayMs, 400);
     expect(s.swapTiming, SwapTiming.now);

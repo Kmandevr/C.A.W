@@ -3,9 +3,12 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../engine/execution.dart';
+import '../model/problem_log.dart';
 import '../model/settings.dart';
+import '../version.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -26,6 +29,7 @@ class SettingsPage extends StatelessWidget {
         builder: (context, _) => Scaffold(
           appBar: AppBar(title: const Text('Settings'), backgroundColor: Neon.panel),
           body: ListView(padding: const EdgeInsets.all(12), children: [
+            const _AboutBeta(),
             const Heading('Look'),
             ListTile(
               leading: Icon(Icons.palette, color: Neon.pink),
@@ -807,4 +811,35 @@ class _KeyRowEditorState extends State<_KeyRowEditor> {
           ),
         ),
       );
+}
+
+/// The version, that this is an open beta, and "Report a problem": the report (version, platform, recent errors) is
+/// copied for the user to paste into a new issue. Nothing is sent from the app.
+class _AboutBeta extends StatelessWidget {
+  const _AboutBeta();
+
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ListTile(
+          leading: const Icon(Icons.science_outlined, color: Neon.yellow),
+          title: const Text('C.A.W open beta'),
+          subtitle: Text('Version $appVersion · things may change or break; projects are saved as you go',
+              style: TextStyle(color: Neon.dim)),
+        ),
+        ListTile(
+          key: const ValueKey('report-problem'),
+          leading: const Icon(Icons.bug_report_outlined, color: Neon.pink),
+          title: const Text('Report a problem'),
+          subtitle: Text('Copies a report (version, device, recent errors) to paste at $issuesUrl',
+              style: TextStyle(color: Neon.dim)),
+          onTap: () async {
+            await Clipboard.setData(ClipboardData(text: ProblemLog.report()));
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Report copied. Paste it into a new issue at $issuesUrl'),
+              duration: const Duration(seconds: 6),
+            ));
+          },
+        ),
+      ]);
 }

@@ -141,7 +141,7 @@ class Settings extends ChangeNotifier {
   final Directory? dir;
 
   String themeName = calmNeon.name;
-  Density density = Density.comfortable;
+  Density density = Density.compact; // owner, 2026-11-09: compact, not oversized
 
   /// Live coding: code swaps in by itself [liveDelayMs] after the last edit, at [swapTiming].
   bool liveUpdate = true;

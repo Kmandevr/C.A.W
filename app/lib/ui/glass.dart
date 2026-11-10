@@ -24,7 +24,11 @@ class Glass {
 
   /// True when floating surfaces blur what is behind them: glass is on, the blur switch is on, and the profile is
   /// Full or Balanced. Otherwise they keep the glass look with a denser tint and no blur, which costs far less.
-  static bool get blur => active && blurEnabled && Neon.performanceMode < 2 && !strained;
+  static bool get blur => blurChosen && !strained;
+
+  /// The blur as the settings choose it, whatever the strain: what the app's root key follows, so a change of strain
+  /// redraws the screens without rebuilding them from scratch.
+  static bool get blurChosen => active && blurEnabled && Neon.performanceMode < 2;
 
   /// True while the audio is under strain (recent overruns, or the device is hot or saving power): the shell sets
   /// it, and floating surfaces drop the blur until it clears, to protect the audio (owner, 2026-11-09).
