@@ -18,6 +18,14 @@ updated: 2026-11-10
 - **Where it opens:** on the phone a device opens as a full-screen editor with tabs for its sections.
 - **The flagship synth** gets its visual UI in the same work, mod matrix included.
 
+## 2026-11-10: Owner calls for the REAPER flow (owner)
+
+**Decision (owner), from `docs/reaper-flow.md`'s top gaps:**
+- **S splits** clips at the playhead, as in REAPER. Next track moves to another key.
+- **Automation writes in Touch mode.** An Automate button in the transport turns it on, and moves made while playing are written. Latch, Write and Read are on a long-press.
+- **Recording without a USB keyboard:** a slide-up on-screen keyboard (scrollable octaves) with a switch to a 4×4 drum pad grid, plus a metronome and count-in.
+- **Loop range:** drag along the ruler to set it, as in REAPER, with handles to adjust it. The loop button toggles it, and a long-press on the ruler adds a marker or region.
+
 ## 2026-11-10: The arranger works like REAPER's (owner)
 
 **Decision (owner):** "I would like the arranger to work like REAPER… Look at how REAPER does it and we're going to copy them" (#172). It covers:
