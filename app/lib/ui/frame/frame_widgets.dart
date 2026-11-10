@@ -378,3 +378,39 @@ class _SectionSwitcherState extends State<SectionSwitcher> with SingleTickerProv
     return Motion.of(context) == MotionLevel.full ? SlideTransition(position: _rise, child: fade) : fade;
   }
 }
+
+/// A panel that slides into place when it first appears: from [from] (a fraction of its own size) with a fade,
+/// over [Motion.panel] on an ease-out curve (owner, 2026-11-10: panels slide into place); a fade only with Reduced
+/// motion, nothing with Off.
+class SlideIn extends StatefulWidget {
+  const SlideIn({super.key, required this.child, this.from = const Offset(0, 0.1)});
+  final Widget child;
+  final Offset from;
+
+  @override
+  State<SlideIn> createState() => _SlideInState();
+}
+
+class _SlideInState extends State<SlideIn> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: Motion.panel);
+  late final Animation<double> _t = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_c.isDismissed) Motion.of(context) == MotionLevel.off ? _c.value = 1 : _c.forward();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fade = FadeTransition(opacity: _t, child: widget.child);
+    if (Motion.of(context) != MotionLevel.full) return fade;
+    return SlideTransition(position: Tween(begin: widget.from, end: Offset.zero).animate(_t), child: fade);
+  }
+}

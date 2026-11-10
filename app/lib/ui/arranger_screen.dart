@@ -48,6 +48,9 @@ class ArrangerScreen extends StatefulWidget {
 class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProviderStateMixin {
   bool mixer = false, settings = false, cardsView = false, mixerCard = false, zoomBar = false;
 
+  /// Phone portrait: the focus panel opened up over the pinned track (owner, 2026-11-10: it can open higher).
+  bool _panelHigh = false;
+
   /// Time zoom: pixels per 16th step (× 0.85 at compact density).
   double zoom = 18.0;
   static const minZoom = 3.0, maxZoom = 64.0;
@@ -380,7 +383,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     Widget panel(bool sheet) => FocusPanel(
       state: s, layer: focused!, tab: _tab, bottomSheetStyle: sheet,
       onTab: (t) => setState(() => _tab = t),
-      onClose: () => _focus(null),
+      onClose: () { _panelHigh = false; _focus(null); },
+      expanded: _panelHigh,
+      onExpand: sheet ? (v) => setState(() => _panelHigh = v) : null,
       onPrevious: fi > 0 ? () => _step(-1) : null,
       onNext: fi >= 0 && fi < focusable.length - 1 ? () => _step(1) : null,
       onOpenModule: widget.onOpenModule,
@@ -389,12 +394,18 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final Widget body;
     if (focused != null && layout == FocusLayout.pinned) {
       // Phone portrait: the track pinned at the top (still scrollable and editable), its panel below.
+      // Opened higher, the panel slides up over the track and leaves only a sliver of it.
       body = LayoutBuilder(builder: (context, box) {
         final pinnedH = (box.maxHeight * 0.2).clamp(84.0, 220.0).toDouble();
         return Column(children: [
-          SizedBox(height: pinnedH, child: _timeline(context, [focused], callbacks, pinned: true)),
-          const SizedBox(height: 4),
-          Expanded(child: panel(true)),
+          AnimatedContainer(duration: Motion.move(Motion.panel, Motion.of(context)), curve: Curves.easeOutCubic,
+            height: _panelHigh ? 0 : pinnedH + 4,
+            child: ClipRect(child: OverflowBox(alignment: Alignment.topCenter, minHeight: pinnedH + 4, maxHeight: pinnedH + 4,
+              child: Column(children: [
+                SizedBox(height: pinnedH, child: _timeline(context, [focused], callbacks, pinned: true)),
+                const SizedBox(height: 4),
+              ])))),
+          Expanded(child: SlideIn(from: const Offset(0, 0.12), child: panel(true))),
         ]);
       });
     } else if (focused != null) {
@@ -405,8 +416,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             : box.maxWidth * 0.4;
         return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(child: _arrangement(context, callbacks)),
-          SizedBox(width: math.min(w, box.maxWidth - 120), child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4), child: panel(false))),
+          SizedBox(width: math.min(w, box.maxWidth - 120), child: SlideIn(from: const Offset(0.12, 0), child: Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4), child: panel(false)))),
         ]);
       });
     } else {
@@ -604,7 +615,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         SizedBox(height: ruler, child: Padding(
           padding: EdgeInsets.only(left: 10, top: pinned ? 4 : 8),
           child: Align(alignment: Alignment.centerLeft,
-            child: Text(pinned ? 'FOCUS · swipe for next' : 'TRACKS',
+            child: Text(pinned ? 'FOCUS · swipe ⇆' : 'TRACKS',
               style: const TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
         for (final layer in layers) ...[
           _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
@@ -672,9 +683,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (!mixerCard) return tracks;
     return LayoutBuilder(builder: (context, box) => Stack(children: [
       Positioned.fill(child: tracks),
-      Positioned(left: 6, right: 6, bottom: 6, height: math.min(box.maxHeight - 12, math.max(320.0, box.maxHeight * 0.72)),
-        child: MixerCard(state: s, onClose: () => setState(() => mixerCard = false),
-          onSlot: (layer, _) { setState(() => mixerCard = false); _openTrack(layer, tab: FocusTab.fx); })),
+      Positioned(left: 6, right: 6, bottom: 6, height: math.min(box.maxHeight - 12, math.max(320.0, box.maxHeight * 0.86)),
+        child: SlideIn(from: const Offset(0, 0.15), child: MixerCard(state: s, onClose: () => setState(() => mixerCard = false),
+          onSlot: (layer, _) { setState(() => mixerCard = false); _openTrack(layer, tab: FocusTab.fx); }))),
     ]));
   }
 }

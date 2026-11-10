@@ -334,6 +334,24 @@ void main() {
     });
   });
 
+  testWidgets('phone portrait: the focus panel opens higher over the pinned track, and back', (tester) async {
+    await pumpArranger(tester, const Size(412, 900));
+    await tester.tap(find.byKey(const ValueKey('track-header-a')));
+    await settle(tester);
+    final panel = find.byKey(const ValueKey('focus-panel'));
+    final low = tester.getTopLeft(panel).dy;
+    await tester.tap(find.byKey(const ValueKey('focus-expand')));
+    await settle(tester);
+    expect(tester.getTopLeft(panel).dy, lessThan(low - 80));
+    await tester.fling(find.byKey(const ValueKey('focus-panel-header')), const Offset(0, 200), 1000);
+    await settle(tester);
+    expect(tester.getTopLeft(panel).dy, closeTo(low, 1), reason: 'a swipe down lowers it first');
+    expect(sections.focusedLayer, 'a');
+    await tester.fling(find.byKey(const ValueKey('focus-panel-header')), const Offset(0, -200), 1000);
+    await settle(tester);
+    expect(tester.getTopLeft(panel).dy, lessThan(low - 80), reason: 'a swipe up opens it higher');
+  });
+
   group('track headers', () {
     testWidgets('drag the headers\' right edge and a row\'s bottom edge to resize them; the sizes are saved',
         (tester) async {
