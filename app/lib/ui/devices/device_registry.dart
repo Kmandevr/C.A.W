@@ -7,6 +7,7 @@ import '../../model/device_target.dart';
 import 'drums/drum_editors.dart';
 import 'effects/effect_editors.dart';
 import 'flagship/flagship_editor.dart';
+import 'flagship/flagship_inline.dart';
 import 'flagship/flagship_presets.dart';
 import 'generic_device_page.dart';
 import 'kit/device_style.dart';
@@ -23,8 +24,11 @@ class DeviceSection {
 /// A custom editor: its tabs, its family (its colours and badge) and an accent that overrides the family's (both
 /// null: the track's colour).
 class DeviceEditorEntry {
-  const DeviceEditorEntry(this.sections, {this.accent, this.family, this.presets = const []});
+  const DeviceEditorEntry(this.sections, {this.accent, this.family, this.presets = const [], this.inline});
   final List<DeviceSection> Function(DeviceTarget target) sections;
+
+  /// What the FX stack shows of the device inline ([DeviceInline]); null: its first section, laid out compact.
+  final WidgetBuilder? inline;
   final Color? accent;
   final DeviceFamily? family;
 
@@ -36,7 +40,8 @@ class DeviceEditors {
   DeviceEditors._();
 
   static final Map<String, DeviceEditorEntry> _byId = {
-    flagshipComponentId: const DeviceEditorEntry(flagshipSections, family: DeviceFamily.synth, presets: flagshipStarterPresets),
+    flagshipComponentId: const DeviceEditorEntry(flagshipSections, family: DeviceFamily.synth, presets: flagshipStarterPresets,
+        inline: flagshipInline),
     ...drumEditors,
   };
 

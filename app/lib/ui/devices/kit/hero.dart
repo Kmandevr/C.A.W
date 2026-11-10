@@ -11,7 +11,10 @@ import '../../motion.dart';
 import '../../theme.dart';
 import '../device_scope.dart';
 
-/// Builds [builder] with the device's newest display frame (null until the engine plays the device).
+final _idle = ValueNotifier<DeviceDisplayFrame?>(null);
+
+/// Builds [builder] with the device's newest display frame (null until the engine plays the device, and while the
+/// device is off screen).
 class DeviceDisplay extends StatelessWidget {
   const DeviceDisplay({super.key, required this.builder});
   final Widget Function(BuildContext context, DeviceDisplayFrame? frame) builder;
@@ -19,8 +22,10 @@ class DeviceDisplay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = DeviceScope.of(context).target;
+    // Off screen (an inline device scrolled away, a covered route) nothing listens, so nothing is polled.
+    final live = TickerMode.valuesOf(context).enabled;
     return ValueListenableBuilder<DeviceDisplayFrame?>(
-        valueListenable: DeviceDisplaySource.current.frames(t), builder: (context, f, _) => builder(context, f));
+        valueListenable: live ? DeviceDisplaySource.current.frames(t) : _idle, builder: (context, f, _) => builder(context, f));
   }
 }
 
@@ -62,9 +67,13 @@ class HeroCanvas extends StatelessWidget {
 }
 
 /// A hero's height on this screen: [base], grown toward a third of a tall screen (a phone in portrait), at most
-/// half again.
-double heroHeight(BuildContext context, double base) =>
-    math.max(base, math.min(base * 1.45, MediaQuery.sizeOf(context).height * 0.33));
+/// half again; inline in the FX stack, compact (140–176).
+double heroHeight(BuildContext context, double base) => DeviceScope.isInline(context)
+    ? inlineHeroHeight(base)
+    : math.max(base, math.min(base * 1.45, MediaQuery.sizeOf(context).height * 0.33));
+
+/// A hero's compact height in the FX stack.
+double inlineHeroHeight(double base) => (base * 0.8).clamp(140.0, 176.0);
 
 class _GridPainter extends CustomPainter {
   _GridPainter(this.color);

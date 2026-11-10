@@ -2,13 +2,18 @@
 import 'package:flutter/material.dart';
 
 import '../device_registry.dart';
+import '../device_scope.dart';
 import '../kit/controls.dart';
 import '../kit/device_style.dart';
 import '../kit/hero.dart';
 
-/// A device page: the hero first, then its controls, scrolling on a phone. [id] keys it for tests.
-Widget effectPage(String id, List<Widget> children) => ListView(
-    key: ValueKey('fx-page-$id'), padding: const EdgeInsets.fromLTRB(10, 10, 10, 28), children: children);
+/// A device page: the hero first, then its controls, scrolling on a phone; inline in the FX stack, a column the
+/// stack scrolls. [id] keys it for tests.
+Widget effectPage(String id, List<Widget> children) => Builder(key: ValueKey('fx-page-$id'), builder: (context) =>
+    DeviceScope.isInline(context)
+        ? Padding(padding: const EdgeInsets.fromLTRB(8, 8, 8, 4), child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: children))
+        : ListView(padding: const EdgeInsets.fromLTRB(10, 10, 10, 28), children: children));
 
 /// An editor with one section (most effects: no tabs).
 DeviceEditorEntry singlePage(String id, String label, IconData icon, DeviceFamily family, Widget Function() page) =>

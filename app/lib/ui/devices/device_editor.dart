@@ -210,7 +210,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
               style: TextStyle(fontSize: 9, color: color)),
           ])),
         if (bypass) ...[
-          _PresetChip(target: t, color: color),
+          DevicePresetChip(target: t, color: color),
           const SizedBox(width: 4),
           _ABSwitch(target: t, color: color),
           IconButton(
@@ -246,16 +246,18 @@ class _DeviceEditorState extends State<DeviceEditor> {
 }
 
 /// The header's preset button: the current preset's name; a tap opens the browser.
-class _PresetChip extends StatelessWidget {
-  const _PresetChip({required this.target, required this.color});
+class DevicePresetChip extends StatelessWidget {
+  const DevicePresetChip({super.key, required this.target, required this.color, this.maxWidth = 150, this.chipKey});
   final DeviceTarget target;
   final Color color;
+  final double maxWidth;
+  final Key? chipKey;
 
   @override
   Widget build(BuildContext context) {
     final name = DevicePresets.label(target);
-    return Flexible(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 150), child: InkWell(
-      key: const ValueKey('device-presets'),
+    return Flexible(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: InkWell(
+      key: chipKey ?? const ValueKey('device-presets'),
       borderRadius: BorderRadius.circular(15),
       onTap: () {
         DeviceFeel.tap();

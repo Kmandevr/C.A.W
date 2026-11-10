@@ -11,7 +11,8 @@ import '../theme.dart';
 /// Hands the device editor's state to its controls.
 class DeviceScope extends InheritedWidget {
   const DeviceScope({super.key, required this.target, required this.matrix, required this.dragging,
-    required this.accent, Color? secondary, required this.focusSource, this.openSource, required super.child})
+    required this.accent, Color? secondary, required this.focusSource, this.openSource, this.inline = false,
+    required super.child})
       : secondary = secondary ?? accent;
 
   final DeviceTarget target;
@@ -30,6 +31,14 @@ class DeviceScope extends InheritedWidget {
 
   /// Shows [ModSource]'s page (the editor's MOD tab), when the editor has one.
   final ValueChanged<ModSource>? openSource;
+
+  /// The device is shown inline in the FX stack ([DeviceInline]) rather than in its own editor: pages lay out
+  /// without scrolling and heroes are compact.
+  final bool inline;
+
+  /// Whether [context] is inside an inline device (no dependency: the scope rebuilds its controls on every change).
+  static bool isInline(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<DeviceScope>()?.inline ?? false;
 
   static DeviceScope of(BuildContext context) {
     final s = context.dependOnInheritedWidgetOfExactType<DeviceScope>();
