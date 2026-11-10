@@ -1566,12 +1566,16 @@ private:
             periodPeak_ = peak;
             return;
         }
+        // Both sides the same (every voice centred: the bass, the acid line): the distortion, which holds no state,
+        // runs on one and gives the other the same bits.
+        bool same = distOn_;
+        for (uint32_t i = 0; i < n && same; ++i) same = L[i] == R[i];
         for (uint32_t i = 0; i < n; ++i) {
             const double at = static_cast<double>(first + i);
             double l = L[i], r = R[i];
             if (distOn_) {
                 l += (distort(l) - l) * distMix_;
-                r += (distort(r) - r) * distMix_;
+                r = same ? l : r + (distort(r) - r) * distMix_;
             }
             if (eqOn_) {
                 l += (eqL_.process(l) - l) * eqMix_;
