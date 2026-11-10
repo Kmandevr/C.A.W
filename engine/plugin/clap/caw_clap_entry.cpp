@@ -290,6 +290,7 @@ struct Plugin {
     const CawComponentDescriptor* d = nullptr;
     CawHost cawHost{};
     void* instance = nullptr;
+    int32_t (*quiet)(void*) = nullptr;  // CAW_EXTENSION_QUIET, when the component offers it
 
     // Port indices into the descriptor, per type and direction, in descriptor order.
     std::vector<uint32_t> audioIn, audioOut, eventIn, eventOut, controlIn, controlOut, modIn, modOut;
@@ -650,6 +651,10 @@ const clap_plugin_state_t kState = {stateSave, stateLoad};
 bool pluginInit(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->instance = s->table->create(&s->cawHost);
+    if (s->instance && s->table->get_extension) {
+        const auto* q = static_cast<const CawQuietExtension*>(s->table->get_extension(s->instance, CAW_EXTENSION_QUIET));
+        if (q && q->struct_size >= sizeof(CawQuietExtension)) s->quiet = q->quiet;
+    }
     return s->instance != nullptr;
 }
 
@@ -766,7 +771,12 @@ uint32_t eventPortFor(const Plugin* s, int32_t portIndex) {
 
 void noteOn(Plugin* s, uint32_t port, uint32_t frame, int32_t clapId, uint32_t channel, uint32_t key, uint16_t velocity) {
     const uint32_t id = clapId >= 0 ? hostNoteId(clapId) : freshNoteId(s);
-    s->eventInPorts[port].noteIds[channel * 128 + key] = id;
+    uint32_t& slot = s->eventInPorts[port].noteIds[channel * 128 + key];
+    // A note already sounding on this channel and key whose id only this slot remembers (a note without a
+    // host id, or any note when this one has none) ends first: no later off could name it.
+    if (slot != 0 && slot != id && (clapId < 0 || (slot & 0x80000000u)))
+        pushEvent(s, port, frame, CAW_EVENT_NOTE, slot, voiceWord(0x8, channel, key, 0), 0);
+    slot = id;
     pushEvent(s, port, frame, CAW_EVENT_NOTE, id, voiceWord(0x9, channel, key, 0), uint32_t(velocity) << 16);
 }
 
@@ -1178,7 +1188,8 @@ clap_process_status pluginProcess(const clap_plugin_t* p, const clap_process_t* 
         silence(proc);
         return CLAP_PROCESS_ERROR;
     }
-    return CLAP_PROCESS_CONTINUE;
+    // A component that has fallen silent lets the host put it to sleep until input or events arrive.
+    return s->quiet && s->quiet(s->instance) == 1 ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
 }
 
 const void* pluginGetExtension(const clap_plugin_t* p, const char* id) {

@@ -92,6 +92,105 @@ ProjectSpec effects() {
     return p;
 }
 
+// ---------- The app's starter project ("First loop", AppState.starterProject) on the built-in C++ instruments ----------
+
+std::string patternSource(const std::string& name, const std::string& length, const std::string& notes) {
+    return "---\ncaw: 1\nkind: pattern\nname: " + name + "\nlength: " + length + "\n---\n" + notes;
+}
+
+// One track of First loop: a native instrument (with its values) playing a pattern, then native effects.
+void addInstrumentLayer(ProjectSpec& p, const std::string& id, const std::string& instrument,
+                        std::vector<std::pair<std::string, double>> params, const std::string& pattern, double volume,
+                        std::vector<ComponentSpec> effects = {}) {
+    LayerSpec l;
+    l.id = id;
+    l.name = id;
+    l.hasInstrument = true;
+    l.instrument.id = instrument;
+    l.instrument.params = std::move(params);
+    l.components = std::move(effects);
+    l.clips.push_back({id + "-clip", pattern, 0, p.loopSteps(), 0, true});
+    l.volume = volume;
+    p.layers.push_back(l);
+}
+
+ComponentSpec component(const std::string& id, std::vector<std::pair<std::string, double>> params = {}) {
+    ComponentSpec c;
+    c.id = id;
+    c.params = std::move(params);
+    return c;
+}
+
+// First loop with every track playing (the app starts with Acid and Pad muted; here they are unmuted). `only`
+// keeps one track (by id); empty keeps all.
+ProjectSpec firstLoop(const std::string& only = "") {
+    ProjectSpec p;
+    p.name = "First loop";
+    p.bpm = 120;
+    p.loopBars = 4;
+    std::string hats;
+    for (int at = 0; at < 16; ++at) hats += std::to_string(at) + (at % 8 == 6 ? " A#2 1 1\n" : " F#2 1 1\n");
+    p.modules = {
+        {"kick", patternSource("Kick", "16", "0 C2 1 1\n4 C2 1 1\n8 C2 1 1\n12 C2 1 1\n"), {}},
+        {"hats", patternSource("Hats", "16", hats), {}},
+        {"bass", patternSource("Bass line", "16",
+                               "0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 1/2 1\n9 C2 1/2 1\n"
+                               "11 G1 1/2 1\n12 A1 1/2 1\n15 A1 1/2 1\n"), {}},
+        {"lead", patternSource("Lead", "2 bars",
+                               "0 E4 2 0.9\n2 A4 2 0.8\n4 C5 3 0.9\n8 B4 2 0.8\n10 A4 2 0.7\n12 G4 4 0.8\n"
+                               "16 E4 2 0.9\n18 A4 2 0.8\n20 C5 2 0.9\n22 D5 1 0.8 slide\n23 E5 5 0.9\n28 D5 2 0.7\n"
+                               "30 C5 2 0.6\n"), {}},
+        {"acid", patternSource("Acid line", "16",
+                               "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
+                               "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n"
+                               "15 E2 1 0.8\n"), {}},
+        {"chords", patternSource("Chords", "4 bars",
+                                 "0 A3,C4,E4 16 0.8\n16 F3,A3,C4 16 0.75\n32 C3,E3,G3 16 0.8\n48 G3,B3,D4 14 0.7\n"
+                                 "62 G3,B3,D4 1/2 0.5 ratchet 2\n"), {}},
+    };
+    addInstrumentLayer(p, "Kick", "org.caw.drum.kick", {}, "kick", 0.9);
+    addInstrumentLayer(p, "Hats", "org.caw.drum.hats", {}, "hats", 0.55);
+    addInstrumentLayer(p, "Bass", "org.caw.bass",
+                       {{"cutoff", 270}, {"resonance", 0.45}, {"env", 0.6}, {"decay", 0.18}, {"sustain", 0.2}}, "bass", 0.75);
+    addInstrumentLayer(p, "Lead", "org.caw.synth.morph",
+                       {{"shape", 0.66}, {"drift", 0.15}, {"unison", 3}, {"detune", 0.1}, {"cutoff", 2600},
+                        {"attack", 0.005}, {"decay", 0.25}, {"sustain", 0.5}, {"release", 0.3}},
+                       "lead", 0.45, {component("org.caw.delay.pingpong", {{"sync", 3}, {"mix", 0.3}})});
+    addInstrumentLayer(p, "Acid", "org.caw.synth.acid", {{"resonance", 0.8}}, "acid", 0.6,
+                       {component("org.caw.distortion", {{"drive", 3}, {"mix", 0.5}})});
+    addInstrumentLayer(p, "Pad", "org.caw.synth.morph", {}, "chords", 0.5, {component("org.caw.chorus")});
+    if (!only.empty()) {
+        std::vector<LayerSpec> keep;
+        for (const LayerSpec& l : p.layers)
+            if (l.id == only) keep.push_back(l);
+        p.layers = keep;
+    }
+    return p;
+}
+
+// One native instrument (and effects) under a busy pattern: 16th-note hits for drums, overlapping 4-note
+// chords every beat (8 voices sounding) for the poly synths, a 16th line for the mono ones.
+ProjectSpec busy(const std::string& instrument, std::vector<std::pair<std::string, double>> params,
+                 std::vector<ComponentSpec> effects = {}, bool notes_ = true) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    std::string notes;
+    if (instrument.find("drum") != std::string::npos) {
+        for (int at = 0; at < 16; ++at) notes += std::to_string(at) + (at % 4 == 0 ? " C2,F#2" : at % 4 == 2 ? " D2,A#2" : " F#2") + " 1 1\n";
+    } else if (instrument == "org.caw.bass" || instrument == "org.caw.synth.acid") {
+        const char* keys[] = {"A1", "A2", "C2", "E2"};
+        for (int at = 0; at < 16; ++at) notes += std::to_string(at) + " " + keys[at % 4] + " 1/2 1\n";
+    } else {
+        const char* chords[] = {"A3,C4,E4,G4", "F3,A3,C4,E4", "C3,E3,G3,B3", "G3,B3,D4,F4"};
+        for (int at = 0; at < 4; ++at) notes += std::to_string(at * 4) + " " + chords[at] + " 4 0.8\n";
+    }
+    if (!notes_) notes.clear();  // the engine's own cost of a track
+    p.modules = {{"busy", patternSource("Busy", "16", notes), {}}};
+    addInstrumentLayer(p, "t", instrument, std::move(params), "busy", 0.6, std::move(effects));
+    return p;
+}
+
 struct Result {
     double meanUs = 0, p99Us = 0, maxUs = 0, load = 0;
 };
@@ -250,7 +349,9 @@ void graphPlanarBench(double secs) {
 
 int main(int argc, char** argv) {
     const double secs = argc > 1 ? std::atof(argv[1]) : 10.0;
-    // `caw_bench SECONDS N` plays only playback scenario N (1-6), for exact instruction counts under callgrind.
+    // `caw_bench SECONDS N` plays only playback scenario N (1-6), for exact instruction counts under callgrind;
+    // N = 100 plays First loop (the app's starter project on the built-in instruments) and each built-in alone
+    // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0).
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
     std::printf("callback %d frames at %d Hz (budget %.0f us); %.0f s per scenario\n", kCallback, kRate,
                 1e6 * kCallback / kRate, secs);
@@ -273,6 +374,41 @@ int main(int argc, char** argv) {
         graphStereoBench(secs);
         graphPlanarBench(secs);
         return 0;
+    }
+    if (only == 100 || only == 0) {  // `caw_bench SECONDS 100`: First loop, its tracks and each built-in alone
+        std::vector<Case> native = {
+            {"first loop (6 tracks, all unmuted)", firstLoop()},
+            {"  track Kick", firstLoop("Kick")},
+            {"  track Hats", firstLoop("Hats")},
+            {"  track Bass", firstLoop("Bass")},
+            {"  track Lead (morph x3 + delay)", firstLoop("Lead")},
+            {"  track Acid (+ distortion)", firstLoop("Acid")},
+            {"  track Pad (morph x7 + chorus)", firstLoop("Pad")},
+            {"idle track (instrument, no notes)", busy("org.caw.drum.kick", {}, {}, false)},
+            {"busy kick", busy("org.caw.drum.kick", {})},
+            {"busy snare", busy("org.caw.drum.snare", {})},
+            {"busy hats", busy("org.caw.drum.hats", {})},
+            {"busy kit", busy("org.caw.drum.kit", {})},
+            {"busy bass", busy("org.caw.bass", {})},
+            {"busy acid", busy("org.caw.synth.acid", {})},
+            {"busy morph (unison 7)", busy("org.caw.synth.morph", {})},
+            {"busy morph (unison 1)", busy("org.caw.synth.morph", {{"unison", 1}})},
+            {"busy morph (unison 16)", busy("org.caw.synth.morph", {{"unison", 16}})},
+            {"busy basic synth", busy("org.caw.synth.basic", {})},
+            {"busy morph x1 + chorus", busy("org.caw.synth.morph", {{"unison", 1}}, {component("org.caw.chorus")})},
+            {"busy morph x1 + ping-pong", busy("org.caw.synth.morph", {{"unison", 1}}, {component("org.caw.delay.pingpong")})},
+            {"busy morph x1 + distortion", busy("org.caw.synth.morph", {{"unison", 1}}, {component("org.caw.distortion")})},
+        };
+        const int pick = only == 100 && argc > 3 ? std::atoi(argv[3]) : -1;  // `caw_bench S 100 K`: case K only
+        for (size_t k = 0; k < native.size(); ++k) {
+            if (pick >= 0 && static_cast<size_t>(pick) != k) continue;
+            Case& c = native[k];
+            Engine e(kRate);
+            e.setProject(c.p);
+            e.play();
+            report(c.name, play(e, secs));
+        }
+        if (only == 100) return 0;
     }
     if (only > 0) {
         Case& c = cases[static_cast<size_t>(std::min<int>(only, static_cast<int>(cases.size())) - 1)];

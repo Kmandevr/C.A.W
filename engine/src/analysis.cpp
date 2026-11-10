@@ -233,12 +233,16 @@ std::vector<Band> spectrumBands(const float* x, std::size_t n, std::size_t fftSi
                                 double bandsPerOctave) {
     const std::size_t size = std::max<std::size_t>(2, nextPowerOfTwo(fftSize));
     std::vector<std::complex<double>> data(size);
+    // The window spans the signal itself (zero-padded past it), and the scale sums only those samples, so a
+    // signal shorter than the FFT reads at its level.
+    const std::size_t len = std::min(n, size);
     double windowSum = 0;
-    for (std::size_t i = 0; i < size; ++i) {
-        const double w = 0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(i) / static_cast<double>(size));
+    for (std::size_t i = 0; i < len; ++i) {
+        const double w = 0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(i) / static_cast<double>(len));
         windowSum += w;
-        data[i] = i < n ? sample(x, i) * w : 0.0;
+        data[i] = sample(x, i) * w;
     }
+    if (windowSum <= 0) windowSum = 1;  // no signal: every band reads silent
     fft(data, false);
     const double scale = 2.0 / windowSum;
     const double binHz = sampleRate / static_cast<double>(size);

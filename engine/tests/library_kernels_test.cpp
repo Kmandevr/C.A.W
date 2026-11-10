@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "caw/library/delay.hpp"
 #include "caw/library/lfo.hpp"
 #include "caw/library/oscillator.hpp"
 #include "caw/library/reverb.hpp"
@@ -507,4 +508,37 @@ TEST(library_reverb_mix_width_pre_delay_and_determinism) {
     float l = 0.0f, r = 0.0f;
     a.process(l, r);
     CHECK_EQ(l, 0.0f);  // cleared: silent
+}
+
+// A centred (mono) sound must still bounce: full ping-pong sends the first echo left, the next right, and so on.
+// Before this test the delay fed each side its own input, so identical left and right stayed identical (owner report).
+TEST(library_ping_pong_bounces_a_centred_sound_between_the_sides) {
+    caw::lib::PingPongDelay d;
+    const double sr = 48000.0;
+    d.prepare(sr, 1.0);
+    const int delay = 4800;  // 0.1 s
+    double eL[4] = {}, eR[4] = {};
+    for (int i = 0; i < 4 * delay; ++i) {
+        float l = i < 64 ? 1.0f : 0.0f, r = l;  // a short centred click
+        d.process(0.1, 0.5, 1.0, 1.0, l, r);   // fully wet, full cross
+        const int echo = i / delay - 1;          // which echo this frame belongs to
+        if (echo >= 0 && echo < 4) { eL[echo] += double(l) * l; eR[echo] += double(r) * r; }
+    }
+    CHECK(eL[0] > 100.0 * eR[0]);  // first echo on the left
+    CHECK(eR[1] > 100.0 * eL[1]);  // second on the right
+    CHECK(eL[2] > 100.0 * eR[2]);  // and back
+}
+
+// cross 0 keeps two plain echoes: each side echoes its own input.
+TEST(library_ping_pong_with_no_cross_echoes_each_side_in_place) {
+    caw::lib::PingPongDelay d;
+    d.prepare(48000.0, 1.0);
+    double eL = 0, eR = 0;
+    for (int i = 0; i < 9600; ++i) {
+        float l = i < 64 ? 1.0f : 0.0f, r = 0.0f;
+        d.process(0.1, 0.5, 0.0, 1.0, l, r);
+        eL += double(l) * l; eR += double(r) * r;
+    }
+    CHECK(eL > 0.5);
+    CHECK(eR == 0.0);
 }

@@ -6,6 +6,13 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: A flagship synth that can do everything (owner)
+
+**Decision (owner):** "the goal is to build one synth that can do all the things", with unison and detune that work "as it does in Vital". It is a new built-in instrument beside Morph, which stays as the simple one (#171).
+- **First version, in order:** three wavetable oscillators with Vital-style unison (up to 16 voices, detune with a power curve, stereo spread, blend, random phase, stack modes); two filters; a mod matrix (envelopes, LFOs, random to any knob); a built-in effects rack reusing the Library kernels.
+- **Not Vital's code:** Vital is GPL-3.0 and C.A.W. takes permissive dependencies only, so nothing of Vital's code, presets or wavetables is copied. The behaviour is reproduced from public descriptions in original code.
+- The mod matrix's UI waits for the owner's direction.
+
 ## 2026-11-10: MIDI files are an import and export format (on the owner's behalf, to confirm)
 
 **Decision (made on the owner's behalf during autonomous work on #158; the owner has not confirmed it):** note clips keep being stored as C.A.W.'s own text note form (pattern text, `app/lib/model/pattern_doc.dart`) inside the project; project storage does not change. C.A.W. imports and exports Standard MIDI Files (SMF format 0 and 1, MIDI 1.0; format 2 reads as format 1) so clips move to and from other DAWs. Per-note pitch bend and expression export as MIDI 1.0 pitch bend, channel pressure and CC74 on per-note channels (MPE lower zone: channel 1 manages, channels 2–16 carry one note each, with an MPE Configuration Message and each channel's bend range by RPN) when a clip has any; otherwise plain notes on channel 1. MIDI 2.0 clip files for clips are later.
@@ -24,6 +31,11 @@ updated: 2026-11-10
 ## 2026-11-10: No fixed polyphony cap; the program sets its own (owner)
 
 **Decision (owner):** "remove the cap on how many notes a synth can play at once unless it's specified in the program; if someone wants to crash the program by abusing it, let them." The engine imposes no practical limit on held notes or note events: its note lists are sized very large when an instrument is set up (never grown on the audio thread, which would cause dropouts). A C++ instrument chooses its own voice count (`caw::VoicePool<Voice, N>`); the built-in instruments get generous counts. Overload is the user's responsibility, not a guarded limit.
+
+Built (engine pass, 2026-11-10):
+- **Polyphony (owner):** the host sets no practical cap; a program sets its own. Built: a native instrument's note list holds 4,096 notes and 16,384 events a block, set aside when its chain is built (never grown on the audio thread); the built-in basic and Morph synths have 128 voices; a C++ instrument picks its own with `caw::VoicePool<Voice, N>`, which walks only the voices sounding.
+- **CPU (owner, verbatim):** "if you can just change the engine to get 15 to 20% with the existing inefficient instruments that would be very impressive. Unfortunately we have to build around people who aren't going to make very efficient plugins. We should also make it very easy to make them efficient as well." The First loop measured 25–30% on the owner's Galaxy S22+; the target is 15–20%. Measured results and what is left: [performance](performance.md#native-instruments-first-loop-2026-11-10).
+- **Chosen for that:** the host skips a component that has fallen silent. A component may say so (`ModuleProcessor::quiet()`; C interface extension `caw.quiet.v1`, read through `get_extension` so older hosts never see it, rather than a new `process` return code, which hosts that check for 1 would treat as a failure; CLAP export: `CLAP_PROCESS_SLEEP`), and without it the host relies on the declared tail (input silent past `tailFrames`, output all zeros). An instrument with no declared tail is never put to sleep by the host's own rule, since a lazy plug-in could sound without notes (a metronome). The engine and SDK build with `-fno-trapping-math` (no result changes; Clang's default), so GCC builds vectorize too.
 
 ## 2026-11-10: Owner feedback on the open beta (look and feel)
 

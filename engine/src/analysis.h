@@ -56,7 +56,8 @@ struct Band {
     double hz = 0, db = 0;
 };
 // Magnitude spectrum of x's first fftSize frames (a power of two; zero-padded if n is shorter), Hann
-// window, scaled so a full-scale sine reads 0 dB: each band gives its loudest bin.
+// window over the frames there are (not the padding), scaled so a full-scale sine reads 0 dB: each band
+// gives its loudest bin.
 std::vector<Band> spectrumBands(const float* x, std::size_t n, std::size_t fftSize, double sampleRate,
                                 double bandsPerOctave);
 // Transfer magnitude out/in per band: 10 * log10(sum |Out|^2 / sum |In|^2) over the band's bins, of

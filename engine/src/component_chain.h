@@ -102,7 +102,10 @@ public:
     // writes left/right (their input is ignored) from the events in notes(), which it then clears. Lanes are read
     // only while `time->playing` (they hold while stopped); null time: no transport at all. A component that fails a block passes its input through;
     // non-finite output becomes 0. A bypassed component crossfades to its input over 5 ms, then
-    // is not run at all.
+    // is not run at all. A component that has fallen silent sleeps (is not run) until an event or input
+    // that is not silent: when it says so (ModuleProcessor::quiet()), or when its input has been silent for
+    // longer than the tail it declares (0 < tailFrames < kInfiniteTail, plus its latency) and its output is
+    // all zeros. An instrument's input is its notes: no events, none held.
     void process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept;
     // Audio thread: clears every component's running state (tails, delay lines), as after activate.
     void reset() noexcept;
@@ -126,6 +129,11 @@ private:
         std::vector<ParameterValue> values;
         std::atomic<bool> bypass{false};
         double mix = 1.0;  // audio thread: 1 processing, 0 bypassed, between while crossfading
+        // Audio thread: asleep, the component is skipped (its output is silence) until an event or input that
+        // is not silent; silentFrames counts the frames since its input (or, for an instrument, its notes)
+        // last had anything in it.
+        bool asleep = false;
+        uint64_t silentFrames = 0;
     };
     ComponentChain() = default;
     int parameterIndex(const Entry& e, const std::string& id) const noexcept;

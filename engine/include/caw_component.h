@@ -244,6 +244,17 @@ typedef struct CawComponentV3 {
     const void* (*get_extension)(void* instance, const char* id); /* NULL if unknown */
 } CawComponentV3;
 
+/* Extension CAW_EXTENSION_QUIET (CawComponentV3.get_extension, asked once per instance after create): a
+ * component that knows when it has fallen silent says so, and the host may skip its process calls while it
+ * stays that way. quiet() runs on the audio thread right after a process that returned 1, and returns 1 when the
+ * output from then on is silence until an event arrives or an audio input is not silent (whatever the
+ * parameters and the transport do), else 0. A skipped component's time does not move. */
+#define CAW_EXTENSION_QUIET "caw.quiet.v1"
+typedef struct CawQuietExtension {
+    uint32_t struct_size;
+    int32_t (*quiet)(void* instance);
+} CawQuietExtension;
+
 /* The one symbol a component library exports. A library may hold several components (a bundle):
    index 0, 1, ... returns each, and NULL past the last. Hosts stop at the first NULL. */
 typedef const CawComponentV3* (*CawGetComponentV3Fn)(uint32_t index);

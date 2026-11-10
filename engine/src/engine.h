@@ -178,6 +178,8 @@ private:
     void runInstrument(Slot& s, int m) noexcept;
     void instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept;
     void instrumentMotion(NoteEvents& notes, int m) noexcept;
+    void noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcept;
+    void playTail(Slot& s) noexcept;
     static bool playsNotes(const Slot& s) noexcept;
     struct Voice& pickVoice(Chain& c) noexcept;
     void previewCommand(const Cmd& c) noexcept;
@@ -190,6 +192,7 @@ private:
     void pickOverloadVictim() noexcept;
 
     const double sr_;
+    double trackGainCoef_ = -1.0;  // audio thread: the track gain glide's per-sample factor, worked out on first use
     const EngineResourceBudget resourceBudget_;
     // Export buffers each slot may hold: fixed at construction from the budget (as the first export
     // pool sized it at 64 layers), so every slot added by a grow gets the same.
