@@ -282,6 +282,13 @@ public:
     }
     virtual void deactivate() noexcept {}
     virtual void reset() noexcept {}
+    // Audio thread, right after a process that succeeded: true when the output from here on is silence (all
+    // zeros) until an event arrives or an audio input is not silent, whatever the parameters and the transport
+    // do: an instrument with no voice sounding, an effect whose tail has died out. A host may then skip process
+    // until that changes and use silence instead (the component's time does not move meanwhile). Default:
+    // never quiet, always run. Hosts also skip a component without this once its input has been silent for
+    // longer than its declared tailFrames and its output is silent (see docs/native-module-sdk.md).
+    virtual bool quiet() const noexcept { return false; }
     virtual uint32_t stateVersion() const noexcept { return 1; }
     // Called on the control thread, possibly while process() runs: keep it safe against processing.
     virtual bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept {

@@ -290,6 +290,7 @@ struct Plugin {
     const CawComponentDescriptor* d = nullptr;
     CawHost cawHost{};
     void* instance = nullptr;
+    int32_t (*quiet)(void*) = nullptr;  // CAW_EXTENSION_QUIET, when the component offers it
 
     // Port indices into the descriptor, per type and direction, in descriptor order.
     std::vector<uint32_t> audioIn, audioOut, eventIn, eventOut, controlIn, controlOut, modIn, modOut;
@@ -650,6 +651,10 @@ const clap_plugin_state_t kState = {stateSave, stateLoad};
 bool pluginInit(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->instance = s->table->create(&s->cawHost);
+    if (s->instance && s->table->get_extension) {
+        const auto* q = static_cast<const CawQuietExtension*>(s->table->get_extension(s->instance, CAW_EXTENSION_QUIET));
+        if (q && q->struct_size >= sizeof(CawQuietExtension)) s->quiet = q->quiet;
+    }
     return s->instance != nullptr;
 }
 
@@ -1183,7 +1188,8 @@ clap_process_status pluginProcess(const clap_plugin_t* p, const clap_process_t* 
         silence(proc);
         return CLAP_PROCESS_ERROR;
     }
-    return CLAP_PROCESS_CONTINUE;
+    // A component that has fallen silent lets the host put it to sleep until input or events arrive.
+    return s->quiet && s->quiet(s->instance) == 1 ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
 }
 
 const void* pluginGetExtension(const clap_plugin_t* p, const char* id) {

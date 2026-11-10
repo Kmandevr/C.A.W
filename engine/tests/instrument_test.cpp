@@ -7,8 +7,10 @@
 
 #include "caw.h"
 #include "caw/instrument.hpp"
+#include "component_chain.h"
 #include "engine.h"
 #include "json.h"
+#include "module_registry.h"
 #include "native_component_test_path.h"
 #include "note_events.h"
 #include "project.h"
@@ -220,6 +222,129 @@ TEST(an_instrument_can_hold_thousands_of_notes) {
     for (const NoteEvents::Held& h : notes->held()) left += h.active;  // packed away: nothing left to walk
     CHECK_EQ(left, 0u);
     CHECK(notes->held().begin() == notes->held().end());
+}
+
+namespace {
+
+// A note sounds for 100 frames; then the instrument says it is quiet. Counts its render calls.
+constexpr PortDescriptor kSleepyPorts[] = {
+    {"notes", PortType::Event, ChannelLayout::None, true, 0, true, 0.0f},
+    stereoOutput("out"),
+};
+ModuleDescriptor sleepyDescriptor() {
+    ModuleDescriptor d;
+    d.id = "org.caw.tests.sleepy";
+    d.role = ModuleRole::Instrument;
+    d.ports = kSleepyPorts;
+    d.portCount = 2;
+    return d;
+}
+const ModuleDescriptor kSleepy = sleepyDescriptor();
+int gSleepyRenders = 0;
+class Sleepy final : public InstrumentProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kSleepy; }
+    bool quiet() const noexcept override { return left_ == 0; }
+
+protected:
+    void onNote(const NoteMessage& m) noexcept override {
+        if (m.type == NoteMessageType::On) left_ = 100;
+    }
+    void render(float* l, float* r, uint32_t frames, uint32_t, const ProcessBlock&) noexcept override {
+        ++gSleepyRenders;
+        for (uint32_t i = 0; i < frames; ++i) {
+            l[i] = r[i] = left_ > 0 ? 0.5f : 0.0f;
+            if (left_ > 0) --left_;
+        }
+    }
+
+private:
+    uint32_t left_ = 0;
+};
+
+// An effect that passes its input on, with a 128-frame declared tail and no quiet(). Counts its calls.
+constexpr PortDescriptor kTailPorts[] = {stereoInput("in"), stereoOutput("out")};
+ModuleDescriptor tailDescriptor() {
+    ModuleDescriptor d;
+    d.id = "org.caw.tests.tail";
+    d.role = ModuleRole::Effect;
+    d.ports = kTailPorts;
+    d.portCount = 2;
+    d.tailFrames = 128;
+    return d;
+}
+const ModuleDescriptor kTail = tailDescriptor();
+int gTailCalls = 0;
+class Tail final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kTail; }
+    void process(const StereoProcessBlock& b) noexcept override {
+        ++gTailCalls;
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            b.outputLeft[i] = b.inputLeft[i];
+            b.outputRight[i] = b.inputRight[i];
+        }
+    }
+};
+
+}  // namespace
+
+TEST(a_quiet_instrument_sleeps_until_its_next_note) {
+    // Owner, 2026-11-10: the host skips what has fallen silent, so a plug-in that says so costs nothing then.
+    ModuleRegistry registry;
+    CHECK(registry.add(kSleepy, []() noexcept -> ModuleProcessor* { return new Sleepy; }));
+    std::string error;
+    ComponentSpec spec;
+    spec.id = kSleepy.id;
+    auto chain = ComponentChain::buildInstrument(registry, spec, 48000, error);
+    CHECK(chain != nullptr);
+    if (!chain) return;
+    float l[64], r[64];
+    gSleepyRenders = 0;
+    chain->notes()->on(0, NoteEvents::Source::Preview, 0, 0, 1, 60, 1);
+    chain->process(l, r, 64, 48000, nullptr);
+    chain->process(l, r, 64, 48000, nullptr);  // frames 64..127: the note ends at 100, then it is quiet
+    const int awake = gSleepyRenders;
+    CHECK(awake > 0);
+    for (int k = 0; k < 10; ++k) chain->process(l, r, 64, 48000, nullptr);
+    CHECK_EQ(gSleepyRenders, awake);  // asleep: not run, and silence out
+    CHECK_EQ(l[0], 0.0f);
+    CHECK_EQ(r[63], 0.0f);
+    chain->notes()->on(10, NoteEvents::Source::Preview, 0, 0, 2, 62, 1);  // an event wakes it, on its frame
+    chain->process(l, r, 64, 48000, nullptr);
+    CHECK(gSleepyRenders > awake);
+    CHECK_EQ(l[9], 0.0f);
+    CHECK_EQ(l[10], 0.5f);
+}
+
+TEST(an_effect_sleeps_once_its_input_has_been_silent_longer_than_its_tail) {
+    ModuleRegistry registry;
+    CHECK(registry.add(kTail, []() noexcept -> ModuleProcessor* { return new Tail; }));
+    std::string error;
+    ComponentSpec spec;
+    spec.id = kTail.id;
+    auto chain = ComponentChain::build(registry, {spec}, 48000, error);
+    CHECK(chain != nullptr);
+    if (!chain) return;
+    float l[64], r[64];
+    gTailCalls = 0;
+    for (int k = 0; k < 2; ++k) {  // 128 silent frames: within the tail, still run
+        std::fill_n(l, 64, 0.0f);
+        std::fill_n(r, 64, 0.0f);
+        chain->process(l, r, 64, 48000, nullptr);
+    }
+    CHECK_EQ(gTailCalls, 2);
+    for (int k = 0; k < 5; ++k) {  // past the tail, with silence out: run once more, then asleep
+        std::fill_n(l, 64, 0.0f);
+        std::fill_n(r, 64, 0.0f);
+        chain->process(l, r, 64, 48000, nullptr);
+    }
+    CHECK_EQ(gTailCalls, 3);
+    std::fill_n(l, 64, 0.25f);  // input again: it runs
+    std::fill_n(r, 64, 0.0f);
+    chain->process(l, r, 64, 48000, nullptr);
+    CHECK_EQ(gTailCalls, 4);
+    CHECK_EQ(l[5], 0.25f);
 }
 
 TEST(pattern_notes_reach_an_instrument_on_their_frames_across_loop_wraps) {

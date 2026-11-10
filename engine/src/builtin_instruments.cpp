@@ -199,6 +199,9 @@ public:
         kick_.clear();
         clock_.restart();
     }
+    // No voice sounding: silent until the next note (which restarts the control grid, so a skipped stretch
+    // changes nothing).
+    bool quiet() const noexcept override { return !kick_.active(); }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
@@ -256,6 +259,7 @@ public:
         snare_.clear();
         clock_.restart();
     }
+    bool quiet() const noexcept override { return !snare_.active(); }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
@@ -328,6 +332,7 @@ public:
         }
     }
     double sample() noexcept { return voices_[0].next() + voices_[1].next(); }
+    bool active() const noexcept { return voices_[0].active() || voices_[1].active() || pending_[0] >= 0.0 || pending_[1] >= 0.0; }
     void clear() noexcept {
         for (int i = 0; i < 2; ++i) {
             voices_[i].clear();
@@ -359,6 +364,7 @@ public:
         hats_.clear();
         clock_.restart();
     }
+    bool quiet() const noexcept override { return !hats_.active(); }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
@@ -420,6 +426,7 @@ public:
         return true;
     }
     void reset() noexcept override { clear(); }
+    bool quiet() const noexcept override { return !kick_.active() && !snare_.active() && !clap_.active() && !hats_.active(); }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
@@ -725,6 +732,7 @@ public:
         accentLevel_ = 0.0;
         clock_.restart();
     }
+    bool quiet() const noexcept override { return !amp_.active(); }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
