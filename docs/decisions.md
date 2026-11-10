@@ -6,6 +6,26 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Owner feedback, evening round (owner)
+
+**Decision (owner), after trying the latest APK (#174):**
+- **Top bars:** they hide only on a deliberate pull, using a visible handle that follows the finger. Scrolling never hides them.
+- **Feedback:** every touch or drag gives feedback, visual and subtle haptic.
+- **Haptics:** subtle everywhere, using the phone's high-definition haptic primitives, with a strength setting and an off switch.
+- **Landscape side panel:** it is resizable, two thirds of the width by default.
+- **Desktop mode on the phone:** Settings offers Auto, Phone or Desktop. Auto uses the desktop layout when the window is big enough (DeX, an external display).
+- **Arranger:**
+  - Clips show their MIDI notes, as in REAPER. Audio clips will show waveforms once audio clips exist.
+  - Folders nest to any depth.
+  - Each track's automation lanes sit under it, behind an arrow.
+- **One synth:** "every instrument that can will be replaced by the better synth". Morph, Bass, Acid and Basic become Flagship presets, and old projects load them as the matching preset. The drum instruments stay.
+- **Plugin UIs:** every instrument and effect gets a real plugin UI, modern vector, "in the theme of the app, but more colorful". Knob pages are only a fallback.
+- **CPU:** the basic project sits at 35–40% on the S22+. The owner allows:
+  - invisible optimizations;
+  - a quality setting (Eco, Normal, High);
+  - a bigger audio buffer when not recording;
+  - "make the plugins take advantage of the hardware of the phone… optimize them to hell".
+
 ## 2026-11-10: Clip editing and the ruler, REAPER-style (built; choices to confirm)
 
 **Built** from the owner's calls below and [REAPER's flow](reaper-flow.md) gaps 1 and 2 ([app](app.md), Clip editing; Loop range, markers and regions). **Choices made on the owner's behalf, to confirm:**
