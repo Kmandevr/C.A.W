@@ -212,6 +212,32 @@ void main() {
       expect(t.value('mode'), 1);
       await close(tester);
     });
+
+    testWidgets('saturator: up on the curve adds drive, sideways bias; a tile picks the mode', (tester) async {
+      final s = await open(tester, 'org.caw.saturator');
+      final t = targetOf(s, 'org.caw.saturator');
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('drive-hero'))), const Offset(40, -60));
+      await tester.pumpAndSettle();
+      expect(t.value('drive'), greaterThan(6));
+      expect(t.value('bias'), greaterThan(0));
+      await tester.tap(find.byKey(const ValueKey('mode-mode-4')));
+      await tester.pumpAndSettle();
+      expect(t.value('mode'), 4);
+      await close(tester);
+    });
+
+    testWidgets('distortion: the same UI on its shape and linear drive', (tester) async {
+      final s = await open(tester, 'org.caw.distortion');
+      final t = targetOf(s, 'org.caw.distortion');
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('drive-hero'))), const Offset(0, -60));
+      await tester.pumpAndSettle();
+      expect(t.value('drive'), greaterThan(4));
+      await tester.tap(find.byKey(const ValueKey('mode-shape-3')));
+      await tester.pumpAndSettle();
+      expect(t.value('shape'), 3);
+      expect(find.byKey(const ValueKey('dknob-bits')), findsOneWidget, reason: 'Crush shows its bits');
+      await close(tester);
+    });
   });
 
   test('presets: Init is always first; applying one sets every value, and the label tracks edits', () {

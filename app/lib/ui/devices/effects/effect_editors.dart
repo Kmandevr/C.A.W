@@ -1,7 +1,5 @@
 // Editors for built-in effects (by id, or found by their parameters): EQ, dynamics, saturation, delay, reverb and the kit,
 // drawn from their parameters with the engine's live display data (spectrum, gain reduction, levels) from DeviceDisplaySource.
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../../../engine/component_info.dart';
@@ -11,8 +9,8 @@ import '../device_controls.dart';
 import '../device_registry.dart';
 import '../device_scope.dart';
 import '../kit/device_style.dart';
-import '../visuals/fx_visuals.dart';
 import 'dynamics_editors.dart';
+import 'drive_editors.dart';
 import 'effect_page.dart';
 import 'space_editors.dart';
 import 'eq_editor.dart';
@@ -42,8 +40,7 @@ DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
     return singlePage('reverb', 'REVERB', Icons.blur_on, DeviceFamily.space, () => const ReverbPage());
   }
   if (_has(info, 'drive') && (_has(info, 'type') || _has(info, 'shape') || _has(info, 'mode'))) {
-    return DeviceEditorEntry((_) => [DeviceSection('sat', 'DRIVE', Icons.whatshot_outlined, (_) => const SaturationEditorPage())],
-        accent: Neon.pink);
+    return singlePage('drive', 'DRIVE', Icons.whatshot_outlined, DeviceFamily.drive, () => const DrivePage());
   }
   return null;
 }
@@ -58,6 +55,8 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.reverb.pro': singlePage('reverb', 'REVERB', Icons.blur_on, DeviceFamily.space, () => const ReverbPage()),
   'org.caw.delay.pro': singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage()),
   'org.caw.delay.pingpong': singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage()),
+  'org.caw.saturator': singlePage('drive', 'DRIVE', Icons.whatshot_outlined, DeviceFamily.drive, () => const DrivePage()),
+  'org.caw.distortion': singlePage('drive', 'DRIVE', Icons.whatshot_outlined, DeviceFamily.drive, () => const DrivePage()),
   'org.caw.limiter': singlePage('limit', 'LIMIT', Icons.vertical_align_top, DeviceFamily.dynamics, () => const LimiterPage()),
   'org.caw.gate': singlePage('gate', 'GATE', Icons.door_sliding_outlined, DeviceFamily.dynamics, () => const GatePage()),
   'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientPage()),
@@ -162,24 +161,3 @@ class LevelsEditorPage extends StatelessWidget {
 
 
 
-/// A saturation: its transfer curve from `type`/`shape` (Drive, Hard clip, Fold, Crush), `drive` and `mix`.
-class SaturationEditorPage extends StatelessWidget {
-  const SaturationEditorPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    final typeId = t.param('type') != null ? 'type' : (t.param('shape') != null ? 'shape' : 'mode');
-    final label = formatParamValue(t.param(typeId), t.value(typeId)).toLowerCase();
-    final type = label.contains('clip') ? 1 : (label.contains('fold') ? 2 : (label.contains('crush') ? 3 : 0));
-    // org.caw.saturator's drive is in dB (0..36); the curve wants a gain.
-    final drive = t.param('drive')?.unit == 'dB' ? math.pow(10, t.value('drive') / 20).toDouble() : t.value('drive');
-    return _page([
-      DeviceCard(title: 'CURVE', color: scope.accent, child: SaturationCurve(type: type, drive: drive,
-        mix: t.param('mix') == null ? 1 : t.value('mix'), color: scope.accent, height: 130)),
-      DeviceCard(title: 'LIVE', color: scope.accent, child: const LevelMeters(showValues: false)),
-      const ParamGrid(),
-    ]);
-  }
-}
