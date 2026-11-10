@@ -571,7 +571,9 @@ void _steppedKnobs() {
     final knobs = <(String, ComponentParameterInfo)>[
       for (final c in [s.componentInfo('org.caw.synth.flagship')!, ...stepped])
         for (final p in c.parameters)
-          if (p.step > 0 && !p.isChoice && (p.max - p.min) / p.step >= 4) (c.id, p),
+          // Flagship's one unison knob stands for its stepped knobs (the others sit on pages and oscillators not shown).
+          if (p.step > 0 && !p.isChoice && (p.max - p.min) / p.step >= 4 && (!c.isInstrument || p.id == 'osc1_unison'))
+            (c.id, p),
     ];
     expect(knobs.map((k) => k.$2.id), contains('osc1_unison'));
     double valueOf(String id, String param) => (id == 'org.caw.synth.flagship'
