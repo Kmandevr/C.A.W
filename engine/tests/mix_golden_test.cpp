@@ -209,7 +209,9 @@ std::vector<Case> cases() {
                                   {"org.caw.delay.pingpong", {{"sync", 3}, {"feedback", 0.5}, {"mix", 0.4}}},
                                   {"org.caw.stereo.balance", {{"pan", 0.2}}}};
         p.masterComponents = {{"org.caw.distortion", {{"shape", 3}, {"bits", 12}, {"mix", 0.3}}}};
-        out.push_back({"built-in library effects on tracks and the master", p, 0xfd57a5fc88bc6ff2ull});
+        // Re-recorded 2026-11-10: the ping-pong feeds its left line the mono average at full cross, not the sum
+        // (its first echo was 6 dB over the dry sound; second audio review, fix 2).
+        out.push_back({"built-in library effects on tracks and the master", p, 0x763c7f177c6f74e5ull});
     }
     return out;
 }

@@ -707,8 +707,9 @@ TEST(the_built_in_synth_matches_its_golden_render) {
     CHECK(peak > 0.05f);
     CHECK(peak <= 1.0f);
     // Re-recorded: voice summing order (engine pass), the ping-pong fix, and a released voice stopping on its own
-    // frame rather than at the end of a render call (second audio review, fix 1: at most 15 frames below -100 dB).
-    constexpr uint64_t kGolden = 0x7602349decd473ebull;
+    // frame rather than at the end of a render call (second audio review, fix 1: at most 15 frames below -100 dB),
+    // and the ping-pong's left line taking the mono average at full cross, not the sum (fix 2: 6 dB quieter echoes).
+    constexpr uint64_t kGolden = 0x7bde97cca43b8dd9ull;
     if (h != kGolden) {
         char buf[96];
         std::snprintf(buf, sizeof buf, "the basic synth renders 0x%016llxull", static_cast<unsigned long long>(h));
