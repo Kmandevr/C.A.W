@@ -1,10 +1,9 @@
 // An LFO's shape over two cycles with a dot running at its rate (or the tempo's division when synced); drag sideways for the rate.
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../../../model/flagship_shapes.dart';
 import '../../arrange/knob.dart' show Taper;
-import '../../motion.dart';
+import '../kit/hero.dart' show MotionClock, motionRuns;
 import '../../theme.dart';
 import '../device_scope.dart';
 import 'grab.dart';
@@ -25,23 +24,20 @@ class LfoView extends StatefulWidget {
   State<LfoView> createState() => _LfoViewState();
 }
 
-class _LfoViewState extends State<LfoView> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker = createTicker((e) => _clock.value = e.inMicroseconds / 1e6);
-  final _clock = ValueNotifier<double>(0);
+class _LfoViewState extends State<LfoView> {
+  final _motion = MotionClock();
+  ValueNotifier<double> get _clock => _motion.seconds;
   double? _pos;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final run = Motion.of(context) == MotionLevel.full;
-    if (run && !_ticker.isActive) _ticker.start();
-    if (!run && _ticker.isActive) _ticker.stop();
+    _motion.run(motionRuns(context));
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
-    _clock.dispose();
+    _motion.dispose();
     super.dispose();
   }
 

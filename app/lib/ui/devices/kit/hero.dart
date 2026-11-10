@@ -1,4 +1,5 @@
 // A device's hero visual frame (a tinted canvas with a grid and readouts), live display frames, a running phase for motion, and a level history.
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -86,9 +87,59 @@ class _GridPainter extends CustomPainter {
   bool shouldRepaint(covariant _GridPainter o) => o.color != color;
 }
 
+/// Seconds since a visual's motion started, advanced about 30 times a second: the display data's rate. A Ticker
+/// would ask for a frame on every screen refresh (120 a second on the S22+) for motion drawn at 30 (#174); this asks
+/// for one frame per step, reads the frame's time (the clock a Ticker reads, so tests stay deterministic), and makes
+/// no frames at all while stopped ([run] false) or while the app is in the background.
+class MotionClock {
+  final ValueNotifier<double> seconds = ValueNotifier(0);
+  Timer? _timer;
+  Duration? _start;
+  bool _pending = false, _disposed = false;
+
+  bool get running => _timer != null;
+
+  /// Starts or stops the clock; stopped, it starts from 0 again next time.
+  void run(bool on) {
+    if (on == running || _disposed) return;
+    if (!on) {
+      _timer!.cancel();
+      _timer = null;
+      _start = null;
+      return;
+    }
+    _timer = Timer.periodic(const Duration(microseconds: 33333), (_) => _step());
+    _step();
+  }
+
+  void _step() {
+    final b = SchedulerBinding.instance;
+    if (_pending || (b.lifecycleState != null && b.lifecycleState != AppLifecycleState.resumed)) return;
+    _pending = true;
+    b.scheduleFrameCallback((stamp) {
+      _pending = false;
+      if (_disposed || _timer == null) return;
+      final start = _start ??= stamp;
+      seconds.value = (stamp - start).inMicroseconds / 1e6;
+    });
+    b.scheduleFrame();
+  }
+
+  void dispose() {
+    _disposed = true;
+    _timer?.cancel();
+    _timer = null;
+    seconds.dispose();
+  }
+}
+
+/// Whether motion may run under [context]: full motion, and the part of the screen shown (not a dormant section or
+/// a covered route, whose tickers are off).
+bool motionRuns(BuildContext context) => Motion.of(context) == MotionLevel.full && TickerMode.valuesOf(context).enabled;
+
 /// Seconds since the visual started, for motion that shows state (a ping-pong ball, a sweeping notch, an LFO dot).
 /// It runs only with full motion (so the Minimal profile and reduced motion stop it), and redraws at about 30 Hz,
-/// the display data's rate, to keep the editor light on CPU; otherwise [builder] gets a fixed time.
+/// the display data's rate, to keep the editor light on CPU ([MotionClock]); otherwise [builder] gets a fixed time.
 class DevicePhase extends StatefulWidget {
   const DevicePhase({super.key, required this.builder, this.still = 0.35});
   final Widget Function(BuildContext context, double seconds) builder;
@@ -100,32 +151,25 @@ class DevicePhase extends StatefulWidget {
   State<DevicePhase> createState() => _DevicePhaseState();
 }
 
-class _DevicePhaseState extends State<DevicePhase> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker = createTicker((d) {
-    final s = d.inMicroseconds / 1e6;
-    if (s - _t.value >= 1 / 30) _t.value = s;
-  });
-  final _t = ValueNotifier<double>(0);
+class _DevicePhaseState extends State<DevicePhase> {
+  final _clock = MotionClock();
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final run = Motion.of(context) == MotionLevel.full;
-    if (run && !_ticker.isActive) _ticker.start();
-    if (!run && _ticker.isActive) _ticker.stop();
+    _clock.run(motionRuns(context));
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
-    _t.dispose();
+    _clock.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<double>(
-    valueListenable: _t,
-    builder: (context, t, _) => widget.builder(context, _ticker.isActive ? t : widget.still));
+    valueListenable: _clock.seconds,
+    builder: (context, t, _) => widget.builder(context, _clock.running ? t : widget.still));
 }
 
 /// The last [length] values of a few lanes (input level, gain reduction...), newest last: a scrolling history.
