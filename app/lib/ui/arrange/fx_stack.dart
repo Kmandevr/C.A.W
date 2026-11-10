@@ -7,6 +7,7 @@ import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/cpp_component.dart';
 import '../../model/project.dart';
+import '../devices/device_editor.dart';
 import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
@@ -365,9 +366,11 @@ class _NativeEffectCard extends StatelessWidget {
       selected: selected,
       dimmed: use.bypass || status == NativeEffectState.needsTrust || status == NativeEffectState.blocked,
       onSelect: onSelect,
-      onTitle: cpp == null ? null : open,
+      onTitle: cpp == null ? () => openDeviceEditor(context, state, layer, instrument ? -1 : index) : open,
       onMenu: menu,
       actions: [
+        _iconAction(key: ValueKey(instrument ? 'fx-instrument-open' : 'fx-open-$index'), tooltip: 'Open $name',
+          icon: Icons.open_in_full, onPressed: () => openDeviceEditor(context, state, layer, instrument ? -1 : index)),
         if (failed) const Tooltip(message: 'Build failed', child: Padding(padding: EdgeInsets.symmetric(horizontal: 6),
           child: Icon(Icons.error, size: 16, color: Neon.pink))),
         _iconAction(key: ValueKey(instrument ? 'fx-instrument-bypass' : 'fx-bypass-$index'),
