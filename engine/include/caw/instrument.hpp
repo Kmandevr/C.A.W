@@ -185,6 +185,7 @@ public:
         const Event* events = b.eventInCount > 0 && b.eventIn ? b.eventIn[0].events : nullptr;
         const uint32_t count = events ? b.eventIn[0].count : 0;
         uint32_t done = 0, e = 0, splits = 0;
+        beginBlock(b);
         auto dispatch = [&](const Event& event) noexcept {
             NoteMessage m;
             if (readNote(event, m)) {
@@ -208,6 +209,9 @@ public:
     }
 
 protected:
+    // Once at the start of each block, before its first event or render(): a place to read the block's knob
+    // values that note handling needs (a voice mode, a glide time). Does nothing unless overridden.
+    virtual void beginBlock(const ProcessBlock&) noexcept {}
     // A note message, on the frame render() continues from.
     virtual void onNote(const NoteMessage& message) noexcept = 0;
     // Any other event (a controller, pitch bend): ignored unless overridden.

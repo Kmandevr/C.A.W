@@ -582,12 +582,12 @@ void _steppedKnobs() {
     s.project = s.starterProject();
     await tester.runAsync(() async {
       s.componentCatalog.refreshIfStale();
-      for (var i = 0; i < 250 && s.componentInfo('org.caw.synth.morph') == null; i++) {
+      for (var i = 0; i < 250 && s.componentInfo('org.caw.synth.flagship') == null; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
     });
     final layer = s.project.layers.firstWhere((l) => !l.isFolder);
-    s.setNativeInstrument(layer, 'org.caw.synth.morph');
+    s.setNativeInstrument(layer, 'org.caw.synth.flagship');
     // Every built-in effect with a stepped knob goes on the track too.
     final stepped = [
       for (final c in s.componentCatalog.value.values)
@@ -603,12 +603,14 @@ void _steppedKnobs() {
         body: ListenableBuilder(listenable: s, builder: (_, _) => FxStack(state: s, layer: layer)))));
     await tester.pump();
     final knobs = <(String, ComponentParameterInfo)>[
-      for (final c in [s.componentInfo('org.caw.synth.morph')!, ...stepped])
+      for (final c in [s.componentInfo('org.caw.synth.flagship')!, ...stepped])
         for (final p in c.parameters)
-          if (p.step > 0 && !p.isChoice && (p.max - p.min) / p.step >= 4) (c.id, p),
+          // Flagship's one unison knob stands for its stepped knobs (the others sit on pages and oscillators not shown).
+          if (p.step > 0 && !p.isChoice && (p.max - p.min) / p.step >= 4 && (!c.isInstrument || p.id == 'osc1_unison'))
+            (c.id, p),
     ];
-    expect(knobs.map((k) => k.$2.id), contains('unison'));
-    double valueOf(String id, String param) => (id == 'org.caw.synth.morph'
+    expect(knobs.map((k) => k.$2.id), contains('osc1_unison'));
+    double valueOf(String id, String param) => (id == 'org.caw.synth.flagship'
         ? layer.instrument!.params[param]
         : layer.components.firstWhere((c) => c.id == id).params[param]) ?? double.nan;
     for (final (id, p) in knobs) {

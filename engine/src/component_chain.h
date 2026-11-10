@@ -130,6 +130,13 @@ private:
         std::vector<std::array<double, kMaxFrames>> samples;
         std::vector<ParameterValue> values;
         std::atomic<bool> bypass{false};
+        // Bumped (release) after any value or touch is stored: while it, the lanes and the play state stand still
+        // and no parameter ramps, the audio thread keeps last block's values instead of resolving each parameter
+        // (Flagship has 209; 2026-11-10 performance pass).
+        std::atomic<uint32_t> generation{0};
+        uint32_t seenGeneration = ~0u;           // audio thread
+        const void* seenLanes = nullptr;         // audio thread: the automation the values were resolved with
+        bool seenPlaying = false, dynamic = true;  // audio thread: dynamic: a ramp or a lane moved a value
         double mix = 1.0;  // audio thread: 1 processing, 0 bypassed, between while crossfading
         // Audio thread: asleep, the component is skipped (its output is silence) until an event or input that
         // is not silent (for an instrument: an event).

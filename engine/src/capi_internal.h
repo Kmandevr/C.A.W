@@ -10,6 +10,10 @@
 struct CawEngine {
     std::unique_ptr<caw::Engine> engine;
     void* audio = nullptr;  // owned by engine/platform
+    // The device buffer (caw_audio_set_buffer_mode): CAW_BUFFER_*, and whether the app is recording. Only the
+    // control thread touches them, under engine/platform's device lock.
+    int bufferMode = 0;
+    bool recording = false;
 
     // Async control jobs retain the handle until their worker callback has finished.
     bool retainAsync() {

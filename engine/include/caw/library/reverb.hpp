@@ -116,6 +116,11 @@ public:
     const ReverbSettings& settings() const noexcept { return settings_; }
 
     // Silence the tail (at Play, after a mute) without reallocating.
+    // Light (for a device's Eco quality): two input all-passes per side instead of four and no line modulation,
+    // about a third less work per sample; the tail is a little less dense from its first echoes.
+    void setLight(bool light) noexcept { light_ = light; }
+    bool light() const noexcept { return light_; }
+
     void clear() noexcept {
         for (float& v : memory_) v = 0.0f;
         for (double& v : lp_) v = 0.0;
@@ -143,12 +148,13 @@ public:
 
         // Input diffusion: Schroeder all-passes smear each click into a burst, so the tail is dense from
         // the first echo. Lines 0-3 diffuse the left, 4-7 the right.
-        for (int i = 0; i < 4; ++i) xl = allpass(i, xl);
-        for (int i = 4; i < 8; ++i) xr = allpass(i, xr);
+        const int diffusers = light_ ? 2 : 4;
+        for (int i = 0; i < diffusers; ++i) xl = allpass(i, xl);
+        for (int i = 4; i < 4 + diffusers; ++i) xr = allpass(i, xr);
 
         // Read the 8 line outputs, damp them and apply their decay gains.
         double v[8];
-        if (modDepth_ > 0.0) {
+        if (modDepth_ > 0.0 && !light_) {
             // Each line read between samples, modDepth_ * (1 + sin) further back: a quadrature oscillator per line
             // (one rotation, four multiplies), its radius pulled back to 1 every 1024 samples.
             for (int i = 0; i < 8; ++i) {
@@ -270,6 +276,7 @@ private:
     double modC_[8] = {}, modS_[8] = {}, rotC_[8] = {}, rotS_[8] = {};
     uint32_t modCount_ = 0;
     bool freeze_ = false;
+    bool light_ = false;
     ReverbSettings settings_;
 };
 

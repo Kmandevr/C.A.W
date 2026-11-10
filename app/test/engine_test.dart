@@ -149,7 +149,7 @@ void main() {
   test('a C++ instrument plays a track\'s notes, takes knob moves live and exports', () async {
     final e = Engine.create();
     final list = await e.nativeComponents();
-    final synth = list.firstWhere((c) => c.id == 'org.caw.synth.basic');
+    final synth = list.firstWhere((c) => c.id == 'org.caw.synth.flagship');
     expect(synth.builtin, isTrue);
     expect(synth.role, 'instrument');
     expect(synth.isInstrument, isTrue);
@@ -157,16 +157,16 @@ void main() {
     final p = ProjectDoc(id: 'p', name: 'T', modules: [
       ModuleDoc(id: 'n', name: 'Line', source: '---\nkind: pattern\nname: Line\nlength: 16\n---\n0 C3 4 1\n4 G3 4 0.8\n'),
     ], layers: [
-      LayerDoc(id: 'l', name: 'Synth', color: 0, patternId: 'n')..setInstrument('org.caw.synth.basic'),
+      LayerDoc(id: 'l', name: 'Synth', color: 0, patternId: 'n')..setInstrument('org.caw.synth.flagship'),
     ]);
-    p.layers.single.instrument!.params['cutoff'] = 900;
-    final result = await e.setProject(p.toEngineJson(playableComponents: {'org.caw.synth.basic'}));
+    p.layers.single.instrument!.params['flt1_cutoff'] = 900;
+    final result = await e.setProject(p.toEngineJson(playableComponents: {'org.caw.synth.flagship'}));
     expect(result['n']!.ok, isTrue);
-    expect(e.setComponentParam('l', ProjectDoc.instrumentIndex, 'cutoff', 1500), isTrue);
-    expect(e.setComponentParam('l', 0, 'cutoff', 1500), isFalse, reason: 'index 0 names the inserts, which are empty');
+    expect(e.setComponentParam('l', ProjectDoc.instrumentIndex, 'flt1_cutoff', 1500), isTrue);
+    expect(e.setComponentParam('l', 0, 'flt1_cutoff', 1500), isFalse, reason: 'index 0 names the inserts, which are empty');
     expect(e.setComponentBypass('l', ProjectDoc.instrumentIndex, false), isTrue);
     expect(e.componentStates('l').keys, contains(ProjectDoc.instrumentIndex));
-    // Display data (#173): the basic synth publishes none; there is no insert 0.
+    // Display data (#173): Flagship publishes none; there is no insert 0.
     final shown = Float32List(16);
     expect(e.componentDisplay('l', ProjectDoc.instrumentIndex, shown), 0);
     expect(e.componentDisplay('l', 0, shown), -1);

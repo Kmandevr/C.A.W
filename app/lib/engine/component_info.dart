@@ -99,6 +99,22 @@ class ComponentUiControlInfo {
       );
 }
 
+/// A built-in preset: a name and the parameter values it sets (the others keep their defaults).
+class ComponentPresetInfo {
+  const ComponentPresetInfo({required this.name, this.description = '', this.params = const {}});
+  final String name, description;
+  final Map<String, double> params;
+
+  factory ComponentPresetInfo.fromJson(Map<String, dynamic> j) => ComponentPresetInfo(
+        name: j['name'] as String? ?? '',
+        description: j['description'] as String? ?? '',
+        params: {
+          for (final e in ((j['params'] as Map?) ?? const {}).entries)
+            if (e.value is num) e.key as String: (e.value as num).toDouble(),
+        },
+      );
+}
+
 class NativeComponentInfo {
   const NativeComponentInfo({
     required this.id,
@@ -113,6 +129,7 @@ class NativeComponentInfo {
     this.parameters = const [],
     this.uiControls = const [],
     this.builtin = false,
+    this.presets = const [],
   });
 
   final String id, name;
@@ -128,6 +145,9 @@ class NativeComponentInfo {
 
   /// Part of the engine (the Library's stereo tools): always there, no trust choice, can't be unloaded.
   final bool builtin;
+
+  /// A built-in's named parameter sets (Flagship's "Mono bass", "Acid 303"...), in display order.
+  final List<ComponentPresetInfo> presets;
 
   String get label => name.isEmpty ? id : name;
 
@@ -155,6 +175,9 @@ class NativeComponentInfo {
           for (final u in (j['ui_controls'] as List? ?? const [])) ComponentUiControlInfo.fromJson(u as Map<String, dynamic>)
         ],
         builtin: j['builtin'] == true,
+        presets: [
+          for (final p in (j['presets'] as List? ?? const [])) ComponentPresetInfo.fromJson(p as Map<String, dynamic>)
+        ],
       );
 
   /// Parses the whole caw_engine_components result; an error result gives an empty list.

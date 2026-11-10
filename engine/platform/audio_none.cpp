@@ -17,4 +17,12 @@ int32_t caw_audio_start(CawEngine*, char* error, int32_t error_len) {
 
 void caw_audio_stop(CawEngine*) {}
 
+void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording) {
+    if (!e) return;
+    e->bufferMode = mode == CAW_BUFFER_LOW_LATENCY || mode == CAW_BUFFER_BATTERY ? mode : CAW_BUFFER_AUTO;
+    e->recording = recording != 0;
+}
+
+int32_t caw_audio_buffer_frames(CawEngine*) { return 0; }
+
 }  // extern "C"

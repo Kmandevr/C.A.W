@@ -1,5 +1,8 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+
+#include "presets.h"
+#include "quality.h"
 #include "builtin_components.h"
 #include "graph.h"
 #include "route_math.h"
@@ -1133,6 +1136,7 @@ ModuleLoadResult Engine::reloadNativeComponent(
     if (!result.success) return result;
     std::vector<Rebuilt> rebuilt;
     std::string error;
+    const BuildingQuality building(&quality_);
     auto rebuild = [&](ComponentChain* old, int slot, LayerState* layer, const std::string& layerId) {
         if (!old || !old->uses(expectedId)) return true;
         const std::vector<ComponentSpec> specs = old->currentSpecs();
@@ -1185,7 +1189,9 @@ std::string Engine::nativeComponentsJson() {
     // Built-in components first, marked so the app can tell them from loaded ones (they need no trust).
     for (const ModuleDescriptor* d : nativeModules_.builtinComponents()) {
         std::string one = moduleDescriptorJson(*d);
-        json += (first ? "{\"builtin\":true," : ",{\"builtin\":true,") + one.substr(1);
+        std::string head = first ? "{\"builtin\":true," : ",{\"builtin\":true,";
+        if (!builtinPresets(d->id).empty()) head += "\"presets\":" + builtinPresetsJson(d->id) + ",";
+        json += head + one.substr(1);
         first = false;
     }
     for (const ModuleDescriptor* d : nativeModules_.loadedComponents()) {
@@ -1200,6 +1206,10 @@ std::unique_ptr<ModuleProcessor> Engine::createNativeComponent(const std::string
     return nativeModules_.create(id);
 }
 
+void Engine::setQuality(int quality) noexcept {
+    quality_.store(quality < kQualityEco ? kQualityEco : (quality > kQualityHigh ? kQualityHigh : quality), std::memory_order_relaxed);
+}
+
 std::string Engine::setProject(const ProjectSpec& p) {
     return setProjectImpl(p, false);
 }
@@ -1209,6 +1219,30 @@ std::string Engine::setProjectOffline(const ProjectSpec& p) {
 }
 
 std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
+    const BuildingQuality building(&quality_);
+    // The synths that became Flagship presets (2026-11-10, one synth): an old project's track plays Flagship with
+    // the matching preset and its knobs mapped, and its lanes on those knobs move Flagship's.
+    if (std::any_of(p.layers.begin(), p.layers.end(), [](const LayerSpec& l) { return isLegacyInstrument(l.instrument.id); })) {
+        ProjectSpec migrated = p;
+        for (LayerSpec& l : migrated.layers) {
+            if (!isLegacyInstrument(l.instrument.id)) continue;
+            const std::string legacy = l.instrument.id;
+            migrateLegacyInstrument(l.instrument.id, l.instrument.params);
+            l.instrument.hasState = false;  // the old synths saved no state
+            auto& lanes = migrated.automation;
+            for (auto it = lanes.begin(); it != lanes.end();) {
+                if (it->targetType == "instrument" && it->moduleId == l.id) {
+                    it->target = migratedLegacyParameter(legacy, it->target);
+                    if (it->target.empty()) {  // an old knob with no Flagship knob in its units
+                        it = lanes.erase(it);
+                        continue;
+                    }
+                }
+                ++it;
+            }
+        }
+        return setProjectImpl(migrated, offline);
+    }
     std::lock_guard<std::mutex> lock(ctl_);
     offlineControl_ = offline;
     struct OfflineControlReset {

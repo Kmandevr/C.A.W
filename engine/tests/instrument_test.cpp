@@ -21,7 +21,8 @@ using namespace caw;
 namespace {
 
 constexpr const char* kRecorder = "org.caw.tests.native-loader.recorder";
-constexpr const char* kSynth = "org.caw.synth.basic";
+constexpr const char* kSynth = "org.caw.synth.flagship";
+constexpr const char* kBasic = "org.caw.synth.basic";  // retired: an old project's plays Flagship's Basic preset
 const double kCentre = std::cos(3.14159265358979323846 / 4.0);  // the pan law at centre
 
 bool ok(const std::string& result) { return result.find("\"ok\":true") != std::string::npos; }
@@ -106,9 +107,9 @@ TEST(project_json_reads_a_layers_native_instrument_and_its_lanes) {
     ProjectSpec p;
     std::string error;
     CHECK(parseProject(R"({"caw_project":1,
-        "layers":[{"id":"t","chain":["fx"],"instrument":{"id":"org.caw.synth.basic","params":{"cutoff":900},"bypass":true}},
-                  {"id":"u","instrument":"org.caw.synth.basic"},{"id":"v"}],
-        "automation":[{"target_type":"instrument","layer":"t","target":"cutoff","points":[{"step":0,"value":500}]}]})",
+        "layers":[{"id":"t","chain":["fx"],"instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900},"bypass":true}},
+                  {"id":"u","instrument":"org.caw.synth.flagship"},{"id":"v"}],
+        "automation":[{"target_type":"instrument","layer":"t","target":"flt1_cutoff","points":[{"step":0,"value":500}]}]})",
                        p, error));
     CHECK_EQ(p.layers.size(), 3u);
     CHECK(p.layers[0].hasInstrument);
@@ -736,7 +737,7 @@ TEST(an_instrument_and_an_effect_each_refuse_the_others_place) {
 TEST(the_built_in_synth_is_listed_as_an_instrument_and_starts_on_its_frame) {
     Engine e(48000);
     const std::string list = e.nativeComponentsJson();
-    const size_t at = list.find("\"id\":\"org.caw.synth.basic\"");
+    const size_t at = list.find("\"id\":\"org.caw.synth.flagship\"");
     CHECK(at != std::string::npos);
     CHECK(list.find("\"role\":\"instrument\"", at) != std::string::npos);
     std::unique_ptr<ModuleProcessor> synth = e.createNativeComponent(kSynth);
@@ -786,9 +787,10 @@ uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak) {
     return h;
 }
 
-TEST(the_built_in_synth_matches_its_golden_render) {
-    // Chords, a slide, a ratchet and a quarter tone, two oscillators through the filter, into a ping-pong delay.
-    ProjectSpec p = instrumentTrack(kSynth, "0 C3 4 1\n0 G3 4 0.8\n4 51 2 0.9 slide\n6 F3 2 0.9\n8 60.5 4 0.7 ratchet 3\n"
+TEST(the_basic_preset_matches_its_golden_render) {
+    // Chords, a slide, a ratchet and a quarter tone, two oscillators through the filter, into a ping-pong delay:
+    // an old project's basic synth, which now plays Flagship's Basic preset with its knobs mapped.
+    ProjectSpec p = instrumentTrack(kBasic, "0 C3 4 1\n0 G3 4 0.8\n4 51 2 0.9 slide\n6 F3 2 0.9\n8 60.5 4 0.7 ratchet 3\n"
                                            "12 60 4 0.6\n12 63 4 0.6\n12 67 4 0.6\n");
     p.bpm = 140;
     p.master = 0.8;
@@ -801,10 +803,12 @@ TEST(the_built_in_synth_matches_its_golden_render) {
     // Re-recorded: voice summing order (engine pass), the ping-pong fix, and a released voice stopping on its own
     // frame rather than at the end of a render call (second audio review, fix 1: at most 15 frames below -100 dB),
     // and the ping-pong's left line taking the mono average at full cross, not the sum (fix 2: 6 dB quieter echoes).
-    constexpr uint64_t kGolden = 0x7bde97cca43b8dd9ull;
+    // Re-recorded (one synth, 2026-11-10): the basic synth is now Flagship's Basic preset (perceptually the same,
+    // builtin_instruments_test.cpp).
+    constexpr uint64_t kGolden = 0x73cffa365cb5ff17ull;  // and again: the fixed-point oscillator phase
     if (h != kGolden) {
         char buf[96];
-        std::snprintf(buf, sizeof buf, "the basic synth renders 0x%016llxull", static_cast<unsigned long long>(h));
+        std::snprintf(buf, sizeof buf, "the Basic preset renders 0x%016llxull", static_cast<unsigned long long>(h));
         cawtest::fail(__FILE__, __LINE__, buf);
     }
     CHECK_EQ(renderHash(p, 48000 * 2, nullptr), h);  // the same bits from a second engine
@@ -814,14 +818,14 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 7);  // 7: count-in, metronome, released touches (6 component display, 5 stereo meters)
+    CHECK_EQ(caw_api_version(), 8);  // 8: presets, quality, buffer mode (7 count-in, 6 component display, 5 stereo meters)
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
-            "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.basic","params":{"cutoff":900}}}]})");
+            "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.flagship","params":{"flt1_cutoff":900}}}]})");
     CHECK(result && std::string(result).find("\"ok\":true") != std::string::npos);
     caw_free(result);
-    CHECK_EQ(caw_engine_set_component_param(engine, "t", CAW_INSTRUMENT_INDEX, "cutoff", 1500), 1);
-    CHECK_EQ(caw_engine_set_component_param(engine, "t", 0, "cutoff", 1500), 0);
+    CHECK_EQ(caw_engine_set_component_param(engine, "t", CAW_INSTRUMENT_INDEX, "flt1_cutoff", 1500), 1);
+    CHECK_EQ(caw_engine_set_component_param(engine, "t", 0, "flt1_cutoff", 1500), 0);
     CHECK_EQ(caw_engine_set_component_bypass(engine, "t", CAW_INSTRUMENT_INDEX, 0), 1);
     char* states = caw_engine_component_states(engine, "t");
     CHECK(states && std::string(states).find("\"index\":4294967295") != std::string::npos);
@@ -832,7 +836,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
 // Owner (2026-11-10): during playback a Morph synth note with a bend went silent. Live playback, device-sized
 // blocks: the bent note must sound like an unbent one.
 TEST(live_playback_plays_a_bent_note_on_a_builtin_instrument) {
-    for (const char* inst : {"org.caw.synth.morph", "org.caw.synth.basic"}) {
+    for (const char* inst : {"org.caw.synth.morph", "org.caw.synth.basic", "org.caw.synth.flagship"}) {
         double level[2] = {0, 0};
         const char* patterns[2] = {"0 C3 8 1\n", "0 C3 8 1  bend 0:0~0.6 1:-12\n"};
         for (int k = 0; k < 2; ++k) {

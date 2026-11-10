@@ -58,8 +58,10 @@ class _FlagshipOscPageState extends State<FlagshipOscPage> {
         else
           AnimatedSwitcher(duration: Motion.fade(Motion.standard, Motion.of(context)),
             child: OscCard(_osc, key: ValueKey('osc-card-$_osc'))),
-        DeviceCard(title: 'VOICE', child: knobRow(const [
+        // Poly, Mono or Legato with its glide (one synth, 2026-11-10: the Mono bass and Acid 303 presets play legato).
+        DeviceCard(title: 'VOICE', actions: const [DeviceChoice('voice_mode', maxSegments: 3)], child: knobRow(const [
           DeviceKnob('volume'), DeviceKnob('velocity', label: 'Velocity'), DeviceKnob('bend_range', label: 'Bend'),
+          DeviceKnob('glide', label: 'Glide'),
         ])),
       ]);
     });
@@ -122,7 +124,7 @@ class OscCard extends StatelessWidget {
       color: scope.accent,
       dimmed: !on,
       leading: DevicePower('${p}on'),
-      actions: [DeviceChoice('${p}table', maxSegments: 4)],
+      actions: [DeviceChoice('${p}table', maxSegments: 5)],
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
         WavetableView(prefix: p),
         const SizedBox(height: 4),

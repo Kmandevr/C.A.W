@@ -120,8 +120,13 @@ ParameterValue ParameterResolver::resolve(uint32_t frames, const double* automat
     const bool automated = automation && !touched_;
     bool modulated = false;
     for (uint32_t k = 0; k < linkCount_; ++k) modulated = modulated || (modulation && modulation[k]);
-    if (!automated && !modulated && rampLeft_ == 0)
-        return ParameterValue{nullptr, frameValue(current_, nullptr, 0)};
+    if (!automated && !modulated && rampLeft_ == 0) {
+        if (!(current_ == steadyFor_)) {  // NaN at first: always worked out once
+            steadyFor_ = current_;
+            steady_ = constrainParameter(parameter_, current_);
+        }
+        return ParameterValue{nullptr, steady_};
+    }
     if (frames == 0 || !out) return ParameterValue{nullptr, frameValue(current_, nullptr, 0)};
     for (uint32_t i = 0; i < frames; ++i) {
         if (automated) {

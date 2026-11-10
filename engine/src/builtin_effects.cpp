@@ -28,6 +28,7 @@ ModuleDescriptor effectDescriptor(std::string_view id, std::string_view name, co
 
 bool EffectBase::activate(double sampleRate, uint32_t maxFrames) noexcept {
     rate_ = sampleRate > 0.0 ? sampleRate : 48000.0;
+    quality_ = buildingQuality();
     clock_.prepare(rate_, 60.0);
     display_.clear();
     if (!prepare(rate_, maxFrames)) return false;
@@ -93,7 +94,9 @@ bool EffectBase::process(const AudioProcessBlock& b) noexcept {
             fellAsleep = true;
         }
     }
-    if (clock_.tick(b.frames) || fellAsleep) {
+    bool publish = clock_.tick(b.frames);
+    if (publish && quality() == kQualityEco) publish = (skipPublish_ = !skipPublish_);  // Eco: 30 a second
+    if (publish || fellAsleep) {
         const uint32_t n = fillDisplay(shown_, display_.watched());
         display_.publish(shown_, std::min<uint32_t>(n, kMaxDisplayFloats));
         inPeak_ = outPeak_ = 0.0;

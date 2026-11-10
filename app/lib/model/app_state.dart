@@ -59,6 +59,7 @@ class AppState extends ChangeNotifier {
   // Lightweight/Minimal change the engine's voice budget; UI meter cadence stays fixed.
   void _settingsChanged() {
     _docChanged(); // the swap timing and the voice budget are in the engine JSON
+    applyAudioSettings();
     final nextMode = settings.performanceMode;
     final nextDensity = settings.density;
     final nextLook = settings.lookRevision;
@@ -76,6 +77,26 @@ class AppState extends ChangeNotifier {
 
   /// App-wide settings (theme, density, live coding).
   final Settings settings;
+
+  SoundQuality? _quality;
+  AudioBuffer? _buffer;
+  bool? _bufferRecording;
+
+  /// Sends the sound quality and the buffer mode to the engine when they (or whether a recording runs) changed.
+  void applyAudioSettings({bool? recording}) {
+    final e = engine;
+    if (e == null) return;
+    if (_quality != settings.soundQuality) {
+      _quality = settings.soundQuality;
+      e.setQuality(settings.soundQuality.index);
+    }
+    final rec = recording ?? _bufferRecording ?? false;
+    if (_buffer != settings.audioBuffer || _bufferRecording != rec) {
+      _buffer = settings.audioBuffer;
+      _bufferRecording = rec;
+      e.setBufferMode(settings.audioBuffer.index, recording: rec);
+    }
+  }
 
   Engine? engine;
   /// The project's C++ effects: the in-app build and trust rules (null without an in-app compiler).
@@ -198,6 +219,7 @@ class AppState extends ChangeNotifier {
     EngineExecutionPolicy.updateRuntimeSignals(pressure: await ResourceSignals.read());
     try {
       engine = Engine.create();
+      applyAudioSettings();  // before the device opens, so it opens at the chosen size
       hardwareProfile = EngineExecutionPolicy.hardwareProfile;
       auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
       templates = Engine.templates();
@@ -310,7 +332,8 @@ class AppState extends ChangeNotifier {
       ModuleDoc(id: newId('m'), name: headerValue(t.source, 'name') ?? t.file.replaceAll('.caw', ''), source: t.source);
 
   /// A first project made of the engine's built-in C++ instruments (#157): kick, hats, bass, a lead, and a muted
-  /// acid line and pad, each playing a pattern over the 4-bar loop. Its patterns are written here, not read from
+  /// acid line and pad, each playing a pattern over the 4-bar loop; the bass, lead, acid and pad are Flagship
+  /// presets (one synth, 2026-11-10) with the knobs the First loop always had, in Flagship's terms. Its patterns are written here, not read from
   /// the .caw templates, so it doesn't depend on them.
   ProjectDoc starterProject() {
     final p = ProjectDoc(id: newId('p'), name: 'First loop');
@@ -344,12 +367,12 @@ class AppState extends ChangeNotifier {
         '0 A3,C4,E4 16 0.8\n16 F3,A3,C4 16 0.75\n32 C3,E3,G3 16 0.8\n48 G3,B3,D4 14 0.7\n62 G3,B3,D4 1/2 0.5 ratchet 2\n');
     var c = 0;
     void layer(String name, String instrument, ModuleDoc pattern, double vol,
-        {Map<String, double> params = const {}, List<ComponentUseDoc> effects = const [], bool mute = false}) {
+        {Map<String, double> params = const {}, String? preset, List<ComponentUseDoc> effects = const [], bool mute = false}) {
       p.layers.add(LayerDoc(
           id: newId('l'),
           name: name,
           color: c++ % 4,
-          instrument: ComponentUseDoc(instrument, {...params}),
+          instrument: ComponentUseDoc(instrument, {...params}, false, null, 1, preset),
           components: [...effects],
           clips: [ClipDoc(id: newId('c'), patternId: pattern.id, lengthSteps: p.loopSteps)],
           volume: vol,
@@ -358,16 +381,21 @@ class AppState extends ChangeNotifier {
 
     layer('Kick', 'org.caw.drum.kick', kick, 0.9);
     layer('Hats', 'org.caw.drum.hats', hats, 0.55);
-    layer('Bass', 'org.caw.bass', bass, 0.75,
-        params: {'cutoff': 270, 'resonance': 0.45, 'env': 0.6, 'decay': 0.18, 'sustain': 0.2});
-    layer('Lead', 'org.caw.synth.morph', lead, 0.45,
-        params: {'shape': 0.66, 'drift': 0.15, 'unison': 3, 'detune': 0.1, 'cutoff': 2600, 'attack': 0.005,
-          'decay': 0.25, 'sustain': 0.5, 'release': 0.3},
-        effects: [ComponentUseDoc('org.caw.delay.pingpong', {'sync': 3, 'mix': 0.3})]);
+    const flagship = 'org.caw.synth.flagship';
+    // The filter envelope's depth: a mod slot's amount is the octaves over the cutoff knob's 9.97-octave travel.
+    const cutoffOctaves = 9.965784284662087;
+    layer('Bass', flagship, bass, 0.75, preset: 'Mono bass', params: {
+      'flt1_cutoff': 270, 'flt1_resonance': 0.45, 'mod1_amt': 5 * 0.6 / cutoffOctaves,
+      'env1_decay': 0.18, 'env2_decay': 0.18, 'env2_release': 0.18, 'env1_sustain': 0.2,
+    });
+    layer('Lead', flagship, lead, 0.45, preset: 'Morph pad', params: {
+      'osc1_frame': 0.66, 'mod1_amt': 0.15, 'osc1_unison': 3, 'osc1_detune': 10, 'flt1_cutoff': 2600,
+      'env1_attack': 0.005, 'env1_decay': 0.25, 'env1_sustain': 0.5, 'env1_release': 0.3,
+    }, effects: [ComponentUseDoc('org.caw.delay.pingpong', {'sync': 3, 'mix': 0.3})]);
     // Muted to start with: the acid line plays in the bass's register and the pad under the lead. Unmute one.
-    layer('Acid', 'org.caw.synth.acid', acid, 0.6,
-        params: {'resonance': 0.8}, effects: [ComponentUseDoc('org.caw.distortion', {'drive': 3, 'mix': 0.5})], mute: true);
-    layer('Pad', 'org.caw.synth.morph', chords, 0.5, effects: [ComponentUseDoc('org.caw.chorus')], mute: true);
+    layer('Acid', flagship, acid, 0.6, preset: 'Acid 303',
+        params: {'flt1_resonance': 0.8}, effects: [ComponentUseDoc('org.caw.distortion', {'drive': 3, 'mix': 0.5})], mute: true);
+    layer('Pad', flagship, chords, 0.5, preset: 'Morph pad', effects: [ComponentUseDoc('org.caw.chorus')], mute: true);
     return p;
   }
 
@@ -1687,6 +1715,9 @@ class AppState extends ChangeNotifier {
     for (final notifier in _layerValueTicks.values) { notifier.dispose(); }
     _moduleValueTicks.clear();
     _layerValueTicks.clear();
+    // The retired synths as Flagship presets, and presets' values into the knobs (the engine does the same when it
+    // plays, so a project opened without the engine library still sounds right).
+    if (engine != null) p.resolveInstruments(Engine.resolveInstrument);
     project = p;
     openError = null;
     _historyTimer?.cancel();

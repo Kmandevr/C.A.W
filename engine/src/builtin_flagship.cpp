@@ -1,5 +1,6 @@
 // The flagship synth (#171): three wavetable oscillators with unison, two filters, a mod matrix and an effects rack.
 #include "builtin_flagship.h"
+#include "quality.h"
 
 #include <algorithm>
 #include <bit>
@@ -42,6 +43,14 @@
 //   that are on. With no voice and the effects' tails below -94 dB the synth clears its effects and is quiet()
 //   (the host skips it) until the next note.
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#define CAW_FORCE_INLINE __forceinline
+#define CAW_NO_INLINE __declspec(noinline)
+#else
+#define CAW_FORCE_INLINE inline __attribute__((always_inline))
+#define CAW_NO_INLINE __attribute__((noinline))
+#endif
+
 namespace caw {
 
 namespace {
@@ -49,9 +58,10 @@ namespace {
 constexpr uint32_t kControlFrames = 16;
 constexpr uint32_t kVoices = 64;  // a voice can be 48 oscillator copies: 64 is plenty; the oldest is stolen past it
 constexpr uint32_t kOscs = 3, kFilters = 2, kEnvs = 3, kLfos = 3, kSlots = 16;
-constexpr int kTableCount = 4;
+constexpr int kTableCount = 5;
 constexpr int kFrameSize = 1024;  // 512 harmonics: a full spectrum down to about 30 Hz at 48 kHz
 constexpr int kMaxCopies = lib::kMaxUnisonVoices;
+constexpr int kEcoCopies = 4;  // the unison cap at Eco quality
 constexpr double kLn2 = 0.69314718055994530942;
 
 // ---------- Parameters ----------
@@ -88,19 +98,25 @@ enum FxParam : uint32_t {
 constexpr uint32_t kModBase = kFxEnd;
 constexpr uint32_t kModTargets = kModBase;  // a slot can move any parameter before the slots themselves
 constexpr uint32_t modParam(uint32_t s, uint32_t p) { return kModBase + s * kModCount + p; }
-constexpr uint32_t kParamCount = kModBase + kSlots * kModCount;
-static_assert(kParamCount == 191, "the parameter list's size is part of the documented layout");
+// Added after the slots (2026-11-10, one synth): appended so the slots' destination numbers (parameter k + 1)
+// stay what saved projects hold. They are not mod destinations.
+constexpr uint32_t kVoiceMode = kModBase + kSlots * kModCount, kGlide = kVoiceMode + 1;
+constexpr uint32_t kViaBase = kGlide + 1;  // modN_via: a second source the slot's amount is multiplied by
+constexpr uint32_t viaParam(uint32_t s) { return kViaBase + s; }
+constexpr uint32_t kParamCount = kViaBase + kSlots;
+static_assert(kParamCount == 209, "the parameter list's size is part of the documented layout");
 
 enum Source : int {
     kSrcNone, kSrcEnv1, kSrcEnv2, kSrcEnv3, kSrcLfo1, kSrcLfo2, kSrcLfo3, kSrcRandom, kSrcVelocity, kSrcNote,
-    kSrcBend, kSrcPressure, kSrcTimbre, kSrcModWheel, kSourceCount
+    kSrcBend, kSrcPressure, kSrcTimbre, kSrcModWheel, kSrcAccent, kSourceCount
 };
 enum FilterType : int { kLadderLp, kLadderHp, kLadderBp, kSvfLp, kSvfHp, kSvfBp, kSvfNotch, kComb, kFormant, kFilterTypeCount };
 enum Warp : int { kWarpNone, kWarpBend, kWarpSync, kWarpMirror, kWarpQuantize };
 enum Dest : int { kToFilter1, kToFilter2, kToBoth, kToBypass };
+enum VoiceMode : int { kPoly, kMono, kLegato };
 
 constexpr std::string_view kOffOn[] = {"Off", "On"};
-constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic"};
+constexpr std::string_view kTables[] = {"Basic", "Analog", "Vocal", "Harmonic", "Classic"};
 constexpr std::string_view kWarps[] = {"None", "Bend", "Sync", "Mirror", "Quantize"};
 constexpr std::string_view kStacks[] = {"Off", "Octave", "2 octaves", "Fifth", "Major chord", "Minor chord", "Harmonics"};
 constexpr std::string_view kDests[] = {"Filter 1", "Filter 2", "Both", "Bypass"};
@@ -110,13 +126,19 @@ constexpr std::string_view kRoutings[] = {"Series", "Parallel"};
 constexpr std::string_view kLfoShapes[] = {"Sine", "Triangle", "Saw up", "Saw down", "Square", "Sample & hold", "Smooth random"};
 constexpr std::string_view kLfoSyncs[] = {"Off", "1/32", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars", "8 bars"};
 constexpr double kLfoSyncBeats[] = {0.0, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0};
-constexpr std::string_view kLfoModes[] = {"Free", "Retrigger"};
+// Free: one for the instrument, a synced one locked to the song's position while it plays. Retrigger: per voice,
+// from each note. Running: one for the instrument at the synced rate, running on from Play rather than following
+// the song's position (a slow sweep longer than the loop keeps going across loop restarts; the Morph synth's drift).
+constexpr std::string_view kLfoModes[] = {"Free", "Retrigger", "Running"};
+enum LfoMode : int { kLfoFree, kLfoRetrigger, kLfoRunning };
 constexpr std::string_view kRndModes[] = {"Sample & hold", "Smooth"};
 constexpr std::string_view kDistTypes[] = {"Drive", "Hard clip", "Fold", "Crush"};
 constexpr std::string_view kDelaySyncs[] = {"Off", "1/16", "1/8", "1/8 dotted", "1/4", "1/4 dotted", "1/2", "1 bar"};
 constexpr double kDelaySyncWholes[] = {0.0, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 1.0};
 constexpr std::string_view kSources[] = {"None",     "Env 1", "Env 2",      "Env 3",    "LFO 1",  "LFO 2",    "LFO 3",
-                                         "Random",   "Velocity", "Note",    "Pitch bend", "Pressure", "Timbre", "Mod wheel"};
+                                         "Random",   "Velocity", "Note",    "Pitch bend", "Pressure", "Timbre", "Mod wheel",
+                                         "Accent"};
+constexpr std::string_view kVoiceModes[] = {"Poly", "Mono", "Legato"};
 constexpr std::string_view kPolarities[] = {"Unipolar", "Bipolar"};
 static_assert(sizeof(kSources) / sizeof(kSources[0]) == kSourceCount);
 
@@ -218,6 +240,13 @@ public:
             num(p + "amt", n + "amount", s == 0 ? 0.15 : 0.0, -1.0, 1.0);
             pick(p + "bipolar", n + "polarity", 0.0, kPolarities, count(kPolarities));
         }
+        // Poly: a voice per note. Mono: one voice, last-note priority, every note restarts the envelopes. Legato: one
+        // voice, and a note played while another is held glides there without restarting them (a 303's slide).
+        pick("voice_mode", "Voice mode", kPoly, kVoiceModes, count(kVoiceModes));
+        expo("glide", "Glide", 0.05, 0.001, 2.0, "s");  // mono and legato: the time to the new note's pitch
+        for (uint32_t s = 0; s < kSlots; ++s)
+            pick("mod" + std::to_string(s + 1) + "_via", "Mod " + std::to_string(s + 1) + " scaled by", kSrcNone, kSources,
+                 count(kSources));
     }
 
 private:
@@ -391,6 +420,14 @@ const Tables& tables() {
             normalize(a, kH);
             sweep.setFrameHarmonics(f, a, kH, phase);
         }
+        // Classic: sine, triangle, saw and square, the Morph synth's shapes in its order and phases (sine and
+        // triangle rising from 0, saw from -1, square at +1), so a frame sweep is its `shape` knob.
+        lib::Wavetable& classic = x.table[4];
+        classic.prepare(4, kFrameSize);
+        classic.setFrameFunction(0, [](double p) { return lib::sineWave(p); });
+        classic.setFrameFunction(1, [](double p) { return lib::triangleWave(p); });
+        classic.setFrameFunction(2, [](double p) { return 2.0 * p - 1.0; });
+        classic.setFrameFunction(3, [](double p) { return p < 0.5 ? 1.0 : -1.0; });
         return x;
     }();
     return t;
@@ -439,6 +476,10 @@ struct OscVoice {
     const float* a[kMaxCopies] = {};
     const float* b[kMaxCopies] = {};
     float size[kMaxCopies] = {};
+    uint32_t step[kMaxCopies] = {};  // dt in 32-bit fixed point (2^32 a cycle), for the unwarped read
+    int shift[kMaxCopies] = {};      // 32 - log2(the mip level's size): a fixed-point phase's index bits
+    int level[kMaxCopies] = {};      // the mip level each copy reads
+    bool centred = false;            // every copy plays the same on both sides (no pan, no spread)
     float gainL[kMaxCopies] = {}, gainR[kMaxCopies] = {};
     // The layout and pan gains, worked out again only when their settings change.
     lib::UnisonSettings layoutKey{-1};
@@ -453,6 +494,35 @@ struct OscVoice {
 // Adds `n` frames of the stack, `first` frames into the control period, to L and R.
 template <int W, bool Morph>
 void addStack(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t first) noexcept {
+    if constexpr (W == kWarpNone) {
+        // Unwarped (the usual case): the phase in 32-bit fixed point, so it wraps by itself and its top bits are the
+        // table index (no floor, no float-to-int per sample): about a third fewer instructions per copy and sample
+        // than the float phase below, and a finer phase (2026-11-10 performance pass).
+        for (int c = 0; c < o.count; ++c) {
+            if (!o.a[c]) continue;
+            const float* A = o.a[c];
+            const float* B = o.b[c];
+            const uint32_t step = o.step[c];
+            const uint32_t p0 = static_cast<uint32_t>(static_cast<uint64_t>(o.phase[c] * 4294967296.0)) + first * step;
+            const int sh = o.shift[c];
+            const uint32_t mask = (1u << sh) - 1u;
+            const float scale = 1.0f / static_cast<float>(1u << sh);
+            const float gl = o.gainL[c], gr = o.gainR[c], mix = o.mix;
+            for (uint32_t i = 0; i < n; ++i) {
+                const uint32_t p = p0 + i * step;
+                const uint32_t k = p >> sh;
+                const float fr = static_cast<float>(p & mask) * scale;
+                float v = A[k] + (A[k + 1] - A[k]) * fr;
+                if constexpr (Morph) {
+                    const float u = B[k] + (B[k + 1] - B[k]) * fr;
+                    v += (u - v) * mix;
+                }
+                L[i] += v * gl;
+                R[i] += v * gr;
+            }
+        }
+        return;
+    }
     for (int c = 0; c < o.count; ++c) {
         if (!o.a[c]) continue;
         const float* A = o.a[c];
@@ -515,6 +585,7 @@ struct VoiceFilter {
     lib::FormantFilter formant[2];
     lib::CombFilter* comb[2] = {nullptr, nullptr};  // the instrument's, one pair per voice (they hold memory)
     lib::Saturator saturator;
+    double qFor = -1.0, q = 0.70710678118654752;  // the SVF's q, for the resonance it was worked out from
 
     void configure(bool enabled, int t, double cutoff, double resonance, double amount, double morph, double wet,
                    double sampleRate, bool fresh) noexcept {
@@ -545,7 +616,11 @@ struct VoiceFilter {
                     if (comb[c]) comb[c]->set(cutoff, 0.4 + 0.595 * resonance, morph);
                     break;
                 case kFormant: formant[c].set(morph, cutoff / 1000.0, 4.0 + 16.0 * resonance, sampleRate); break;
-                default: svf[c].set(cutoff, lib::resonanceQ(resonance), sampleRate); break;
+                default:
+                    if (resonance != qFor) qFor = resonance, q = lib::resonanceQ(resonance);  // a pow: only on a change
+                    if (c == 0) svf[0].set(cutoff, q, sampleRate);
+                    else svf[1].setLike(svf[0]);  // one tan for the pair
+                    break;
             }
         }
     }
@@ -554,8 +629,36 @@ struct VoiceFilter {
         for (uint32_t i = 0; i < n; ++i) x[i] = static_cast<float>(f(static_cast<double>(x[i])));
     }
     // In place: drive (when above 1) into the filter, then the dry/wet mix.
+    // A centred voice (both sides the same): only the left side is filtered, and stands for both. Ladder and SVF
+    // low-pass only; the right side's state takes the left's when it is filtered again (it was the same).
+    bool monoCapable() const noexcept { return !on || type <= kLadderBp || type == kSvfLp; }
+    void processMono(float* L, uint32_t n) noexcept {
+        if (!on) return;
+        monoUsed = true;
+        float dry[kControlFrames];
+        const bool wet = mix >= 1.0f;
+        if (!wet) std::copy(L, L + n, dry);
+        if (drive) each(L, n, [&](double v) noexcept { return saturator.process(v); });
+        if (type == kLadderLp || type == kLadderHp || type == kLadderBp) {
+            ladder[0].flushDenormals();
+            if (type == kLadderLp) ladder[0].process<lib::LadderMode::LowPass>(L, n);
+            else if (type == kLadderHp) ladder[0].process<lib::LadderMode::HighPass>(L, n);
+            else ladder[0].process<lib::LadderMode::BandPass>(L, n);
+        } else {
+            for (uint32_t i = 0; i < n; ++i) L[i] = static_cast<float>(svf[0].lowpass(static_cast<double>(L[i])));
+        }
+        if (!wet)
+            for (uint32_t i = 0; i < n; ++i) L[i] = dry[i] + (L[i] - dry[i]) * mix;
+    }
+    bool monoUsed = false;  // the left side ran alone: the right's state is behind
+
     void process(float* L, float* R, uint32_t n) noexcept {
         if (!on) return;
+        if (monoUsed) {  // back to stereo: the right side continues from the left's state, which both had
+            monoUsed = false;
+            ladder[1] = ladder[0];
+            svf[1] = svf[0];
+        }
         float dryL[kControlFrames], dryR[kControlFrames];
         const bool wet = mix >= 1.0f;
         if (!wet) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
@@ -570,10 +673,15 @@ struct VoiceFilter {
             else if (type == kLadderHp) ladder[0].processPair<lib::LadderMode::HighPass>(ladder[1], L, R, n);
             else ladder[0].processPair<lib::LadderMode::BandPass>(ladder[1], L, R, n);
         }
-        for (int c = 0; c < 2 && type > kLadderBp; ++c) {
+        if (type == kSvfLp) {  // both sides in one loop (two independent chains: twice the work per cycle)
+            for (uint32_t i = 0; i < n; ++i) {
+                L[i] = static_cast<float>(svf[0].lowpass(static_cast<double>(L[i])));
+                R[i] = static_cast<float>(svf[1].lowpass(static_cast<double>(R[i])));
+            }
+        }
+        for (int c = 0; c < 2 && type > kSvfLp; ++c) {
             float* x = c ? R : L;
             switch (type) {
-                case kSvfLp: each(x, n, [&](double v) noexcept { return svf[c].process(v).low; }); break;
                 case kSvfHp: each(x, n, [&](double v) noexcept { return svf[c].process(v).high; }); break;
                 case kSvfBp: each(x, n, [&](double v) noexcept { return svf[c].process(v).band; }); break;
                 case kSvfNotch: each(x, n, [&](double v) noexcept { return svf[c].process(v).notch; }); break;
@@ -608,6 +716,49 @@ struct Voice {
     VoiceFilter filter[kFilters];
     bool parallel = false;
     double gain0 = 0.0, gain1 = 0.0;  // the level ramps from gain0 to gain1 over the control period
+    bool mono = false;  // the mono or legato voice: its pitch follows `glide` at each control
+    double configuredPitch = -1.0;  // the pitch its oscillators and filters were last worked out for
+    lib::Glide glide;   // in semitones, stepped once per control period
+};
+
+// The notes held in mono and legato, newest last (last-note priority: ending the newest returns to the one held
+// before it). Holds 16; a 17th forgets the oldest.
+class HeldNotes {
+public:
+    struct Held {
+        uint32_t id = 0;
+        double pitch = 60.0;
+    };
+    void push(uint32_t id, double pitch) noexcept {
+        remove(id);
+        if (count_ == kSize) {
+            std::copy(notes_ + 1, notes_ + kSize, notes_);
+            --count_;
+        }
+        notes_[count_++] = {id, pitch};
+    }
+    bool remove(uint32_t id) noexcept {
+        for (uint32_t i = 0; i < count_; ++i)
+            if (notes_[i].id == id) {
+                std::copy(notes_ + i + 1, notes_ + count_, notes_ + i);
+                --count_;
+                return true;
+            }
+        return false;
+    }
+    Held* find(uint32_t id) noexcept {
+        for (uint32_t i = 0; i < count_; ++i)
+            if (notes_[i].id == id) return &notes_[i];
+        return nullptr;
+    }
+    const Held* top() const noexcept { return count_ ? &notes_[count_ - 1] : nullptr; }
+    bool empty() const noexcept { return count_ == 0; }
+    void clear() noexcept { count_ = 0; }
+
+private:
+    static constexpr uint32_t kSize = 16;
+    Held notes_[kSize];
+    uint32_t count_ = 0;
 };
 
 class FlagshipInstrument final : public InstrumentProcessor {
@@ -617,6 +768,7 @@ public:
     bool activate(double sampleRate, uint32_t maxBlock) noexcept override {
         try {
             sr_ = sampleRate > 0.0 && std::isfinite(sampleRate) ? sampleRate : 48000.0;
+            quality_ = buildingQuality();
             tables_ = &tables();
             for (auto& pair : combs_)
                 for (lib::CombFilter& c : pair) c.prepare(sr_, 20.0);
@@ -634,6 +786,8 @@ public:
 
     void reset() noexcept override {
         voices_.clear();
+        held_.clear();
+        knobsChanged_ = true;
         for (lib::Lfo& l : lfo_) {
             l = lib::Lfo{};
             l.prepare(sr_);
@@ -660,9 +814,14 @@ protected:
         switch (m.type) {
             case NoteMessageType::On: {
                 settle();  // the sounding voices move on to this frame first
+                if (voiceMode(m.frame) != kPoly) {
+                    monoOn(m);
+                    break;
+                }
                 Voice& v = voices_.start(m.noteId);
                 v.fresh = !v.env[0].active();  // a stolen voice continues from where it is (no click)
                 v.starting = true;
+                v.mono = false;
                 v.seed = hash32(++started_ * 0x9E3779B9U);
                 v.notePitch = v.pitch = m.pitch;
                 v.velocity = m.velocity;
@@ -673,6 +832,11 @@ protected:
                 break;
             }
             case NoteMessageType::Off:
+                if (held_.find(m.noteId)) {
+                    settle();
+                    monoOff(m);
+                    break;
+                }
                 if (Voice* v = voices_.find(m.noteId); v && v->held) {
                     settle();  // the modulation envelopes release from this frame
                     v->held = false;
@@ -680,7 +844,13 @@ protected:
                 }
                 break;
             case NoteMessageType::Pitch:
-                if (Voice* v = voices_.find(m.noteId)) v->pitch = m.pitch;
+                if (HeldNotes::Held* h = held_.find(m.noteId)) {  // mono: a held note's slide or bend
+                    h->pitch = m.pitch;
+                    if (Voice* v = voices_.find(m.noteId); v && v->mono)  // the note sounding: followed within ~3 ms
+                        v->glide.glideTo(m.pitch, 0.003, sr_ / kControlFrames);
+                } else if (Voice* v = voices_.find(m.noteId)) {
+                    v->pitch = m.pitch;
+                }
                 break;
             case NoteMessageType::Pressure:
                 if (Voice* v = voices_.find(m.noteId)) v->pressure = m.value;
@@ -692,6 +862,68 @@ protected:
         }
     }
 
+    // Mono and legato: one voice. A note while it sounds moves it there (gliding), restarting its envelopes
+    // unless legato and another note is held; a note while it is silent starts it afresh.
+    void monoOn(const NoteMessage& m) noexcept {
+        const bool overlap = !held_.empty();
+        const bool legato = voiceMode(m.frame) == kLegato;
+        held_.push(m.noteId, m.pitch);
+        Voice* sounding = nullptr;
+        voices_.forEachActive([&](Voice& v) noexcept {
+            if (v.env[0].active() && (!sounding || v.age > sounding->age)) sounding = &v;
+        });
+        clock_.restart();
+        idle_ = false;
+        if (sounding && sounding->mono) {
+            Voice& v = *sounding;
+            v.noteId = m.noteId;
+            v.held = true;
+            v.notePitch = m.pitch;
+            v.glide.glideTo(m.pitch, glideAt(m.frame), sr_ / kControlFrames);
+            if (overlap && legato) return;  // a slide: the envelopes run on
+            v.velocity = m.velocity;
+            v.starting = true;  // the LFOs and the random source restart; the phases run on (no click)
+            v.fresh = false;
+            for (lib::Adsr& e : v.env) e.gateOn();
+            return;
+        }
+        Voice& v = voices_.start(m.noteId);
+        v.fresh = !v.env[0].active();
+        v.starting = true;
+        v.mono = true;
+        v.seed = hash32(++started_ * 0x9E3779B9U);
+        v.notePitch = v.pitch = m.pitch;
+        v.glide.jump(m.pitch);
+        v.velocity = m.velocity;
+        v.pressure = v.timbre = 0.0;
+        for (lib::Adsr& e : v.env) e.gateOn();
+    }
+    // A knob at a note's frame: its value in this block (or where it is ramping, there).
+    double knobAt(uint32_t k, uint32_t frame) const noexcept {
+        if (block_ && k < block_->parameterCount && block_->parameters && block_->parameters[k].samples)
+            return block_->parameters[k].samples[frame];
+        return base_[k];
+    }
+    int voiceMode(uint32_t frame) const noexcept { return clampi(knobAt(kVoiceMode, frame), 0, 2); }
+    double glideAt(uint32_t frame) const noexcept { return clampd(knobAt(kGlide, frame), 0.001, 2.0); }
+
+    void monoOff(const NoteMessage& m) noexcept {
+        const HeldNotes::Held* top = held_.top();
+        const bool wasTop = top && top->id == m.noteId;
+        held_.remove(m.noteId);
+        Voice* v = wasTop ? voices_.find(m.noteId) : nullptr;
+        if (!v || !v->mono) return;
+        if (held_.empty()) {
+            v->held = false;
+            for (lib::Adsr& e : v->env) e.gateOff();
+            return;
+        }
+        const HeldNotes::Held& back = *held_.top();  // back to the note held before, gliding, envelopes running on
+        v->noteId = back.id;
+        v->glide.glideTo(back.pitch, glideAt(m.frame), sr_ / kControlFrames);
+        clock_.restart();
+    }
+
     // The mod wheel (controller 1), from a MIDI 1.0 or MIDI 2.0 channel voice message, when the host sends one.
     void onEvent(const Event& e) noexcept override {
         const uint32_t w0 = e.data[0], type = w0 >> 28, status = (w0 >> 20) & 0xF, index = (w0 >> 8) & 0x7F;
@@ -700,20 +932,36 @@ protected:
         else if (type == 0x4) modWheel_ = static_cast<double>(e.data[1]) / 4294967295.0;
     }
 
+    // The knobs that hold still over this block are read once here, before its notes (whose voice mode and glide
+    // they set); the ramping ones at each control.
+    void beginBlock(const ProcessBlock& b) noexcept override {
+        transport_ = b.transport;
+        block_ = &b;
+        const Params& p = params();
+        rampCount_ = 0;
+        bool changed = false;
+        const uint32_t given = b.parameters ? std::min(b.parameterCount, kParamCount) : 0;
+        for (uint32_t k = 0; k < given; ++k) {  // the host's values (the usual case: every one, none ramping)
+            const ParameterValue& pv = b.parameters[k];
+            if (pv.samples) {
+                ramp_[rampCount_++] = static_cast<uint16_t>(k);
+                continue;
+            }
+            changed |= pv.value != base_[k];
+            base_[k] = pv.value;
+        }
+        for (uint32_t k = given; k < kParamCount; ++k) {
+            changed |= p.d[k].defaultValue != base_[k];
+            base_[k] = p.d[k].defaultValue;
+        }
+        knobsChanged_ = knobsChanged_ || changed;  // until the next control has used them
+    }
+
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
         if (idle_) {
             std::memset(left, 0, frames * sizeof(float));
             std::memset(right, 0, frames * sizeof(float));
             return;
-        }
-        transport_ = b.transport;
-        // The knobs that hold still over this block are read once here; the ramping ones at each control.
-        const Params& p = params();
-        rampCount_ = 0;
-        for (uint32_t k = 0; k < kParamCount; ++k) {
-            if (k >= b.parameterCount || !b.parameters) base_[k] = p.d[k].defaultValue;
-            else if (b.parameters[k].samples) ramp_[rampCount_++] = static_cast<uint16_t>(k);
-            else base_[k] = b.parameters[k].value;
         }
         clock_.run(frames, offset,
                    [&](uint32_t at) noexcept {
@@ -795,6 +1043,7 @@ private:
     }
 
     bool uses(uint32_t source) const noexcept { return (used_ >> source) & 1u; }
+    bool retriggered(uint32_t lfo) const noexcept { return clampi(base_[lfoParam(lfo, kLfoMode)], 0, 2) == kLfoRetrigger; }
 
     // A source's value for a voice, 0..1 (a bipolar source such as an LFO is centred on 0.5).
     double sourceValue(const Voice& v, int source, double bendRange) const noexcept {
@@ -806,7 +1055,7 @@ private:
             case kSrcLfo2:
             case kSrcLfo3: {
                 const uint32_t l = static_cast<uint32_t>(source - kSrcLfo1);
-                return 0.5 * ((base_[lfoParam(l, kLfoMode)] >= 0.5 ? v.lfo[l].value() : freeLfo_[l]) + 1.0);
+                return 0.5 * ((retriggered(l) ? v.lfo[l].value() : freeLfo_[l]) + 1.0);
             }
             case kSrcRandom: return 0.5 * (v.random.value() + 1.0);
             case kSrcVelocity: return v.velocity;
@@ -815,6 +1064,7 @@ private:
             case kSrcPressure: return v.pressure;
             case kSrcTimbre: return v.timbre;
             case kSrcModWheel: return modWheel_;
+            case kSrcAccent: return clampd((v.velocity - 0.7) / 0.3, 0.0, 1.0);  // a 303's: above 0.7, fully at 1
             default: return 0.0;
         }
     }
@@ -822,16 +1072,24 @@ private:
     // The value of parameter k for a voice whose slot offsets are `offsets`.
     // (k is below kModTargets: the slots' own parameters are read from base_.) The unmodulated case, by far the
     // most common, is a load and a branch.
-    double value(uint32_t k, const double* offsets) const noexcept {
+    CAW_FORCE_INLINE double value(uint32_t k, const double* offsets) const noexcept {
         const int t = targetOf_[k];
-        return t ? modulated(k, t - 1, offsets) : base_[k];
+        // A slot whose source is at 0 (an envelope at rest, no timbre) leaves the knob as it is: no exp, and the
+        // filter that reads it keeps its coefficients.
+        return t && offsets[t - 1] != 0.0 ? modulated(k, t - 1, offsets) : base_[k];
     }
-    double modulated(uint32_t k, int t, const double* offsets) const noexcept { return fromNorm(k, targetNorm_[t] + offsets[t]); }
+    CAW_NO_INLINE double modulated(uint32_t k, int t, const double* offsets) const noexcept { return fromNorm(k, targetNorm_[t] + offsets[t]); }
 
     // Once per control period: the knobs, the matrix, every sounding voice's settings and the effects.
     void control(const ProcessBlock& b, uint32_t at) noexcept {
         for (uint32_t r = 0; r < rampCount_; ++r) base_[ramp_[r]] = b.parameters[ramp_[r]].samples[at];
         tempo_ = transport_ && transport_->tempo > 0.0 ? transport_->tempo : 120.0;
+        // What a voice must work out again this control: everything when a knob, the tempo or the quality moved;
+        // otherwise only the sections a slot modulates, and what follows the pitch (2026-11-10 performance pass).
+        const int quality = qualityNow(quality_);
+        if (rampCount_ > 0 || tempo_ != lastTempo_ || quality != lastQuality_) knobsChanged_ = true;
+        lastTempo_ = tempo_;
+        lastQuality_ = quality;
         const bool beatLocked = transport_ && transport_->playing;
         const double beat = beatLocked ? transport_->beat + at * tempo_ / (60.0 * sr_) : 0.0;
 
@@ -839,6 +1097,7 @@ private:
         std::memset(targetOf_, 0, sizeof targetOf_);
         slotCount_ = targetCount_ = 0;
         used_ = 0;
+        moved_ = 0;
         for (uint32_t s = 0; s < kSlots; ++s) {
             const int src = clampi(base_[modParam(s, kModSource)], 0, kSourceCount - 1);
             const int dst = clampi(base_[modParam(s, kModTarget)], 0, kModTargets) - 1;
@@ -849,8 +1108,10 @@ private:
                 targetNorm_[targetCount_] = toNorm(static_cast<uint32_t>(dst), base_[dst]);
                 targetOf_[dst] = static_cast<uint8_t>(++targetCount_);
             }
-            slots_[slotCount_++] = {src, targetOf_[dst] - 1, amount, base_[modParam(s, kModPolarity)] >= 0.5};
-            used_ |= 1u << src;
+            const int via = clampi(base_[viaParam(s)], 0, kSourceCount - 1);
+            slots_[slotCount_++] = {src, targetOf_[dst] - 1, amount, base_[modParam(s, kModPolarity)] >= 0.5, via};
+            moved_ |= sectionOf(static_cast<uint32_t>(dst));
+            used_ |= (1u << src) | (via != kSrcNone ? 1u << via : 0u);
         }
 
         // The free LFOs run once for the instrument, on their knobs' own values; synced to a playing song,
@@ -861,7 +1122,8 @@ private:
             lfo_[l].setShape(static_cast<lib::LfoShape>(clampi(base_[lfoParam(l, kLfoShape)], 0, 6)));
             if (sync > 0) {
                 lfo_[l].setRateBeats(kLfoSyncBeats[sync], tempo_);
-                if (beatLocked) lfo_[l].syncToBeat(beat, kLfoSyncBeats[sync]);
+                if (beatLocked && clampi(base_[lfoParam(l, kLfoMode)], 0, 2) != kLfoRunning)
+                    lfo_[l].syncToBeat(beat, kLfoSyncBeats[sync]);
             } else {
                 lfo_[l].setRateHz(base_[lfoParam(l, kLfoRate)]);
             }
@@ -874,10 +1136,13 @@ private:
         const double bendRange = clampd(base_[kBendRange], 1.0, 48.0);
         voices_.forEachActive([&](Voice& v) noexcept {
             if (v.starting) startVoice(v);
+            if (v.mono) v.pitch = v.glide.next();
             double offsets[kSlots] = {};
             for (uint32_t s = 0; s < slotCount_; ++s) {
-                const double u = sourceValue(v, slots_[s].source, bendRange);
-                offsets[slots_[s].target] += slots_[s].amount * (slots_[s].bipolar ? 2.0 * u - 1.0 : u);
+                const Slot& slot = slots_[s];
+                const double u = sourceValue(v, slot.source, bendRange);
+                const double scale = slot.via != kSrcNone ? sourceValue(v, slot.via, bendRange) : 1.0;
+                offsets[slot.target] += slot.amount * (slot.bipolar ? 2.0 * u - 1.0 : u) * scale;
             }
             configureVoice(v, offsets);
             if (v.age > newest) {
@@ -899,6 +1164,7 @@ private:
         volume1_ = clampd(g(kVolume), 0.0, 1.0);
         configureEffects(g);
 
+        knobsChanged_ = false;
         // Nothing sounding and the tails below -94 dB for long enough: clear the effects and rest.
         if (voices_.activeCount() == 0) {
             const bool fx = distOn_ || eqOn_ || chorusOn_ || delayOn_ || reverbOn_;
@@ -936,27 +1202,46 @@ private:
             for (int c = 0; c < 2; ++c) v.filter[f].comb[c] = &combs_[index][f * 2 + c];
     }
 
+    // The voice section a parameter belongs to (a bit of moved_), 0 for the instrument-wide ones.
+    static uint32_t sectionOf(uint32_t k) noexcept {
+        if (k < kFltBase) return 1u << (k / kOscCount);                    // osc 1..3: bits 0..2
+        if (k < kFltRouting) return 1u << (3 + (k - kFltBase) / kFltCount);  // filter 1, 2: bits 3, 4
+        if (k == kFltRouting) return kMovedRouting;
+        if (k < kLfoBase) return kMovedEnvs;
+        if (k < kVolume) return kMovedLfos;
+        return 0;
+    }
+    static constexpr uint32_t kMovedRouting = 1u << 5, kMovedEnvs = 1u << 6, kMovedLfos = 1u << 7;
+
     void configureVoice(Voice& v, const double* offsets) noexcept {
         const auto P = [&](uint32_t k) noexcept { return value(k, offsets); };
+        // Only what changed: every section at a note's start or after a knob moved, else those a slot moves and
+        // those that follow the pitch (it glides, bends).
+        const bool all = v.starting || knobsChanged_;
+        const bool pitch = v.pitch != v.configuredPitch;
+        v.configuredPitch = v.pitch;
+        const auto moved = [&](uint32_t bits) noexcept { return all || (moved_ & bits) != 0; };
         // Only what a slot listens to runs (env 1 always: it is the level).
-        for (uint32_t e = 0; e < kEnvs; ++e)
+        for (uint32_t e = 0; e < kEnvs && moved(kMovedEnvs); ++e)
             if (e == 0 || uses(kSrcEnv1 + e))
                 v.env[e].set(P(envParam(e, kEnvAttack)), P(envParam(e, kEnvDecay)), P(envParam(e, kEnvSustain)),
                              P(envParam(e, kEnvRelease)), sr_);
-        for (uint32_t l = 0; l < kLfos; ++l) {
-            if (!uses(kSrcLfo1 + l) || base_[lfoParam(l, kLfoMode)] < 0.5) continue;  // unused, or free: the instrument's
+        for (uint32_t l = 0; l < kLfos && moved(kMovedLfos); ++l) {
+            if (!uses(kSrcLfo1 + l) || !retriggered(l)) continue;  // unused, or the instrument's
             const int sync = clampi(P(lfoParam(l, kLfoSync)), 0, 9);
             v.lfo[l].setShape(static_cast<lib::LfoShape>(clampi(P(lfoParam(l, kLfoShape)), 0, 6)));
             if (sync > 0) v.lfo[l].setRateBeats(kLfoSyncBeats[sync], tempo_);
             else v.lfo[l].setRateHz(P(lfoParam(l, kLfoRate)));
         }
-        if (uses(kSrcRandom)) {
+        if (uses(kSrcRandom) && moved(kMovedLfos)) {
             v.random.setShape(P(kRndMode) >= 0.5 ? lib::LfoShape::SmoothRandom : lib::LfoShape::SampleHold);
             v.random.setRateHz(P(kRndRate));
         }
-        for (uint32_t o = 0; o < kOscs; ++o) configureOscillator(v, o, P);
-        v.parallel = P(kFltRouting) >= 0.5;
+        for (uint32_t o = 0; o < kOscs; ++o)
+            if (pitch || moved(1u << o)) configureOscillator(v, o, P);
+        if (moved(kMovedRouting)) v.parallel = P(kFltRouting) >= 0.5;
         for (uint32_t f = 0; f < kFilters; ++f) {
+            if (!pitch && !moved(1u << (3 + f))) continue;
             if (P(fltParam(f, kFltOn)) < 0.5) {
                 v.filter[f].configure(false, 0, 0, 0, 1, 0, 1, sr_, v.starting && v.fresh);
                 continue;
@@ -992,7 +1277,9 @@ private:
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, 4) : kWarpNone;
         lib::UnisonSettings& u = key.unison;
-        u.voices = clampi(at(kOscUnison), 1, kMaxCopies);
+        // Eco quality caps each oscillator at 4 copies (the outermost and the centre kept: the stack is laid out
+        // again for 4, so its detune and spread stay as wide).
+        u.voices = clampi(at(kOscUnison), 1, qualityNow(quality_) == kQualityEco ? kEcoCopies : kMaxCopies);
         u.detune = clampd(at(kOscDetune), 0.0, 100.0) / 100.0;
         u.power = at(kOscPower);
         u.spread = at(kOscSpread);
@@ -1004,6 +1291,18 @@ private:
         const double position = key.position * (table.frameCount() - 1);
         const int f0 = static_cast<int>(position), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
         o.mix = static_cast<float>(position - f0);
+        {
+            // Only the frame position moved (an LFO sweeping the table): the copies keep their steps, mip levels
+            // and gains, and just read the new pair of frames.
+            OscKey moved = key;
+            moved.position = o.key.position;
+            if (moved == o.key) {
+                o.key = key;
+                for (int c = 0; c < o.count; ++c)
+                    if (o.a[c]) o.a[c] = table.levelData(f0, o.level[c]), o.b[c] = table.levelData(f1, o.level[c]);
+                return;
+            }
+        }
         if (!(u == o.layoutKey)) {
             o.layoutKey = u;
             o.count = lib::unisonLayout(u, o.layout);
@@ -1067,9 +1366,14 @@ private:
             o.a[c] = table.levelData(f0, k);
             o.b[c] = table.levelData(f1, k);
             o.size[c] = static_cast<float>(table.levelSize(k));
+            o.level[c] = k;
+            o.step[c] = static_cast<uint32_t>(dt * 4294967296.0 + 0.5);
+            o.shift[c] = 32 - std::countr_zero(static_cast<uint32_t>(table.levelSize(k)));
             o.gainL[c] = static_cast<float>(o.panL[c] * key.level);
             o.gainR[c] = static_cast<float>(o.panR[c] * key.level);
         }
+        o.centred = true;
+        for (int c = 0; c < o.count; ++c) o.centred = o.centred && (!o.a[c] || o.gainL[c] == o.gainR[c]);
     }
 
     template <class Get>
@@ -1114,6 +1418,7 @@ private:
             delayMix_ = clampd(g(kDelayMix), 0.0, 1.0);
         }
         if (reverb) {
+            reverb_.setLight(qualityNow(quality_) == kQualityEco);
             lib::ReverbSettings s;
             s.size = g(kReverbSize);
             s.decay = g(kReverbDecay);
@@ -1133,6 +1438,10 @@ private:
         quietRun_ = 0;
     }
 
+    static void zero(float* x) noexcept {
+        for (uint32_t i = 0; i < kControlFrames; ++i) x[i] = 0.0f;
+    }
+
     // One voice's piece of the period: its oscillators into their filters, the filters, the level.
     void renderVoice(Voice& v, float* outL, float* outR, uint32_t n, uint32_t first) noexcept {
         float f1L[kControlFrames], f1R[kControlFrames], f2L[kControlFrames], f2R[kControlFrames];
@@ -1143,10 +1452,10 @@ private:
             bypass = bypass || o.dest == kToBypass;
             second = second || o.dest == kToFilter2 || (v.parallel && o.dest == kToBoth);
         }
-        std::fill_n(f1L, n, 0.0f);
-        std::fill_n(f1R, n, 0.0f);
-        if (second) std::fill_n(f2L, n, 0.0f), std::fill_n(f2R, n, 0.0f);
-        if (bypass) std::fill_n(byL, n, 0.0f), std::fill_n(byR, n, 0.0f);
+        // Whole periods cleared (a fixed count: inline stores, no memset call).
+        zero(f1L), zero(f1R);
+        if (second) zero(f2L), zero(f2R);
+        if (bypass) zero(byL), zero(byR);
         for (const OscVoice& o : v.osc) {
             if (!o.on || o.count == 0) continue;
             switch (o.dest) {
@@ -1166,6 +1475,27 @@ private:
                     }
                     [[fallthrough]];  // in series, filter 1 feeds filter 2 anyway
                 default: addOscillator(o, f1L, f1R, n, first); break;
+            }
+        }
+        // A centred voice through filter 1 alone (the bass, the acid line, Basic): one side filtered, both sides
+        // the same bits as before at half the filter's cost (2026-11-10 performance pass).
+        if (!second && !bypass && v.filter[0].monoCapable()) {
+            bool centred = true;
+            for (const OscVoice& o : v.osc)
+                if (o.on && o.count > 0) centred = centred && o.centred;
+            if (centred) {
+                v.filter[0].processMono(f1L, n);
+                float amp[kControlFrames];
+                const double step = (v.gain1 - v.gain0) / kControlFrames;
+                for (uint32_t i = 0; i < n; ++i)
+                    amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
+                for (uint32_t i = 0; i < n; ++i) {
+                    const float y = f1L[i] * amp[i];
+                    outL[i] += y;
+                    outR[i] += y;
+                }
+                if (!v.env[0].active()) v.active = false;
+                return;
             }
         }
         v.filter[0].process(f1L, f1R, n);
@@ -1208,6 +1538,17 @@ private:
         const double volumeStep = (volume1_ - volume0_) / kControlFrames;
         const double delayStep = (delayTime1_ - delayTime0_) / kControlFrames;
         float peak = periodPeak_;
+        if (!(distOn_ || eqOn_ || chorusOn_ || delayOn_ || reverbOn_)) {  // dry: one plain loop the compiler vectorizes
+            for (uint32_t i = 0; i < n; ++i) {
+                const double volume = volume0_ + volumeStep * static_cast<double>(first + i);
+                const float ol = static_cast<float>(finiteOr0(L[i] * volume)), orr = static_cast<float>(finiteOr0(R[i] * volume));
+                left[i] = ol;
+                right[i] = orr;
+                peak = std::max(peak, std::max(std::fabs(ol), std::fabs(orr)));
+            }
+            periodPeak_ = peak;
+            return;
+        }
         for (uint32_t i = 0; i < n; ++i) {
             const double at = static_cast<double>(first + i);
             double l = L[i], r = R[i];
@@ -1246,13 +1587,17 @@ private:
         int target = 0;  // into targetParam_
         double amount = 0.0;
         bool bipolar = false;
+        int via = kSrcNone;  // the source the amount is scaled by (None: 1)
     };
 
     VoicePool<Voice, kVoices> voices_;
+    HeldNotes held_;  // mono and legato
     lib::CombFilter combs_[kVoices][kFilters * 2];
     const Tables* tables_ = nullptr;
+    const std::atomic<int>* quality_ = nullptr;  // the building Engine's (quality.h)
     Clock clock_;
     const Transport* transport_ = nullptr;
+    const ProcessBlock* block_ = nullptr;  // the block being processed (beginBlock), for knobs at a note's frame
     double sr_ = 48000.0, tempo_ = 120.0, modWheel_ = 0.0;
     uint32_t sinceControl_ = 0, started_ = 0;
     bool idle_ = true;
@@ -1265,7 +1610,11 @@ private:
     lib::Lfo lfo_[kLfos];
     double freeLfo_[kLfos] = {};
     Slot slots_[kSlots];
-    uint32_t slotCount_ = 0, targetCount_ = 0, used_ = 0;  // used_: bit s set when a slot listens to source s
+    uint32_t slotCount_ = 0, targetCount_ = 0, used_ = 0;
+    uint32_t moved_ = 0;          // the voice sections (sectionOf) a slot moves this control
+    bool knobsChanged_ = true;    // a knob, the tempo or the quality moved since the last control
+    double lastTempo_ = 0.0;
+    int lastQuality_ = -1;  // used_: bit s set when a slot listens to source s
     uint32_t targetParam_[kSlots] = {};
     double targetNorm_[kSlots] = {};
     uint8_t targetOf_[kModTargets] = {};  // 1 + the parameter's index into targetParam_, 0 if no slot moves it
@@ -1290,5 +1639,12 @@ ModuleProcessor* makeFlagship() noexcept { return new (std::nothrow) FlagshipIns
 }  // namespace
 
 void registerFlagshipSynth(ModuleRegistry& registry) { registry.add(flagshipDescriptor(), &makeFlagship); }
+
+int flagshipParameterIndex(std::string_view id) noexcept {
+    const Params& p = params();
+    for (uint32_t k = 0; k < kParamCount; ++k)
+        if (p.d[k].id == id) return static_cast<int>(k);
+    return -1;
+}
 
 }  // namespace caw
