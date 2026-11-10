@@ -715,7 +715,7 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
           ListTile(
             leading: const Icon(Icons.auto_awesome_mosaic, color: Neon.green),
             title: const Text('New from template'),
-            subtitle: const Text('First loop: drums, bass, a byte lead and an acid line', style: TextStyle(color: Neon.dim)),
+            subtitle: const Text('First loop: drums, bass, a lead and an acid line on C++ instruments', style: TextStyle(color: Neon.dim)),
             onTap: () {
               Navigator.pop(context);
               s.newProjectFromTemplate();

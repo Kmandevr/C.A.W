@@ -305,53 +305,65 @@ class AppState extends ChangeNotifier {
   ModuleDoc moduleFromTemplate(Template t) =>
       ModuleDoc(id: newId('m'), name: headerValue(t.source, 'name') ?? t.file.replaceAll('.caw', ''), source: t.source);
 
-  /// A first project that shows the idea: layers of different lengths over one 4-bar loop.
+  /// A first project made of the engine's built-in C++ instruments (#157): kick, hats, bass, a lead, and a muted
+  /// acid line and pad, each playing a pattern over the 4-bar loop. Its patterns are written here, not read from
+  /// the .caw templates, so it doesn't depend on them.
   ProjectDoc starterProject() {
     final p = ProjectDoc(id: newId('p'), name: 'First loop');
-    ModuleDoc? add(String file) {
-      final t = template(file);
-      if (t == null) return null;
-      final m = moduleFromTemplate(t);
+    ModuleDoc pattern(String name, String summary, String length, String notes) {
+      final m = ModuleDoc(
+          id: newId('m'),
+          name: name,
+          source: '---\ncaw: 1\nkind: pattern\nname: $name\nsummary: $summary\nlength: $length\n---\n'
+              '// at = start in 16ths, len = length in 16ths, vel = 0..1\n$notes');
       p.modules.add(m);
       return m;
     }
 
-    final kick = add('kick.caw');
-    final bass = add('bass.caw');
-    final hats = add('hats.caw');
-    final byte = add('bytebeat-loop.caw');
-    final crush = add('bitcrush.caw');
-    add('glitch-fx.caw');
-    add('fold.caw');
-    final acid = add('acid-synth.caw');
-    final line = add('acid-line.caw');
-    add('chords.caw');
+    final kick = pattern('Kick', 'Four on the floor', '16', '0 C2 1 1\n4 C2 1 1\n8 C2 1 1\n12 C2 1 1\n');
+    // F#2 is the closed hi-hat and A#2 the open one, as on a General MIDI drum kit.
+    final hats = pattern('Hats', 'Hi-hats on every 16th, opening on the off-beat', '16',
+        [for (var at = 0; at < 16; at++) '$at ${at % 8 == 6 ? 'A#2' : 'F#2'} 1 1\n'].join());
+    final bass = pattern('Bass line', 'A minor 16th-note bass', '16',
+        '0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 1/2 1\n9 C2 1/2 1\n11 G1 1/2 1\n'
+        '12 A1 1/2 1\n15 A1 1/2 1\n');
+    final lead = pattern('Lead', 'Two bars of an A minor hook', '2 bars',
+        '0 E4 2 0.9\n2 A4 2 0.8\n4 C5 3 0.9\n8 B4 2 0.8\n10 A4 2 0.7\n12 G4 4 0.8\n'
+        '16 E4 2 0.9\n18 A4 2 0.8\n20 C5 2 0.9\n22 D5 1 0.8 slide\n23 E5 5 0.9\n28 D5 2 0.7\n30 C5 2 0.6\n');
+    final acid = pattern('Acid line', 'One bar of A minor acid with two slides, a ratchet and a note that plays half the time',
+        '16',
+        '// extras: slide (glide into the next note), ratchet N (repeat N times), prob P (chance it plays)\n'
+        '0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n8 E2 2 1 ratchet 2\n'
+        '10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n15 E2 1 0.8\n');
+    final chords = pattern('Chords', 'Four bars of A minor, F, C and G chords', '4 bars',
+        '// A chord is several notes joined by commas; each note gets its own voice.\n'
+        '0 A3,C4,E4 16 0.8\n16 F3,A3,C4 16 0.75\n32 C3,E3,G3 16 0.8\n48 G3,B3,D4 14 0.7\n62 G3,B3,D4 1/2 0.5 ratchet 2\n');
     var c = 0;
-    void layer(String name, ModuleDoc? gen, int steps, double vol,
-        [List<ModuleDoc?> fx = const [], ModuleDoc? pattern, bool mute = false]) {
-      if (gen == null) return;
-      final patternDoc = pattern == null ? null : PatternDoc.parse(pattern.runSource).doc;
-      final clipLength = patternDoc?.lengthSteps(p.beatsPerBar) ?? (steps > 0 ? steps : p.stepsPerBar);
+    void layer(String name, String instrument, ModuleDoc pattern, double vol,
+        {Map<String, double> params = const {}, List<ComponentUseDoc> effects = const [], bool mute = false}) {
       p.layers.add(LayerDoc(
           id: newId('l'),
           name: name,
           color: c++ % 4,
-          generatorId: gen.id,
-          effectIds: [for (final f in fx) if (f != null) f.id],
-          clips: pattern == null ? [] : [
-            ClipDoc(id: newId('c'), patternId: pattern.id, lengthSteps: clipLength),
-          ],
-          lengthSteps: steps,
+          instrument: ComponentUseDoc(instrument, {...params}),
+          components: [...effects],
+          clips: [ClipDoc(id: newId('c'), patternId: pattern.id, lengthSteps: p.loopSteps)],
           volume: vol,
           mute: mute));
     }
 
-    layer('Kick', kick, 16, 0.9);
-    layer('Bass', bass, 16, 0.7);
-    layer('Hats', hats, 16, 0.5);
-    layer('Byte lead', byte, 48, 0.35, [crush]);
-    // Muted to start with: unmute it to hear a sound played from a pattern's notes.
-    layer('Acid', acid, 0, 0.6, const [], line, true);
+    layer('Kick', 'org.caw.drum.kick', kick, 0.9);
+    layer('Hats', 'org.caw.drum.hats', hats, 0.55);
+    layer('Bass', 'org.caw.bass', bass, 0.75,
+        params: {'cutoff': 270, 'resonance': 0.45, 'env': 0.6, 'decay': 0.18, 'sustain': 0.2});
+    layer('Lead', 'org.caw.synth.morph', lead, 0.45,
+        params: {'shape': 0.66, 'drift': 0.15, 'unison': 3, 'detune': 0.1, 'cutoff': 2600, 'attack': 0.005,
+          'decay': 0.25, 'sustain': 0.5, 'release': 0.3},
+        effects: [ComponentUseDoc('org.caw.delay.pingpong', {'sync': 3, 'mix': 0.3})]);
+    // Muted to start with: the acid line plays in the bass's register and the pad under the lead. Unmute one.
+    layer('Acid', 'org.caw.synth.acid', acid, 0.6,
+        params: {'resonance': 0.8}, effects: [ComponentUseDoc('org.caw.distortion', {'drive': 3, 'mix': 0.5})], mute: true);
+    layer('Pad', 'org.caw.synth.morph', chords, 0.5, effects: [ComponentUseDoc('org.caw.chorus')], mute: true);
     return p;
   }
 

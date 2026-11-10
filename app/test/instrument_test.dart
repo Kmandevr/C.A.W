@@ -9,6 +9,9 @@ import 'package:caw/ui/arrange/fx_stack.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:caw/engine/engine.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -173,5 +176,51 @@ void main() {
       expect(layer.instrument?.id, 'org.caw.synth.basic');
       expect(layer.components, isEmpty);
     });
+  });
+
+  group('First loop', () {
+    test('is made of built-in C++ instruments playing patterns, with no .caw sounds', () {
+      final p = AppState().starterProject();
+      expect(p.name, 'First loop');
+      expect([for (final l in p.layers) l.name], ['Kick', 'Hats', 'Bass', 'Lead', 'Acid', 'Pad']);
+      for (final l in p.layers) {
+        expect(l.generatorId, isNull, reason: l.name);
+        expect(l.effectIds, isEmpty, reason: l.name);
+        expect(l.instrument?.id, startsWith('org.caw.'), reason: l.name);
+        expect(l.clips.single.lengthSteps, p.loopSteps, reason: l.name);
+        expect(l.components.every((c) => c.id.startsWith('org.caw.')), isTrue, reason: l.name);
+      }
+      for (final m in p.modules) {
+        expect(m.source, contains('kind: pattern'), reason: m.name);
+      }
+      expect([for (final l in p.layers) if (l.mute) l.name], ['Acid', 'Pad']);
+    });
+
+    final lib = Platform.environment['CAW_LIB'];
+    test('the engine plays it, and lists its instruments with readable names', () async {
+      final s = AppState();
+      final p = s.starterProject();
+      final e = Engine.create();
+      final result = await e.setProject(p.toEngineJson());
+      for (final m in p.modules) {
+        expect(result[m.id]?.ok, isTrue, reason: m.name);
+      }
+      final names = {for (final c in await e.nativeComponents()) if (c.isInstrument) c.id: c.name};
+      expect(names, containsPair('org.caw.drum.kick', 'Kick'));
+      expect(names, containsPair('org.caw.drum.hats', 'Hi-hats'));
+      expect(names, containsPair('org.caw.drum.snare', 'Snare'));
+      expect(names, containsPair('org.caw.drum.kit', 'Drum kit'));
+      expect(names, containsPair('org.caw.bass', 'Bass'));
+      expect(names, containsPair('org.caw.synth.acid', 'Acid synth'));
+      expect(names, containsPair('org.caw.synth.morph', 'Morph synth'));
+      e.play();
+      e.pullForTest(48000 * 2);
+      for (var i = 0; i < p.layers.length; i++) {
+        final peak = e.layerMeter(i).peak;
+        if (p.layers[i].mute) continue;
+        expect(peak, greaterThan(0.01), reason: p.layers[i].name);
+      }
+      e.dispose();
+    }, skip: lib == null || lib.isEmpty);
   });
 }

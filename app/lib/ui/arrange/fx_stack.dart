@@ -327,7 +327,7 @@ class _NativeEffectCard extends StatelessWidget {
     final cpp = state.cppComponentFor(use.id);
     final builtin = isBuiltinComponent(use.id) || (info?.builtin ?? false);
     final status = state.nativeEffectState(use.id);
-    final name = info?.label ?? cpp?.name ?? _builtinName(use.id);
+    final name = info?.label ?? cpp?.name ?? builtinComponentName(use.id);
     void open() {
       if (cpp != null) openSource(context, BuildTab(BuildTabKind.cpp, use.id));
     }
@@ -435,14 +435,6 @@ class _NativeEffectCard extends StatelessWidget {
   }
 }
 
-/// A readable name for a built-in before its descriptor arrives: `org.caw.delay.pingpong` → "Delay pingpong".
-String _builtinName(String id) {
-  if (!isBuiltinComponent(id)) return id;
-  final words = id.substring('org.caw.'.length).split('.');
-  final text = words.join(' ');
-  return text.isEmpty ? id : text[0].toUpperCase() + text.substring(1);
-}
-
 /// A choice or toggle parameter: a small dropdown with its name above.
 class _ChoiceParam extends StatelessWidget {
   const _ChoiceParam({required this.label, required this.value, required this.choices, required this.min,
@@ -485,14 +477,14 @@ class _RoutingView extends StatelessWidget {
     final out = p.layers.where((f) => f.id == layer.parentId && f.isFolder && f.busEnabled).firstOrNull;
     final nodes = <(String, String, Color, bool)>[
       if (layer.instrument case final inst?)
-        (state.componentInfo(inst.id)?.label ?? state.cppComponentFor(inst.id)?.name ?? _builtinName(inst.id),
+        (state.componentInfo(inst.id)?.label ?? state.cppComponentFor(inst.id)?.name ?? builtinComponentName(inst.id),
           inst.bypass ? 'Bypassed' : (state.componentPlayable(inst.id) ? 'C++ instrument' : 'Not loaded'),
           isBuiltinComponent(inst.id) ? Neon.blue : Neon.green, inst.bypass || !state.componentPlayable(inst.id))
       else
         (p.module(layer.generatorId)?.name ?? 'No instrument', 'Instrument', Neon.green, false),
       for (final id in layer.effectIds) (p.module(id)?.name ?? 'Missing', '.caw', Neon.violet, false),
       for (final c in layer.components)
-        (state.componentInfo(c.id)?.label ?? state.cppComponentFor(c.id)?.name ?? _builtinName(c.id),
+        (state.componentInfo(c.id)?.label ?? state.cppComponentFor(c.id)?.name ?? builtinComponentName(c.id),
           c.bypass ? 'Bypassed' : (state.componentPlayable(c.id) ? 'C++' : 'Not loaded'),
           isBuiltinComponent(c.id) ? Neon.blue : Neon.green, c.bypass || !state.componentPlayable(c.id)),
       ('Volume · Pan', '${(layer.volume * 100).round()}%', Neon.yellow, false),
