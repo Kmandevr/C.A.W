@@ -41,9 +41,9 @@ class StartCard {
 
 const startCards = [
   StartCard('new instrument', Icons.piano_outlined, Neon.green, 'New instrument', 'C++ that plays a track\'s notes',
-      'class Synth : caw::InstrumentProcessor\n  render(voice, out) { sine(); }'),
+      'class Synth : public caw::InstrumentProcessor\n  void onNote(const caw::NoteMessage& m)'),
   StartCard('new effect', Icons.tune, Neon.pink, 'New effect', 'C++ that shapes a track\'s sound',
-      'void process(StereoProcessBlock& b)\n  out[i] = in[i] * drive;'),
+      'void process(const caw::StereoProcessBlock& block)\n  block.outputLeft[i] = block.inputLeft[i];'),
   StartCard('new pattern', Icons.queue_music, Neon.yellow, 'New pattern', 'Notes for a track, as text or a piano roll',
       '// at  note  len  vel\n0     C4    1/4  0.8'),
 ];
