@@ -6,6 +6,10 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: The engine carries inefficient plug-ins; efficient ones are easy to write (owner)
+
+**Decision (owner):** "we have to build around people who aren't going to make very efficient plugins. We should also make it very easy to make them efficient as well." The performance goal for a whole project on the owner's phone (Galaxy S22+, 25–30% CPU on 2026-11-10) is 15–20%, reached by engine and host work with the existing instruments unchanged; the built-in instruments are optimized later and separately. The SDK and the testing suite should make the efficient path the easy one (for example block-based helpers, letting the host skip silent voices, and showing each component's CPU cost). [Proposal] Which helpers to build is not decided yet.
+
 ## 2026-11-10: No fixed polyphony cap; the program sets its own (owner)
 
 **Decision (owner):** "remove the cap on how many notes a synth can play at once unless it's specified in the program; if someone wants to crash the program by abusing it, let them." The engine imposes no practical limit on held notes or note events: its note lists are sized very large when an instrument is set up (never grown on the audio thread, which would cause dropouts). A C++ instrument chooses its own voice count (`caw::VoicePool<Voice, N>`); the built-in instruments get generous counts. Overload is the user's responsibility, not a guarded limit.
