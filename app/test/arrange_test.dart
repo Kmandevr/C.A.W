@@ -148,15 +148,49 @@ void main() {
       await settle(tester);
     });
 
-    testWidgets('landscape puts the panel on the right, about 40% wide, and keeps every track', (tester) async {
+    testWidgets('landscape puts the panel on the right, two thirds wide; its edge resizes it and the size is saved',
+        (tester) async {
+      listenForHaptics(tester);
       await pumpArranger(tester, const Size(860, 400));
       await tester.tap(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
-      final panel = tester.getRect(find.byKey(const ValueKey('focus-panel')));
-      expect(panel.left, greaterThan(860 * 0.5));
-      expect(panel.width, closeTo(860 * 0.4, 20));
+      Rect panel() => tester.getRect(find.byKey(const ValueKey('focus-panel')));
+      expect(panel().left, greaterThan(860 * 0.25));
+      expect(panel().width, closeTo(860 * 2 / 3, 20));
       expect(find.byKey(const ValueKey('track-header-c')), findsOneWidget);
       expect(tester.takeException(), isNull);
+
+      // Grabbed, the edge grows and a ghost shows where the panel will land; it moves only on release.
+      final edge = find.byKey(const ValueKey('focus-panel-edge'));
+      final before = panel().width;
+      final g = await tester.startGesture(tester.getCenter(edge));
+      await g.moveBy(const Offset(20, 0));
+      await g.moveBy(const Offset(120, 0));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('focus-panel-ghost')), findsOneWidget);
+      expect(panel().width, before, reason: 'the ghost previews; the panel waits for the drop');
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('focus-panel-ghost')), findsNothing);
+      expect(panel().width, closeTo(before - 140, 6));
+      expect(s.settings.focusPanelShare, closeTo((before + 4 - 140) / 860, 0.02), reason: 'remembered in settings');
+      expect(haptics, contains('HapticFeedbackType.lightImpact'), reason: 'a grab');
+
+      // Near a half it snaps there, with a tick; a double-tap goes back to two thirds.
+      final g2 = await tester.startGesture(tester.getCenter(edge));
+      final toHalf = panel().right - 860 * 0.5 - 4 - tester.getCenter(edge).dx + 7;
+      await g2.moveBy(Offset(toHalf.sign * 20, 0));
+      await g2.moveBy(Offset(toHalf - toHalf.sign * 20 + 5, 0));
+      await tester.pump();
+      expect(find.text('½'), findsOneWidget);
+      await g2.up();
+      await tester.pumpAndSettle();
+      expect(s.settings.focusPanelShare, 0.5);
+      await tester.tap(edge);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(edge);
+      await tester.pumpAndSettle();
+      expect(s.settings.focusPanelShare, closeTo(2 / 3, 1e-9));
       await settle(tester);
     });
 

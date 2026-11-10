@@ -663,16 +663,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       });
     } else if (focused != null) {
       // Landscape and desktop: a right side panel; the tracks keep their full height.
-      body = LayoutBuilder(builder: (context, box) {
-        final w = layout == FocusLayout.side && MediaQuery.sizeOf(context).width >= 900
-            ? (box.maxWidth * 0.34).clamp(320.0, 480.0).toDouble()
-            : box.maxWidth * 0.4;
-        return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Expanded(child: _arrangement(context, callbacks)),
-          SizedBox(width: math.min(w, box.maxWidth - 120), child: SlideIn(from: const Offset(0.12, 0), child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4), child: panel(false)))),
-        ]);
-      });
+      // Its size is FocusSidePane's (focus_panel.dart): resizable on a phone, two thirds by default.
+      body = FocusSidePane(settings: s.settings, desktop: MediaQuery.sizeOf(context).width >= 900,
+        tracks: _arrangement(context, callbacks), panel: panel(false));
     } else {
       body = _arrangement(context, callbacks);
     }
