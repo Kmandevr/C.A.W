@@ -2,7 +2,7 @@
 title: App
 summary: The built Flutter app: eight workspaces, shared engine state, portable files, performance profiles, storage and CI.
 covers: [app/, engine/include/caw.h, engine/src/worker_api.cpp, engine/src/hardware.*, engine/src/execution.*, engine/src/scheduler.*]
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # App
@@ -21,7 +21,13 @@ The project model stores C++ component entries alongside existing project module
 
 ## Areas
 
-- **Top bar:**
+- **Frame** (`lib/ui/shell.dart`, `lib/ui/frame/`; owner's layout, `docs/decisions.md`): three sections, **Build**, **Files** and **Arrange** (`SectionController`, which also holds Build's open tabs and the track Arrange is focused on).
+  - **Phone portrait:** a slim status row on top (crow, project name for the project menu, tempo, CPU, ⋮ More for the Mixer, Automation, Export, Engine Lab and Plugin Builder as pages), the section in the middle, then the bottom transport (undo, redo, the position, stop, play, record) and the section bar. Both hide while the keyboard is open. Dragging sideways on the transport scrubs the playhead a bar at a time (`AppState.seekTo`); a downward swipe on the section bar brings the status row down within reach until the next tap.
+  - **Phone landscape:** a slim rail on the left instead of the section bar, the transport at the bottom.
+  - **Desktop and tablets** (900 dp wide, or a shortest side of 600 dp or more): the rail, the transport bar below, and the docking panels; the rail shows its section's panel.
+  - **Record:** while a MIDI keyboard is connected (Android), Record arms the selected track and starts playback; Stop writes the take as a new pattern clip (`lib/model/live_midi.dart`). Notes from the keyboard play the armed or selected track at any time.
+  - **Glass under strain:** after an audio overrun (for 20 s) or while the device is hot or saving power, floating surfaces drop the blur and redraw (`GlassStrainWatcher`).
+- **Status row / transport bar contents:**
   - the crow mark
   - the project name, which opens the project menu: rename, new blank project, new from a template, duplicate, open, delete and **Settings…**
   - undo and redo of project edits (`lib/model/history.dart`): one step per burst of edits (until a 600 ms pause, so a drag or a run of typing is one step), up to 100 steps; a project opened fresh starts with none. A burst that changed nothing (Run on unedited code) adds no step and keeps redo, and an undo also drops the library and automation undo steps and the time selection, which described the project before it. Ctrl+Z and Ctrl+Shift+Z do the same outside the piano roll, which keeps its own history, and outside a focused text field such as the code editor, which keeps its own text undo; the code editor shows the undone code
@@ -101,7 +107,12 @@ The project model stores C++ component entries alongside existing project module
   - a sequential in-memory queue holds up to 50 snapshot jobs, supports removal/clear, runs one render at a time and can cancel the current job while preserving remaining items
   - each queued item uses the native offline renderer or MIDI writer and asks for its own destination; the queue itself is not persisted across restarts. Batch/stem rendering and multi-destination automation remain incomplete
   - the system file picker saves each completed output; unsupported formats are not offered
-- **Files** (`lib/ui/file_manager_screen.dart`):
+- **Files** (`lib/ui/file_manager_screen.dart`, `lib/ui/files/`, `lib/model/files_catalog.dart`), like Unity's Project window:
+  - a folder tree (Favourites; Effects & instruments: Built-in, My C++ effects, .caw modules; Code: each C++ component's files and the .caw modules with their library folders; Audio & MIDI: patterns) beside an asset grid with type badges, a size slider (a list at the smallest), a breadcrumb, search across all folders and type filters. Below 560 dp wide the tree is a drawer. Packs are hidden until the app has packs.
+  - tap selects and shows the inspector (type, place, a C++ component's build state, parameters, the tracks using it, ▶ Solo preview, Open, favourite); double-tap opens a C++ component or .caw module in Build; a long press (or right-click) opens its menu: Open, Preview, Favourite, Rename, Duplicate (a C++ copy gets a new component id), Edit tags, Export .caw, Delete (which names the tracks using it first). Folder menus add a new C++ effect (blank pass-through, trusted as the user's own code, opened in Build), .caw effect, module or pattern, import a .caw module, and library folders.
+  - favourites are app-wide, in `files-favourites.json` next to `settings.json`
+  - effects, instruments and patterns can be dragged (`AssetDrag`); "+ effect" opens the same catalogue as a half sheet (`showAssetPicker`)
+  - the ⋯ menu keeps the earlier tools (`lib/ui/files/library_manager.dart`):
   - import/export portable `.cawproj` projects and `.caw` module source to user-chosen operating-system locations
   - project-local virtual folders support nested create, rename, safe delete, module moves and tags; deleting a folder moves modules to its parent rather than deleting source
   - search by module name/type/tags, saved searches, sort by name/type and flag identical module source
@@ -115,7 +126,7 @@ The project model stores C++ component entries alongside existing project module
   - guided creation from blank generators/effects or existing generator/effect templates; advanced workflow can select, clone, validate and package project modules
   - validates/runs through the existing engine, exposes generated parameters and packages native `.caw` source; cloning preserves the original and creates an independent project module
   - CLAP/VST3 binary targets, host sandboxing and per-plugin CPU/memory tests are not available until a native plugin SDK/host backend is integrated
-- **Layout:** the eight workspaces are docking panels (`lib/ui/shell.dart`, `lib/ui/dock/`), on phones too. Each screen shape (phone portrait, phone landscape, desktop at 900 px wide or more) keeps its own layout in Settings, saved shortly after a change. The Arrange preset shows the arrangement in one group and the other panels as tabs in a second: stacked in portrait, side by side otherwise. The transport's layout button offers the Arrange, Mix and Code presets and shows any panel. The keyboard area follows the panel touched last. All workspaces share the same AppState. Global shortcuts show a workspace's panel: Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
+- **Docking (desktop and tablets):** the workspaces are docking panels (`lib/ui/dock/`). A panel can also float in a window over the layout (⧉ on its tab strip): drag the title bar to move it, the corner to resize it, and dock it back from its title bar; floating windows are saved with the layout. Each screen shape keeps its own layout in Settings, saved shortly after a change. The Arrange preset shows the arrangement in one group and the other panels as tabs in a second: stacked in portrait, side by side otherwise. The transport's layout button offers the Arrange, Mix and Code presets and shows any panel. The keyboard area follows the panel touched last. All workspaces share the same AppState. Global shortcuts show a workspace's panel: Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
 - **Key:** stored with the project and sent to the engine as `key_root` and `key_scale`, so `scale`, `chord` and `arp` follow it. "None" leaves the engine's default, A minor.
 - **Library and pattern modules** make no sound of their own: layers, the Exporter and Solo preview don't use them as generators.
 
@@ -144,7 +155,7 @@ The in-app build and toolchain install exist (see the C++ platform note). When a
 - **Audio:** the device opens at start-up (48 kHz stereo, low-latency profile). When the app goes to the background while stopped, it closes the device, and it reopens it on return. Playing on in the background (an Android foreground service) is not in v1.
 - **Opening:** the app opens straight into the last project (`AppState.openStorage`) with the arrangement in front (the shell brings it forward once at launch, whatever the saved layout showed), or the "First loop" template on a first run or when the last project is gone. If the last project's file is damaged, or opening it fails, the template opens and a pink line under the transport says why; the damaged file stays in the projects folder. There is no startup screen. The project menu offers a new blank project, a new one from the template, and every saved project.
   - "First loop" has Kick, Bass and Hats layers of 1 bar each and a 3-bar Byte lead with Bitcrush over a 4-bar loop at 140 BPM, plus a muted Acid layer that plays the Acid synth from the Acid line pattern.
-- **Settings** (`lib/model/settings.dart`, `lib/ui/theme_editor.dart`): saved as `settings.json` next to `projects/`.
+- **Settings** (`lib/model/settings.dart`, `lib/ui/theme_editor.dart`): saved as `settings.json` next to `projects/`. Density is compact by default. The page opens with the open-beta version (`lib/version.dart`, 0.9.0-beta.1, equal to `pubspec.yaml`) and **Report a problem**, which copies a plain report (version, platform, the last 20 uncaught errors kept on the device by `ProblemLog`) to paste into a GitHub issue; the app sends nothing itself.
   - **Theme**, with a theme editor: each colour can be set with hue, saturation and brightness sliders or as hex, with a live preview and a glow switch. Themes can be saved, duplicated, imported and exported.
     - The built-in themes are Calm neon (the default), Night (dimmer, no glow) and Amber terminal.
     - Each theme has eight track colours (`layer1`–`layer8`), and new tracks cycle through all eight. A theme file without the newer slots takes them from Calm neon.

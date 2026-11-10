@@ -1,7 +1,7 @@
 ---
 title: Task 1 UI implementation handoff
 summary: Current UI implementation pointer and verified outstanding workflow gaps; no stale branch or CI snapshot.
-updated: 2026-11-09
+updated: 2026-11-10
 covers: [app/lib/ui/, app/lib/model/cpp_component.dart, app/lib/model/project.dart, app/test/project_test.dart]
 ---
 
@@ -22,10 +22,10 @@ Implemented UI/workflow foundations include:
 - Mixer controls for tracks and master output, plus a read-only Engine Lab scope/spectrum and diagnostics.
 - Track/folder volume-pan automation.
 - Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue.
-- Files workspace for project/module import/export, project-local organization, tags, saved searches and project restore points.
+- Files: a Unity-style tree, grid and inspector over built-in effects, C++ components, .caw modules and patterns, with drag and the effect picker; project/module import/export, library folders, tags, saved searches and restore points stay in its ⋯ menu.
 - Plugin Builder for validating and packaging native .caw source modules.
 - Motion rules and the Motion, Haptics and Glow settings (`lib/ui/motion.dart`), the Glass setting and the glass look across the app (`lib/ui/glass.dart`: ambient background, see-through panels and tracks, frosted sheets, outlined controls), and golden tests with real fonts (`test/golden_util.dart`). No screen animates with them yet.
-- The docking shell (`lib/ui/shell.dart`, `lib/ui/dock/`): the eight workspaces are docking panels, on phones too.
+- The frame (`lib/ui/shell.dart`, `lib/ui/frame/`): Build, Files and Arrange as sections on phones (bottom transport and section bar in portrait, a rail in landscape), and docking panels that can float on desktop and tablets ([app](app.md), Frame).
 
 The owner's UI redesign (2026-11-04) is specified in the [UI plan](ui-plan.md), with steps U0–U8.
 

@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across eight shared-state workspaces, with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-09
+updated: 2026-11-10
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -70,13 +70,13 @@ The application shell shows eight workspaces as docking panels: Builder (Code), 
 
 **Glass (on by default):** a soft ambient background behind see-through panels, cards, track headers and the transport; bottom sheets slide up as frosted glass; sliders, level bars, switches, buttons, M/S toggles and clips have a light fill and a solid outline ([App](app.md), Look).
 
-**Transport:** the project menu, the tempo (tap the BPM to type it, long-press it for a tap-tempo pad; T taps too), the playhead as bar.beat while playing, CPU, undo and redo of project edits, the layout button and Play.
+**The frame (owner, 2026-11-09):** three sections, Build, Files and Arrange; the other workspaces fold into them or open from ⋮ More ([app](app.md), Frame).
 
-**Phone (portrait):** transport at the top, the arrangement above, and the other panels as tabs below it. Inside the arrangement, the track headers sit beside a horizontally scrolling song timeline, with the Arranger's compact mixer panel below the timeline.
+**Phone (portrait):** a slim status row (project, tempo, CPU, More) on top; the section; then the transport in thumb reach (undo, redo, position, stop, play, record; drag sideways to scrub) and the section bar. Both hide while the keyboard is open, and a downward swipe on the section bar brings the status row within reach.
 
-**Phone (landscape):** the arrangement and the other panels side by side. Track headers stay aligned with their lanes while the song timeline scrolls horizontally.
+**Phone (landscape):** a slim rail on the left, the section, the transport at the bottom.
 
-**Desktop / wide:** persistent transport, and the arrangement beside the other panels. Track headers remain fixed beside the horizontally scrolling timeline; the Arranger's mixer panel can be opened without replacing the arrangement, and the dedicated Mixer remains a separate detailed workspace; Files exposes portable project/module import and export.
+**Desktop, tablets:** the rail, the transport bar and docking panels, which can also float in windows. Files is a Unity-style tree, grid and inspector here; on a phone the tree is a drawer.
 
 The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 

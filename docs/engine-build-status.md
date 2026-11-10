@@ -2,7 +2,7 @@
 title: Modular engine implementation status
 summary: Evidence-based status of the unified engine build, what is implemented, what is only a contract, and the next engineering stages.
 covers: [engine/, app/lib/engine/, app/lib/model/app_state.dart, app/lib/model/lane_curve.dart, app/lib/model/pattern_doc.dart, app/lib/model/poller.dart, app/lib/model/project.dart, examples/cpp/minimal/, scripts/caw-component-build.js, scripts/caw-component-build.test.js, .github/workflows/cpp-components.yml]
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Modular engine implementation status
