@@ -22,7 +22,9 @@ extern "C" {
  * through LLD in this process; any other job fails the run. Temporary files go to $TMPDIR.
  * Returns the exit code (0 success). *output, when output is not NULL, receives every diagnostic
  * the driver, compiler and linker wrote, as UTF-8 text in Clang's usual format; free it with
- * caw_compiler_free. Not reentrant: run one build at a time per process. */
+ * caw_compiler_free. What Clang prints to standard output during the run (code-completion results from
+ * "-Xclang -code-completion-at=<file>:<line>:<column>", one "COMPLETION: ..." line each) is captured (POSIX hosts)
+ * and follows the diagnostics in *output. Not reentrant: run one build at a time per process. */
 CAW_COMPILER_API int caw_compiler_run(int argc, const char* const* argv, char** output);
 CAW_COMPILER_API void caw_compiler_free(char* text);
 /* The LLVM version the library was built from, e.g. "23.1.5". */
