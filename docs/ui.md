@@ -66,6 +66,7 @@ The owner asked for the arranger to work like REAPER's (#172, [decisions](decisi
 - **Creating items:** Ctrl+drag in an empty area of the arrange view creates an empty item (UG 7.35, p. 149); in pencil mode, Ctrl+drag draws a copy of the selected item, snapped (UG 7.17, p. 138). A plain drag there makes a time selection (UG 7.35, p. 149).
 - **Snapping:** Alt+S toggles snap; snap settings decide whether items snap to the grid, other items, markers or the cursor, within a snap distance in pixels (UG 7.26, p. 141).
 - **Clicks on an item:** a click selects it and moves the edit cursor; Shift adds to the selection, Ctrl toggles it (UG 7.5, p. 132; 7.35, p. 149). A double-click opens the item's properties (UG 7.5, p. 132); on a MIDI item it opens the MIDI editor (UG 13.5, p. 242). Shift+double-click sets the time selection to the item, Ctrl+double-click the loop (UG 2.17, p. 46).
+- **The rest of REAPER's flow** (templates, recording, takes, editing, the MIDI editor, routing, automation, the mixer, markers, actions, render, freeze) is in [REAPER's flow and C.A.W's](reaper-flow.md), with the gaps and a build plan.
 - **[Assumption]** what the edit cursor does while an item is dragged, and how REAPER scrolls while dragging at the view's edge, are not described in the guide.
 
 ## Arrangement workspace
@@ -179,7 +180,7 @@ The broader UI specification below records design intent as well as current beha
 
 ## Not yet implemented
 
-Audio recording, MIDI recording, audio clips, clip-following automation and module/global parameter automation are not part of the current implementation. They are planned at the later stages in the permanent [roadmap](roadmap.md).
+Audio recording, audio clips and clip-following automation are not part of the current implementation; MIDI recording is limited to a connected USB keyboard ([app](app.md), Frame: Record). They are planned at the later stages in the permanent [roadmap](roadmap.md).
 
 ## Performance profiles
 

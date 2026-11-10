@@ -221,7 +221,7 @@ Recording is part of the product direction and the last stage before Release 1. 
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 7.1 | MIDI recording from devices and on-screen controls | Planned | both | 5.1, 5.5 | Not built |
+| 7.1 | MIDI recording from devices and on-screen controls | Partial | both | 5.1, 5.5 | With a USB MIDI keyboard connected (Android), Record writes a take as a new pattern clip ([app](app.md)); no on-screen keys, metronome, count-in, loop takes or record modes |
 | 7.2 | Audio input selection, channel configuration and input monitoring | Planned | both | 5.6 | No audio input path exists |
 | 7.3 | Multitrack audio recording to arrangement tracks | Planned | both | 3.2, 7.2 | Not built |
 | 7.4 | Input latency measurement and compensation | Planned | engine | 7.2 | Not built |

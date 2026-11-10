@@ -6,6 +6,10 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Match REAPER's whole flow, made easy (owner)
+
+**Decision (owner):** "look at the flow of REAPER and match that as well", after the arranger (#172), and "The goal is to make it really easy to use." REAPER's flow is followed where it is simple and direct; where it is powerful but fiddly (deep dialogs, modifier gestures, the routing matrix) C.A.W. offers one obvious easy path with sensible defaults and keeps REAPER's depth behind it. The study, the gaps and the plan ranked by "makes a song easier to finish" are in [REAPER's flow and C.A.W's](reaper-flow.md); nothing in it is built, and the phone look of each new screen waits for the owner ([vision](vision.md#open-owner-decisions)).
+
 ## 2026-11-10: A complete built-in suite with visual device UIs (owner)
 
 **Decision (owner):** the effects get the flagship synth's treatment, "everything you would need to make something, already built in" (#173).
