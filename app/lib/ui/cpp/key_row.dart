@@ -1,7 +1,10 @@
 // The symbol key row above the soft keyboard: a trackpad cursor key, code symbols with held variants, undo/redo.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
 
@@ -61,6 +64,10 @@ class CodeKeyRow extends StatefulWidget {
 
   static const height = 40.0;
 
+  /// How many times the row has shown its hint this run: the first [hintTimes] showings explain the hidden moves.
+  static int hintsShown = 0;
+  static const hintTimes = 2;
+
   @override
   State<CodeKeyRow> createState() => _CodeKeyRowState();
 }
@@ -70,14 +77,32 @@ class _CodeKeyRowState extends State<CodeKeyRow> {
   int _page = 0;
   OverlayEntry? _variants;
 
+  /// The hint over the row (hold for more, swipe for more, drag ⌖), for a few seconds on its first showings.
+  bool _hint = false;
+  Timer? _hintTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (CodeKeyRow.hintsShown < CodeKeyRow.hintTimes) {
+      CodeKeyRow.hintsShown++;
+      _hint = true;
+      _hintTimer = Timer(const Duration(seconds: 5), () {
+        if (mounted) setState(() => _hint = false);
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _hintTimer?.cancel();
     _variants?.remove();
     _pages.dispose();
     super.dispose();
   }
 
   void _type(String text) {
+    Haptics.tap();
     widget.target.insert(text);
     widget.onChanged?.call();
     setState(() {});
@@ -172,7 +197,7 @@ class _CodeKeyRowState extends State<CodeKeyRow> {
             ),
           for (final k in keys) _symbol(k),
         ]);
-    return Container(
+    final row = Container(
       height: CodeKeyRow.height,
       decoration: BoxDecoration(color: Neon.panel, border: Border(top: BorderSide(color: Neon.line))),
       child: Row(children: [
@@ -205,6 +230,34 @@ class _CodeKeyRowState extends State<CodeKeyRow> {
         _icon('key redo', Icons.redo, t.canRedo ? () { t.redo(); widget.onChanged?.call(); setState(() {}); } : null, tip: 'Redo'),
       ]),
     );
+    return Stack(clipBehavior: Clip.none, children: [
+      row,
+      // Above the row, over the code: what is not visible on the keys themselves.
+      Positioned(
+        left: 0,
+        right: 0,
+        top: -26,
+        child: IgnorePointer(
+          child: AnimatedOpacity(
+            opacity: _hint ? 1 : 0,
+            duration: const Duration(milliseconds: 250),
+            child: Center(
+              child: Container(
+                key: const ValueKey('key row hint'),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Neon.panelHi.withValues(alpha: 0.95),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Neon.blue.withValues(alpha: 0.4)),
+                ),
+                child: Text('Hold a key for more · swipe for :: & * [ ] · drag ⌖ to move',
+                    style: Neon.code(size: 10.5, color: Neon.text)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ]);
   }
 }
 

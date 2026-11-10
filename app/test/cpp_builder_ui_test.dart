@@ -78,6 +78,21 @@ void main() {
     expect(t.undos, 1);
   });
 
+  testWidgets('the key row explains its hidden moves on its first showings, then stays quiet', (tester) async {
+    CodeKeyRow.hintsShown = 0;
+    double opacity() => tester
+        .widget<AnimatedOpacity>(find.ancestor(of: find.byKey(const ValueKey('key row hint')), matching: find.byType(AnimatedOpacity)))
+        .opacity;
+    for (var i = 0; i < CodeKeyRow.hintTimes; i++) {
+      await tester.pumpWidget(host(Align(alignment: Alignment.bottomCenter, child: CodeKeyRow(key: ValueKey(i), target: FakeTarget()))));
+      expect(opacity(), 1);
+      await tester.pump(const Duration(seconds: 6));
+      expect(opacity(), 0);
+    }
+    await tester.pumpWidget(host(Align(alignment: Alignment.bottomCenter, child: CodeKeyRow(key: const ValueKey('again'), target: FakeTarget()))));
+    expect(opacity(), 0);
+  });
+
   testWidgets('the cursor key moves the cursor like a trackpad; held, it selects', (tester) async {
     final t = FakeTarget()..text = 'abcdefghijklmnopqrstuvwxyz';
     await tester.pumpWidget(host(Align(alignment: Alignment.bottomCenter, child: CodeKeyRow(target: t))));
