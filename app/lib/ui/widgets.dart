@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import 'motion.dart';
 import 'theme.dart';
 import 'glass.dart';
 
@@ -599,4 +600,22 @@ class BarsField extends StatelessWidget {
         tooltip: 'One bar more', visualDensity: VisualDensity.compact),
     ]);
   }
+}
+
+/// A double-tap on [child] (a slider, usually) sets it back to its default (owner, 2026-11-10: every slider and knob
+/// resets on a double-tap). A drag still belongs to the slider; a single tap waits the double-tap time first.
+class ResetOnDoubleTap extends StatelessWidget {
+  const ResetOnDoubleTap({super.key, required this.onReset, required this.child});
+  final VoidCallback? onReset;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => onReset == null
+      ? child
+      : GestureDetector(
+          onDoubleTap: () {
+            Motion.tick();
+            onReset!();
+          },
+          child: child);
 }

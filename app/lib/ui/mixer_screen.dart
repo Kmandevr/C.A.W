@@ -324,13 +324,13 @@ class ChannelStrip extends StatelessWidget {
               ],
               onChanged: (id) { state.moveLayerIntoFolder(layer, id); },
             ))),
-          SizedBox(height: 40, child: Slider(
+          SizedBox(height: 40, child: ResetOnDoubleTap(onReset: () => state.mixLayer(layer, pan: 0), child: Slider(
             key: ValueKey('pan-${layer.id}'),
             value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1, activeColor: Neon.blue,
             semanticFormatterCallback: (v) => v.abs() < .01 ? '${layer.name} pan centre'
               : '${layer.name} pan ${(v.abs() * 100).round()}% ${v < 0 ? 'left' : 'right'}',
             onChanged: (v) => state.mixLayer(layer, pan: v),
-          )),
+          ))),
           _TypedValue(key: ValueKey('pan-value-${layer.id}'), text: _panText(layer.pan), tooltip: 'Type ${layer.name} pan',
             color: Neon.blue, onTap: () => typeValue(context, title: 'Pan (C, 30L, 30R or -30)',
               initial: _panText(layer.pan), parse: _parsePan, apply: (v) => state.mixLayer(layer, pan: v))),

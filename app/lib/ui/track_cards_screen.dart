@@ -252,11 +252,8 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
       Row(children: [
         const SizedBox(width: 56, child: Text('Master', style: TextStyle(color: Neon.dim))),
         Expanded(
-          child: Slider(
-            value: p.master,
-            activeColor: Neon.blue,
-            onChanged: (v) => s.editProject((p) => p.master = v),
-          ),
+          child: SizedBox(height: 40, child: VolumeFader(value: p.master, vertical: false, color: Neon.blue,
+            label: 'Master level', defaultGain: 0.7, onChanged: s.setMaster)),
         ),
       ]),
       Theme(
@@ -854,13 +851,13 @@ class _TrackSheet extends StatelessWidget {
             const SizedBox(width: 56, child: Text('Pan', style: TextStyle(color: Neon.dim))),
             const Text('L', style: TextStyle(color: Neon.dim, fontSize: 12)),
             Expanded(
-              child: Slider(
+              child: ResetOnDoubleTap(onReset: () => s.mixLayer(layer, pan: 0), child: Slider(
                 value: layer.pan,
                 min: -1,
                 max: 1,
                 activeColor: color,
                 onChanged: (v) => s.mixLayer(layer, pan: v.abs() < 0.04 ? 0 : v),
-              ),
+              )),
             ),
             const Text('R', style: TextStyle(color: Neon.dim, fontSize: 12)),
           ]),

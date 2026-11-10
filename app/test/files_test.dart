@@ -155,6 +155,7 @@ void main() {
     expect(tester.widget<Slider>(slider).value, 0);
     expect(find.text('FX'), findsWidgets); // list rows show the type badge next to the name
     expect(tester.getSize(find.byKey(const ValueKey('mod:crush'))).height, 34);
+    await tester.pump(const Duration(milliseconds: 400)); // the slider's double-tap reset waits this long
   });
 
   testWidgets('the asset picker lists Built-in and My effects and returns the one tapped', (tester) async {

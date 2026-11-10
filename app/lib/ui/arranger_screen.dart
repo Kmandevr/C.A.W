@@ -588,17 +588,19 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       const SizedBox(width: 6),
       const Tooltip(message: 'Time zoom', child: Icon(Icons.swap_horiz, size: 16, color: Neon.dim)),
       icon(Icons.remove, 'Zoom out', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget / 1.4 : zoom / 1.4)),
-      Expanded(flex: 3, child: Slider(key: const ValueKey('arrange-zoom-time'),
+      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => _animateZoom(18), child: Slider(key: const ValueKey('arrange-zoom-time'),
         value: (math.log(zoom / minZoom) / ratio).clamp(0.0, 1.0).toDouble(),
-        onChanged: (v) { _zoomAnim.stop(); _setZoom(minZoom * math.exp(v * ratio)); })),
+        onChanged: (v) { _zoomAnim.stop(); _setZoom(minZoom * math.exp(v * ratio)); }))),
       icon(Icons.add, 'Zoom in', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget * 1.4 : zoom * 1.4)),
       const SizedBox(width: 6),
       const Tooltip(message: 'Track height', child: Icon(Icons.swap_vert, size: 16, color: Neon.dim)),
-      Expanded(flex: 2, child: Slider(key: const ValueKey('arrange-zoom-height'),
+      Expanded(flex: 2, child: ResetOnDoubleTap(onReset: () {
+        widget.state.settings.update((x) => x.trackHeight = 0).then((_) { if (mounted) setState(() {}); });
+      }, child: Slider(key: const ValueKey('arrange-zoom-height'),
         value: h.clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble(),
         min: Settings.minTrackHeight, max: Settings.maxTrackHeight,
         onChanged: (v) => setState(() => _dragTrackH = v),
-        onChangeEnd: (_) => _saveHeaderSize())),
+        onChangeEnd: (_) => _saveHeaderSize()))),
     ]));
   }
 
@@ -1292,8 +1294,8 @@ class _ArrangementMixer extends StatelessWidget {
                     SizedBox(width: 52, child: Text(VolumeTaper.label(l.volume), textAlign: TextAlign.right,
                       style: Neon.code(size: 9, color: Neon.dim)))]),
                   Row(children: [const Text('L', style: TextStyle(color: Neon.dim, fontSize: 10)),
-                    Expanded(child: Slider(value: l.pan, min: -1, max: 1,
-                      onChanged: (v) => state.mixLayer(l, pan: v))),
+                    Expanded(child: ResetOnDoubleTap(onReset: () => state.mixLayer(l, pan: 0), child: Slider(
+                      value: l.pan, min: -1, max: 1, onChanged: (v) => state.mixLayer(l, pan: v)))),
                     const Text('R', style: TextStyle(color: Neon.dim, fontSize: 10))]),
                 ]))),
             ]))),

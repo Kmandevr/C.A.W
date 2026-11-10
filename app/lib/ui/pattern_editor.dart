@@ -27,6 +27,7 @@ import 'key_router.dart';
 import 'note_expression.dart';
 import 'motion.dart';
 import 'theme.dart';
+import 'widgets.dart';
 import 'arrange/track_color.dart';
 import 'glass.dart';
 
@@ -1766,16 +1767,17 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       const SizedBox(width: 6),
       const Tooltip(message: 'Time zoom', child: Icon(Icons.swap_horiz, size: 16, color: Neon.dim)),
       icon(Icons.remove, 'Zoom out', () => setState(() => _zoomX(_pxPerStep / 1.25))),
-      Expanded(flex: 3, child: Slider(key: const ValueKey('roll-zoom-time'),
+      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => setState(() => _zoomX(28)), child: Slider(key: const ValueKey('roll-zoom-time'),
         value: (math.log(_pxPerStep / _minPx) / ratio).clamp(0.0, 1.0).toDouble(),
-        onChanged: (v) => setState(() => _zoomX(_minPx * math.exp(v * ratio))))),
+        onChanged: (v) => setState(() => _zoomX(_minPx * math.exp(v * ratio)))))),
       icon(Icons.add, 'Zoom in', () => setState(() => _zoomX(_pxPerStep * 1.25))),
       const SizedBox(width: 6),
       const Tooltip(message: 'Row height', child: Icon(Icons.swap_vert, size: 16, color: Neon.dim)),
-      Expanded(flex: 2, child: Slider(key: const ValueKey('roll-zoom-rows'),
+      Expanded(flex: 2, child: ResetOnDoubleTap(onReset: () { setState(() => _zoomY(const RollLook().rowHeight)); _saveRow(); },
+        child: Slider(key: const ValueKey('roll-zoom-rows'),
         value: _rowH.clamp(_minRow, _maxRow).toDouble(), min: _minRow, max: _maxRow,
         onChanged: (v) => setState(() => _zoomY(v)),
-        onChangeEnd: (_) => _saveRow())),
+        onChangeEnd: (_) => _saveRow()))),
     ]));
   }
 

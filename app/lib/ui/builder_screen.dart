@@ -827,8 +827,9 @@ class _BuilderTrackControlsState extends State<_BuilderTrackControls> {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('PAN · ${layer.pan.abs() < .01 ? 'CENTER' : layer.pan < 0 ? 'LEFT' : 'RIGHT'}',
                 style: Neon.code(size: 10, color: Neon.blue)),
-              Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
-                activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v)),
+              ResetOnDoubleTap(onReset: () => state.mixLayer(layer, pan: 0), child: Slider(
+                value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
+                activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v))),
             ])),
           ])),
           if (showMix) Row(children: [

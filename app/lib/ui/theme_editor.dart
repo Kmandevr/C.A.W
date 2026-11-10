@@ -120,11 +120,14 @@ class SettingsPage extends StatelessWidget {
               title: Text(settings.reactiveGlow == 0
                   ? 'Music-reactive glow: off'
                   : 'Music-reactive glow: ${(settings.reactiveGlow * 100).round()}%'),
-              subtitle: Slider(
-                value: settings.reactiveGlow,
-                divisions: 20,
-                onChanged: (v) => settings.adjust((s) => s.reactiveGlow = v),
-                onChangeEnd: (_) => settings.save(),
+              subtitle: ResetOnDoubleTap(
+                onReset: () => settings.update((s) => s.reactiveGlow = Settings().reactiveGlow),
+                child: Slider(
+                  value: settings.reactiveGlow,
+                  divisions: 20,
+                  onChanged: (v) => settings.adjust((s) => s.reactiveGlow = v),
+                  onChangeEnd: (_) => settings.save(),
+                ),
               ),
             ),
             // Meters fall like REAPER's, at a rate in dB per second (owner, 2026-11-10: faster than the old 24).
@@ -604,12 +607,14 @@ class _ColorPickerState extends State<ColorPicker> {
 /// The roll's sizes, look and touch choices; sliders show the value while dragging and save when let go.
 List<Widget> _rollSettings(Settings settings) {
   final r = settings.roll;
+  const d = RollLook();
   Widget slider(String label, IconData icon, double value, double min, double max, String Function(double) show,
-      RollLook Function(double) set) {
+      RollLook Function(double) set, double reset) {
     return ListTile(
       leading: Icon(icon, color: Neon.blue),
       title: Text('$label: ${show(value)}', style: Neon.code(size: 14)),
-      subtitle: Slider(
+      // Double-tap: the look's default for this one.
+      subtitle: ResetOnDoubleTap(onReset: () => settings.update((s) => s.roll = set(reset)), child: Slider(
         min: min,
         max: max,
         value: value.clamp(min, max),
@@ -618,22 +623,22 @@ List<Widget> _rollSettings(Settings settings) {
           settings.preview(null);
         },
         onChangeEnd: (v) => settings.update((s) => s.roll = set(v)),
-      ),
+      )),
     );
   }
 
   String px(double v) => '${v.round()} px';
   return [
-    slider('Row height', Icons.height, r.rowHeight, 10, 40, px, (v) => r.copyWith(rowHeight: v.roundToDouble())),
+    slider('Row height', Icons.height, r.rowHeight, 10, 40, px, (v) => r.copyWith(rowHeight: v.roundToDouble()), d.rowHeight),
     slider('Velocity lane', Icons.equalizer, r.velocityLane, 32, 160, px,
-        (v) => r.copyWith(velocityLane: v.roundToDouble())),
+        (v) => r.copyWith(velocityLane: v.roundToDouble()), d.velocityLane),
     slider('Chance lane', Icons.casino_outlined, r.chanceLane, 24, 120, px,
-        (v) => r.copyWith(chanceLane: v.roundToDouble())),
+        (v) => r.copyWith(chanceLane: v.roundToDouble()), d.chanceLane),
     slider('Grid lines', Icons.grid_4x4, r.gridStrength, 0.2, 2, (v) => '${(v * 100).round()}%',
-        (v) => r.copyWith(gridStrength: (v * 10).round() / 10)),
-    slider('Grab zone', Icons.pan_tool_alt_outlined, r.grab, 6, 40, px, (v) => r.copyWith(grab: v.roundToDouble())),
+        (v) => r.copyWith(gridStrength: (v * 10).round() / 10), d.gridStrength),
+    slider('Grab zone', Icons.pan_tool_alt_outlined, r.grab, 6, 40, px, (v) => r.copyWith(grab: v.roundToDouble()), d.grab),
     slider('Hold for extras', Icons.touch_app_outlined, r.holdMs.toDouble(), 250, 1500, (v) => '${v.round()} ms',
-        (v) => r.copyWith(holdMs: (v / 50).round() * 50)),
+        (v) => r.copyWith(holdMs: (v / 50).round() * 50), d.holdMs.toDouble()),
     ListTile(
       leading: Icon(Icons.piano, color: Neon.yellow),
       title: const Text('Key names'),

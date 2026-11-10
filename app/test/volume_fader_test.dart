@@ -1,5 +1,6 @@
 // Volume faders like REAPER's: a dB taper over the linear gain, dB labels and typing, fine drags, double-tap 0 dB.
 import 'package:caw/ui/volume_fader.dart';
+import 'package:caw/ui/widgets.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -61,5 +62,20 @@ void main() {
     await tester.tap(f);
     await tester.pumpAndSettle();
     expect(gain, 1, reason: 'double-tap: 0 dB');
+  });
+
+  testWidgets('a slider wrapped in ResetOnDoubleTap still drags, and a double-tap resets it', (tester) async {
+    var pan = 0.0;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Center(child: SizedBox(width: 300,
+      child: StatefulBuilder(builder: (context, setState) => ResetOnDoubleTap(onReset: () => setState(() => pan = 0),
+        child: Slider(key: const ValueKey('pan'), value: pan, min: -1, max: 1, onChanged: (v) => setState(() => pan = v)))))))));
+    await tester.drag(find.byKey(const ValueKey('pan')), const Offset(80, 0));
+    await tester.pumpAndSettle();
+    expect(pan, greaterThan(0.3));
+    await tester.tap(find.byKey(const ValueKey('pan')));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(const ValueKey('pan')));
+    await tester.pumpAndSettle();
+    expect(pan, 0);
   });
 }
