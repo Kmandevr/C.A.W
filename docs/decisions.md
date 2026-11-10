@@ -6,6 +6,10 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Release APK splits its Dart debug info out; no obfuscation (app performance pass)
+
+**Decided on the owner's behalf ("optimize everything", #174), to confirm:** CI builds the APK with `--split-debug-info` and keeps the symbols as an artifact (and a release asset), about 0.73 MB off the download; release stack traces need `flutter symbolize` with them. `--obfuscate` is not used: it saves only 0.13 MB more and garbles type names in error texts users see. Project files are written as compact JSON (the indented form cost a second encode per save). Signing is unchanged. [performance](performance.md#release-build)
+
 ## 2026-11-10: Frame and feel, as built (choices to confirm)
 
 **Built** from the evening round's frame decisions ([app](app.md), Frame; Motion and feel). **Choices made on the owner's behalf, to confirm:**

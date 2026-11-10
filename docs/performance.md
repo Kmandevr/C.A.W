@@ -1,7 +1,7 @@
 ---
 title: Performance
 summary: How C.A.W is measured for low-end devices, the audit's ranked bottlenecks with evidence, fixes with before/after numbers, and what remains.
-covers: [engine/bench/, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/test/poller_test.dart, app/test/rebuild_test.dart]
+covers: [engine/bench/, app/lib/model/poller.dart, app/lib/model/settings.dart, app/lib/ui/motion.dart, app/test/poller_test.dart, app/test/rebuild_test.dart, app/test/perf_*]
 updated: 2026-11-10
 ---
 
@@ -94,7 +94,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 
 - **Stopped:** the callback just writes silence; costs about 0 µs.
 - **Offline WAV exports:** run on their own `Engine` instance through the native bounded worker pool, so they never touch live playback state. They compete for CPU only; Android callback-thread priority still requires physical-device verification.
-- **MIDI pattern import/export:** the native conversion API is currently called synchronously from the UI isolate. It is not routed through the native worker pool. Large-file responsiveness has not been benchmarked; move it off the UI isolate if measurements show a stall.
+- **MIDI files:** a `.mid` import is read and converted on another isolate (the Dart converter, `lib/ui/midi_file_actions.dart`); exports are built in Dart, and the engine's MIDI 2.0 clip converter runs in `Isolate.run`.
 - **Live code edits:**
   - A swap compiles on the control thread, about 0.4–0.5 ms for 16 layers.
   - For 20 ms the audio thread runs both the old and the new code to crossfade.
@@ -151,7 +151,6 @@ Timed release run after the fixes (same server, a single run, so noisy):
 
 ## UI update isolation
 - Mixer master gain now uses a dedicated native command (`caw_engine_set_master`) with a 5 ms audio-thread ramp. Dragging the master slider no longer serializes and recompiles the entire project; the UI updates through the scoped `values` notifier. This removes project-compilation work from the master-gain gesture, but device-level latency and CPU savings have not yet been benchmarked.
-- MIDI pattern import/export is still synchronous on the UI isolate before/after the system file picker. This is a known potential UI stall for larger files; it has not been benchmarked or moved to the native worker pool.
 
 
 - The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
@@ -290,6 +289,44 @@ The owner's measure after the evening round (#174): the basic project at 35–40
 - **Multi-core: not built.** The First loop's audio work is about 280 M instructions a second, about 375,000 per 64-frame chunk (the engine's step), split over six tracks of 30,000–130,000. Handing tracks to worker threads needs a wake-up and a barrier per chunk, 750 a second per worker; on Android a futex wake and the barrier's return take [Assumption, typical figures, not measured here] 5–20 µs, about what a whole track's chunk costs, and spinning instead keeps big cores awake, which costs battery. It would cut the callback's time on heavy projects (16+ busy tracks), not the CPU used; so it waits for a phone measurement showing the callback near its budget, and would be gated on the chunk's measured cost (more than about 200 µs) and on there being at least four heavy tracks.
 - **The phone's hardware:** the device is opened with miniaudio's low-latency profile, which asks AAudio for its low-latency (MMAP) path ([engine](engine.md), the device buffer); the new buffer setting's Auto mode opens a 1024-frame buffer while not recording (about 47 callbacks a second instead of 250–500), and Battery also leaves the fast path. Flush-to-zero stays off (the owner has not decided; the kernels keep their own denormal guards).
 - **Quality:** Eco caps unison at 4 copies, turns the saturator's oversampling off and thins the reverbs: the Pad −17 %, the First loop −6 % (the Lead has 3 copies, below the cap).
+
+## App performance pass (2026-11-10)
+
+The owner's evening round (#174): "optimize everything". Each hot path has a benchmark test that counts work (`app/test/perf_*_test.dart`, run with `flutter test`; the live-drag one needs `CAW_LIB`); they print `BENCH` lines, and the device editors' frame counts are asserted so they can't grow back. The project is the First loop grown to 16 tracks with 8 clips each, 64-note patterns, an effect and a volume lane per track (`test/perf_fixture.dart`). Numbers are from the Flutter test VM (JIT, debug asserts) on the cloud server, so compare before and after; [Assumption] release AOT on the S22+ is faster in absolute terms and keeps the ratios. Frame and meter work is in [app](app.md) (Frame performance, `test/frame_bench_test.dart`).
+
+| Hot path | Before | After |
+| --- | --- | --- |
+| Piano-roll drag heard live, UI isolate per 30 Hz step (`perf_model_bench_test`) | 458 µs (the whole project JSON rebuilt) | 12–17 µs (spliced into a cached JSON) |
+| The same step's round trip through the engine (`perf_live_bench_test`) | 3.0 ms | 1.8–2.2 ms |
+| Project encodes per burst of edits (autosave + undo snapshot) | 825 µs indented + 564 µs compact | 564 µs, once |
+| Device editor open, stopped, with full motion (ping-pong delay, frames asked for in one second at 120 Hz, `perf_device_bench_test`) | 119 | 30 |
+| The same, playing (display data at 30 Hz) | 120 | 60 |
+| Arranger sideways scroll, render objects painted in 30 frames (`perf_arrange_bench_test`) | 5,280 | 750 |
+| Arranger vertical scroll, the same | 48,240 | 0 (the layers move) |
+| Arranger pinch zoom, widgets rebuilt in 30 frames | 126,690 | 76,620 (the headers kept) |
+| Startup project list, 20 saved projects of about 0.4 MB (`perf_startup_bench_test`) | 110 ms, UI isolate blocked 73.5 ms, longest stall 10.6 ms | 77 ms, blocked 11.6 ms, longest 4.4 ms |
+| C++ completion per keystroke, 5,000-line file (`perf_cpp_bench_test`) | 5.5 ms | 2.2 ms |
+
+- **What changed:**
+  - `AppState.liveEngineJson` builds the engine JSON once around a marker and splices each step's text in; any save, sync, settings change or value tick (a knob moved live) drops the cache, and a test checks it against a full build after live knob and volume moves.
+  - Autosave writes compact JSON and the undo step settled 100 ms later reuses that text; opening a project, a restore point and the project list decode in `Isolate.run` (the decoded map comes back without a copy).
+  - `MotionClock` (device motion) asks for one frame per 33 ms step and reads the frame's time, instead of a Ticker that asked for every refresh; it stops in the background and in sleeping sections (`TickerMode`). Device display polls skip their FFI read in the background.
+  - Repaint boundaries in the arranger (tracks, timeline viewport, lanes, grid, ruler); a zoom rebuilds the lanes and keeps the headers (`_headersRev`).
+  - `FileWords` (C++ completion) counts the file's words once and re-reads only an edit's span, widened to whole words; a randomized test checks it against a full scan. List ties sort by name.
+  - Memory: undo history holds at most 48 M characters of snapshots (a project with large component states held up to a hundred copies of them).
+- **Measured and left as they are:**
+  - A knob step in a device editor rebuilds the whole editor page (EQ about 450 widgets a step, the flagship about 1,100): every control and visual reads the values. Narrowing it means controls listening to their own values; not done.
+  - The pinch zoom still lays out and paints every clip each frame (about 4,200 render objects). Scaling the painted lanes during the pinch and laying out once at the end would remove most of it.
+  - The ping-pong and phaser editors' motion steps out of phase with display frames while playing (60 frames a second, not 30).
+  - Each native job's wait spawns an `Isolate.run` (about 0.3 ms in the test VM); a project sync or live step pays it once.
+
+### Release build
+
+- **[Fact]** R8 is on for release: Flutter's Gradle plugin sets `isMinifyEnabled` and `isShrinkResources` on the release build type with its ProGuard rules (FlutterPlugin.kt in the Flutter SDK's Gradle plugin, Flutter 3.47.7, checked 2026-11-10); the APK's `classes.dex` is 0.59 MB.
+- **[Fact]** Impeller is the Android renderer: "available and enabled by default on Android API 29+", with a fallback to OpenGL on older or non-Vulkan devices (docs.flutter.dev/perf/impeller, read 2026-11-10); the engine at Flutter 3.47.7 defaults `enable_impeller = true` on Android (common/settings.h in the Flutter SDK's engine sources), and the manifest has no `EnableImpeller` opt-out. **[Assumption]** The S22+ (Android 12 or later, a Vulkan GPU) runs Impeller on Vulkan.
+- **`--split-debug-info`** (CI's `flutter build apk`): `libapp.so` for arm64, AOT-compiled from this branch with Flutter 3.47.7's `gen_snapshot` and stripped as AGP strips it: 10.22 MB → 8.85 MB (gzip 4.17 → 3.44 MB, so the APK is about 0.73 MB smaller: the last CI APK was 55.5 MB, of which `libapp.so` 3.97 MB compressed). It is safe with FFI (native symbols are looked up by name strings; only Dart stack-trace tables move out). Release stack traces become addresses: CI keeps `caw-android-symbols`, and the problem log keeps the trace's header that `flutter symbolize` needs.
+- **No `--obfuscate`:** 0.13 MB more, and type names in the app's own error texts (shown to the user and in problem reports) would be garbled.
+- Signing is unchanged. The APK's size after these changes is measured when CI builds this branch.
 
 ## Remaining bottlenecks and next steps
 
