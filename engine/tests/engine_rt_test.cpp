@@ -287,7 +287,7 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
                                 "4 D2 2 1 slide\n4 D#2 1 1\n6 A1 2 0.9\n8 E2 4 1 ratchet 4\n8 C4 4 0.7\n8 E4 4 0.7\n"
                                 "12 G#2 2 0.6\n12 B1 4 1\n", {}});
     const char* ids[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit",
-                         "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph"};
+                         "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph", "org.caw.synth.flagship"};
     for (const char* id : ids) {
         LayerSpec l = layer(id, {});
         l.pattern = "pat";
@@ -306,6 +306,16 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
         e.setComponentParam("org.caw.synth.morph", Engine::kInstrumentIndex, "unison", 1 + 3 * round);
         e.setComponentParam("org.caw.synth.acid", Engine::kInstrumentIndex, "cutoff", 300 + 200 * round);
         e.setComponentParam("org.caw.drum.hats", Engine::kInstrumentIndex, "mode", round % 3);
+        // The flagship: more copies, every filter type, the oscillators and effects switched on as it plays.
+        e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "osc1_unison", 1 + 3 * round);
+        e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "flt1_type", 2 * round);
+        e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "osc2_on", round % 2);
+        e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "fx_delay_on", round % 2);
+        e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "fx_chorus_on", 1);
+        e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "mod2_src", round + 3);
+        e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "mod2_dst", 3);
+        e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "mod2_amt", 0.5);
+        e.noteOn("org.caw.synth.flagship", 200 + round, 60 + round, 1);
         e.noteOn("org.caw.bass", 100 + round, 40 + round, 1);
         cawtest::AllocationScope scope;
         for (int k = 0; k < 100; ++k) {

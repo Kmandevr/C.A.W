@@ -2,6 +2,7 @@
 #include "builtin_flagship.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -418,6 +419,15 @@ inline float warp(float t, float w1, float w2, float w3) noexcept {
     }
 }
 
+// What an oscillator's copies are worked out from: when none of it moves, a control skips them.
+struct OscKey {
+    int table = -1;
+    double position = 0, level = 0, pan = 0, pitch = 0, amount = 0;
+    int warp = 0;
+    lib::UnisonSettings unison{-1};
+    bool operator==(const OscKey&) const = default;
+};
+
 struct OscVoice {
     bool on = false;
     int dest = kToFilter1;
@@ -436,7 +446,8 @@ struct OscVoice {
     lib::UnisonVoice layout[kMaxCopies];
     double ratio[kMaxCopies] = {};
     double panL[kMaxCopies] = {}, panR[kMaxCopies] = {};
-    double pitchKey = -1e9, hz = 0.0;
+    double hz = 0.0;
+    OscKey key;
 };
 
 // Adds `n` frames of the stack, `first` frames into the control period, to L and R.
@@ -486,9 +497,10 @@ void addOscillator(const OscVoice& o, float* L, float* R, uint32_t n, uint32_t f
 int mipLevel(double dt, int levels) noexcept {
     const double x = kFrameSize * dt;
     if (!(x > 1.0)) return 0;
-    int e = 0;
-    const double m = std::frexp(x, &e);  // x = m 2^e, m in [0.5, 1)
-    const int k = m == 0.5 ? e - 1 : e;
+    // x = 1.f * 2^e from its bits (x > 1 is normal): the smallest k with x <= 2^k is e, or e + 1 if f > 0.
+    const uint64_t bits = std::bit_cast<uint64_t>(x);
+    const int e = static_cast<int>((bits >> 52) & 0x7FF) - 1023;
+    const int k = (bits & 0xFFFFFFFFFFFFFull) ? e + 1 : e;
     return k < levels ? k : levels - 1;
 }
 
@@ -525,7 +537,10 @@ struct VoiceFilter {
             switch (type) {
                 case kLadderLp:
                 case kLadderHp:
-                case kLadderBp: ladder[c].set(cutoff, resonance, sampleRate); break;
+                case kLadderBp:
+                    if (c == 0) ladder[0].set(cutoff, resonance, sampleRate);
+                    else ladder[1].setLike(ladder[0]);  // one tan for the pair
+                    break;
                 case kComb:
                     if (comb[c]) comb[c]->set(cutoff, 0.4 + 0.595 * resonance, morph);
                     break;
@@ -535,31 +550,35 @@ struct VoiceFilter {
         }
     }
     template <class F>
-    void run(float* x, uint32_t n, F&& f) noexcept {
-        for (uint32_t i = 0; i < n; ++i) {
-            const double in = x[i];
-            const double y = f(drive ? saturator.process(in) : in);
-            x[i] = static_cast<float>(in + (y - in) * mix);
-        }
+    void each(float* x, uint32_t n, F&& f) noexcept {
+        for (uint32_t i = 0; i < n; ++i) x[i] = static_cast<float>(f(static_cast<double>(x[i])));
     }
+    // In place: drive (when above 1) into the filter, then the dry/wet mix.
     void process(float* L, float* R, uint32_t n) noexcept {
         if (!on) return;
+        if (type <= kLadderBp) ladder[0].flushDenormals(), ladder[1].flushDenormals();
         for (int c = 0; c < 2; ++c) {
             float* x = c ? R : L;
+            float dry[kControlFrames];
+            const bool wet = mix >= 1.0f;
+            if (!wet) std::copy(x, x + n, dry);
+            if (drive) each(x, n, [&](double v) noexcept { return saturator.process(v); });
             switch (type) {
-                case kLadderLp: run(x, n, [&](double v) noexcept { return ladder[c].process<lib::LadderMode::LowPass>(v); }); break;
-                case kLadderHp: run(x, n, [&](double v) noexcept { return ladder[c].process<lib::LadderMode::HighPass>(v); }); break;
-                case kLadderBp: run(x, n, [&](double v) noexcept { return ladder[c].process<lib::LadderMode::BandPass>(v); }); break;
-                case kSvfLp: run(x, n, [&](double v) noexcept { return svf[c].process(v).low; }); break;
-                case kSvfHp: run(x, n, [&](double v) noexcept { return svf[c].process(v).high; }); break;
-                case kSvfBp: run(x, n, [&](double v) noexcept { return svf[c].process(v).band; }); break;
-                case kSvfNotch: run(x, n, [&](double v) noexcept { return svf[c].process(v).notch; }); break;
+                case kLadderLp: ladder[c].process<lib::LadderMode::LowPass>(x, n); break;
+                case kLadderHp: ladder[c].process<lib::LadderMode::HighPass>(x, n); break;
+                case kLadderBp: ladder[c].process<lib::LadderMode::BandPass>(x, n); break;
+                case kSvfLp: each(x, n, [&](double v) noexcept { return svf[c].process(v).low; }); break;
+                case kSvfHp: each(x, n, [&](double v) noexcept { return svf[c].process(v).high; }); break;
+                case kSvfBp: each(x, n, [&](double v) noexcept { return svf[c].process(v).band; }); break;
+                case kSvfNotch: each(x, n, [&](double v) noexcept { return svf[c].process(v).notch; }); break;
                 case kComb:
-                    if (comb[c]) run(x, n, [&](double v) noexcept { return comb[c]->process(v); });
+                    if (comb[c]) each(x, n, [&](double v) noexcept { return comb[c]->process(v); });
                     break;
-                case kFormant: run(x, n, [&](double v) noexcept { return formant[c].process(v); }); break;
+                case kFormant: each(x, n, [&](double v) noexcept { return formant[c].process(v); }); break;
                 default: break;
             }
+            if (!wet)
+                for (uint32_t i = 0; i < n; ++i) x[i] = dry[i] + (x[i] - dry[i]) * mix;
         }
     }
 };
@@ -679,6 +698,14 @@ protected:
             return;
         }
         transport_ = b.transport;
+        // The knobs that hold still over this block are read once here; the ramping ones at each control.
+        const Params& p = params();
+        rampCount_ = 0;
+        for (uint32_t k = 0; k < kParamCount; ++k) {
+            if (k >= b.parameterCount || !b.parameters) base_[k] = p.d[k].defaultValue;
+            else if (b.parameters[k].samples) ramp_[rampCount_++] = static_cast<uint16_t>(k);
+            else base_[k] = b.parameters[k].value;
+        }
         clock_.run(frames, offset,
                    [&](uint32_t at) noexcept {
                        settle();
@@ -724,10 +751,11 @@ private:
             for (OscVoice& o : v.osc)
                 for (int c = 0; c < o.count; ++c)
                     if (o.a[c]) o.phase[c] = lib::wrap01(o.phase[c] + frames * o.dt[c]);
-            v.env[1].skip(n);
-            v.env[2].skip(n);
-            for (lib::Lfo& l : v.lfo) l.advance(static_cast<int>(n));
-            v.random.advance(static_cast<int>(n));
+            if (uses(kSrcEnv2)) v.env[1].skip(n);
+            if (uses(kSrcEnv3)) v.env[2].skip(n);
+            for (uint32_t l = 0; l < kLfos; ++l)
+                if (uses(kSrcLfo1 + l)) v.lfo[l].advance(static_cast<int>(n));
+            if (uses(kSrcRandom)) v.random.advance(static_cast<int>(n));
             v.gain0 += (v.gain1 - v.gain0) * done;
         });
         for (lib::Lfo& l : lfo_) l.advance(static_cast<int>(n));
@@ -757,37 +785,51 @@ private:
         return clampd(v, d.minimum, d.maximum);
     }
 
-    // The value of parameter k for a voice whose slot offsets are `offsets`.
-    double value(uint32_t k, const double* offsets) const noexcept {
-        const int t = k < kModTargets ? targetOf_[k] : 0;
-        return t ? fromNorm(k, targetNorm_[t - 1] + offsets[t - 1]) : base_[k];
+    bool uses(uint32_t source) const noexcept { return (used_ >> source) & 1u; }
+
+    // A source's value for a voice, 0..1 (a bipolar source such as an LFO is centred on 0.5).
+    double sourceValue(const Voice& v, int source, double bendRange) const noexcept {
+        switch (source) {
+            case kSrcEnv1:
+            case kSrcEnv2:
+            case kSrcEnv3: return v.env[source - kSrcEnv1].level();
+            case kSrcLfo1:
+            case kSrcLfo2:
+            case kSrcLfo3: {
+                const uint32_t l = static_cast<uint32_t>(source - kSrcLfo1);
+                return 0.5 * ((base_[lfoParam(l, kLfoMode)] >= 0.5 ? v.lfo[l].value() : freeLfo_[l]) + 1.0);
+            }
+            case kSrcRandom: return 0.5 * (v.random.value() + 1.0);
+            case kSrcVelocity: return v.velocity;
+            case kSrcNote: return clampd(v.pitch / 127.0, 0.0, 1.0);
+            case kSrcBend: return 0.5 * (clampd((v.pitch - v.notePitch) / bendRange, -1.0, 1.0) + 1.0);
+            case kSrcPressure: return v.pressure;
+            case kSrcTimbre: return v.timbre;
+            case kSrcModWheel: return modWheel_;
+            default: return 0.0;
+        }
     }
+
+    // The value of parameter k for a voice whose slot offsets are `offsets`.
+    // (k is below kModTargets: the slots' own parameters are read from base_.) The unmodulated case, by far the
+    // most common, is a load and a branch.
+    double value(uint32_t k, const double* offsets) const noexcept {
+        const int t = targetOf_[k];
+        return t ? modulated(k, t - 1, offsets) : base_[k];
+    }
+    double modulated(uint32_t k, int t, const double* offsets) const noexcept { return fromNorm(k, targetNorm_[t] + offsets[t]); }
 
     // Once per control period: the knobs, the matrix, every sounding voice's settings and the effects.
     void control(const ProcessBlock& b, uint32_t at) noexcept {
-        const Params& p = params();
-        for (uint32_t k = 0; k < kParamCount; ++k) base_[k] = parameterAt(b, k, at, p.d[k].defaultValue);
+        for (uint32_t r = 0; r < rampCount_; ++r) base_[ramp_[r]] = b.parameters[ramp_[r]].samples[at];
         tempo_ = transport_ && transport_->tempo > 0.0 ? transport_->tempo : 120.0;
         const bool beatLocked = transport_ && transport_->playing;
         const double beat = beatLocked ? transport_->beat + at * tempo_ / (60.0 * sr_) : 0.0;
 
-        // The free LFOs run once for the instrument, on their knobs' own values; synced to a playing song,
-        // they follow its position.
-        for (uint32_t l = 0; l < kLfos; ++l) {
-            const int sync = clampi(base_[lfoParam(l, kLfoSync)], 0, 9);
-            lfo_[l].setShape(static_cast<lib::LfoShape>(clampi(base_[lfoParam(l, kLfoShape)], 0, 6)));
-            if (sync > 0) {
-                lfo_[l].setRateBeats(kLfoSyncBeats[sync], tempo_);
-                if (beatLocked) lfo_[l].syncToBeat(beat, kLfoSyncBeats[sync]);
-            } else {
-                lfo_[l].setRateHz(base_[lfoParam(l, kLfoRate)]);
-            }
-            freeLfo_[l] = lfo_[l].value();
-        }
-
         // The matrix: the slots that move something, and the parameters they move (each once, in slot order).
         std::memset(targetOf_, 0, sizeof targetOf_);
         slotCount_ = targetCount_ = 0;
+        used_ = 0;
         for (uint32_t s = 0; s < kSlots; ++s) {
             const int src = clampi(base_[modParam(s, kModSource)], 0, kSourceCount - 1);
             const int dst = clampi(base_[modParam(s, kModTarget)], 0, kModTargets) - 1;
@@ -799,6 +841,22 @@ private:
                 targetOf_[dst] = static_cast<uint8_t>(++targetCount_);
             }
             slots_[slotCount_++] = {src, targetOf_[dst] - 1, amount, base_[modParam(s, kModPolarity)] >= 0.5};
+            used_ |= 1u << src;
+        }
+
+        // The free LFOs run once for the instrument, on their knobs' own values; synced to a playing song,
+        // they follow its position.
+        for (uint32_t l = 0; l < kLfos; ++l) {
+            if (!uses(kSrcLfo1 + l)) continue;
+            const int sync = clampi(base_[lfoParam(l, kLfoSync)], 0, 9);
+            lfo_[l].setShape(static_cast<lib::LfoShape>(clampi(base_[lfoParam(l, kLfoShape)], 0, 6)));
+            if (sync > 0) {
+                lfo_[l].setRateBeats(kLfoSyncBeats[sync], tempo_);
+                if (beatLocked) lfo_[l].syncToBeat(beat, kLfoSyncBeats[sync]);
+            } else {
+                lfo_[l].setRateHz(base_[lfoParam(l, kLfoRate)]);
+            }
+            freeLfo_[l] = lfo_[l].value();
         }
 
         // Each voice: its sources, its slot offsets, then its settings.
@@ -808,25 +866,9 @@ private:
         voices_.forEachActive([&](Voice& v) noexcept {
             if (v.starting) startVoice(v);
             double offsets[kSlots] = {};
-            if (slotCount_ > 0) {
-                double src[kSourceCount];
-                src[kSrcNone] = 0.0;
-                for (uint32_t e = 0; e < kEnvs; ++e) src[kSrcEnv1 + e] = v.env[e].level();
-                for (uint32_t l = 0; l < kLfos; ++l) {
-                    const bool retrig = base_[lfoParam(l, kLfoMode)] >= 0.5;
-                    src[kSrcLfo1 + l] = 0.5 * ((retrig ? v.lfo[l].value() : freeLfo_[l]) + 1.0);
-                }
-                src[kSrcRandom] = 0.5 * (v.random.value() + 1.0);
-                src[kSrcVelocity] = v.velocity;
-                src[kSrcNote] = clampd(v.pitch / 127.0, 0.0, 1.0);
-                src[kSrcBend] = 0.5 * (clampd((v.pitch - v.notePitch) / bendRange, -1.0, 1.0) + 1.0);
-                src[kSrcPressure] = v.pressure;
-                src[kSrcTimbre] = v.timbre;
-                src[kSrcModWheel] = modWheel_;
-                for (uint32_t s = 0; s < slotCount_; ++s) {
-                    const double u = src[slots_[s].source];
-                    offsets[slots_[s].target] += slots_[s].amount * (slots_[s].bipolar ? 2.0 * u - 1.0 : u);
-                }
+            for (uint32_t s = 0; s < slotCount_; ++s) {
+                const double u = sourceValue(v, slots_[s].source, bendRange);
+                offsets[slots_[s].target] += slots_[s].amount * (slots_[s].bipolar ? 2.0 * u - 1.0 : u);
             }
             configureVoice(v, offsets);
             if (v.age > newest) {
@@ -887,24 +929,32 @@ private:
 
     void configureVoice(Voice& v, const double* offsets) noexcept {
         const auto P = [&](uint32_t k) noexcept { return value(k, offsets); };
+        // Only what a slot listens to runs (env 1 always: it is the level).
         for (uint32_t e = 0; e < kEnvs; ++e)
-            v.env[e].set(P(envParam(e, kEnvAttack)), P(envParam(e, kEnvDecay)), P(envParam(e, kEnvSustain)),
-                         P(envParam(e, kEnvRelease)), sr_);
+            if (e == 0 || uses(kSrcEnv1 + e))
+                v.env[e].set(P(envParam(e, kEnvAttack)), P(envParam(e, kEnvDecay)), P(envParam(e, kEnvSustain)),
+                             P(envParam(e, kEnvRelease)), sr_);
         for (uint32_t l = 0; l < kLfos; ++l) {
-            if (base_[lfoParam(l, kLfoMode)] < 0.5) continue;  // free: the instrument's
+            if (!uses(kSrcLfo1 + l) || base_[lfoParam(l, kLfoMode)] < 0.5) continue;  // unused, or free: the instrument's
             const int sync = clampi(P(lfoParam(l, kLfoSync)), 0, 9);
             v.lfo[l].setShape(static_cast<lib::LfoShape>(clampi(P(lfoParam(l, kLfoShape)), 0, 6)));
             if (sync > 0) v.lfo[l].setRateBeats(kLfoSyncBeats[sync], tempo_);
             else v.lfo[l].setRateHz(P(lfoParam(l, kLfoRate)));
         }
-        v.random.setShape(P(kRndMode) >= 0.5 ? lib::LfoShape::SmoothRandom : lib::LfoShape::SampleHold);
-        v.random.setRateHz(P(kRndRate));
+        if (uses(kSrcRandom)) {
+            v.random.setShape(P(kRndMode) >= 0.5 ? lib::LfoShape::SmoothRandom : lib::LfoShape::SampleHold);
+            v.random.setRateHz(P(kRndRate));
+        }
         for (uint32_t o = 0; o < kOscs; ++o) configureOscillator(v, o, P);
         v.parallel = P(kFltRouting) >= 0.5;
         for (uint32_t f = 0; f < kFilters; ++f) {
+            if (P(fltParam(f, kFltOn)) < 0.5) {
+                v.filter[f].configure(false, 0, 0, 0, 1, 0, 1, sr_, v.starting && v.fresh);
+                continue;
+            }
             const double keytrack = P(fltParam(f, kFltKeytrack));
             const double cutoff = P(fltParam(f, kFltCutoff)) * (keytrack != 0.0 ? exp2(keytrack * (v.pitch - 60.0) / 12.0) : 1.0);
-            v.filter[f].configure(P(fltParam(f, kFltOn)) >= 0.5, clampi(P(fltParam(f, kFltType)), 0, kFilterTypeCount - 1),
+            v.filter[f].configure(true, clampi(P(fltParam(f, kFltType)), 0, kFilterTypeCount - 1),
                                   cutoff, clampd(P(fltParam(f, kFltResonance)), 0.0, 1.0), P(fltParam(f, kFltDrive)),
                                   P(fltParam(f, kFltMorph)), P(fltParam(f, kFltMix)), sr_, v.starting && v.fresh);
         }
@@ -918,32 +968,43 @@ private:
         o.on = at(kOscOn) >= 0.5;
         if (!o.on) {
             o.count = 0;
+            o.key.table = -1;  // on again: everything is worked out afresh
+            o.layoutKey.voices = -1;
             return;
         }
-        const lib::Wavetable& table = tables_->table[clampi(at(kOscTable), 0, kTableCount - 1)];
-        const double position = clampd(at(kOscFrame), 0.0, 1.0) * (table.frameCount() - 1);
-        const int f0 = static_cast<int>(position), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
-        o.mix = static_cast<float>(position - f0);
         o.dest = clampi(at(kOscDest), 0, 3);
-
-        lib::UnisonSettings u;
+        OscKey key;
+        key.table = clampi(at(kOscTable), 0, kTableCount - 1);
+        key.position = clampd(at(kOscFrame), 0.0, 1.0);
+        key.level = clampd(at(kOscLevel), 0.0, 1.0);
+        key.pan = clampd(at(kOscPan), -1.0, 1.0);
+        key.pitch = v.pitch + 12.0 * clampi(at(kOscOctave), -4, 4) + clampi(at(kOscSemi), -12, 12) +
+                    clampd(at(kOscFine), -100.0, 100.0) / 100.0;
+        key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
+        key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, 4) : kWarpNone;
+        lib::UnisonSettings& u = key.unison;
         u.voices = clampi(at(kOscUnison), 1, kMaxCopies);
         u.detune = clampd(at(kOscDetune), 0.0, 100.0) / 100.0;
         u.power = at(kOscPower);
         u.spread = at(kOscSpread);
         u.blend = at(kOscBlend);
         u.stack = static_cast<lib::UnisonStack>(clampi(at(kOscStack), 0, lib::kUnisonStackCount - 1));
+        if (key == o.key) return;  // nothing moved: the copies keep their steps, levels and gains
+
+        const lib::Wavetable& table = tables_->table[key.table];
+        const double position = key.position * (table.frameCount() - 1);
+        const int f0 = static_cast<int>(position), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
+        o.mix = static_cast<float>(position - f0);
         if (!(u == o.layoutKey)) {
             o.layoutKey = u;
             o.count = lib::unisonLayout(u, o.layout);
             for (int c = 0; c < o.count; ++c) o.ratio[c] = exp2(o.layout[c].semitones / 12.0);
             o.panKey = 2.0;  // the pans follow the layout
         }
-        const double pan = clampd(at(kOscPan), -1.0, 1.0);
-        if (pan != o.panKey) {
-            o.panKey = pan;
+        if (key.pan != o.panKey) {
+            o.panKey = key.pan;
             for (int c = 0; c < o.count; ++c) {
-                const double q = clampd(pan + o.layout[c].pan, -1.0, 1.0);
+                const double q = clampd(key.pan + o.layout[c].pan, -1.0, 1.0);
                 double l = 1.0, r = 1.0;  // the centre at unity on both sides, exactly
                 if (q != 0.0) {  // mirror pans get mirror gains, bit for bit
                     const lib::PanGains g = lib::constantPowerPan(q < 0.0 ? -q : q);
@@ -955,18 +1016,11 @@ private:
                 o.panR[c] = r * o.layout[c].gain;
             }
         }
-        const double pitch = v.pitch + 12.0 * clampi(at(kOscOctave), -4, 4) + clampi(at(kOscSemi), -12, 12) +
-                             clampd(at(kOscFine), -100.0, 100.0) / 100.0;
-        if (pitch != o.pitchKey) {
-            o.pitchKey = pitch;
-            o.hz = 440.0 * exp2((pitch - 69.0) / 12.0);
-        }
+        if (key.pitch != o.key.pitch || o.key.table < 0) o.hz = 440.0 * exp2((key.pitch - 69.0) / 12.0);
         // The warp's constants, and how much faster than the note it reads the table (for the mip level).
-        const double amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
-        int mode = clampi(at(kOscWarp), 0, 4);
+        const double amount = key.amount;
         double faster = 1.0;
-        if (amount <= 0.0) mode = kWarpNone;
-        switch (mode) {
+        switch (key.warp) {
             case kWarpBend:
                 o.w1 = static_cast<float>(amount);
                 faster = 1.0 + amount;
@@ -989,8 +1043,8 @@ private:
             }
             default: break;
         }
-        o.warpMode = mode;
-        const double level = clampd(at(kOscLevel), 0.0, 1.0);
+        o.warpMode = key.warp;
+        o.key = key;
         const double perSample = o.hz / sr_;
         for (int c = 0; c < o.count; ++c) {
             const double dt = perSample * o.ratio[c];
@@ -1004,8 +1058,8 @@ private:
             o.a[c] = table.levelData(f0, k);
             o.b[c] = table.levelData(f1, k);
             o.size[c] = static_cast<float>(table.levelSize(k));
-            o.gainL[c] = static_cast<float>(o.panL[c] * level);
-            o.gainR[c] = static_cast<float>(o.panR[c] * level);
+            o.gainL[c] = static_cast<float>(o.panL[c] * key.level);
+            o.gainR[c] = static_cast<float>(o.panR[c] * key.level);
         }
     }
 
@@ -1072,17 +1126,23 @@ private:
 
     // One voice's piece of the period: its oscillators into their filters, the filters, the level.
     void renderVoice(Voice& v, float* outL, float* outR, uint32_t n, uint32_t first) noexcept {
-        float f1L[kControlFrames] = {}, f1R[kControlFrames] = {}, f2L[kControlFrames] = {}, f2R[kControlFrames] = {};
-        float byL[kControlFrames] = {}, byR[kControlFrames] = {};
-        bool bypass = false;
+        float f1L[kControlFrames], f1R[kControlFrames], f2L[kControlFrames], f2R[kControlFrames];
+        float byL[kControlFrames], byR[kControlFrames];
+        bool bypass = false, second = v.filter[1].on;  // second: filter 2's path carries anything
+        for (const OscVoice& o : v.osc) {
+            if (!o.on || o.count == 0) continue;
+            bypass = bypass || o.dest == kToBypass;
+            second = second || o.dest == kToFilter2 || (v.parallel && o.dest == kToBoth);
+        }
+        std::fill_n(f1L, n, 0.0f);
+        std::fill_n(f1R, n, 0.0f);
+        if (second) std::fill_n(f2L, n, 0.0f), std::fill_n(f2R, n, 0.0f);
+        if (bypass) std::fill_n(byL, n, 0.0f), std::fill_n(byR, n, 0.0f);
         for (const OscVoice& o : v.osc) {
             if (!o.on || o.count == 0) continue;
             switch (o.dest) {
                 case kToFilter2: addOscillator(o, f2L, f2R, n, first); break;
-                case kToBypass:
-                    addOscillator(o, byL, byR, n, first);
-                    bypass = true;
-                    break;
+                case kToBypass: addOscillator(o, byL, byR, n, first); break;
                 case kToBoth:
                     if (v.parallel) {
                         float tL[kControlFrames] = {}, tR[kControlFrames] = {};
@@ -1100,29 +1160,28 @@ private:
             }
         }
         v.filter[0].process(f1L, f1R, n);
-        if (v.parallel) {
-            v.filter[1].process(f2L, f2R, n);
-        } else {
-            for (uint32_t i = 0; i < n; ++i) {
-                f2L[i] += f1L[i];
-                f2R[i] += f1R[i];
-            }
-            v.filter[1].process(f2L, f2R, n);
-        }
-        const double step = (v.gain1 - v.gain0) / kControlFrames;
-        for (uint32_t i = 0; i < n; ++i) {
-            const double a = v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i));
-            float l = f2L[i], r = f2R[i];
+        // The voice's output: filter 1's, through or beside filter 2's, plus the bypass.
+        float* yL = f1L;
+        float* yR = f1R;
+        if (second) {
             if (v.parallel) {
-                l += f1L[i];
-                r += f1R[i];
+                v.filter[1].process(f2L, f2R, n);
+                for (uint32_t i = 0; i < n; ++i) f1L[i] += f2L[i], f1R[i] += f2R[i];
+            } else {
+                for (uint32_t i = 0; i < n; ++i) f2L[i] += f1L[i], f2R[i] += f1R[i];
+                v.filter[1].process(f2L, f2R, n);
+                yL = f2L;
+                yR = f2R;
             }
-            if (bypass) {
-                l += byL[i];
-                r += byR[i];
-            }
-            outL[i] += static_cast<float>(l * a);
-            outR[i] += static_cast<float>(r * a);
+        }
+        if (bypass)
+            for (uint32_t i = 0; i < n; ++i) yL[i] += byL[i], yR[i] += byR[i];
+        float amp[kControlFrames];
+        const double step = (v.gain1 - v.gain0) / kControlFrames;
+        for (uint32_t i = 0; i < n; ++i) amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
+        for (uint32_t i = 0; i < n; ++i) {
+            outL[i] += yL[i] * amp[i];
+            outR[i] += yR[i] * amp[i];
         }
         if (!v.env[0].active()) v.active = false;
     }
@@ -1192,10 +1251,12 @@ private:
     float periodPeak_ = 0.0f;
 
     double base_[kParamCount] = {};
+    uint16_t ramp_[kParamCount] = {};  // the parameters ramping in this block
+    uint32_t rampCount_ = 0;
     lib::Lfo lfo_[kLfos];
     double freeLfo_[kLfos] = {};
     Slot slots_[kSlots];
-    uint32_t slotCount_ = 0, targetCount_ = 0;
+    uint32_t slotCount_ = 0, targetCount_ = 0, used_ = 0;  // used_: bit s set when a slot listens to source s
     uint32_t targetParam_[kSlots] = {};
     double targetNorm_[kSlots] = {};
     uint8_t targetOf_[kModTargets] = {};  // 1 + the parameter's index into targetParam_, 0 if no slot moves it

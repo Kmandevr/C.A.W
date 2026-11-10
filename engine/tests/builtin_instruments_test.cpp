@@ -25,8 +25,8 @@ using namespace caw;
 
 namespace {
 
-const char* const kInstruments[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit",
-                                    "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph"};
+const char* const kInstruments[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats",   "org.caw.drum.kit",
+                                    "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph", "org.caw.synth.flagship"};
 
 bool ok(const std::string& result) { return result.find("\"ok\":true") != std::string::npos; }
 
@@ -464,8 +464,8 @@ TEST(library_drum_voices_ring_for_their_decay_then_stop_and_a_choke_cuts_them) {
 TEST(the_built_in_instruments_are_listed_with_readable_names) {
     Engine e(48000);
     const std::string list = e.nativeComponentsJson();
-    const char* names[] = {"Kick", "Snare", "Hi-hats", "Drum kit", "Bass", "Acid synth", "Morph synth"};
-    for (int i = 0; i < 7; ++i) {
+    const char* names[] = {"Kick", "Snare", "Hi-hats", "Drum kit", "Bass", "Acid synth", "Morph synth", "Flagship"};
+    for (int i = 0; i < 8; ++i) {
         const size_t at = list.find(std::string("\"id\":\"") + kInstruments[i] + "\"");
         CHECK(at != std::string::npos);
         if (at == std::string::npos) continue;
@@ -627,6 +627,11 @@ std::vector<Golden> goldens() {
     g.push_back({"morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
                                 {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
                  0xcd3342395d322d32ull});
+    // Flagship: its default patch (a warm, wide saw stack of seven, a ladder, env 2 on the cutoff, reverb) on a
+    // chord, a line over it and a bent note.
+    g.push_back({"flagship", track("org.caw.synth.flagship", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n"
+                                                             "8 C4 6 0.7\n10 A4 1 1\n11 C5 1 0.9\n12 E5 3 0.8 bend 0:0 1:2\n"),
+                 0x31e09b5d1c44ef48ull});
     return g;
 }
 
@@ -764,6 +769,7 @@ TEST(the_built_in_instruments_render_the_same_at_any_block_size) {
     std::vector<Golden> cases = goldens();
     for (const char* id : {"org.caw.synth.morph", "org.caw.synth.basic", "org.caw.bass", "org.caw.synth.acid"})
         cases.push_back({id, track(id, expressive, {{"attack", 0.002}}), 0});
+    cases.push_back({"flagship expressive", track("org.caw.synth.flagship", expressive, {{"env1_attack", 0.002}}), 0});
     for (const Golden& g : cases) {
         const std::vector<float> a = render(g.project, 256), b = render(g.project, 37);
         size_t differ = 0;
@@ -784,7 +790,8 @@ TEST(a_note_held_at_sustain_zero_settles_instead_of_decaying_into_denormals) {
     };
     const Case cases[] = {{"org.caw.synth.basic", {{"sustain", 0}, {"decay", 0.01}}},
                           {"org.caw.synth.morph", {{"sustain", 0}, {"decay", 0.01}, {"attack", 0.001}}},
-                          {"org.caw.bass", {{"sustain", 0}, {"decay", 0.02}}}};
+                          {"org.caw.bass", {{"sustain", 0}, {"decay", 0.02}}},
+                          {"org.caw.synth.flagship", {{"env1_sustain", 0}, {"env1_decay", 0.01}, {"env1_attack", 0.001}, {"fx_reverb_on", 0}}}};
     for (const Case& c : cases) {
         std::unique_ptr<ModuleProcessor> p = make(e, c.id);
         if (!p) continue;

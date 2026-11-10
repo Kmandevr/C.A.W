@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstdint>
 
 #include "../detmath.hpp"
 #include "fastmath.hpp"
@@ -137,8 +138,22 @@ private:
 // low = y4 (24 dB/octave), high = u - 4 y1 + 6 y2 - 4 y3 + y4 (24 dB/octave: four one-pole high-passes, since
 // each stage is u times a one-pole low-pass H and this is u (1 - H)^4), band = 4 (y2 - 2 y3 + y4) (u H^2
 // (1 - H)^2: 12 dB/octave each side, unity near the cutoff). The resonance feeds back from y4 in every mode,
-// so it peaks at the cutoff whichever output is taken. Same cost as Ladder::processFast plus a few adds.
+// so it peaks at the cutoff whichever output is taken.
+//
+// Made for many voices: set() works out every per-sample constant (the zero-delay feedback's powers of G and
+// its divide), and the input stage saturates with softClip() (a rational curve, one divide) instead of a tanh,
+// well under half of Ladder::processFast's cost. The curve stays within 3 % of tanh (most near |x| = 1.5 to 2),
+// which at the levels a synth voice feeds it only shades the drive.
 enum class LadderMode : int { LowPass, HighPass, BandPass };
+
+// x (27 + x^2) / (27 + 9 x^2) for |x| <= 3, +-1 beyond: tanh's shape (slope 1 at 0, level and flat at 3) for a
+// multiply-add and a divide. NaN gives 0.
+inline double softClip(double x) noexcept {
+    const double c = x < -3.0 ? -3.0 : (x > 3.0 ? 3.0 : finiteOr0(x));
+    const double c2 = c * c;
+    return c * (27.0 + c2) / (27.0 + 9.0 * c2);
+}
+
 class MultiLadder {
 public:
     void set(double cutoff, double resonance, double sampleRate) noexcept {
@@ -150,24 +165,38 @@ public:
         const double top = 0.45 * sampleRate;
         fc = fc < 10.0 ? 10.0 : (fc > top ? top : fc);
         const double g = detTan(kPi * fc / sampleRate);
+        const double r0 = finiteOr0(resonance);
+        const double k = 3.95 * (r0 < 0.0 ? 0.0 : (r0 > 1.0 ? 1.0 : r0));
         G_ = g / (1.0 + g);
-        const double r = finiteOr0(resonance) < 0.0 ? 0.0 : (resonance > 1.0 ? 1.0 : finiteOr0(resonance));
-        k_ = 3.95 * r;
+        // u = clip((x (1 + k/2) - k S) / (1 + k G^4)) with S = (1 - G)(G^3 s0 + G^2 s1 + G s2 + s3): the
+        // feedback solved for the sample itself (zero delay), every constant here.
+        const double b = 1.0 - G_, G2 = G_ * G_, G3 = G2 * G_, G4 = G3 * G_;
+        const double inv = 1.0 / (1.0 + k * G4);
+        in_ = (1.0 + 0.5 * k) * inv;
+        c_[0] = k * b * G3 * inv;
+        c_[1] = k * b * G2 * inv;
+        c_[2] = k * b * G_ * inv;
+        c_[3] = k * b * inv;
+    }
+    // The coefficients of `other` (a stereo pair's second channel: one tan for both); the state stays.
+    void setLike(const MultiLadder& other) noexcept {
+        G_ = other.G_;
+        in_ = other.in_;
+        for (int i = 0; i < 4; ++i) c_[i] = other.c_[i];
+        cutoff_ = other.cutoff_;
+        resonance_ = other.resonance_;
+        rate_ = other.rate_;
     }
     template <LadderMode Mode>
     double process(double input) noexcept {
         const double x = finiteOr0(input);
-        const double b = 1.0 - G_;
-        const double G2 = G_ * G_, G3 = G2 * G_, G4 = G3 * G_;
-        const double S = b * (G3 * s_[0] + G2 * s_[1] + G_ * s_[2] + s_[3]);
-        const double u = fastTanh((x * (1.0 + 0.5 * k_) - k_ * S) / (1.0 + k_ * G4));
+        const double u = softClip(x * in_ - (c_[0] * s_[0] + c_[1] * s_[1] + c_[2] * s_[2] + c_[3] * s_[3]));
         double y[4];
         double in = u;
         for (int i = 0; i < 4; ++i) {
             const double v = (in - s_[i]) * G_;
             y[i] = v + s_[i];
             s_[i] = y[i] + v;
-            if (s_[i] < 1e-20 && s_[i] > -1e-20) s_[i] = 0.0;  // a silent tail never runs in subnormals
             in = y[i];
         }
         if constexpr (Mode == LadderMode::LowPass) return y[3];
@@ -181,11 +210,43 @@ public:
             default: return process<LadderMode::LowPass>(input);
         }
     }
+    // A block in place: the same as process<Mode>() per sample, with the state held in registers across it.
+    template <LadderMode Mode>
+    void process(float* x, uint32_t frames) noexcept {
+        double s0 = s_[0], s1 = s_[1], s2 = s_[2], s3 = s_[3];
+        const double G = G_, in = in_, c0 = c_[0], c1 = c_[1], c2 = c_[2], c3 = c_[3];
+        for (uint32_t i = 0; i < frames; ++i) {
+            const double u = softClip(finiteOr0(x[i]) * in - (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3));
+            const double v0 = (u - s0) * G, y0 = v0 + s0;
+            s0 = y0 + v0;
+            const double v1 = (y0 - s1) * G, y1 = v1 + s1;
+            s1 = y1 + v1;
+            const double v2 = (y1 - s2) * G, y2 = v2 + s2;
+            s2 = y2 + v2;
+            const double v3 = (y2 - s3) * G, y3 = v3 + s3;
+            s3 = y3 + v3;
+            double y;
+            if constexpr (Mode == LadderMode::LowPass) y = y3;
+            else if constexpr (Mode == LadderMode::HighPass) y = u - 4.0 * y0 + 6.0 * y1 - 4.0 * y2 + y3;
+            else y = 4.0 * (y1 - 2.0 * y2 + y3);
+            x[i] = static_cast<float>(y);
+        }
+        s_[0] = s0;
+        s_[1] = s1;
+        s_[2] = s2;
+        s_[3] = s3;
+    }
+    // A silent tail would decay into subnormal numbers (slow on many CPUs): a caller that knows its input is
+    // silent can flush the state with this once per block.
+    void flushDenormals() noexcept {
+        for (double& s : s_)
+            if (s < 1e-20 && s > -1e-20) s = 0.0;
+    }
     void clear() noexcept { s_[0] = s_[1] = s_[2] = s_[3] = 0.0; }
 
 private:
     double s_[4] = {0, 0, 0, 0};
-    double G_ = 0.5, k_ = 0;
+    double G_ = 0.5, in_ = 1.0, c_[4] = {0, 0, 0, 0};
     double cutoff_ = -1, resonance_ = -1, rate_ = -1;  // what set() last worked out
 };
 

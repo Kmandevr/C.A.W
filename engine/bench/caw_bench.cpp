@@ -398,6 +398,15 @@ int main(int argc, char** argv) {
             {"busy morph x1 + chorus", busy("org.caw.synth.morph", {{"unison", 1}}, {component("org.caw.chorus")})},
             {"busy morph x1 + ping-pong", busy("org.caw.synth.morph", {{"unison", 1}}, {component("org.caw.delay.pingpong")})},
             {"busy morph x1 + distortion", busy("org.caw.synth.morph", {{"unison", 1}}, {component("org.caw.distortion")})},
+            {"busy flagship (default: x7, ladder, reverb)", busy("org.caw.synth.flagship", {})},
+            {"busy flagship x1, no filter, no fx", busy("org.caw.synth.flagship", {{"osc1_unison", 1}, {"flt1_on", 0}, {"fx_reverb_on", 0}})},
+            {"busy flagship x7, no filter, no fx", busy("org.caw.synth.flagship", {{"flt1_on", 0}, {"fx_reverb_on", 0}})},
+            {"busy flagship x16, no filter, no fx", busy("org.caw.synth.flagship", {{"osc1_unison", 16}, {"flt1_on", 0}, {"fx_reverb_on", 0}})},
+            {"busy flagship x7, ladder, no fx", busy("org.caw.synth.flagship", {{"fx_reverb_on", 0}})},
+            {"busy flagship 3 osc x16, 2 filters, all fx",
+             busy("org.caw.synth.flagship", {{"osc1_unison", 16}, {"osc2_on", 1}, {"osc2_unison", 16}, {"osc3_on", 1}, {"osc3_unison", 16},
+                                             {"osc2_frame", 0.5}, {"flt2_on", 1}, {"fx_dist_on", 1}, {"fx_eq_on", 1}, {"fx_chorus_on", 1},
+                                             {"fx_delay_on", 1}, {"mod2_src", 4}, {"mod2_dst", 3}, {"mod2_amt", 0.3}})},
         };
         const int pick = only == 100 && argc > 3 ? std::atoi(argv[3]) : -1;  // `caw_bench S 100 K`: case K only
         for (size_t k = 0; k < native.size(); ++k) {
