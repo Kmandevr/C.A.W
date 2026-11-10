@@ -248,6 +248,17 @@ CAW_API void caw_worker_pool_wait_idle(CawWorkerPool* pool);
    thread. Free the result with caw_free. */
 CAW_API char* caw_component_test(const char* request_json);
 
+/* Sample-pack maker (#164): renders an instrument (and an optional effect chain) offline over a grid of
+   notes x velocities x parameter steps, each a note held then released until its tail is quiet, and writes
+   named WAV files (16/24-bit PCM or 32-bit float, smpl chunk with root note and optional loop), a manifest
+   JSON and optionally SFZ files, all directly inside the request's "output_dir". Request and result keys:
+   docs/engine.md, "Sample packs". trust_level (CAW_NATIVE_TRUST_*) applies to every library the request
+   names; only TRUSTED loads one, and a "trust" key in the request is refused. progress gets 0..1000 and a
+   non-zero *cancel stops it (either may be NULL). Blocks the caller for the whole render: call it from a
+   worker, never the UI or audio thread. The result always has "ok" and "error"; free it with caw_free. */
+CAW_API char* caw_sample_pack_render(const char* request_json, int32_t trust_level, int32_t* progress,
+                                     int32_t* cancel);
+
 #ifdef __cplusplus
 }
 #endif
