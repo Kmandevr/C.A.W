@@ -6,9 +6,11 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "caw/instrument.hpp"
 #include "capi_internal.h"
 #include "compile.h"
 #include "engine.h"
@@ -195,6 +197,77 @@ struct Result {
     double meanUs = 0, p99Us = 0, maxUs = 0, load = 0;
 };
 
+// The flagship synth's cost per held voice and per unison copy (`caw_bench SECONDS 200`): 8 notes held for
+// `seconds` straight through the instrument (no engine around it) in kCallback-frame blocks, the best of 3 runs
+// per setting; the differences between settings give each part's share.
+double heldNotes(const std::vector<std::pair<std::string, double>>& values, int count, double seconds) {
+    Engine e(kRate);
+    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent("org.caw.synth.flagship");
+    if (!p || !p->activate(kRate, kCallback)) return 0.0;
+    const ModuleDescriptor& d = p->descriptor();
+    std::vector<ParameterValue> params(d.parameterCount);
+    for (uint32_t k = 0; k < d.parameterCount; ++k) {
+        params[k].value = d.parameters[k].defaultValue;
+        for (const auto& [id, v] : values)
+            if (d.parameters[k].id == id) params[k].value = v;
+    }
+    std::vector<float> l(kCallback), r(kCallback);
+    float* channels[2] = {l.data(), r.data()};
+    const ChannelBufferView audio{channels, 2, kCallback};
+    std::vector<Event> on;
+    for (int i = 0; i < count; ++i) on.push_back(notes::noteOn(0, static_cast<uint32_t>(i + 1), 48 + 3 * i, 0.9));
+    double best = 1e30;
+    for (int run = 0; run < 3; ++run) {
+        p->reset();
+        const int calls = static_cast<int>(seconds * kRate / kCallback);
+        const auto t0 = Clock::now();
+        for (int c = 0; c < calls; ++c) {
+            const EventInput in{c == 0 ? on.data() : nullptr, c == 0 ? static_cast<uint32_t>(on.size()) : 0u};
+            ProcessBlock b;
+            b.frames = kCallback;
+            b.audioOut = &audio;
+            b.audioOutCount = 1;
+            b.eventIn = &in;
+            b.eventInCount = 1;
+            b.parameters = params.data();
+            b.parameterCount = d.parameterCount;
+            p->processPorts(b);
+        }
+        best = std::min(best, std::chrono::duration<double, std::micro>(Clock::now() - t0).count() / seconds);
+    }
+    return best;  // microseconds of CPU per second of audio
+}
+
+void flagshipVoiceCost(double seconds) {
+    using Values = std::vector<std::pair<std::string, double>>;
+    const Values dry = {{"flt1_on", 0}, {"fx_reverb_on", 0}, {"env1_sustain", 1}, {"mod1_src", 0}};
+    auto with = [&](Values v) {
+        Values x = dry;
+        x.insert(x.end(), v.begin(), v.end());
+        return x;
+    };
+    const double idle = heldNotes(dry, 0, seconds);
+    const double x1 = heldNotes(with({{"osc1_unison", 1}}), 8, seconds);
+    const double x7 = heldNotes(with({{"osc1_unison", 7}}), 8, seconds);
+    const double x16 = heldNotes(with({{"osc1_unison", 16}}), 8, seconds);
+    const double ladder = heldNotes(with({{"osc1_unison", 1}, {"flt1_on", 1}}), 8, seconds);
+    const double svf = heldNotes(with({{"osc1_unison", 1}, {"flt1_on", 1}, {"flt1_type", 3}}), 8, seconds);
+    const double matrix = heldNotes(with({{"osc1_unison", 1}, {"mod1_src", 4}, {"mod1_dst", 3}, {"mod1_amt", 0.3}}), 8, seconds);
+    const double reverb = heldNotes(with({{"osc1_unison", 1}, {"fx_reverb_on", 1}}), 8, seconds);
+    const double def = heldNotes({}, 8, seconds);
+    std::printf("flagship, 8 held notes: microseconds of CPU per second of audio (10000 = 1%% of a core)\n");
+    std::printf("  no notes                         %8.0f\n", idle);
+    std::printf("  one copy each, no filter         %8.0f   a voice: %5.0f\n", x1, (x1 - idle) / 8);
+    std::printf("  seven copies                     %8.0f   a copy:  %5.0f\n", x7, (x7 - x1) / (8 * 6));
+    std::printf("  sixteen copies                   %8.0f   a copy:  %5.0f\n", x16, (x16 - x1) / (8 * 15));
+    std::printf("  one copy + ladder                %8.0f   a ladder pair: %5.0f\n", ladder, (ladder - x1) / 8);
+    std::printf("  one copy + SVF                   %8.0f   an SVF pair:   %5.0f\n", svf, (svf - x1) / 8);
+    std::printf("  one copy + an LFO slot           %8.0f   a slot per voice: %5.0f\n", matrix, (matrix - x1) / 8);
+    std::printf("  one copy + reverb                %8.0f   the reverb: %5.0f\n", reverb, reverb - x1);
+    std::printf("  the default patch                %8.0f   a voice: %5.0f\n", def, (def - idle) / 8);
+}
+
+
 // Plays `seconds` of audio in kCallback-frame callbacks; `each` runs between callbacks (control-thread work).
 Result play(Engine& e, double seconds, const std::function<void(int)>& each = nullptr) {
     const int calls = static_cast<int>(seconds * kRate / kCallback);
@@ -351,7 +424,7 @@ int main(int argc, char** argv) {
     const double secs = argc > 1 ? std::atof(argv[1]) : 10.0;
     // `caw_bench SECONDS N` plays only playback scenario N (1-6), for exact instruction counts under callgrind;
     // N = 100 plays First loop (the app's starter project on the built-in instruments) and each built-in alone
-    // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0).
+    // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
     std::printf("callback %d frames at %d Hz (budget %.0f us); %.0f s per scenario\n", kCallback, kRate,
                 1e6 * kCallback / kRate, secs);
@@ -370,6 +443,10 @@ int main(int argc, char** argv) {
                                {"64 layers", manyLayers(64)},
                                {"pattern layers (acid + chords)", patterns()},
                                {"starter + delay + reverb each", effects()}};
+    if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
+        flagshipVoiceCost(secs);
+        return 0;
+    }
     if (only < 0) {  // `caw_bench SECONDS -1`: graph executor scenarios only
         graphStereoBench(secs);
         graphPlanarBench(secs);

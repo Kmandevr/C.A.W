@@ -209,6 +209,26 @@ The owner's measure: the whole First loop (all six tracks, Acid and Pad unmuted)
   - Tell a component how long it slept when it wakes (an extension), so timed state such as an LFO can catch up and more instruments can sleep without changing their sound.
   - Flush-to-zero on the audio thread: cheaper denormals on x86, but it changes results below the smallest normal number and differs in detail between x86 and ARM, so it needs the owner's word on determinism.
 
+## Flagship synth (2026-11-10)
+
+The flagship (#171, [engine](engine.md)) is built for the phone budget: everything but audio runs every 16 frames (and only for what moved or what a mod slot listens to), knobs that hold still over a block are read once per block, only sounding voices, oscillators, filters and effects run, and it says it is quiet when nothing sounds. `caw_bench SECONDS 200` times it with 8 notes held (straight through the instrument, best of 3); `caw_bench S 100 K` with K 21..26 plays it under the busy pattern.
+
+**Held notes** (10 s, x86-64 server, GCC 13 `-O3`, microseconds of CPU per second of audio; 10,000 = 1 % of a core; one run on a shared machine):
+
+| Part | Cost |
+| --- | --- |
+| A voice (one copy, no filter: envelope, control work, amp) | 520 |
+| Each further unison copy, per voice | 140–155 |
+| Filter: a ladder (stereo pair) per voice | 950 |
+| Filter: an SVF (stereo pair) per voice | 490 |
+| A mod slot (an LFO on a knob), per voice | 85 |
+| The reverb (one per instrument) | 4,800 |
+| The default patch (seven copies, ladder, env 2 on the cutoff), per voice | 2,540 |
+
+- So 8 voices of the default patch take about 2 % of one server core, a 16-copy voice about 0.3 %. The Morph synth's busy pattern (seven copies, a shared filter) costs 59 M instructions a second of audio, the flagship's default 158 M (callgrind, the instrument alone); a voice of seven copies without a filter about the same as Morph's.
+- [Assumption] On the owner's Galaxy S22+ these scale like the instruction counts (not measured on the phone).
+- The ladder is a long chain of dependent operations per sample; running a voice's two sides in one loop let the CPU overlap them (1.7× faster), and voices could be interleaved the same way next. The reverb (the Library's, unchanged) is why the flagship's starts off.
+
 ## Remaining bottlenecks and next steps
 
 - **Measure on the phone.** Build a release APK, then:
