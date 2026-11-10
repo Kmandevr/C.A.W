@@ -200,8 +200,8 @@ class PeakMeter extends StatefulWidget {
   /// The meter's range: [floorDb] (empty) to 0 dBFS (full).
   static const floorDb = -60.0;
 
-  /// Set from Settings (`meter_fall`); 48 dB/s by default.
-  static double fallDbPerSecond = 48.0;
+  /// Set from Settings (`meter_fall`); 96 dB/s by default (owner: the old "Very fast" is the right medium).
+  static double fallDbPerSecond = 96.0;
 
   static final _wall = Stopwatch()..start();
 

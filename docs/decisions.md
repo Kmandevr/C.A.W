@@ -85,7 +85,7 @@ Built (engine pass, 2026-11-10):
 ## 2026-11-10: Owner feedback on the open beta (look and feel)
 
 **Owner, after trying the APK:** most things feel okay for now. Changes asked for (not built unless marked):
-- **Meters** work about the way REAPER's do, and fall faster than today's 24 dB/s while staying smooth. [Fact, 2026-11-10] REAPER sets meter decay in dB/s as a preference; its factory default is not confirmed here, so the app gets a decay setting with a faster default. Built (2026-11-10): Settings → Meter fall, 48 dB/s by default; the master meters are stereo; track meters stay one bar until the engine reports left and right peaks per track.
+- **Meters** work about the way REAPER's do, and fall faster than today's 24 dB/s while staying smooth. [Fact, 2026-11-10] REAPER sets meter decay in dB/s as a preference; its factory default is not confirmed here, so the app gets a decay setting with a faster default. Built (2026-11-10): Settings → Meter fall, 96 dB/s ("Medium") by default; the owner found the first default (48) slow and said the 96 then labelled "Very fast" should be medium. Master and stereo track meters show left and right.
 - **Look** (built, #168): the whole app a little darker, with less green in the background (a grey-to-black frosted backdrop).
 - **Arrange** (built, #168): track headers can be resized (drag their right edge for the width, a row's bottom edge for the height; saved). [Assumption] One height for every track, not per track.
 - **Track headers, REAPER-style** (built, #168): the track's colour tints the header panel and its edge, instead of a thin colour stripe. Colours carry meaning by folder: tracks in a folder take shades of the folder's colour (a top-level track keeps its own); the user can still override a colour.
