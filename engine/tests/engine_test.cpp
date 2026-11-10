@@ -428,6 +428,51 @@ TEST(layers_loop_at_their_own_length) {
     CHECK_NEAR(out[168000], 0.0, 1e-7);
 }
 
+TEST(a_loop_range_loops_playback_inside_the_song) {
+    // 120 BPM at 48 kHz: 6000 samples a step. The range is steps 4 to 8 (24000 to 48000) of a 16-step song.
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.1"}});
+    p.loopRange = true;
+    p.loopStartSteps = 4;
+    p.loopEndSteps = 8;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    run(e, 47999);
+    CHECK_EQ(e.meters().position, int64_t{47999});
+    run(e, 2);
+    CHECK_EQ(e.meters().position, int64_t{24001});  // back to the range's start, not the song's
+    run(e, 3 * 24000);
+    CHECK_EQ(e.meters().position, int64_t{24001});  // and round again, never past its end
+    // Played from after the range, the song plays to its end, then goes back to the range.
+    e.play(12);
+    run(e, 24000 + 10);
+    CHECK_EQ(e.meters().position, int64_t{24010});
+    // Off: the whole song loops, as projects without a range always have.
+    p.loopRange = false;
+    e.setProject(p);
+    e.play(4);
+    run(e, 96000);
+    CHECK_EQ(e.meters().position, int64_t{24000});
+}
+
+TEST(project_file_loop_range_is_checked_and_reaches_the_song) {
+    ProjectSpec p;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,"loop_bars":1,"loop_range":true,"loop_start_steps":16,"loop_end_steps":40})",
+        p, error));
+    CHECK(p.loopRange);
+    CHECK_EQ(p.loopStartSteps, 16);
+    CHECK_EQ(p.loopEndSteps, 40);
+    CHECK_EQ(p.loopBars, 3);  // the song reaches the range's end
+    CHECK(!parseProject(R"({"caw_project":1,"loop_range":true,"loop_start_steps":8,"loop_end_steps":8})", p, error));
+    CHECK(error.find("loop_start_steps") != std::string::npos);
+    // Off, the range's numbers are not read: older projects have none.
+    CHECK(parseProject(R"({"caw_project":1,"loop_start_steps":8})", p, error));
+    CHECK(!p.loopRange);
+    CHECK_EQ(p.loopBars, 4);
+}
+
 TEST(seam_crossfade_removes_the_click) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "pos * 0.8"}});
     p.layers[0].lengthSteps = 4;

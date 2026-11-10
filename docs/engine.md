@@ -232,6 +232,7 @@ Errors give a line and column, counting the header lines, for example `line 5, c
 ## Playback
 
 - **Project:** BPM, beats per bar, loop length in bars, seed and master volume. The project loop is `round(steps × 60 × sr / (bpm × 4))` samples, and every layer restarts when it wraps.
+- **Loop range** (REAPER's loop points, 2026-11-10): with `loop_range` on, playback that reaches `loop_end_steps` goes back to `loop_start_steps` (both rounded to samples like the loop), every layer restarting there as at the song's end, with the same seam crossfades. Played from after the range, the song plays to its end and then goes back to the range's start. Off (the default, and every older project), the whole song loops.
 - **Layers:** up to 64. Each layer is a generator (or a native C++ instrument, below) followed by a dynamically sized effect chain; chain length is constrained by explicit host resource budgets, not a fixed product limit. A layer loops at its own length in 16ths, or its pattern's length; 0 means it follows the project loop. Each loop start falls at `round(k × length)`, so a 3-bar layer against a 4-bar loop stays in time.
 - **Pattern layers:** notes start and end on the exact sample (`round(at × samples per 16th)`). At a pattern restart, held notes are released, but voices and effects carry on, so tails ring across it and there's no seam crossfade. Editing a pattern swaps it in at the next block without rebuilding the sound. A note that is already sounding finishes where the old pattern ended it, and the edit is heard from the note's next start. Editing the generator's code keeps held notes playing in the new code (see Hot swap).
 - **Seams:** when a layer restarts, the end of its previous pass crossfades into the new one over 3 ms. This can be turned off per project with `seam_crossfade`.
@@ -292,6 +293,7 @@ The app, the CLI and exports share one format:
 - Values outside their range are clamped:
   - BPM 20–400
 - Any number of layers: the Engine grows to fit, up to what its memory budget allows (`maxLayers()`), and refuses a project with more by name (F7.3).
+- `loop_range` (default false) with `loop_start_steps` and `loop_end_steps` turns the loop range on (see Playback); while it is on, both must be whole steps with the end after the start, and the song lengthens to reach the end. Off, the two are not read.
 - Song positions are refused with a message naming the field, never moved or shortened (F7.2): `loop_bars`, layer `length_steps`, clip `start_steps`/`length_steps`/`source_offset_steps`, automation point steps and the audition length must be whole numbers (points may be fractional) that fit the 32-bit step count, so a song holds whole bars up to 2^31 − 1 steps (`maxLoopBars`/`maxArrangementSteps` in `engine/src/project.h`). Project automation lengthens the loop to reach its last point.
 - Clips are expanded off the audio thread. A layer whose clips would expand past the project-state budget left (an upper bound, checked before expanding) is not installed, with a warning. Building takes about three times the result, so that peak must fit the budget left after the project so far and the layer's own chain.
 - Fields the app adds for itself, such as colours, are ignored.
@@ -300,7 +302,7 @@ The app, the CLI and exports share one format:
 
 | Kind | What it renders |
 | --- | --- |
-| Loop | One exact project loop (refused before rendering when it is longer than a WAV file holds, about 3.1 hours of stereo float at 48 kHz). The engine renders two loops and keeps the second, so the file starts with the seam crossfades it has when it repeats. Includes a `smpl` loop chunk over the whole file. Bit-identical to the second loop of live playback |
+| Loop | One exact project loop, or the loop range while it is on (refused before rendering when it is longer than a WAV file holds, about 3.1 hours of stereo float at 48 kHz). The engine renders two loops and keeps the second (with a loop range: from the start to the range's end, then the range again), so the file starts with the seam crossfades it has when it repeats. Includes a `smpl` loop chunk over the whole file. Bit-identical to the second pass of live playback |
 | Free | Any length from 0.1 to 600 seconds, from the start |
 | One-shot | One pass of one layer (its own or its pattern's length, or the project loop if it follows it), at most 30 s. The end is trimmed to 5 ms after the last sound above −80 dB |
 | Wavetable | 1–256 frames of 2048 samples from one module, sweeping one param from its min to its max. In a frame, `t` runs 0–2047, `phase` 0–1 and `sr` is 2048, so `sine(1)` is one cycle. Each frame's DC is removed, and the table is normalized to peak 1. Written as 32-bit float mono |

@@ -263,10 +263,15 @@ bool prepareExport(const ProjectSpec& in, const ExportOptions& o, ProjectSpec& p
 }
 
 // Loop and free exports: which frames of a render from the start they keep. A loop renders two loops and keeps
-// the second: it starts with the first loop's seam crossfades, exactly as a loop sounds when it repeats.
+// the second: it starts with the first loop's seam crossfades, exactly as a loop sounds when it repeats. With the
+// project's loop range on, the loop is that range: the render plays to the range's end, goes back to its start as
+// playback does, and keeps that second pass.
 void playedSpan(const ProjectSpec& p, const ExportOptions& o, int64_t& keepFrom, int64_t& total) {
     const int sr = o.sampleRate;
-    if (o.kind == ExportKind::Loop) {
+    if (o.kind == ExportKind::Loop && p.loopRange && p.loopEndSteps > p.loopStartSteps && p.loopEndSteps <= p.loopSteps()) {
+        keepFrom = loopFrames(p, sr, p.loopEndSteps);
+        total = keepFrom + keepFrom - loopFrames(p, sr, p.loopStartSteps);
+    } else if (o.kind == ExportKind::Loop) {
         keepFrom = loopFrames(p, sr, p.loopSteps());
         total = 2 * keepFrom;
     } else {

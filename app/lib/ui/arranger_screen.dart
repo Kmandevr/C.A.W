@@ -9,11 +9,13 @@ import '../actions/actions.dart';
 import '../model/app_state.dart';
 import '../model/arrange_edit.dart';
 import '../model/arrange_fx.dart';
+import '../model/arrange_markers.dart';
 import '../model/live_midi.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
 import 'arrange/arrange_drag.dart';
 import 'arrange/clip_bar.dart';
+import 'arrange/ruler.dart';
 import 'arrange/focus_panel.dart';
 import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
@@ -159,6 +161,21 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         s.deleteSelected();
       case 'arranger.clip.selectMode':
         setState(() => _selectMode = !_selectMode);
+      case 'arranger.loop.toggle':
+        s.toggleLoopRange();
+      case 'arranger.marker.add':
+        s.addMarker(s.editStep);
+      case 'arranger.region.add':
+        final a = s.timeSelectionStart, b = s.timeSelectionEnd;
+        if (a != null && b != null && a != b) {
+          s.addMarker(math.min(a, b), end: math.max(a, b));
+        } else if (s.project.hasLoopRange) {
+          s.addMarker(s.project.loopStartSteps, end: s.project.loopEndSteps);
+        } else {
+          _router?.toast('Make a time selection or a loop range first');
+        }
+      case 'arranger.marker.next' || 'arranger.marker.prev':
+        if (!s.jumpToMarker(next: id.endsWith('next'))) _router?.toast('No marker that way');
       default:
         return false;
     }
@@ -749,6 +766,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           IconButton(key: const ValueKey('arrange-browse'), onPressed: () => setState(() => _browser = !_browser),
             color: _browser ? Neon.blue : Neon.dim, icon: const Icon(Icons.folder_open),
             tooltip: 'Files: drag one onto a track'),
+          // REAPER's repeat (R): loops playback over the loop range drawn on the ruler, or the whole song when off.
+          IconButton(key: const ValueKey('arrange-loop'), onPressed: s.toggleLoopRange,
+            color: p.loopsRange ? Neon.blue : Neon.dim, icon: const Icon(Icons.repeat),
+            tooltip: p.loopsRange ? 'Loop range on (R): drag on the ruler to change it' : 'Loop range (R): drag on the ruler to set it'),
           IconButton(onPressed: () => setState(() => zoomBar = !zoomBar),
             key: const ValueKey('arrange-zoom'),
             color: zoomBar ? Neon.blue : null,
@@ -803,7 +824,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           const SizedBox(width: 8),
           Expanded(child: Align(alignment: Alignment.centerLeft, child: !clipsChosen ? const SizedBox.shrink()
               : SingleChildScrollView(scrollDirection: Axis.horizontal, child: _clipBar(docked: false)))),
-          ...controls,
+          // The controls scroll sideways when the toolbar is just over the phone width.
+          ConstrainedBox(constraints: BoxConstraints(maxWidth: math.max(0.0, constraints.maxWidth - 170)),
+            child: SingleChildScrollView(scrollDirection: Axis.horizontal, reverse: true,
+              child: Row(mainAxisSize: MainAxisSize.min, children: controls))),
         ]);
       }),
     );
@@ -892,7 +916,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     // as in Reaper. The timeline always reaches 64 bars past it, so a clip can go anywhere and the song grows with it.
     final end = p.engineLoopSteps;
     final width = math.max(560.0, math.min(p.maxArrangementSteps, math.max(p.timelineSteps, end + 64 * p.stepsPerBar)) * stepW);
-    final ruler = pinned ? 20.0 : 30.0;
+    // The ruler holds the bar numbers and loop range over the markers and regions: taller on a phone, for a finger.
+    final ruler = pinned ? 20.0 : (_phone ? 44.0 : 36.0);
     final focusId = _focusId;
     final drag = pinned ? null : _drag;
     // The rows' total height, so the New track zone fills the rest of the view below the last track.
@@ -951,13 +976,19 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           // below the last track (owner: like Reaper).
           Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: CustomPaint(
             painter: _ArrangementGrid(stepW, p.stepsPerBar, _hScroll)))),
+          // The loop range's edges, down through the lanes while it is on.
+          if (p.loopsRange) for (final at in [p.loopStartSteps, p.loopEndSteps])
+            Positioned(left: at * stepW - 0.5, top: ruler, bottom: 0, width: 1, child: IgnorePointer(
+              child: ColoredBox(color: Neon.blue.withValues(alpha: 0.45)))),
           // Where the song ends and playback loops back to the start.
           Positioned(left: end * stepW - 1, top: 0, bottom: 0, width: 2, child: IgnorePointer(
             child: Tooltip(message: 'Song end: playback loops back to the start',
               child: Container(color: Neon.pink.withValues(alpha: 0.7))))),
           ConstrainedBox(constraints: BoxConstraints(minHeight: pinned ? 0 : view.maxHeight), child: Column(children: [
-            SizedBox(height: ruler, width: width,
-              child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll))),
+            if (pinned)
+              SizedBox(height: ruler, width: width, child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll)))
+            else
+              ArrangeRuler(state: s, stepW: stepW, width: width, height: ruler, scroll: _hScroll),
             for (final layer in layers) ...[
               _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width, stepW: stepW,
                 trackHeight: trackHeight, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag),

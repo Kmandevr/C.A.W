@@ -232,6 +232,15 @@ const List<ActionDef> standardActions = [
   ActionDef('arranger.clip.properties', 'Clip properties', _r, defaultKeys: ['F2'], toast: false),
   ActionDef('arranger.clip.selectMode', 'Select several clips', _r,
       description: 'Taps add clips; a long-press drag draws a box', toast: false),
+  // The loop range, markers and regions (docs/reaper-flow.md, gap 2). REAPER's M, ] and [ are the layer's mute and
+  // length here, so markers take Shift+M and Ctrl+] / Ctrl+[.
+  ActionDef('arranger.loop.toggle', 'Loop range on / off', _r,
+      description: 'Loops over the range drawn on the ruler; off loops the whole song', defaultKeys: ['R'], isChange: true),
+  ActionDef('arranger.marker.add', 'Add marker at the playhead', _r, defaultKeys: ['Shift+M'], isChange: true),
+  ActionDef('arranger.region.add', 'Add region', _r, description: 'Over the time selection, else the loop range',
+      defaultKeys: ['Shift+R'], isChange: true),
+  ActionDef('arranger.marker.next', 'Go to next marker', _r, defaultKeys: ['Ctrl+]'], toast: false),
+  ActionDef('arranger.marker.prev', 'Go to previous marker', _r, defaultKeys: ['Ctrl+['], toast: false),
 
   // Exporter.
   ActionDef('export.now', 'Export', _e,

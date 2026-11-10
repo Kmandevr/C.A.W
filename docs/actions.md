@@ -197,6 +197,10 @@ Generators (buttons; no default keys):
 | Delete the selected clips | — (Delete, above) |
 | Clip properties (REAPER's F2) | F2 |
 | Select several clips (Select mode: taps add, a long-press drag draws a box) | — |
+| Loop range on / off (REAPER's R; on with none drawn takes the time selection, else four bars) | R |
+| Add a marker at the playhead (REAPER's M is the layer's mute here) | Shift+M |
+| Add a region over the time selection, else the loop range (REAPER's Shift+R) | Shift+R |
+| Go to the next / previous marker or region (REAPER's ] and [ are the layer's length here) | Ctrl+] / Ctrl+[ |
 
 ### Exporter
 

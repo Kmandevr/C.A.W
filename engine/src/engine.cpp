@@ -271,6 +271,8 @@ struct Engine::Cmd {
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
     int beatsPerBar = 4, loopSteps = 64, keyRoot = 9, keyScale = 1;
+    int loopFromSteps = 0, loopToSteps = 0;  // Transport: the loop range, when loopRange
+    bool loopRange = false;
     uint32_t seed = 0;
     bool seamXf = true, flag = false;
     int swapMode = 0;
@@ -1305,6 +1307,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     t.bpm = p.bpm;
     t.beatsPerBar = p.beatsPerBar;
     t.loopSteps = p.loopSteps();
+    t.loopRange = p.loopRange && p.loopEndSteps > p.loopStartSteps && p.loopEndSteps <= p.loopSteps();
+    t.loopFromSteps = p.loopStartSteps;
+    t.loopToSteps = p.loopEndSteps;
     t.seed = p.seed;
     t.master = p.master;
     t.seamXf = p.seamCrossfade;
@@ -2480,6 +2485,14 @@ void Engine::updateTiming() noexcept {
     stepLen_ = 60.0 * sr_ / (bpm_ * 4.0);
     loopLen_ = static_cast<int64_t>(std::floor(loopSteps_ * stepLen_ + 0.5));
     if (loopLen_ < 1) loopLen_ = 1;
+    loopFrom_ = loopRange_ ? std::clamp<int64_t>(static_cast<int64_t>(std::floor(loopFromSteps_ * stepLen_ + 0.5)), 0, loopLen_ - 1) : 0;
+    loopTo_ = loopRange_ ? std::clamp<int64_t>(static_cast<int64_t>(std::floor(loopToSteps_ * stepLen_ + 0.5)), loopFrom_ + 1, loopLen_) : loopLen_;
+}
+
+int64_t Engine::wrapAt() const noexcept { return loopRange_ && g_ < loopTo_ ? loopTo_ : loopLen_; }
+
+int64_t Engine::after(int64_t next) const noexcept {
+    return next >= wrapAt() ? (loopRange_ ? loopFrom_ : 0) : next;
 }
 
 bool Engine::canRetire(size_t count) const noexcept {
@@ -2751,6 +2764,9 @@ void Engine::applyCommands() noexcept {
                 bpm_ = c.bpm;
                 beatsPerBar_ = c.beatsPerBar;
                 loopSteps_ = c.loopSteps;
+                loopRange_ = c.loopRange;
+                loopFromSteps_ = c.loopFromSteps;
+                loopToSteps_ = c.loopToSteps;
                 seed_ = c.seed;
                 master_ = masterTarget_ = c.master;
                 masterStep_ = 0.0;
@@ -4329,7 +4345,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     }
     s.lastN = s.n0 + m - 1;
     const int64_t next = g_ + m;
-    s.expectG = next >= loopLen_ ? 0 : next;
+    s.expectG = after(next);
     s.contiguous = true;
     s.progress.store(static_cast<float>(static_cast<double>(s.n0 + m) / s.cur->layerLen), std::memory_order_relaxed);
 }
@@ -4540,15 +4556,17 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             i += m;
             continue;
         }
-        const int maxM = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, loopLen_ - g_}));
+        // The song loops at its end, or at the loop range's end while that is on (and before it).
+        const int64_t wrap = wrapAt();
+        const int maxM = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, wrap - g_}));
         const int m = processChunk(left + i, right + i, maxM);
         if (stopEnded_) {
             stopEnded_ = false;
             endPlayback();
         }
         g_ += m;
-        if (g_ >= loopLen_) {
-            g_ = 0;
+        if (g_ >= wrap) {
+            g_ = loopRange_ ? loopFrom_ : 0;
             ++epoch_;
         }
         i += m;

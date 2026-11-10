@@ -82,6 +82,10 @@ struct ProjectSpec {
     double bpm = 120.0;
     int beatsPerBar = 4;
     int loopBars = 4;
+    // A loop range inside the song (REAPER's loop points): while on, playback that reaches loopEndSteps goes back to
+    // loopStartSteps, and the song end goes back there too. Off (the default), the whole song loops.
+    bool loopRange = false;
+    int loopStartSteps = 0, loopEndSteps = 0;
     uint32_t seed = 0;
     double master = 0.7;
     bool seamCrossfade = true;

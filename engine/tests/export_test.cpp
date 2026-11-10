@@ -90,6 +90,38 @@ TEST(loop_export_matches_playback_bit_for_bit) {
     CHECK(same);
 }
 
+TEST(loop_export_uses_the_loop_range_and_matches_playback_bit_for_bit) {
+    ProjectSpec p = groove();
+    p.loopRange = true;
+    p.loopStartSteps = 8;
+    p.loopEndSteps = 40;
+    RenderResult r;
+    ExportOptions o;
+    CHECK(renderExport(p, o, r));
+    const double stepLen = 60.0 * 48000 / (140 * 4.0);
+    const auto at = [&](int steps) { return static_cast<int64_t>(std::floor(steps * stepLen + 0.5)); };
+    CHECK_EQ(r.frames, at(40) - at(8));
+    // Playback goes from the start to the range's end, back to its start, and on: the second pass is the file.
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    const int64_t total = at(40) + r.frames;
+    std::vector<float> l(static_cast<size_t>(total)), rr(static_cast<size_t>(total));
+    for (int64_t i = 0; i < total; i += 441) {
+        const int n = static_cast<int>(std::min<int64_t>(441, total - i));
+        e.process(l.data() + i, rr.data() + i, n);
+    }
+    bool same = true;
+    for (int64_t i = 0; i < r.frames && same; ++i)
+        same = r.samples[static_cast<size_t>(i) * 2] == l[static_cast<size_t>(at(40) + i)] &&
+               r.samples[static_cast<size_t>(i) * 2 + 1] == rr[static_cast<size_t>(at(40) + i)];
+    CHECK(same);
+    // Off, the loop export is the whole song again.
+    p.loopRange = false;
+    CHECK(renderExport(p, o, r));
+    CHECK_EQ(r.frames, int64_t{329143});
+}
+
 TEST(free_length_and_cancel) {
     RenderResult r;
     ExportOptions o;
