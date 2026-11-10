@@ -21,6 +21,7 @@ import 'arrange/track_color.dart';
 import 'file_manager_screen.dart';
 import 'frame/frame_widgets.dart';
 import 'widgets.dart';
+import 'volume_fader.dart';
 import 'track_cards_screen.dart';
 import 'glass.dart';
 import 'midi_file_actions.dart';
@@ -1286,7 +1287,10 @@ class _ArrangementMixer extends StatelessWidget {
               Expanded(child: ValueListenableBuilder<int>(valueListenable: state.layerValueTick(l.id),
                 builder: (context, _, _) => Column(children: [
                   Row(children: [const Icon(Icons.volume_up, size: 13, color: Neon.dim),
-                    Expanded(child: Slider(value: l.volume, onChanged: (v) => state.mixLayer(l, volume: v)))]),
+                    Expanded(child: SizedBox(height: 36, child: VolumeFader(value: l.volume, vertical: false,
+                      label: '${l.name} level', onChanged: (v) => state.mixLayer(l, volume: v)))),
+                    SizedBox(width: 52, child: Text(VolumeTaper.label(l.volume), textAlign: TextAlign.right,
+                      style: Neon.code(size: 9, color: Neon.dim)))]),
                   Row(children: [const Text('L', style: TextStyle(color: Neon.dim, fontSize: 10)),
                     Expanded(child: Slider(value: l.pan, min: -1, max: 1,
                       onChanged: (v) => state.mixLayer(l, pan: v))),
@@ -1448,11 +1452,12 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
           Expanded(
             child: ValueListenableBuilder<int>(
               valueListenable: s.masterValueTick,
-              builder: (context, _, _) => Slider(
-                value: s.project.master.clamp(0.0, 1.0).toDouble(),
-                activeColor: Neon.blue,
-                onChanged: s.setMaster,
-              ),
+              builder: (context, _, _) => Row(children: [
+                Expanded(child: SizedBox(height: 36, child: VolumeFader(value: s.project.master, vertical: false,
+                  color: Neon.blue, label: 'Master level', onChanged: s.setMaster))),
+                SizedBox(width: 56, child: Text(VolumeTaper.label(s.project.master), textAlign: TextAlign.right,
+                  style: Neon.code(size: 10, color: Neon.dim))),
+              ]),
             ),
           ),
           SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.meters.peakL, readRight: () => s.meters.peakR, color: Neon.blue)),

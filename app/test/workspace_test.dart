@@ -18,6 +18,7 @@ import 'package:caw/ui/files/library_manager.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/key_router.dart';
 import 'package:caw/ui/plugin_builder_screen.dart';
+import 'package:caw/ui/volume_fader.dart';
 import 'package:caw/ui/widgets.dart';
 
 void main() {
@@ -278,13 +279,13 @@ void main() {
     Navigator.of(tester.element(find.text('MODULE INSPECTOR'))).pop();
     await tester.pumpAndSettle();
 
-    tester.widget<Slider>(find.descendant(of: find.byKey(const ValueKey('fader-layer-1')), matching: find.byType(Slider)))
-      .onChanged!(0.72);
+    tester.widget<VolumeFader>(find.descendant(of: find.byKey(const ValueKey('fader-layer-1')), matching: find.byType(VolumeFader)))
+      .onChanged(0.72);
     await tester.pump();
     expect(layer.volume, closeTo(0.72, 0.0001));
-    expect(find.text('72%'), findsOneWidget);
+    expect(find.text('-2.9 dB'), findsOneWidget);
 
-    // Typed values: the level in percent, the pan as C, 30L or 30R.
+    // Typed values: the level in dB, the pan as C, 30L or 30R.
     await tester.tap(find.byKey(const ValueKey('level-layer-1')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'NaN');
@@ -292,10 +293,10 @@ void main() {
     await tester.pump();
     expect(find.text('Not a value'), findsOneWidget);
     expect(layer.volume, closeTo(0.72, 0.0001));
-    await tester.enterText(find.byType(TextField), '40');
+    await tester.enterText(find.byType(TextField), '-6');
     await tester.tap(find.text('Set'));
     await tester.pumpAndSettle();
-    expect(layer.volume, closeTo(0.4, 0.0001));
+    expect(layer.volume, closeTo(0.5012, 0.0001));
     await tester.tap(find.byKey(const ValueKey('pan-value-layer-1')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'left');
@@ -511,14 +512,15 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
 
-    final slider = tester.widget<Slider>(find.byType(Slider).first);
-    slider.onChanged!(0.42);
+    final fader = find.byWidgetPredicate((w) => w is VolumeFader && w.label == 'Master level');
+    tester.widget<VolumeFader>(fader).onChanged(0.42);
     await tester.pump();
 
     expect(state.project.master, closeTo(0.42, 0.0001));
     expect(valueTicks, 1);
     expect(appNotifications, 0);
-    expect(tester.widget<Slider>(find.byType(Slider).first).value, closeTo(0.42, 0.0001));
+    expect(tester.widget<VolumeFader>(fader).value, closeTo(0.42, 0.0001));
+    expect(find.text('-7.5 dB'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 600));
   });
 

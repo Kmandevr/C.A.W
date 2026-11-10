@@ -9,6 +9,7 @@ import '../model/project.dart';
 import 'builder_screen.dart' show kindColor, kindIcon;
 import 'param_control.dart';
 import 'theme.dart';
+import 'volume_fader.dart';
 import 'arrange/track_color.dart';
 import 'widgets.dart';
 import 'glass.dart';
@@ -844,7 +845,10 @@ class _TrackSheet extends StatelessWidget {
         builder: (context, _, _) => Column(children: [
           Row(children: [
             const SizedBox(width: 56, child: Text('Volume', style: TextStyle(color: Neon.dim))),
-            Expanded(child: Slider(value: layer.volume, activeColor: color, onChanged: (v) => s.mixLayer(layer, volume: v))),
+            Expanded(child: SizedBox(height: 40, child: VolumeFader(value: layer.volume, vertical: false, color: color,
+              label: '${layer.name} level', onChanged: (v) => s.mixLayer(layer, volume: v)))),
+            SizedBox(width: 56, child: Text(VolumeTaper.label(layer.volume), textAlign: TextAlign.right,
+              style: Neon.code(size: 10, color: Neon.dim))),
           ]),
           Row(children: [
             const SizedBox(width: 56, child: Text('Pan', style: TextStyle(color: Neon.dim))),

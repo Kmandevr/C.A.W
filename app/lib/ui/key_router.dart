@@ -1,6 +1,7 @@
 // Routes hardware keys through the action system (keymap, Vim modes, counts, `:` commands, macros) and shows its badge.
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import '../model/settings.dart';
 import 'glass.dart';
 import 'key_bindings.dart';
 import 'theme.dart';
+import 'volume_fader.dart';
 import 'touch_quick_actions.dart';
 
 /// Whether a focused text editor, rather than the global action router, should receive this key.
@@ -305,8 +307,9 @@ class KeyRouterState extends State<KeyRouter> {
         if (layer != null) _say(layers[_layer].name);
       case 'arranger.vol.up' || 'arranger.vol.down':
         if (layer == null) return false;
-        final d = (id.endsWith('up') ? 0.05 : -0.05) * count;
-        s.mixLayer(layer, volume: (layer.volume + d).clamp(0, 1).toDouble());
+        // 1 dB a press (from silence, up from -60 dB), at most 0 dB.
+        final db = (layer.volume <= 0 ? -61.0 : VolumeTaper.db(layer.volume)) + (id.endsWith('up') ? 1.0 : -1.0) * count;
+        s.mixLayer(layer, volume: db < -60 ? 0 : math.min(VolumeTaper.maxGain, math.pow(10, db / 20).toDouble()));
       case 'arranger.pan.left' || 'arranger.pan.right':
         if (layer == null) return false;
         final d = (id.endsWith('right') ? 0.1 : -0.1) * count;

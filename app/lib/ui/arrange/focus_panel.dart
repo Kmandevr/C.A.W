@@ -8,6 +8,7 @@ import '../glass.dart';
 import '../mixer_screen.dart';
 import '../pattern_editor.dart';
 import '../theme.dart';
+import '../volume_fader.dart';
 import 'track_color.dart';
 import 'fx_stack.dart';
 import 'knob.dart';
@@ -170,10 +171,11 @@ class _MixerTab extends StatelessWidget {
         Expanded(child: ValueListenableBuilder<int>(
           valueListenable: state.layerValueTick(layer.id),
           builder: (context, _, _) => Wrap(spacing: 8, runSpacing: 8, children: [
-            Knob(key: const ValueKey('mix-volume'), value: layer.volume, min: 0, max: 1, defaultValue: 0.8,
-              label: 'Volume', color: Neon.green, size: 44,
-              valueText: (v) => '${(v * 100).round()}%',
-              onChanged: (v) => state.mixLayer(layer, volume: v)),
+            // On the fader's dB taper: the knob turns through fader positions; double-tap is 0 dB.
+            Knob(key: const ValueKey('mix-volume'), value: VolumeTaper.position(layer.volume), min: 0, max: 1,
+              defaultValue: VolumeTaper.position(1), label: 'Volume', color: Neon.green, size: 44,
+              valueText: (p) => VolumeTaper.label(VolumeTaper.gain(p)),
+              onChanged: (p) => state.mixLayer(layer, volume: VolumeTaper.gain(p))),
             Knob(key: const ValueKey('mix-pan'), value: layer.pan, min: -1, max: 1, defaultValue: 0,
               label: 'Pan', color: Neon.blue, size: 44,
               valueText: (v) => v.abs() < .01 ? 'C' : '${(v.abs() * 100).round()}${v < 0 ? 'L' : 'R'}',
