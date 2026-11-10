@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../model/app_state.dart';
+import '../model/arrange_fx.dart';
 import '../model/project.dart';
 import 'param_control.dart';
 import 'theme.dart';
@@ -239,6 +240,11 @@ class ChannelStrip extends StatelessWidget {
   final int index;
   final ValueChanged<String> onSlot;
 
+  String? get _instrumentName {
+    final id = layer.instrument?.id;
+    return id == null ? null : state.componentLabel(id);
+  }
+
   Widget _slot(String id, Color color) {
     final selected = state.selectedLayerId == layer.id && state.selectedModuleId == id;
     final name = state.project.module(id)?.name ?? 'Missing module';
@@ -295,7 +301,10 @@ class ChannelStrip extends StatelessWidget {
                 Switch.adaptive(value: layer.busEnabled, onChanged: (v) => state.setFolderBus(layer, v)),
               ])
             : layer.chain.isEmpty
-              ? const Center(child: Text('No instrument', style: TextStyle(color: Neon.dim, fontSize: 10)))
+              // A C++ instrument (no .caw chain): its name, else there is none.
+              ? Center(child: Text(_instrumentName ?? 'No instrument', maxLines: 2, overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: _instrumentName == null ? Neon.dim : Neon.green, fontSize: 10)))
               // A chain is a handful of slots: all built, scrolling inside the strip when there are more than three.
               : SingleChildScrollView(child: Column(children: [
                   for (final id in layer.chain)

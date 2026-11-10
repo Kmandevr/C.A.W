@@ -1,6 +1,8 @@
 // Built-in components (the C.A.W. Library, #121): stereo effects and an instrument, registered in every Engine.
 #include "builtin_components.h"
 
+#include "builtin_instruments.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -468,6 +470,7 @@ void registerBuiltinComponents(ModuleRegistry& registry) {
     registry.add(kDelay, &make<PingPong>);
     registry.add(kChorus, &make<ChorusEffect>);
     registry.add(kSynth, &make<BasicSynth>);
+    registerBuiltinInstruments(registry);  // the drums, bass, acid and morph synths (builtin_instruments.cpp)
 }
 
 }  // namespace caw

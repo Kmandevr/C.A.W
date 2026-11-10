@@ -12,6 +12,13 @@ import 'project.dart';
 /// The engine's built-in stereo tools (`org.caw.*`): always loaded, no trust choice (docs/engine.md).
 bool isBuiltinComponent(String id) => id.startsWith('org.caw.');
 
+/// A readable name for a built-in before its descriptor arrives: `org.caw.delay.pingpong` → "Delay pingpong".
+String builtinComponentName(String id) {
+  if (!isBuiltinComponent(id)) return id;
+  final text = id.substring('org.caw.'.length).split('.').join(' ');
+  return text.isEmpty ? id : text[0].toUpperCase() + text.substring(1);
+}
+
 /// What a native effect in a track's stack is doing now, for its card.
 enum NativeEffectState { playing, needsTrust, blocked, buildFailed, loadFailed, waiting }
 
@@ -66,6 +73,9 @@ extension ArrangeFx on AppState {
   /// The project's C++ component that defines [componentId], or null (a built-in, or code that isn't in the project).
   CppComponentDoc? cppComponentFor(String componentId) =>
       project.cppComponents.where((c) => c.componentId == componentId).firstOrNull;
+
+  /// A component's display name: its descriptor's, else the project code's, else one made from a built-in's id.
+  String componentLabel(String id) => componentInfo(id)?.label ?? cppComponentFor(id)?.name ?? builtinComponentName(id);
 
   /// The same rule the project sync uses (`toEngineJson(playableComponents:)`): without an in-app compiler every
   /// component is sent; with one, the built-ins and the components it loaded.
