@@ -20,6 +20,9 @@
 #include "caw/library/spectrum.hpp"
 #include "analysis.h"
 #include "capi_internal.h"
+
+// M_PI is not standard C++ (MSVC lacks it without _USE_MATH_DEFINES).
+static constexpr double kTestPi = 3.14159265358979323846;
 #include "component_chain.h"
 #include "engine.h"
 #include "project.h"
@@ -208,12 +211,12 @@ TEST(a_parametric_band_has_its_type_s_response_measured_and_computed) {
             lib::SvfState st[lib::EqFilter::kMaxStages];
             double in = 0, out = 0;
             for (int i = 0; i < 48000; ++i) {
-                const double x = std::sin(2 * M_PI * hz * i / rate);
+                const double x = std::sin(2 * kTestPi * hz * i / rate);
                 const double y = f.process(st, x);
                 if (i >= 24000) in += x * x, out += y * y;
             }
             const double measured = 10 * std::log10(out / in + 1e-30);
-            const double computed = 10 * std::log10(f.magnitude2(std::tan(M_PI * hz / rate)) + 1e-30);
+            const double computed = 10 * std::log10(f.magnitude2(std::tan(kTestPi * hz / rate)) + 1e-30);
             if (computed > -60 && std::fabs(measured - computed) > 0.05)
                 cawtest::fail(__FILE__, __LINE__, "type " + std::to_string(type) + " at " + std::to_string(hz) + " Hz: measured " +
                                                       std::to_string(measured) + " computed " + std::to_string(computed));
@@ -222,12 +225,12 @@ TEST(a_parametric_band_has_its_type_s_response_measured_and_computed) {
     // The cuts fall at their slopes: an octave and two below a 1 kHz 48 dB/octave low cut.
     lib::EqFilter cut;
     cut.set(lib::EqType::LowCut48, 1000.0, 0.0, 0.70710678, rate);
-    CHECK_NEAR(10 * std::log10(cut.magnitude2(std::tan(M_PI * 1000 / rate))), -3.01, 0.05);
-    CHECK(10 * std::log10(cut.magnitude2(std::tan(M_PI * 250 / rate))) < -90);
+    CHECK_NEAR(10 * std::log10(cut.magnitude2(std::tan(kTestPi * 1000 / rate))), -3.01, 0.05);
+    CHECK(10 * std::log10(cut.magnitude2(std::tan(kTestPi * 250 / rate))) < -90);
     lib::EqFilter tilt;
     tilt.set(lib::EqType::Tilt, 1000.0, 12.0, 0.7071, rate);
-    CHECK_NEAR(10 * std::log10(tilt.magnitude2(std::tan(M_PI * 20 / rate))), -6.0, 0.1);
-    CHECK_NEAR(10 * std::log10(tilt.magnitude2(std::tan(M_PI * 20000 / rate))), 6.0, 0.2);
+    CHECK_NEAR(10 * std::log10(tilt.magnitude2(std::tan(kTestPi * 20 / rate))), -6.0, 0.1);
+    CHECK_NEAR(10 * std::log10(tilt.magnitude2(std::tan(kTestPi * 20000 / rate))), 6.0, 0.2);
 }
 
 TEST(the_half_band_oversampler_passes_the_audio_band_and_stops_images) {
@@ -235,7 +238,7 @@ TEST(the_half_band_oversampler_passes_the_audio_band_and_stops_images) {
     double stop = -1e9, ripple = 0;
     for (int i = 0; i <= 2000; ++i) {
         const double f = 0.5 * i / 2000;
-        const std::complex<double> z = std::polar(1.0, 2 * M_PI * f), z2 = z * z;
+        const std::complex<double> z = std::polar(1.0, 2 * kTestPi * f), z2 = z * z;
         std::complex<double> a0 = 1, a1 = 1;
         for (int k = 0; k < d.count(); ++k) {
             const std::complex<double> s = (d.coefficient(k) + 1.0 / z2) / (1.0 + d.coefficient(k) / z2);
@@ -252,7 +255,7 @@ TEST(the_half_band_oversampler_passes_the_audio_band_and_stops_images) {
         lib::Oversampler2x os(d);
         double in = 0, out = 0;
         for (int i = 0; i < 48000; ++i) {
-            const double x = std::sin(2 * M_PI * hz * i / 48000);
+            const double x = std::sin(2 * kTestPi * hz * i / 48000);
             double up[2];
             os.up(x, up);
             const double y = os.down(up);
@@ -284,7 +287,7 @@ TEST(the_sliding_minimum_and_true_peak_estimate_are_exact_enough) {
     lib::TruePeak tp;
     double est = 0, samples = 0;
     for (int i = 0; i < 2000; ++i) {
-        const double x = std::sin(M_PI / 2 * i + M_PI / 4);
+        const double x = std::sin(kTestPi / 2 * i + kTestPi / 4);
         samples = std::max(samples, std::fabs(x));
         if (i > 16) est = std::max(est, tp.process(x));
         else tp.process(x);
@@ -300,7 +303,7 @@ TEST(the_spectrum_analyzer_finds_a_sine_at_its_level_and_frequency) {
     for (int round = 0; round < 10; ++round) {
         for (uint32_t i = 0; i < 2048; ++i) {
             const double t = (round * 2048 + i) / 48000.0;
-            a.push(static_cast<float>(std::sin(2 * M_PI * 1000 * t)), static_cast<float>(0.1 * std::sin(2 * M_PI * 200 * t)));
+            a.push(static_cast<float>(std::sin(2 * kTestPi * 1000 * t)), static_cast<float>(0.1 * std::sin(2 * kTestPi * 200 * t)));
         }
         a.analyze(pre.data(), post.data());
     }
@@ -710,7 +713,7 @@ TEST(the_saturator_bends_loud_signals_and_oversampling_cuts_aliases) {
         std::unique_ptr<ModuleProcessor> p = make(e, "org.caw.saturator");
         const Stereo out = run(*p, sine(7031.25, 0.5, 8192 * 2), {{"mode", 3}, {"drive", 24}, {"oversample", oversample}});
         std::vector<std::complex<double>> d(8192);
-        for (size_t i = 0; i < 8192; ++i) d[i] = out.l[8192 + i] * (0.5 - 0.5 * std::cos(2 * M_PI * i / 8192));
+        for (size_t i = 0; i < 8192; ++i) d[i] = out.l[8192 + i] * (0.5 - 0.5 * std::cos(2 * kTestPi * i / 8192));
         analysis::fft(d, false);
         double harm = 0, other = 0;
         for (size_t k = 2; k < 4096; ++k) {
