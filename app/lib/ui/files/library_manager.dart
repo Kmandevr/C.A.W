@@ -8,6 +8,7 @@ import '../../model/app_state.dart';
 import '../../model/project.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import '../adaptive_sheet.dart';
 
 class LibraryManagerView extends StatefulWidget {
   const LibraryManagerView({super.key, required this.state, required this.onOpenBuilder});
@@ -666,7 +667,7 @@ Future<void> showProjectRestorePoints(BuildContext context, AppState state) asyn
   try {
     final points = await state.listRestorePoints();
     if (!context.mounted) return;
-    final selected = await showDialog<String>(
+    final selected = await showDialogOrSheet<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Project restore points'),

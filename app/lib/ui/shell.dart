@@ -38,6 +38,7 @@ import 'frame/live_keys.dart';
 import 'frame/record_tools.dart';
 import 'frame/sections.dart';
 import 'frame/strain.dart';
+import 'adaptive_sheet.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [
@@ -775,7 +776,7 @@ class _BpmButton extends StatelessWidget {
         parse: parseBpm,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
         apply: (v) => state.editProject((p) => p.bpm = v));
-    void pad() => showDialog<void>(context: context, builder: (_) => _TapTempoPad(state: state));
+    void pad() => showDialogOrSheet<void>(context: context, builder: (_) => _TapTempoPad(state: state));
     // A screen reader gets both actions: double-tap types, a long-press opens the pad.
     return Semantics(
       button: true,
@@ -823,7 +824,10 @@ class _TapTempoPad extends StatelessWidget {
               child: FilledButton(
                 key: const ValueKey('tap-pad'),
                 autofocus: true,
-                onPressed: state.tapTempo,
+                onPressed: () {
+                  Haptics.tap();
+                  state.tapTempo();
+                },
                 child: const Text('TAP', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
               ),
             ),

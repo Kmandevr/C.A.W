@@ -20,6 +20,7 @@ import 'code_style.dart';
 import 'cpp_library.dart';
 import 'key_row.dart';
 import 'panels.dart';
+import '../adaptive_sheet.dart';
 
 /// One file's editor state, kept with its session so undo survives switching tabs and files.
 class CppFileView {
@@ -400,7 +401,7 @@ class CppEditorState extends State<CppEditor> {
   }
 
   void _viewVersion(BuildContext c, CppVersion v) {
-    showDialog<void>(
+    showDialogOrSheet<void>(
       context: c,
       builder: (d) => AlertDialog(
         title: Text(v.label, style: const TextStyle(fontSize: 14)),

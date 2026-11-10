@@ -356,6 +356,8 @@ void main() {
     await tester.longPress(find.byKey(const ValueKey('transport-bpm')));
     await tester.pumpAndSettle();
     expect(find.text('Tap tempo'), findsOneWidget);
+    // On a phone the pad is a bottom sheet, within thumb reach.
+    expect(find.ancestor(of: find.byKey(const ValueKey('tap-pad')), matching: find.byType(BottomSheet)), findsOneWidget);
     // Over two seconds (real time) since the T taps, so the pad starts a new measurement.
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 2500)));
     await tester.tap(find.byKey(const ValueKey('tap-pad')));

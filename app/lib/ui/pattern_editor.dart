@@ -31,6 +31,7 @@ import 'theme.dart';
 import 'widgets.dart';
 import 'arrange/track_color.dart';
 import 'glass.dart';
+import 'adaptive_sheet.dart';
 
 enum PatternTool { draw, select, curve, erase }
 
@@ -1151,7 +1152,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     if (d == null) return;
     final bar = Steps(s.project.beatsPerBar * 4);
     final seed = DateTime.now().microsecondsSinceEpoch & 0x7fffffff;
-    final v = await showDialog<Map<String, double>>(
+    final v = await showDialogOrSheet<Map<String, double>>(
       context: context,
       builder: (_) => _GenDialog(id: id),
     );
