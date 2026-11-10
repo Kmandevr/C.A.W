@@ -472,6 +472,8 @@ struct OscVoice {
     int warpMode = kWarpNone;
     float w1 = 0.0f, w2 = 0.0f, w3 = 0.0f, mix = 0.0f;  // the warp's constants; the morph between frames a and b
     int f0 = -1, f1 = -1;                              // the frames a and b read
+    double faster = 1.0;                               // how much faster than the note the warp reads the table
+    double pitchOffset[3] = {};                        // octave, semitones and fine, in semitones
     double phase[kMaxCopies] = {};
     double dt[kMaxCopies] = {};  // cycles per sample; 0 for a copy above Nyquist (silent)
     const float* a[kMaxCopies] = {};
@@ -1288,7 +1290,8 @@ private:
         }
         for (uint32_t o = 0; o < kOscs; ++o) {
             if (frameOnly & (1u << o)) moveFrame(v.osc[o], P(oscParam(o, kOscFrame)));
-            else if (pitch || moved(1u << o)) configureOscillator(v, o, P);
+            else if (moved(1u << o)) configureOscillator(v, o, P);
+            else if (pitch) retune(v.osc[o], v.pitch);
         }
         if (moved(kMovedRouting)) v.parallel = P(kFltRouting) >= 0.5;
         for (uint32_t f = 0; f < kFilters; ++f) {
@@ -1342,8 +1345,10 @@ private:
         key.position = clampd(at(kOscFrame), 0.0, 1.0);
         key.level = clampd(at(kOscLevel), 0.0, 1.0);
         key.pan = clampd(at(kOscPan), -1.0, 1.0);
-        key.pitch = v.pitch + 12.0 * clampi(at(kOscOctave), -4, 4) + clampi(at(kOscSemi), -12, 12) +
-                    clampd(at(kOscFine), -100.0, 100.0) / 100.0;
+        o.pitchOffset[0] = 12.0 * clampi(at(kOscOctave), -4, 4);
+        o.pitchOffset[1] = clampi(at(kOscSemi), -12, 12);
+        o.pitchOffset[2] = clampd(at(kOscFine), -100.0, 100.0) / 100.0;
+        key.pitch = v.pitch + o.pitchOffset[0] + o.pitchOffset[1] + o.pitchOffset[2];
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, 4) : kWarpNone;
         lib::UnisonSettings& u = key.unison;
@@ -1425,6 +1430,25 @@ private:
         }
         o.warpMode = key.warp;
         o.key = key;
+        o.faster = faster;
+        tuneCopies(o, table);
+    }
+
+    // The pitch alone moved (a glide, a bend): the copies' steps and mip levels follow it; nothing else changed.
+    void retune(OscVoice& o, double notePitch) noexcept {
+        if (!o.on || o.key.table < 0) return;
+        const double pitch = notePitch + o.pitchOffset[0] + o.pitchOffset[1] + o.pitchOffset[2];  // configureOscillator's sum
+        if (pitch == o.key.pitch) return;
+        o.key.pitch = pitch;
+        o.hz = 440.0 * exp2((pitch - 69.0) / 12.0);
+        tuneCopies(o, tables_->table[o.key.table]);
+    }
+
+    // Each copy's step, mip level, frames and gains, from the oscillator's pitch, frames and layout.
+    void tuneCopies(OscVoice& o, const lib::Wavetable& table) noexcept {
+        const int f0 = o.f0, f1 = o.f1;
+        const double faster = o.faster;
+        const OscKey& key = o.key;
         const double perSample = o.hz / sr_;
         for (int c = 0; c < o.count; ++c) {
             const double dt = perSample * o.ratio[c];
@@ -1514,9 +1538,8 @@ private:
         fxDirty_ = 0;
     }
 
-    static void zero(float* x) noexcept {
-        for (uint32_t i = 0; i < kControlFrames; ++i) x[i] = 0.0f;
-    }
+    // A constant-size memset the compiler writes as a few vector stores (a plain loop can become a memset call).
+    static void zero(float* x) noexcept { std::memset(x, 0, kControlFrames * sizeof(float)); }
 
     // One voice's piece of the period: its oscillators into their filters, the filters, the level.
     void renderVoice(Voice& v, float* outL, float* outR, uint32_t n, uint32_t first) noexcept {
