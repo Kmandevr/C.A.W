@@ -1,5 +1,7 @@
 // Mixer implementation: the audio-thread render loop and the control-thread project diffing that feeds it.
 #include "engine.h"
+
+#include "builtin_presets.h"
 #include "builtin_components.h"
 #include "graph.h"
 #include "route_math.h"
@@ -1185,7 +1187,9 @@ std::string Engine::nativeComponentsJson() {
     // Built-in components first, marked so the app can tell them from loaded ones (they need no trust).
     for (const ModuleDescriptor* d : nativeModules_.builtinComponents()) {
         std::string one = moduleDescriptorJson(*d);
-        json += (first ? "{\"builtin\":true," : ",{\"builtin\":true,") + one.substr(1);
+        std::string head = first ? "{\"builtin\":true," : ",{\"builtin\":true,";
+        if (!builtinPresets(d->id).empty()) head += "\"presets\":" + builtinPresetsJson(d->id) + ",";
+        json += head + one.substr(1);
         first = false;
     }
     for (const ModuleDescriptor* d : nativeModules_.loadedComponents()) {
@@ -1209,6 +1213,29 @@ std::string Engine::setProjectOffline(const ProjectSpec& p) {
 }
 
 std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
+    // The synths that became Flagship presets (2026-11-10, one synth): an old project's track plays Flagship with
+    // the matching preset and its knobs mapped, and its lanes on those knobs move Flagship's.
+    if (std::any_of(p.layers.begin(), p.layers.end(), [](const LayerSpec& l) { return isLegacyInstrument(l.instrument.id); })) {
+        ProjectSpec migrated = p;
+        for (LayerSpec& l : migrated.layers) {
+            if (!isLegacyInstrument(l.instrument.id)) continue;
+            const std::string legacy = l.instrument.id;
+            migrateLegacyInstrument(l.instrument.id, l.instrument.params);
+            l.instrument.hasState = false;  // the old synths saved no state
+            auto& lanes = migrated.automation;
+            for (auto it = lanes.begin(); it != lanes.end();) {
+                if (it->targetType == "instrument" && it->moduleId == l.id) {
+                    it->target = migratedLegacyParameter(legacy, it->target);
+                    if (it->target.empty()) {  // an old knob with no Flagship knob in its units
+                        it = lanes.erase(it);
+                        continue;
+                    }
+                }
+                ++it;
+            }
+        }
+        return setProjectImpl(migrated, offline);
+    }
     std::lock_guard<std::mutex> lock(ctl_);
     offlineControl_ = offline;
     struct OfflineControlReset {

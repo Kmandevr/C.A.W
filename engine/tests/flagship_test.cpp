@@ -18,6 +18,8 @@
 #include "caw/library/unison.hpp"
 #include "caw/library/wavetable.hpp"
 #include "analysis.h"
+#include "builtin_presets.h"
+#include "caw.h"
 #include "engine.h"
 #include "project.h"
 #include "test.h"
@@ -274,9 +276,9 @@ TEST(the_flagship_lists_its_parameters_grouped_by_section_with_good_descriptors)
     const ModuleDescriptor& d = p->descriptor();
     CHECK_EQ(d.id, std::string_view("org.caw.synth.flagship"));
     CHECK_EQ(d.name, std::string_view("Flagship"));
-    CHECK_EQ(d.parameterCount, 191u);
+    CHECK_EQ(d.parameterCount, 209u);
     const char* prefixes[] = {"osc1_", "osc2_", "osc3_", "flt1_", "flt2_", "flt_", "env1_", "env2_", "env3_", "lfo1_",
-                              "lfo2_", "lfo3_", "rnd_", "volume", "velocity", "bend_range", "fx_", "mod"};
+                              "lfo2_", "lfo3_", "rnd_", "volume", "velocity", "bend_range", "fx_", "mod", "voice_mode", "glide"};
     for (uint32_t k = 0; k < d.parameterCount; ++k) {
         const ParameterDescriptor& q = d.parameters[k];
         bool grouped = false;
@@ -602,4 +604,188 @@ TEST(the_flagship_voice_follows_pitch_bend_and_stops_at_its_highest_notes) {
     p->reset();
     const Stereo high = play(*p, {notes::noteOn(0, 1, 127, 1)}, 4800, plain({{"osc1_octave", 4}}));
     CHECK_EQ(analysis::levels(high.left.data(), 4800).peak, 0.0);
+}
+
+TEST(the_flagship_mono_and_legato_modes_play_one_voice_gliding_between_notes) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    // A1 held, E2 over it from 0.5 s to 1 s, then A1 alone again: one voice, at the newest note's pitch.
+    const std::vector<Event> notes = {notes::noteOn(0, 1, 33, 1), notes::noteOn(24000, 2, 40, 1), notes::noteOff(48000, 2, 40),
+                                      notes::noteOff(72000, 1, 33)};
+    for (double mode : {1.0, 2.0}) {
+        p->reset();
+        const Stereo out = play(*p, notes, 72000, plain({{"voice_mode", mode}, {"glide", 0.02}}));
+        const std::vector<double> held = spectrum(out.left, 12000, 8192), over = spectrum(out.left, 36000, 8192),
+                                  back = spectrum(out.left, 60000, 8192);
+        CHECK_NEAR(peakHz(held, 30, 200, 8192), 55.0, 1.5);
+        CHECK_NEAR(peakHz(over, 30, 200, 8192), 82.41, 1.5);
+        CHECK(peakNear(over, 55.0, 2, 8192) < 0.01 * peakNear(over, 82.41, 2, 8192));  // A1 is not sounding too
+        CHECK_NEAR(peakHz(back, 30, 200, 8192), 55.0, 1.5);
+    }
+    // Poly plays both. The glide: 5 ms after the second note the pitch is still on its way.
+    p->reset();
+    const Stereo poly = play(*p, notes, 48000, plain());
+    const std::vector<double> both = spectrum(poly.left, 36000, 8192);
+    CHECK(peakNear(both, 55.0, 2, 8192) > 0.3 * peakNear(both, 82.41, 2, 8192));
+    // Mono restarts the envelopes at each note (an attack after a decay), legato does not.
+    const Values decaying = {{"osc1_frame", 0.0}, {"osc1_unison", 1}, {"flt1_on", 0}, {"fx_reverb_on", 0}, {"mod1_src", 0},
+                             {"env1_attack", 0.001}, {"env1_decay", 0.1}, {"env1_sustain", 0.1}, {"osc1_phase_rand", 0}};
+    auto jump = [&](double mode) {
+        p->reset();
+        Values v = decaying;
+        v.push_back({"voice_mode", mode});
+        const Stereo s = play(*p, notes, 30000, v);
+        return analysis::levels(s.left.data() + 24000, 2400).rms / analysis::levels(s.left.data() + 21600, 2400).rms;
+    };
+    CHECK(jump(1.0) > 3.0);
+    CHECK(jump(2.0) < 1.5);
+}
+
+TEST(the_flagship_accent_and_a_slots_second_source_scale_its_amount) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    const ModuleDescriptor& d = p->descriptor();
+    const double volume = paramIndex(d, "volume") + 1;
+    // Accent (14) on the volume: nothing at velocity 0.7, all of it at 1. Velocity to level is off.
+    auto level = [&](double velocity, Values extra) {
+        p->reset();
+        Values v = plain({{"volume", 0.3}, {"velocity", 0}});
+        for (auto& x : extra) v.push_back(x);
+        const Stereo s = play(*p, {notes::noteOn(0, 1, 57, static_cast<float>(velocity))}, 24000, v);
+        return analysis::levels(s.left.data(), 24000).rms;
+    };
+    const Values accent = {{"mod1_src", 14}, {"mod1_dst", volume}, {"mod1_amt", 0.3}};
+    CHECK_NEAR(level(0.7, accent) / level(0.7, {}), 1.0, 1e-6);
+    CHECK_NEAR(level(1.0, accent) / level(1.0, {}), 2.0, 0.02);
+    // The same slot scaled by velocity (8): at velocity 0.5 half the amount.
+    const Values via = {{"mod1_src", 14}, {"mod1_dst", volume}, {"mod1_amt", 0.3}, {"mod1_via", 8}};
+    CHECK_NEAR(level(1.0, via) / level(1.0, {}), 2.0, 0.02);
+    const Values half = {{"mod1_src", 8}, {"mod1_dst", volume}, {"mod1_amt", 0.3}, {"mod1_via", 8}};
+    CHECK_NEAR(level(0.5, half) / level(0.5, {}), 1.0 + 0.3 * 0.25 / 0.3, 0.02);
+}
+
+TEST(the_flagship_classic_table_plays_the_classic_shapes) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    // Classic (4): frame 0 a sine, 1/3 a triangle (odd harmonics at 1/h^2), 1 a square (odd at 1/h).
+    auto harmonics = [&](double frame) {
+        p->reset();
+        const Stereo s = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, plain({{"osc1_table", 4}, {"osc1_frame", frame}}));
+        const std::vector<double> sp = spectrum(s.left, 8000, 8192);
+        return std::vector<double>{peakNear(sp, 220, 3, 8192), peakNear(sp, 440, 3, 8192), peakNear(sp, 660, 3, 8192)};
+    };
+    const std::vector<double> sine = harmonics(0), triangle = harmonics(1.0 / 3.0), square = harmonics(1);
+    CHECK(sine[2] < 1e-3 * sine[0]);
+    CHECK_NEAR(triangle[2] / triangle[0], 1.0 / 81.0, 0.003);  // powers
+    CHECK_NEAR(square[2] / square[0], 1.0 / 9.0, 0.02);
+    CHECK(square[1] < 1e-3 * square[0]);
+}
+
+TEST(flagship_presets_set_their_values_and_an_entry_names_one) {
+    // Every preset names only Flagship's parameters, within their ranges.
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e);
+    if (!p) return;
+    const ModuleDescriptor& d = p->descriptor();
+    CHECK_EQ(builtinPresets(kId).size(), 5u);
+    for (const BuiltinPreset& preset : builtinPresets(kId))
+        for (const auto& [id, v] : preset.values) {
+            const int k = paramIndex(d, std::string(id));
+            if (k < 0) continue;
+            const ParameterDescriptor& q = d.parameters[k];
+            if (!(v >= q.minimum && v <= q.maximum))
+                cawtest::fail(__FILE__, __LINE__, std::string(preset.name) + ": " + std::string(id) + " out of range");
+        }
+    // {"id": flagship, "preset": "Mono bass", "params": {...}}: the preset's values under the entry's own.
+    std::string json = R"({"bpm":120,"loop_bars":1,"layers":[{"id":"t","name":"t","volume":1,
+        "instrument":{"id":"org.caw.synth.flagship","preset":"Mono bass","params":{"flt1_cutoff":900}}}]})";
+    ProjectSpec spec;
+    std::string error;
+    CHECK(parseProject(json, spec, error));
+    const auto& params = spec.layers[0].instrument.params;
+    auto value = [&](const char* id) {
+        for (const auto& [k, v] : params)
+            if (k == id) return v;
+        return -1.0;
+    };
+    CHECK_EQ(value("voice_mode"), 2.0);
+    CHECK_EQ(value("flt1_cutoff"), 900.0);
+    CHECK(!parseProject(R"({"layers":[{"id":"t","instrument":{"id":"org.caw.synth.flagship","preset":"Nope"}}]})", spec, error));
+    CHECK(error.find("Nope") != std::string::npos);
+}
+
+TEST(an_old_project_s_retired_synth_plays_as_flagship_with_its_preset_and_knobs) {
+    // An old project naming org.caw.bass renders exactly as Flagship with the Mono bass preset and the old knobs
+    // mapped, and its lanes move the knobs they map to.
+    auto render = [](ProjectSpec p) {
+        Engine e(48000);
+        std::vector<float> out;
+        const std::string result = e.setProjectOffline(p);
+        if (!ok(result)) cawtest::fail(__FILE__, __LINE__, result);
+        if (!ok(result)) return out;
+        e.play();
+        std::vector<float> l(256), r(256);
+        for (int done = 0; done < 48000; done += 256) {
+            e.process(l.data(), r.data(), 256);
+            out.insert(out.end(), l.begin(), l.end());
+        }
+        return out;
+    };
+    ProjectSpec old;
+    old.bpm = 120;
+    old.loopBars = 1;
+    old.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 A1 2 1\n2 C2 2 0.8\n4 E2 4 1\n", {}});
+    LayerSpec l;
+    l.id = "t";
+    l.name = "t";
+    l.pattern = "pat";
+    l.hasInstrument = true;
+    l.instrument.id = "org.caw.bass";
+    l.instrument.params = {{"cutoff", 300}, {"env", 0.8}, {"legato", 0}};
+    old.layers.push_back(l);
+    ProjectAutomationLaneSpec lane;
+    lane.targetType = "instrument";
+    lane.moduleId = "t";
+    lane.target = "cutoff";
+    lane.points = {{0, 200}, {8, 2000}};
+    old.automation.push_back(lane);
+    ProjectAutomationLaneSpec gone = lane;
+    gone.target = "env";  // no Flagship knob in its units: dropped
+    old.automation.push_back(gone);
+    ProjectSpec now = old;
+    now.layers[0].instrument.id = kId;
+    now.layers[0].instrument.params.clear();
+    CHECK(applyBuiltinPreset(kId, "Mono bass", now.layers[0].instrument.params));
+    auto set = [&](const char* id, double v) {
+        for (auto& [k, x] : now.layers[0].instrument.params)
+            if (k == id) x = v;
+    };
+    set("flt1_cutoff", 300);
+    set("mod1_amt", 5.0 * 0.8 / 9.965784284662087);
+    set("voice_mode", 1);
+    now.automation = {lane};
+    now.automation[0].target = "flt1_cutoff";
+    const std::vector<float> a = render(old), b = render(now);
+    CHECK(!a.empty());
+    size_t first = 0;
+    while (first < a.size() && first < b.size() && a[first] == b[first]) ++first;
+    if (a.size() != b.size() || first != a.size())
+        cawtest::fail(__FILE__, __LINE__, "the migrated project differs from frame " + std::to_string(first));
+    CHECK(analysis::levels(a.data(), a.size()).rms > 1e-3);
+    // The C API's migration gives the app the same entry, its preset's name and the lanes' knobs.
+    char* json = caw_migrate_instrument(R"({"id":"org.caw.synth.acid","params":{"resonance":0.9,"slide":0.1}})");
+    const std::string out = json;
+    caw_free(json);
+    CHECK(out.find("\"migrated\":true") != std::string::npos);
+    CHECK(out.find("\"id\":\"org.caw.synth.flagship\"") != std::string::npos);
+    CHECK(out.find("\"preset\":\"Acid 303\"") != std::string::npos);
+    CHECK(out.find("\"flt1_resonance\":0.90000000000000002") != std::string::npos);
+    CHECK(out.find("\"glide\":0.10000000000000001") != std::string::npos);
+    CHECK(out.find("\"slide\":\"glide\"") != std::string::npos);
+    char* other = caw_migrate_instrument(R"({"id":"org.caw.drum.kick","params":{"tune":50}})");
+    CHECK(std::string(other).find("\"migrated\":false") != std::string::npos);
+    caw_free(other);
 }

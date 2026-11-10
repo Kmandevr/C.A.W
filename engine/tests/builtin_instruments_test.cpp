@@ -17,6 +17,7 @@
 #include "caw/library/filter.hpp"
 #include "caw/library/oscillator.hpp"
 #include "analysis.h"
+#include "builtin_presets.h"
 #include "engine.h"
 #include "project.h"
 #include "test.h"
@@ -25,8 +26,10 @@ using namespace caw;
 
 namespace {
 
-const char* const kInstruments[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats",   "org.caw.drum.kit",
-                                    "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph", "org.caw.synth.flagship"};
+const char* const kInstruments[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit",
+                                    "org.caw.synth.flagship"};
+// The synths that became Flagship presets (2026-11-10, one synth): a test of one plays Flagship with its preset.
+const char* const kRetired[] = {"org.caw.bass", "org.caw.synth.acid", "org.caw.synth.morph", "org.caw.synth.basic"};
 
 bool ok(const std::string& result) { return result.find("\"ok\":true") != std::string::npos; }
 
@@ -73,8 +76,15 @@ std::vector<float> play(ModuleProcessor& p, const std::vector<Event>& events, ui
     return out;
 }
 
+// A retired synth's knob values as Flagship's (its preset and the knobs mapped), as the engine loads an old project.
+std::vector<std::pair<std::string, double>> asFlagship(const char* id, std::vector<std::pair<std::string, double>> values) {
+    std::string to = id;
+    migrateLegacyInstrument(to, values);
+    return values;
+}
+
 std::unique_ptr<ModuleProcessor> make(Engine& e, const char* id) {
-    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(id);
+    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(isLegacyInstrument(id) ? "org.caw.synth.flagship" : id);
     CHECK(p != nullptr);
     if (p) CHECK(p->activate(48000, 64));
     return p;
@@ -464,8 +474,8 @@ TEST(library_drum_voices_ring_for_their_decay_then_stop_and_a_choke_cuts_them) {
 TEST(the_built_in_instruments_are_listed_with_readable_names) {
     Engine e(48000);
     const std::string list = e.nativeComponentsJson();
-    const char* names[] = {"Kick", "Snare", "Hi-hats", "Drum kit", "Bass", "Acid synth", "Morph synth", "Flagship"};
-    for (int i = 0; i < 8; ++i) {
+    const char* names[] = {"Kick", "Snare", "Hi-hats", "Drum kit", "Flagship"};
+    for (int i = 0; i < 5; ++i) {
         const size_t at = list.find(std::string("\"id\":\"") + kInstruments[i] + "\"");
         CHECK(at != std::string::npos);
         if (at == std::string::npos) continue;
@@ -474,16 +484,24 @@ TEST(the_built_in_instruments_are_listed_with_readable_names) {
         CHECK(entry.find("\"role\":\"instrument\"") != std::string::npos);
         CHECK(entry.find(std::string("\"name\":\"") + names[i] + "\"") != std::string::npos);
     }
+    // The retired synths are gone from the list; Flagship lists the presets that replace them.
+    for (const char* id : kRetired) CHECK(list.find(std::string("\"id\":\"") + id + "\"") == std::string::npos);
+    const size_t flagship = list.find("\"presets\":[{\"name\":\"Init\"");
+    CHECK(flagship != std::string::npos);
+    for (const char* name : {"Morph pad", "Mono bass", "Acid 303", "Basic"})
+        CHECK(list.find(std::string("{\"name\":\"") + name + "\"", flagship) != std::string::npos);
 }
 
 TEST(each_built_in_instrument_starts_on_its_frame_and_falls_silent_after_its_note) {
     Engine e(48000);
-    for (const char* id : kInstruments) {
+    std::vector<const char*> ids(std::begin(kInstruments), std::end(kInstruments));
+    ids.insert(ids.end(), std::begin(kRetired), std::end(kRetired));  // Flagship with each preset
+    for (const char* id : ids) {
         std::unique_ptr<ModuleProcessor> p = make(e, id);
         if (!p) continue;
         const uint8_t key = std::strcmp(id, "org.caw.drum.kit") == 0 ? 36 : 45;
         const std::vector<Event> notes = {notes::noteOn(100, 1, key, 1.0), notes::noteOff(12100, 1, key)};
-        const std::vector<float> out = play(*p, notes, 48000 * 6);
+        const std::vector<float> out = play(*p, notes, 48000 * 6, asFlagship(id, {}));
         bool before = true;
         for (int i = 0; i < 100; ++i) before = before && out[static_cast<size_t>(i)] == 0.0f;
         if (!before) cawtest::fail(__FILE__, __LINE__, std::string(id) + " sounds before its note");
@@ -496,9 +514,9 @@ TEST(each_built_in_instrument_starts_on_its_frame_and_falls_silent_after_its_not
         for (float v : out) peak = std::max(peak, std::fabs(v));
         if (!(peak <= 1.0f)) cawtest::fail(__FILE__, __LINE__, std::string(id) + " clips at default settings");
         // reset() silences it at once.
-        play(*p, {notes::noteOn(0, 2, key, 1.0)}, 640);
+        play(*p, {notes::noteOn(0, 2, key, 1.0)}, 640, asFlagship(id, {}));
         p->reset();
-        const std::vector<float> quiet = play(*p, {}, 640);
+        const std::vector<float> quiet = play(*p, {}, 640, asFlagship(id, {}));
         if (energy(quiet, 0, 640) != 0.0) cawtest::fail(__FILE__, __LINE__, std::string(id) + " sounds after reset");
         p->deactivate();
     }
@@ -540,7 +558,7 @@ TEST(the_kit_maps_general_midi_keys_to_its_drums) {
     CHECK_EQ(energy(muted, 0, 4800), 0.0);
 }
 
-TEST(mono_synths_glide_to_an_overlapping_note_and_back_when_it_ends) {
+TEST(the_mono_and_acid_presets_glide_to_an_overlapping_note_and_back_when_it_ends) {
     Engine e(48000);
     for (const char* id : {"org.caw.synth.acid", "org.caw.bass"}) {
         std::unique_ptr<ModuleProcessor> p = make(e, id);
@@ -553,7 +571,7 @@ TEST(mono_synths_glide_to_an_overlapping_note_and_back_when_it_ends) {
             acid ? std::vector<std::pair<std::string, double>>{{"cutoff", 40}, {"resonance", 0}, {"env", 0}, {"drive", 1}}
                  : std::vector<std::pair<std::string, double>>{{"cutoff", 40}, {"resonance", 0}, {"env", 0}, {"sub", 0},
                                                                {"sustain", 1}, {"drive", 1}};
-        const std::vector<float> out = play(*p, notes, 72000, dark);
+        const std::vector<float> out = play(*p, notes, 72000, asFlagship(id, dark));
         const double a = frequency(out, 12000, 24000), up = frequency(out, 36000, 48000), back = frequency(out, 60000, 72000);
         if (std::fabs(a - 55.0) > 1.5 || std::fabs(up - 82.41) > 1.5 || std::fabs(back - 55.0) > 1.5) {
             char buf[160];
@@ -568,22 +586,24 @@ TEST(mono_synths_glide_to_an_overlapping_note_and_back_when_it_ends) {
     }
 }
 
-TEST(the_morph_synth_spreads_its_unison_across_the_stereo_field) {
+TEST(the_morph_pad_preset_spreads_its_unison_across_the_stereo_field) {
     Engine e(48000);
     std::unique_ptr<ModuleProcessor> p = make(e, "org.caw.synth.morph");
     if (!p) return;
     std::vector<float> right;
-    const std::vector<float> left = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, {{"attack", 0.001}}, &right);
+    const char* id = "org.caw.synth.morph";
+    const std::vector<float> left = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, asFlagship(id, {{"attack", 0.001}}), &right);
     double diff = 0;
     for (size_t i = 0; i < left.size(); ++i) diff += std::fabs(left[i] - right[i]);
     CHECK(diff > 1.0);  // wide
     p->reset();
-    const std::vector<float> mono = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, {{"attack", 0.001}, {"spread", 0}}, &right);
+    const std::vector<float> mono = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, asFlagship(id, {{"attack", 0.001}, {"spread", 0}}), &right);
     for (size_t i = 0; i < mono.size(); ++i) CHECK_EQ(mono[i], right[i]);  // spread 0: both sides the same
     // One unison voice without detune or drift is a plain morph of the shape: at shape 0, a sine at the note's pitch.
     p->reset();
     const std::vector<float> sine =
-        play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, {{"attack", 0.001}, {"unison", 1}, {"drift", 0}, {"shape", 0}, {"cutoff", 16000}});
+        play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000,
+             asFlagship(id, {{"attack", 0.001}, {"unison", 1}, {"drift", 0}, {"shape", 0}, {"cutoff", 16000}}));
     CHECK_NEAR(frequency(sine, 4800, 24000), 220.0, 0.5);
 }
 
@@ -613,20 +633,22 @@ std::vector<Golden> goldens() {
     g.push_back({"kit", track("org.caw.drum.kit", "0 C2 1 1\n2 F#2 1 0.6\n4 D2 1 1\n4 D#2 1 0.7\n6 A#2 1 0.8\n8 C2 1 1\n"
                                                   "10 C#2 1 1\n11 B1 1 0.7\n12 E2 1 0.9\n14 G#2 1 0.6\n"),
                  0x15d9886e50243793ull});
+    // The retired synths' projects (bass, acid, morph) play Flagship presets with their knobs mapped (one synth,
+    // 2026-11-10): re-recorded then, perceptually the same as before (the_presets_sound_like_the_synths_they_replace).
     // Bass: First loop's line, an overlap that glides, a slide.
     g.push_back({"bass", track("org.caw.bass", "0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 2 1\n9 C2 2 0.8\n"
                                                "11 G1 1 1 slide\n12 A1 2 1\n15 A1 1/2 1\n",
                                {{"cutoff", 300}, {"resonance", 0.45}, {"env", 0.6}, {"decay", 0.18}, {"sustain", 0.3}}),
-                 0xa6502b79039ea747ull});
+                 0x2dfac85287b81f0bull});
     // Acid: the Acid line pattern (slides, a ratchet, a note that plays half the time), squelchy.
     g.push_back({"acid", track("org.caw.synth.acid", "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
                                                      "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n15 E2 1 0.8\n",
                                {{"resonance", 0.8}, {"wave", 1}}),
-                 0x96341f4427792447ull});
+                 0x9eb65a7606dda58full});
     // Morph synth: a chord with a quarter tone, drifting, wide.
     g.push_back({"morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
                                 {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
-                 0xcd3342395d322d32ull});
+                 0x7b2732aaa1d57967ull});
     // Flagship: its default patch (a warm, wide saw stack of seven, a ladder, env 2 on the cutoff) on a
     // chord, a line over it and a bent note.
     g.push_back({"flagship", track("org.caw.synth.flagship", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n"
@@ -854,7 +876,7 @@ TEST(a_note_held_at_sustain_zero_settles_instead_of_decaying_into_denormals) {
         std::unique_ptr<ModuleProcessor> p = make(e, c.id);
         if (!p) continue;
         std::vector<float> right;
-        const std::vector<float> left = play(*p, {notes::noteOn(0, 1, 57, 1)}, 48000 * 4, c.values, &right);
+        const std::vector<float> left = play(*p, {notes::noteOn(0, 1, 57, 1)}, 48000 * 4, asFlagship(c.id, c.values), &right);
         const analysis::Levels l = analysis::levels(left.data(), left.size());
         CHECK_EQ(l.denormal, 0u);
         CHECK_EQ(left.back(), 0.0f);  // silent while still held
@@ -883,5 +905,45 @@ TEST(the_built_in_sounds_are_perceptually_what_they_were) {
             continue;
         }
         checkSameSound(g.name, ref->sound, now);
+    }
+}
+
+TEST(the_presets_sound_like_the_synths_they_replace) {
+    // One synth (owner, 2026-11-10): the bass, acid, morph and basic synths became Flagship presets, which an old
+    // project's tracks play with their knobs mapped. Each case is compared with the retired synth's own render
+    // (kRetiredSynthReferences). The mono and two-oscillator ones (bass, acid, basic, a one-copy sine) are
+    // perceptually the same by the owner's bar (checkSameSound). The unison ones start each copy at a random
+    // phase, which neither synth repeats, so a 2 s render moves by about as much between two runs of the old
+    // synth itself (a phase seed shifted, docs/performance.md): their bar is each side's level within 1.2 dB,
+    // the correlation within 0.07 and the bands within 30 dB of the loudest within 2 dB RMS. The bright square
+    // through 16 kHz is not compared band by band: the old synth's polyBLEP square aliased, Flagship's band-limited
+    // tables don't, so it lacks the old aliases between the harmonics (up to 9 dB at 88 Hz).
+    for (const Golden& g : references()) {
+        const Reference* was = nullptr;
+        for (const Reference& r : kRetiredSynthReferences)
+            if (std::strcmp(r.name, g.name) == 0) was = &r;
+        if (!was) continue;
+        const Sound now = measure(g.project, 48000 * 2);
+        const std::string name = g.name;
+        if (name == "bass" || name == "acid" || name == "acid + distortion" || name == "basic synth" || name == "morph sine") {
+            checkSameSound(g.name, was->sound, now);
+            continue;
+        }
+        auto fail = [&](const char* what, double a, double b) {
+            char buf[200];
+            std::snprintf(buf, sizeof buf, "%s: %s was %.3f, now %.3f", g.name, what, a, b);
+            cawtest::fail(__FILE__, __LINE__, buf);
+        };
+        if (!(std::fabs(was->sound.rmsL - now.rmsL) <= 1.2)) fail("left RMS dB", was->sound.rmsL, now.rmsL);
+        if (!(std::fabs(was->sound.rmsR - now.rmsR) <= 1.2)) fail("right RMS dB", was->sound.rmsR, now.rmsR);
+        if (!(std::fabs(was->sound.correlation - now.correlation) <= 0.07)) fail("correlation", was->sound.correlation, now.correlation);
+        if (name == "morph bright square x16") continue;
+        double loudest = -1e9, squares = 0;
+        int bands = 0;
+        for (double b : was->sound.bands) loudest = std::max(loudest, b);
+        for (int b = 0; b < kSoundBands; ++b)
+            if (loudest - was->sound.bands[b] <= 30) squares += std::pow(now.bands[b] - was->sound.bands[b], 2), ++bands;
+        const double rms = std::sqrt(squares / std::max(1, bands));
+        if (!(rms <= 2.0)) fail("band RMS difference dB", 0.0, rms);
     }
 }

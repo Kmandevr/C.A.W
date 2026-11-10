@@ -1,6 +1,8 @@
 // Sample-pack maker: batch-renders an instrument (and effects) over notes, velocities and parameter steps to named WAV files.
 #include "sample_pack.h"
 
+#include "builtin_presets.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -778,6 +780,21 @@ bool parseSamplePackRequest(std::string_view json, SamplePackRequest& out, std::
         } else {
             error = "'loop' must be true, false or {\"enabled\", \"min_seconds\", \"max_seconds\"}";
             return false;
+        }
+    }
+    // A retired synth (2026-11-10, one synth) renders as Flagship with its preset; steps on its old knobs move
+    // the Flagship knob they map to, and a step on one that maps to none is refused.
+    if (r.instrument.library.empty() && isLegacyInstrument(r.instrument.id)) {
+        const std::string legacy = r.instrument.id;
+        migrateLegacyInstrument(r.instrument.id, r.instrument.params);
+        for (PackParamAxis& axis : r.params) {
+            if (axis.effect >= 0) continue;
+            const std::string to = migratedLegacyParameter(legacy, axis.id);
+            if (to.empty()) {
+                error = "'" + legacy + "' now plays as a Flagship preset, which has no knob for '" + axis.id + "'";
+                return false;
+            }
+            axis.id = to;
         }
     }
     out = std::move(r);

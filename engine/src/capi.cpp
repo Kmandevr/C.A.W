@@ -7,6 +7,7 @@
 #include <string>
 
 #include "caw.h"
+#include "builtin_presets.h"
 #include "capi_internal.h"
 #include "compile.h"
 #include "component_test.h"
@@ -388,3 +389,10 @@ char* caw_sample_pack_render(const char* request_json, int32_t trust_level, int3
 }
 
 }  // extern "C"
+
+extern "C" char* caw_migrate_instrument(const char* entry_json) try {
+    if (!entry_json) return dup("{\"ok\":false,\"error\":\"missing entry\"}");
+    return dup(caw::migrateInstrumentJson(entry_json));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
