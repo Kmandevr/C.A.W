@@ -271,7 +271,7 @@ These stages ship as updates. Their order still holds.
 |---|---|---|---|---|---|
 | 9.1 | Native module host and lifecycle with three user-chosen modes per plugin/module: Isolated (separate process), Trusted (in-process) or Blocked (owner, 2026-11-03) | Partial | engine | F4 | The native SDK, static registry and module lifecycle contract exist; no dynamic loading, isolation or trust modes. The default mode for unseen code is an open owner question |
 | 9.2 | External CLAP hosting, then VST3 and AU where licensing and platforms allow | Conditional | engine | 9.1 | Not built. **[Assumption]** Out-of-process isolation on Android is unverified and may be desktop-first |
-| 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Planned | engine | CP.2–CP.4, F4 | Not built; the processor implementation must be reused rather than duplicated per format |
+| 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Partial | engine | CP.2–CP.4, F4 | CLAP export of component libraries is built for Linux and Windows (#162, `engine/plugin/clap/`); missing: graphs, VST3, macOS bundles, the app's Export button, a third-party host check |
 | 9.4 | iOS, macOS and Linux app builds with platform audio/device testing | Conditional | both | — | Not configured in CI; iOS ships without C++ authoring (owner, 2026-11-09) |
 | 9.5 | Plugin Builder packages C++ components; binary plugin hosting/export remains a separate adapter workflow | Partial | app | CP.1–CP.4, UI.1 | The current Plugin Builder validates/packages .caw source; it must move to the shared C++ component build and descriptor contract |
 

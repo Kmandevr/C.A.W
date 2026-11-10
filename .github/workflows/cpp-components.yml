@@ -1,4 +1,4 @@
-# Builds an independently authored component against the installed CAW SDK on each supported target.
+# Builds an independently authored component against the installed CAW SDK on each supported target, and as a CLAP plug-in.
 name: C++ components
 on:
   pull_request:
@@ -6,6 +6,8 @@ on:
       - "engine/CMakeLists.txt"
       - "engine/cmake/**"
       - "engine/include/caw/**"
+      - "engine/include/caw_component.h"
+      - "engine/plugin/**"
       - "examples/cpp/**"
       - "scripts/caw-component-build.js"
       - "scripts/caw-component-build.test.js"
@@ -90,5 +92,50 @@ jobs:
         with:
           name: caw-minimal-component-${{ matrix.name }}
           path: ${{ runner.temp }}/caw-component-build/artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # The plug-in builder: the example as a .clap for desktop hosts, and the CLAP test host on Linux.
+  clap:
+    name: CLAP plug-in (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-24.04
+            test: true
+          - name: Windows x64
+            os: windows-2025
+            test: false
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the SDK for the build host
+        run: |
+          cmake -S engine -B "$RUNNER_TEMP/caw-sdk-build" \
+            -DCAW_AUDIO=OFF -DCAW_TOOLS=OFF -DCAW_INSTALL_SDK=ON \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/caw-sdk"
+          cmake --install "$RUNNER_TEMP/caw-sdk-build" --config Release
+      - name: Build the example as a CLAP plug-in (fetches the pinned CLAP headers)
+        run: |
+          cmake -S examples/cpp/minimal -B "$RUNNER_TEMP/caw-clap-build" -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/caw-sdk" -DCAW_BUILD_CLAP=ON
+          cmake --build "$RUNNER_TEMP/caw-clap-build" --config Release --parallel
+          find "$RUNNER_TEMP/caw-clap-build/artifacts" -name '*.clap' | grep -q .
+      - name: Run the CLAP test host against the engine registry
+        if: matrix.test
+        run: |
+          cmake -S engine -B "$RUNNER_TEMP/caw-clap-tests" -DCMAKE_BUILD_TYPE=Release -DCAW_AUDIO=OFF -DCAW_CLAP=ON
+          cmake --build "$RUNNER_TEMP/caw-clap-tests" --target caw_clap_tests --parallel
+          ctest --test-dir "$RUNNER_TEMP/caw-clap-tests" -R caw_clap_tests --output-on-failure
+      - name: Upload the plug-in
+        uses: actions/upload-artifact@v7
+        with:
+          name: caw-minimal-clap-${{ matrix.name }}
+          path: ${{ runner.temp }}/caw-clap-build/artifacts/**/*.clap
           if-no-files-found: error
           retention-days: 14

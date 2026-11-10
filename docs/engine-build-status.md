@@ -52,7 +52,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Project manifest writing/round-tripping, dependency snapshots, content-hash generation and library/app integration for the new resolver.
 - App-side rendering/runtime for declarative and custom module interfaces.
 - Dynamic native module loading, package verification, crash containment and optional out-of-process isolation.
-- CLAP/VST3 export wrappers.
+- VST3 export, CLAP export of whole graphs, and macOS plug-in bundles (CLAP export of component libraries is built: [native module SDK](native-module-sdk.md#export-as-a-clap-plug-in)).
 
 ## Known project-size and reliability risks under active refactor
 

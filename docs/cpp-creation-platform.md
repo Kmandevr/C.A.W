@@ -1,7 +1,7 @@
 ---
 title: C++ creation platform
 summary: Owner-approved C++ authoring direction and implementation status for the shared SDK, component model and code, visual and performance interfaces.
-covers: [engine/compiler/, .github/workflows/compiler.yml, app/lib/platform/cpp_compiler.dart, app/android/app/src/main/kotlin/, engine/include/caw/, engine/cmake/, engine/src/module_registry.*, engine/src/capi.cpp, engine/CMakeLists.txt, app/lib/model/cpp_component.dart, app/lib/model/project.dart, app/lib/model/storage.dart, app/lib/platform/cpp_build.dart, app/lib/platform/cpp_toolchain.dart, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
+covers: [engine/compiler/, engine/plugin/clap/, .github/workflows/compiler.yml, app/lib/platform/cpp_compiler.dart, app/android/app/src/main/kotlin/, engine/include/caw/, engine/cmake/, engine/src/module_registry.*, engine/src/capi.cpp, engine/CMakeLists.txt, app/lib/model/cpp_component.dart, app/lib/model/project.dart, app/lib/model/storage.dart, app/lib/platform/cpp_build.dart, app/lib/platform/cpp_toolchain.dart, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml]
 updated: 2026-11-10
 ---
 
@@ -303,12 +303,12 @@ A component is authored and implemented once. C.A.W. loads it through the shared
 
 External formats are adapters, not separate processors:
 
-- CLAP is the first planned export target.
-- VST3 follows when its adapter and host validation are ready.
+- CLAP is the first export target. **[Fact, 2026-11-10]** built for Linux and Windows: `caw_add_clap_plugin` builds any component library as a `.clap` holding every component of the bundle, through one wrapper around the C interface, so the processor is not duplicated ([native module SDK](native-module-sdk.md#export-as-a-clap-plug-in)). CI builds the example `.clap` for Linux x64 and Windows x64. Not built: an Export button in the app, macOS bundles, plug-in GUIs.
+- VST3 follows when its adapter and host validation are ready. **[Fact, secondary source, 2026-11-10]** the VST3 SDK is MIT from 3.8.0 (October 2025); to be checked against its LICENSE when that work starts.
 - Standalone builds reuse the same component implementation and runtime.
 - Host-specific parameter, MIDI, state, channel-layout, latency and UI requirements are translated at the adapter boundary.
 
-Plugin export is a later roadmap stage. It must not block the initial SDK or the three C.A.W. authoring interfaces.
+Plugin export must not block the initial SDK or the three C.A.W. authoring interfaces.
 
 ## 10. Prototype-first delivery
 
