@@ -942,6 +942,8 @@ class _TimelineHeader extends StatelessWidget {
         final top = SizedBox(height: thin ? 24 : 28, child: Row(children: [
           if (layer.isFolder)
             IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+              // 24 px wide: a padded 48 px target overflowed a phone's one-row folder header.
+              style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
               tooltip: layer.collapsed ? 'Show folder' : 'Hide folder',
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
               onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed)),
@@ -1406,6 +1408,7 @@ class _TimelineClipState extends State<_TimelineClip> {
     final drag = _drag;
     if (drag == null || sourceDragging) return;
     drag.begin(onScroll: _follow, onCancel: _cancel);
+    drag.copy.addListener(_follow);
     _ghost = OverlayEntry(builder: (_) => _GhostView(ghost: _ghostState, name: _name));
     Overlay.of(context).insert(_ghost!);
     _follow();
@@ -1483,6 +1486,7 @@ class _TimelineClipState extends State<_TimelineClip> {
   void _finish() {
     _removeGhost();
     _ghostState.value = null;
+    _drag?.copy.removeListener(_follow);
     if (dragging && !sourceDragging) _drag?.end();
     if (mounted) setState(() { dragging = false; sourceDragging = false; dx = 0; _lastSnap = null; });
     _ignored = true; // the rest of this gesture does nothing
@@ -1491,6 +1495,8 @@ class _TimelineClipState extends State<_TimelineClip> {
   Widget _edge({required bool left}) => Positioned(left: left ? 0 : null, right: left ? null : 0, top: 0, bottom: 0,
     width: 12,
     child: MouseRegion(cursor: SystemMouseCursors.resizeColumn, child: GestureDetector(behavior: HitTestBehavior.opaque,
+      // The edge follows the finger from where it went down, slop included.
+      dragStartBehavior: DragStartBehavior.down,
       onHorizontalDragStart: (_) => setState(() {
         if (left) { trimming = true; trimDx = 0; } else { resizing = true; resizeDx = 0; }
         _lastSnap = null;
@@ -1564,6 +1570,7 @@ class _TimelineClipState extends State<_TimelineClip> {
           // A clip's notes open in the Clip tab of the focus view (owner, 2026-11-09; REAPER: a MIDI item's
           // double-click opens the MIDI editor).
           onDoubleTap: () => widget.callbacks.onClipOpen(widget.layer, c),
+          dragStartBehavior: DragStartBehavior.down,
           onPanStart: _start,
           onPanUpdate: _update,
           onPanEnd: _end,

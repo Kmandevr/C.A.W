@@ -133,6 +133,10 @@ class ArrangeDrag {
       _onCancel!();
       return true;
     }
+    // Ctrl pressed or let go mid-drag turns copy on or off at once (the ghost shows it).
+    if (e.logicalKey == LogicalKeyboardKey.controlLeft || e.logicalKey == LogicalKeyboardKey.controlRight) {
+      scheduleMicrotask(() => _onScroll?.call());
+    }
     return false;
   }
 
