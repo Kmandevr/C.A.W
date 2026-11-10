@@ -20,8 +20,14 @@ class DevicePresets {
 
   static final Map<String, List<DevicePreset>> _byId = {};
 
-  /// The engine's presets for a component, when the engine offers a list (null or empty: none).
-  static List<DevicePreset>? Function(DeviceTarget target)? engine;
+  /// The engine's presets for a component (its descriptor's "presets", caw_engine_components): Flagship's Morph pad,
+  /// Mono bass, Acid 303 and Basic. The engine's "Init" is Flagship's defaults, the same as the browser's own.
+  static List<DevicePreset>? Function(DeviceTarget target)? engine = fromDescriptor;
+
+  static List<DevicePreset> fromDescriptor(DeviceTarget target) => [
+        for (final p in target.info?.presets ?? const <ComponentPresetInfo>[])
+          if (p.name != 'Init') DevicePreset(p.name, p.params, category: 'Factory'),
+      ];
 
   static void register(String componentId, List<DevicePreset> presets) => _byId[componentId] = presets;
 
@@ -47,6 +53,7 @@ class DevicePresets {
     if (info == null) return;
     target.setAll(preset.resolve(info));
     _current[_key(target)] = preset.name;
+    target.use?.preset = null;  // every value is set now: the entry no longer starts from a preset
   }
 
   /// The name the header shows: the preset last loaded, with "*" when a value has changed since; "Init" while every
@@ -54,7 +61,7 @@ class DevicePresets {
   static String label(DeviceTarget target) {
     final info = target.info;
     if (info == null) return '';
-    final name = _current[_key(target)];
+    final name = _current[_key(target)] ?? target.use?.preset;  // a track that opened on a preset shows its name
     final preset = name == null ? null : of(target).where((p) => p.name == name).firstOrNull;
     if (preset != null) return matches(target, preset) ? preset.name : '${preset.name} *';
     return matches(target, const DevicePreset('Init', {})) ? 'Init' : 'Custom';

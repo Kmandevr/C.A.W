@@ -262,6 +262,7 @@ TEST(sample_pack_sfz_maps_keys_and_velocities) {
 }
 
 TEST(sample_pack_renders_the_basic_synth) {
+    // The retired basic synth: Flagship's Basic preset, its knobs (and the cutoff steps) mapped to Flagship's.
     const fs::path dir = freshDir("synth");
     const std::string req = "{\"instrument\":{\"id\":\"org.caw.synth.basic\",\"params\":{\"release\":0.05}},"
                             "\"output_dir\":\"" + esc(dir / "pack") + "\",\"name\":\"lead\","
@@ -275,11 +276,11 @@ TEST(sample_pack_renders_the_basic_synth) {
     CHECK_EQ(r.number("file_count", 0), 8.0);
     const std::vector<std::string> files = wavFiles(dir / "pack");
     CHECK_EQ(files.size(), static_cast<std::size_t>(8));
-    CHECK(fs::exists(dir / "pack" / "lead_C3_64_cutoff-800.wav"));
-    CHECK(fs::exists(dir / "pack" / "lead_E4_127_cutoff-4000.wav"));
+    CHECK(fs::exists(dir / "pack" / "lead_C3_64_flt1_cutoff-800.wav"));
+    CHECK(fs::exists(dir / "pack" / "lead_E4_127_flt1_cutoff-4000.wav"));
     CHECK(fs::exists(dir / "pack" / "lead.json"));
-    CHECK(fs::exists(dir / "pack" / "lead_cutoff-800.sfz"));
-    CHECK(fs::exists(dir / "pack" / "lead_cutoff-4000.sfz"));
+    CHECK(fs::exists(dir / "pack" / "lead_flt1_cutoff-800.sfz"));
+    CHECK(fs::exists(dir / "pack" / "lead_flt1_cutoff-4000.sfz"));
     double loudest = 0;
     for (const std::string& f : files) {
         const Wav w = parseWav(readBytes(dir / "pack" / f));
@@ -299,7 +300,7 @@ TEST(sample_pack_renders_the_basic_synth) {
     CHECK(list && list->arr.size() == 8);
     if (list && !list->arr.empty()) {
         const Json& f0 = list->arr[0];
-        CHECK_EQ(f0.string("file"), std::string("lead_C3_64_cutoff-800.wav"));
+        CHECK_EQ(f0.string("file"), std::string("lead_C3_64_flt1_cutoff-800.wav"));
         CHECK_EQ(f0.number("note", 0), 48.0);
         CHECK_EQ(f0.string("note_name"), std::string("C3"));
         CHECK(f0.get("loop") && f0.get("loop")->type == Json::Type::Object);
@@ -320,10 +321,10 @@ TEST(sample_pack_renders_the_basic_synth) {
     for (const std::string& f : files) CHECK(readBytes(dir / "pack" / f) == readBytes(dir2 / f));
     std::string sfz;
     {
-        std::ifstream in(dir / "pack" / "lead_cutoff-800.sfz");
+        std::ifstream in(dir / "pack" / "lead_flt1_cutoff-800.sfz");
         sfz.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     }
-    CHECK(sfz.find("sample=lead_C3_127_cutoff-800.wav lokey=0 hikey=56 pitch_keycenter=48 lovel=65 hivel=127 "
+    CHECK(sfz.find("sample=lead_C3_127_flt1_cutoff-800.wav lokey=0 hikey=56 pitch_keycenter=48 lovel=65 hivel=127 "
                    "loop_mode=loop_continuous") != std::string::npos);
     fs::remove_all(dir);
     fs::remove_all(dir2);
@@ -378,7 +379,7 @@ TEST(sample_pack_refuses_what_it_should) {
     if (!ok.boolean("ok", false)) std::printf("%s\n", ok.string("error").c_str());
     CHECK(error("{\"instrument\":\"org.caw.synth.basic\"," + out + ",\"params\":[{\"id\":\"nope\",\"values\":[1]}]}")
               .find("nope") != std::string::npos);
-    CHECK(error("{\"instrument\":{\"id\":\"org.caw.synth.basic\",\"params\":{\"nope\":1}}," + out + "}")
+    CHECK(error("{\"instrument\":{\"id\":\"org.caw.synth.flagship\",\"params\":{\"nope\":1}}," + out + "}")
               .find("nope") != std::string::npos);
     CHECK(error("{\"instrument\":\"org.caw.distortion\"," + out + "}").find("not an instrument") != std::string::npos);
     CHECK(error("{\"instrument\":\"org.example.missing\"," + out + "}").find("not built in") != std::string::npos);

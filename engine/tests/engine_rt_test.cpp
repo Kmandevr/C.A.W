@@ -312,12 +312,12 @@ TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
     LayerSpec l = layer("s", {"fold"});
     l.pattern = "pat";
     l.hasInstrument = true;
-    l.instrument.id = "org.caw.synth.basic";
+    l.instrument.id = "org.caw.synth.flagship";
     l.components = {{"org.caw.delay.pingpong", {}}};
     p.layers = {l, layer("t", {})};
     p.layers[1].pattern = "pat";
     p.layers[1].hasInstrument = true;
-    p.layers[1].instrument.id = "org.caw.synth.basic";
+    p.layers[1].instrument.id = "org.caw.synth.flagship";
     Engine e(48000);
     const char* path = caw::test::nativeComponentPath();
     const bool recorder = path && e.loadNativeComponent(path, "org.caw.tests.native-loader.recorder", NativeModuleTrust::Trusted).success;
@@ -327,7 +327,7 @@ TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
     std::vector<float> l2(192), r2(192);
     for (int k = 0; k < 250; ++k) e.process(l2.data(), r2.data(), 192);  // warm up
     if (recorder) p.layers[1].instrument.id = "org.caw.tests.native-loader.recorder";
-    p.layers[0].instrument.params = {{"cutoff", 800}};
+    p.layers[0].instrument.params = {{"flt1_cutoff", 800}};
     e.setProject(p);
     e.noteOn("s", 1, 64, 1);
     e.setComponentParam("s", Engine::kInstrumentIndex, "resonance", 0.8);
@@ -355,7 +355,7 @@ TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
 }
 
 TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
-    // Every built-in instrument (#157) on its own track plays a dense pattern (drum keys, chords, a slide, a
+    // Every built-in instrument (#157), and Flagship with each retired synth's preset, on its own track plays a dense pattern (drum keys, chords, a slide, a
     // ratchet), takes knob moves and previews, and stops: no allocation or free on the audio thread.
     ProjectSpec p;
     p.bpm = 150;
@@ -364,7 +364,8 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
                                 "4 D2 2 1 slide\n4 D#2 1 1\n6 A1 2 0.9\n8 E2 4 1 ratchet 4\n8 C4 4 0.7\n8 E4 4 0.7\n"
                                 "12 G#2 2 0.6\n12 B1 4 1\n", {}});
     const char* ids[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit",
-                         "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph", "org.caw.synth.flagship"};
+                         "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph", "org.caw.synth.flagship",
+                         "org.caw.synth.basic"};
     for (const char* id : ids) {
         LayerSpec l = layer(id, {});
         l.pattern = "pat";
@@ -380,8 +381,10 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
     std::size_t operations = 0;
     float peak = 0.0f;
     for (int round = 0; round < 5; ++round) {
-        e.setComponentParam("org.caw.synth.morph", Engine::kInstrumentIndex, "unison", 1 + 3 * round);
-        e.setComponentParam("org.caw.synth.acid", Engine::kInstrumentIndex, "cutoff", 300 + 200 * round);
+        // The retired synths' tracks play Flagship presets (the layers keep the old ids as their names).
+        e.setComponentParam("org.caw.synth.morph", Engine::kInstrumentIndex, "osc1_unison", 1 + 3 * round);
+        e.setComponentParam("org.caw.synth.acid", Engine::kInstrumentIndex, "flt1_cutoff", 300 + 200 * round);
+        e.setComponentParam("org.caw.bass", Engine::kInstrumentIndex, "voice_mode", round % 3);
         e.setComponentParam("org.caw.drum.hats", Engine::kInstrumentIndex, "mode", round % 3);
         // The flagship: more copies, every filter type, the oscillators and effects switched on as it plays.
         e.setComponentParam("org.caw.synth.flagship", Engine::kInstrumentIndex, "osc1_unison", 1 + 3 * round);

@@ -51,6 +51,11 @@ Finder get goldenScreen => find.byKey(goldenKey);
 /// Pumps [child] in the app's theme at [size], with animations settled.
 Future<void> pumpGolden(WidgetTester tester, Widget child, Size size) async {
   await loadAppFonts(tester);
+  // Images (the crow logo) decode only when an earlier test ran async work, so a golden would depend on test order:
+  // start every golden with an empty cache, so the logo is always undrawn in goldens.
+  imageCache
+    ..clear()
+    ..clearLiveImages();
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);

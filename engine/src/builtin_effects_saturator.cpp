@@ -1,4 +1,4 @@
-// The built-in saturator (#173, "org.caw.saturator"): tape, tube, soft and hard clip, fold and crush, 2x oversampled.
+// The built-in saturator (#173, "org.caw.saturator"): tape, tube, soft and hard clip, fold and crush, 2x oversampled (4x at High quality).
 #include "builtin_effects.h"
 
 #include <algorithm>
@@ -67,12 +67,14 @@ public:
 protected:
     bool prepare(double sampleRate, uint32_t) noexcept override {
         for (auto& o : os_) o.set(lib::HalfBandDesign(8, 0.04));
+        for (auto& o : os4_) o.set(lib::HalfBandDesign(8, 0.04));
         for (auto& d : dc_) d.set(10.0, sampleRate);
         for (auto& t : tape_) t.set(15000.0, sampleRate);
         return true;
     }
     void clearState() noexcept override {
         for (auto& o : os_) o.clear();
+        for (auto& o : os4_) o.clear();
         for (auto& d : dc_) d.clear();
         for (auto& t : tape_) t.clear();
         for (int c = 0; c < 2; ++c)
@@ -92,7 +94,13 @@ protected:
         if (tone_filter_.identity())  // flat: not run; start clean when it tilts again
             for (int c = 0; c < 2; ++c)
                 for (auto& st : tone_[c]) st.clear();
-        oversample_ = on(kOversample, at) && mode_ != kCrush;
+        // Oversampling: the knob's 2x, off in Eco, 4x (two half-band stages) in High.
+        const int q = quality();
+        const int factor = !on(kOversample, at) || mode_ == kCrush || q == kQualityEco ? 1 : (q == kQualityHigh ? 4 : 2);
+        if (factor == 4 && factor_ != 4)  // the inner stage starts clean
+            for (auto& o : os4_) o.clear();
+        factor_ = factor;
+        oversample_ = factor > 1;
         autoDb_ = on(kAutoGain, at) ? -0.5 * driveDb_ : 0.0;
         out_.set(lib::dbToGain(param(kOutput, at) + autoDb_), kControlFrames);
         mix_.set(std::clamp(param(kMix, at), 0.0, 1.0), kControlFrames);
@@ -120,7 +128,16 @@ protected:
             } else {
                 for (int c = 0; c < 2; ++c) {
                     const double v = x[c] * drive + bias;
-                    if (oversample_) {
+                    if (factor_ == 4) {
+                        double up[2], a[2], b[2];
+                        os_[c].up(v, up);
+                        os4_[c].up(up[0], a);
+                        os4_[c].up(up[1], b);
+                        for (double& u : a) u = curve(mode_, u) - offset;
+                        for (double& u : b) u = curve(mode_, u) - offset;
+                        const double down[2] = {os4_[c].down(a), os4_[c].down(b)};
+                        y[c] = os_[c].down(down);
+                    } else if (oversample_) {
                         double up[2];
                         os_[c].up(v, up);
                         up[0] = curve(mode_, up[0]) - offset;
@@ -165,13 +182,14 @@ protected:
     }
 
 private:
-    lib::Oversampler2x os_[2];
+    lib::Oversampler2x os_[2], os4_[2];  // os4_: the inner stage of High's 4x
     lib::OnePole dc_[2], tape_[2];
     lib::EqFilter tone_filter_;
     lib::SvfState tone_[2][lib::EqFilter::kMaxStages];
     Ramp drive_, out_, mix_, bias_;
     int mode_ = 0;
     bool oversample_ = true;
+    int factor_ = 2;
     double driveDb_ = 6, biasValue_ = 0, toneValue_ = 0, autoDb_ = 0, steps_ = 128, crushStep_ = 0.25;
     double crushPhase_ = 1.0, held_[2] = {};
 };

@@ -150,6 +150,14 @@ class ExportHistoryEntry {
 /// When the metronome clicks: never, while recording (and its count-in), or whenever the song plays.
 enum Metronome { off, recording, always }
 
+/// Sound quality (owner, 2026-11-10), in the engine's order (CAW_QUALITY_*): Eco spends less on oversampling,
+/// unison copies, reverb density and display updates; High oversamples the saturator further.
+enum SoundQuality { eco, normal, high }
+
+/// The device buffer (owner, 2026-11-10), in the engine's order (CAW_BUFFER_*): Auto uses a larger one while not
+/// recording (fewer wake-ups, less battery), Low latency always the smallest, Battery always the larger.
+enum AudioBuffer { auto, lowLatency, battery }
+
 class Settings extends ChangeNotifier {
   /// Settings kept in [dir] (settings.json and themes/); with no folder they live in memory only.
   Settings({this.dir}) {
@@ -246,6 +254,10 @@ class Settings extends ChangeNotifier {
   /// The transport's Automate button's write mode ('touch', 'latch', 'write', 'read'; owner, 2026-11-10: Touch).
   String automationMode = 'touch';
 
+  /// Sound quality and the device buffer (owner, 2026-11-10).
+  SoundQuality soundQuality = SoundQuality.normal;
+  AudioBuffer audioBuffer = AudioBuffer.auto;
+
   /// The piano roll's sizes, look and touch choices.
   RollLook roll = const RollLook();
 
@@ -324,6 +336,8 @@ class Settings extends ChangeNotifier {
         'metronome': metronome.name,
         'count_in_bars': countInBars,
         'automation_mode': automationMode,
+        'sound_quality': soundQuality.name,
+        'audio_buffer': audioBuffer.name,
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -361,6 +375,8 @@ class Settings extends ChangeNotifier {
     if (fall is num && fall.isFinite) meterFall = fall.toDouble().clamp(6.0, 240.0);
     longPressMenu = pick(LongPressMenuStyle.values, j['long_press_menu'], longPressMenu);
     metronome = pick(Metronome.values, j['metronome'], metronome);
+    soundQuality = pick(SoundQuality.values, j['sound_quality'], soundQuality);
+    audioBuffer = pick(AudioBuffer.values, j['audio_buffer'], audioBuffer);
     final countIn = j['count_in_bars'];
     if (countIn is num && countIn.isFinite) countInBars = countIn.toInt().clamp(0, 4);
     if (const ['touch', 'latch', 'write', 'read'].contains(j['automation_mode'])) automationMode = j['automation_mode'] as String;

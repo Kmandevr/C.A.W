@@ -1,6 +1,8 @@
 // Reads the project JSON into a ProjectSpec: values clamp to a safe range, song positions out of range are refused.
 #include "project.h"
 
+#include "presets.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -67,6 +69,13 @@ bool componentEntry(const Json& j, const std::string& where, ComponentSpec& c, s
                     return false;
                 }
                 c.params.emplace_back(k, v.num);
+            }
+        }
+        // A built-in preset's values under the entry's own params (docs/engine.md, Presets).
+        if (const Json* pr = j.get("preset"); pr && pr->type != Json::Type::Null) {
+            if (pr->type != Json::Type::String || !applyBuiltinPreset(c.id, pr->str, c.params)) {
+                error = where + ": component '" + c.id + "' has no preset '" + (pr->type == Json::Type::String ? pr->str : "") + "'";
+                return false;
             }
         }
     }

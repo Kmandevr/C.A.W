@@ -218,14 +218,38 @@ void main() {
       for (final m in p.modules) {
         expect(result[m.id]?.ok, isTrue, reason: m.name);
       }
-      final names = {for (final c in await e.nativeComponents()) if (c.isInstrument) c.id: c.name};
+      final infos = await e.nativeComponents();
+      final names = {for (final c in infos) if (c.isInstrument) c.id: c.name};
       expect(names, containsPair('org.caw.drum.kick', 'Kick'));
       expect(names, containsPair('org.caw.drum.hats', 'Hi-hats'));
       expect(names, containsPair('org.caw.drum.snare', 'Snare'));
       expect(names, containsPair('org.caw.drum.kit', 'Drum kit'));
-      expect(names, containsPair('org.caw.bass', 'Bass'));
-      expect(names, containsPair('org.caw.synth.acid', 'Acid synth'));
-      expect(names, containsPair('org.caw.synth.morph', 'Morph synth'));
+      expect(names, containsPair('org.caw.synth.flagship', 'Flagship'));
+      // One synth (2026-11-10): the bass, acid, morph and basic synths are Flagship presets now.
+      for (final id in ComponentUseDoc.retiredInstruments) {
+        expect(names.containsKey(id), isFalse, reason: id);
+      }
+      final flagship = infos.firstWhere((c) => c.id == 'org.caw.synth.flagship');
+      expect(flagship.presets.map((p) => p.name), containsAll(['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic']));
+      expect(flagship.presets.firstWhere((p) => p.name == 'Mono bass').params['voice_mode'], 2);
+      // The starter's tracks name their presets; resolved, they hold the values the First loop's old synths had.
+      final resolved = s.starterProject()..resolveInstruments(Engine.resolveInstrument);
+      final old = {
+        'Bass': {'id': 'org.caw.bass', 'params': {'cutoff': 270, 'resonance': 0.45, 'env': 0.6, 'decay': 0.18, 'sustain': 0.2}},
+        'Lead': {'id': 'org.caw.synth.morph', 'params': {'shape': 0.66, 'drift': 0.15, 'unison': 3, 'detune': 0.1,
+          'cutoff': 2600, 'attack': 0.005, 'decay': 0.25, 'sustain': 0.5, 'release': 0.3}},
+        'Acid': {'id': 'org.caw.synth.acid', 'params': {'resonance': 0.8}},
+        'Pad': {'id': 'org.caw.synth.morph', 'params': <String, double>{}},
+      };
+      for (final MapEntry(key: name, value: entry) in old.entries) {
+        final layer = resolved.layers.firstWhere((l) => l.name == name);
+        final migrated = Engine.resolveInstrument(entry)!;
+        expect(layer.instrument!.id, 'org.caw.synth.flagship', reason: name);
+        expect(layer.instrument!.preset, migrated['preset'], reason: name);
+        expect(layer.instrument!.params, {
+          for (final e in (migrated['params'] as Map).entries) e.key as String: (e.value as num).toDouble(),
+        }, reason: name);
+      }
       e.play();
       e.pullForTest(48000 * 2);
       for (var i = 0; i < p.layers.length; i++) {

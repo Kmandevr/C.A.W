@@ -28,8 +28,11 @@ extern "C" {
    6 (2026-11-10): caw_engine_component_display (live display data a component publishes for its UI: spectra,
    gain reduction, levels; #173). Nothing else changes.
    7 (2026-11-10): caw_engine_play_count_in, caw_engine_set_metronome (a built-in click) and
-   caw_engine_release_touches; track volume lanes up to +12 dB, as the faders. */
-#define CAW_API_VERSION 7
+   caw_engine_release_touches; track volume lanes up to +12 dB, as the faders.
+   8 (2026-11-10): built-in presets ("presets" in caw_engine_components, "preset" in a component entry),
+   caw_migrate_instrument (the retired synths as Flagship presets), caw_engine_set_quality and
+   caw_audio_set_buffer_mode. */
+#define CAW_API_VERSION 8
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -291,6 +294,33 @@ CAW_API char* caw_component_test(const char* request_json, int32_t trust_level, 
    worker, never the UI or audio thread. The result always has "ok" and "error"; free it with caw_free. */
 CAW_API char* caw_sample_pack_render(const char* request_json, int32_t trust_level, int32_t* progress,
                                      int32_t* cancel);
+
+/* The retired synths (org.caw.synth.morph, org.caw.bass, org.caw.synth.acid, org.caw.synth.basic) are Flagship
+   presets. For an instrument entry {"id": ..., "params": {...}} returns {"ok": true, "migrated": bool, "id": ...,
+   "params": {...}} and, when migrated, "preset" (its name) and "lanes" ({old knob: Flagship knob} for automation
+   lanes; a knob not listed has no Flagship knob in its units). Another entry comes back with "migrated": false,
+   and, when it names a "preset", that preset's values under its own params (an unknown preset: "ok": false).
+   Needs no engine; free with caw_free. The engine migrates a project it is given too. */
+CAW_API char* caw_migrate_instrument(const char* entry_json);
+
+/* Sound quality, for the device's budget: Eco lowers oversampling, caps unison copies at 4, halves display
+   updates and thins the built-in reverbs; High raises oversampling where a built-in has it. Takes effect at
+   the next block (settings that size memory, such as oversampling, at the next project update). */
+#define CAW_QUALITY_ECO 0
+#define CAW_QUALITY_NORMAL 1
+#define CAW_QUALITY_HIGH 2
+CAW_API void caw_engine_set_quality(CawEngine* e, int32_t quality);
+CAW_API int32_t caw_engine_quality(CawEngine* e);
+
+/* The device buffer: Auto uses a larger one (about 21 ms) while not recording and the smallest the device
+   gives while recording; Low latency always the smallest; Battery always the larger, on the power-saving path.
+   A running device reopens when the size changes (a short gap). */
+#define CAW_BUFFER_AUTO 0
+#define CAW_BUFFER_LOW_LATENCY 1
+#define CAW_BUFFER_BATTERY 2
+CAW_API void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording);
+/* The device's callback size in frames while it runs (0 when stopped or unknown). */
+CAW_API int32_t caw_audio_buffer_frames(CawEngine* e);
 
 #ifdef __cplusplus
 }

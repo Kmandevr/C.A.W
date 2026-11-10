@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 7;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 8;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -161,6 +161,14 @@ class Bindings {
             'caw_engine_set_metronome'),
         releaseTouches = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
             'caw_engine_release_touches'),
+        migrateInstrument = lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>(
+            'caw_migrate_instrument'),
+        setQuality = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
+            'caw_engine_set_quality'),
+        audioSetBufferMode = lib.lookupFunction<Void Function(Pointer<Void>, Int32, Int32),
+            void Function(Pointer<Void>, int, int)>('caw_audio_set_buffer_mode'),
+        audioBufferFrames = lib.lookupFunction<Int32 Function(Pointer<Void>), int Function(Pointer<Void>)>(
+            'caw_audio_buffer_frames'),
         stop = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_stop'),
         clearOverload = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
             'caw_engine_clear_overload'),
@@ -266,6 +274,10 @@ class Bindings {
   final void Function(Pointer<Void>, double) playAt;
   final void Function(Pointer<Void>, double, int) playCountIn;
   final void Function(Pointer<Void>, int) setMetronome;
+  final Pointer<Utf8> Function(Pointer<Utf8>) migrateInstrument;
+  final void Function(Pointer<Void>, int) setQuality;
+  final void Function(Pointer<Void>, int, int) audioSetBufferMode;
+  final int Function(Pointer<Void>) audioBufferFrames;
   final void Function(Pointer<Void>) releaseTouches;
   final void Function(Pointer<Void>) stop;
   final void Function(Pointer<Void>) clearOverload;

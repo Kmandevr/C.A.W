@@ -114,14 +114,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('preset-browser')), findsOneWidget);
     expect(find.byKey(const ValueKey('preset-Init')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('preset-Sub bass')));
+    await tester.tap(find.byKey(const ValueKey('preset-Pluck')));
     await tester.pumpAndSettle();
-    expect(t.value('osc1_octave'), -1);
-    expect(t.value('osc1_unison'), 1);
-    expect(find.text('Sub bass'), findsOneWidget, reason: 'the header names the preset');
+    expect(t.value('env1_sustain'), 0);
+    expect(t.value('osc1_unison'), 3);
+    expect(find.text('Pluck'), findsOneWidget, reason: 'the header names the preset');
     t.set('osc1_level', 0.2);
     await tester.pumpAndSettle();
-    expect(find.text('Sub bass *'), findsOneWidget, reason: 'an edit marks it changed');
+    expect(find.text('Pluck *'), findsOneWidget, reason: 'an edit marks it changed');
     await close(tester);
   });
 

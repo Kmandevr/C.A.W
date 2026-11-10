@@ -222,6 +222,42 @@ class SettingsPage extends StatelessWidget {
             ),
             const Heading('Engine'),
             ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Sound quality'),
+              subtitle: Text(switch (settings.soundQuality) {
+                SoundQuality.eco => 'Less oversampling, at most 4 unison copies, lighter reverbs: saves battery',
+                SoundQuality.normal => 'The full sound',
+                SoundQuality.high => 'More oversampling on the saturator',
+              }, style: TextStyle(color: Neon.dim)),
+              trailing: SegmentedButton<SoundQuality>(
+                segments: const [
+                  ButtonSegment(value: SoundQuality.eco, label: Text('Eco')),
+                  ButtonSegment(value: SoundQuality.normal, label: Text('Normal')),
+                  ButtonSegment(value: SoundQuality.high, label: Text('High')),
+                ],
+                selected: {settings.soundQuality},
+                onSelectionChanged: (v) => settings.update((s) => s.soundQuality = v.first),
+              ),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Audio buffer'),
+              subtitle: Text(switch (settings.audioBuffer) {
+                AudioBuffer.auto => 'Larger while not recording, smallest while recording',
+                AudioBuffer.lowLatency => 'Always the smallest the device allows',
+                AudioBuffer.battery => 'Always larger: fewer wake-ups, more delay',
+              }, style: TextStyle(color: Neon.dim)),
+              trailing: SegmentedButton<AudioBuffer>(
+                segments: const [
+                  ButtonSegment(value: AudioBuffer.auto, label: Text('Auto')),
+                  ButtonSegment(value: AudioBuffer.lowLatency, label: Text('Low latency')),
+                  ButtonSegment(value: AudioBuffer.battery, label: Text('Battery')),
+                ],
+                selected: {settings.audioBuffer},
+                onSelectionChanged: (v) => settings.update((s) => s.audioBuffer = v.first),
+              ),
+            ),
+            ListTile(
               leading: Icon(Icons.memory, color: Neon.green),
               title: const Text('Native hardware profile'),
               subtitle: Text(

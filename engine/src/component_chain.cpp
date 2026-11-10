@@ -189,6 +189,7 @@ void ComponentChain::setValues(const std::vector<ComponentSpec>& specs) noexcept
                 if (d.parameters[k].id == name) value = v;
             e.held[k].store(toBits(constrainParameter(d.parameters[k], value)), std::memory_order_relaxed);
         }
+        e.generation.fetch_add(1, std::memory_order_release);  // after the values
         e.bypass.store(specs[i].bypass, std::memory_order_relaxed);
     }
 }
@@ -201,6 +202,7 @@ bool ComponentChain::setValue(std::size_t index, const std::string& parameterId,
     const double v = constrainParameter(e.processor->descriptor().parameters[k], value);
     e.held[k].store(toBits(v), std::memory_order_relaxed);
     e.touches[k].fetch_add(1, std::memory_order_release);  // after the value: the audio thread reads it after this
+    e.generation.fetch_add(1, std::memory_order_release);
     return true;
 }
 
@@ -338,8 +340,16 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         Entry& e = *entries_[index];
         const std::size_t count = e.resolvers.size();
-        // Parameters move on even while bypassed, so a component comes back at its current values.
-        for (std::size_t k = 0; k < count; ++k) {
+        // Parameters move on even while bypassed, so a component comes back at its current values. Nothing new
+        // since the last block (no value, touch, lane or play change, no ramp): last block's values stand.
+        const uint32_t generation = e.generation.load(std::memory_order_acquire);
+        const bool steady = generation == e.seenGeneration && !newPlay && !e.dynamic && playing == e.seenPlaying &&
+                            e.seenLanes == static_cast<const void*>(automation_);
+        e.seenGeneration = generation;
+        e.seenPlaying = playing;
+        e.seenLanes = automation_;
+        e.dynamic = false;
+        for (std::size_t k = 0; k < count && !steady; ++k) {
             if (newPlay) e.resolvers[k].clearTouch();  // a Play ends knob overrides: the lanes rule again
             const uint32_t touch = e.touches[k].load(std::memory_order_acquire);
             const uint64_t bits = e.held[k].load(std::memory_order_relaxed);
@@ -365,6 +375,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
                 automation = lane_.data();
             }
             e.values[k] = e.resolvers[k].resolve(m, automation, nullptr, e.samples[k].data());
+            e.dynamic = e.dynamic || e.values[k].samples != nullptr || e.resolvers[k].ramping();
         }
         const double target = e.bypass.load(std::memory_order_relaxed) ? 0.0 : 1.0;
         if (e.mix == 0.0 && target == 0.0) continue;  // bypassed: not run, input passes on untouched

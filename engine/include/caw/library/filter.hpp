@@ -60,6 +60,11 @@ public:
     double highpass(double x) noexcept { return process(x).high; }
     double bandpass(double x) noexcept { return process(x).band; }
     void clear() noexcept { ic1_ = ic2_ = 0.0; }
+    // Takes another filter's coefficients (no tan): the second side of a stereo pair set like the first.
+    void setLike(const Svf& other) noexcept {
+        a1_ = other.a1_, a2_ = other.a2_, a3_ = other.a3_, k_ = other.k_;
+        cutoff_ = other.cutoff_, q_ = other.q_, rate_ = other.rate_;
+    }
 
 private:
     double ic1_ = 0, ic2_ = 0, a1_ = 1, a2_ = 0, a3_ = 0, k_ = 1.41421356237309505;
