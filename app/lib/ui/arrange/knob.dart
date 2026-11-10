@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
 
@@ -80,6 +81,7 @@ class _KnobState extends State<Knob> {
   double? _dragValue;
   // The travel position during a drag, so slow drags still move along a curved or stepped taper.
   double? _dragPos;
+  bool _held = false;
 
   Taper get _taper => Taper(widget.min, widget.max, exponential: widget.exponential);
 
@@ -94,9 +96,16 @@ class _KnobState extends State<Knob> {
   void _set(double next) {
     final before = _dragValue ?? widget.value;
     next = _quantize(next);
-    // Reaching the centre ticks once (owner: light haptics on a knob reaching centre).
+    // Reaching the centre ticks once (owner: light haptics on a knob reaching centre), and so does each step: a
+    // stepped knob's every value, a smooth knob's every 1/24 of its travel (Haptics rate-limits a fast turn).
     final c = _centre;
-    if (before != next && before != c && (next == c || (before - c) * (next - c) < 0)) Motion.tick();
+    final notches = widget.step > 0 ? null : 24;
+    int notch(double v) => notches == null ? ((v - widget.min) / widget.step).round() : (_taper.position(v) * notches).floor();
+    if (before != next && before != c && (next == c || (before - c) * (next - c) < 0)) {
+      Motion.tick();
+    } else if (before != next && notch(before) != notch(next)) {
+      Haptics.tick();
+    }
     _dragValue = next;
     if (next != widget.value) widget.onChanged(next);
   }
@@ -133,7 +142,14 @@ class _KnobState extends State<Knob> {
         waitDuration: const Duration(milliseconds: 600),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onVerticalDragStart: widget.enabled ? (_) { _dragValue = widget.value; _dragPos = _taper.position(widget.value); } : null,
+          onVerticalDragStart: widget.enabled
+              ? (_) {
+                  _dragValue = widget.value;
+                  _dragPos = _taper.position(widget.value);
+                  Haptics.grab();
+                  setState(() => _held = true);
+                }
+              : null,
           onVerticalDragUpdate: widget.enabled
               ? (d) {
                   // 200 px of travel covers the range; hold Shift on a desktop for fine moves.
@@ -143,16 +159,36 @@ class _KnobState extends State<Knob> {
                   _set(_taper.value(pos));
                 }
               : null,
-          onVerticalDragEnd: widget.enabled ? (_) { _dragValue = null; _dragPos = null; widget.onChangeEnd?.call(); } : null,
+          onVerticalDragEnd: widget.enabled
+              ? (_) {
+                  _dragValue = null;
+                  _dragPos = null;
+                  setState(() => _held = false);
+                  widget.onChangeEnd?.call();
+                }
+              : null,
+          onVerticalDragCancel: () {
+            if (_held) setState(() => _held = false);
+          },
           onDoubleTap: widget.enabled && widget.defaultValue != null
               ? () { _set(widget.defaultValue!); _dragValue = null; widget.onChangeEnd?.call(); }
               : null,
           child: SizedBox(
             width: math.max(48, widget.size + 14),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              SizedBox(width: widget.size + 6, height: widget.size + 6, child: Center(child: CustomPaint(
-                size: Size.square(widget.size),
-                painter: _KnobPainter(norm, color, bipolar: widget.min < 0 && widget.max > 0),
+              // Held, the knob grows a little and glows (feedback.dart's press look).
+              SizedBox(width: widget.size + 6, height: widget.size + 6, child: Center(child: AnimatedScale(
+                key: const ValueKey('knob-held'),
+                scale: _held && Motion.of(context) == MotionLevel.full ? 1.1 : 1,
+                duration: Motion.fade(Motion.small, Motion.of(context)),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(shape: BoxShape.circle,
+                    boxShadow: _held ? [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 10)] : null),
+                  child: RepaintBoundary(child: CustomPaint(
+                    size: Size.square(widget.size),
+                    painter: _KnobPainter(norm, color, bipolar: widget.min < 0 && widget.max > 0),
+                  )),
+                ),
               ))),
               Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 9, color: Neon.dim)),

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
+import 'haptics.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'tokens.dart';
@@ -213,6 +214,7 @@ Future<T?> showGlassSheet<T>({
   BoxConstraints? constraints,
 }) {
   final glass = Glass.active;
+  Haptics.tap(); // a sheet opening is felt too
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,

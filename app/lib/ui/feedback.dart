@@ -97,7 +97,7 @@ mixin GrabFeedback<T extends StatefulWidget> on State<T> {
 /// hovered or grabbed, and glows when [hot] (at a snap point, or past a threshold).
 class GripMark extends StatelessWidget {
   const GripMark({super.key, required this.axis, this.grabbed = false, this.hovered = false, this.hot = false,
-      this.length = 28, this.color});
+      this.length = 28, this.color, this.restColor, this.restThickness = 3});
 
   /// The drag's direction: [Axis.horizontal] draws an upright line.
   final Axis axis;
@@ -107,19 +107,25 @@ class GripMark extends StatelessWidget {
   /// The lit colour (the accent when null).
   final Color? color;
 
+  /// At rest: the colour (a faint grey when null) and the thickness, so each grip keeps its own quiet look.
+  final Color? restColor;
+  final double restThickness;
+
   @override
   Widget build(BuildContext context) {
     final lit = color ?? Neon.blue;
     final sideways = axis == Axis.horizontal;
     final long = grabbed ? length * 2 : hovered ? length * 1.4 : length;
-    final thick = grabbed ? 4.0 : 3.0;
+    final thick = grabbed ? 4.0 : hovered ? 3.0 : restThickness;
     return AnimatedContainer(
       duration: Motion.fade(Motion.small, Motion.of(context)),
       curve: Curves.easeOut,
       width: sideways ? thick : long,
       height: sideways ? long : thick,
       decoration: BoxDecoration(
-        color: grabbed || hovered ? (hot ? Neon.green : lit).withValues(alpha: 0.95) : Neon.dim.withValues(alpha: 0.4),
+        color: grabbed || hovered
+            ? (hot ? Neon.green : lit).withValues(alpha: 0.95)
+            : restColor ?? Neon.dim.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(2),
         boxShadow: grabbed ? [BoxShadow(color: (hot ? Neon.green : lit).withValues(alpha: 0.45), blurRadius: 8)] : null,
       ),

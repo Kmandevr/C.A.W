@@ -202,6 +202,17 @@ class Neon {
         : const [];
   }
 
+  /// A button style that only adds the pressed glow and the hover tint (merged under a button's own style).
+  static ButtonStyle pressedGlow(Color accent, Color text) => ButtonStyle(
+        overlayColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.pressed)
+            ? accent.withValues(alpha: 0.20)
+            : s.contains(WidgetState.hovered)
+                ? text.withValues(alpha: 0.08)
+                : s.contains(WidgetState.focused)
+                    ? text.withValues(alpha: 0.10)
+                    : null),
+      );
+
   /// True when the compact density is on.
   static bool compact(BuildContext context) => Theme.of(context).visualDensity == VisualDensity.compact;
 
@@ -232,6 +243,13 @@ class Neon {
       scaffoldBackgroundColor: g ? Colors.transparent : bg,
       canvasColor: bg,
       dividerColor: line,
+      // Every press shows (owner, 2026-11-10: feedback on every touch): a quick accent ripple on every InkWell, list
+      // tile, chip and button, and a soft accent glow on icon buttons while held. InkRipple is the cheaper, snappier
+      // ripple. (highlightColor stays the default: scrollbars take their thumb colour from it.)
+      splashFactory: InkRipple.splashFactory,
+      splashColor: green.withValues(alpha: 0.16),
+      hoverColor: text.withValues(alpha: 0.06),
+      iconButtonTheme: IconButtonThemeData(style: pressedGlow(green, text)),
       sliderTheme: g
           ? SliderThemeData(
               trackHeight: 7,

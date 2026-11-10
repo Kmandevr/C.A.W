@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../model/app_state.dart';
 import '../../model/automation_writer.dart';
 import '../../model/live_midi.dart';
+import '../feedback.dart';
 import '../glass.dart';
 import '../haptics.dart';
 import '../motion.dart';
@@ -110,7 +111,7 @@ class _SectionButton extends StatelessWidget {
           onTap();
         },
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          AnimatedContainer(
+          Pressable(radius: 12, child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
             decoration: BoxDecoration(
@@ -118,7 +119,7 @@ class _SectionButton extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, size: label ? 19 : 18, color: color),
-          ),
+          )),
           if (label) ...[
             const SizedBox(height: 1),
             Text(name, style: TextStyle(fontSize: 10, color: color, fontWeight: selected ? FontWeight.w700 : null)),
@@ -201,6 +202,7 @@ class _BottomTransportState extends State<BottomTransport> {
   void _start(DragStartDetails _) {
     _scrubFrom = s.playheadStep;
     _dx = 0;
+    Haptics.grab();
   }
 
   void _update(DragUpdateDetails d) {
@@ -221,7 +223,10 @@ class _BottomTransportState extends State<BottomTransport> {
   void _end(DragEndDetails _) {
     final at = _scrubAt;
     _scrubFrom = _scrubAt = null;
-    if (at != null) s.seekTo(at);
+    if (at != null) {
+      s.seekTo(at);
+      Haptics.drop();
+    }
     setState(() {});
   }
 
@@ -243,7 +248,7 @@ class _BottomTransportState extends State<BottomTransport> {
         padding: EdgeInsets.fromLTRB(6 + widget.inset.left, 0, 6 + widget.inset.right, widget.inset.bottom),
         decoration: _barDecoration(top: true),
         child: Row(children: [
-          IconButton(
+          Pressable(child: IconButton(
             key: const ValueKey('transport-undo'),
             tooltip: 'Undo (Ctrl+Z)',
             iconSize: 19,
@@ -251,8 +256,8 @@ class _BottomTransportState extends State<BottomTransport> {
             color: Neon.text,
             icon: const Icon(Icons.undo),
             onPressed: s.canUndo ? s.undo : null,
-          ),
-          IconButton(
+          )),
+          Pressable(child: IconButton(
             key: const ValueKey('transport-redo'),
             tooltip: 'Redo (Ctrl+Shift+Z)',
             iconSize: 19,
@@ -260,7 +265,7 @@ class _BottomTransportState extends State<BottomTransport> {
             color: Neon.text,
             icon: const Icon(Icons.redo),
             onPressed: s.canRedo ? s.redo : null,
-          ),
+          )),
           Expanded(
             child: Center(
               child: _scrubAt != null
@@ -275,7 +280,7 @@ class _BottomTransportState extends State<BottomTransport> {
           ...widget.extras,
           if (writer != null) AutomateButton(writer: writer, state: s, size: 34),
           if (midi != null) KeysButton(midi: midi, constraints: narrow),
-          IconButton(
+          Pressable(child: IconButton(
             key: const ValueKey('transport-stop'),
             tooltip: 'Stop, back to the start (Shift+Space)',
             iconSize: 21,
@@ -283,7 +288,7 @@ class _BottomTransportState extends State<BottomTransport> {
             color: Neon.green,
             icon: const Icon(Icons.stop),
             onPressed: playing || s.pausedStep != null ? s.stopPlayback : null,
-          ),
+          )),
           const SizedBox(width: 4),
           Tooltip(
             message: playing ? 'Pause (Space)' : s.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
@@ -294,7 +299,7 @@ class _BottomTransportState extends State<BottomTransport> {
                 Haptics.tap();
                 s.togglePlay();
               },
-              child: AnimatedContainer(
+              child: Pressable(circle: true, child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
                 width: 40,
                 height: 40,
@@ -305,7 +310,7 @@ class _BottomTransportState extends State<BottomTransport> {
                   boxShadow: Neon.glow(Neon.green, strength: playing ? 0.6 : 0.2),
                 ),
                 child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 24),
-              ),
+              )),
             ),
           ),
           const SizedBox(width: 4),
@@ -347,7 +352,7 @@ class RecordButton extends StatelessWidget {
     Widget button(bool recording) => GestureDetector(
           onLongPressStart: m == null || state == null ? null : (d) => showRecordOptions(context, state!, m, d.globalPosition),
           onSecondaryTapUp: m == null || state == null ? null : (d) => showRecordOptions(context, state!, m, d.globalPosition),
-          child: IconButton(
+          child: Pressable(glow: Neon.pink, child: IconButton(
             key: const ValueKey('transport-record'),
             tooltip: recording
                 ? 'Stop recording'
@@ -364,7 +369,7 @@ class RecordButton extends StatelessWidget {
                     Haptics.tap();
                     m.toggleRecord();
                   },
-          ),
+          )),
         );
     if (m == null) return button(false);
     return ListenableBuilder(listenable: m, builder: (context, _) => button(m.recording));

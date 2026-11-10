@@ -2,7 +2,7 @@
 // rate limit so a fast knob turn doesn't buzz.
 import '../platform/haptics_device.dart';
 
-export '../platform/haptics_device.dart' show HapticKind, HapticsDevice;
+export '../platform/haptics_device.dart' show FlutterHaptics, HapticKind, HapticsDevice;
 
 /// The app's haptics (owner, 2026-11-10: "subtle everywhere", with a strength setting and an off switch). Settings
 /// sets [enabled] and [strength]; `main.dart` sets [device] for the platform.
@@ -41,8 +41,8 @@ class Haptics {
   /// Something refused.
   static void error() => play(HapticKind.error);
 
-  /// The shortest time between two of a kind. A tick also waits this long after any other feedback, so a fast knob
-  /// turn plays at most about 28 a second and a press isn't doubled by the step it causes.
+  /// The shortest time between two of a kind, so a fast knob turn plays at most about 28 ticks a second. A tick
+  /// also waits this long after a tap, so a press isn't doubled by the step it causes.
   static const minGap = {
     HapticKind.tick: Duration(milliseconds: 35),
     HapticKind.tap: Duration(milliseconds: 40),
@@ -68,7 +68,6 @@ class Haptics {
       (baseScale[kind]! * (0.5 + (at ?? strength).clamp(0.0, 1.0))).clamp(0.0, 1.0);
 
   static final Map<HapticKind, Duration> _last = {};
-  static Duration? _lastAny;
 
   /// Plays [kind] unless haptics are off or it comes too soon; true when it played.
   static bool play(HapticKind kind) {
@@ -76,10 +75,9 @@ class Haptics {
     final t = now();
     final last = _last[kind];
     if (last != null && t - last < minGap[kind]!) return false;
-    final any = _lastAny;
-    if (kind == HapticKind.tick && any != null && t - any < minGap[HapticKind.tick]!) return false;
+    final tap = _last[HapticKind.tap];
+    if (kind == HapticKind.tick && tap != null && t - tap < minGap[HapticKind.tick]!) return false;
     _last[kind] = t;
-    _lastAny = t;
     device.play(kind, scaleFor(kind));
     return true;
   }
@@ -87,6 +85,5 @@ class Haptics {
   /// Forgets the rate limit's history (tests).
   static void reset() {
     _last.clear();
-    _lastAny = null;
   }
 }

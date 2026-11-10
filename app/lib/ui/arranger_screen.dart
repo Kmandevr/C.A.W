@@ -21,6 +21,7 @@ import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
 import 'frame/sections.dart';
+import 'feedback.dart' show GrabFeedback, GripMark;
 import 'motion.dart';
 import 'param_control.dart';
 import 'theme.dart';
@@ -1242,22 +1243,21 @@ class _ResizeGrip extends StatefulWidget {
   State<_ResizeGrip> createState() => _ResizeGripState();
 }
 
-class _ResizeGripState extends State<_ResizeGrip> {
-  bool _active = false;
-
+class _ResizeGripState extends State<_ResizeGrip> with GrabFeedback {
   @override
   Widget build(BuildContext context) {
     final sideways = widget.axis == Axis.horizontal;
-    final line = Container(
-      width: sideways ? 2 : 22, height: sideways ? 22 : 2,
-      decoration: BoxDecoration(color: (_active ? Neon.blue : Neon.dim).withValues(alpha: _active ? 0.9 : 0.35),
-        borderRadius: BorderRadius.circular(1)));
-    void start() => setState(() => _active = true);
+    // The shared grip (feedback.dart): it grows and lights when grabbed, with a haptic grab and drop.
+    final line = GripMark(axis: widget.axis, grabbed: grabbed, hovered: hovered, length: 22,
+      restColor: Neon.dim.withValues(alpha: 0.35), restThickness: 2);
+    void start() => grab();
     void update(double d) => widget.onDrag(d);
-    void end() { setState(() => _active = false); widget.onEnd(); }
+    void end() { release(); widget.onEnd(); }
     return Semantics(label: widget.label, child: Tooltip(message: widget.label, waitDuration: const Duration(milliseconds: 600),
       child: MouseRegion(
         cursor: sideways ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
+        onEnter: (_) => hover(true),
+        onExit: (_) => hover(false),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           // The edge follows the finger from where it went down, slop included.

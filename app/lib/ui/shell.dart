@@ -29,7 +29,9 @@ import 'key_router.dart';
 import 'theme.dart';
 import 'theme_editor.dart';
 import 'widgets.dart';
+import 'feedback.dart';
 import 'glass.dart';
+import 'haptics.dart';
 import 'frame/bars_handle.dart';
 import 'frame/frame_widgets.dart';
 import 'frame/live_keys.dart';
@@ -376,7 +378,7 @@ class _ShellState extends State<Shell> {
         // Compact landscape: smaller icons and denser controls everywhere in it.
         data: Theme.of(context).copyWith(
           visualDensity: VisualDensity.compact,
-          iconButtonTheme: IconButtonThemeData(style: small),
+          iconButtonTheme: IconButtonThemeData(style: small.merge(Theme.of(context).iconButtonTheme.style)),
         ),
         child: Row(children: [
           SectionRail(
@@ -389,16 +391,16 @@ class _ShellState extends State<Shell> {
               child: InkWell(
                 key: const ValueKey('project-menu'),
                 onTap: () => showProjectMenu(context, s),
-                child: const SizedBox(height: 40, child: Center(child: CrowLogo(size: 22))),
+                child: const Pressable(child: SizedBox(height: 40, child: Center(child: CrowLogo(size: 22)))),
               ),
             ),
-            bottom: IconButton(
+            bottom: Pressable(child: IconButton(
               key: const ValueKey('more-tools'),
               tooltip: 'More: mixer, automation, export…',
               color: Neon.dim,
               icon: const Icon(Icons.more_vert),
               onPressed: () => _showTools(context),
-            ),
+            )),
           ),
           Expanded(
             child: Column(children: [
@@ -633,7 +635,7 @@ class _TransportBar extends StatelessWidget {
             },
           ),
           // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
-          IconButton(
+          Pressable(child: IconButton(
             key: const ValueKey('transport-undo'),
             tooltip: 'Undo (Ctrl+Z)',
             color: Neon.text,
@@ -641,8 +643,8 @@ class _TransportBar extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
             icon: const Icon(Icons.undo),
             onPressed: state.canUndo ? state.undo : null,
-          ),
-          IconButton(
+          )),
+          Pressable(child: IconButton(
             key: const ValueKey('transport-redo'),
             tooltip: 'Redo (Ctrl+Shift+Z)',
             color: Neon.text,
@@ -650,17 +652,17 @@ class _TransportBar extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
             icon: const Icon(Icons.redo),
             onPressed: state.canRedo ? state.redo : null,
-          ),
-          IconButton(
+          )),
+          Pressable(child: IconButton(
             tooltip: 'Layout and panels',
             color: Neon.dim,
             icon: const Icon(Icons.dashboard_customize),
             onPressed: () => showLayoutMenu(context, dock),
-          ),
+          )),
           if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
           if (LiveMidi.current case final m?) KeysButton(midi: m),
           // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
-          if (playing || state.pausedStep != null) IconButton(
+          if (playing || state.pausedStep != null) Pressable(child: IconButton(
             key: const ValueKey('transport-stop'),
             tooltip: 'Stop, back to the start (Shift+Space)',
             color: Neon.green,
@@ -668,13 +670,16 @@ class _TransportBar extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
             icon: const Icon(Icons.stop),
             onPressed: state.stopPlayback,
-          ),
+          )),
           Tooltip(
             message: playing ? 'Pause (Space)' : state.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
             child: InkWell(
               borderRadius: BorderRadius.circular(28),
-              onTap: state.togglePlay,
-              child: AnimatedContainer(
+              onTap: () {
+                Haptics.tap();
+                state.togglePlay();
+              },
+              child: Pressable(circle: true, child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
                 width: 52,
                 height: 52,
@@ -685,7 +690,7 @@ class _TransportBar extends StatelessWidget {
                   boxShadow: Neon.glow(Neon.green, strength: playing ? 0.8 : 0.3),
                 ),
                 child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
-              ),
+              )),
             ),
           ),
           RecordButton(midi: LiveMidi.current, state: state),
