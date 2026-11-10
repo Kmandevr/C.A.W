@@ -289,6 +289,14 @@ public:
     // never quiet, always run (a declared tail alone never puts a component to sleep, so its output doesn't
     // depend on the host's block size). Say quiet only when nothing timed is left running (see docs/native-module-sdk.md).
     virtual bool quiet() const noexcept { return false; }
+    // Live display data for the component's UI (#173): any thread but the audio thread, at any time while the
+    // instance exists (process() may be running): copies the latest display block the processor published into
+    // out (at most max floats) and returns how many floats it copied, 0 when it has none. Never blocks, locks or
+    // allocates. A processor that publishes keeps a caw::DisplayBuffer (caw/display.hpp) and forwards to its
+    // read(); the layout of the floats is the component's own (documented beside it).
+    virtual uint32_t readDisplay(float* out, uint32_t max) const noexcept {
+        (void)out; (void)max; return 0;
+    }
     virtual uint32_t stateVersion() const noexcept { return 1; }
     // Called on the control thread, possibly while process() runs: keep it safe against processing.
     virtual bool saveState(uint8_t* destination, uint32_t capacity, uint32_t& written) const noexcept {

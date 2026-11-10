@@ -321,8 +321,8 @@ reverb_.process(left, right, static_cast<int>(frames));"""),
 ];
 
 /// A component that ships in every engine (org.caw.*): put on a track from Files or "+ effect"; its id names it in
-/// code and project files. Hand-kept from `engine/src/builtin_components.cpp`, `builtin_instruments.cpp` and
-/// `builtin_flagship.cpp` (a test checks the ids and knobs are still there; the flagship lists only the knobs it
+/// code and project files. Hand-kept from `engine/src/builtin_components.cpp`, `builtin_instruments.cpp`,
+/// `builtin_flagship.cpp` and `builtin_effects_*.cpp` (a test checks the ids and knobs are still there; the flagship lists only the knobs it
 /// names whole, not the per-section ones it builds from a prefix).
 class CppBuiltin {
   const CppBuiltin(this.id, this.name, this.instrument, this.doc, this.knobs);
@@ -355,6 +355,35 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.drum.snare', 'Snare', true, 'A two-mode body and noise.', ['tune', 'body', 'snappy', 'tone', 'mix', 'volume']),
   CppBuiltin('org.caw.drum.hats', 'Hi-hats', true, 'Closed on every key but A#2 (open), unless mode says otherwise.',
       ['mode', 'closed', 'open', 'tone', 'metal', 'volume']),
+  // The effects suite (#173, engine/src/builtin_effects_*.cpp); the EQ lists only its output, its bands are b1_..b8_.
+  CppBuiltin('org.caw.eq', 'EQ', false,
+      '8 bands (bell, shelves, cuts at 12/24/48 dB, notch, band-pass, tilt), each stereo, mid, side, left or right; '
+      'knobs b1_..b8_ on, type, freq, gain, q, channel; a live spectrum.',
+      ['output']),
+  CppBuiltin('org.caw.compressor', 'Compressor', false, 'Soft knee, auto release and makeup, RMS or peak, link, sidechain filter.',
+      ['threshold', 'ratio', 'knee', 'attack', 'release', 'auto_release', 'makeup', 'auto_makeup', 'mix', 'lookahead', 'detect',
+       'link', 'sc_hpf', 'sc_listen']),
+  CppBuiltin('org.caw.limiter', 'Limiter', false, 'A look-ahead limiter with a true-peak estimate.',
+      ['gain', 'ceiling', 'release', 'lookahead', 'true_peak']),
+  CppBuiltin('org.caw.reverb.pro', 'Reverb', false, 'A modulated hall with pre-delay sync, filters, freeze and ducking.',
+      ['size', 'decay', 'predelay', 'predelay_sync', 'damping', 'low_cut', 'high_cut', 'width', 'mod', 'mod_rate', 'freeze', 'duck',
+       'mix']),
+  CppBuiltin('org.caw.delay.pro', 'Delay', false, 'Stereo, ping-pong or dual; synced (dotted, triplet) or free; a filtered, driven loop.',
+      ['mode', 'sync', 'time', 'sync_r', 'time_r', 'offset', 'feedback', 'low_cut', 'high_cut', 'drive', 'mod_depth', 'mod_rate',
+       'duck', 'freeze', 'mix']),
+  CppBuiltin('org.caw.saturator', 'Saturator', false, 'Tape, tube, soft and hard clip, fold and crush, 2x oversampled.',
+      ['mode', 'drive', 'bias', 'tone', 'bits', 'rate', 'oversample', 'auto_gain', 'output', 'mix']),
+  CppBuiltin('org.caw.gate', 'Gate', false, 'A gate or expander with hold and a sidechain filter.',
+      ['threshold', 'range', 'ratio', 'attack', 'hold', 'release', 'knee', 'sc_hpf']),
+  CppBuiltin('org.caw.transient', 'Transient shaper', false, 'More or less attack and sustain.', ['attack', 'sustain', 'output', 'mix']),
+  CppBuiltin('org.caw.filter', 'Filter', false, 'SVF and ladder filters swept by an LFO and an envelope follower.',
+      ['type', 'cutoff', 'resonance', 'drive', 'lfo_amount', 'lfo_rate', 'lfo_sync', 'lfo_shape', 'lfo_stereo', 'env_amount',
+       'env_attack', 'env_release', 'mix']),
+  CppBuiltin('org.caw.phaser', 'Phaser', false, '2 to 12 all-pass stages with feedback.',
+      ['stages', 'rate', 'sync', 'depth', 'center', 'feedback', 'stereo', 'mix']),
+  CppBuiltin('org.caw.flanger', 'Flanger', false, 'A swept short delay with feedback.', ['delay', 'depth', 'rate', 'sync', 'feedback', 'stereo', 'mix']),
+  CppBuiltin('org.caw.utility', 'Utility', false, 'Gain, phase, mono, width, pan, bass mono and DC block.',
+      ['gain', 'invert_l', 'invert_r', 'channels', 'width', 'pan', 'bass_mono', 'bass_freq', 'dc_block']),
   CppBuiltin('org.caw.distortion', 'Distortion', false, 'Four shapes, a dry/wet mix and an output level.',
       ['shape', 'drive', 'bits', 'mix', 'output']),
   CppBuiltin('org.caw.delay.pingpong', 'Ping-pong delay', false, 'A stereo delay that bounces between the sides.',

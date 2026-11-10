@@ -108,6 +108,10 @@ public:
     // id: the master's; its instrument has index kInstrumentIndex), as each component's save_state writes it now; store it in the project so a
     // reload or an export starts from it. {"ok":false,...} if the layer has no chain.
     std::string componentStatesJson(const std::string& layerId);
+    // Live display data (#173): the latest block a playing component published (ModuleProcessor::readDisplay),
+    // at most `max` floats into out; the count, 0 when it has none (or the control thread is busy: it never
+    // waits), -1 when there is no such component. Any thread but the audio thread.
+    int32_t componentDisplay(const std::string& layerId, uint32_t index, float* out, uint32_t max);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
     // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play notes

@@ -1,6 +1,7 @@
 // Engine integration over dart:ffi: needs CAW_LIB pointing at a desktop build of the engine library (CI sets it).
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/project.dart';
@@ -165,6 +166,10 @@ void main() {
     expect(e.setComponentParam('l', 0, 'cutoff', 1500), isFalse, reason: 'index 0 names the inserts, which are empty');
     expect(e.setComponentBypass('l', ProjectDoc.instrumentIndex, false), isTrue);
     expect(e.componentStates('l').keys, contains(ProjectDoc.instrumentIndex));
+    // Display data (#173): the basic synth publishes none; there is no insert 0.
+    final shown = Float32List(16);
+    expect(e.componentDisplay('l', ProjectDoc.instrumentIndex, shown), 0);
+    expect(e.componentDisplay('l', 0, shown), -1);
     e.dispose();
     final dir = await Directory.systemTemp.createTemp('caw');
     final out = '${dir.path}/synth.wav';

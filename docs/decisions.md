@@ -10,6 +10,14 @@ updated: 2026-11-10
 
 **Decision (owner):** "look at the flow of REAPER and match that as well", after the arranger (#172), and "The goal is to make it really easy to use." REAPER's flow is followed where it is simple and direct; where it is powerful but fiddly (deep dialogs, modifier gestures, the routing matrix) C.A.W. offers one obvious easy path with sensible defaults and keeps REAPER's depth behind it. The study, the gaps and the plan ranked by "makes a song easier to finish" are in [REAPER's flow and C.A.W's](reaper-flow.md); nothing in it is built, and the phone look of each new screen waits for the owner ([vision](vision.md#open-owner-decisions)).
 
+## 2026-11-10: The effects suite's engine choices (on the owner's behalf, to confirm)
+
+**Decision (made during #173's engine work; the owner has not confirmed it):**
+- **Display data:** components publish a float block about 60 times a second through a lock-free two-slot seqlock (`caw/display.hpp`), read with `caw_engine_component_display` (API version 6), which never waits (it skips a busy control thread). Expensive display work (the EQ's FFT) runs only while a UI reads.
+- **Look-ahead latency:** a descriptor declares one latency, so the compressor and limiter always delay by 240 frames (5 ms at 48 kHz) and their look-ahead knob moves the detector within that delay, instead of changing the latency the engine compensates.
+- **External sidechain:** not built. A track's chain takes components with one stereo input; a compressor keyed by another track needs a second input port and routing, a follow-up (the [proposal](vision.md#open-owner-decisions) for sends and sidechains stands).
+- **References, all maths, no code or dependency taken:** the soft-knee curve (Giannoulis, Massberg and Reiss, "Digital Dynamic Range Compressor Design", JAES 2012); the polyphase IIR half-band design (Valenzuela and Constantinides, IEE Proc. G, 1983); trapezoidal SVF EQ bands as `eq.hpp` already used. Nothing from Airwindows, Vital, Surge or any GPL source.
+
 ## 2026-11-10: A complete built-in suite with visual device UIs (owner)
 
 **Decision (owner):** the effects get the flagship synth's treatment, "everything you would need to make something, already built in" (#173).

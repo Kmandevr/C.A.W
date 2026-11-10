@@ -18,6 +18,12 @@ struct ReverbSettings {
     double preDelay = 0.0;  // seconds before the reverb starts, 0 .. the prepare() maximum
     double width = 1.0;     // 0 (mono tail) .. 1 (natural) .. 2 (extra wide)
     double mix = 0.3;       // 0 (dry only) .. 1 (wet only)
+    // Line modulation, 0 (none: every read a whole sample, the original sound) .. 1 (each line's length swept by up
+    // to 0.8 ms at its own rate near `modRate` Hz): blurs the tail's resonances, as a large hall's air does.
+    double modulation = 0.0;
+    double modRate = 0.7;   // Hz, 0.05 .. 5
+    // Freeze: the loop keeps what it holds forever (gain 1, no damping) and takes no new input.
+    bool freeze = false;
 };
 
 // How it works (an 8x8 feedback delay network, FDN):
@@ -51,8 +57,9 @@ public:
         rate_ = sampleRate > 0.0 && std::isfinite(sampleRate) ? sampleRate : 48000.0;
         const double scale = rate_ / 1000.0;
         size_t total = 0;
+        modRoom_ = static_cast<size_t>(2.0 * kMaxModSeconds * rate_) + 2;  // room for the deepest sweep (2 x depth)
         for (int i = 0; i < 8; ++i) {  // room for the longest size (scale 1.0 at size 1)
-            lineMask_[i] = pow2Above(static_cast<size_t>(kLineMs[i] * kMaxScale * scale) + 2) - 1;
+            lineMask_[i] = pow2Above(static_cast<size_t>(kLineMs[i] * kMaxScale * scale) + 2 + modRoom_) - 1;
             lineStart_[i] = total;
             total += lineMask_[i] + 1;
         }
@@ -83,13 +90,24 @@ public:
         for (int i = 0; i < 8; ++i) {
             size_t len = static_cast<size_t>(kLineMs[i] * lineScale * rate_ / 1000.0 + 0.5);
             if (len < 1) len = 1;
-            if (len > lineMask_[i]) len = lineMask_[i];
+            if (len + modRoom_ > lineMask_[i]) len = lineMask_[i] - modRoom_;
             lineLen_[i] = len;
-            gain_[i] = detPow(10.0, -3.0 * static_cast<double>(len) / (rt60 * rate_));
+            gain_[i] = s.freeze ? 1.0 : detPow(10.0, -3.0 * static_cast<double>(len) / (rt60 * rate_));
         }
-        const double d = clamp(s.damping, 0.0, 1.0);
+        const double d = s.freeze ? 0.0 : clamp(s.damping, 0.0, 1.0);
         // Loop low-pass cutoff from 20 kHz (damping 0: the filter is skipped) down to 1 kHz (damping 1).
         dampK_ = d <= 0.0 ? 1.0 : 1.0 - detExp(-kTwoPi * 20000.0 * detPow(0.05, d) / rate_);
+        freeze_ = s.freeze;
+        modDepth_ = clamp(s.modulation, 0.0, 1.0) * kMaxModSeconds * rate_;
+        const double modHz = clamp(s.modRate, 0.05, 5.0);
+        if (modDepth_ > 0.0 && modHz != modHz_) {
+            modHz_ = modHz;
+            for (int i = 0; i < 8; ++i) {  // each line its own rate, so the sweeps never line up
+                const double w = kTwoPi * modHz * (1.0 + 0.137 * i) / rate_;
+                rotC_[i] = detCos(w);
+                rotS_[i] = detSin(w);
+            }
+        }
         double pre = clamp(s.preDelay, 0.0, 1e9) * rate_;
         preFrames_ = static_cast<size_t>(pre > static_cast<double>(maxPreFrames_) ? maxPreFrames_ : pre + 0.5);
         width_ = clamp(s.width, 0.0, 2.0);
@@ -101,6 +119,11 @@ public:
     void clear() noexcept {
         for (float& v : memory_) v = 0.0f;
         for (double& v : lp_) v = 0.0;
+        for (int i = 0; i < 8; ++i) {  // the sweeps start spread around the circle
+            modC_[i] = detCos(kTwoPi * i / 8.0);
+            modS_[i] = detSin(kTwoPi * i / 8.0);
+        }
+        modCount_ = 0;
     }
 
     // One stereo frame, in place.
@@ -116,6 +139,7 @@ public:
         preR[pw] = static_cast<float>(inR);
         const size_t pr = (pos_ - preFrames_) & preMask_;
         double xl = preL[pr], xr = preR[pr];
+        if (freeze_) xl = xr = 0.0;  // frozen: the loop takes nothing new
 
         // Input diffusion: Schroeder all-passes smear each click into a burst, so the tail is dense from
         // the first echo. Lines 0-3 diffuse the left, 4-7 the right.
@@ -124,11 +148,37 @@ public:
 
         // Read the 8 line outputs, damp them and apply their decay gains.
         double v[8];
-        for (int i = 0; i < 8; ++i) {
-            const float* line = &memory_[lineStart_[i]];
-            const double y = line[(pos_ - lineLen_[i]) & lineMask_[i]];
-            lp_[i] += (y - lp_[i]) * dampK_;
-            v[i] = lp_[i] * gain_[i];
+        if (modDepth_ > 0.0) {
+            // Each line read between samples, modDepth_ * (1 + sin) further back: a quadrature oscillator per line
+            // (one rotation, four multiplies), its radius pulled back to 1 every 1024 samples.
+            for (int i = 0; i < 8; ++i) {
+                const double c = modC_[i] * rotC_[i] - modS_[i] * rotS_[i];
+                modS_[i] = modS_[i] * rotC_[i] + modC_[i] * rotS_[i];
+                modC_[i] = c;
+                const float* line = &memory_[lineStart_[i]];
+                const double back = static_cast<double>(lineLen_[i]) + modDepth_ * (1.0 + modS_[i]);
+                const size_t whole = static_cast<size_t>(back);
+                const double frac = back - static_cast<double>(whole);
+                const double a = line[(pos_ - whole) & lineMask_[i]], b = line[(pos_ - whole - 1) & lineMask_[i]];
+                const double y = a + (b - a) * frac;
+                lp_[i] += (y - lp_[i]) * dampK_;
+                v[i] = lp_[i] * gain_[i];
+            }
+            if (++modCount_ >= 1024) {
+                modCount_ = 0;
+                for (int i = 0; i < 8; ++i) {
+                    const double k = 1.5 - 0.5 * (modC_[i] * modC_[i] + modS_[i] * modS_[i]);
+                    modC_[i] *= k;
+                    modS_[i] *= k;
+                }
+            }
+        } else {
+            for (int i = 0; i < 8; ++i) {
+                const float* line = &memory_[lineStart_[i]];
+                const double y = line[(pos_ - lineLen_[i]) & lineMask_[i]];
+                lp_[i] += (y - lp_[i]) * dampK_;
+                v[i] = lp_[i] * gain_[i];
+            }
         }
         // Stereo taps before mixing: two orthogonal sign patterns give a decorrelated left and right.
         double wetL = v[0] - v[1] + v[2] - v[3] + v[4] - v[5] + v[6] - v[7];
@@ -171,6 +221,7 @@ private:
     static constexpr double kAllpassMs[8] = {4.77, 3.59, 12.73, 9.31, 4.31, 3.83, 11.89, 8.71};
     static constexpr double kAllpassGain = 0.6;
     static constexpr double kOutScale = 0.35355339059327376;  // 1/sqrt(8)
+    static constexpr double kMaxModSeconds = 0.0008;           // the deepest sweep at modulation 1
 
     static double clamp(double x, double lo, double hi) noexcept {
         if (!(x >= lo)) return lo;  // below the range, or NaN: the minimum
@@ -214,6 +265,11 @@ private:
     size_t pos_ = 0;  // one write position for every line; each line masks it to its own length
     double gain_[8] = {}, lp_[8] = {};
     double rate_ = 48000.0, dampK_ = 1.0, width_ = 1.0, mix_ = 0.3;
+    size_t modRoom_ = 0;
+    double modDepth_ = 0.0, modHz_ = -1.0;  // samples of sweep; the rate the rotations were made for
+    double modC_[8] = {}, modS_[8] = {}, rotC_[8] = {}, rotS_[8] = {};
+    uint32_t modCount_ = 0;
+    bool freeze_ = false;
     ReverbSettings settings_;
 };
 

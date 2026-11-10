@@ -427,4 +427,10 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
     if (notes_) notes_->clearEvents();  // delivered (or dropped while bypassed): the next block starts empty
 }
 
+int32_t ComponentChain::readDisplay(std::size_t index, float* out, uint32_t max) const noexcept {
+    if (index >= entries_.size() || !entries_[index]->processor) return -1;
+    const uint32_t n = entries_[index]->processor->readDisplay(out, max);
+    return static_cast<int32_t>(n > max ? max : n);
+}
+
 }  // namespace caw
