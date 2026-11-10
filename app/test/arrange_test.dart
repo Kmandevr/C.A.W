@@ -219,7 +219,7 @@ void main() {
       await tester.pump();
     }
 
-    testWidgets('a built-in native effect shows its knobs; a knob, bypass, reorder and remove edit the project',
+    testWidgets('a built-in native effect shows its plugin UI inline; a knob, bypass, reorder and remove edit the project',
         (tester) async {
       listenForHaptics(tester);
       s.componentCatalog.set(const [_width, _chorus]);
@@ -229,10 +229,11 @@ void main() {
       expect(find.text('CODE EFFECTS · .caw'), findsOneWidget);
       expect(find.text('NATIVE EFFECTS · C++'), findsOneWidget);
       expect(find.text('Width'), findsWidgets);
-      expect(find.text('Built-in'), findsOneWidget);
+      expect(find.byKey(const ValueKey('fx-inline-0')), findsOneWidget, reason: 'its plugin UI, inline');
+      expect(find.text('UTILITY'), findsOneWidget);
 
       // A knob turned up is stored in the project; passing the centre ticks.
-      final knob = find.byKey(const ValueKey('knob-org.caw.stereo.width-width'));
+      final knob = find.descendant(of: find.byKey(const ValueKey('fx-inline-0')), matching: find.byKey(const ValueKey('dknob-width')));
       await tester.drag(knob, const Offset(0, -60));
       await tester.pumpAndSettle();
       expect(layer.components.first.params['width'], greaterThan(1.0));
@@ -270,6 +271,9 @@ void main() {
       await gesture.moveBy(const Offset(0, 60));
       await tester.pump(const Duration(milliseconds: 100));
       await gesture.moveBy(const Offset(0, 120));
+      await tester.pump(const Duration(milliseconds: 100));
+      // Past the next device's whole plugin UI.
+      await gesture.moveBy(Offset(0, tester.getSize(find.byKey(const ValueKey('fx-inline-1'))).height));
       await tester.pump(const Duration(milliseconds: 100));
       await gesture.up();
       await tester.pumpAndSettle();
@@ -613,8 +617,17 @@ void _steppedKnobs() {
     double valueOf(String id, String param) => (id == 'org.caw.synth.flagship'
         ? layer.instrument!.params[param]
         : layer.components.firstWhere((c) => c.id == id).params[param]) ?? double.nan;
+    // Built-ins show their plugin UIs inline: each knob is found in its own device's UI; a knob the inline UI
+    // leaves to MORE or the full-screen editor is skipped (the unison knob must be there).
+    var tried = 0;
     for (final (id, p) in knobs) {
-      final knob = find.byKey(ValueKey('knob-$id-${p.id}'));
+      final slot = id == 'org.caw.synth.flagship' ? 'instrument' : '${layer.components.indexWhere((c) => c.id == id)}';
+      final knob = find.descendant(of: find.byKey(ValueKey('fx-inline-$slot')), matching: find.byKey(ValueKey('dknob-${p.id}')));
+      if (knob.evaluate().isEmpty) {
+        expect(p.id, isNot('osc1_unison'), reason: 'the flagship shows its unison knob inline');
+        continue;
+      }
+      tried++;
       await tester.ensureVisible(knob);
       await tester.pumpAndSettle();
       // Set to the minimum first (double-tap goes to the default, so drag far down).
@@ -632,6 +645,7 @@ void _steppedKnobs() {
       final steps = (valueOf(id, p.id) - p.min) / p.step;
       expect(steps, greaterThanOrEqualTo(2), reason: '$id ${p.id} moved $steps steps in one slow drag');
     }
+    expect(tried, greaterThanOrEqualTo(1));
     await tester.pump(const Duration(seconds: 1));
   }, skip: Platform.environment['CAW_LIB']?.isNotEmpty != true);
 }
