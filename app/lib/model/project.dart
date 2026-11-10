@@ -52,7 +52,8 @@ class ModuleDoc {
 }
 
 class ClipDoc {
-  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0, this.loop = true, this.linked = false});
+  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0,
+    this.loop = true, this.linked = false, this.name, this.color, this.mute = false, this.lock = false});
   final String id;
   String patternId;
   int startSteps;
@@ -61,9 +62,25 @@ class ClipDoc {
   bool loop;
   bool linked;
 
+  /// The clip's own name (its Properties); null shows its pattern's name.
+  String? name;
+
+  /// The clip's own colour, a track-colour index; null takes its track's colour.
+  int? color;
+
+  /// A muted clip stays on the timeline but isn't sent to the engine (REAPER's item mute, UG 7.8).
+  bool mute;
+
+  /// A locked clip can't be moved, trimmed, split, glued or deleted until it is unlocked (REAPER's item lock).
+  bool lock;
+
   Map<String, dynamic> toJson() => {
         'id': id, 'pattern': patternId, 'start_steps': startSteps,
         'length_steps': lengthSteps, 'source_offset_steps': sourceOffsetSteps, 'loop': loop, 'linked': linked,
+        if (name != null) 'name': name,
+        if (color != null) 'color': color,
+        if (mute) 'mute': true,
+        if (lock) 'lock': true,
       };
 
   static ClipDoc fromJson(Map<String, dynamic> j) => ClipDoc(
@@ -74,6 +91,10 @@ class ClipDoc {
         sourceOffsetSteps: (j['source_offset_steps'] as num?)?.toInt() ?? 0,
         loop: j['loop'] != false,
         linked: j['linked'] == true,
+        name: switch (_boundedProjectText(j['name'], 128)) { '' => null, final n => n },
+        color: switch (j['color']) { final int c when c >= 0 && c < LayerDoc.trackColors => c, _ => null },
+        mute: j['mute'] == true,
+        lock: j['lock'] == true,
       );
 }
 
@@ -544,6 +565,7 @@ class ProjectDoc {
                   'id': clip.id, 'pattern': clip.patternId, 'start_steps': clip.startSteps,
                   'length_steps': clip.lengthSteps, 'source_offset_steps': clip.sourceOffsetSteps,
                   'loop': clip.loop,
+                  if (clip.mute) 'mute': true,
                 },
               ],
               'length_steps': l.clips.isNotEmpty ? 0 : l.lengthSteps,

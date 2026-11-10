@@ -203,7 +203,8 @@ const List<ActionDef> standardActions = [
 
   // Arranger.
   ActionDef('arranger.layer.prev', 'Previous layer', _r, defaultKeys: ['W', 'Up'], toast: false),
-  ActionDef('arranger.layer.next', 'Next layer', _r, defaultKeys: ['S', 'Down'], toast: false),
+  // S splits (owner, 2026-11-10, as in REAPER), so next layer keeps only Down.
+  ActionDef('arranger.layer.next', 'Next layer', _r, defaultKeys: ['Down'], toast: false),
   ActionDef('arranger.pan.left', 'Pan left', _r, defaultKeys: ['A'], isChange: true),
   ActionDef('arranger.pan.right', 'Pan right', _r, defaultKeys: ['D'], isChange: true),
   ActionDef('arranger.vol.up', 'Volume up', _r, defaultKeys: ['='], isChange: true),
@@ -219,6 +220,18 @@ const List<ActionDef> standardActions = [
   ActionDef('arranger.layer.moveUp', 'Move layer up', _r, defaultKeys: ['Ctrl+W'], isChange: true),
   ActionDef('arranger.layer.moveDown', 'Move layer down', _r, defaultKeys: ['Ctrl+S'], isChange: true),
   ActionDef('arranger.layer.color', 'Layer colour', _r, isChange: true),
+  // Clips (docs/reaper-flow.md, gap 1), run by the Arranger screen. Keys follow REAPER where they're free.
+  ActionDef('arranger.clip.split', 'Split clips at the playhead', _r,
+      description: 'The selected clips, or every clip under the playhead', defaultKeys: ['S'], isChange: true),
+  ActionDef('arranger.clip.glue', 'Glue clips', _r, description: 'The selected clips on each track become one',
+      defaultKeys: ['G'], isChange: true),
+  ActionDef('arranger.clip.duplicate', 'Duplicate clips', _r, description: 'After the selection, with their own notes',
+      defaultKeys: ['Ctrl+D'], isChange: true),
+  ActionDef('arranger.clip.delete', 'Delete clips', _r,
+      description: 'Delete also does this while clips are selected', isChange: true),
+  ActionDef('arranger.clip.properties', 'Clip properties', _r, defaultKeys: ['F2'], toast: false),
+  ActionDef('arranger.clip.selectMode', 'Select several clips', _r,
+      description: 'Taps add clips; a long-press drag draws a box', toast: false),
 
   // Exporter.
   ActionDef('export.now', 'Export', _e,

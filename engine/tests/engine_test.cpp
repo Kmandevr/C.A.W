@@ -731,6 +731,39 @@ TEST(arrangement_clips_schedule_reusable_patterns_on_the_project_timeline) {
 }
 
 
+TEST(a_muted_arrangement_clip_plays_nothing_and_the_rest_still_play) {
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.seamCrossfade = false;
+    p.modules.push_back({"tone", std::string(kFloat) + "gate * vel * 0.5", {}});
+    p.modules.push_back({"phrase", "---\nkind: pattern\nlength: 4\n---\n0 A4 2 1\n", {}});
+    LayerSpec layer;
+    layer.id = "track";
+    layer.chain = {"tone"};
+    layer.volume = 1.0;
+    layer.clips.push_back({"heard", "phrase", 0, 4, 0, false});
+    layer.clips.push_back({"muted", "phrase", 8, 4, 0, false, true});
+    p.layers.push_back(layer);
+
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const auto out = run(e, 70000);
+    CHECK_NEAR(out[3000], 0.5 * std::cos(kPi / 4.0), 1e-5);  // the first clip's note
+    CHECK_NEAR(out[51000], 0.0, 1e-7);                         // the muted clip's note is silent
+
+    // The project file carries it.
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,"modules":[{"id":"p","source":"---\nkind: pattern\n---\n"}],
+        "layers":[{"id":"t","clips":[{"id":"c","pattern":"p","mute":true},{"id":"d","pattern":"p"}]}]})", parsed, error));
+    CHECK(parsed.layers.at(0).clips.at(0).mute);
+    CHECK(!parsed.layers.at(0).clips.at(1).mute);
+}
+
 TEST(arrangement_clip_source_offset_trims_the_source_and_honors_non_looping) {
     ProjectSpec p;
     p.bpm = 120;

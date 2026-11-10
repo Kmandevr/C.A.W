@@ -262,6 +262,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                         return false;
                     }
                     clip.loop = c.boolean("loop", true);
+                    clip.mute = c.boolean("mute", false);
                     if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));
                 }
             }

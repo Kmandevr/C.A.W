@@ -37,6 +37,7 @@ struct ClipSpec {
     int lengthSteps = 64;
     int sourceOffsetSteps = 0;
     bool loop = true;
+    bool mute = false;  // kept on the timeline (the layer stays arranged) but plays nothing
 };
 
 struct AutomationPointSpec { double step = 0, value = 0; };

@@ -336,6 +336,7 @@ double arrangementBytes(const std::vector<ClipSpec>& clips,
     const std::map<std::string, std::shared_ptr<const Pattern>>& sources, int beatsPerBar) {
     double total = 0;
     for (const ClipSpec& clip : clips) {
+        if (clip.mute) continue;
         const auto found = sources.find(clip.pattern);
         if (found == sources.end() || !found->second || found->second->notes.empty()) continue;
         const Pattern& src = *found->second;
@@ -358,6 +359,7 @@ std::shared_ptr<const Pattern> compileArrangement(
     out->name = "Arrangement";
     out->lengthSteps = projectLengthSteps;
     for (const ClipSpec& clip : clips) {
+        if (clip.mute) continue;  // a muted clip plays nothing; the layer still follows the arrangement
         const auto found = sources.find(clip.pattern);
         if (found == sources.end() || !found->second) continue;
         const Pattern& src = *found->second;
@@ -1538,7 +1540,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             for (const ClipSpec& clip : w.clips) {
                 pl.arrangementSig += clip.id + "|" + clip.pattern + "|" + std::to_string(clip.startSteps) + "|" +
                     std::to_string(clip.lengthSteps) + "|" + std::to_string(clip.sourceOffsetSteps) + "|" +
-                    (clip.loop ? "1" : "0") + "|";
+                    (clip.loop ? "1" : "0") + (clip.mute ? "m" : "") + "|";
                 auto source = modules_.find(clip.pattern);
                 if (source != modules_.end()) pl.arrangementSig += source->second.source;
                 pl.arrangementSig += "\x1e";

@@ -5,12 +5,15 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../actions/actions.dart';
 import '../model/app_state.dart';
+import '../model/arrange_edit.dart';
 import '../model/arrange_fx.dart';
 import '../model/live_midi.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
 import 'arrange/arrange_drag.dart';
+import 'arrange/clip_bar.dart';
 import 'arrange/focus_panel.dart';
 import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
@@ -26,6 +29,7 @@ import 'widgets.dart';
 import 'volume_fader.dart';
 import 'track_cards_screen.dart';
 import 'glass.dart';
+import 'key_router.dart';
 import 'midi_file_actions.dart';
 
 
@@ -108,8 +112,102 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   /// Clip and track drags: what they point at, edge scrolling and Escape (REAPER-style, #172).
   late final ArrangeDrag _drag = ArrangeDrag()..hScroll = _hScroll;
 
+  /// Select mode (the phone's multi-select, from the clip bar or a clip's "Select several"): a tap adds or removes a
+  /// clip and a long-press drag in empty lane space draws a box around clips.
+  bool _selectMode = false;
+
+  /// A marquee in progress (REAPER's right-drag; a long-press drag in Select mode), in global coordinates, and
+  /// whether it adds to the selection (Shift).
+  final _marquee = ValueNotifier<Rect?>(null);
+  Offset? _marqueeFrom;
+  bool _marqueeAdd = false;
+  final _lanesBox = GlobalKey(debugLabel: 'lanes');
+
+  /// The timeline's step width and track height at the last build, for the marquee's hit test.
+  double _stepW = 18, _laneTrackH = 60;
+
+  final _keys = FocusNode(debugLabel: 'arranger keys', skipTraversal: true);
+  KeyRouterState? _router;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final r = KeyRouter.of(context);
+    if (r == _router) return;
+    _router?.unregister(Area.arranger, _keys);
+    _router = r?..register(Area.arranger, _keys, _action);
+  }
+
+  /// The clip actions (docs/actions.md, Arranger): false for the rest, which the key router runs itself.
+  bool _action(String id, int count, String? arg) {
+    final s = widget.state;
+    switch (id) {
+      case 'arranger.clip.split':
+        if (!s.splitClips()) _router?.toast('Nothing under the playhead to split');
+      case 'arranger.clip.glue':
+        if (!s.glueSelected()) _router?.toast('Select two or more clips on a track to glue');
+      case 'arranger.clip.duplicate':
+        if (!s.duplicateSelected()) _router?.toast('Select clips to duplicate');
+      case 'arranger.clip.properties':
+        if (s.selectedClipIds.isEmpty) return false;
+        showClipProperties(context, s);
+      case 'arranger.clip.delete':
+        if (!s.deleteSelected()) _router?.toast('Select clips to delete');
+      case 'arranger.layer.delete':
+        // REAPER's Delete removes the selected items; with no clip selected it deletes the track as before.
+        if (s.selectedClipIds.isEmpty) return false;
+        s.deleteSelected();
+      case 'arranger.clip.selectMode':
+        setState(() => _selectMode = !_selectMode);
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  // ---------- the marquee ----------
+
+  void _marqueeStart(Offset global, {bool additive = false}) {
+    _marqueeFrom = global;
+    _marqueeAdd = additive;
+  }
+
+  void _marqueeMove(Offset global) {
+    final from = _marqueeFrom;
+    if (from == null) return;
+    // A right click that doesn't move stays a click.
+    if (_marquee.value == null && (global - from).distance < 6) return;
+    _marquee.value = Rect.fromPoints(from, global);
+  }
+
+  void _marqueeEnd() {
+    final box = _marquee.value;
+    _marqueeFrom = null;
+    _marquee.value = null;
+    if (box == null) return;
+    final s = widget.state;
+    final inset = _clipInset(_laneTrackH);
+    final hit = <PlacedClip>[];
+    for (final layer in s.visibleLayers) {
+      final lane = _drag.laneRect(layer.id);
+      if (lane == null) continue;
+      final top = lane.top + inset, bottom = lane.top + _laneTrackH - inset;
+      if (box.bottom < top || box.top > bottom) continue;
+      for (final clip in layer.clips) {
+        final left = lane.left + clip.startSteps * _stepW;
+        final right = left + math.max(12.0, clip.lengthSteps * _stepW);
+        // REAPER: touching an item with the marquee is enough to include it (UG 7.2.2).
+        if (box.right >= left && box.left <= right) hit.add((layer: layer, clip: clip));
+      }
+    }
+    s.selectClipsInBox(hit, additive: _marqueeAdd);
+  }
+
   @override
   void dispose() {
+    _router?.unregister(Area.arranger, _keys);
+    _keys.dispose();
+    _marquee.dispose();
     _zoomAnim.dispose();
     _trackGhost?.remove();
     _trackGhostAt.dispose();
@@ -434,26 +532,47 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final s = widget.state;
     final splitAt = s.timeSelectionEnd;
     final canSplit = splitAt != null && splitAt > clip.startSteps && splitAt < clip.startSteps + clip.lengthSteps;
-    final v = await showLongPressMenu<String>(context, at: at, title: s.project.module(clip.patternId)?.name ?? 'Clip',
+    final playhead = s.editStep;
+    final canSplitHere = !clip.lock && playhead > clip.startSteps && playhead < clip.startSteps + clip.lengthSteps;
+    final v = await showLongPressMenu<String>(context, at: at, title: s.clipName(clip),
       style: s.settings.longPressMenu, actions: [
         const MenuAction('notes', 'Edit notes', Icons.piano),
         if (widget.onOpenPattern != null) const MenuAction('edit', 'Open in Sounds', Icons.open_in_new),
-        MenuAction('select', s.selectedClipIds.contains(clip.id) ? 'Deselect' : 'Add to selection', Icons.select_all),
+        // The phone's way to select several (docs/ui.md): this clip joins the selection and Select mode turns on.
+        if (!s.selectedClipIds.contains(clip.id) || !_selectMode)
+          const MenuAction('select', 'Select several', Icons.checklist)
+        else
+          const MenuAction('select', 'Deselect', Icons.deselect),
+        const MenuAction('properties', 'Properties…', Icons.tune),
+        if (canSplitHere) const MenuAction('split-here', 'Split at the playhead', Icons.content_cut),
         const MenuAction('copy', 'Duplicate independently', Icons.copy),
         const MenuAction('linked', 'Duplicate linked', Icons.link),
         MenuAction('loop', clip.loop ? 'Disable clip looping' : 'Enable clip looping', Icons.loop, checked: clip.loop),
-        if (canSplit) const MenuAction('split', 'Split at time selection', Icons.content_cut),
+        if (canSplit && !clip.lock) const MenuAction('split', 'Split at time selection', Icons.content_cut),
         const MenuAction('midi', 'Export as MIDI file', Icons.file_upload_outlined),
-        const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
+        if (!clip.lock) const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
       ]);
     if (v == null || !mounted) return;
+    if (v == 'select') {
+      final adding = !s.selectedClipIds.contains(clip.id) || !_selectMode;
+      setState(() => _selectMode = true);
+      if (adding && !s.selectedClipIds.contains(clip.id)) s.toggleClipSelection(layer, clip);
+      if (!adding) s.toggleClipSelection(layer, clip);
+    }
+    if (v == 'properties') {
+      if (!s.selectedClipIds.contains(clip.id)) s.selectClip(layer, clip);
+      await showClipProperties(context, s);
+      return;
+    }
+    if (v == 'split-here' || v == 'split') {
+      s.selectClip(layer, clip);
+      s.splitClips(at: v == 'split' ? splitAt : playhead);
+    }
     if (v == 'notes') { s.activateClip(layer, clip); _focus(layer.id, tab: FocusTab.clip); }
     if (v == 'edit') { s.activateClip(layer, clip); widget.onOpenPattern?.call(); }
-    if (v == 'select') s.selectClip(layer, clip, additive: true);
     if (v == 'copy') s.duplicateClip(layer, clip);
     if (v == 'linked') s.duplicateClip(layer, clip, linked: true);
     if (v == 'loop') s.editLayer(layer, (l) => clip.loop = !clip.loop);
-    if (v == 'split') s.splitClipAt(layer, clip, splitAt!);
     if (v == 'midi') await exportClipAsMidi(context, s, clip);
     if (v == 'delete') s.removeClip(layer, clip);
   }
@@ -464,6 +583,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     onMenu: (l, at) => _trackMenu(l, at, patterns),
     onClipMenu: _clipMenu,
     onClipOpen: (l, c) { widget.state.activateClip(l, c); _focus(l.id, tab: FocusTab.clip); },
+    selectMode: () => _selectMode,
+    onMarquee: (phase, at, additive) => switch (phase) {
+      _Marquee.start => _marqueeStart(at, additive: additive),
+      _Marquee.move => _marqueeMove(at),
+      _Marquee.end => _marqueeEnd(),
+    },
   );
 
   @override
@@ -582,19 +707,32 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             child: zoomBar ? _zoomBar() : const SizedBox(width: double.infinity)),
         ])),
         if (settings) _settingsPanel(),
-        Expanded(child: withBrowser),
+        Expanded(child: _withDockedClipBar(withBrowser, focused)),
         if (mixer) _ArrangementMixer(state: s),
       ]),
     );
   }
 
+  /// A phone (a narrow arrangement) gets the clip bar docked near the bottom of the tracks while clips are selected,
+  /// in reach of the thumb; a wide one has it in the toolbar.
+  Widget _withDockedClipBar(Widget body, LayerDoc? focused) {
+    final s = widget.state;
+    if (focused != null || mixerCard || (s.selectedClipIds.isEmpty && !_selectMode)) return body;
+    return LayoutBuilder(builder: (context, box) {
+      if (box.maxWidth >= 760) return body;
+      return Stack(children: [
+        Positioned.fill(child: body),
+        Positioned(left: 8, right: 8, bottom: 10, child: Center(child: SlideIn(from: const Offset(0, 0.4),
+          child: FittedBox(fit: BoxFit.scaleDown, child: _clipBar(docked: true))))),
+      ]);
+    });
+  }
+
   Widget _toolbar(BuildContext context, LayerDoc? focused) {
     final s = widget.state;
     final p = s.project;
-    final selectedLayer = p.layers.where((l) => l.id == s.selectedLayerId).firstOrNull;
-    final selectedClip = selectedLayer?.clips.where((c) => c.id == s.selectedClipId).firstOrNull;
-    final splitAt = s.timeSelectionEnd;
     final gap = s.settings.trackGap;
+    final clipsChosen = s.selectedClipIds.isNotEmpty || _selectMode;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
       child: LayoutBuilder(builder: (context, constraints) {
@@ -611,9 +749,6 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           IconButton(key: const ValueKey('arrange-browse'), onPressed: () => setState(() => _browser = !_browser),
             color: _browser ? Neon.blue : Neon.dim, icon: const Icon(Icons.folder_open),
             tooltip: 'Files: drag one onto a track'),
-          if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
-            IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt),
-              icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
           IconButton(onPressed: () => setState(() => zoomBar = !zoomBar),
             key: const ValueKey('arrange-zoom'),
             color: zoomBar ? Neon.blue : null,
@@ -661,14 +796,22 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             child: Row(children: controls),
           );
         }
+        // Wide: the clip bar sits in the toolbar while clips are selected (owner, 2026-11-10: docs/reaper-flow.md).
         return Row(children: [
-          const Expanded(child: Text('ARRANGEMENT', style: TextStyle(
-            color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800))),
+          const Text('ARRANGEMENT', style: TextStyle(
+            color: Neon.dim, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w800)),
+          const SizedBox(width: 8),
+          Expanded(child: Align(alignment: Alignment.centerLeft, child: !clipsChosen ? const SizedBox.shrink()
+              : SingleChildScrollView(scrollDirection: Axis.horizontal, child: _clipBar(docked: false)))),
           ...controls,
         ]);
       }),
     );
   }
+
+  Widget _clipBar({required bool docked}) => ClipBar(state: widget.state, docked: docked, selectMode: _selectMode,
+    onSelectMode: (v) => setState(() => _selectMode = v),
+    onProperties: () => showClipProperties(context, widget.state));
 
   Widget _tucked(Widget bar) {
     final shown = _sections?.barsShown;
@@ -741,6 +884,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     // The gap between tracks (Settings, chosen from the track height menu), so tracks don't sit on each other.
     final gap = pinned ? 0.0 : s.settings.trackGap;
     final headW = _headerWidth;
+    if (!pinned) {
+      _stepW = stepW;
+      _laneTrackH = trackHeight;
+    }
     // The song ends at its last clip or automation point (or the shortest length) and playback loops back there,
     // as in Reaper. The timeline always reaches 64 bars past it, so a clip can go anywhere and the song grows with it.
     final end = p.engineLoopSteps;
@@ -799,7 +946,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       Expanded(child: SingleChildScrollView(key: drag?.hViewport, controller: _hScroll, scrollDirection: Axis.horizontal,
         child: Listener(
           onPointerSignal: (e) => _wheel(e, _hScroll.hasClients ? e.localPosition.dx - _hScroll.positions.last.pixels : null),
-          child: SizedBox(width: width, child: Stack(children: [
+          child: SizedBox(key: pinned ? null : _lanesBox, width: width, child: Stack(children: [
           // One grid behind every track, through the gaps and spacers and down to the bottom of the view
           // below the last track (owner: like Reaper).
           Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: CustomPaint(
@@ -824,11 +971,20 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
             valueListenable: s.tick,
             builder: (context, _, _) {
-              final playheadStep = s.meters.playing && s.meters.loopLength > 0
-                  ? endPosition(s, p, s.meters.loopLength) : -1.0;
-              return CustomPaint(painter: _PlayheadPainter(stepW, playheadStep));
+              // Stopped, a dimmer line shows where play starts and Split cuts (REAPER's edit cursor).
+              final playing = s.meters.playing && s.meters.loopLength > 0;
+              return CustomPaint(painter: _PlayheadPainter(stepW,
+                playing ? endPosition(s, p, s.meters.loopLength) : s.playheadStep, stopped: !playing));
             },
           ))),
+          if (!pinned) Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<Rect?>(
+            valueListenable: _marquee,
+            builder: (context, box, _) {
+              final me = _lanesBox.currentContext?.findRenderObject();
+              if (box == null || me is! RenderBox || !me.attached) return const SizedBox.shrink();
+              final local = Rect.fromPoints(me.globalToLocal(box.topLeft), me.globalToLocal(box.bottomRight));
+              return CustomPaint(painter: _MarqueePainter(local));
+            }))),
         ]))))),
     ])));
       })));
@@ -852,12 +1008,20 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 /// What a track header, lane or clip asks of the arranger.
 class _TrackCallbacks {
   const _TrackCallbacks({required this.onTap, required this.onFx, required this.onMenu, required this.onClipMenu,
-    required this.onClipOpen});
+    required this.onClipOpen, required this.selectMode, required this.onMarquee});
   final ValueChanged<LayerDoc> onTap, onFx;
   final void Function(LayerDoc layer, Offset at) onMenu;
   final void Function(LayerDoc layer, ClipDoc clip, Offset at) onClipMenu;
   final void Function(LayerDoc layer, ClipDoc clip) onClipOpen;
+
+  /// Whether Select mode is on: a tap on a clip adds or removes it, a long-press drag in a lane draws a box.
+  final bool Function() selectMode;
+
+  /// A marquee's start, move and end, in global coordinates; [additive] adds to the selection.
+  final void Function(_Marquee phase, Offset at, bool additive) onMarquee;
 }
+
+enum _Marquee { start, move, end }
 
 /// A compact track header (owner, 2026-11-09): name, M, S and FX always show; record-arm, input, the instrument and
 /// the rest are in the long-press menu (right-click on a desktop). A tap opens the track's focus view. The selected
@@ -1113,7 +1277,16 @@ class _TimelineLaneState extends State<_TimelineLane> {
     return up ? ((raw + _snap) ~/ _snap) * _snap : (raw ~/ _snap) * _snap;
   }
 
+  /// REAPER's right-drag in the arrange view draws a marquee around items; Shift adds to the selection (UG 15.x mouse
+  /// modifiers, "Arrange view, right drag").
+  bool _marquee = false;
+
   void _drawDown(PointerDownEvent e) {
+    if (e.kind == PointerDeviceKind.mouse && e.buttons == kSecondaryMouseButton) {
+      _marquee = true;
+      widget.callbacks.onMarquee(_Marquee.start, e.position, HardwareKeyboard.instance.isShiftPressed);
+      return;
+    }
     if (e.kind != PointerDeviceKind.mouse || e.buttons != kPrimaryMouseButton ||
         !HardwareKeyboard.instance.isControlPressed) {
       return;
@@ -1123,6 +1296,7 @@ class _TimelineLaneState extends State<_TimelineLane> {
   }
 
   void _drawMove(PointerMoveEvent e) {
+    if (_marquee) return widget.callbacks.onMarquee(_Marquee.move, e.position, false);
     final d = _drawing;
     if (d == null) return;
     final to = math.max(d.$1 + 1, _snapped(e.localPosition.dx, up: true));
@@ -1130,6 +1304,10 @@ class _TimelineLaneState extends State<_TimelineLane> {
   }
 
   void _drawUp(PointerEvent e) {
+    if (_marquee) {
+      _marquee = false;
+      return widget.callbacks.onMarquee(_Marquee.end, e.position, false);
+    }
     final d = _drawing;
     if (d == null) return;
     setState(() => _drawing = null);
@@ -1159,16 +1337,28 @@ class _TimelineLaneState extends State<_TimelineLane> {
         child: GestureDetector(behavior: HitTestBehavior.opaque,
         // A plain horizontal drag belongs to the enclosing scroll view. Long-press
         // drag creates a time selection without stealing normal timeline navigation.
-        onTapUp: (d) { final step = (d.localPosition.dx / stepW).round(); state.setTimeSelection(step, step); },
+        // A tap sets the edit cursor; stopped, play then starts there and Split cuts there (REAPER).
+        onTapUp: (d) {
+          final step = (d.localPosition.dx / stepW).round();
+          state.setTimeSelection(step, step);
+          if (!state.meters.playing) state.seekTo(step.toDouble());
+        },
         // A double-tap in empty space draws a one-bar empty clip there (the touch stand-in for REAPER's Ctrl+drag).
         onDoubleTapDown: (d) => _doubleTapStep = _snapped(d.localPosition.dx),
         onDoubleTap: () {
           final at = _doubleTapStep;
           if (at != null) state.addEmptyClip(layer, at, state.project.stepsPerBar);
         },
-        onLongPressStart: (d) { state.beginTimeSelection((d.localPosition.dx / stepW).round()); },
-        onLongPressMoveUpdate: (d) => state.updateTimeSelection((d.localPosition.dx / stepW).round()),
-        onLongPressEnd: (_) => state.endTimeSelection(),
+        // In Select mode a long-press drag draws a box around clips instead of a time selection.
+        onLongPressStart: (d) => widget.callbacks.selectMode()
+            ? widget.callbacks.onMarquee(_Marquee.start, d.globalPosition, true)
+            : state.beginTimeSelection((d.localPosition.dx / stepW).round()),
+        onLongPressMoveUpdate: (d) => widget.callbacks.selectMode()
+            ? widget.callbacks.onMarquee(_Marquee.move, d.globalPosition, true)
+            : state.updateTimeSelection((d.localPosition.dx / stepW).round()),
+        onLongPressEnd: (d) => widget.callbacks.selectMode()
+            ? widget.callbacks.onMarquee(_Marquee.end, d.globalPosition, true)
+            : state.endTimeSelection(),
         child: hovering.isEmpty ? const SizedBox.expand()
             : DecoratedBox(decoration: BoxDecoration(color: color.withValues(alpha: 0.12),
                 border: Border.all(color: color)))))),
@@ -1181,7 +1371,8 @@ class _TimelineLaneState extends State<_TimelineLane> {
         Positioned(left: clip.startSteps * stepW, top: _clipInset(trackHeight),
           width: math.max(12.0, clip.lengthSteps * stepW), height: trackHeight - 2 * _clipInset(trackHeight),
           child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW, drag: widget.drag,
-            color: color, selected: widget.selectedIds.contains(clip.id), callbacks: widget.callbacks)),
+            color: clip.color == null ? color : Neon.layer(clip.color!),
+            selected: widget.selectedIds.contains(clip.id), callbacks: widget.callbacks)),
       if (_drawing case (final from, final to))
         Positioned(left: from * stepW, top: _clipInset(trackHeight), width: (to - from) * stepW,
           height: trackHeight - 2 * _clipInset(trackHeight), child: IgnorePointer(child: DecoratedBox(
@@ -1309,19 +1500,35 @@ class _BarRuler extends CustomPainter {
 }
 
 class _PlayheadPainter extends CustomPainter {
-  const _PlayheadPainter(this.stepW, this.step);
+  const _PlayheadPainter(this.stepW, this.step, {this.stopped = false});
   final double stepW, step;
+  final bool stopped;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (step < 0) return;
     final x = step * stepW;
     canvas.drawLine(Offset(x, 0), Offset(x, size.height),
-      Paint()..color = Neon.blue..strokeWidth = 1.6);
+      Paint()..color = stopped ? Neon.blue.withValues(alpha: 0.45) : Neon.blue..strokeWidth = stopped ? 1.2 : 1.6);
   }
 
   @override
-  bool shouldRepaint(covariant _PlayheadPainter old) => old.step != step || old.stepW != stepW;
+  bool shouldRepaint(covariant _PlayheadPainter old) => old.step != step || old.stepW != stepW || old.stopped != stopped;
+}
+
+/// The marquee box being drawn around clips.
+class _MarqueePainter extends CustomPainter {
+  const _MarqueePainter(this.box);
+  final Rect box;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(box, Paint()..color = Neon.blue.withValues(alpha: 0.12));
+    canvas.drawRect(box, Paint()..color = Neon.blue.withValues(alpha: 0.8)..style = PaintingStyle.stroke..strokeWidth = 1);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MarqueePainter old) => old.box != box;
 }
 
 
@@ -1345,6 +1552,7 @@ typedef _Ghost = ({Rect rect, Rect clip, Color color, bool copy});
 
 class _TimelineClipState extends State<_TimelineClip> {
   double dx = 0, resizeDx = 0, trimDx = 0;
+  (bool, bool) _tapKeys = (false, false);
   bool dragging = false, resizing = false, trimming = false, sourceDragging = false;
   int? _lastSnap;
 
@@ -1397,7 +1605,7 @@ class _TimelineClipState extends State<_TimelineClip> {
   }
 
   void _start(DragStartDetails d) {
-    _ignored = _drag?.pinching ?? false;
+    _ignored = (_drag?.pinching ?? false) || widget.clip.lock;
     if (_ignored) return;
     setState(() {
       dragging = true;
@@ -1417,7 +1625,14 @@ class _TimelineClipState extends State<_TimelineClip> {
     _follow();
   }
 
-  String get _name => widget.state.project.module(widget.clip.patternId)?.name ?? 'Missing pattern';
+  String get _name {
+    final name = widget.state.clipName(widget.clip);
+    final others = _together ? widget.state.selectedClipIds.length - 1 : 0;
+    return others > 0 && dragging ? '$name +$others' : name;
+  }
+
+  /// This drag moves every selected clip (the grabbed one is among several selected), as REAPER moves a selection.
+  bool get _together => widget.selected && widget.state.selectedClipIds.length > 1;
 
   void _update(DragUpdateDetails d) {
     if (_ignored || !dragging) return;
@@ -1474,7 +1689,11 @@ class _TimelineClipState extends State<_TimelineClip> {
       final copy = _copy;
       final target = spot == null || spot.newTrack ? null
           : widget.state.project.layers.where((l) => l.id == spot.layerId).firstOrNull;
-      if (spot == null || (!spot.newTrack && target == null)) {
+      if (_together) {
+        // Several selected clips move (or copy) together, by the same time and number of tracks.
+        widget.state.moveSelectedClips(widget.layer, c, spot == null || spot.newTrack ? widget.layer : target, at,
+          copy: copy);
+      } else if (spot == null || (!spot.newTrack && target == null)) {
         widget.state.moveClip(widget.layer, c, at);
       } else {
         widget.state.moveClipTo(widget.layer, c, target, at, copy: copy);
@@ -1497,7 +1716,7 @@ class _TimelineClipState extends State<_TimelineClip> {
 
   Widget _edge({required bool left}) => Positioned(left: left ? 0 : null, right: left ? null : 0, top: 0, bottom: 0,
     width: 12,
-    child: MouseRegion(cursor: SystemMouseCursors.resizeColumn, child: GestureDetector(behavior: HitTestBehavior.opaque,
+    child: widget.clip.lock ? const SizedBox.shrink() : MouseRegion(cursor: SystemMouseCursors.resizeColumn, child: GestureDetector(behavior: HitTestBehavior.opaque,
       // The edge follows the finger from where it went down, slop included.
       dragStartBehavior: DragStartBehavior.down,
       onHorizontalDragStart: (_) => setState(() {
@@ -1548,7 +1767,7 @@ class _TimelineClipState extends State<_TimelineClip> {
     final ghosted = dragging && !sourceDragging && _drag != null && !_copy;
     // The body drags in any direction from the first few pixels, before the scroll views take the gesture.
     final mq = MediaQuery.of(context);
-    return Opacity(opacity: ghosted ? 0.35 : 1,
+    return Opacity(opacity: ghosted ? 0.35 : c.mute ? 0.45 : 1,
       child: Transform.translate(offset: Offset(shown + (start - c.startSteps) * widget.stepW, 0),
       child: Transform.scale(scaleX: length / c.lengthSteps,
         alignment: Alignment.centerLeft,
@@ -1557,13 +1776,21 @@ class _TimelineClipState extends State<_TimelineClip> {
           child: Stack(children: [
         Positioned.fill(child: MediaQuery(
           data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 2)),
+          // The modifiers count as they were when the click went down: the tap itself comes after the double-tap wait.
+          child: Listener(onPointerDown: (_) =>
+              _tapKeys = (HardwareKeyboard.instance.isControlPressed, HardwareKeyboard.instance.isShiftPressed),
           child: GestureDetector(
           key: ValueKey('clip-${c.id}'),
           onLongPressStart: (d) => widget.callbacks.onClipMenu(widget.layer, c, d.globalPosition),
           onSecondaryTapUp: (d) => widget.callbacks.onClipMenu(widget.layer, c, d.globalPosition),
           onTap: () {
-            if (HardwareKeyboard.instance.isShiftPressed) {
-              widget.state.selectClip(widget.layer, c, additive: true);
+            final (ctrl, shift) = _tapKeys;
+            // REAPER (UG 7.2.1): Ctrl-click adds or removes a clip, Shift-click selects the range to it. A tap in
+            // Select mode adds or removes it, the phone's way.
+            if (ctrl || widget.callbacks.selectMode()) {
+              widget.state.toggleClipSelection(widget.layer, c);
+            } else if (shift) {
+              widget.state.selectClipRange(widget.layer, c);
             } else if (widget.state.selectedClipIds.contains(c.id)) {
               widget.state.activateClip(widget.layer, c);
             } else {
@@ -1597,11 +1824,15 @@ class _TimelineClipState extends State<_TimelineClip> {
               Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: widget.color, fontSize: 10, fontWeight: FontWeight.w800)),
               Expanded(child: Align(alignment: Alignment.bottomLeft,
-                child: Text(c.loop ? 'MIDI · LOOP' : 'MIDI',
-                  style: TextStyle(color: widget.color.withValues(alpha: .8), fontSize: 8)))),
+                child: Row(children: [
+                  if (c.lock) Icon(Icons.lock, key: ValueKey('clip-locked-${c.id}'), size: 9, color: widget.color),
+                  if (c.mute) Icon(Icons.volume_off, key: ValueKey('clip-muted-${c.id}'), size: 9, color: widget.color),
+                  Flexible(child: Text(c.loop ? 'MIDI · LOOP' : 'MIDI', maxLines: 1, overflow: TextOverflow.clip,
+                    style: TextStyle(color: widget.color.withValues(alpha: .8), fontSize: 8))),
+                ]))),
             ]),
           ),
-        ))),
+        )))),
         // Both edges trim (REAPER: drag an item's edge): the left one moves the start and keeps the notes in time.
         _edge(left: true),
         _edge(left: false),
