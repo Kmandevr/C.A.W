@@ -535,6 +535,16 @@ class AppState extends ChangeNotifier {
     });
   }
 
+  /// Closes the burst of edits now, so a discrete action (split, glue, a clip's properties) is one undo step of its
+  /// own and the next edit starts another.
+  void endUndoStep() {
+    if (!(_historyTimer?.isActive ?? false)) return;
+    _historyTimer!.cancel();
+    final was = (history.canUndo, history.canRedo);
+    history.settle(_snapshot());
+    if ((history.canUndo, history.canRedo) != was) notifyListeners();
+  }
+
   bool get canUndo => history.canUndo;
   bool get canRedo => history.canRedo;
 
@@ -1334,20 +1344,6 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void splitClipAt(LayerDoc layer, ClipDoc clip, int atStep) {
-    final offset = atStep - clip.startSteps;
-    if (offset <= 0 || offset >= clip.lengthSteps) return;
-    final right = ClipDoc(id: newId('c'), patternId: clip.patternId,
-      startSteps: atStep, lengthSteps: clip.lengthSteps - offset,
-      sourceOffsetSteps: clip.sourceOffsetSteps + offset, loop: clip.loop, linked: true);
-    editLayer(layer, (l) {
-      clip.lengthSteps = offset;
-      l.clips.add(right);
-    });
-    selectClip(layer, right);
-  }
-
-
   /// Adds a track using [soundId], the first available sound, or no sound when [empty] is true.
   void addLayer({String? soundId, bool empty = false}) {
     final gen = empty ? null : project.module(soundId) ?? project.modules.where((m) => isGenerator(m.id)).firstOrNull;
@@ -1473,6 +1469,9 @@ class AppState extends ChangeNotifier {
     selectedClipIds.add(clip.id);
     notifyListeners();
   }
+
+  /// Tells the screens that [selectedClipIds] changed (Arrange's marquee, split and glue set it directly).
+  void clipSelectionChanged() => notifyListeners();
 
   void selectClip(LayerDoc layer, ClipDoc clip, {bool additive = false}) {
     if (!additive) selectedClipIds.clear();

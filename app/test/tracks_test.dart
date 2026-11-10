@@ -96,6 +96,7 @@ void main() {
     s.ready = true;
     s.starting = false;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: ArrangerScreen(state: s))));
+    await tester.ensureVisible(find.byTooltip('Settings')); // the phone's toolbar scrolls sideways
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

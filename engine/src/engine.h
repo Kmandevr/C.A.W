@@ -202,6 +202,10 @@ private:
     void rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
+    // Where playback from g_ goes back: the loop range's end while it is on and ahead, else the song end.
+    int64_t wrapAt() const noexcept;
+    // The position after a chunk that ends at [next]: back to the loop range's start (or 0) at the wrap.
+    int64_t after(int64_t next) const noexcept;
     void pickOverloadVictim() noexcept;
 
     const double sr_;
@@ -241,6 +245,9 @@ private:
     double bpm_ = 120.0;
     int beatsPerBar_ = 4;
     int loopSteps_ = 64;
+    bool loopRange_ = false;               // the project's loop range is on
+    int loopFromSteps_ = 0, loopToSteps_ = 0;
+    int64_t loopFrom_ = 0, loopTo_ = 0;    // the loop range in samples (updateTiming)
     uint32_t seed_ = 0;
     double master_ = 0.7;
     double masterTarget_ = 0.7, masterStep_ = 0.0;

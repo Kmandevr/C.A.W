@@ -182,15 +182,25 @@ Generators (buttons; no default keys):
 
 | Action | Default keys |
 | --- | --- |
-| Select previous / next layer | W / S, ↑ / ↓ |
+| Select previous / next layer | W, ↑ / ↓ (S splits since 2026-11-10, owner: as in REAPER) |
 | Pan left / right | A / D |
 | Volume up / down (1 dB a press, at most 0 dB) | = / - |
 | Mute / solo the layer | M / Alt+S |
 | Open the layer's menu (generator, pattern, effects, length) | Enter |
 | Layer length shorter / longer | [ / ] |
-| Add layer / delete layer | Ctrl+N / Delete |
+| Add layer / delete layer (Delete removes the selected clips instead while any are selected, as REAPER's Delete removes selected items) | Ctrl+N / Delete |
 | Move layer up / down | Ctrl+W / Ctrl+S |
 | Change layer colour | — |
+| Split clips at the playhead: the selected ones, or every clip under it (REAPER's S) | S |
+| Glue the selected clips on each track into one | G |
+| Duplicate the selected clips after themselves, with their own notes (REAPER's Ctrl+D; [Assumption] not checked in the guide) | Ctrl+D |
+| Delete the selected clips | — (Delete, above) |
+| Clip properties (REAPER's F2) | F2 |
+| Select several clips (Select mode: taps add, a long-press drag draws a box) | — |
+| Loop range on / off (REAPER's R; on with none drawn takes the time selection, else four bars) | R |
+| Add a marker at the playhead (REAPER's M is the layer's mute here) | Shift+M |
+| Add a region over the time selection, else the loop range (REAPER's Shift+R) | Shift+R |
+| Go to the next / previous marker or region (REAPER's ] and [ are the layer's length here) | Ctrl+] / Ctrl+[ |
 
 ### Exporter
 

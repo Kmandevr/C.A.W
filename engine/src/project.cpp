@@ -136,6 +136,16 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             std::to_string(out.beatsPerBar) + " beats per bar";
         return false;
     }
+    out.loopRange = root.boolean("loop_range", false);
+    if (out.loopRange) {
+        if (!wholeIn(root.number("loop_start_steps", 0), 0, maxSteps - 1, out.loopStartSteps) ||
+            !wholeIn(root.number("loop_end_steps", 0), 1, maxSteps, out.loopEndSteps) ||
+            out.loopEndSteps <= out.loopStartSteps) {
+            error = "loop_start_steps and loop_end_steps must be whole numbers from " + range(0, maxSteps) +
+                ", the end after the start";
+            return false;
+        }
+    }
     const auto pointStepsOk = [&](const Json* points, std::string& message, const std::string& owner) {
         if (!points || points->type != Json::Type::Array) return true;
         for (const Json& point : points->arr) {
@@ -262,6 +272,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                         return false;
                     }
                     clip.loop = c.boolean("loop", true);
+                    clip.mute = c.boolean("mute", false);
                     if (!clip.pattern.empty()) spec.clips.push_back(std::move(clip));
                 }
             }
@@ -333,6 +344,9 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
     const int64_t stepsPerBar = out.beatsPerBar * 4;
     if (automationEndStep > 0)
         out.loopBars = std::max(out.loopBars, static_cast<int>((automationEndStep + stepsPerBar - 1) / stepsPerBar));
+    // The song reaches the loop range's end, so playback gets there.
+    if (out.loopRange)
+        out.loopBars = std::max(out.loopBars, static_cast<int>((out.loopEndSteps + stepsPerBar - 1) / stepsPerBar));
 
     // Reject malformed parent references and cycles before the audio thread sees routing indices.
     // A chain has fewer ancestors than there are layers, so the walk is bounded by the layer count.

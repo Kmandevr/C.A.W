@@ -199,6 +199,9 @@ class KeyRouterState extends State<KeyRouter> {
     if (r.toast != null) _say(r.toast!, error: r.error);
   }
 
+  /// Shows [text] in the key badge's toast (a screen's action that did nothing says why).
+  void toast(String text) => _say(text, error: true);
+
   void _say(String text, {bool error = false}) {
     if (!mounted) return;
     _toastTimer?.cancel();

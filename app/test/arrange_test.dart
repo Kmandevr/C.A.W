@@ -380,7 +380,7 @@ void main() {
       expect(find.byKey(const ValueKey('arrange-zoom-bar')), findsOneWidget);
       double clipW() => tester.getSize(find.text('Double-tap for a clip, or drop a pattern here').first).width;
       expect(clipW(), greaterThan(0));
-      final ruler = find.byWidgetPredicate((w) => w is CustomPaint && w.painter.runtimeType.toString() == '_BarRuler');
+      final ruler = find.byWidgetPredicate((w) => w is CustomPaint && w.painter.runtimeType.toString() == '_RulerPainter');
       double barW() => (tester.widget<CustomPaint>(ruler).painter as dynamic).stepW as double;
       final w0 = barW();
       await tester.tap(find.byTooltip('Zoom in'));

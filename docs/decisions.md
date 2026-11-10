@@ -6,6 +6,21 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Clip editing and the ruler, REAPER-style (built; choices to confirm)
+
+**Built** from the owner's calls below and [REAPER's flow](reaper-flow.md) gaps 1 and 2 ([app](app.md), Clip editing; Loop range, markers and regions). **Choices made on the owner's behalf, to confirm:**
+- **Phone multi-select is a Select mode**, from the clip bar's ☑ or a clip's long-press › Select several: taps add or remove clips and a long-press drag in empty lane space draws a box. A two-finger marquee was not used: two fingers already pinch-zoom and, during a drag, mean copy.
+- **Keys:** S splits; next track keeps ↓ only (W and ↑ stay previous); G glues, Ctrl+D duplicates, F2 opens Properties. Delete removes the selected clips while any are selected and the track otherwise (REAPER's Delete acts on the selection).
+- **Split of MIDI:** REAPER's "Allow trim of MIDI items when splitting" (a note-off at the split, UG 22.9.1) and its unpooled split parts (UG 13.35): the left clip keeps its pattern, the right gets its own pattern without the crossing note. Before, the right part shared the pattern and played the crossing note's tail again.
+- **Where Split cuts:** the playhead; while stopped, a tap on empty lane space moves it (REAPER's edit cursor), shown as a dim line.
+- **Glue** makes a non-looping clip and keeps the originals' patterns in the project (REAPER keeps the originals' media).
+- **Lock** blocks drag, trim, split, glue and delete; **Mute** keeps the clip on the timeline and sends it to the engine as muted (so a track whose clips are all muted stays silent instead of free-running).
+- **The loop button sits in Arrange's toolbar (⟳), not the transport**, which another branch is changing; R toggles it. Off, the whole song loops as before (C.A.W. has no "stop at the end"). Turned on with no range drawn, it takes the time selection, else four bars from the playhead's bar. A range past the last clip lengthens the song.
+- **The loop export is the loop range while it is on** (Export's description says so); there is no separate range choice yet (build step 6).
+- **The ruler** is 44 px on a phone (36 px wide), bar numbers and the loop range in its top half, markers and regions sharing its bottom half (one lane). A tap on it moves the playhead.
+- **Marker keys:** REAPER's M, ] and [ are the layer's mute and length in Arrange, so markers take Shift+M (REAPER: insert marker with a name) and Ctrl+] / Ctrl+[; Shift+R adds a region over the time selection, else the loop range.
+- **A new region** covers the time selection when the long press is inside it, else four bars from the bar pressed. **Dragging a region moves only the region**, not its clips (REAPER moves the contents with it, UG 9.8); moving or copying the clips is left for later.
+
 ## 2026-11-10: Match REAPER's whole flow, made easy (owner)
 
 **Decision (owner):** "look at the flow of REAPER and match that as well", after the arranger (#172), and "The goal is to make it really easy to use." REAPER's flow is followed where it is simple and direct; where it is powerful but fiddly (deep dialogs, modifier gestures, the routing matrix) C.A.W. offers one obvious easy path with sensible defaults and keeps REAPER's depth behind it. The study, the gaps and the plan ranked by "makes a song easier to finish" are in [REAPER's flow and C.A.W's](reaper-flow.md); nothing in it is built, and the phone look of each new screen waits for the owner ([vision](vision.md#open-owner-decisions)).
@@ -49,7 +64,7 @@ REAPER's behaviour is taken from its user guide ([UI design](ui.md#reaper-refere
 - **New tracks from a drop are empty but for the drop** (as in REAPER): a clip dragged below the last track gets a track with no instrument, named after its pattern; an instrument's or effect's track is named after it.
 - **Copies have their own notes** (REAPER's plain Ctrl-drag doesn't pool MIDI); a linked copy stays in the clip menu.
 - **Phone gestures where REAPER uses a mouse:** a track header is dragged after a long press (a long press released without moving opens the menu); a double-tap in empty lane space draws a one-bar clip in place of Ctrl+drag.
-- **Not done:** REAPER's S to split (S is C.A.W.'s next-track key; the clip menu and toolbar split), Alt-drag stretch of a clip edge (Alt-drag shifts the source offset), and dragging several selected clips together.
+- **Not done:** Alt-drag stretch of a clip edge (Alt-drag shifts the source offset). S to split and dragging several selected clips together came with clip editing (below).
 
 ## 2026-11-10: A flagship synth that can do everything (owner)
 
