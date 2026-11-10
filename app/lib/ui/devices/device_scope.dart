@@ -11,7 +11,8 @@ import '../theme.dart';
 /// Hands the device editor's state to its controls.
 class DeviceScope extends InheritedWidget {
   const DeviceScope({super.key, required this.target, required this.matrix, required this.dragging,
-    required this.accent, required this.focusSource, this.openSource, required super.child});
+    required this.accent, Color? secondary, required this.focusSource, this.openSource, required super.child})
+      : secondary = secondary ?? accent;
 
   final DeviceTarget target;
 
@@ -21,8 +22,8 @@ class DeviceScope extends InheritedWidget {
   /// The mod source being dragged onto a knob (every knob it can reach lights up), or null.
   final ValueNotifier<ModSource?> dragging;
 
-  /// The device's colour.
-  final Color accent;
+  /// The device's colour, and its family's second colour (the right channel, the output, a gradient's end).
+  final Color accent, secondary;
 
   /// The source the MOD page shows (a tapped chip picks it).
   final ValueNotifier<ModSource> focusSource;
@@ -37,8 +38,9 @@ class DeviceScope extends InheritedWidget {
   }
 
   @override
-  bool updateShouldNotify(DeviceScope old) =>
-      old.target.layerId != target.layerId || old.target.slot != target.slot || old.matrix != matrix || old.accent != accent;
+  // The editor rebuilds the scope only when the device changed (a value, undo, the catalog), and every control
+  // reads its values through it, so each rebuild reaches them (an effect has no mod matrix whose new object would).
+  bool updateShouldNotify(DeviceScope old) => true;
 }
 
 /// A source's colour: envelopes green, LFOs blue, random violet, the note's own sources yellow.
@@ -84,7 +86,7 @@ String formatParamValue(ComponentParameterInfo? p, double v, {bool pan = false})
 /// A short knob label: the descriptor's name without its section ("Osc 1 detune" → "detune"), capitalised.
 String shortParamLabel(ComponentParameterInfo? p, String fallback) {
   final name = p?.label ?? fallback;
-  final m = RegExp(r'^(Osc|Filter|Env|LFO|Mod) \d+ ').firstMatch(name);
+  final m = RegExp(r'^(Osc|Filter|Env|LFO|Mod|Band) \d+ ').firstMatch(name);
   final s = m == null ? name : name.substring(m.end);
   return s.isEmpty ? name : s[0].toUpperCase() + s.substring(1);
 }
@@ -120,23 +122,32 @@ class DeviceCard extends StatelessWidget {
     duration: const Duration(milliseconds: 120),
     opacity: dimmed ? 0.5 : 1,
     child: Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(10, 4, 8, 8),
+      margin: const EdgeInsets.only(bottom: 10),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        color: Color.lerp(Neon.panel, color, 0.06)!.withValues(alpha: 0.55),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
+        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+          Color.lerp(Neon.panel, color, 0.12)!.withValues(alpha: 0.7),
+          Color.lerp(Neon.panel, color, 0.03)!.withValues(alpha: 0.6),
+        ]),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(height: 30, child: Row(children: [
-          ?leading,
-          if (leading != null) const SizedBox(width: 6),
-          Text(title, style: TextStyle(fontSize: 11, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: color)),
-          const SizedBox(width: 8),
-          Expanded(child: Align(alignment: Alignment.centerRight,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [for (final a in actions) Flexible(child: a)]))),
-        ])),
-        child,
+        Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
+          color.withValues(alpha: 0.9), color.withValues(alpha: 0.0)]))),
+        Padding(padding: const EdgeInsets.fromLTRB(10, 2, 8, 8), child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(height: 32, child: Row(children: [
+              ?leading,
+              if (leading != null) const SizedBox(width: 6),
+              Text(title, style: TextStyle(fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800, color: color,
+                shadows: [Shadow(color: color.withValues(alpha: 0.5), blurRadius: 8)])),
+              const SizedBox(width: 8),
+              Expanded(child: Align(alignment: Alignment.centerRight,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [for (final a in actions) Flexible(child: a)]))),
+            ])),
+            child,
+          ])),
       ]),
     ),
   );

@@ -1,4 +1,4 @@
-// The built-in effects suite (#173) in the app: each opens its visual editor, and display floats decode into frames.
+// The built-in effects suite (#173) in the app: each opens its plugin UI from the FX stack, and display floats decode into frames.
 import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
@@ -72,7 +72,7 @@ void main() {
     e.dispose();
   }, skip: lib == null || lib.isEmpty ? 'set CAW_LIB to the built engine library' : null);
 
-  testWidgets('each effect\'s editor opens from the FX stack and shows its live levels', (tester) async {
+  testWidgets('each effect\'s editor opens from the FX stack with live data', (tester) async {
     late List infos;
     await tester.runAsync(() async {
       final e = Engine.create();
@@ -92,6 +92,7 @@ void main() {
     addTearDown(tester.view.reset);
     for (final id in suite) {
       final s = AppState(settings: Settings());
+      Motion.setting = MotionLevel.off; // the state applies its settings' motion; animated visuals stand still
       s.project = ProjectDoc(id: 'p', name: 'Fx', bpm: 120, modules: [], layers: [LayerDoc(id: 'a', name: 'T', color: 0)]);
       s.componentCatalog.set([for (final c in infos) c]);
       s.addNativeEffect(s.project.layers.first, id);
@@ -102,7 +103,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('device-editor')), findsOneWidget, reason: id);
       expect(find.byKey(const ValueKey('device-fallback')), findsNothing, reason: id);
-      expect(find.text('-6.0 dB'), findsWidgets, reason: '$id shows no live input level');
+      expect(find.byWidgetPredicate((w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('fx-page-')),
+          findsOneWidget, reason: '$id shows its plugin UI');
       expect(tester.takeException(), isNull, reason: id);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 1));

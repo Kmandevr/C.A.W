@@ -4,9 +4,13 @@ import 'package:flutter/material.dart';
 import '../../engine/component_info.dart';
 import '../../model/arrange_fx.dart' show isBuiltinComponent;
 import '../../model/device_target.dart';
+import 'drums/drum_editors.dart';
 import 'effects/effect_editors.dart';
 import 'flagship/flagship_editor.dart';
+import 'flagship/flagship_presets.dart';
 import 'generic_device_page.dart';
+import 'kit/device_style.dart';
+import 'kit/presets.dart';
 
 /// One tab of a device editor.
 class DeviceSection {
@@ -16,18 +20,24 @@ class DeviceSection {
   final WidgetBuilder builder;
 }
 
-/// A custom editor: its tabs, and its colour (null: the track's).
+/// A custom editor: its tabs, its family (its colours and badge) and an accent that overrides the family's (both
+/// null: the track's colour).
 class DeviceEditorEntry {
-  const DeviceEditorEntry(this.sections, {this.accent});
+  const DeviceEditorEntry(this.sections, {this.accent, this.family, this.presets = const []});
   final List<DeviceSection> Function(DeviceTarget target) sections;
   final Color? accent;
+  final DeviceFamily? family;
+
+  /// Presets written in Dart for the device (its preset browser lists them after Init and the engine's own).
+  final List<DevicePreset> presets;
 }
 
 class DeviceEditors {
   DeviceEditors._();
 
   static final Map<String, DeviceEditorEntry> _byId = {
-    flagshipComponentId: const DeviceEditorEntry(flagshipSections),
+    flagshipComponentId: const DeviceEditorEntry(flagshipSections, family: DeviceFamily.synth, presets: flagshipStarterPresets),
+    ...drumEditors,
   };
 
   /// Editors chosen by a built-in effect's parameters (an EQ by its `bandN_` knobs, and so on), so the stock
