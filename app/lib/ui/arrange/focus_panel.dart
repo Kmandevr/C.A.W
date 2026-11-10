@@ -8,6 +8,7 @@ import '../glass.dart';
 import '../mixer_screen.dart';
 import '../pattern_editor.dart';
 import '../theme.dart';
+import 'track_color.dart';
 import 'fx_stack.dart';
 import 'knob.dart';
 
@@ -55,7 +56,7 @@ class FocusPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Neon.layer(layer.color);
+    final color = trackColor(state, layer);
     final header = GestureDetector(
       key: const ValueKey('focus-panel-header'),
       behavior: HitTestBehavior.opaque,

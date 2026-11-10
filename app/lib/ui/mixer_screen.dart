@@ -9,6 +9,7 @@ import '../model/arrange_fx.dart';
 import '../model/project.dart';
 import 'param_control.dart';
 import 'theme.dart';
+import 'arrange/track_color.dart';
 import 'widgets.dart';
 
 /// Below this the strips keep their height and the panel scrolls up and down instead.
@@ -277,7 +278,7 @@ class ChannelStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final folders = state.project.layers.where((item) => item.isFolder && item.id != layer.id).toList();
     final routeId = folders.any((folder) => folder.id == layer.parentId) ? layer.parentId : null;
-    final tint = Neon.layer(layer.color);
+    final tint = trackColor(state, layer);
     return SizedBox(width: _stripWidth, child: NeonPanel(
       color: state.selectedLayerId == layer.id ? Neon.blue : tint,
       padding: const EdgeInsets.fromLTRB(5, 6, 5, 6),

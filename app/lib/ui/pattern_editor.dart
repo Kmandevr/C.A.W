@@ -24,6 +24,7 @@ import 'key_router.dart';
 import 'note_expression.dart';
 import 'motion.dart';
 import 'theme.dart';
+import 'arrange/track_color.dart';
 import 'glass.dart';
 
 enum PatternTool { draw, select, curve, erase }
@@ -1682,7 +1683,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   Color get _noteColor {
     for (final l in s.project.layers) {
       if (l.patternId == widget.module.id || l.clips.any((clip) => clip.patternId == widget.module.id)) {
-        return Neon.layer(l.color);
+        return trackColor(s, l);
       }
     }
     return Neon.yellow;

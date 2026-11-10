@@ -1,6 +1,7 @@
 // Arrange: the tracks and clips on a timeline, compact track headers, the focus view (one track and its panel) and the mixer card.
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -16,6 +17,7 @@ import 'frame/sections.dart';
 import 'motion.dart';
 import 'param_control.dart';
 import 'theme.dart';
+import 'arrange/track_color.dart';
 import 'widgets.dart';
 import 'track_cards_screen.dart';
 import 'glass.dart';
@@ -44,7 +46,32 @@ class ArrangerScreen extends StatefulWidget {
 
 class _ArrangerScreenState extends State<ArrangerScreen> {
   bool mixer = false, settings = false, cardsView = false, mixerCard = false;
-  double zoom = 18.0, _trackHeight = 76.0;
+  double zoom = 18.0;
+  // A header resize in progress, shown before it is saved when the drag ends.
+  double? _dragHeaderW, _dragTrackH;
+
+  bool get _phone => MediaQuery.sizeOf(context).shortestSide < 600;
+
+  /// The track row height: dragged from a row's bottom edge or picked in the toolbar's height menu (saved).
+  double get _trackHeight {
+    final saved = widget.state.settings.trackHeight;
+    return _dragTrackH ?? (saved > 0 ? saved : (_phone ? 60.0 : 76.0));
+  }
+
+  /// The track header width: dragged from the headers' right edge (saved).
+  double get _headerWidth {
+    final saved = widget.state.settings.headerWidth;
+    return _dragHeaderW ?? (saved > 0 ? saved : (_phone ? 132.0 : 176.0));
+  }
+
+  void _saveHeaderSize() {
+    final w = _dragHeaderW, h = _dragTrackH;
+    if (w == null && h == null) return;
+    widget.state.settings.update((x) {
+      if (w != null) x.headerWidth = w;
+      if (h != null) x.trackHeight = h;
+    }).then((_) { if (mounted) setState(() { _dragHeaderW = null; _dragTrackH = null; }); });
+  }
   // The timeline can be millions of bars long (F7.2), so the ruler and grid paint only what this shows.
   final _hScroll = ScrollController();
 
@@ -130,7 +157,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
         const MenuAction('midi', 'Import MIDI file…', Icons.file_open_outlined),
       ],
       const MenuAction('rename', 'Rename', Icons.edit_outlined),
-      MenuAction('color', 'Colour', Icons.palette_outlined),
+      MenuAction('color', layer.ownColor || layer.parentId == null ? 'Colour' : 'Own colour', Icons.palette_outlined),
+      if (layer.ownColor && layer.parentId != null) const MenuAction('folder-color', "Use the folder's colour", Icons.format_color_reset_outlined),
       if (index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
       if (index < s.project.layers.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
       if (layer.parentId != null) const MenuAction('unparent', 'Move out of folder', Icons.drive_file_move_rtl_outlined),
@@ -152,7 +180,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     if (v.startsWith('clip:')) s.addClip(layer, v.substring(5));
     if (v == 'midi') await importMidiFile(context, s, layer: layer);
     if (v == 'rename') await _rename(layer);
-    if (v == 'color') s.editLayer(layer, (l) => l.color = (l.color + 1) % LayerDoc.trackColors);
+    if (v == 'color') s.editLayer(layer, (l) { l.color = l.ownColor ? (l.color + 1) % LayerDoc.trackColors : l.color; l.ownColor = true; });
+    if (v == 'folder-color') s.editLayer(layer, (l) => l.ownColor = false);
     if (v == 'up' && index > 0) s.moveLayer(index, index - 1);
     if (v == 'down' && index < s.project.layers.length - 1) s.moveLayer(index, index + 2);
     if (v == 'unparent') s.moveLayerIntoFolder(layer, null);
@@ -324,14 +353,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             onSelected: (v) {
               final px = double.parse(v.substring(2));
               if (v.startsWith('h:')) {
-                setState(() => _trackHeight = px);
+                s.settings.update((x) => x.trackHeight = px).then((_) { if (mounted) setState(() {}); });
               } else {
                 s.settings.update((x) => x.trackGap = px).then((_) { if (mounted) setState(() {}); });
               }
             },
-            icon: Icon(Icons.height, color: _trackHeight == 76 ? Neon.dim : Neon.blue),
+            icon: const Icon(Icons.height, color: Neon.dim),
             itemBuilder: (_) => [
-              for (final (px, name) in const [(54.0, 'Compact'), (76.0, 'Standard'), (96.0, 'Tall'), (120.0, 'Extra tall')])
+              for (final (px, name) in const [(44.0, 'Thin'), (60.0, 'Compact'), (76.0, 'Standard'), (96.0, 'Tall'), (120.0, 'Extra tall')])
                 CheckedPopupMenuItem(value: 'h:$px', checked: _trackHeight == px, child: Text('$name · ${px.round()} px')),
               const PopupMenuDivider(),
               for (final (px, name) in const [(0.0, 'No gap'), (3.0, 'Small gap'), (6.0, 'Gap'), (12.0, 'Wide gap'), (20.0, 'Extra wide gap')])
@@ -408,7 +437,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final trackHeight = _trackHeight;
     // The gap between tracks (Settings, chosen from the track height menu), so tracks don't sit on each other.
     final gap = pinned ? 0.0 : s.settings.trackGap;
-    final headW = Neon.compact(context) ? 158.0 : 184.0;
+    final headW = _headerWidth;
     // The song ends at its last clip or automation point (or the shortest length) and playback loops back there,
     // as in Reaper. The timeline always reaches 64 bars past it, so a clip can go anywhere and the song grows with it.
     final end = p.engineLoopSteps;
@@ -416,7 +445,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final ruler = pinned ? 20.0 : 30.0;
     final focusId = _focusId;
     return LayoutBuilder(builder: (context, view) => SingleChildScrollView(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: headW, child: Column(children: [
+      Stack(children: [SizedBox(width: headW, child: Column(children: [
         SizedBox(height: ruler, child: Padding(
           padding: EdgeInsets.only(left: 10, top: pinned ? 4 : 8),
           child: Align(alignment: Alignment.centerLeft,
@@ -430,11 +459,21 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             onTap: pinned ? () => _focus(null) : () => callbacks.onTap(layer),
             onSwipe: pinned ? _step : null,
             onFx: () => callbacks.onFx(layer),
-            onMenu: (at) => callbacks.onMenu(layer, at)),
+            onMenu: (at) => callbacks.onMenu(layer, at),
+            onResize: pinned ? null : (dy) => setState(() => _dragTrackH = (_trackHeight + dy)
+                .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble()),
+            onResizeEnd: _saveHeaderSize),
           if (layer.spaceBelow > 0 && !pinned) _SpacerHeader(state: s, layer: layer),
           SizedBox(height: gap),
         ],
       ])),
+        // The headers' right edge: drag it to make the headers narrower or wider (saved).
+        Positioned(right: 0, top: 0, bottom: 0, width: 10, child: _ResizeGrip(
+          key: const ValueKey('header-width-grip'), axis: Axis.horizontal, label: 'Resize track headers',
+          onDrag: (dx) => setState(() => _dragHeaderW = (_headerWidth + dx)
+              .clamp(Settings.minHeaderWidth, Settings.maxHeaderWidth).toDouble()),
+          onEnd: _saveHeaderSize)),
+      ]),
       Expanded(child: SingleChildScrollView(controller: _hScroll, scrollDirection: Axis.horizontal,
         child: SizedBox(width: width, child: Stack(children: [
           // One grid behind every track, through the gaps and spacers and down to the bottom of the view
@@ -499,7 +538,7 @@ class _TrackCallbacks {
 class _TimelineHeader extends StatelessWidget {
   const _TimelineHeader({required this.state, required this.layer, required this.index, required this.depth,
     required this.trackHeight, required this.onTap, required this.onFx, required this.onMenu,
-    this.focused = false, this.onSwipe});
+    this.focused = false, this.onSwipe, this.onResize, this.onResizeEnd});
   final AppState state;
   final LayerDoc layer;
   final int index, depth;
@@ -509,77 +548,86 @@ class _TimelineHeader extends StatelessWidget {
   final void Function(Offset at) onMenu;
   final ValueChanged<int>? onSwipe;
 
+  /// A drag on the row's bottom edge, by this many pixels; null on the focus view's pinned track.
+  final ValueChanged<double>? onResize;
+  final VoidCallback? onResizeEnd;
+
   @override
   Widget build(BuildContext context) {
-    final color = Neon.layer(layer.color);
+    final color = trackColor(state, layer);
     final selected = focused || state.selectedLayerId == layer.id;
     final gens = state.project.modules.where((m) => state.isGenerator(m.id)).toList();
     final fxCount = layer.effectIds.length + layer.components.length;
-    final box = Container(height: trackHeight + layer.automation.length * 34.0, padding: EdgeInsets.fromLTRB(7 + depth * 13, 4, 2, 4),
-      // Glass: a see-through header tinted with its track's colour, with a soft highlight along the top.
+    final thin = trackHeight < 52;
+    // REAPER-style (owner, 2026-11-10): the track's colour tints the whole header and its left edge, no outline.
+    final edge = BorderSide(color: selected ? color : color.withValues(alpha: 0.75), width: selected ? 4 : 3);
+    final box = Container(height: trackHeight + layer.automation.length * 34.0,
+      padding: EdgeInsets.fromLTRB(6 + depth * 10, thin ? 2 : 4, 2, thin ? 2 : 4),
       decoration: Glass.active
           ? BoxDecoration(
-              gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
-                Color.lerp(Neon.panel, color, selected ? 0.30 : 0.14)!.withValues(alpha: 0.78),
-                Color.lerp(Neon.panel, color, selected ? 0.12 : 0.05)!.withValues(alpha: 0.62),
+              gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: [
+                Color.lerp(Neon.panel, color, selected ? 0.42 : 0.26)!.withValues(alpha: 0.82),
+                Color.lerp(Neon.panel, color, selected ? 0.20 : 0.10)!.withValues(alpha: 0.66),
               ]),
               border: Border(
-                left: selected ? BorderSide(color: color, width: 2) : BorderSide.none,
-                bottom: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
-                right: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
+                left: edge,
+                bottom: BorderSide(color: Colors.black.withValues(alpha: 0.35)),
+                right: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
               ),
               boxShadow: selected ? [BoxShadow(color: color.withValues(alpha: 0.28), blurRadius: 12)] : null)
-          : BoxDecoration(color: selected ? Color.lerp(Neon.panel, color, 0.18) : Neon.panel,
-              border: Border(left: selected ? BorderSide(color: color, width: 2) : BorderSide.none,
-                bottom: const BorderSide(color: Neon.line), right: const BorderSide(color: Neon.line))),
+          : BoxDecoration(color: Color.lerp(Neon.panel, color, selected ? 0.30 : 0.16),
+              border: Border(left: edge, bottom: const BorderSide(color: Neon.bg))),
       child: LayoutBuilder(builder: (context, box) {
-        final oneRow = box.maxHeight < 60;
-        final mute = ToggleChip(label: 'M', size: 30, tooltip: layer.isFolder ? 'Mute folder' : 'Mute',
+        final oneRow = box.maxHeight < 56;
+        final chip = box.maxWidth < 150 ? 24.0 : 30.0;
+        final mute = ToggleChip(label: 'M', size: chip, tooltip: layer.isFolder ? 'Mute folder' : 'Mute',
             on: layer.mute, color: Neon.yellow,
             onTap: () => layer.isFolder
                 ? state.editLayer(layer, (l) => l.mute = !l.mute)
                 : state.mixLayer(layer, mute: !layer.mute));
-        final solo = ToggleChip(label: 'S', size: 30, tooltip: layer.isFolder ? 'Solo folder' : 'Solo',
+        final solo = ToggleChip(label: 'S', size: chip, tooltip: layer.isFolder ? 'Solo folder' : 'Solo',
             on: layer.solo, color: Neon.blue,
             onTap: () => layer.isFolder
                 ? state.editLayer(layer, (l) => l.solo = !l.solo)
                 : state.mixLayer(layer, solo: !layer.solo));
+        // The engine reports one peak per track today, so a track's meter is a single bar (the master is stereo).
         final meter = PeakMeter(key: ValueKey('meter-${layer.id}'), state: state, color: color,
             read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0);
-        // FX: drawn at 18 dp, touched over about 36 dp; a dot tells the track has effects.
+        // FX: drawn at 18 dp, touched over about 34 dp; a dot tells the track has effects. A very narrow header
+        // drops it: a tap on the header opens the track's effects too.
+        final showFx = box.maxWidth >= 104;
         final fx = layer.isFolder
             ? Tooltip(message: layer.busEnabled ? 'Folder with a group bus' : 'Folder',
-                child: SizedBox(width: 32, height: 28, child: Icon(Icons.account_tree_outlined, size: 15, color: color)))
+                child: SizedBox(width: 26, height: 26, child: Icon(Icons.account_tree_outlined, size: 15, color: color)))
             : Tooltip(message: 'Effects', child: InkResponse(
                 key: ValueKey('fx-button-${layer.id}'),
                 radius: 20,
                 onTap: onFx,
-                child: SizedBox(width: 34, height: 28, child: Stack(alignment: Alignment.center, children: [
+                child: SizedBox(width: 30, height: 26, child: Stack(alignment: Alignment.center, children: [
                   Icon(Icons.graphic_eq, size: 18, color: fxCount > 0 ? color : Neon.dim),
-                  if (fxCount > 0) Positioned(right: 4, top: 2, child: Container(width: 5, height: 5,
+                  if (fxCount > 0) Positioned(right: 3, top: 2, child: Container(width: 5, height: 5,
                     decoration: BoxDecoration(color: color, shape: BoxShape.circle))),
                 ]))));
-        final top = SizedBox(height: 28, child: Row(children: [
+        final top = SizedBox(height: thin ? 24 : 28, child: Row(children: [
           if (layer.isFolder)
-            IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
               tooltip: layer.collapsed ? 'Show folder' : 'Hide folder',
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
-              onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed))
-          else Container(width: 5, height: 18, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3),
-              boxShadow: selected ? [BoxShadow(color: color.withValues(alpha: 0.7), blurRadius: 6)] : null)),
-          const SizedBox(width: 5),
+              onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed)),
+          const SizedBox(width: 3),
           Expanded(child: Tooltip(
             message: layer.isFolder
                 ? (layer.busEnabled ? 'Folder with a group bus' : 'Folder')
                 : 'Instrument: ${layer.instrument != null ? state.componentInfo(layer.instrument!.id)?.label ?? layer.instrument!.id
                     : gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'none'} · hold for more',
             child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: selected ? Color.lerp(Neon.text, color, 0.35) : null)))),
-          if (oneRow) ...[mute, const SizedBox(width: 3), solo],
-          fx,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15))))),
+          if (oneRow) ...[mute, const SizedBox(width: 2), solo],
+          if (showFx || layer.isFolder) fx,
         ]));
         if (oneRow) {
-          return Column(mainAxisSize: MainAxisSize.min, children: [top, const SizedBox(height: 4), meter]);
+          return Column(mainAxisSize: MainAxisSize.min, children: [top, SizedBox(height: thin ? 2 : 4), meter]);
         }
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           top,
@@ -595,6 +643,13 @@ class _TimelineHeader extends StatelessWidget {
         ]);
       }),
     );
+    final resizable = onResize == null ? box : Stack(children: [
+      box,
+      // The row's bottom edge: drag it to make every track thinner or taller (saved).
+      Positioned(left: 0, right: 0, bottom: 0, height: 8, child: _ResizeGrip(
+        key: ValueKey('track-height-grip-${layer.id}'), axis: Axis.vertical, label: 'Resize tracks',
+        onDrag: onResize!, onEnd: onResizeEnd ?? () {})),
+    ]);
     return Semantics(
       button: true,
       selected: selected,
@@ -609,11 +664,58 @@ class _TimelineHeader extends StatelessWidget {
           final v = d.primaryVelocity ?? 0;
           if (v.abs() > 200) onSwipe!(v < 0 ? 1 : -1);
         },
-        child: box,
+        child: resizable,
       ),
     );
   }
 }
+
+/// A thin edge that resizes something when dragged: a faint grip line shows where it is, and the mouse cursor
+/// changes over it on a desktop.
+class _ResizeGrip extends StatefulWidget {
+  const _ResizeGrip({super.key, required this.axis, required this.label, required this.onDrag, required this.onEnd});
+
+  /// [Axis.horizontal]: dragged sideways (a width); [Axis.vertical]: dragged up and down (a height).
+  final Axis axis;
+  final String label;
+  final ValueChanged<double> onDrag;
+  final VoidCallback onEnd;
+  @override
+  State<_ResizeGrip> createState() => _ResizeGripState();
+}
+
+class _ResizeGripState extends State<_ResizeGrip> {
+  bool _active = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final sideways = widget.axis == Axis.horizontal;
+    final line = Container(
+      width: sideways ? 2 : 22, height: sideways ? 22 : 2,
+      decoration: BoxDecoration(color: (_active ? Neon.blue : Neon.dim).withValues(alpha: _active ? 0.9 : 0.35),
+        borderRadius: BorderRadius.circular(1)));
+    void start() => setState(() => _active = true);
+    void update(double d) => widget.onDrag(d);
+    void end() { setState(() => _active = false); widget.onEnd(); }
+    return Semantics(label: widget.label, child: Tooltip(message: widget.label, waitDuration: const Duration(milliseconds: 600),
+      child: MouseRegion(
+        cursor: sideways ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          // The edge follows the finger from where it went down, slop included.
+          dragStartBehavior: DragStartBehavior.down,
+          onHorizontalDragStart: sideways ? (_) => start() : null,
+          onHorizontalDragUpdate: sideways ? (d) => update(d.delta.dx) : null,
+          onHorizontalDragEnd: sideways ? (_) => end() : null,
+          onVerticalDragStart: sideways ? null : (_) => start(),
+          onVerticalDragUpdate: sideways ? null : (d) => update(d.delta.dy),
+          onVerticalDragEnd: sideways ? null : (_) => end(),
+          child: Align(alignment: sideways ? Alignment.center : Alignment.bottomCenter, child: line)))));
+  }
+}
+
+/// The space above and below a clip in its row.
+double _clipInset(double trackHeight) => trackHeight < 60 ? 3 : 8;
 
 class _TimelineLane extends StatelessWidget {
   const _TimelineLane({required this.state, required this.layer, required this.width,
@@ -645,18 +747,18 @@ class _TimelineLane extends StatelessWidget {
         onLongPressMoveUpdate: (d) => state.updateTimeSelection((d.localPosition.dx / stepW).round()),
         onLongPressEnd: (_) => state.endTimeSelection(),
         child: hovering.isEmpty ? const SizedBox.expand()
-            : DecoratedBox(decoration: BoxDecoration(color: Neon.layer(layer.color).withValues(alpha: 0.12),
-                border: Border.all(color: Neon.layer(layer.color)))))),
+            : DecoratedBox(decoration: BoxDecoration(color: trackColor(state, layer).withValues(alpha: 0.12),
+                border: Border.all(color: trackColor(state, layer)))))),
       if (state.timeSelectionStart != null && state.timeSelectionEnd != null)
         Positioned(left: math.min(state.timeSelectionStart!, state.timeSelectionEnd!) * stepW, top: 0,
           width: math.max(1.0, (state.timeSelectionEnd! - state.timeSelectionStart!).abs() * stepW), height: height,
           child: IgnorePointer(child: Container(color: Neon.blue.withValues(alpha: .09)))),
 
       for (final clip in layer.clips)
-        Positioned(left: clip.startSteps * stepW, top: trackHeight == 54.0 ? 5 : 8,
-          width: math.max(12.0, clip.lengthSteps * stepW), height: trackHeight == 54.0 ? 42 : 60,
+        Positioned(left: clip.startSteps * stepW, top: _clipInset(trackHeight),
+          width: math.max(12.0, clip.lengthSteps * stepW), height: trackHeight - 2 * _clipInset(trackHeight),
           child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW,
-            color: Neon.layer(layer.color), selected: selectedIds.contains(clip.id), callbacks: callbacks)),
+            color: trackColor(state, layer), selected: selectedIds.contains(clip.id), callbacks: callbacks)),
       if (layer.clips.isEmpty && !layer.isFolder)
         Positioned(left: 10, top: trackHeight * 0.38, child: const IgnorePointer(child: Text('Hold the track for clips, or drop a pattern here',
           style: TextStyle(color: Neon.dim, fontSize: 10)))),
@@ -960,7 +1062,7 @@ class _ArrangementMixer extends StatelessWidget {
           SizedBox(width: 150, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 7),
             child: Column(children: [
               Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Neon.layer(l.color), fontSize: 11)),
+                style: TextStyle(color: trackColor(state, l), fontSize: 11)),
               Expanded(child: ValueListenableBuilder<int>(valueListenable: state.layerValueTick(l.id),
                 builder: (context, _, _) => Column(children: [
                   Row(children: [const Icon(Icons.volume_up, size: 13, color: Neon.dim),

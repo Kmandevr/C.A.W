@@ -9,6 +9,7 @@ import '../model/project.dart';
 import 'builder_screen.dart' show kindColor, kindIcon;
 import 'param_control.dart';
 import 'theme.dart';
+import 'arrange/track_color.dart';
 import 'widgets.dart';
 import 'glass.dart';
 
@@ -353,7 +354,7 @@ class _TrackCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = state.project;
-    final color = Neon.layer(layer.color);
+    final color = trackColor(state, layer);
     final sound = p.module(layer.generatorId);
     final pattern = p.module(layer.patternId);
     final cycle = _cycleSteps(state, layer);
@@ -691,7 +692,7 @@ class _TrackSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = state;
     final p = s.project;
-    final color = Neon.layer(layer.color);
+    final color = trackColor(state, layer);
     final index = p.layers.indexOf(layer);
     final sounds = p.modules.where((m) => s.isGenerator(m.id)).toList();
     final effects = p.modules.where((m) => s.isEffect(m.id)).toList();

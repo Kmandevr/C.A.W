@@ -98,13 +98,13 @@ void main() {
     expect(m().shownDb, closeTo(-6.02, 0.01));
     expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.9, 0.001));
     expect(tester.binding.hasScheduledFrame, isFalse, reason: 'while sound comes in, the reads move it: no ticker');
-    // A silent read, then no more (the engine went quiet): the bar still falls 24 dB a second, the line holds 1.5 s.
+    // A silent read, then no more (the engine went quiet): the bar falls at the set rate, the line holds 1.5 s.
     peak = 0;
     state.tick.value++;
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 500));
-    expect(m().shownDb, closeTo(-6.02 - 24 * .516, 0.01));
+    expect(m().shownDb, closeTo(-6.02 - PeakMeter.fallDbPerSecond * .516, 0.01));
     expect(m().holdDb, closeTo(-6.02, 0.01));
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(seconds: 1));

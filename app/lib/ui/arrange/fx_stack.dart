@@ -11,6 +11,7 @@ import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../theme.dart';
+import 'track_color.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
 
@@ -64,7 +65,7 @@ class _FxStackState extends State<FxStack> {
       builder: (context, hovering, _) => DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          border: hovering.isEmpty ? null : Border.all(color: Neon.layer(layer.color), width: 1.5)),
+          border: hovering.isEmpty ? null : Border.all(color: trackColor(s, layer), width: 1.5)),
         child: ValueListenableBuilder<Map<String, NativeComponentInfo>>(
           valueListenable: s.componentCatalog,
           builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -97,7 +98,7 @@ class _FxStackState extends State<FxStack> {
   ]));
 
   Widget _stack(BuildContext context) {
-    final glow = Neon.layer(layer.color);
+    final glow = trackColor(s, layer);
     return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 24), children: [
       if (layer.instrument != null) ...[
         const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),

@@ -11,6 +11,8 @@ import 'package:caw/model/native_trust.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/fx_stack.dart';
+import 'package:caw/ui/arrange/track_color.dart';
+import 'package:caw/ui/theme.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:flutter/material.dart';
@@ -328,6 +330,46 @@ void main() {
       expect(bass.clips.single.patternId, 'pat');
       expect(bass.clips.single.startSteps, greaterThan(0));
       await settle(tester);
+    });
+  });
+
+  group('track headers', () {
+    testWidgets('drag the headers\' right edge and a row\'s bottom edge to resize them; the sizes are saved',
+        (tester) async {
+      await pumpArranger(tester, const Size(412, 900));
+      final header = find.byKey(const ValueKey('track-header-a'));
+      final w0 = tester.getSize(header).width, h0 = tester.getSize(header).height;
+      await tester.drag(find.byKey(const ValueKey('header-width-grip')), const Offset(-30, 0));
+      await settle(tester);
+      expect(tester.getSize(header).width, closeTo(w0 - 30, 1.5));
+      expect(s.settings.headerWidth, closeTo(w0 - 30, 1.5));
+      await tester.drag(find.byKey(const ValueKey('track-height-grip-a')), const Offset(0, -20));
+      await settle(tester);
+      expect(tester.getSize(header).height, closeTo(h0 - 20, 1.5));
+      expect(s.settings.trackHeight, closeTo(h0 - 20, 1.5));
+      expect(Settings()..fromJson(s.settings.toJson()), isA<Settings>()
+          .having((x) => x.headerWidth, 'width', s.settings.headerWidth)
+          .having((x) => x.trackHeight, 'height', s.settings.trackHeight));
+      await settle(tester);
+    });
+
+    test('tracks in a folder take shades of its colour unless they have their own', () {
+      final folder = LayerDoc(id: 'f', name: 'Drums', color: 3, isFolder: true);
+      final kick = LayerDoc(id: 'k', name: 'Kick', color: 0, parentId: 'f');
+      final snare = LayerDoc(id: 'n', name: 'Snare', color: 1, parentId: 'f');
+      final own = LayerDoc(id: 'o', name: 'Own', color: 5, parentId: 'f', ownColor: true);
+      final top = LayerDoc(id: 't', name: 'Top', color: 6);
+      final layers = [folder, kick, snare, own, top];
+      final base = Neon.layer(3);
+      expect(trackColorIn(layers, folder), base);
+      expect(trackColorIn(layers, kick), isNot(base));
+      expect(trackColorIn(layers, kick), isNot(trackColorIn(layers, snare)), reason: 'siblings get different shades');
+      // A shade of the folder's colour: the same hue, give or take rounding.
+      expect(HSVColor.fromColor(trackColorIn(layers, kick)).hue, closeTo(HSVColor.fromColor(base).hue, 3));
+      expect(trackColorIn(layers, own), Neon.layer(5));
+      expect(trackColorIn(layers, top), Neon.layer(6));
+      expect(LayerDoc.fromJson(own.toJson()).ownColor, isTrue);
+      expect(LayerDoc.fromJson(kick.toJson()).ownColor, isFalse);
     });
   });
 

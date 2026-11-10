@@ -8,6 +8,7 @@ import '../../model/project.dart';
 import '../glass.dart';
 import '../mixer_screen.dart';
 import '../theme.dart';
+import 'track_color.dart';
 import '../widgets.dart';
 
 class MixerCard extends StatefulWidget {
@@ -79,7 +80,7 @@ class _NarrowStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tint = Neon.layer(layer.color);
+    final tint = trackColor(state, layer);
     return SizedBox(width: 52, child: GlassPanel(tint: tint, radius: 8, child: ValueListenableBuilder<int>(
       valueListenable: state.layerValueTick(layer.id),
       builder: (context, _, _) => Column(children: [

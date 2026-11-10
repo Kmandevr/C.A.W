@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../ui/glass.dart';
 import '../ui/motion.dart';
 import '../ui/theme.dart';
+import '../ui/widgets.dart' show PeakMeter;
 
 enum Density { comfortable, compact }
 
@@ -166,6 +167,7 @@ class Settings extends ChangeNotifier {
     Glass.enabled = glass;
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
+    PeakMeter.fallDbPerSecond = meterFall;
   }
 
   /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off. Minimal and the system setting lower it further.
@@ -182,6 +184,16 @@ class Settings extends ChangeNotifier {
   /// of each other with no room).
   double trackGap = 6;
   static const maxTrackGap = 24.0;
+
+  /// Arrange's track header width and track row height in logical pixels, dragged from the header's right edge and
+  /// a row's bottom edge (owner, 2026-11-10: narrower, thinner headers); 0 uses the screen's default.
+  double headerWidth = 0, trackHeight = 0;
+  static const minHeaderWidth = 96.0, maxHeaderWidth = 320.0;
+  static const minTrackHeight = 40.0, maxTrackHeight = 160.0;
+
+  /// How fast peak meters fall, in dB per second (owner, 2026-11-10: faster than the old 24, still smooth).
+  double meterFall = 48;
+  static const meterFalls = [24.0, 48.0, 72.0, 96.0];
 
   /// Long-press menus on tracks, clips and effects: a list by default, a ring as a choice.
   LongPressMenuStyle longPressMenu = LongPressMenuStyle.list;
@@ -262,6 +274,9 @@ class Settings extends ChangeNotifier {
         'glass': glass,
         'quick_actions': quickActions,
         'track_gap': trackGap,
+        if (headerWidth > 0) 'header_width': headerWidth,
+        if (trackHeight > 0) 'track_height': trackHeight,
+        'meter_fall': meterFall,
         'long_press_menu': longPressMenu.name,
         'glass_blur': glassBlur,
         'dock_layouts': dockLayouts,
@@ -294,6 +309,12 @@ class Settings extends ChangeNotifier {
     if (j['quick_actions'] is bool) quickActions = j['quick_actions'] as bool;
     final gap = j['track_gap'];
     if (gap is num && gap.isFinite) trackGap = gap.toDouble().clamp(0.0, maxTrackGap);
+    final hw = j['header_width'];
+    if (hw is num && hw.isFinite && hw > 0) headerWidth = hw.toDouble().clamp(minHeaderWidth, maxHeaderWidth);
+    final th = j['track_height'];
+    if (th is num && th.isFinite && th > 0) trackHeight = th.toDouble().clamp(minTrackHeight, maxTrackHeight);
+    final fall = j['meter_fall'];
+    if (fall is num && fall.isFinite) meterFall = fall.toDouble().clamp(6.0, 240.0);
     longPressMenu = pick(LongPressMenuStyle.values, j['long_press_menu'], longPressMenu);
     if (j['glass_blur'] is bool) glassBlur = j['glass_blur'] as bool;
     final dock = j['dock_layouts'];

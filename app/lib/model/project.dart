@@ -210,6 +210,7 @@ class LayerDoc {
     this.busEnabled = true,
     this.collapsed = false,
     this.spaceBelow = 0,
+    this.ownColor = false,
   }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [], components = components ?? [];
 
   /// The tallest visual spacer under a track, in logical pixels.
@@ -221,6 +222,9 @@ class LayerDoc {
   final String id;
   String name;
   int color;
+
+  /// The user chose [color] for this track; without it a track in a folder takes a shade of the folder's colour.
+  bool ownColor;
   String? generatorId;
   List<String> effectIds;
   String? patternId; // a pattern module whose notes play the generator; it sets the layer's length
@@ -273,6 +277,7 @@ class LayerDoc {
         if (instrument != null) 'instrument': instrument!.toJson(),
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
         if (spaceBelow > 0) 'space_below': spaceBelow,
+        if (ownColor) 'own_color': true,
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j) => LayerDoc(
@@ -297,6 +302,7 @@ class LayerDoc {
           final num v when v.isFinite => v.toDouble().clamp(0.0, maxSpaceBelow),
           _ => 0,
         },
+        ownColor: j['own_color'] == true,
       );
 }
 
