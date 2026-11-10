@@ -3,12 +3,15 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../engine/engine.dart' show Template;
 import '../../model/app_state.dart';
+import '../../model/pattern_doc.dart';
 import '../../model/project.dart';
 import '../../model/settings.dart';
 import '../automation_screen.dart';
 import '../feedback.dart';
 import '../frame/frame_widgets.dart' show SlideIn;
+import '../frame/sections.dart';
 import '../glass.dart';
 import '../haptics.dart';
 import '../mixer_screen.dart';
@@ -287,26 +290,53 @@ class _ClipTab extends StatelessWidget {
     if (clip == null || module == null) {
       final patterns = state.project.modules.where((m) => state.isPattern(m.id)).toList();
       return ListView(padding: const EdgeInsets.all(12), children: [
-        Text(clip == null ? 'No clip on this track yet.' : 'This clip\'s pattern is missing.',
+        Text(clip == null ? 'No clip on this track yet: start a new pattern, or add one the project has.' : 'This clip\'s pattern is missing.',
           style: const TextStyle(color: Neon.dim)),
         const SizedBox(height: 8),
+        ListTile(key: const ValueKey('clip-new-pattern'), dense: true,
+          leading: const Icon(Icons.queue_music, size: 18, color: Neon.yellow), title: const Text('New pattern on this track'),
+          onTap: () {
+            Haptics.tap();
+            final id = state.addModule(Template('${layer.name} notes.caw', PatternDoc.blank(name: '${layer.name} notes').serialize()));
+            state.addClip(layer, id);
+          }),
         for (final p in patterns)
           ListTile(dense: true, leading: const Icon(Icons.add, size: 18), title: Text('Add clip · ${p.name}'),
             onTap: () => state.addClip(layer, p.id)),
       ]);
     }
+    final sections = SectionController.maybeOf(context);
+    // Which pattern is being edited: its name (or the track's clips to pick from) and a way to its full editor.
+    final header = SizedBox(height: 34, child: Row(children: [
+      Expanded(child: layer.clips.length > 1
+          ? ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 6), children: [
+              for (final c in layer.clips)
+                Padding(padding: const EdgeInsets.only(right: 4), child: ChoiceChip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text('${state.project.module(c.patternId)?.name ?? '?'} · ${c.startSteps ~/ state.project.stepsPerBar + 1}',
+                    style: const TextStyle(fontSize: 10)),
+                  selected: c.id == clip.id,
+                  onSelected: (_) => state.selectClip(layer, c))),
+            ])
+          : Padding(padding: const EdgeInsets.only(left: 10), child: Row(children: [
+              const Icon(Icons.queue_music, size: 15, color: Neon.yellow),
+              const SizedBox(width: 6),
+              Flexible(child: Text(module.name, key: const ValueKey('clip-pattern-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+              Text('  · bar ${clip.startSteps ~/ state.project.stepsPerBar + 1}', style: const TextStyle(fontSize: 11, color: Neon.dim)),
+            ]))),
+      if (sections != null)
+        IconButton(key: const ValueKey('clip-open-build'), tooltip: 'Open in Build: the notes as text, full screen',
+          iconSize: 17, visualDensity: VisualDensity.compact,
+          onPressed: () {
+            Haptics.tap();
+            state.selectModule(module.id);
+            sections.openBuild(BuildTab(BuildTabKind.caw, module.id));
+          },
+          icon: const Icon(Icons.open_in_new, color: Neon.dim)),
+    ]));
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      if (layer.clips.length > 1)
-        SizedBox(height: 36, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 6),
-          children: [
-            for (final c in layer.clips)
-              Padding(padding: const EdgeInsets.only(right: 4), child: ChoiceChip(
-                visualDensity: VisualDensity.compact,
-                label: Text('${state.project.module(c.patternId)?.name ?? '?'} · ${c.startSteps ~/ state.project.stepsPerBar + 1}',
-                  style: const TextStyle(fontSize: 10)),
-                selected: c.id == clip.id,
-                onSelected: (_) => state.selectClip(layer, c))),
-          ])),
+      header,
       Expanded(child: PatternEditor(key: ValueKey('clip-${module.id}'), state: state, module: module)),
     ]);
   }

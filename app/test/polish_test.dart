@@ -5,6 +5,7 @@ import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
+import 'package:caw/ui/arrange/focus_panel.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
@@ -145,6 +146,32 @@ void main() {
     test('recent exports show their time to the minute', () {
       final ms = DateTime(2026, 11, 10, 9, 5, 33, 120).millisecondsSinceEpoch;
       expect(exportStamp(ms), '2026-11-10 09:05');
+    });
+  });
+
+  group('Clip tab', () {
+    testWidgets('an empty track offers a new pattern; a clip names its pattern and opens it in Build', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final layer = s.project.layers.first;
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SectionScope(controller: sections, child: ListenableBuilder(
+        listenable: s,
+        builder: (_, _) => FocusPanel(state: s, layer: layer, tab: FocusTab.clip, onTab: (_) {}, onClose: () {}),
+      )))));
+      await tester.tap(find.byKey(const ValueKey('clip-new-pattern')));
+      await tester.pumpAndSettle();
+      expect(layer.clips, hasLength(1));
+      final pattern = s.project.module(layer.clips.single.patternId)!;
+      expect(s.isPattern(pattern.id), isTrue);
+      expect(find.byKey(const ValueKey('clip-pattern-name')), findsOneWidget);
+      expect(find.text(pattern.name), findsWidgets);
+      await tester.tap(find.byKey(const ValueKey('clip-open-build')));
+      await tester.pump();
+      expect(sections.current, Section.build);
+      expect(sections.activeBuildTab, BuildTab(BuildTabKind.caw, pattern.id));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
     });
   });
 }
