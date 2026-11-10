@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
+import '../model/live_midi.dart';
+import '../platform/midi_input.dart';
 import '../model/app_state.dart';
 import 'arranger_screen.dart';
 import 'exporter_screen.dart';
@@ -82,6 +84,7 @@ class _ShellState extends State<Shell> {
   late final AppLifecycleListener _life;
   late final DockController _dock = DockController(s.settings);
   final SectionController _sections = SectionController();
+  late final LiveMidi _midi = LiveMidi(s, platformMidiInput());
   Section _lastSection = Section.arrange;
 
   // Phone: the top row brought down within thumb reach (a downward swipe on the bottom bar); a tap anywhere ends it.
@@ -96,6 +99,7 @@ class _ShellState extends State<Shell> {
   void initState() {
     super.initState();
     _sections.addListener(_onSection);
+    _midi; // starts listening for MIDI keyboards
     _life = AppLifecycleListener(
       onPause: () {
         _dock.flush();
@@ -116,6 +120,7 @@ class _ShellState extends State<Shell> {
     _dock.dispose();
     _sections.removeListener(_onSection);
     _sections.dispose();
+    _midi.dispose();
     super.dispose();
   }
 
@@ -285,7 +290,7 @@ class _ShellState extends State<Shell> {
             status,
             ?_banner(),
             Expanded(child: body),
-            if (!keyboard) BottomTransport(state: s, compact: true),
+            if (!keyboard) BottomTransport(state: s, midi: _midi, compact: true),
           ]),
         ),
       ]);
@@ -296,7 +301,7 @@ class _ShellState extends State<Shell> {
       Expanded(child: body),
       if (_reach) status,
       if (!keyboard) ...[
-        BottomTransport(state: s),
+        BottomTransport(state: s, midi: _midi),
         SectionBar(sections: _sections, onReach: () => setState(() => _reach = true)),
       ],
     ]);

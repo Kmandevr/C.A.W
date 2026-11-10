@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../model/app_state.dart';
+import '../../model/live_midi.dart';
 import '../glass.dart';
 import '../theme.dart';
 import 'sections.dart';
@@ -115,9 +116,12 @@ class SectionRail extends StatelessWidget {
 
 /// Play, stop, record and undo within thumb reach. A sideways drag on it scrubs the playhead (one bar per 48 px).
 class BottomTransport extends StatefulWidget {
-  const BottomTransport({super.key, required this.state, this.compact = false});
+  const BottomTransport({super.key, required this.state, this.midi, this.compact = false});
   final AppState state;
   final bool compact;
+
+  /// The MIDI keyboard input; Record is on while a keyboard is connected or a take is running.
+  final LiveMidi? midi;
 
   @override
   State<BottomTransport> createState() => _BottomTransportState();
@@ -236,16 +240,8 @@ class _BottomTransportState extends State<BottomTransport> {
             ),
           ),
           const SizedBox(width: 4),
-          // Recording needs the engine's audio and MIDI input, which isn't built yet (#152).
-          IconButton(
-            key: const ValueKey('transport-record'),
-            tooltip: 'Record (coming with audio and MIDI input)',
-            iconSize: 19,
-            constraints: small,
-            color: Neon.pink,
-            icon: const Icon(Icons.fiber_manual_record),
-            onPressed: null,
-          ),
+          // Record takes a MIDI keyboard for now; audio recording needs the engine's audio input (#152).
+          RecordButton(midi: widget.midi, constraints: small),
         ]),
       ),
     );
@@ -257,5 +253,39 @@ class _BottomTransportState extends State<BottomTransport> {
     final step = s.playheadStep.floor().clamp(0, p.engineLoopSteps - 1);
     final text = '${step ~/ p.stepsPerBar + 1}.${(step % p.stepsPerBar) ~/ 4 + 1}';
     return m.playing ? text : s.pausedStep != null ? '$text ‖' : text;
+  }
+}
+
+/// Records a MIDI keyboard into the selected track: on while a keyboard is connected (or a take is running).
+class RecordButton extends StatelessWidget {
+  const RecordButton({super.key, required this.midi, this.constraints});
+  final LiveMidi? midi;
+  final BoxConstraints? constraints;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = midi;
+    Widget button(bool recording, bool can) => IconButton(
+          key: const ValueKey('transport-record'),
+          tooltip: recording
+              ? 'Stop recording'
+              : can
+                  ? 'Record the MIDI keyboard into the selected track'
+                  : 'Record: connect a MIDI keyboard (audio recording comes later)',
+          iconSize: 19,
+          constraints: constraints,
+          color: Neon.pink,
+          isSelected: recording,
+          selectedIcon: const Icon(Icons.stop_circle),
+          icon: const Icon(Icons.fiber_manual_record),
+          onPressed: can || recording
+              ? () {
+                  HapticFeedback.selectionClick();
+                  m!.toggleRecord();
+                }
+              : null,
+        );
+    if (m == null) return button(false, false);
+    return ListenableBuilder(listenable: m, builder: (context, _) => button(m.recording, m.devices.isNotEmpty));
   }
 }
