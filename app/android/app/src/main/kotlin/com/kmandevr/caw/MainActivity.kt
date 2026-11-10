@@ -1,5 +1,5 @@
 // The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
-// keyboard input and saving exports.
+// keyboard input, saving exports and haptics.
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -77,6 +77,9 @@ class MainActivity : FlutterActivity() {
                     result.error("unavailable", e.message, null)
                 }
             }
+
+        // Touch feedback with the vibrator's fine primitives (Haptics.kt).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HAPTICS_METHOD_CHANNEL).setMethodCallHandler(Haptics(this))
 
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_EVENT_CHANNEL)
             .setStreamHandler(MidiInput(applicationContext))
@@ -187,6 +190,7 @@ class MainActivity : FlutterActivity() {
         private const val COMPILER_METHOD_CHANNEL = "caw/compiler"
         private const val MIDI_EVENT_CHANNEL = "caw/midi"
         private const val FILES_METHOD_CHANNEL = "caw/files"
+        private const val HAPTICS_METHOD_CHANNEL = "caw/haptics"
         private const val SAVE_REQUEST = 4711
     }
 }

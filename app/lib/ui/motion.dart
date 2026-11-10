@@ -1,8 +1,9 @@
-// Motion and feel: the motion setting, distance-aware settle durations, the small-overshoot curve, snapping maths, haptics.
+// Motion and feel: the motion setting, distance-aware settle durations, the small-overshoot curve, snapping maths.
 import 'dart:math' as math;
 
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+
+import 'haptics.dart';
 
 /// How much the app moves (owner, 2026-11-04): Full; Reduced keeps fades but no movement or springs; Off.
 enum MotionLevel {
@@ -21,8 +22,9 @@ class Motion {
   /// The user's choice. [effective] combines it with the performance profile and the system setting.
   static MotionLevel setting = MotionLevel.full;
 
-  /// Haptic ticks on snaps, detents and placed notes (on by default, owner).
-  static bool haptics = true;
+  /// Haptics on or off (on by default, owner): the same switch as [Haptics.enabled].
+  static bool get haptics => Haptics.enabled;
+  static set haptics(bool on) => Haptics.enabled = on;
 
   /// True while the Minimal performance profile is on: it turns motion off.
   static bool minimalProfile = false;
@@ -67,10 +69,8 @@ class Motion {
   static Curve settleCurve(double distancePx, MotionLevel level) =>
       level == MotionLevel.full ? OvershootCurve(overshoot(distancePx)) : Curves.linear;
 
-  /// A light tick on Android when something snaps, clicks into a detent, or a note is placed.
-  static void tick() {
-    if (haptics) HapticFeedback.selectionClick();
-  }
+  /// A light tick when something snaps, clicks into a detent, or a note is placed ([Haptics.tick], rate-limited).
+  static void tick() => Haptics.tick();
 }
 
 /// Ease-out that passes the end by [amount] (a fraction of the distance) and settles back on it.

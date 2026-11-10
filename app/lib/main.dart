@@ -8,8 +8,10 @@ import 'model/automation_writer.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
+import 'platform/haptics_device.dart';
 import 'platform/midi_input.dart';
 import 'ui/glass.dart';
+import 'ui/haptics.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
 
@@ -28,6 +30,7 @@ Future<void> main() async {
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(['JetBrains Mono'], await rootBundle.loadString('assets/fonts/OFL.txt'));
   });
+  Haptics.device = platformHapticsDevice(); // the vibrator's fine primitives on Android
   final settings = await Settings.open();
   final state = AppState(settings: settings);
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).

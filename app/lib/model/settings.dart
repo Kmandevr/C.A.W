@@ -6,11 +6,23 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../ui/glass.dart';
+import '../ui/haptics.dart';
 import '../ui/motion.dart';
 import '../ui/theme.dart';
 import '../ui/widgets.dart' show PeakMeter;
 
 enum Density { comfortable, compact }
+
+/// The frame (owner, 2026-11-10): Auto (the desktop frame on a big window: DeX, an external display, a tablet),
+/// Phone (always the phone frame) or Desktop (the rail, docking panels and floating windows, even on a phone).
+enum LayoutMode {
+  auto('Auto'),
+  phone('Phone'),
+  desktop('Desktop');
+
+  const LayoutMode(this.label);
+  final String label;
+}
 
 /// How a long-press menu opens (owner, 2026-11-09): a compact list near the finger, or a Bitwig-style ring.
 enum LongPressMenuStyle { list, ring }
@@ -167,6 +179,7 @@ class Settings extends ChangeNotifier {
     Neon.showScopes = performanceMode != PerformanceMode.minimal;
     Motion.setting = motion;
     Motion.haptics = haptics;
+    Haptics.strength = hapticStrength;
     Glass.enabled = glass;
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
@@ -176,8 +189,18 @@ class Settings extends ChangeNotifier {
   /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off. Minimal and the system setting lower it further.
   MotionLevel motion = MotionLevel.full;
 
-  /// Haptic ticks on snaps, detents and placed notes; on by default (owner).
+  /// Haptics on every touch, step and drag; on by default (owner).
   bool haptics = true;
+
+  /// How strong the haptics are, 0 to 1 (owner, 2026-11-10: "a little bit more, just barely"; 0.5 is the base).
+  double hapticStrength = 0.5;
+
+  /// Which frame the app uses (owner, 2026-11-10): Auto picks the desktop frame on a big enough window.
+  LayoutMode layoutMode = LayoutMode.auto;
+
+  /// Phone landscape: the focus view's side panel's share of the width (owner, 2026-11-10: resizable, 2/3).
+  double focusPanelShare = defaultFocusPanelShare;
+  static const defaultFocusPanelShare = 2 / 3, minFocusPanelShare = 0.3, maxFocusPanelShare = 0.8;
 
   /// The docking layouts by screen shape (`phonePortrait`, `phoneLandscape`, `desktop`), kept as raw JSON: the dock
   /// reads them and falls back to a preset when one is missing or damaged.
@@ -281,6 +304,9 @@ class Settings extends ChangeNotifier {
         'vim_code': vimCode,
         'motion': motion.name,
         'haptics': haptics,
+        'haptic_strength': hapticStrength,
+        'layout_mode': layoutMode.name,
+        'focus_panel_share': focusPanelShare,
         'glass': glass,
         'quick_actions': quickActions,
         'track_gap': trackGap,
@@ -318,6 +344,11 @@ class Settings extends ChangeNotifier {
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     motion = pick(MotionLevel.values, j['motion'], motion);
     if (j['haptics'] is bool) haptics = j['haptics'] as bool;
+    final hs = j['haptic_strength'];
+    if (hs is num && hs.isFinite) hapticStrength = hs.toDouble().clamp(0.0, 1.0);
+    layoutMode = pick(LayoutMode.values, j['layout_mode'], layoutMode);
+    final fs = j['focus_panel_share'];
+    if (fs is num && fs.isFinite) focusPanelShare = fs.toDouble().clamp(minFocusPanelShare, maxFocusPanelShare);
     if (j['glass'] is bool) glass = j['glass'] as bool;
     if (j['quick_actions'] is bool) quickActions = j['quick_actions'] as bool;
     final gap = j['track_gap'];

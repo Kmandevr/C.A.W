@@ -1,12 +1,12 @@
 // The frame's pieces: the section bar (phone portrait), the rail (landscape, tablet, desktop), the bottom transport
 // (play, stop, record, undo; drag to scrub) and the slim top status row.
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../model/app_state.dart';
 import '../../model/automation_writer.dart';
 import '../../model/live_midi.dart';
 import '../glass.dart';
+import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
 import 'live_keys.dart';
@@ -95,7 +95,7 @@ class _SectionButton extends StatelessWidget {
       child: InkWell(
         key: ValueKey('section-${section.name}'),
         onTap: () {
-          if (Motion.haptics) HapticFeedback.selectionClick();
+          Haptics.tap();
           onTap();
         },
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -202,7 +202,7 @@ class _BottomTransportState extends State<BottomTransport> {
     final clamped = at.clamp(0.0, (s.project.engineLoopSteps - 1).toDouble()).toDouble();
     if (clamped != _scrubAt) {
       _scrubAt = clamped;
-      if (Motion.haptics) HapticFeedback.selectionClick();
+      Haptics.tick();
       setState(() {});
     }
   }
@@ -280,7 +280,7 @@ class _BottomTransportState extends State<BottomTransport> {
               key: const ValueKey('transport-play'),
               radius: 24,
               onTap: () {
-                if (Motion.haptics) HapticFeedback.selectionClick();
+                Haptics.tap();
                 s.togglePlay();
               },
               child: AnimatedContainer(
@@ -350,7 +350,7 @@ class RecordButton extends StatelessWidget {
             onPressed: m == null
                 ? null
                 : () {
-                    if (Motion.haptics) HapticFeedback.selectionClick();
+                    Haptics.tap();
                     m.toggleRecord();
                   },
           ),
