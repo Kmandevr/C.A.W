@@ -307,6 +307,17 @@ void ComponentChain::reset() noexcept {
     for (auto& e : entries_) e->processor->reset();
 }
 
+namespace {
+// Non-finite samples become 0. Tested on the bits (exponent all ones: inf or NaN) and written as a select,
+// so the loop vectorizes.
+void sanitize(float* x, uint32_t m) noexcept {
+    for (uint32_t i = 0; i < m; ++i) {
+        const uint32_t bits = std::bit_cast<uint32_t>(x[i]);
+        x[i] = (bits & 0x7f800000u) == 0x7f800000u ? 0.0f : x[i];
+    }
+}
+}  // namespace
+
 void ComponentChain::process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept {
     if (m == 0 || m > kMaxFrames) return;
     if (notes_) {  // an instrument makes its sound from silence: bypassed, it crossfades to silence
@@ -388,10 +399,8 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
             std::copy_n(stageL_.data(), m, left);
             std::copy_n(stageR_.data(), m, right);
         }
-        for (uint32_t i = 0; i < m; ++i) {
-            if (!std::isfinite(left[i])) left[i] = 0.0f;
-            if (!std::isfinite(right[i])) right[i] = 0.0f;
-        }
+        sanitize(left, m);
+        sanitize(right, m);
         if (e.mix != target || target != 1.0) {
             for (uint32_t i = 0; i < m; ++i) {
                 e.mix = target > e.mix ? std::min(target, e.mix + bypassStep) : std::max(target, e.mix - bypassStep);

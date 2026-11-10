@@ -4130,24 +4130,30 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.gl = g.left;
         s.gr = g.right;
     }
+    // A native instrument with no .caw effects after it stays stereo into the inserts; the mono chain output
+    // (y) is then not used, so it is not worked out.
+    const bool instrumentStereo = !tail && s.cur->native && s.cur->main.empty() && !(s.fade && !s.old->main.empty());
     double* y = tmp_;
-    for (int i = 0; i < m; ++i) y[i] = tail ? 0.0 : static_cast<double>(in[0][i]);
+    if (!instrumentStereo)
+        for (int i = 0; i < m; ++i) y[i] = tail ? 0.0 : static_cast<double>(in[0][i]);
     if (s.seam && !tail) {
         const int sl = std::min(m, s.seamLeft);
-        for (int i = 0; i < sl; ++i) {
-            const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
-            y[i] = static_cast<double>(in[1][i]) * (1.0 - w) + y[i] * w;
-        }
+        if (!instrumentStereo)
+            for (int i = 0; i < sl; ++i) {
+                const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
+                y[i] = static_cast<double>(in[1][i]) * (1.0 - w) + y[i] * w;
+            }
         s.shadowN += sl;
         s.seamLeft -= sl;
     }
     if (s.fade && !tail) {
         const int sl = std::min(m, s.swapLeft);
-        for (int i = 0; i < m; ++i) {
-            double w = 1.0;
-            if (i < sl) w = static_cast<double>(swapLen - s.swapLeft + i + 1) / (swapLen + 1);
-            y[i] = static_cast<double>(in[2][i]) * (1.0 - w) + y[i] * w;
-        }
+        if (!instrumentStereo)
+            for (int i = 0; i < m; ++i) {
+                double w = 1.0;
+                if (i < sl) w = static_cast<double>(swapLen - s.swapLeft + i + 1) / (swapLen + 1);
+                y[i] = static_cast<double>(in[2][i]) * (1.0 - w) + y[i] * w;
+            }
         s.swapLeft -= sl;
     }
     if (s.old && s.swapLeft <= 0 && canRetire(1)) {
@@ -4159,8 +4165,6 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     // make of it stays stereo through volume and pan (the pan law then works per side, as balance).
     ComponentChain* const inserts = s.inserts;
     const bool fading = s.insertsFadeLeft > 0;
-    // A native instrument with no .caw effects after it stays stereo into the inserts.
-    const bool instrumentStereo = !tail && s.cur->native && s.cur->main.empty() && !(s.fade && !s.old->main.empty());
     const bool stereo = inserts || fading || instrumentStereo;  // stereo output, not the mono chain
     if (stereo) {
         // A tail frozen while the track was silent must not play on when it sounds again.
@@ -4204,6 +4208,39 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     int sp = s.scopePos.load(std::memory_order_relaxed);
     const bool volumeAutomated = s.automation && !s.automation->volume.empty();
     const bool panAutomated = s.automation && !s.automation->pan.empty();
+    const double settled = target > 0.0 ? target : 0.0;
+    if (!volumeAutomated && !panAutomated && s.gain == settled) {
+        // The usual case: volume settled, no lanes. The same sums as the loop below, without its per-sample
+        // branches, and the scope written in at most two runs instead of a wrap test per sample.
+        const double gain = s.gain, gl = s.gl, gr = s.gr;
+        float mid[kBlock];
+        if (stereo) {
+            for (int i = 0; i < m; ++i) {
+                const double vl = static_cast<double>(insertL_[i]) * gain;
+                const double vr = static_cast<double>(insertR_[i]) * gain;
+                outL[i] = routeSample(vl * gl);
+                outR[i] = routeSample(vr * gr);
+                peak = std::max(peak, std::max(std::fabs(outL[i]), std::fabs(outR[i])));
+                sig = std::max(sig, static_cast<float>(std::max(std::fabs(vl), std::fabs(vr))));
+                mid[i] = static_cast<float>(0.5 * (vl + vr));
+            }
+        } else {
+            for (int i = 0; i < m; ++i) {
+                const double v = finiteOr0(y[i]) * gain;
+                outL[i] = routeSample(v * gl);
+                outR[i] = routeSample(v * gr);
+                peak = std::max(peak, std::max(std::fabs(outL[i]), std::fabs(outR[i])));
+                sig = std::max(sig, static_cast<float>(std::fabs(v)));
+                mid[i] = static_cast<float>(v);
+            }
+        }
+        for (int i = 0; i < m;) {
+            const int run = std::min(m - i, kScopeSize - sp);
+            for (int k = 0; k < run; ++k) s.scope[sp + k].store(mid[i + k], std::memory_order_relaxed);
+            i += run;
+            sp = (sp + run) % kScopeSize;
+        }
+    } else  // volume moving or automated: per sample
     for (int i = 0; i < m; ++i) {
         const double step = volumeAutomated || panAutomated ? static_cast<double>(g_ + i) / stepLen_ : 0.0;
         const double desired = target > 0.0
