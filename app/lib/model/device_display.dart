@@ -2,6 +2,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import 'arrange_fx.dart';
@@ -88,6 +89,9 @@ class _Poll extends ValueNotifier<DeviceDisplayFrame?> {
   }
 
   void _read() {
+    // In the background nothing is drawn: no reads over FFI until the app is back.
+    final life = SchedulerBinding.instance.lifecycleState;
+    if (life != null && life != AppLifecycleState.resumed) return;
     final engine = target.state.engine;
     final layer = target.layer;
     final id = target.componentId;

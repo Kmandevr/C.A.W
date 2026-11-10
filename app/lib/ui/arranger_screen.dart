@@ -136,9 +136,26 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   final _keys = FocusNode(debugLabel: 'arranger keys', skipTraversal: true);
   KeyRouterState? _router;
 
+  // Bumped by every rebuild cause but a time zoom: the track headers, which don't depend on the zoom, are kept as
+  // built while a pinch or a zoom glide rebuilds the lanes every frame (#174).
+  int _headersRev = 0;
+
+  @override
+  void setState(VoidCallback fn) {
+    _headersRev++;
+    super.setState(fn);
+  }
+
+  @override
+  void didUpdateWidget(covariant ArrangerScreen old) {
+    super.didUpdateWidget(old);
+    _headersRev++;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _headersRev++;
     final r = KeyRouter.of(context);
     if (r == _router) return;
     _router?.unregister(Area.arranger, _keys);
@@ -246,7 +263,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final pos = _hScroll.hasClients ? _hScroll.positions.last : null;
     final f = focal ?? (pos?.viewportDimension ?? 0) / 2;
     final anchor = pos == null ? null : (pos.pixels + f) / zoom;
-    setState(() => zoom = z);
+    super.setState(() => zoom = z); // the zoom alone: the headers stay as built
     if (anchor == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_hScroll.hasClients) return;
@@ -947,10 +964,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       child: LayoutBuilder(builder: (context, view) {
         // A pixel short of the view, so a few tracks still don't scroll (the lanes' column fills the view anyway).
         final zoneH = math.max(view.maxHeight - ruler - rows - 1, math.max(80.0, trackHeight * 1.5));
-        return SingleChildScrollView(key: drag?.vViewport, controller: drag?.vScroll, child: Listener(
+        // Repaint boundaries (#174): a scroll moves a layer already painted instead of repainting every track and
+        // clip; only the grid and the ruler, which paint the visible span, repaint as the view moves.
+        return SingleChildScrollView(key: drag?.vViewport, controller: drag?.vScroll, child: RepaintBoundary(child: Listener(
         onPointerSignal: (e) => _wheel(e, null),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Stack(children: [SizedBox(width: headW, child: Column(children: [
+      Stack(children: [SizedBox(width: headW, child: Selected(
+        select: () => (_headersRev, layers.length, zoneH),
+        builder: (context) => Column(children: [
         SizedBox(height: ruler, child: Padding(
           padding: EdgeInsets.only(left: 10, top: pinned ? 4 : 8),
           child: Align(alignment: Alignment.centerLeft,
@@ -977,7 +998,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           SizedBox(height: gap),
         ],
         if (drag != null) NewTrackZone(key: drag.newTrackHeader, state: s, drag: drag, height: zoneH, header: true),
-      ])),
+      ]))),
         // The headers' right edge: drag it to make the headers narrower or wider (saved).
         Positioned(right: 0, top: 0, bottom: 0, width: 10, child: _ResizeGrip(
           key: const ValueKey('header-width-grip'), axis: Axis.horizontal, label: 'Resize track headers',
@@ -985,14 +1006,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
               .clamp(Settings.minHeaderWidth, Settings.maxHeaderWidth).toDouble()),
           onEnd: _saveHeaderSize)),
       ]),
-      Expanded(child: SingleChildScrollView(key: drag?.hViewport, controller: _hScroll, scrollDirection: Axis.horizontal,
+      Expanded(child: RepaintBoundary(child: SingleChildScrollView(key: drag?.hViewport, controller: _hScroll, scrollDirection: Axis.horizontal,
         child: Listener(
           onPointerSignal: (e) => _wheel(e, _hScroll.hasClients ? e.localPosition.dx - _hScroll.positions.last.pixels : null),
           child: SizedBox(key: pinned ? null : _lanesBox, width: width, child: Stack(children: [
           // One grid behind every track, through the gaps and spacers and down to the bottom of the view
           // below the last track (owner: like Reaper).
-          Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: CustomPaint(
-            painter: _ArrangementGrid(stepW, p.stepsPerBar, _hScroll)))),
+          Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: RepaintBoundary(child: CustomPaint(
+            painter: _ArrangementGrid(stepW, p.stepsPerBar, _hScroll))))),
           // The loop range's edges, down through the lanes while it is on.
           if (p.loopsRange) for (final at in [p.loopStartSteps, p.loopEndSteps])
             Positioned(left: at * stepW - 0.5, top: ruler, bottom: 0, width: 1, child: IgnorePointer(
@@ -1001,11 +1022,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           Positioned(left: end * stepW - 1, top: 0, bottom: 0, width: 2, child: IgnorePointer(
             child: Tooltip(message: 'Song end: playback loops back to the start',
               child: Container(color: Neon.pink.withValues(alpha: 0.7))))),
-          ConstrainedBox(constraints: BoxConstraints(minHeight: pinned ? 0 : view.maxHeight), child: Column(children: [
-            if (pinned)
-              SizedBox(height: ruler, width: width, child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll)))
-            else
-              ArrangeRuler(state: s, stepW: stepW, width: width, height: ruler, scroll: _hScroll),
+          ConstrainedBox(constraints: BoxConstraints(minHeight: pinned ? 0 : view.maxHeight), child: RepaintBoundary(child: Column(children: [
+            RepaintBoundary(child: pinned
+                ? SizedBox(height: ruler, width: width, child: CustomPaint(painter: _BarRuler(stepW, p.stepsPerBar, _hScroll)))
+                : ArrangeRuler(state: s, stepW: stepW, width: width, height: ruler, scroll: _hScroll)),
             for (final layer in layers) ...[
               _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width, stepW: stepW,
                 trackHeight: trackHeight, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag),
@@ -1017,7 +1037,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             ],
             if (drag != null) SizedBox(width: width,
               child: NewTrackZone(key: drag.newTrackLane, state: s, drag: drag, height: zoneH, stepW: stepW)),
-          ])),
+          ]))),
           // A live island (widgets.dart): the line moves about 30 times a second while playing, and without it the
           // timeline around it would lay out and repaint with it.
           Positioned.fill(child: IgnorePointer(child: LiveIsland(child: ValueListenableBuilder<int>(
@@ -1037,8 +1057,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
               final local = Rect.fromPoints(me.globalToLocal(box.topLeft), me.globalToLocal(box.bottomRight));
               return CustomPaint(painter: _MarqueePainter(local));
             }))),
-        ]))))),
-    ])));
+        ])))))),
+    ]))));
       })));
   }
 
