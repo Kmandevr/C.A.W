@@ -10,6 +10,7 @@
 #include "capi_internal.h"
 #include "compile.h"
 #include "component_test.h"
+#include "sample_pack.h"
 #include "docs.h"
 #include "json.h"
 #include "midifile.h"
@@ -343,6 +344,20 @@ char* caw_component_test(const char* request_json, int32_t trust_level, const ch
     host.outputDir = output_dir ? output_dir : "";
     host.inputDir = input_dir ? input_dir : "";
     return dup(caw::componentTestJson(request_json, host));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+char* caw_sample_pack_render(const char* request_json, int32_t trust_level, int32_t* progress, int32_t* cancel) try {
+    if (!request_json) return dup("{\"ok\":false,\"error\":\"missing request\"}");
+    caw::NativeModuleTrust trust;
+    switch (trust_level) {
+        case CAW_NATIVE_TRUST_BLOCKED: trust = caw::NativeModuleTrust::Blocked; break;
+        case CAW_NATIVE_TRUST_ISOLATED: trust = caw::NativeModuleTrust::Isolated; break;
+        case CAW_NATIVE_TRUST_TRUSTED: trust = caw::NativeModuleTrust::Trusted; break;
+        default: return dup("{\"ok\":false,\"error\":\"invalid native component trust level\"}");
+    }
+    return dup(caw::samplePackJson(request_json, trust, progress, cancel));
 } catch (...) {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
 }

@@ -19,6 +19,7 @@
 #include "pattern.h"
 #include "project.h"
 #include "render.h"
+#include "sample_pack.h"
 #include "wav.h"
 
 namespace {
@@ -62,7 +63,16 @@ const char* kUsage =
     "      --compare ID|LIBRARY [--compare-id ID --compare-trust T]   null test against another component or build\n"
     "      --bypass (null test against the dry input)  --align none|declared|measured (default declared)\n"
     "      --wav OUT.wav --input-wav IN.wav --no-cpu --fft N --request FILE.json (the request as JSON)\n"
-    "      --report json|text  --strict (exit 1 when the result has warnings)\n";
+    "      --report json|text  --strict (exit 1 when the result has warnings)\n"
+    "  caw sample-pack [INSTRUMENT] --out DIR [options]  render an instrument over notes, velocities and parameter\n"
+    "                                        steps to named WAV files plus a manifest (docs/engine.md \"Sample packs\")\n"
+    "      --request FILE.json (the request as JSON; the options below override its keys)\n"
+    "      --library PATH --trust trusted|isolated|blocked   for an instrument or effect in a built library\n"
+    "      --effect ID (repeatable, in order)  --set NAME=VALUE (an instrument parameter; repeatable)\n"
+    "      --notes C3,E3,60 | FROM:TO[:STEP]   --vel 64,127   --step NAME=V1,V2,... (repeatable)\n"
+    "      --name NAME --pattern '{name}_{note}_{vel}_{param}'  --hold S --max S --tail-db DB\n"
+    "      --rate R --bits 16|24|32 --mono --trim-db DB --no-trim --fade-in MS --fade-out MS\n"
+    "      --normalize peak|rms [--target DB] [--group]  --loop  --sfz  --max-files N  --overwrite\n";
 
 bool readFile(const std::string& path, std::string& out) {
     std::ifstream f(path, std::ios::binary);
@@ -582,6 +592,249 @@ int testComponent(int argc, char** argv) {
     return strict && warnings && !warnings->arr.empty() ? 1 : 0;
 }
 
+// The JSON text of a parsed value (for the merged sample-pack request).
+std::string jsonText(const caw::Json& j) {
+    switch (j.type) {
+        case caw::Json::Type::Null: return "null";
+        case caw::Json::Type::Bool: return j.b ? "true" : "false";
+        case caw::Json::Type::Number: {
+            char buf[40];
+            std::snprintf(buf, sizeof buf, "%.17g", j.num);
+            return buf;
+        }
+        case caw::Json::Type::String: return "\"" + caw::jsonEscape(j.str) + "\"";
+        case caw::Json::Type::Array: {
+            std::string s = "[";
+            for (std::size_t i = 0; i < j.arr.size(); ++i) s += (i ? "," : "") + jsonText(j.arr[i]);
+            return s + "]";
+        }
+        case caw::Json::Type::Object: {
+            std::string s = "{";
+            bool first = true;
+            for (const auto& [k, v] : j.obj) {
+                s += (first ? "\"" : ",\"") + caw::jsonEscape(k) + "\":" + jsonText(v);
+                first = false;
+            }
+            return s + "}";
+        }
+    }
+    return "null";
+}
+
+caw::Json jsonNumber(double v) {
+    caw::Json j;
+    j.type = caw::Json::Type::Number;
+    j.num = v;
+    return j;
+}
+caw::Json jsonString(const std::string& v) {
+    caw::Json j;
+    j.type = caw::Json::Type::String;
+    j.str = v;
+    return j;
+}
+caw::Json jsonBool(bool v) {
+    caw::Json j;
+    j.type = caw::Json::Type::Bool;
+    j.b = v;
+    return j;
+}
+
+// "a,b,c" as JSON values: numbers where they parse, note names (strings) otherwise.
+bool listArg(const std::string& text, caw::Json& out) {
+    out = caw::Json{};
+    out.type = caw::Json::Type::Array;
+    std::size_t at = 0;
+    while (at <= text.size()) {
+        const std::size_t comma = std::min(text.find(',', at), text.size());
+        const std::string item = text.substr(at, comma - at);
+        if (item.empty()) return false;
+        char* end = nullptr;
+        const double d = std::strtod(item.c_str(), &end);
+        out.arr.push_back(*end == '\0' && std::isfinite(d) ? jsonNumber(d) : jsonString(item));
+        at = comma + 1;
+    }
+    return !out.arr.empty();
+}
+
+int samplePack(int argc, char** argv) {
+    caw::Json req;
+    req.type = caw::Json::Type::Object;
+    std::string requestFile, instrument, library, trust;
+    std::vector<std::string> effects;
+    std::vector<std::pair<std::string, double>> sets;
+    std::vector<std::pair<std::string, caw::Json>> steps;
+    caw::Json normalize;
+    normalize.type = caw::Json::Type::Object;
+    std::vector<std::pair<const char*, caw::Json>> top;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        auto val = [&](const char* name) -> std::string {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "%s needs a value\n", name);
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        auto num = [&](const char* name) {
+            const std::string v = val(name);
+            char* end = nullptr;
+            const double d = std::strtod(v.c_str(), &end);
+            if (v.empty() || *end != '\0' || !std::isfinite(d)) {
+                std::fprintf(stderr, "%s needs a number\n", name);
+                std::exit(2);
+            }
+            return jsonNumber(d);
+        };
+        if (a == "--request") requestFile = val("--request");
+        else if (a == "--out") top.emplace_back("output_dir", jsonString(val("--out")));
+        else if (a == "--library") library = val("--library");
+        else if (a == "--trust") trust = val("--trust");
+        else if (a == "--effect") effects.push_back(val("--effect"));
+        else if (a == "--name") top.emplace_back("name", jsonString(val("--name")));
+        else if (a == "--pattern") top.emplace_back("name_pattern", jsonString(val("--pattern")));
+        else if (a == "--hold") top.emplace_back("hold_seconds", num("--hold"));
+        else if (a == "--max") top.emplace_back("max_seconds", num("--max"));
+        else if (a == "--tail-db") top.emplace_back("tail_threshold_db", num("--tail-db"));
+        else if (a == "--rate") top.emplace_back("sample_rate", num("--rate"));
+        else if (a == "--bits") top.emplace_back("bit_depth", num("--bits"));
+        else if (a == "--mono") top.emplace_back("channels", jsonNumber(1));
+        else if (a == "--fade-in") top.emplace_back("fade_in_ms", num("--fade-in"));
+        else if (a == "--fade-out") top.emplace_back("fade_out_ms", num("--fade-out"));
+        else if (a == "--max-files") top.emplace_back("max_files", num("--max-files"));
+        else if (a == "--loop") top.emplace_back("loop", jsonBool(true));
+        else if (a == "--sfz") top.emplace_back("sfz", jsonBool(true));
+        else if (a == "--overwrite") top.emplace_back("overwrite", jsonBool(true));
+        else if (a == "--no-trim") top.emplace_back("trim", jsonBool(false));
+        else if (a == "--trim-db") {
+            caw::Json t;
+            t.type = caw::Json::Type::Object;
+            t.obj["threshold_db"] = num("--trim-db");
+            top.emplace_back("trim", t);
+        } else if (a == "--normalize") normalize.obj["mode"] = jsonString(val("--normalize"));
+        else if (a == "--target") normalize.obj["target_db"] = num("--target");
+        else if (a == "--group") normalize.obj["scope"] = jsonString("group");
+        else if (a == "--vel" || a == "--notes") {
+            const std::string v = val(a.c_str());
+            caw::Json list;
+            const std::size_t colon = v.find(':');
+            if (a == "--notes" && colon != std::string::npos) {
+                list.type = caw::Json::Type::Object;
+                caw::Json parts;
+                std::string range = v;
+                for (char& c : range)
+                    if (c == ':') c = ',';
+                if (!listArg(range, parts) || parts.arr.size() < 2 || parts.arr.size() > 3) {
+                    std::fputs("--notes needs FROM:TO[:STEP]\n", stderr);
+                    return 2;
+                }
+                list.obj["from"] = parts.arr[0];
+                list.obj["to"] = parts.arr[1];
+                if (parts.arr.size() == 3) list.obj["step"] = parts.arr[2];
+            } else if (!listArg(v, list)) {
+                std::fprintf(stderr, "%s needs a comma-separated list\n", a.c_str());
+                return 2;
+            }
+            top.emplace_back(a == "--vel" ? "velocities" : "notes", list);
+        } else if (a == "--set" || a == "--step") {
+            const std::string p = val(a.c_str());
+            const std::size_t eq = p.find('=');
+            caw::Json list;
+            if (eq == std::string::npos || eq == 0 || !listArg(p.substr(eq + 1), list)) {
+                std::fprintf(stderr, "%s needs NAME=VALUE%s\n", a.c_str(), a == "--step" ? "[,VALUE...]" : "");
+                return 2;
+            }
+            for (const caw::Json& x : list.arr)
+                if (x.type != caw::Json::Type::Number) {
+                    std::fprintf(stderr, "%s values must be numbers\n", a.c_str());
+                    return 2;
+                }
+            if (a == "--set") {
+                if (list.arr.size() != 1) {
+                    std::fputs("--set takes one value (use --step for several)\n", stderr);
+                    return 2;
+                }
+                sets.emplace_back(p.substr(0, eq), list.arr[0].num);
+            } else {
+                steps.emplace_back(p.substr(0, eq), list);
+            }
+        } else if (instrument.empty() && a.rfind("--", 0) != 0) instrument = a;
+        else {
+            std::fprintf(stderr, "unknown option %s\n", a.c_str());
+            return 2;
+        }
+    }
+    if (!requestFile.empty()) {
+        std::string text, err;
+        if (!readFile(requestFile, text)) {
+            std::fprintf(stderr, "can't read %s\n", requestFile.c_str());
+            return 1;
+        }
+        if (!caw::parseJson(text, req, err) || req.type != caw::Json::Type::Object) {
+            std::fprintf(stderr, "%s: %s\n", requestFile.c_str(), err.empty() ? "not a JSON object" : err.c_str());
+            return 1;
+        }
+    }
+    for (auto& [k, v] : top) req.obj[k] = v;
+    if (!instrument.empty() || !library.empty() || !sets.empty()) {
+        caw::Json inst;
+        if (const caw::Json* old = req.get("instrument")) inst = *old;
+        if (inst.type == caw::Json::Type::String) {
+            const std::string id = inst.str;
+            inst = caw::Json{};
+            inst.type = caw::Json::Type::Object;
+            inst.obj["id"] = jsonString(id);
+        }
+        inst.type = caw::Json::Type::Object;
+        if (!instrument.empty()) inst.obj["id"] = jsonString(instrument);
+        if (!library.empty()) {  // a bare file name would make the system loader search its path, not this directory
+            const bool bare = library.find('/') == std::string::npos && library.find('\\') == std::string::npos;
+            inst.obj["library"] = jsonString(bare ? "./" + library : library);
+        }
+        if (!sets.empty()) {
+            caw::Json& params = inst.obj["params"];
+            params.type = caw::Json::Type::Object;
+            for (const auto& [k, v] : sets) params.obj[k] = jsonNumber(v);
+        }
+        req.obj["instrument"] = inst;
+    }
+    if (!effects.empty()) {
+        caw::Json fx;
+        fx.type = caw::Json::Type::Array;
+        for (const std::string& e : effects) fx.arr.push_back(jsonString(e));
+        req.obj["effects"] = fx;
+    }
+    if (!steps.empty()) {
+        caw::Json axes;
+        axes.type = caw::Json::Type::Array;
+        for (const auto& [id, values] : steps) {
+            caw::Json axis;
+            axis.type = caw::Json::Type::Object;
+            axis.obj["id"] = jsonString(id);
+            axis.obj["values"] = values;
+            axes.arr.push_back(axis);
+        }
+        req.obj["params"] = axes;
+    }
+    if (!normalize.obj.empty()) req.obj["normalize"] = normalize;
+    caw::NativeModuleTrust level = caw::NativeModuleTrust::Blocked;  // no --trust: no library loads
+    if (trust == "trusted") level = caw::NativeModuleTrust::Trusted;
+    else if (trust == "isolated") level = caw::NativeModuleTrust::Isolated;
+    else if (!trust.empty() && trust != "blocked") {
+        std::fputs("--trust must be trusted, isolated or blocked\n", stderr);
+        return 2;
+    }
+    if (!req.get("instrument") || !req.get("output_dir")) {
+        std::fputs("sample-pack needs an instrument and --out DIR (or a --request file with them)\n", stderr);
+        return 2;
+    }
+    const std::string result = caw::samplePackJson(jsonText(req), level);
+    std::printf("%s\n", result.c_str());
+    caw::Json parsed;
+    std::string err;
+    return caw::parseJson(result, parsed, err) && parsed.boolean("ok", false) ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fputs(kUsage, stderr);
@@ -593,6 +846,7 @@ int main(int argc, char** argv) {
     if (cmd == "docs") return docs(argc, argv);
     if (cmd == "midi") return midi(argc, argv);
     if (cmd == "test-component") return testComponent(argc, argv);
+    if (cmd == "sample-pack") return samplePack(argc, argv);
     if (cmd == "templates") {
         for (int i = 0; i < caw::kTemplateCount; ++i) std::printf("%s\n", caw::kTemplateFiles[i]);
         return 0;

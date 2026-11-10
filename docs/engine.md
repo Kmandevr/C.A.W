@@ -1,6 +1,6 @@
 ---
 title: Engine and language reference
-summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI, the component testing suite and the tests.
+summary: What the built C++ engine does: the module language, playback of layers, the project file, exports, the C API, the caw CLI, the component testing suite, the sample-pack maker and the tests.
 covers: [engine/, examples/]
 updated: 2026-11-10
 ---
@@ -341,6 +341,7 @@ The native hardware probe is a one-time, non-real-time snapshot. It uses active/
   - `org.caw.synth.morph` ("Morph synth"): 8 voices, each up to 16 unison copies (`unison`, `detune` ±1 semitone at 1, `spread` across the stereo field) of a wave that morphs sine, triangle, saw, square (`shape`; the wavetable pad's `table.basic`, computed with band-limited oscillators instead of a table), swept by `drift` over 16 beats of the song's tempo; a resonant 12 dB low-pass per side (`cutoff` 100..16000 Hz, `resonance`; a note's timbre opens it), ADSR (`attack`, `decay`, `release` 0.001..10 s, `sustain`), `volume`; velocity and pressure scale each voice.
 
 - **Component testing:** `caw_component_test(request_json, trust_level, output_dir, input_dir)` renders one C++ effect offline with a test signal and returns its measurements as JSON (see [Component testing](#component-testing)). The host gives a library's trust (the user's own choice for it); a request naming a `trust` is refused. Written WAVs are plain file names inside `output_dir` and a WAV test signal a plain name inside `input_dir` (NULL: none), so a request handed on from project data can't load code or touch files on its own. A test WAV is read only from a regular file of at most 200 MB. The CLI keeps `--trust` and paths, since its user types them. It blocks while it renders, so hosts call it from a worker, never the UI or audio thread.
+- **Sample packs:** `caw_sample_pack_render(request_json, trust_level, progress, cancel)` renders an instrument over notes, velocities and parameter steps to named WAV files in one directory and returns the result as JSON (see [Sample packs](#sample-packs)). It blocks while it renders, so hosts call it from a worker, never the UI or audio thread.
 - Strings the engine returns are freed with `caw_free`. Only `caw_*` symbols are exported.
 - Nothing throws across the API: running out of memory comes back as an error.
 
@@ -354,6 +355,7 @@ caw templates
 caw docs [--check] [--dir DIR]
 caw midi import IN.mid -o OUT.caw | caw midi export PATTERN.caw -o OUT.mid [--clip]
 caw test-component ID|LIBRARY [--id ID --trust T] [--signal TYPE ...] [--param NAME=VALUE ...] [--sweep P] [--compare X] [--bypass] [--report json|text] [--strict]
+caw sample-pack [INSTRUMENT] --out DIR [--request FILE.json] [--library PATH --trust T] [--effect ID ...] [--notes ...] [--vel ...] [--step NAME=V1,V2 ...] [...]
 ```
 
 - For a single `.caw` file, `render` builds a one-layer project: `--bpm` and `--bars` set the loop, `--steps` sets the layer's length, and `--pattern FILE` plays it from a pattern's notes. `caw check` checks patterns too.
@@ -402,9 +404,52 @@ The testing suite for C++ effects (#163; `engine/src/component_test.*`, measurem
 
 **CLI:** `caw test-component org.caw.distortion --param drive=8 --report text`, or for a built library `caw test-component ./build/my-echo.so --id local.my-echo --trust trusted --signal impulse`. Options map onto the request (`caw` with no arguments lists them); `--request FILE.json` sends a request file as it is. It prints the JSON result (`--report text`: a few readable lines). It exits 1 when the test fails, and with `--strict` also when the result has warnings, so CI can gate a component on it.
 
+## Sample packs
+
+The sample-pack maker (#164; `engine/src/sample_pack.*`) renders one instrument, optionally followed by a chain of stereo effects, offline on the calling thread (no audio device, never the audio thread) over a grid of notes x velocities x parameter steps, and writes each cell as a WAV file into one output directory, with a manifest and optionally SFZ files. Each cell gets fresh instances, activated at the request's sample rate and block size; the instrument gets a MIDI 2.0 note on at frame 0 (velocity / 127, note id 1), held for `hold_seconds`, then a note off; the render goes on until, after the off and the chain's declared latency, the output has stayed below `tail_threshold_db` for 0.25 s (or `max_seconds` is reached: `tail_truncated`). The file then ends at the last frame above that threshold. Parameters keep one value per file (no smoothing), and the transport is playing at `tempo` from beat 0. The same request gives the same files byte for byte (the manifest records an FNV-1a hash of each).
+
+**Trust and files.** Trust is never read from the request: the caller passes it (`trust_level` in the C API, `--trust` in the CLI) and it applies to every `library` the request names; only `CAW_NATIVE_TRUST_TRUSTED` loads one (blocked and isolated are refused, as in the Engine), and a `"trust"` key anywhere in the request is an error. Built-ins need no trust. Every file is written directly inside `output_dir` (created if missing, then made canonical): names are sanitised to letters, digits and `. _ - # +` (anything else becomes `_`, no `..`, no leading dot, at most 150 characters, Windows device names prefixed with `_`), a target that is a symbolic link or not a regular file is refused, and an existing file is refused unless `overwrite` is true. All names are checked (and must be unique, ignoring case) before anything renders. Each file is written to `NAME.part` and renamed, so a failure never leaves a half-written file; a cancelled or failed pack keeps the files finished before it and writes no manifest. The engine reads no WAV files here.
+
+**Request** (JSON object; an unknown key is an error):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `instrument` | required | an id (`"org.caw.synth.basic"`) or `{"id", "library", "params": {id: value}}`; it must be an instrument (one event input, one stereo audio output) |
+| `effects` | none | up to 16 stereo effects in order, each in the same form |
+| `output_dir` | required | the directory every file goes into |
+| `name` | `sample` | the pack's name (sanitised): `{name}`, and the manifest `NAME.json` and SFZ `NAME.sfz` |
+| `name_pattern` | `{name}_{note}_{vel}_{param}` | tokens `{name}`, `{note}` (C4 = 60, sharps: `F#4`, `C-1`), `{midi}`, `{vel}`, `{param}`, `{index}`; the result is sanitised, repeated underscores collapse and trailing `_`/`-` are dropped (so an empty `{param}` leaves no trace); `.wav` is added |
+| `notes` | `[60]` | up to 128 notes, MIDI numbers or names (`"C3"`, `"Bb2"`), or `{"from", "to", "step"}` |
+| `velocities` | `[100]` | 1..127, a list or `{"from", "to", "steps"}` (rounded) |
+| `params` | none | up to 8 axes: `{"id", "values": [...]}` or `{"id", "from", "to", "steps"}` (at most 128 values), with `"effect": n` for `effects[n]`'s parameter (default: the instrument's). Values are clamped and stepped as in playback. The first axis changes slowest, then notes, then velocities |
+| `hold_seconds` | 1 | 0.001..60 |
+| `max_seconds` | the larger of 10 and hold + 5 (at most 60) | the longest a file may be |
+| `tail_threshold_db` | -80 | where the tail ends |
+| `sample_rate`, `block_size`, `tempo` | 48000, 64, 120 | 8000..192000, 1..8192, 20..999 |
+| `bit_depth` | 24 | 16 or 24 (PCM, rounded and clipped to full scale, no dither) or 32 (float) |
+| `channels` | 2 | 1 writes the mid, (L + R) / 2 |
+| `trim` | `{"start": true, "end": true, "threshold_db": -80}` | removes leading and trailing frames where every channel is below the threshold; `false` turns both off |
+| `fade_in_ms`, `fade_out_ms` | 0 | linear fades after trimming, kept outside a loop |
+| `normalize` | `none` | `"peak"`, `"rms"` or `{"mode", "target_db", "scope"}`: target -1 dBFS for peak, -18 dBFS for RMS (over all samples of all channels); scope `file` (each file its own gain) or `group` (one gain for the pack, set by its loudest file, keeping the files' relative levels; costs a measuring pass). For 16/24-bit the gain is held so the peak stays at or below 0 dBFS (`normalize_limited_by_peak`) |
+| `loop` | false | `true` or `{"enabled", "min_seconds": 0.05, "max_seconds": half the hold}`: a forward loop in the held part, as heard after the chain's latency. Its end is the frame before the last rising zero crossing (of the mid) at or before 20 ms (or a tenth of the hold, if less) before the note off; its start is the rising zero crossing, from `max_seconds` before the end to `min_seconds` before it, whose surrounding 64 frames either side best match the end's (both channels; ties keep the longer loop). Written to the `smpl` chunk; `no_loop_found` when there is none |
+| `sfz` | false | also write SFZ: one file per parameter combination (`NAME.sfz`, or `NAME_PARAMS.sfz` with axes) |
+| `manifest` | true | write `NAME.json` |
+| `max_files` | 256 | the grid may be at most this (at most 4096); a larger grid is refused before rendering |
+| `overwrite` | false | replace existing files of the same names |
+
+**Each WAV** has `fmt `, `fact` (float), a `smpl` chunk (MIDI unity note = the rendered note, the sample period, and the loop, if any, as start and inclusive end frames) and `data`.
+
+**SFZ** (plain text, basic opcodes only): one `<region>` per file with `sample=` (the file name, in the same directory), `lokey`/`hikey` (each sampled note covers the keys halfway to its neighbours; the lowest from 0, the highest to 127), `pitch_keycenter`, `lovel`/`hivel` (each velocity layer from the one below it, exclusive, up to its own velocity; the lowest from 1, the highest to 127), and `loop_mode=loop_continuous loop_start= loop_end=` or `loop_mode=no_loop`.
+
+**Result and manifest.** The result has `ok` and `error` (on failure that is all), `output_dir` (canonical) and everything the manifest holds; the manifest has no absolute paths, so a pack can be moved: `schema` (1), `name`, `instrument` and `effects` (`id`, `source` builtin or library), `settings`, `file_count`, `files` (each: `file`, `note`, `note_name`, `velocity`, `params` {id: value used}, `param_effects` (`"instrument"` or an effect index, per axis), `frames`, `seconds`, `trimmed_start_frames`, `peak_db`, `rms_db`, `gain_db`, `loop` (`start`, `end`, `match_db`: the seam's difference energy relative to the signal, lower is better) or null, `tail_truncated`, `hash` and `warnings`), `sfz` (file names), `manifest` and `warnings` (`tail_truncated`, `failed_blocks`, `no_loop_found`, `silent`, `normalize_limited_by_peak`, `clipped`, `over_full_scale`). A dB of digital silence is `null`.
+
+**CLI:** `caw sample-pack org.caw.synth.basic --out pack --name lead --notes C2:C5:12 --vel 64,127 --step cutoff=600,3000 --set release=0.4 --loop --sfz --normalize peak --group --bits 16`. `--request FILE.json` reads a request; the options override its keys. `--library PATH` takes the instrument from a built library and `--trust trusted|isolated|blocked` (default blocked) is the trust passed for every library; `--effect ID` (repeatable) adds built-in effects (library effects go in a request file). `caw` with no arguments lists every option. It prints the result JSON and exits 1 when the pack fails.
+
+**[Fact] Limits, as built:** a loop is found only where the held sound repeats: a detuned two-oscillator patch that beats slower than the hold gets a loop whose seam does not match well (`match_db` about -25 to -28 dB for `org.caw.synth.basic` at its default 7-cent detune, against below -80 dB with one sine oscillator), and nothing crossfades the seam. Notes are whole MIDI numbers.
+
 ## Tests
 
-`engine/build/caw_tests` runs 344 tests and `engine/build/caw_rt_tests` 77 more (CTest runs both):
+`engine/build/caw_tests` runs 370 tests and `engine/build/caw_rt_tests` 77 more (CTest runs both):
 - **Language:** JavaScript semantics, the defined edge cases, built-ins, params, error messages and limits.
 - **Variables:** functions, rich params, globals, exports across layers in either order, exports inside a chain, missing sources, and cycles.
 - **Library:** envelopes, LFOs, the music helpers (NaN arguments included), delay, effects and glitch tools, effect buffers starting silent on every loop, project libraries and name clashes, borrowed tips, the function-call and project memory budgets, and that every function is documented with an example that plays.
@@ -417,6 +462,7 @@ The testing suite for C++ effects (#163; `engine/src/component_test.*`, measurem
 - **Native SDK:** compiled components cross the plain-C interface v3 in `engine/include/caw_component.h` (installed with the SDK; `tests/component_header_check.c` compiles it as C99); `CAW_EXPORT_COMPONENT` in `engine/include/caw/component.hpp` builds it from a C++ `ModuleProcessor`. The C++ contract is `engine/include/caw/module.hpp`, exposed through the installable `CAW::SDK` package, which also checks with `static_assert` that its enums and event record match the C ones. `ModuleRegistry` and the Engine C API load explicit-trust shared libraries on Windows and POSIX through that one entry point, copy and validate the descriptor and stable ID, refuse a library without it (`MissingEntryPoint`), another interface version (`IncompatibleAbi`) or a missing function (`IncompleteTable`), and keep the library loaded while instances live. Tests: a fixture component, and a second build of it without the entry point. With `-DCAW_CLAP=ON`, `caw_clap_tests` (8 tests) loads the exported `.clap` plug-ins as a CLAP host and checks the factory, descriptors, ports, parameters (info, text, flush, sample-accurate changes and smoothing), state round trips, notes and MIDI in and out, the transport and zero allocations in process, against the same components run through `ModuleRegistry`, sample for sample.
 - **Mixer golden renders:** eight multi-track projects in `engine/tests/mix_golden_test.cpp` (pan, a folder bus, nested folders, mute and solo together and each alone, folder and track automation, the limiter driven through a bus and shown to engage), rendered in uneven blocks and hashed over float bits. They hold routing changes, such as moving the mixer into the graph, to bit-exact output. A companion test shows a muted or non-soloed track contributes exactly nothing: the mix equals the same project without it.
 - **Component testing:** every measurement against known signals (a sine's level, crest and THD near zero, a known 1 % + 0.5 % harmonic mix, FFT bins and the Hann scaling, IR end and cross-correlation lag), the signals (levels, seeded noise, decorrelation), the fixture's echo IR length (3,361 frames) and denormals, its 100-frame delay measured against the declared latency with every broadband signal, exact nulls of identical components and of two loads of one library, gain changes in dB, parameter sweeps, the built-in effects at an odd block size with every signal, a tail longer than declared, refusals (no trust, blocked, unknown keys and parameters), a WAV round trip, the C API, and the same JSON for the same request.
+- **Sample packs:** note names both ways, the sanitiser (separators, `..`, leading dots, device names, length) and name patterns, trim, fades, a loop on whole cycles of a sine, the `smpl` chunk and samples read back at 16, 24 and 32 bits, SFZ key and velocity ranges, a real pack of `org.caw.synth.basic` (8 files, non-silent, looped, group peak, the same bytes in another directory and with `overwrite`), effects with an effect-parameter axis, mono float and RMS normalisation, refusals (a library without trust, a `trust` key, unknown parameters and keys, not an instrument, `max_files`, clashing names, an existing file, a symlinked target), names that try to leave the directory, and the C API's trust, progress and cancel.
 - **Golden renders:** one hash per template in `engine/tests/golden.txt`. A hash changes only with an intended sound change; then run `caw_tests --update-golden` and say why in the commit.
 
 The suite passes under GCC 13, Clang 18, and GCC with AddressSanitizer and UBSan (`-DCAW_SANITIZE=ON`). GCC and Clang give identical golden hashes.

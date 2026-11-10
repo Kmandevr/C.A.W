@@ -2,7 +2,7 @@
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-10
-covers: [engine/include/caw_component.h, engine/include/caw/library/, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
+covers: [engine/include/caw_component.h, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
@@ -135,6 +135,18 @@ What the host sends, as `caw::Event` records of kind `Note` (MIDI 2.0 Channel Vo
 - Poly Pressure and Registered Per-Note Controller 74 (timbre) from the note's pressure and timbre curves.
 
 The rules of an effect hold too: allocate in `activate`, make `reset()` silence every voice (the host calls it at Play and after the track was muted), and declare `tailFrames` for the longest release. The host ends every held note at Stop and lets the instrument ring out until it is quiet; the [engine reference](engine.md) has the details.
+
+## Make a sample pack of your instrument
+
+The sample-pack maker plays your instrument offline over the notes, velocities and parameter values you list and writes each as a WAV file, named, trimmed and optionally normalised and looped, with a manifest and an SFZ file a sampler can load ([engine reference](engine.md#sample-packs) for every key). After building:
+
+```
+caw sample-pack local.my-synth --library ./build/my-synth.so --trust trusted --out pack --name keys \
+    --notes C2:C6:12 --vel 40,90,127 --hold 2 --loop --sfz --normalize peak --group
+caw sample-pack --request pack.json --trust trusted --out pack --overwrite
+```
+
+Each file is a fresh instance: a note on at the first frame, held for `--hold` seconds, a note off, and the release until it falls below -80 dB. So `reset()`/`activate` must leave no state from before, `tailFrames` should cover your release (a release longer than `--max` is cut, `tail_truncated`), and the same build gives the same bytes every time. Use `--step NAME=V1,V2` to render a parameter at several values (one SFZ per combination), and `effects` in a request file to bake an effect chain into the samples. The library is in-process code, so it loads only with `--trust trusted` (hosts pass `CAW_NATIVE_TRUST_TRUSTED` to `caw_sample_pack_render`); the request itself cannot grant trust. Loops are found at matching zero crossings in the held part, so they sound seamless only when the held sound repeats.
 
 ## The Library
 
