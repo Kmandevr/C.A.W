@@ -462,9 +462,12 @@ class _ShellState extends State<Shell> {
             const Heading('More'),
             for (final id in const [Panels.mixer, Panels.automation, Panels.exporter, Panels.engineLab, Panels.pluginBuilder])
               ListTile(
+                key: ValueKey('more-$id'),
                 dense: true,
                 leading: Icon(_panelIcon(id), color: Neon.dim, size: 19),
                 title: Text(dockPanelTitle(id)),
+                // One line each on what it is for, so the less obvious ones (Engine lab, Plugins) say so.
+                subtitle: Text(_panelBlurb(id), style: const TextStyle(fontSize: 11.5, color: Neon.dim)),
                 onTap: () {
                   Navigator.pop(sheet);
                   _reveal(context, id);
@@ -499,14 +502,15 @@ class _StatusRow extends StatelessWidget {
         Expanded(
           child: InkWell(
             key: const ValueKey('project-menu'),
+            borderRadius: BorderRadius.circular(8),
             onTap: () => showProjectMenu(context, state),
-            child: Row(children: [
+            child: Pressable(child: Row(children: [
               Flexible(
                 child: Text(p.name,
                     overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
               ),
               const Icon(Icons.arrow_drop_down, color: Neon.dim, size: 18),
-            ]),
+            ])),
           ),
         ),
         _BpmButton(state: state),
@@ -596,6 +600,15 @@ Future<void> showLayoutMenu(BuildContext context, DockController dock) => showGl
         ),
       ),
     );
+
+String _panelBlurb(String id) => switch (id) {
+      Panels.mixer => 'Every track side by side: levels, pan, routing',
+      Panels.automation => 'Volume, pan and parameter lanes over the song',
+      Panels.exporter => 'Render the loop or song to WAV or MIDI',
+      Panels.engineLab => 'CPU, peaks, signal paths, scope and spectrum',
+      Panels.pluginBuilder => 'Make and package .caw instruments and effects',
+      _ => '',
+    };
 
 IconData _panelIcon(String id) => switch (id) {
       Panels.builder => Icons.code,

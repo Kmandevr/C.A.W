@@ -1,12 +1,18 @@
 // The polish pass (#175): empty states with a way forward, hints that hidden controls exist, phone sheets, labels.
+import 'dart:io';
+
+import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
+import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'golden_util.dart';
 
 void main() {
   late AppState s;
@@ -69,5 +75,36 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: TrackAutomationPanel(state: s, layer: s.project.layers.first))));
       expect(find.byKey(const ValueKey('automate-hint')), findsOneWidget);
     });
+  });
+
+  group('Frame', () {
+    final lib = Platform.environment['CAW_LIB'];
+    final skip = lib == null || lib.isEmpty;
+
+    AppState app() {
+      final a = AppState();
+      a.engine = Engine.create();
+      a.templates = Engine.templates();
+      a.project = a.starterProject();
+      a.selectedModuleId = a.project.modules.first.id;
+      a.ready = true;
+      a.starting = false;
+      return a;
+    }
+
+    testWidgets('Build opens on its start page, not on a module; More says what each page is for', (tester) async {
+      final a = app();
+      await pumpGolden(tester, Shell(state: a), goldenSizes['phone']!);
+      final c = SectionController.of(tester.element(find.byType(Scaffold).first));
+      c.show(Section.build);
+      await tester.pumpAndSettle();
+      expect(c.buildTabs, isEmpty);
+      expect(find.text('Write C++ instruments, effects and patterns, then hear them on your tracks.'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('more-tools')));
+      await tester.pumpAndSettle();
+      expect(find.text('CPU, peaks, signal paths, scope and spectrum'), findsOneWidget);
+      expect(find.text('Make and package .caw instruments and effects'), findsOneWidget);
+      a.dispose();
+    }, skip: skip);
   });
 }
