@@ -580,6 +580,8 @@ int main(int argc, char** argv) {
             if (pick >= 0 && static_cast<size_t>(pick) != k) continue;
             Case& c = native[k];
             Engine e(kRate);
+            // CAW_BENCH_QUALITY=0|1|2: the quality setting (Eco, Normal, High) to measure at.
+            if (const char* q = std::getenv("CAW_BENCH_QUALITY")) e.setQuality(std::atoi(q));
             e.setProject(c.p);
             e.play();
             report(c.name, play(e, secs));
