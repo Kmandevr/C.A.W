@@ -6,6 +6,11 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: CLAP headers for the plug-in builder (#162)
+
+- **Dependency:** the CLAP headers, free-audio/clap **1.2.9** (tag dated 2026-06-18, commit `cd94482b`; the latest tag on 2026-11-10, newer than the 1.2.6 first noted), **MIT** (its `LICENSE` read in the fetched tree, 2026-11-10). Fetched at configure time by `caw_add_clap_plugin` (`engine/cmake/CAWClap.cmake`), headers only, and the build stops if the fetched licence is not MIT. Not vendored, not in the app or the engine library.
+- **Why:** CLAP is the first export target (roadmap 9.3): a C.A.W component library builds as a `.clap` plug-in other hosts load, through one wrapper around the C interface. VST3 follows later.
+
 ## 2026-11-10: C++ replaces the .caw language (owner)
 
 **Decision (owner):** the .caw sound language is removed completely and replaced by C++. [Proposal, not built] Status: .caw still runs today; nothing below is built yet.

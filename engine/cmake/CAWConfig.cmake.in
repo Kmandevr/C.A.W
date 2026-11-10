@@ -2,6 +2,7 @@
 @PACKAGE_INIT@
 include("${CMAKE_CURRENT_LIST_DIR}/CAWSDKTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/CAWComponent.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/CAWClap.cmake")
 # Clang's float flags depend on this build's frontend (clang or clang-cl), so they are chosen here,
 # not baked into the package: no fused multiply-add contraction, no fast-math (see caw/detmath.hpp).
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

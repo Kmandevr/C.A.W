@@ -10,6 +10,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(CAW_AUDIO "Build the shared library with device audio output (miniaudio)" ON)
 option(CAW_TOOLS "Build the caw CLI and the tests" ON)
 option(CAW_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(CAW_CLAP "Build the CLAP export tests: example plug-ins and a test host (fetches the CLAP headers)" OFF)
 get_filename_component(CAW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
 # Public source-level C++ SDK. Internal engine headers stay private to engine targets.
@@ -63,7 +64,10 @@ if(CAW_INSTALL_SDK)
   install(TARGETS caw_sdk EXPORT CAWSDKTargets)
   install(EXPORT CAWSDKTargets NAMESPACE CAW:: DESTINATION "${CAW_SDK_CMAKE_DIR}")
   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWComponent.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CAWClap.cmake"
     DESTINATION "${CAW_SDK_CMAKE_DIR}")
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/plugin/clap/caw_clap_entry.cpp"
+    DESTINATION "${CAW_SDK_CMAKE_DIR}/clap")
   install(DIRECTORY include/caw/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/caw")
   install(FILES include/caw_component.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
   install(FILES
@@ -251,4 +255,10 @@ add_executable(caw_bench bench/caw_bench.cpp src/capi.cpp platform/audio_none.cp
   target_compile_options(caw_bench PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_bench PRIVATE src)
   target_link_libraries(caw_bench PRIVATE caw_core)
+endif()
+
+# CLAP export (docs/native-module-sdk.md): plug-ins of the example and a test bundle, and a host test.
+if(CAW_CLAP AND CAW_TOOLS)
+  include(cmake/CAWClap.cmake)
+  add_subdirectory(plugin/clap)
 endif()
