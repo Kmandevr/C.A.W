@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
 import '../../model/files_catalog.dart';
+import '../devices/kit/preset_actions.dart' show exportPreset;
 import '../frame/sections.dart';
 import '../theme.dart';
 import 'asset_views.dart';
@@ -149,6 +150,7 @@ class FilesActions {
       if (!a.builtin && a.midi == null) const MenuEntry('duplicate', Icons.copy, 'Duplicate'),
       if (a.module != null) const MenuEntry('tags', Icons.sell_outlined, 'Edit tags'),
       if (a.module != null) const MenuEntry('export', Icons.file_upload_outlined, 'Export .caw'),
+      if (a.preset != null) const MenuEntry('export-preset', Icons.file_upload_outlined, 'Export preset file'),
       if (!a.builtin) const MenuEntry('delete', Icons.delete_outline, 'Delete', danger: true, dividerBefore: true),
     ]);
     if (action == null || !context.mounted) return;
@@ -168,6 +170,8 @@ class FilesActions {
         await editTags(a);
       case 'export':
         await exportCawModule(context, a.module!);
+      case 'export-preset':
+        await exportPreset(context, a.preset!);
       case 'delete':
         await delete(a);
     }
