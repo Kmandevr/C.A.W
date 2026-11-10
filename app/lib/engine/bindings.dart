@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 4;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 5;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -160,6 +160,10 @@ class Bindings {
             void Function(Pointer<Void>, Pointer<CawMetersStruct>)>('caw_engine_meters'),
         layerMeter = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32, Pointer<CawLayerMeterStruct>),
             int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>)>('caw_engine_layer_meter'),
+        layerMeterStereo = lib.lookupFunction<
+            Int32 Function(Pointer<Void>, Int32, Pointer<CawLayerMeterStruct>, Pointer<Float>, Pointer<Float>),
+            int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>, Pointer<Float>, Pointer<Float>)>(
+            'caw_engine_layer_meter_stereo'),
         scope = lib.lookupFunction<Int32 Function(Pointer<Void>, Int32, Pointer<Float>, Int32),
             int Function(Pointer<Void>, int, Pointer<Float>, int)>('caw_engine_scope'),
         process = lib.lookupFunction<Void Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, Int32),
@@ -255,6 +259,7 @@ class Bindings {
   final void Function(Pointer<Void>) clearOverload;
   final void Function(Pointer<Void>, Pointer<CawMetersStruct>) meters;
   final int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>) layerMeter;
+  final int Function(Pointer<Void>, int, Pointer<CawLayerMeterStruct>, Pointer<Float>, Pointer<Float>) layerMeterStereo;
   final int Function(Pointer<Void>, int, Pointer<Float>, int) scope;
   final void Function(Pointer<Void>, Pointer<Float>, Pointer<Float>, int) process;
   final int Function(Pointer<Void>, Pointer<Utf8>, int) audioStart;

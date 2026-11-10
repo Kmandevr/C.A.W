@@ -6,6 +6,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/pattern_doc.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/ui/pattern_editor.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -67,6 +68,40 @@ void main() {
     await tester.tapAt(const Offset(200, 380));
     await tester.pump(const Duration(milliseconds: 200));
     expect(m.source.split('---').last.trim().split('\n').length, 1, reason: m.source);
+    s.dispose();
+  }, skip: skip != null);
+
+  testWidgets('zoom per axis: an upright pinch changes the row height and saves it, the zoom bar zooms time',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 800);
+    tester.view.devicePixelRatio = 1;
+    final s = AppState();
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject();
+    final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n');
+    s.project.modules.add(m);
+    s.ready = true;
+    s.starting = false;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
+    final row0 = s.settings.roll.rowHeight;
+    final a = await tester.startGesture(const Offset(400, 300), kind: PointerDeviceKind.touch);
+    final b = await tester.startGesture(const Offset(400, 400), kind: PointerDeviceKind.touch);
+    await a.moveBy(const Offset(0, -25));
+    await b.moveBy(const Offset(0, 25));
+    await a.up();
+    await b.up();
+    await tester.pumpAndSettle();
+    expect(s.settings.roll.rowHeight, closeTo(row0 * 1.5, 0.5));
+    expect(m.source.split('---').last.trim(), isEmpty, reason: 'a pinch draws nothing');
+    await tester.tap(find.byKey(const ValueKey('roll-zoom')));
+    await tester.pumpAndSettle();
+    final time = find.byKey(const ValueKey('roll-zoom-time'));
+    final before = tester.widget<Slider>(time).value;
+    await tester.tap(find.byTooltip('Zoom in'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(time).value, greaterThan(before));
+    expect(s.settings.roll.rowHeight, closeTo(row0 * 1.5, 0.5), reason: 'time zoom leaves the rows alone');
     s.dispose();
   }, skip: skip != null);
 

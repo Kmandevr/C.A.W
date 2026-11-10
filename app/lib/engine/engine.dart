@@ -252,8 +252,11 @@ class EngineMeters {
 }
 
 class LayerMeterValue {
-  const LayerMeterValue({this.peak = 0, this.progress = 0, this.active = false, this.overloaded = false});
-  final double peak, progress;
+  const LayerMeterValue(
+      {this.peak = 0, this.peakL = 0, this.peakR = 0, this.progress = 0, this.active = false, this.overloaded = false});
+
+  /// Sample peaks since the last read, after volume and pan: [peak] is the louder of the left and right.
+  final double peak, peakL, peakR, progress;
   final bool active, overloaded;
 }
 
@@ -296,6 +299,7 @@ class Engine {
   Future<void> _queue = Future.value();
   final Pointer<CawMetersStruct> _meters = calloc<CawMetersStruct>();
   final Pointer<CawLayerMeterStruct> _layer = calloc<CawLayerMeterStruct>();
+  final Pointer<Float> _layerSides = calloc<Float>(2);
   final Pointer<Float> _scope = calloc<Float>(1024);
   bool _audioOn = false;
   bool _disposed = false;
@@ -530,10 +534,17 @@ class Engine {
   }
 
   LayerMeterValue layerMeter(int index) {
-    _b.layerMeter(_handle, index, _layer);
+    _layerSides[0] = 0;
+    _layerSides[1] = 0;
+    _b.layerMeterStereo(_handle, index, _layer, _layerSides, _layerSides + 1);
     final m = _layer.ref;
     return LayerMeterValue(
-        peak: m.peak, progress: m.progress, active: m.active != 0, overloaded: m.overloaded != 0);
+        peak: m.peak,
+        peakL: _layerSides[0],
+        peakR: _layerSides[1],
+        progress: m.progress,
+        active: m.active != 0,
+        overloaded: m.overloaded != 0);
   }
 
   /// Copies the latest samples of a layer (project index), the audition or the master into [out].
@@ -576,6 +587,7 @@ class Engine {
     _b.destroy(_handle);
     calloc.free(_meters);
     calloc.free(_layer);
+    calloc.free(_layerSides);
     calloc.free(_scope);
   }
 

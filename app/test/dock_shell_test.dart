@@ -5,9 +5,12 @@ import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/arrange_fx.dart';
+import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/dock/dock_controller.dart';
 import 'package:caw/ui/dock/layout.dart';
+import 'package:caw/ui/frame/frame_widgets.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/shell.dart';
@@ -161,6 +164,77 @@ void main() {
       s.dispose();
     }, skip: skip);
   }
+
+  testWidgets('phone landscape draws edge to edge: the rail and the tracks keep clear of a camera cutout',
+      (tester) async {
+    final s = await startState(tester);
+    tester.view.padding = const FakeViewPadding(left: 80);
+    await pumpGolden(tester, Shell(state: s), const Size(924, 390));
+    expect(tester.takeException(), isNull);
+    // The rail's background starts at the screen's edge; its buttons and the tracks sit right of the cutout.
+    expect(tester.getTopLeft(find.byType(SectionRail)).dx, 0);
+    expect(tester.getTopLeft(find.byKey(const ValueKey('section-build'))).dx, greaterThanOrEqualTo(80));
+    expect(tester.getTopLeft(find.byKey(ValueKey('track-header-${s.project.layers.first.id}'))).dx, greaterThan(80));
+    expect(find.byKey(const ValueKey('transport-bpm')), findsOneWidget, reason: 'the tempo moves into the transport');
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('Arrange\'s Files browser: an effect dragged from it lands on a track', (tester) async {
+    final s = await startState(tester);
+    await tester.runAsync(() async {
+      s.componentCatalog.set(await s.refreshNativeCatalog());
+    });
+    await pumpGolden(tester, Shell(state: s), const Size(390, 844));
+    await tester.tap(find.byKey(const ValueKey('arrange-browse')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('arrange-browser')), findsOneWidget);
+    await tester.tap(find.text('Built-in').last);
+    await tester.pumpAndSettle();
+    final layer = s.project.layers.first;
+    final before = layer.components.length;
+    final item = find.descendant(of: find.byKey(const ValueKey('arrange-browser')), matching: find.text('Distortion'));
+    expect(item, findsOneWidget);
+    final lane = tester.getCenter(find.byKey(ValueKey('track-header-${layer.id}'))) + const Offset(180, 0);
+    await tester.ensureVisible(item);
+    await tester.pumpAndSettle();
+    final g = await tester.startGesture(tester.getCenter(item));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 400));
+    await g.moveBy(const Offset(0, -30));
+    await tester.pump();
+    await g.moveTo(lane - const Offset(0, 20));
+    await tester.pump();
+
+    await g.moveTo(lane);
+    await tester.pump();
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(s.project.layers.firstWhere((l) => l.id == layer.id).components.length, before + 1);
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('scrolling the tracks down tucks the top bars away, scrolling up brings them back', (tester) async {
+    final s = await startState(tester);
+    for (var i = 0; i < 12; i++) {
+      s.addLayer();
+    }
+    tester.view.padding = const FakeViewPadding(top: 30, bottom: 20);
+    await pumpGolden(tester, Shell(state: s), const Size(390, 844));
+    final status = find.byKey(const ValueKey('project-menu'));
+    final toolbar = find.byKey(const ValueKey('arrange-toolbar'));
+    expect(tester.getTopLeft(status).dy, greaterThanOrEqualTo(30), reason: 'clear of the status bar');
+    final top0 = tester.getTopLeft(toolbar).dy;
+    final tracks = find.byKey(ValueKey('track-header-${s.project.layers[3].id}'));
+    await tester.drag(tracks, const Offset(0, -200));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(status).bottom, lessThanOrEqualTo(31), reason: 'the status row tucked away');
+    expect(tester.getTopLeft(toolbar).dy, lessThan(top0));
+    await tester.drag(tracks, const Offset(0, 120));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(status).dy, greaterThanOrEqualTo(30));
+    expect(tester.getTopLeft(toolbar).dy, top0);
+    s.dispose();
+  }, skip: skip);
 
   testWidgets('arrangement: the track gap and a spacer keep headers level with their lanes; the grip resizes it',
       (tester) async {

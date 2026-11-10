@@ -88,7 +88,7 @@ struct Engine::Slot {
 
     std::atomic<uint64_t> vol{0}, pan{0};
     std::atomic<bool> mute{false}, solo{false};
-    std::atomic<float> peak{0}, progress{0};
+    std::atomic<float> peakL{0}, peakR{0}, progress{0};  // meters: each side's sample peak since the last read
     std::atomic<bool> overloadFlag{false};
     std::atomic<float> scope[kScopeSize];
     std::atomic<int> scopePos{0};
@@ -2314,7 +2314,7 @@ void Engine::setLayerMix(const std::string& layerId, double volume, double pan, 
     auto it = layers_.find(layerId);
     if (it == layers_.end() || it->second.slot < 0) return;
     LayerState& ls = it->second;
-    ls.volume = std::min(1.0, std::max(0.0, volume));
+    ls.volume = std::isfinite(volume) ? std::clamp(volume, 0.0, kMaxMixGain) : 0.0;
     ls.pan = std::min(1.0, std::max(-1.0, pan));
     ls.mute = mute;
     ls.solo = solo;
@@ -2381,7 +2381,7 @@ void Engine::setMaster(double volume) {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::SetMaster;
-    c.master = std::isfinite(volume) ? std::clamp(volume, 0.0, 1.0) : 0.0;
+    c.master = std::isfinite(volume) ? std::clamp(volume, 0.0, kMaxMixGain) : 0.0;
     send(c);
 }
 
@@ -2440,7 +2440,9 @@ bool Engine::layerMeter(int index, LayerMeter& out) {
     if (it == layers_.end() || it->second.slot < 0) return true;
     Slot& s = ctlSlot(it->second.slot);
     out.active = true;
-    out.peak = s.peak.exchange(0, std::memory_order_relaxed);
+    out.peakL = s.peakL.exchange(0, std::memory_order_relaxed);
+    out.peakR = s.peakR.exchange(0, std::memory_order_relaxed);
+    out.peak = std::max(out.peakL, out.peakR);
     out.progress = s.progress.load(std::memory_order_relaxed);
     out.overloaded = s.overloadFlag.load(std::memory_order_relaxed);
     return true;
@@ -2601,7 +2603,8 @@ void Engine::applyCommands() noexcept {
                     s.old = nullptr;
                     s.swapLeft = 0;
                     s.seamLeft = 0;
-                    s.peak.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
+                    s.peakL.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
+                    s.peakR.store(0, std::memory_order_relaxed);
                     s.active = true;
                     s.removing = false;
                     s.fresh = true;
@@ -2673,7 +2676,8 @@ void Engine::applyCommands() noexcept {
                 }
                 s.cur = s.old = s.pending = nullptr;
                 s.pattern = nullptr;
-                s.peak.store(0, std::memory_order_relaxed);
+                s.peakL.store(0, std::memory_order_relaxed);
+                s.peakR.store(0, std::memory_order_relaxed);
                 s.active = true;
                 s.removing = false;
                 s.bus = true;
@@ -2759,7 +2763,7 @@ void Engine::applyCommands() noexcept {
                 loopLenFlag_.store(loopLen_, std::memory_order_relaxed);
                 break;
             case Cmd::SetMaster:
-                masterTarget_ = std::isfinite(c.master) ? std::clamp(c.master, 0.0, 1.0) : 0.0;
+                masterTarget_ = std::isfinite(c.master) ? std::clamp(c.master, 0.0, kMaxMixGain) : 0.0;
                 masterRamp_ = std::max(1, static_cast<int>(sr_ * kGainSeconds));
                 masterStep_ = (masterTarget_ - master_) / masterRamp_;
                 break;
@@ -2872,42 +2876,50 @@ void Engine::applyCommands() noexcept {
                 epoch_ = 0;
                 dcL_[0] = dcL_[1] = dcR_[0] = dcR_[1] = 0;
                 limEnv_ = 0;
-                for (int i = 0; i < slotCount_; ++i) {
-                    Slot& s = slotAt(i);
-                    if (!s.active) continue;
-                    retire(s.old, nullptr);
-                    s.old = nullptr;
-                    if (s.pending) {
-                        retire(s.cur, nullptr);
-                        s.cur = s.pending;
-                        s.pending = nullptr;
-                    }
-                    s.swapLeft = 0;
-                    s.seamLeft = 0;
-                    if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
-                    s.playTailLen = s.playTailAt = 0;
-                    if (s.instrument) {
-                        // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
-                        NoteEvents& notes = *s.instrument->notes();
-                        notes.releaseAll(0, true);
-                        if (!notes.holdsPreview()) {
-                            // Still sounding (a release after Stop): its next 5 ms fade out over the new pass's start.
-                            if (!s.instrumentIdle && s.active && s.previewQuiet < static_cast<int64_t>(kPlayTailQuietSeconds * sr_))
-                                playTail(s);
-                            s.instrument->reset();
-                            notes.forget(false);
-                            notes.clearEvents();
+                // The instruments still ringing share the play-tail budget, so Play's callback stays bounded.
+                {
+                    int ringing = 0;
+                    for (int i = 0; i < slotCount_; ++i)
+                        if (ringsAtPlay(slotAt(i))) ++ringing;
+                    const int tailLen = ringing > 0 ? std::max(1, kPlayTailBudgetFrames / ringing) : 0;
+                    for (int i = 0; i < slotCount_; ++i) {
+                        Slot& s = slotAt(i);
+                        if (!s.active) continue;
+                        retire(s.old, nullptr);
+                        s.old = nullptr;
+                        if (s.pending) {
+                            retire(s.cur, nullptr);
+                            s.cur = s.pending;
+                            s.pending = nullptr;
                         }
+                        s.swapLeft = 0;
+                        s.seamLeft = 0;
+                        if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
+                        s.playTailLen = s.playTailAt = 0;
+                        if (s.instrument) {
+                            // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
+                            NoteEvents& notes = *s.instrument->notes();
+                            const bool rings = ringsAtPlay(s);
+                            notes.releaseAll(0, true);
+                            if (!notes.holdsPreview()) {
+                                // Still sounding (a release after Stop): its next 5 ms (less when many ring) fade out
+                                // over the new pass's start.
+                                if (rings) playTail(s, tailLen);
+                                s.instrument->reset();
+                                notes.forget(false);
+                                notes.clearEvents();
+                            }
+                        }
+                        s.fresh = true;
+                        s.contiguous = false;
+                        s.k = -1;
+                        s.epoch = -1;
+                        updateSolo();
+                        const double target = slotTarget(s);
+                        s.gain = target > 0.0
+                            ? (s.automation ? automationValue(s.automation->volume, 0.0, target) : target)
+                            : 0.0;
                     }
-                    s.fresh = true;
-                    s.contiguous = false;
-                    s.k = -1;
-                    s.epoch = -1;
-                    updateSolo();
-                    const double target = slotTarget(s);
-                    s.gain = target > 0.0
-                        ? (s.automation ? automationValue(s.automation->volume, 0.0, target) : target)
-                        : 0.0;
                 }
                 break;
             case Cmd::Stop:
@@ -3478,6 +3490,12 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
                 continue;
             }
         }
+        // The same note still held ends first, with its motion up to here, as an off, an orphan and a slide do
+        // (on() would end it too, but without the motion, so its last pitch would depend on the block split).
+        if (NoteEvents::Held* same = notes.findPattern(pe.note, pe.sub)) {
+            noteMotion(notes, *same, static_cast<int>(frame));
+            notes.off(frame, *same);
+        }
         NoteEvents::Held& h = notes.on(frame, NoteEvents::Source::Pattern, pe.note, pe.sub, -1, n.pitch, n.vel);
         express(h, n, frame);
     }
@@ -3522,10 +3540,18 @@ void Engine::instrumentMotion(NoteEvents& notes, int m) noexcept {
     }
 }
 
-// Renders the instrument's next few milliseconds (its notes already let go) into the slot's play tail, faded
-// to silence, before Play resets it; runInstrument mixes the tail into the first chunks of the new pass.
-void Engine::playTail(Slot& s) noexcept {
-    const int len = std::min(Slot::kPlayTailMax, std::max(1, static_cast<int>(kPlayTailSeconds * sr_ + 0.5)));
+// Whether Play finds the slot's instrument still ringing out after Stop (it sounded within the last 0.1 s and
+// holds no preview, which plays on into the new pass): Play then renders a short tail of it (playTail).
+bool Engine::ringsAtPlay(const Slot& s) const noexcept {
+    return s.instrument && !s.instrumentIdle && s.active &&
+           s.previewQuiet < static_cast<int64_t>(kPlayTailQuietSeconds * sr_) && !s.instrument->notes()->holdsPreview();
+}
+
+// Renders the instrument's next few milliseconds (at most 5 ms and `most` frames; its notes already let go) into
+// the slot's play tail, faded to silence, before Play resets it; runInstrument mixes the tail into the first
+// chunks of the new pass.
+void Engine::playTail(Slot& s, int most) noexcept {
+    const int len = std::min({Slot::kPlayTailMax, std::max(1, most), std::max(1, static_cast<int>(kPlayTailSeconds * sr_ + 0.5))});
     const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), false};
     for (int done = 0; done < len;) {
         const int n = std::min(kBlock, len - done);
@@ -4212,7 +4238,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             }
         }
     }
-    float peak = 0, sig = 0;
+    float peakL = 0, peakR = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
     const bool volumeAutomated = s.automation && !s.automation->volume.empty();
     const bool panAutomated = s.automation && !s.automation->pan.empty();
@@ -4241,7 +4267,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
                 mid[i] = static_cast<float>(v);
             }
         }
-        peak = std::max(peakAbs(outL, m), peakAbs(outR, m));
+        peakL = peakAbs(outL, m);
+        peakR = peakAbs(outR, m);
         sig = peakAbs(level, m);
         for (int i = 0; i < m;) {
             const int run = std::min(m - i, kScopeSize - sp);
@@ -4273,15 +4300,16 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
         outL[i] = routeSample(vl * gl);
         outR[i] = routeSample(vr * gr);
-        // The meter reads what the track sends on (after volume and pan), the louder channel's sample peak.
-        const float av = std::max(std::fabs(outL[i]), std::fabs(outR[i]));
-        if (av > peak) peak = av;
+        // The meter reads what the track sends on (after volume and pan), each channel's sample peak.
+        peakL = std::max(peakL, std::fabs(outL[i]));
+        peakR = std::max(peakR, std::fabs(outR[i]));
         sig = std::max(sig, static_cast<float>(std::max(std::fabs(vl), std::fabs(vr))));  // before pan: a preview's tail test, like the scope
         s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
         sp = (sp + 1) % kScopeSize;
     }
     s.scopePos.store(sp, std::memory_order_release);
-    storeMax(s.peak, peak);
+    storeMax(s.peakL, peakL);
+    storeMax(s.peakR, peakR);
     if (tail && s.tailFade != 0) {  // a capped tail fading out (or faded: silence until it is ended)
         const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
         for (int i = 0; i < m; ++i) {
@@ -4339,13 +4367,15 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     }
     if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; routingDirty_ = true; }
     // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
-    float peak = 0;
+    float peakL = 0, peakR = 0;
     for (int j = 0; j < m; ++j) {
         outL[j] = routeSample(s.outL[j]);
         outR[j] = routeSample(s.outR[j]);
-        peak = std::max(peak, std::max(std::fabs(outL[j]), std::fabs(outR[j])));
+        peakL = std::max(peakL, std::fabs(outL[j]));
+        peakR = std::max(peakR, std::fabs(outR[j]));
     }
-    storeMax(s.peak, peak);  // a folder's meter: its mix after volume and pan
+    storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
+    storeMax(s.peakR, peakR);
 }
 
 void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {

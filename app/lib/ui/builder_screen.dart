@@ -14,6 +14,7 @@ import 'param_control.dart';
 import 'pattern_editor.dart';
 import 'pattern_fields.dart';
 import 'theme.dart';
+import 'volume_fader.dart';
 import 'widgets.dart';
 import 'glass.dart';
 
@@ -818,16 +819,17 @@ class _BuilderTrackControlsState extends State<_BuilderTrackControls> {
           ]),
           if (showMix) ValueListenableBuilder<int>(valueListenable: state.layerValueTick(layer.id), builder: (context, _, _) => Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('LEVEL · ${(layer.volume * 100).round()}%', style: Neon.code(size: 10, color: Neon.green)),
-              Slider(value: layer.volume.clamp(0.0, 1.0).toDouble(), min: 0, max: 1,
-                activeColor: Neon.green, onChanged: (v) => state.mixLayer(layer, volume: v)),
+              Text('LEVEL · ${VolumeTaper.label(layer.volume)}', style: Neon.code(size: 10, color: Neon.green)),
+              SizedBox(height: 40, child: VolumeFader(value: layer.volume, vertical: false, label: '${layer.name} level',
+                onChanged: (v) => state.mixLayer(layer, volume: v))),
             ])),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('PAN · ${layer.pan.abs() < .01 ? 'CENTER' : layer.pan < 0 ? 'LEFT' : 'RIGHT'}',
                 style: Neon.code(size: 10, color: Neon.blue)),
-              Slider(value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
-                activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v)),
+              ResetOnDoubleTap(onReset: () => state.mixLayer(layer, pan: 0), child: Slider(
+                value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1,
+                activeColor: Neon.blue, onChanged: (v) => state.mixLayer(layer, pan: v))),
             ])),
           ])),
           if (showMix) Row(children: [

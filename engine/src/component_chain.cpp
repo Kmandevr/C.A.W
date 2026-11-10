@@ -308,7 +308,6 @@ void ComponentChain::reset() noexcept {
     for (auto& e : entries_) {
         e->processor->reset();
         e->asleep = false;
-        e->silentFrames = 0;
     }
 }
 
@@ -374,9 +373,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         // in left/right (an instrument's are cleared above; an effect's input is silent and passes on).
         const bool on = e.mix == 1.0 && target == 1.0;
         const bool events = notes_ && notes_->count() > 0;
-        const bool silentIn = notes_ ? !events && !notes_->holdsAny() : peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f;
-        e.silentFrames = silentIn ? e.silentFrames + m : 0;
-        if (e.asleep && on && !events && (notes_ || silentIn)) continue;
+        if (e.asleep && on && !events && (notes_ || (peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f))) continue;
         e.asleep = false;
         std::copy_n(left, m, stageL_.data());
         std::copy_n(right, m, stageR_.data());
@@ -414,13 +411,10 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         }
         sanitize(left, m);
         sanitize(right, m);
-        if (on && processed) {
-            const ModuleDescriptor& d = e.processor->descriptor();
-            const bool declared = d.tailFrames > 0 && d.tailFrames != kInfiniteTail;
-            e.asleep = e.processor->quiet() ||
-                       (declared && e.silentFrames > static_cast<uint64_t>(d.tailFrames) + d.latencyFrames &&
-                        peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f);
-        }
+        // Only a component that says so sleeps: one put to sleep by its declared tail alone would fall asleep on a
+        // block boundary with its timed state (an LFO, a control grid) frozen there, and wake differently for
+        // each device buffer size than in an export.
+        if (on && processed) e.asleep = e.processor->quiet();
         if (e.mix != target || target != 1.0) {
             for (uint32_t i = 0; i < m; ++i) {
                 e.mix = target > e.mix ? std::min(target, e.mix + bypassStep) : std::max(target, e.mix - bypassStep);

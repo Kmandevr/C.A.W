@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "caw.h"
 #include "detmath.h"
 #include "engine.h"
 #include "native_component_test_path.h"
@@ -126,6 +127,40 @@ TEST(meters_read_what_each_track_and_folder_sends_on_after_volume_and_pan) {
     CHECK_NEAR(lm.peak, 0.25, 1e-4);
     CHECK(e.layerMeter(0, lm) && lm.active);  // the folder: its child at half volume, through the folder's pan
     CHECK_NEAR(lm.peak, 0.5 * c, 1e-4);
+}
+
+TEST(track_meters_read_each_side_for_stereo_tracks) {
+    // Owner, 2026-11-10 (feel pass): stereo meters on tracks. The C API read one peak per track (the louder
+    // side); caw_engine_layer_meter_stereo reads left and right, and the mono peak stays their maximum.
+    CawEngine* engine = caw_engine_create(48000);
+    CHECK(engine != nullptr);
+    if (!engine) return;
+    char* result = caw_engine_set_project(engine,
+        R"({"caw_project":1,"bpm":120,"master":1,"modules":[{"id":"dc","source":"---\nmode: float\n---\n0.5"}],
+            "layers":[{"id":"l","chain":["dc"],"volume":0.5,"pan":-1},{"id":"c","chain":["dc"],"volume":1,"pan":0.5}]})");
+    CHECK(result && std::string(result).find("\"ok\":true") != std::string::npos);
+    caw_free(result);
+    caw_engine_play(engine);
+    std::vector<float> l(256), r(256);
+    for (int k = 0; k < 40; ++k) caw_engine_process(engine, l.data(), r.data(), 256);
+    CawLayerMeter m{};
+    float left = -1, right = -1;
+    CHECK_EQ(caw_engine_layer_meter_stereo(engine, 0, &m, &left, &right), 1);
+    CHECK(m.active == 1);
+    CHECK_NEAR(left, 0.25, 1e-4);  // hard left at half volume
+    CHECK_EQ(right, 0.0f);
+    CHECK_NEAR(m.peak, 0.25, 1e-4);
+    CHECK_EQ(caw_engine_layer_meter_stereo(engine, 1, &m, &left, &right), 1);
+    const double gl = std::cos((0.5 + 1.0) * kPi / 4.0), gr = std::sin((0.5 + 1.0) * kPi / 4.0);  // constant power
+    CHECK_NEAR(left, 0.5 * gl, 1e-4);
+    CHECK_NEAR(right, 0.5 * gr, 1e-4);
+    CHECK_NEAR(m.peak, 0.5 * gr, 1e-4);
+    // Read since the last call: both sides start again from 0, and the mono reading shares them.
+    CHECK_EQ(caw_engine_layer_meter(engine, 1, &m), 1);
+    CHECK_EQ(m.peak, 0.0f);
+    CHECK_EQ(caw_engine_layer_meter_stereo(engine, 5, &m, &left, &right), 0);  // no such layer
+    CHECK_EQ(caw_engine_layer_meter_stereo(engine, 0, &m, nullptr, nullptr), 1);  // either side may be left out
+    caw_engine_destroy(engine);
 }
 
 TEST(audition_only_uses_the_dedicated_audition_slot) {
@@ -466,6 +501,42 @@ TEST(mute_and_solo) {
     CHECK_NEAR(right[4999], 0.0, 1e-5);
 }
 
+TEST(track_and_master_faders_reach_plus_12_db) {
+    // Owner, 2026-11-10 (feel pass): faders like REAPER's, up to +12 dB (a gain of 3.981) on tracks and the
+    // master; the safety limiter stays last. They were clamped at 0 dB (gain 1).
+    const double kPlus12 = std::pow(10.0, 12.0 / 20.0);
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.05"}});
+    p.master = 1.0;
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    const double g = std::cos(kPi / 4.0);
+    e.setLayerMix("l0", 2.0, 0.0, false, false);
+    std::vector<float> out = run(e, 5000);
+    CHECK_NEAR(out[4999], 0.1 * g, 1e-5);
+    e.setLayerMix("l0", 10.0, 0.0, false, false);  // past +12 dB: held there
+    out = run(e, 5000);
+    CHECK_NEAR(out[4999], 0.05 * kPlus12 * g, 1e-5);
+    e.setLayerMix("l0", 1.0, 0.0, false, false);
+    e.setMaster(2.0);
+    out = run(e, 5000);
+    CHECK_NEAR(out[4999], 0.1 * g, 1e-5);
+    e.setMaster(10.0);
+    out = run(e, 5000);
+    CHECK_NEAR(out[4999], 0.05 * kPlus12 * g, 1e-5);
+    // The project's own values too.
+    ProjectSpec q;
+    std::string error;
+    CHECK(parseProject(R"({"caw_project":1,"master":3,"layers":[{"id":"t","volume":2.5},{"id":"u","volume":9}]})", q, error));
+    CHECK_NEAR(q.master, 3.0, 1e-12);
+    CHECK_EQ(q.layers.size(), 2u);
+    if (q.layers.size() == 2) {
+        CHECK_NEAR(q.layers[0].volume, 2.5, 1e-12);
+        CHECK_NEAR(q.layers[1].volume, kPlus12, 1e-12);
+    }
+}
+
 TEST(overload_mutes_the_newest_layer) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}, {"b", std::string(kFloat) + "0.5"}});
     Engine e(48000);
@@ -784,7 +855,7 @@ TEST(master_gain_updates_without_recompiling_and_ramps_smoothly) {
     CHECK_NEAR(faded.back(), 0.0, 1e-7);
     CHECK(maxStep(faded, 0, faded.size()) < 0.01f);
 
-    e.setMaster(2.0); // Control API clamps invalid gain ranges.
+    e.setMaster(2.0); // up to +12 dB: louder than before the fade
     const auto restored = run(e, 512);
     CHECK(restored.back() > 0.34f);
 }

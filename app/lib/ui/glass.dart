@@ -148,7 +148,9 @@ class GlassBackdrop extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        RepaintBoundary(child: CustomPaint(painter: _BackdropPainter(Neon.bg, [Neon.green, Neon.blue, Neon.violet]))),
+        // Grey and black (owner, 2026-11-10: not green): soft neutral light from the theme's text colour, with one
+        // faint touch of the accent blue, so the frost still reads as glass rather than a flat colour.
+        RepaintBoundary(child: CustomPaint(painter: _BackdropPainter(Neon.bg, [Neon.text, Neon.text, Neon.blue]))),
         child,
       ],
     );
@@ -167,11 +169,18 @@ class _BackdropPainter extends CustomPainter {
   final List<Color> glows;
 
   /// Where each glow sits (fractions of the screen), its radius (of the longer side) and strength.
-  static const _spots = [(0.12, 0.05, 0.9, 0.13), (0.95, 0.55, 0.8, 0.10), (0.3, 1.05, 0.9, 0.08)];
+  static const _spots = [(0.12, 0.0, 0.95, 0.075), (0.95, 0.6, 0.8, 0.045), (0.3, 1.05, 0.9, 0.05)];
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = bg);
+    final rect = Offset.zero & size;
+    // A dark grey that deepens to black towards the bottom.
+    canvas.drawRect(rect, Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
+        colors: [Color.lerp(bg, const Color(0xFF2A2A30), 0.55)!, bg]).createShader(rect));
+    // A faint diagonal sheen, like light across frosted glass.
+    canvas.drawRect(rect, Paint()..shader = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+        colors: [const Color(0x00FFFFFF), const Color(0x0AFFFFFF), const Color(0x00FFFFFF)],
+        stops: const [0.30, 0.45, 0.62]).createShader(rect));
     final long = size.longestSide;
     for (var i = 0; i < _spots.length && i < glows.length; i++) {
       final (x, y, r, a) = _spots[i];

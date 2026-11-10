@@ -8,6 +8,8 @@ import '../../model/project.dart';
 import '../glass.dart';
 import '../mixer_screen.dart';
 import '../theme.dart';
+import '../volume_fader.dart';
+import 'track_color.dart';
 import '../widgets.dart';
 
 class MixerCard extends StatefulWidget {
@@ -79,7 +81,7 @@ class _NarrowStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tint = Neon.layer(layer.color);
+    final tint = trackColor(state, layer);
     return SizedBox(width: 52, child: GlassPanel(tint: tint, radius: 8, child: ValueListenableBuilder<int>(
       valueListenable: state.layerValueTick(layer.id),
       builder: (context, _, _) => Column(children: [
@@ -96,20 +98,13 @@ class _NarrowStrip extends StatelessWidget {
           ),
         )),
         Expanded(child: Row(children: [
-          Expanded(child: RotatedBox(quarterTurns: 3, child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7)),
-            child: Slider(
-              value: layer.volume.clamp(0.0, 1.0).toDouble(),
-              activeColor: tint,
-              semanticFormatterCallback: (v) => '${layer.name} level ${(v * 100).round()}%',
-              onChanged: (v) => state.mixLayer(layer, volume: v)),
-          ))),
-          SizedBox(width: 6, child: PeakMeter(state: state, color: tint, vertical: true,
-            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0)),
+          Expanded(child: VolumeFader(value: layer.volume, color: tint, label: '${layer.name} level',
+            onChanged: (v) => state.mixLayer(layer, volume: v))),
+          SizedBox(width: layer.isStereo ? 9 : 6, child: TrackMeter(state: state, index: index, stereo: layer.isStereo,
+            color: tint, vertical: true)),
           const SizedBox(width: 4),
         ])),
-        Text('${(layer.volume * 100).round()}%', style: Neon.code(size: 9, color: Neon.dim)),
+        Text(VolumeTaper.label(layer.volume), style: Neon.code(size: 9, color: Neon.dim)),
         const SizedBox(height: 2),
         ToggleChip(label: 'M', size: 34, on: layer.mute, color: Neon.yellow,
           tooltip: layer.mute ? 'Unmute ${layer.name}' : 'Mute ${layer.name}',

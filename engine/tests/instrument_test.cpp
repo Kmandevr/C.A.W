@@ -169,6 +169,25 @@ TEST(a_note_list_is_bounded_and_sorted_and_counts_what_overflows) {
     CHECK(notes->findPreview(1) != nullptr);
 }
 
+TEST(a_note_list_holds_plenty_of_notes_in_little_memory) {
+    // Second audio review, fix 4: 4,096 held notes and 2 x 16,384 events came to about 1.5 MB per instrument
+    // track (about 94 MB at 64 tracks, and twice that for a track during a rebuild). No practical polyphony cap
+    // stays (owner, 2026-11-10): a thousand notes at once on one track, room for all their offs and ons again
+    // in one block, in a few hundred KB.
+    CHECK(NoteEvents::kMaxHeld >= 1024u);
+    CHECK(NoteEvents::kCapacity >= 3u * NoteEvents::kMaxHeld);  // every held note ends and starts again in one block
+    CHECK(NoteEvents::kBytes <= 512u * 1024u);
+    // Every held note ends and a new one starts in the same block: every off and every on arrives.
+    auto notes = std::make_unique<NoteEvents>();
+    for (uint32_t i = 0; i < NoteEvents::kMaxHeld; ++i)
+        notes->on(0, NoteEvents::Source::Preview, 0, 0, static_cast<int32_t>(i), 60, 1);
+    notes->clearEvents();
+    for (uint32_t i = 0; i < NoteEvents::kMaxHeld; ++i)
+        notes->on(1, NoteEvents::Source::Preview, 0, 0, static_cast<int32_t>(i), 62, 1);
+    CHECK_EQ(notes->count(), 2u * NoteEvents::kMaxHeld);
+    CHECK_EQ(notes->overflow(), 0u);
+}
+
 TEST(a_full_note_list_still_delivers_every_off) {
     // Audio review fix 5: a block whose list filled up (with per-note motion) dropped a note-off: a stuck note.
     // Room for every held note's off is now kept back from note-ons and motion.
@@ -206,16 +225,17 @@ TEST(a_note_list_sorts_many_runs_in_frame_order_and_keeps_their_order) {
     }
 }
 
-TEST(an_instrument_can_hold_thousands_of_notes) {
-    // Owner, 2026-11-10: no practical polyphony cap from the host; a program sets its own.
+TEST(an_instrument_can_hold_a_thousand_notes) {
+    // Owner, 2026-11-10: no practical polyphony cap from the host; a program sets its own. A track holds 1,024
+    // notes at once (4,096 before the second audio review's memory fix, which took 1.5 MB per track).
     auto notes = std::make_unique<NoteEvents>();
-    for (uint32_t i = 0; i < 4000; ++i) notes->on(0, NoteEvents::Source::Pattern, i, 0, -1, 40 + i % 60, 1);
-    CHECK_EQ(notes->activeCount(), 4000u);
+    for (uint32_t i = 0; i < 1000; ++i) notes->on(0, NoteEvents::Source::Pattern, i, 0, -1, 40 + i % 60, 1);
+    CHECK_EQ(notes->activeCount(), 1000u);
     CHECK(notes->findPattern(0, 0) != nullptr);  // the first is still held
     CHECK_EQ(notes->overflow(), 0u);
     notes->clearEvents();
     notes->releaseAll(0, false);
-    CHECK_EQ(notes->count(), 4000u);
+    CHECK_EQ(notes->count(), 1000u);
     notes->clearEvents();
     CHECK_EQ(notes->activeCount(), 0u);
     uint32_t left = 0;
@@ -262,7 +282,7 @@ private:
     uint32_t left_ = 0;
 };
 
-// An effect that passes its input on, with a 128-frame declared tail and no quiet(). Counts its calls.
+// An effect that passes its input on, with a 128-frame declared tail, quiet() when gTailQuiet. Counts its calls.
 constexpr PortDescriptor kTailPorts[] = {stereoInput("in"), stereoOutput("out")};
 ModuleDescriptor tailDescriptor() {
     ModuleDescriptor d;
@@ -275,9 +295,11 @@ ModuleDescriptor tailDescriptor() {
 }
 const ModuleDescriptor kTail = tailDescriptor();
 int gTailCalls = 0;
+bool gTailQuiet = false;
 class Tail final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kTail; }
+    bool quiet() const noexcept override { return gTailQuiet; }
     void process(const StereoProcessBlock& b) noexcept override {
         ++gTailCalls;
         for (uint32_t i = 0; i < b.frames; ++i) {
@@ -317,7 +339,10 @@ TEST(a_quiet_instrument_sleeps_until_its_next_note) {
     CHECK_EQ(l[10], 0.5f);
 }
 
-TEST(an_effect_sleeps_once_its_input_has_been_silent_longer_than_its_tail) {
+TEST(an_effect_sleeps_only_when_it_says_it_is_quiet_not_when_its_tail_has_passed) {
+    // Second audio review, fix 1: the host used to put an effect to sleep once its input had been silent past its
+    // declared tail. It fell asleep on a block boundary with its timed state frozen, so the output depended on
+    // the device's buffer size. A declared tail alone now keeps it running; quiet() still puts it to sleep.
     ModuleRegistry registry;
     CHECK(registry.add(kTail, []() noexcept -> ModuleProcessor* { return new Tail; }));
     std::string error;
@@ -328,23 +353,25 @@ TEST(an_effect_sleeps_once_its_input_has_been_silent_longer_than_its_tail) {
     if (!chain) return;
     float l[64], r[64];
     gTailCalls = 0;
-    for (int k = 0; k < 2; ++k) {  // 128 silent frames: within the tail, still run
+    for (int k = 0; k < 8; ++k) {  // 512 silent frames, four times its tail: still run
         std::fill_n(l, 64, 0.0f);
         std::fill_n(r, 64, 0.0f);
         chain->process(l, r, 64, 48000, nullptr);
     }
-    CHECK_EQ(gTailCalls, 2);
-    for (int k = 0; k < 5; ++k) {  // past the tail, with silence out: run once more, then asleep
+    CHECK_EQ(gTailCalls, 8);
+    gTailQuiet = true;  // now it says it is quiet: run once more (it says so after a block), then asleep
+    for (int k = 0; k < 4; ++k) {
         std::fill_n(l, 64, 0.0f);
         std::fill_n(r, 64, 0.0f);
         chain->process(l, r, 64, 48000, nullptr);
     }
-    CHECK_EQ(gTailCalls, 3);
+    CHECK_EQ(gTailCalls, 9);
     std::fill_n(l, 64, 0.25f);  // input again: it runs
     std::fill_n(r, 64, 0.0f);
     chain->process(l, r, 64, 48000, nullptr);
-    CHECK_EQ(gTailCalls, 4);
+    CHECK_EQ(gTailCalls, 10);
     CHECK_EQ(l[5], 0.25f);
+    gTailQuiet = false;
 }
 
 TEST(pattern_notes_reach_an_instrument_on_their_frames_across_loop_wraps) {
@@ -385,6 +412,37 @@ TEST(a_looping_clip_plays_its_notes_on_every_repeat) {
         CHECK_EQ(rec[i].type, kOn);
         CHECK_EQ(rec[i].frame, static_cast<uint64_t>(24000 * (i / 2)));
         CHECK_EQ(rec[i + 1].frame, static_cast<uint64_t>(24000 * (i / 2) + 6000));
+    }
+}
+
+TEST(a_note_played_again_while_held_gets_its_motion_up_to_its_end_at_any_block_size) {
+    // Second audio review, fix 5: NoteEvents::on() ends a pattern note still held without the pitch points due
+    // before its end, so its last pitch could depend on where the block split fell. The Engine now ends it first
+    // with its motion, as an off, an orphan and a slide do. Today a pattern's restart ends its notes before
+    // they start again (here a bent note longer than its 3-step pattern, restarting mid-chunk), so this checks
+    // that the motion up to a note's end and its new start land on the same frames at any block size.
+    auto recordAt = [](int block) {
+        Engine e(48000);
+        std::vector<Rec> rec;
+        if (!loadFixture(e, kRecorder)) return rec;
+        ProjectSpec p = instrumentTrack(kRecorder, "");
+        p.modules[0].source = pattern("0 C4 7/2 1 bend 0:0 0.8:0 1:12\n", 3);
+        p.layers[0].pattern = "pat";
+        if (!ok(e.setProject(p))) return rec;
+        e.play();
+        run(e, 6000 * 3 + 7001, block);  // past the restart at step 3 (mid-chunk), ending mid-block
+        return records(e);
+    };
+    const std::vector<Rec> a = recordAt(64), b = recordAt(37);
+    CHECK(a.size() > 4u);
+    uint32_t ons = 0;
+    for (const Rec& r : a) ons += r.type == kOn;
+    CHECK(ons >= 2u);
+    CHECK_EQ(a.size(), b.size());
+    for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
+        CHECK_EQ(a[i].frame, b[i].frame);
+        CHECK_EQ(a[i].type, b[i].type);
+        CHECK_EQ(a[i].pitch, b[i].pitch);
     }
 }
 
@@ -495,6 +553,47 @@ TEST(play_after_stop_fades_a_ringing_instrument_out_instead_of_cutting_it) {
     }
     CHECK_NEAR(l[63], 0.0, 1e-6);  // then silence: the new pass starts from it, as an export does
     CHECK(jump < 0.25f * before);    // no step: the tail fades over a few milliseconds
+}
+
+TEST(play_after_stop_caps_the_tail_work_when_many_instruments_ring) {
+    // Second audio review, fix 3: Play rendered 5 ms of every instrument still ringing, all inside one callback,
+    // so with many tracks Play itself could overrun on a phone. The tails now share a fixed budget of frames
+    // (Engine::kPlayTailBudgetFrames): one or two ringing instruments still fade over 5 ms, many over less each.
+    auto ringing = [](int tracks) {
+        ProjectSpec p = instrumentTrack("org.caw.synth.morph", "8 C4 4 1\n");
+        p.layers[0].instrument.params = {{"release", 3.0}, {"sustain", 1.0}, {"shape", 0.0}, {"drift", 0.0}, {"unison", 1}, {"attack", 0.01}};
+        p.layers[0].volume = 1.0 / tracks;
+        for (int k = 1; k < tracks; ++k) {
+            LayerSpec l = p.layers[0];
+            l.id = l.name = "t" + std::to_string(k);
+            p.layers.push_back(l);
+        }
+        return p;
+    };
+    // The frames after Play that still carry a tail (the new pass starts silent).
+    auto tailFrames = [](const ProjectSpec& p) {
+        Engine e(48000);
+        e.setMasterBypass(true);
+        if (!ok(e.setProject(p))) return -1;
+        e.play();
+        std::vector<float> l(64), r(64);
+        for (int i = 0; i < 62400 / 64; ++i) e.process(l.data(), r.data(), 64);
+        e.stop();
+        for (int i = 0; i < 4800 / 64; ++i) e.process(l.data(), r.data(), 64);
+        e.play();
+        int last = -1;
+        for (int i = 0; i < 8; ++i) {
+            e.process(l.data(), r.data(), 64);
+            for (int k = 0; k < 64; ++k)
+                if (l[static_cast<size_t>(k)] != 0.0f) last = i * 64 + k;
+        }
+        return last + 1;
+    };
+    const int one = tailFrames(ringing(1)), many = tailFrames(ringing(16));
+    CHECK(one >= 200);  // 5 ms: 240 frames
+    CHECK(one <= 240);
+    CHECK(many > 0);    // still a fade, not a cut
+    CHECK(many * 16 <= Engine::kPlayTailBudgetFrames);
 }
 
 TEST(an_instruments_values_bypass_and_automation_work_as_for_an_effect) {
@@ -699,7 +798,10 @@ TEST(the_built_in_synth_matches_its_golden_render) {
     const uint64_t h = renderHash(p, 48000 * 2, &peak);
     CHECK(peak > 0.05f);
     CHECK(peak <= 1.0f);
-    constexpr uint64_t kGolden = 0x128b1949baeaf161ull;  // re-recorded: voice summing order (engine pass) and the ping-pong fix
+    // Re-recorded: voice summing order (engine pass), the ping-pong fix, and a released voice stopping on its own
+    // frame rather than at the end of a render call (second audio review, fix 1: at most 15 frames below -100 dB),
+    // and the ping-pong's left line taking the mono average at full cross, not the sum (fix 2: 6 dB quieter echoes).
+    constexpr uint64_t kGolden = 0x7bde97cca43b8dd9ull;
     if (h != kGolden) {
         char buf[96];
         std::snprintf(buf, sizeof buf, "the basic synth renders 0x%016llxull", static_cast<unsigned long long>(h));
@@ -712,7 +814,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 4);
+    CHECK_EQ(caw_api_version(), 5);  // 5: stereo track meters (4 brought instruments)
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
             "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.basic","params":{"cutoff":900}}}]})");

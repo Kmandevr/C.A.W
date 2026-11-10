@@ -50,6 +50,9 @@ struct ProjectAutomationLaneSpec {
     std::vector<AutomationPointSpec> points;
 };
 
+// The most a track or the master fader gains: +12 dB (owner, 2026-11-10: faders like REAPER's), 10^(12/20).
+constexpr double kMaxMixGain = 3.9810717055349722;
+
 struct LayerSpec {
     std::string id, name;
     std::vector<std::string> chain;  // module ids: generator first, then effects

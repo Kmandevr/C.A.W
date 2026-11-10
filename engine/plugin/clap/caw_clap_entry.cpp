@@ -23,6 +23,7 @@
 #include <clap/clap.h>
 
 #include <algorithm>
+#include <utility>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -277,9 +278,18 @@ uint32_t voiceWord(uint32_t status, uint32_t channel, uint32_t key, uint32_t ind
 
 constexpr uint32_t kNoteSlots = 16 * 128;
 
+// More notes with host ids sounding on one channel and key than the latest (which noteIds holds): at most this
+// many at once on a port; past it, the oldest such note ends.
+constexpr uint32_t kMaxStacked = 256;
+
 struct EventPort {
     std::vector<CawEvent> events;    // kEventCapacity, allocated in activate
-    std::vector<uint32_t> noteIds;   // [channel * 128 + key]: the sounding note's C.A.W id, 0 none
+    std::vector<uint32_t> noteIds;   // [channel * 128 + key]: the latest sounding note's C.A.W id, 0 none
+    // Earlier notes with host ids still sounding on a key whose latest is in noteIds (a host may start the same
+    // key twice with two ids): [slot, id] pairs, kMaxStacked, allocated in activate, the oldest first.
+    std::vector<std::pair<uint32_t, uint32_t>> stacked;
+    uint32_t stackedCount = 0;
+    uint32_t held = 0;  // notes tracked (noteIds set plus stacked): room for their offs is kept in `events`
 };
 
 struct Plugin {
@@ -706,6 +716,7 @@ bool pluginActivate(const clap_plugin_t* p, double sampleRate, uint32_t, uint32_
         for (EventPort& port : s->eventInPorts) {
             port.events.assign(kEventCapacity, CawEvent{});
             port.noteIds.assign(kNoteSlots, 0);
+            port.stacked.assign(kMaxStacked, {0u, 0u});
         }
         s->eventInputs.assign(s->eventIn.size(), CawEventInput{});
         s->eventOutBuffer.assign(s->eventOut.size() * size_t(kEventCapacity), CawEvent{});
@@ -733,7 +744,10 @@ void pluginStopProcessing(const clap_plugin_t*) {}
 void pluginReset(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->table->reset(s->instance);
-    for (EventPort& port : s->eventInPorts) std::fill(port.noteIds.begin(), port.noteIds.end(), 0u);
+    for (EventPort& port : s->eventInPorts) {
+        std::fill(port.noteIds.begin(), port.noteIds.end(), 0u);
+        port.stackedCount = port.held = 0;
+    }
     for (uint32_t k = 0; k < s->paramCount; ++k) {
         Param& prm = s->params[k];
         prm.current = prm.target;
@@ -750,10 +764,13 @@ uint32_t freshNoteId(Plugin* s) {
 }
 uint32_t hostNoteId(int32_t id) { return static_cast<uint32_t>(id) + 1u; }
 
+// Adds an event to the port's list. Room for the tracked notes' offs (up to half the list) is kept back from
+// everything but an off, so a full list drops a controller or an on, never the off of a note it delivered.
 void pushEvent(Plugin* s, uint32_t port, uint32_t frame, uint16_t kind, uint32_t noteId, uint32_t w0, uint32_t w1,
-               uint32_t w2 = 0, uint32_t w3 = 0) {
+               uint32_t w2 = 0, uint32_t w3 = 0, bool isOff = false) {
     CawEventInput& in = s->eventInputs[port];
-    if (in.count >= kEventCapacity) return;  // full: dropped
+    const uint32_t keep = isOff ? 0u : std::min(s->eventInPorts[port].held, kEventCapacity / 2);
+    if (in.count + keep >= kEventCapacity) return;  // full: dropped
     CawEvent& e = s->eventInPorts[port].events[in.count++];
     e.frame = frame;
     e.kind = kind;
@@ -769,46 +786,109 @@ uint32_t eventPortFor(const Plugin* s, int32_t portIndex) {
     return portIndex >= 0 && static_cast<size_t>(portIndex) < s->eventIn.size() ? static_cast<uint32_t>(portIndex) : 0u;
 }
 
+// The note bookkeeping: noteIds holds each key's latest note, `stacked` the earlier ones with host ids, and
+// `held` counts both.
+void setSlot(EventPort& e, uint32_t slot, uint32_t id) {
+    if (e.noteIds[slot] == 0 && id != 0) ++e.held;
+    if (e.noteIds[slot] != 0 && id == 0) --e.held;
+    e.noteIds[slot] = id;
+}
+void unstack(EventPort& e, uint32_t i) {
+    for (uint32_t j = i + 1; j < e.stackedCount; ++j) e.stacked[j - 1] = e.stacked[j];
+    --e.stackedCount;
+    --e.held;
+}
+void sendOff(Plugin* s, uint32_t port, uint32_t frame, uint32_t id, uint32_t slot, uint16_t velocity) {
+    pushEvent(s, port, frame, CAW_EVENT_NOTE, id, voiceWord(0x8, slot / 128, slot % 128, 0), uint32_t(velocity) << 16,
+              0, 0, true);
+}
+// Ends every tracked note on `slot` (all of them, or only `id` when it is not 0).
+void endSlot(Plugin* s, uint32_t port, uint32_t frame, uint32_t slot, uint32_t id, uint16_t velocity) {
+    EventPort& e = s->eventInPorts[port];
+    for (uint32_t i = 0; i < e.stackedCount;)
+        if (e.stacked[i].first == slot && (id == 0 || e.stacked[i].second == id)) {
+            sendOff(s, port, frame, e.stacked[i].second, slot, velocity);
+            unstack(e, i);
+        } else {
+            ++i;
+        }
+    if (e.noteIds[slot] != 0 && (id == 0 || e.noteIds[slot] == id)) {
+        sendOff(s, port, frame, e.noteIds[slot], slot, velocity);
+        setSlot(e, slot, 0);
+    }
+}
+
 void noteOn(Plugin* s, uint32_t port, uint32_t frame, int32_t clapId, uint32_t channel, uint32_t key, uint16_t velocity) {
     const uint32_t id = clapId >= 0 ? hostNoteId(clapId) : freshNoteId(s);
-    uint32_t& slot = s->eventInPorts[port].noteIds[channel * 128 + key];
-    // A note already sounding on this channel and key whose id only this slot remembers (a note without a
-    // host id, or any note when this one has none) ends first: no later off could name it.
-    if (slot != 0 && slot != id && (clapId < 0 || (slot & 0x80000000u)))
-        pushEvent(s, port, frame, CAW_EVENT_NOTE, slot, voiceWord(0x8, channel, key, 0), 0);
-    slot = id;
+    EventPort& e = s->eventInPorts[port];
+    const uint32_t slot = channel * 128 + key;
+    const uint32_t was = e.noteIds[slot];
+    if (was != 0 && was != id) {
+        if (clapId < 0 || (was & 0x80000000u)) {
+            // A note sounding on this key whose id only this slot remembers (a note without a host id, or any
+            // note when this one has none) ends first: no later off could name it.
+            sendOff(s, port, frame, was, slot, 0);
+            setSlot(e, slot, 0);
+        } else {
+            // Two notes with host ids on one key: the earlier one is kept, so an off by its id or a wildcard
+            // off for the key still ends it. Past kMaxStacked, the oldest kept ends.
+            if (e.stackedCount == kMaxStacked) {
+                sendOff(s, port, frame, e.stacked[0].second, e.stacked[0].first, 0);
+                unstack(e, 0);
+            }
+            e.stacked[e.stackedCount++] = {slot, was};
+            ++e.held;
+            e.noteIds[slot] = 0;
+            --e.held;
+        }
+    }
+    setSlot(e, slot, id);
     pushEvent(s, port, frame, CAW_EVENT_NOTE, id, voiceWord(0x9, channel, key, 0), uint32_t(velocity) << 16);
 }
 
 // Ends the matching notes (-1 is a wildcard, as in CLAP); a fully specified note with a host id ends
 // even if the wrapper never saw it start.
 void noteOff(Plugin* s, uint32_t port, uint32_t frame, int32_t clapId, int32_t channel, int32_t key, uint16_t velocity) {
-    std::vector<uint32_t>& ids = s->eventInPorts[port].noteIds;
+    EventPort& e = s->eventInPorts[port];
+    const uint32_t id = clapId >= 0 ? hostNoteId(clapId) : 0u;
     if (channel >= 0 && key >= 0 && channel < 16 && key < 128) {
-        uint32_t& slot = ids[uint32_t(channel) * 128 + uint32_t(key)];
-        const uint32_t id = clapId >= 0 ? hostNoteId(clapId) : slot;
-        if (clapId < 0 || slot == id) slot = 0;
-        pushEvent(s, port, frame, CAW_EVENT_NOTE, id, voiceWord(0x8, channel, key, 0), uint32_t(velocity) << 16);
+        const uint32_t slot = uint32_t(channel) * 128 + uint32_t(key);
+        bool tracked = e.noteIds[slot] != 0 && (id == 0 || e.noteIds[slot] == id);
+        for (uint32_t i = 0; i < e.stackedCount && !tracked; ++i)
+            tracked = e.stacked[i].first == slot && (id == 0 || e.stacked[i].second == id);
+        if (tracked) endSlot(s, port, frame, slot, id, velocity);
+        else sendOff(s, port, frame, id, slot, velocity);  // not seen starting (or nothing sounding): passed on
+        if (e.noteIds[slot] == 0)  // the latest ended: an earlier note on the key, if any, is the latest again
+            for (uint32_t i = e.stackedCount; i-- > 0;)
+                if (e.stacked[i].first == slot) {
+                    const uint32_t back = e.stacked[i].second;
+                    unstack(e, i);
+                    setSlot(e, slot, back);
+                    break;
+                }
         return;
     }
     for (uint32_t c = 0; c < 16; ++c) {
         if (channel >= 0 && uint32_t(channel) != c) continue;
         for (uint32_t k = 0; k < 128; ++k) {
             if (key >= 0 && uint32_t(key) != k) continue;
-            uint32_t& slot = ids[c * 128 + k];
-            if (!slot || (clapId >= 0 && slot != hostNoteId(clapId))) continue;
-            pushEvent(s, port, frame, CAW_EVENT_NOTE, slot, voiceWord(0x8, c, k, 0), uint32_t(velocity) << 16);
-            slot = 0;
+            endSlot(s, port, frame, c * 128 + k, id, velocity);
         }
     }
 }
 
 bool findNote(const Plugin* s, uint32_t port, uint32_t id, uint32_t& channel, uint32_t& key) {
-    const std::vector<uint32_t>& ids = s->eventInPorts[port].noteIds;
+    const EventPort& e = s->eventInPorts[port];
     for (uint32_t i = 0; i < kNoteSlots; ++i)
-        if (ids[i] == id) {
+        if (e.noteIds[i] == id) {
             channel = i / 128;
             key = i % 128;
+            return true;
+        }
+    for (uint32_t i = 0; i < e.stackedCount; ++i)
+        if (e.stacked[i].second == id) {
+            channel = e.stacked[i].first / 128;
+            key = e.stacked[i].first % 128;
             return true;
         }
     return false;
@@ -886,17 +966,18 @@ void midi2(Plugin* s, uint32_t port, uint32_t frame, const uint32_t data[4]) {
     const uint32_t mt = data[0] >> 28;
     if (mt == 0x4) {
         const uint32_t status = (data[0] >> 20) & 0xFu, channel = (data[0] >> 16) & 0xFu, key = (data[0] >> 8) & 0x7Fu;
-        std::vector<uint32_t>& ids = s->eventInPorts[port].noteIds;
+        EventPort& ep = s->eventInPorts[port];
+        std::vector<uint32_t>& ids = ep.noteIds;
         if (status == 0x9) {
             const uint32_t id = freshNoteId(s);
-            ids[channel * 128 + key] = id;
+            setSlot(ep, channel * 128 + key, id);
             pushEvent(s, port, frame, CAW_EVENT_NOTE, id, data[0], data[1], data[2], data[3]);
             return;
         }
         if (status == 0x8) {
             const uint32_t id = ids[channel * 128 + key];
-            ids[channel * 128 + key] = 0;
-            pushEvent(s, port, frame, CAW_EVENT_NOTE, id, data[0], data[1], data[2], data[3]);
+            setSlot(ep, channel * 128 + key, 0);
+            pushEvent(s, port, frame, CAW_EVENT_NOTE, id, data[0], data[1], data[2], data[3], true);
             return;
         }
         // Per-note messages: registered/assignable per-note controllers, per-note pitch bend,

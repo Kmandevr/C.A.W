@@ -1,6 +1,7 @@
 // Arrange: the tracks and clips on a timeline, compact track headers, the focus view (one track and its panel) and the mixer card.
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -16,7 +17,11 @@ import 'frame/sections.dart';
 import 'motion.dart';
 import 'param_control.dart';
 import 'theme.dart';
+import 'arrange/track_color.dart';
+import 'file_manager_screen.dart';
+import 'frame/frame_widgets.dart';
 import 'widgets.dart';
+import 'volume_fader.dart';
 import 'track_cards_screen.dart';
 import 'glass.dart';
 import 'midi_file_actions.dart';
@@ -42,9 +47,55 @@ class ArrangerScreen extends StatefulWidget {
   State<ArrangerScreen> createState() => _ArrangerScreenState();
 }
 
-class _ArrangerScreenState extends State<ArrangerScreen> {
-  bool mixer = false, settings = false, cardsView = false, mixerCard = false;
-  double zoom = 18.0, _trackHeight = 76.0;
+class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProviderStateMixin {
+  bool mixer = false, settings = false, cardsView = false, mixerCard = false, zoomBar = false;
+
+  /// Phone portrait: the focus panel opened up over the pinned track (owner, 2026-11-10: it can open higher).
+  bool _panelHigh = false;
+
+  /// The Files browser beside (or under) the tracks, so files can be dragged onto a track or into the FX stack
+  /// without leaving Arrange (owner, 2026-11-10).
+  bool _browser = false;
+
+  /// Time zoom: pixels per 16th step (× 0.85 at compact density).
+  double zoom = 18.0;
+  static const minZoom = 3.0, maxZoom = 64.0;
+
+  // The zoom buttons glide to their new zoom ([Motion.standard]); a pinch, slider or Ctrl + wheel follows at once.
+  late final AnimationController _zoomAnim = AnimationController(vsync: this, duration: Motion.standard)
+    ..addListener(_zoomFrame);
+  double _zoomFrom = 18, _zoomTarget = 18;
+  double? _zoomFocal;
+
+  // Two fingers on the timeline: a sideways pinch zooms time, an up-and-down pinch the track height.
+  final Map<int, Offset> _touches = {};
+  double _pinchDx0 = 0, _pinchDy0 = 0, _pinchZoom0 = 0, _pinchH0 = 0;
+  bool _pinchX = false, _pinchY = false;
+  // A header resize in progress, shown before it is saved when the drag ends.
+  double? _dragHeaderW, _dragTrackH;
+
+  bool get _phone => MediaQuery.sizeOf(context).shortestSide < 600;
+
+  /// The track row height: dragged from a row's bottom edge or picked in the toolbar's height menu (saved).
+  double get _trackHeight {
+    final saved = widget.state.settings.trackHeight;
+    return _dragTrackH ?? (saved > 0 ? saved : (_phone ? 60.0 : 76.0));
+  }
+
+  /// The track header width: dragged from the headers' right edge (saved).
+  double get _headerWidth {
+    final saved = widget.state.settings.headerWidth;
+    return _dragHeaderW ?? (saved > 0 ? saved : (_phone ? 132.0 : 176.0));
+  }
+
+  void _saveHeaderSize() {
+    final w = _dragHeaderW, h = _dragTrackH;
+    if (w == null && h == null) return;
+    widget.state.settings.update((x) {
+      if (w != null) x.headerWidth = w;
+      if (h != null) x.trackHeight = h;
+    }).then((_) { if (mounted) setState(() { _dragHeaderW = null; _dragTrackH = null; }); });
+  }
   // The timeline can be millions of bars long (F7.2), so the ruler and grid paint only what this shows.
   final _hScroll = ScrollController();
 
@@ -54,8 +105,101 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
 
   @override
   void dispose() {
+    _zoomAnim.dispose();
     _hScroll.dispose();
     super.dispose();
+  }
+
+  /// Sets the time zoom, keeping the timeline point under [focal] (pixels from the lanes' left edge; the middle of
+  /// the view by default) where it is.
+  void _setZoom(double z, {double? focal}) {
+    z = z.clamp(minZoom, maxZoom).toDouble();
+    if (z == zoom) return;
+    final pos = _hScroll.hasClients ? _hScroll.positions.last : null;
+    final f = focal ?? (pos?.viewportDimension ?? 0) / 2;
+    final anchor = pos == null ? null : (pos.pixels + f) / zoom;
+    setState(() => zoom = z);
+    if (anchor == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_hScroll.hasClients) return;
+      final p = _hScroll.positions.last;
+      p.jumpTo((anchor * zoom - f).clamp(0.0, p.maxScrollExtent).toDouble());
+    });
+  }
+
+  /// The zoom buttons: a short glide to [z] (at once when motion is off).
+  void _animateZoom(double z) {
+    _zoomTarget = z.clamp(minZoom, maxZoom).toDouble();
+    if (Motion.of(context) != MotionLevel.full) {
+      _setZoom(_zoomTarget);
+      return;
+    }
+    _zoomFrom = zoom;
+    _zoomFocal = null;
+    _zoomAnim.forward(from: 0);
+  }
+
+  void _zoomFrame() {
+    final t = Curves.easeOutCubic.transform(_zoomAnim.value);
+    _setZoom(_zoomFrom + (_zoomTarget - _zoomFrom) * t, focal: _zoomFocal);
+  }
+
+  void _touchDown(PointerDownEvent e, double headW) {
+    if (e.kind != PointerDeviceKind.touch) return;
+    _touches[e.pointer] = e.localPosition;
+    if (_touches.length == 2) {
+      final ps = _touches.values.toList();
+      final dx = (ps[0].dx - ps[1].dx).abs(), dy = (ps[0].dy - ps[1].dy).abs();
+      _pinchDx0 = dx;
+      _pinchDy0 = dy;
+      _pinchZoom0 = zoom;
+      _pinchH0 = _trackHeight;
+      // Fingers side by side zoom time, one above the other the height; diagonal, both.
+      _pinchX = dx > 24 && dx >= dy * 0.6;
+      _pinchY = dy > 24 && dy >= dx * 0.6;
+      _zoomAnim.stop();
+    }
+  }
+
+  void _touchMove(PointerMoveEvent e, double headW) {
+    if (!_touches.containsKey(e.pointer)) return;
+    _touches[e.pointer] = e.localPosition;
+    if (_touches.length != 2) return;
+    final ps = _touches.values.toList();
+    if (_pinchX) {
+      _setZoom(_pinchZoom0 * (ps[0].dx - ps[1].dx).abs() / _pinchDx0, focal: (ps[0].dx + ps[1].dx) / 2 - headW);
+    }
+    if (_pinchY) {
+      setState(() => _dragTrackH = (_pinchH0 * (ps[0].dy - ps[1].dy).abs() / _pinchDy0)
+          .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble());
+    }
+  }
+
+  void _touchUp(PointerEvent e) {
+    if (_touches.remove(e.pointer) == null) return;
+    if (_touches.length == 1 && (_pinchX || _pinchY)) {
+      _pinchX = _pinchY = false;
+      _saveHeaderSize();
+    }
+  }
+
+  /// Ctrl + wheel zooms time around the mouse; Ctrl + Shift + wheel changes the track height. Registered before the
+  /// scroll views see the wheel, so they don't also scroll.
+  void _wheel(PointerSignalEvent e, double? focal) {
+    if (e is! PointerScrollEvent || !HardwareKeyboard.instance.isControlPressed) return;
+    GestureBinding.instance.pointerSignalResolver.register(e, (event) {
+      final d = (event as PointerScrollEvent).scrollDelta;
+      final amount = d.dy != 0 ? d.dy : d.dx;
+      if (amount == 0) return;
+      final factor = amount > 0 ? 1 / 1.12 : 1.12;
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        setState(() => _dragTrackH = (_trackHeight * factor)
+            .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble());
+        _saveHeaderSize();
+      } else {
+        _setZoom(zoom * factor, focal: focal);
+      }
+    });
   }
 
   SectionController? get _sections => SectionController.maybeOf(context);
@@ -130,7 +274,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
         const MenuAction('midi', 'Import MIDI file…', Icons.file_open_outlined),
       ],
       const MenuAction('rename', 'Rename', Icons.edit_outlined),
-      MenuAction('color', 'Colour', Icons.palette_outlined),
+      MenuAction('color', layer.ownColor || layer.parentId == null ? 'Colour' : 'Own colour', Icons.palette_outlined),
+      if (layer.ownColor && layer.parentId != null) const MenuAction('folder-color', "Use the folder's colour", Icons.format_color_reset_outlined),
       if (index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
       if (index < s.project.layers.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
       if (layer.parentId != null) const MenuAction('unparent', 'Move out of folder', Icons.drive_file_move_rtl_outlined),
@@ -152,7 +297,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     if (v.startsWith('clip:')) s.addClip(layer, v.substring(5));
     if (v == 'midi') await importMidiFile(context, s, layer: layer);
     if (v == 'rename') await _rename(layer);
-    if (v == 'color') s.editLayer(layer, (l) => l.color = (l.color + 1) % LayerDoc.trackColors);
+    if (v == 'color') s.editLayer(layer, (l) { l.color = l.ownColor ? (l.color + 1) % LayerDoc.trackColors : l.color; l.ownColor = true; });
+    if (v == 'folder-color') s.editLayer(layer, (l) => l.ownColor = false);
     if (v == 'up' && index > 0) s.moveLayer(index, index - 1);
     if (v == 'down' && index < s.project.layers.length - 1) s.moveLayer(index, index + 2);
     if (v == 'unparent') s.moveLayerIntoFolder(layer, null);
@@ -243,21 +389,31 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     Widget panel(bool sheet) => FocusPanel(
       state: s, layer: focused!, tab: _tab, bottomSheetStyle: sheet,
       onTab: (t) => setState(() => _tab = t),
-      onClose: () => _focus(null),
+      onClose: () { _panelHigh = false; _focus(null); },
+      expanded: _panelHigh,
+      onExpand: sheet ? (v) => setState(() => _panelHigh = v) : null,
       onPrevious: fi > 0 ? () => _step(-1) : null,
       onNext: fi >= 0 && fi < focusable.length - 1 ? () => _step(1) : null,
       onOpenModule: widget.onOpenModule,
+      browsing: _browser,
+      onBrowse: () => setState(() => _browser = !_browser),
     );
 
     final Widget body;
     if (focused != null && layout == FocusLayout.pinned) {
       // Phone portrait: the track pinned at the top (still scrollable and editable), its panel below.
+      // Opened higher, the panel slides up over the track and leaves only a sliver of it.
       body = LayoutBuilder(builder: (context, box) {
         final pinnedH = (box.maxHeight * 0.2).clamp(84.0, 220.0).toDouble();
         return Column(children: [
-          SizedBox(height: pinnedH, child: _timeline(context, [focused], callbacks, pinned: true)),
-          const SizedBox(height: 4),
-          Expanded(child: panel(true)),
+          AnimatedContainer(duration: Motion.move(Motion.panel, Motion.of(context)), curve: Curves.easeOutCubic,
+            height: _panelHigh ? 0 : pinnedH + 4,
+            child: ClipRect(child: OverflowBox(alignment: Alignment.topCenter, minHeight: pinnedH + 4, maxHeight: pinnedH + 4,
+              child: Column(children: [
+                SizedBox(height: pinnedH, child: _timeline(context, [focused], callbacks, pinned: true)),
+                const SizedBox(height: 4),
+              ])))),
+          Expanded(child: SlideIn(from: const Offset(0, 0.12), child: panel(true))),
         ]);
       });
     } else if (focused != null) {
@@ -268,25 +424,66 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             : box.maxWidth * 0.4;
         return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(child: _arrangement(context, callbacks)),
-          SizedBox(width: math.min(w, box.maxWidth - 120), child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4), child: panel(false))),
+          SizedBox(width: math.min(w, box.maxWidth - 120), child: SlideIn(from: const Offset(0.12, 0), child: Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4), child: panel(false)))),
         ]);
       });
     } else {
       body = _arrangement(context, callbacks);
     }
 
+    final withBrowser = !_browser ? body : LayoutBuilder(builder: (context, box) {
+      // The same Files browser as Build's explorer; hold an item and drag it onto a track or the FX stack.
+      final pane = SlideIn(
+        from: box.maxWidth >= 600 ? const Offset(0.15, 0) : const Offset(0, 0.15),
+        child: Padding(padding: const EdgeInsets.all(4), child: GlassPanel(key: const ValueKey('arrange-browser'),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SizedBox(height: 30, child: Row(children: [
+              const SizedBox(width: 10),
+              const Icon(Icons.drag_indicator, size: 14, color: Neon.dim),
+              const SizedBox(width: 4),
+              const Expanded(child: Text('Hold an item, drag it onto a track', maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Neon.dim, fontSize: 11))),
+              IconButton(tooltip: 'Close the browser', iconSize: 16, visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() => _browser = false), icon: const Icon(Icons.close)),
+            ])),
+            Expanded(child: FileManagerScreen(key: const ValueKey('arrange explorer'), state: s, explorer: true,
+              onOpenAsset: (_) {})),
+          ]))));
+      if (box.maxWidth >= 600) {
+        return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(child: body),
+          SizedBox(width: math.min(300.0, box.maxWidth * 0.32), child: pane),
+        ]);
+      }
+      return Column(children: [
+        Expanded(child: body),
+        SizedBox(height: math.max(160.0, box.maxHeight * 0.4), child: pane),
+      ]);
+    });
+
     return PopScope(
-      // Android Back leaves the focus view first (owner, 2026-11-09).
-      canPop: focused == null,
+      // Android Back closes the browser, then leaves the focus view (owner, 2026-11-09).
+      canPop: focused == null && !_browser,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && focused != null) _focus(null);
+        if (didPop) return;
+        if (_browser) {
+          setState(() => _browser = false);
+        } else if (focused != null) {
+          _focus(null);
+        }
       },
       child: Column(children: [
         if (s.meters.overloaded > 0) _OverloadBanner(state: s),
-        _toolbar(context, focused),
+        // The toolbar tucks away with the status row while the tracks scroll down (owner, 2026-11-10).
+        _tucked(Column(mainAxisSize: MainAxisSize.min, children: [
+          _toolbar(context, focused),
+          AnimatedSize(duration: Motion.move(Motion.standard, Motion.of(context)), curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: zoomBar ? _zoomBar() : const SizedBox(width: double.infinity)),
+        ])),
         if (settings) _settingsPanel(),
-        Expanded(child: body),
+        Expanded(child: withBrowser),
         if (mixer) _ArrangementMixer(state: s),
       ]),
     );
@@ -312,26 +509,29 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
           else
             TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
               icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
+          IconButton(key: const ValueKey('arrange-browse'), onPressed: () => setState(() => _browser = !_browser),
+            color: _browser ? Neon.blue : Neon.dim, icon: const Icon(Icons.folder_open),
+            tooltip: 'Files: drag one onto a track'),
           if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
             IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt),
               icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom / 1.15).clamp(10.0, 36.0).toDouble()),
-            icon: const Icon(Icons.zoom_out), tooltip: 'Zoom out'),
-          IconButton(onPressed: () => setState(() => zoom = (zoom * 1.15).clamp(10.0, 36.0).toDouble()),
-            icon: const Icon(Icons.zoom_in), tooltip: 'Zoom in'),
+          IconButton(onPressed: () => setState(() => zoomBar = !zoomBar),
+            key: const ValueKey('arrange-zoom'),
+            color: zoomBar ? Neon.blue : null,
+            icon: const Icon(Icons.zoom_in), tooltip: 'Zoom (or pinch; Ctrl + wheel)'),
           PopupMenuButton<String>(
             tooltip: 'Track height',
             onSelected: (v) {
               final px = double.parse(v.substring(2));
               if (v.startsWith('h:')) {
-                setState(() => _trackHeight = px);
+                s.settings.update((x) => x.trackHeight = px).then((_) { if (mounted) setState(() {}); });
               } else {
                 s.settings.update((x) => x.trackGap = px).then((_) { if (mounted) setState(() {}); });
               }
             },
-            icon: Icon(Icons.height, color: _trackHeight == 76 ? Neon.dim : Neon.blue),
+            icon: const Icon(Icons.height, color: Neon.dim),
             itemBuilder: (_) => [
-              for (final (px, name) in const [(54.0, 'Compact'), (76.0, 'Standard'), (96.0, 'Tall'), (120.0, 'Extra tall')])
+              for (final (px, name) in const [(44.0, 'Thin'), (60.0, 'Compact'), (76.0, 'Standard'), (96.0, 'Tall'), (120.0, 'Extra tall')])
                 CheckedPopupMenuItem(value: 'h:$px', checked: _trackHeight == px, child: Text('$name · ${px.round()} px')),
               const PopupMenuDivider(),
               for (final (px, name) in const [(0.0, 'No gap'), (3.0, 'Small gap'), (6.0, 'Gap'), (12.0, 'Wide gap'), (20.0, 'Extra wide gap')])
@@ -371,6 +571,39 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     );
   }
 
+  Widget _tucked(Widget bar) {
+    final shown = _sections?.barsShown;
+    if (shown == null) return bar;
+    return ValueListenableBuilder<bool>(valueListenable: shown,
+      builder: (context, v, child) => TuckAway(shown: v || settings, child: child!), child: bar);
+  }
+
+  /// Time and height zoom: − and + glide a step, the sliders follow the finger (time on a log scale).
+  Widget _zoomBar() {
+    final ratio = math.log(maxZoom / minZoom);
+    final h = _trackHeight;
+    Widget icon(IconData i, String tip, VoidCallback onTap) => IconButton(onPressed: onTap, tooltip: tip,
+        visualDensity: VisualDensity.compact, iconSize: 18, icon: Icon(i, color: Neon.dim));
+    return SizedBox(height: 36, child: Row(key: const ValueKey('arrange-zoom-bar'), children: [
+      const SizedBox(width: 6),
+      const Tooltip(message: 'Time zoom', child: Icon(Icons.swap_horiz, size: 16, color: Neon.dim)),
+      icon(Icons.remove, 'Zoom out', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget / 1.4 : zoom / 1.4)),
+      Expanded(flex: 3, child: ResetOnDoubleTap(onReset: () => _animateZoom(18), child: Slider(key: const ValueKey('arrange-zoom-time'),
+        value: (math.log(zoom / minZoom) / ratio).clamp(0.0, 1.0).toDouble(),
+        onChanged: (v) { _zoomAnim.stop(); _setZoom(minZoom * math.exp(v * ratio)); }))),
+      icon(Icons.add, 'Zoom in', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget * 1.4 : zoom * 1.4)),
+      const SizedBox(width: 6),
+      const Tooltip(message: 'Track height', child: Icon(Icons.swap_vert, size: 16, color: Neon.dim)),
+      Expanded(flex: 2, child: ResetOnDoubleTap(onReset: () {
+        widget.state.settings.update((x) => x.trackHeight = 0).then((_) { if (mounted) setState(() {}); });
+      }, child: Slider(key: const ValueKey('arrange-zoom-height'),
+        value: h.clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble(),
+        min: Settings.minTrackHeight, max: Settings.maxTrackHeight,
+        onChanged: (v) => setState(() => _dragTrackH = v),
+        onChangeEnd: (_) => _saveHeaderSize()))),
+    ]));
+  }
+
   Widget _settingsPanel() {
     final s = widget.state;
     return Flexible(flex: 0, child: ConstrainedBox(
@@ -408,19 +641,29 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final trackHeight = _trackHeight;
     // The gap between tracks (Settings, chosen from the track height menu), so tracks don't sit on each other.
     final gap = pinned ? 0.0 : s.settings.trackGap;
-    final headW = Neon.compact(context) ? 158.0 : 184.0;
+    final headW = _headerWidth;
     // The song ends at its last clip or automation point (or the shortest length) and playback loops back there,
     // as in Reaper. The timeline always reaches 64 bars past it, so a clip can go anywhere and the song grows with it.
     final end = p.engineLoopSteps;
     final width = math.max(560.0, math.min(p.maxArrangementSteps, math.max(p.timelineSteps, end + 64 * p.stepsPerBar)) * stepW);
     final ruler = pinned ? 20.0 : 30.0;
     final focusId = _focusId;
-    return LayoutBuilder(builder: (context, view) => SingleChildScrollView(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: headW, child: Column(children: [
+    // Two fingers scroll by their average, so a pinch zooms without dragging the view; the pointers are read raw.
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(multitouchDragStrategy: MultitouchDragStrategy.averageBoundaryPointers),
+      child: Listener(
+      onPointerDown: (e) => _touchDown(e, headW),
+      onPointerMove: (e) => _touchMove(e, headW),
+      onPointerUp: _touchUp,
+      onPointerCancel: _touchUp,
+      child: LayoutBuilder(builder: (context, view) => SingleChildScrollView(child: Listener(
+        onPointerSignal: (e) => _wheel(e, null),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Stack(children: [SizedBox(width: headW, child: Column(children: [
         SizedBox(height: ruler, child: Padding(
           padding: EdgeInsets.only(left: 10, top: pinned ? 4 : 8),
           child: Align(alignment: Alignment.centerLeft,
-            child: Text(pinned ? 'FOCUS · swipe for next' : 'TRACKS',
+            child: Text(pinned ? 'FOCUS · swipe ‹ ›' : 'TRACKS',
               style: const TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
         for (final layer in layers) ...[
           _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),
@@ -430,13 +673,25 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             onTap: pinned ? () => _focus(null) : () => callbacks.onTap(layer),
             onSwipe: pinned ? _step : null,
             onFx: () => callbacks.onFx(layer),
-            onMenu: (at) => callbacks.onMenu(layer, at)),
+            onMenu: (at) => callbacks.onMenu(layer, at),
+            onResize: pinned ? null : (dy) => setState(() => _dragTrackH = (_trackHeight + dy)
+                .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble()),
+            onResizeEnd: _saveHeaderSize),
           if (layer.spaceBelow > 0 && !pinned) _SpacerHeader(state: s, layer: layer),
           SizedBox(height: gap),
         ],
       ])),
+        // The headers' right edge: drag it to make the headers narrower or wider (saved).
+        Positioned(right: 0, top: 0, bottom: 0, width: 10, child: _ResizeGrip(
+          key: const ValueKey('header-width-grip'), axis: Axis.horizontal, label: 'Resize track headers',
+          onDrag: (dx) => setState(() => _dragHeaderW = (_headerWidth + dx)
+              .clamp(Settings.minHeaderWidth, Settings.maxHeaderWidth).toDouble()),
+          onEnd: _saveHeaderSize)),
+      ]),
       Expanded(child: SingleChildScrollView(controller: _hScroll, scrollDirection: Axis.horizontal,
-        child: SizedBox(width: width, child: Stack(children: [
+        child: Listener(
+          onPointerSignal: (e) => _wheel(e, _hScroll.hasClients ? e.localPosition.dx - _hScroll.positions.last.pixels : null),
+          child: SizedBox(width: width, child: Stack(children: [
           // One grid behind every track, through the gaps and spacers and down to the bottom of the view
           // below the last track (owner: like Reaper).
           Positioned(left: 0, right: 0, top: ruler, bottom: 0, child: IgnorePointer(child: CustomPaint(
@@ -464,8 +719,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
               return CustomPaint(painter: _PlayheadPainter(stepW, playheadStep));
             },
           ))),
-        ])))),
-    ])));
+        ]))))),
+    ]))))));
   }
 
   Widget _arrangement(BuildContext context, _TrackCallbacks callbacks) {
@@ -476,9 +731,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     if (!mixerCard) return tracks;
     return LayoutBuilder(builder: (context, box) => Stack(children: [
       Positioned.fill(child: tracks),
-      Positioned(left: 6, right: 6, bottom: 6, height: math.min(box.maxHeight - 12, math.max(320.0, box.maxHeight * 0.72)),
-        child: MixerCard(state: s, onClose: () => setState(() => mixerCard = false),
-          onSlot: (layer, _) { setState(() => mixerCard = false); _openTrack(layer, tab: FocusTab.fx); })),
+      Positioned(left: 6, right: 6, bottom: 6, height: math.min(box.maxHeight - 12, math.max(320.0, box.maxHeight * 0.86)),
+        child: SlideIn(from: const Offset(0, 0.15), child: MixerCard(state: s, onClose: () => setState(() => mixerCard = false),
+          onSlot: (layer, _) { setState(() => mixerCard = false); _openTrack(layer, tab: FocusTab.fx); }))),
     ]));
   }
 }
@@ -499,7 +754,7 @@ class _TrackCallbacks {
 class _TimelineHeader extends StatelessWidget {
   const _TimelineHeader({required this.state, required this.layer, required this.index, required this.depth,
     required this.trackHeight, required this.onTap, required this.onFx, required this.onMenu,
-    this.focused = false, this.onSwipe});
+    this.focused = false, this.onSwipe, this.onResize, this.onResizeEnd});
   final AppState state;
   final LayerDoc layer;
   final int index, depth;
@@ -509,77 +764,86 @@ class _TimelineHeader extends StatelessWidget {
   final void Function(Offset at) onMenu;
   final ValueChanged<int>? onSwipe;
 
+  /// A drag on the row's bottom edge, by this many pixels; null on the focus view's pinned track.
+  final ValueChanged<double>? onResize;
+  final VoidCallback? onResizeEnd;
+
   @override
   Widget build(BuildContext context) {
-    final color = Neon.layer(layer.color);
+    final color = trackColor(state, layer);
     final selected = focused || state.selectedLayerId == layer.id;
     final gens = state.project.modules.where((m) => state.isGenerator(m.id)).toList();
     final fxCount = layer.effectIds.length + layer.components.length;
-    final box = Container(height: trackHeight + layer.automation.length * 34.0, padding: EdgeInsets.fromLTRB(7 + depth * 13, 4, 2, 4),
-      // Glass: a see-through header tinted with its track's colour, with a soft highlight along the top.
+    final thin = trackHeight < 52;
+    // REAPER-style (owner, 2026-11-10): the track's colour tints the whole header and its left edge, no outline.
+    final edge = BorderSide(color: selected ? color : color.withValues(alpha: 0.75), width: selected ? 4 : 3);
+    final box = Container(height: trackHeight + layer.automation.length * 34.0,
+      padding: EdgeInsets.fromLTRB(6 + depth * 10, thin ? 2 : 4, 2, thin ? 2 : 4),
       decoration: Glass.active
           ? BoxDecoration(
-              gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
-                Color.lerp(Neon.panel, color, selected ? 0.30 : 0.14)!.withValues(alpha: 0.78),
-                Color.lerp(Neon.panel, color, selected ? 0.12 : 0.05)!.withValues(alpha: 0.62),
+              gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: [
+                Color.lerp(Neon.panel, color, selected ? 0.42 : 0.26)!.withValues(alpha: 0.82),
+                Color.lerp(Neon.panel, color, selected ? 0.20 : 0.10)!.withValues(alpha: 0.66),
               ]),
               border: Border(
-                left: selected ? BorderSide(color: color, width: 2) : BorderSide.none,
-                bottom: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
-                right: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
+                left: edge,
+                bottom: BorderSide(color: Colors.black.withValues(alpha: 0.35)),
+                right: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
               ),
               boxShadow: selected ? [BoxShadow(color: color.withValues(alpha: 0.28), blurRadius: 12)] : null)
-          : BoxDecoration(color: selected ? Color.lerp(Neon.panel, color, 0.18) : Neon.panel,
-              border: Border(left: selected ? BorderSide(color: color, width: 2) : BorderSide.none,
-                bottom: const BorderSide(color: Neon.line), right: const BorderSide(color: Neon.line))),
+          : BoxDecoration(color: Color.lerp(Neon.panel, color, selected ? 0.30 : 0.16),
+              border: Border(left: edge, bottom: const BorderSide(color: Neon.bg))),
       child: LayoutBuilder(builder: (context, box) {
-        final oneRow = box.maxHeight < 60;
-        final mute = ToggleChip(label: 'M', size: 30, tooltip: layer.isFolder ? 'Mute folder' : 'Mute',
+        final oneRow = box.maxHeight < 56;
+        final chip = box.maxWidth < 150 ? 24.0 : 30.0;
+        final mute = ToggleChip(label: 'M', size: chip, tooltip: layer.isFolder ? 'Mute folder' : 'Mute',
             on: layer.mute, color: Neon.yellow,
             onTap: () => layer.isFolder
                 ? state.editLayer(layer, (l) => l.mute = !l.mute)
                 : state.mixLayer(layer, mute: !layer.mute));
-        final solo = ToggleChip(label: 'S', size: 30, tooltip: layer.isFolder ? 'Solo folder' : 'Solo',
+        final solo = ToggleChip(label: 'S', size: chip, tooltip: layer.isFolder ? 'Solo folder' : 'Solo',
             on: layer.solo, color: Neon.blue,
             onTap: () => layer.isFolder
                 ? state.editLayer(layer, (l) => l.solo = !l.solo)
                 : state.mixLayer(layer, solo: !layer.solo));
-        final meter = PeakMeter(key: ValueKey('meter-${layer.id}'), state: state, color: color,
-            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0);
-        // FX: drawn at 18 dp, touched over about 36 dp; a dot tells the track has effects.
+        // A stereo track (a native instrument or effect, or a folder) meters each side; a .caw track one bar.
+        final meter = TrackMeter(key: ValueKey('meter-${layer.id}'), state: state, index: index, stereo: layer.isStereo,
+            color: color);
+        // FX: drawn at 18 dp, touched over about 34 dp; a dot tells the track has effects. A very narrow header
+        // drops it: a tap on the header opens the track's effects too.
+        final showFx = box.maxWidth >= 104;
         final fx = layer.isFolder
             ? Tooltip(message: layer.busEnabled ? 'Folder with a group bus' : 'Folder',
-                child: SizedBox(width: 32, height: 28, child: Icon(Icons.account_tree_outlined, size: 15, color: color)))
+                child: SizedBox(width: 26, height: 26, child: Icon(Icons.account_tree_outlined, size: 15, color: color)))
             : Tooltip(message: 'Effects', child: InkResponse(
                 key: ValueKey('fx-button-${layer.id}'),
                 radius: 20,
                 onTap: onFx,
-                child: SizedBox(width: 34, height: 28, child: Stack(alignment: Alignment.center, children: [
+                child: SizedBox(width: 30, height: 26, child: Stack(alignment: Alignment.center, children: [
                   Icon(Icons.graphic_eq, size: 18, color: fxCount > 0 ? color : Neon.dim),
-                  if (fxCount > 0) Positioned(right: 4, top: 2, child: Container(width: 5, height: 5,
+                  if (fxCount > 0) Positioned(right: 3, top: 2, child: Container(width: 5, height: 5,
                     decoration: BoxDecoration(color: color, shape: BoxShape.circle))),
                 ]))));
-        final top = SizedBox(height: 28, child: Row(children: [
+        final top = SizedBox(height: thin ? 24 : 28, child: Row(children: [
           if (layer.isFolder)
-            IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
               tooltip: layer.collapsed ? 'Show folder' : 'Hide folder',
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
-              onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed))
-          else Container(width: 5, height: 18, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3),
-              boxShadow: selected ? [BoxShadow(color: color.withValues(alpha: 0.7), blurRadius: 6)] : null)),
-          const SizedBox(width: 5),
+              onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed)),
+          const SizedBox(width: 3),
           Expanded(child: Tooltip(
             message: layer.isFolder
                 ? (layer.busEnabled ? 'Folder with a group bus' : 'Folder')
                 : 'Instrument: ${layer.instrument != null ? state.componentInfo(layer.instrument!.id)?.label ?? layer.instrument!.id
                     : gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'none'} · hold for more',
             child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: selected ? Color.lerp(Neon.text, color, 0.35) : null)))),
-          if (oneRow) ...[mute, const SizedBox(width: 3), solo],
-          fx,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15))))),
+          if (oneRow) ...[mute, const SizedBox(width: 2), solo],
+          if (showFx || layer.isFolder) fx,
         ]));
         if (oneRow) {
-          return Column(mainAxisSize: MainAxisSize.min, children: [top, const SizedBox(height: 4), meter]);
+          return Column(mainAxisSize: MainAxisSize.min, children: [top, SizedBox(height: thin ? 2 : 4), meter]);
         }
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           top,
@@ -595,6 +859,13 @@ class _TimelineHeader extends StatelessWidget {
         ]);
       }),
     );
+    final resizable = onResize == null ? box : Stack(children: [
+      box,
+      // The row's bottom edge: drag it to make every track thinner or taller (saved).
+      Positioned(left: 0, right: 0, bottom: 0, height: 8, child: _ResizeGrip(
+        key: ValueKey('track-height-grip-${layer.id}'), axis: Axis.vertical, label: 'Resize tracks',
+        onDrag: onResize!, onEnd: onResizeEnd ?? () {})),
+    ]);
     return Semantics(
       button: true,
       selected: selected,
@@ -609,11 +880,58 @@ class _TimelineHeader extends StatelessWidget {
           final v = d.primaryVelocity ?? 0;
           if (v.abs() > 200) onSwipe!(v < 0 ? 1 : -1);
         },
-        child: box,
+        child: resizable,
       ),
     );
   }
 }
+
+/// A thin edge that resizes something when dragged: a faint grip line shows where it is, and the mouse cursor
+/// changes over it on a desktop.
+class _ResizeGrip extends StatefulWidget {
+  const _ResizeGrip({super.key, required this.axis, required this.label, required this.onDrag, required this.onEnd});
+
+  /// [Axis.horizontal]: dragged sideways (a width); [Axis.vertical]: dragged up and down (a height).
+  final Axis axis;
+  final String label;
+  final ValueChanged<double> onDrag;
+  final VoidCallback onEnd;
+  @override
+  State<_ResizeGrip> createState() => _ResizeGripState();
+}
+
+class _ResizeGripState extends State<_ResizeGrip> {
+  bool _active = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final sideways = widget.axis == Axis.horizontal;
+    final line = Container(
+      width: sideways ? 2 : 22, height: sideways ? 22 : 2,
+      decoration: BoxDecoration(color: (_active ? Neon.blue : Neon.dim).withValues(alpha: _active ? 0.9 : 0.35),
+        borderRadius: BorderRadius.circular(1)));
+    void start() => setState(() => _active = true);
+    void update(double d) => widget.onDrag(d);
+    void end() { setState(() => _active = false); widget.onEnd(); }
+    return Semantics(label: widget.label, child: Tooltip(message: widget.label, waitDuration: const Duration(milliseconds: 600),
+      child: MouseRegion(
+        cursor: sideways ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          // The edge follows the finger from where it went down, slop included.
+          dragStartBehavior: DragStartBehavior.down,
+          onHorizontalDragStart: sideways ? (_) => start() : null,
+          onHorizontalDragUpdate: sideways ? (d) => update(d.delta.dx) : null,
+          onHorizontalDragEnd: sideways ? (_) => end() : null,
+          onVerticalDragStart: sideways ? null : (_) => start(),
+          onVerticalDragUpdate: sideways ? null : (d) => update(d.delta.dy),
+          onVerticalDragEnd: sideways ? null : (_) => end(),
+          child: Align(alignment: sideways ? Alignment.center : Alignment.bottomCenter, child: line)))));
+  }
+}
+
+/// The space above and below a clip in its row.
+double _clipInset(double trackHeight) => trackHeight < 60 ? 3 : 8;
 
 class _TimelineLane extends StatelessWidget {
   const _TimelineLane({required this.state, required this.layer, required this.width,
@@ -645,18 +963,18 @@ class _TimelineLane extends StatelessWidget {
         onLongPressMoveUpdate: (d) => state.updateTimeSelection((d.localPosition.dx / stepW).round()),
         onLongPressEnd: (_) => state.endTimeSelection(),
         child: hovering.isEmpty ? const SizedBox.expand()
-            : DecoratedBox(decoration: BoxDecoration(color: Neon.layer(layer.color).withValues(alpha: 0.12),
-                border: Border.all(color: Neon.layer(layer.color)))))),
+            : DecoratedBox(decoration: BoxDecoration(color: trackColor(state, layer).withValues(alpha: 0.12),
+                border: Border.all(color: trackColor(state, layer)))))),
       if (state.timeSelectionStart != null && state.timeSelectionEnd != null)
         Positioned(left: math.min(state.timeSelectionStart!, state.timeSelectionEnd!) * stepW, top: 0,
           width: math.max(1.0, (state.timeSelectionEnd! - state.timeSelectionStart!).abs() * stepW), height: height,
           child: IgnorePointer(child: Container(color: Neon.blue.withValues(alpha: .09)))),
 
       for (final clip in layer.clips)
-        Positioned(left: clip.startSteps * stepW, top: trackHeight == 54.0 ? 5 : 8,
-          width: math.max(12.0, clip.lengthSteps * stepW), height: trackHeight == 54.0 ? 42 : 60,
+        Positioned(left: clip.startSteps * stepW, top: _clipInset(trackHeight),
+          width: math.max(12.0, clip.lengthSteps * stepW), height: trackHeight - 2 * _clipInset(trackHeight),
           child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW,
-            color: Neon.layer(layer.color), selected: selectedIds.contains(clip.id), callbacks: callbacks)),
+            color: trackColor(state, layer), selected: selectedIds.contains(clip.id), callbacks: callbacks)),
       if (layer.clips.isEmpty && !layer.isFolder)
         Positioned(left: 10, top: trackHeight * 0.38, child: const IgnorePointer(child: Text('Hold the track for clips, or drop a pattern here',
           style: TextStyle(color: Neon.dim, fontSize: 10)))),
@@ -723,7 +1041,9 @@ class _ArrangementGrid extends CustomPainter {
     final minor = Paint()..color = Neon.line.withValues(alpha: .55)..strokeWidth = .6;
     final major = Paint()..color = Neon.dim.withValues(alpha: .35)..strokeWidth = 1;
     final (from, to) = visibleSpan(scroll, size);
-    for (var n = (from / stepW).floor(); n * stepW <= to; n++) {
+    // Zoomed out, the minor lines thin to beats, then to bars only, so they stay at least 5 px apart.
+    final every = stepW >= 5 ? 1 : stepW * 4 >= 5 ? 4 : barSteps;
+    for (var n = (from / stepW / every).floor() * every; n * stepW <= to; n += every) {
       final x = n * stepW;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
     }
@@ -742,9 +1062,14 @@ class _BarRuler extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final barW = barSteps * stepW;
     final (from, to) = visibleSpan(scroll, size);
-    for (var b = (from / barW).floor(); b * barW <= to; b++) {
+    // A label every bar, or every 2, 4, 8… bars when bars are narrower than a label.
+    var every = 1;
+    while (every * barW < 28 && every < 1 << 16) {
+      every *= 2;
+    }
+    for (var b = (from / barW / every).floor() * every; b * barW <= to; b += every) {
       final label = TextPainter(text: TextSpan(text: '${b + 1}', style: Neon.code(size: 10, color: Neon.dim)),
-        textDirection: TextDirection.ltr, maxLines: 1)..layout(maxWidth: math.max(1.0, barW - 2));
+        textDirection: TextDirection.ltr, maxLines: 1)..layout(maxWidth: math.max(1.0, every * barW - 2));
       label.paint(canvas, Offset(b * barW, (size.height - label.height) / 2));
       label.dispose();
     }
@@ -960,14 +1285,17 @@ class _ArrangementMixer extends StatelessWidget {
           SizedBox(width: 150, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 7),
             child: Column(children: [
               Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Neon.layer(l.color), fontSize: 11)),
+                style: TextStyle(color: trackColor(state, l), fontSize: 11)),
               Expanded(child: ValueListenableBuilder<int>(valueListenable: state.layerValueTick(l.id),
                 builder: (context, _, _) => Column(children: [
                   Row(children: [const Icon(Icons.volume_up, size: 13, color: Neon.dim),
-                    Expanded(child: Slider(value: l.volume, onChanged: (v) => state.mixLayer(l, volume: v)))]),
+                    Expanded(child: SizedBox(height: 36, child: VolumeFader(value: l.volume, vertical: false,
+                      label: '${l.name} level', onChanged: (v) => state.mixLayer(l, volume: v)))),
+                    SizedBox(width: 52, child: Text(VolumeTaper.label(l.volume), textAlign: TextAlign.right,
+                      style: Neon.code(size: 9, color: Neon.dim)))]),
                   Row(children: [const Text('L', style: TextStyle(color: Neon.dim, fontSize: 10)),
-                    Expanded(child: Slider(value: l.pan, min: -1, max: 1,
-                      onChanged: (v) => state.mixLayer(l, pan: v))),
+                    Expanded(child: ResetOnDoubleTap(onReset: () => state.mixLayer(l, pan: 0), child: Slider(
+                      value: l.pan, min: -1, max: 1, onChanged: (v) => state.mixLayer(l, pan: v)))),
                     const Text('R', style: TextStyle(color: Neon.dim, fontSize: 10))]),
                 ]))),
             ]))),
@@ -1126,14 +1454,15 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
           Expanded(
             child: ValueListenableBuilder<int>(
               valueListenable: s.masterValueTick,
-              builder: (context, _, _) => Slider(
-                value: s.project.master.clamp(0.0, 1.0).toDouble(),
-                activeColor: Neon.blue,
-                onChanged: s.setMaster,
-              ),
+              builder: (context, _, _) => Row(children: [
+                Expanded(child: SizedBox(height: 36, child: VolumeFader(value: s.project.master, vertical: false,
+                  color: Neon.blue, label: 'Master level', onChanged: s.setMaster))),
+                SizedBox(width: 56, child: Text(VolumeTaper.label(s.project.master), textAlign: TextAlign.right,
+                  style: Neon.code(size: 10, color: Neon.dim))),
+              ]),
             ),
           ),
-          SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.meters.peakL > s.meters.peakR ? s.meters.peakL : s.meters.peakR, color: Neon.blue)),
+          SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.meters.peakL, readRight: () => s.meters.peakR, color: Neon.blue)),
         ]),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,

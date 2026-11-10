@@ -226,7 +226,7 @@ void caw_engine_meters(CawEngine* e, CawMeters* out) {
     out->loop_length = m.loopLength;
 }
 
-int32_t caw_engine_layer_meter(CawEngine* e, int32_t index, CawLayerMeter* out) {
+int32_t caw_engine_layer_meter_stereo(CawEngine* e, int32_t index, CawLayerMeter* out, float* peak_l, float* peak_r) {
     if (!e || !out) return 0;
     caw::LayerMeter m;
     const bool ok = e->engine->layerMeter(index, m);
@@ -234,7 +234,13 @@ int32_t caw_engine_layer_meter(CawEngine* e, int32_t index, CawLayerMeter* out) 
     out->progress = m.progress;
     out->active = m.active ? 1 : 0;
     out->overloaded = m.overloaded ? 1 : 0;
+    if (peak_l) *peak_l = m.peakL;
+    if (peak_r) *peak_r = m.peakR;
     return ok ? 1 : 0;
+}
+
+int32_t caw_engine_layer_meter(CawEngine* e, int32_t index, CawLayerMeter* out) {
+    return caw_engine_layer_meter_stereo(e, index, out, nullptr, nullptr);
 }
 
 int32_t caw_engine_scope(CawEngine* e, int32_t index, float* out, int32_t n) {

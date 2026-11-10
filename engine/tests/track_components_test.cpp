@@ -623,11 +623,13 @@ TEST(the_ping_pong_delay_crosses_each_echo_to_the_other_side) {
         L.push_back(l);
         R.push_back(r);
     }
-    CHECK_NEAR(L[10], 1.0, 1e-6);  // the first echo on its own side
+    // Full cross feeds the left line the mono average of both sides (second audio review, fix 2), so a hard-left
+    // click enters at half its level: 0.5, then 0.25, 0.125 as it bounces.
+    CHECK_NEAR(L[10], 0.5, 1e-6);  // the first echo on its own side
     CHECK_EQ(R[10], 0.0f);
-    CHECK_NEAR(R[20], 0.5, 1e-6);  // then it crosses
+    CHECK_NEAR(R[20], 0.25, 1e-6);  // then it crosses
     CHECK_EQ(L[20], 0.0f);
-    CHECK_NEAR(L[30], 0.25, 1e-6);  // and back
+    CHECK_NEAR(L[30], 0.125, 1e-6);  // and back
 }
 
 TEST(the_built_in_delay_syncs_to_the_song_tempo) {

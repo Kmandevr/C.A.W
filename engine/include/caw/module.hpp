@@ -286,8 +286,8 @@ public:
     // zeros) until an event arrives or an audio input is not silent, whatever the parameters and the transport
     // do: an instrument with no voice sounding, an effect whose tail has died out. A host may then skip process
     // until that changes and use silence instead (the component's time does not move meanwhile). Default:
-    // never quiet, always run. Hosts also skip a component without this once its input has been silent for
-    // longer than its declared tailFrames and its output is silent (see docs/native-module-sdk.md).
+    // never quiet, always run (a declared tail alone never puts a component to sleep, so its output doesn't
+    // depend on the host's block size). Say quiet only when nothing timed is left running (see docs/native-module-sdk.md).
     virtual bool quiet() const noexcept { return false; }
     virtual uint32_t stateVersion() const noexcept { return 1; }
     // Called on the control thread, possibly while process() runs: keep it safe against processing.

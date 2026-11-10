@@ -11,6 +11,7 @@ import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../theme.dart';
+import 'track_color.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
 
@@ -59,12 +60,12 @@ class _FxStackState extends State<FxStack> {
         textAlign: TextAlign.center, style: TextStyle(color: Neon.dim))));
     }
     return DragTarget<AssetDrag>(
-      onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern,
+      onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern && d.data.kind != AssetKind.midiFile,
       onAcceptWithDetails: (d) => s.dropAsset(layer, d.data),
       builder: (context, hovering, _) => DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          border: hovering.isEmpty ? null : Border.all(color: Neon.layer(layer.color), width: 1.5)),
+          border: hovering.isEmpty ? null : Border.all(color: trackColor(s, layer), width: 1.5)),
         child: ValueListenableBuilder<Map<String, NativeComponentInfo>>(
           valueListenable: s.componentCatalog,
           builder: (context, _, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -97,7 +98,7 @@ class _FxStackState extends State<FxStack> {
   ]));
 
   Widget _stack(BuildContext context) {
-    final glow = Neon.layer(layer.color);
+    final glow = trackColor(s, layer);
     return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 24), children: [
       if (layer.instrument != null) ...[
         const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),
@@ -424,6 +425,7 @@ class _NativeEffectCard extends StatelessWidget {
               else
                 Knob(key: ValueKey('knob-${use.id}-${p.id}'), value: use.params[p.id] ?? p.defaultValue,
                   min: p.min, max: p.max, step: p.step, defaultValue: p.defaultValue, label: p.label,
+                  exponential: p.exponential,
                   enabled: !use.bypass,
                   color: isBuiltinComponent(use.id) ? Neon.blue : Neon.green,
                   valueText: (v) => '${v.toStringAsFixed(p.max - p.min > 20 ? 0 : 2)}${p.unit.isEmpty ? '' : ' ${p.unit}'}',

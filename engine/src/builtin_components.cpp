@@ -481,10 +481,13 @@ private:
             const double y = v2 * v.level * v.velocity * v.pressure * parameterAt(b, kVolume, at, 0.5) * 0.3;
             left[i] += static_cast<float>(y);
             right[i] += static_cast<float>(y);
-        }
-        if (v.stage == Stage::Release && v.level < 1e-5) {
-            v.active = false;
-            v.level = 0.0;
+            // Released and below -100 dB: silent from the next frame. Checked every frame, so where a render call
+            // ends (the block size, an event) doesn't move it.
+            if (v.stage == Stage::Release && v.level < 1e-5) {
+                v.active = false;
+                v.level = 0.0;
+                break;
+            }
         }
     }
     static constexpr uint32_t kControlFrames = 16;

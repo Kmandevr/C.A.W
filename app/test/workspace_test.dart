@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +20,7 @@ import 'package:caw/ui/files/library_manager.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/key_router.dart';
 import 'package:caw/ui/plugin_builder_screen.dart';
+import 'package:caw/ui/volume_fader.dart';
 import 'package:caw/ui/widgets.dart';
 
 void main() {
@@ -82,6 +85,58 @@ void main() {
     expect(PeakMeter.fraction(PeakMeter.db(2.0)), 1.0);
   });
 
+  testWidgets('a stereo track meters each side; a mono one shows one meter', (tester) async {
+    // Owner, 2026-11-10 (feel pass): stereo track meters, from the engine's caw_engine_layer_meter_stereo.
+    final mono = LayerDoc(id: 'm', name: 'M', color: 0);
+    final stereo = LayerDoc(id: 's', name: 'S', color: 0)..instrument = ComponentUseDoc('org.caw.drum.kick');
+    expect(mono.isStereo, isFalse);
+    expect(stereo.isStereo, isTrue);
+    expect((LayerDoc(id: 'f', name: 'F', color: 0)..isFolder = true).isStereo, isTrue);
+    state.layerMeters = const [LayerMeterValue(peak: 0.5, peakL: 0.5, peakR: 0.125, active: true)];
+    Widget strip(bool isStereo) => MaterialApp(home: Scaffold(body: Center(child: SizedBox(width: 10, height: 120,
+        child: TrackMeter(state: state, index: 0, stereo: isStereo, color: Colors.green, vertical: true)))));
+    await tester.pumpWidget(strip(true));
+    state.tick.value++;
+    await tester.pump();
+    PeakMeterState m() => tester.state<PeakMeterState>(find.byType(PeakMeter));
+    expect(m().shownDb, closeTo(-6.02, 0.01)); // left
+    expect(m().shownRightDb, closeTo(-18.06, 0.01)); // right
+    await tester.pumpWidget(strip(false));
+    state.tick.value++;
+    await tester.pump();
+    expect(find.byType(PeakMeter), findsOneWidget);
+    expect(m().shownDb, closeTo(-6.02, 0.01)); // the louder side
+  });
+
+  testWidgets('a stereo meter shows left and right apart, and the fall rate follows the setting', (tester) async {
+    final wall = PeakMeter.clock, start = tester.binding.clock.now(), fall = PeakMeter.fallDbPerSecond;
+    addTearDown(() { PeakMeter.clock = wall; PeakMeter.fallDbPerSecond = fall; });
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start);
+    final settings = Settings()..fromJson({'meter_fall': 96});
+    expect(settings.meterFall, 96);
+    expect(PeakMeter.fallDbPerSecond, fall, reason: 'fromJson alone does not apply it');
+    settings.adjust((x) => x.meterFall = 96);
+    expect(PeakMeter.fallDbPerSecond, 96);
+    var l = 0.0, r = 0.0;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PeakMeter(
+        state: state, read: () => l, readRight: () => r, color: Colors.green))));
+    PeakMeterState m() => tester.state<PeakMeterState>(find.byType(PeakMeter));
+    expect(find.byType(Bar), findsNWidgets(2));
+    l = 0.5;
+    r = 0.25;
+    state.tick.value++;
+    await tester.pump();
+    expect(m().shownDb, closeTo(-6.02, 0.01));
+    expect(m().shownRightDb, closeTo(-12.04, 0.01));
+    l = r = 0;
+    state.tick.value++;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(m().shownDb, closeTo(-6.02 - 96 * .266, 0.05));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('peak meters rise at once, fall on wall-clock time, hold the peak and show a clip', (tester) async {
     final wall = PeakMeter.clock, start = tester.binding.clock.now();
     addTearDown(() => PeakMeter.clock = wall);
@@ -98,13 +153,13 @@ void main() {
     expect(m().shownDb, closeTo(-6.02, 0.01));
     expect(tester.widget<Bar>(find.byType(Bar)).value, closeTo(0.9, 0.001));
     expect(tester.binding.hasScheduledFrame, isFalse, reason: 'while sound comes in, the reads move it: no ticker');
-    // A silent read, then no more (the engine went quiet): the bar still falls 24 dB a second, the line holds 1.5 s.
+    // A silent read, then no more (the engine went quiet): the bar falls at the set rate, the line holds 1.5 s.
     peak = 0;
     state.tick.value++;
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 16));
     await tester.pump(const Duration(milliseconds: 500));
-    expect(m().shownDb, closeTo(-6.02 - 24 * .516, 0.01));
+    expect(m().shownDb, closeTo(-6.02 - PeakMeter.fallDbPerSecond * .516, 0.01));
     expect(m().holdDb, closeTo(-6.02, 0.01));
     await tester.pump(const Duration(seconds: 3));
     await tester.pump(const Duration(seconds: 1));
@@ -152,6 +207,20 @@ void main() {
     expect(state.project.master, closeTo(0.42, 0.0001));
     expect(valueTicks, 1);
     expect(appNotifications, 0);
+  });
+
+  test('track and master gain go up to +12 dB, as the engine allows', () {
+    // Owner, 2026-11-10: faders like REAPER's, to +12 dB (a gain of 3.981); the model held them at 0 dB.
+    state.project = ProjectDoc(id: 'project-1', name: 'Gain test', master: 0.7, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    state.setMaster(2.0);
+    expect(state.project.master, closeTo(2.0, 1e-9));
+    state.setMaster(9.0);
+    expect(state.project.master, closeTo(kMaxMixGain, 1e-9));
+    state.mixLayer(state.project.layers.first, volume: 3.0);
+    expect(state.project.layers.first.volume, closeTo(3.0, 1e-9));
+    state.mixLayer(state.project.layers.first, volume: -1.0);
+    expect(state.project.layers.first.volume, 0.0);
+    expect(kMaxMixGain, closeTo(math.pow(10, 12 / 20), 1e-12));
   });
 
   testWidgets('Mixer inspector divider exposes accessible width adjustments', (tester) async {
@@ -249,13 +318,13 @@ void main() {
     Navigator.of(tester.element(find.text('MODULE INSPECTOR'))).pop();
     await tester.pumpAndSettle();
 
-    tester.widget<Slider>(find.descendant(of: find.byKey(const ValueKey('fader-layer-1')), matching: find.byType(Slider)))
-      .onChanged!(0.72);
+    tester.widget<VolumeFader>(find.descendant(of: find.byKey(const ValueKey('fader-layer-1')), matching: find.byType(VolumeFader)))
+      .onChanged(0.72);
     await tester.pump();
     expect(layer.volume, closeTo(0.72, 0.0001));
-    expect(find.text('72%'), findsOneWidget);
+    expect(find.text('-2.9 dB'), findsOneWidget);
 
-    // Typed values: the level in percent, the pan as C, 30L or 30R.
+    // Typed values: the level in dB, the pan as C, 30L or 30R.
     await tester.tap(find.byKey(const ValueKey('level-layer-1')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'NaN');
@@ -263,10 +332,10 @@ void main() {
     await tester.pump();
     expect(find.text('Not a value'), findsOneWidget);
     expect(layer.volume, closeTo(0.72, 0.0001));
-    await tester.enterText(find.byType(TextField), '40');
+    await tester.enterText(find.byType(TextField), '-6');
     await tester.tap(find.text('Set'));
     await tester.pumpAndSettle();
-    expect(layer.volume, closeTo(0.4, 0.0001));
+    expect(layer.volume, closeTo(0.5012, 0.0001));
     await tester.tap(find.byKey(const ValueKey('pan-value-layer-1')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'left');
@@ -482,14 +551,15 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
 
-    final slider = tester.widget<Slider>(find.byType(Slider).first);
-    slider.onChanged!(0.42);
+    final fader = find.byWidgetPredicate((w) => w is VolumeFader && w.label == 'Master level');
+    tester.widget<VolumeFader>(fader).onChanged(0.42);
     await tester.pump();
 
     expect(state.project.master, closeTo(0.42, 0.0001));
     expect(valueTicks, 1);
     expect(appNotifications, 0);
-    expect(tester.widget<Slider>(find.byType(Slider).first).value, closeTo(0.42, 0.0001));
+    expect(tester.widget<VolumeFader>(fader).value, closeTo(0.42, 0.0001));
+    expect(find.text('-7.5 dB'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 600));
   });
 

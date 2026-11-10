@@ -1,4 +1,5 @@
 // Library kernel tests: smoothers, the LFO, the band-limited wavetable and the FDN reverb (caw/library/).
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -527,6 +528,21 @@ TEST(library_ping_pong_bounces_a_centred_sound_between_the_sides) {
     CHECK(eL[0] > 100.0 * eR[0]);  // first echo on the left
     CHECK(eR[1] > 100.0 * eL[1]);  // second on the right
     CHECK(eL[2] > 100.0 * eR[2]);  // and back
+}
+
+// Second audio review, fix 2: full cross fed the left line inL + inR, so a centred sound's first echo came back at
+// twice its level (+6 dB over the dry sound). The left line now takes the mono average: the echo is at the dry level.
+TEST(library_ping_pong_echoes_a_centred_sound_no_louder_than_it_came_in) {
+    caw::lib::PingPongDelay d;
+    d.prepare(1000.0, 1.0);
+    float peak = 0.0f;
+    for (int t = 0; t < 15; ++t) {
+        float l = t == 0 ? 0.5f : 0.0f, r = l;  // a centred click at 0.5
+        d.process(0.010, 0.0, 1.0, 1.0, l, r);   // no feedback, full cross, all wet
+        if (t == 10) CHECK_NEAR(l, 0.5, 1e-6);   // the one echo, on the left, at the click's level
+        peak = std::max({peak, std::fabs(l), std::fabs(r)});
+    }
+    CHECK(peak <= 0.5f + 1e-6f);
 }
 
 // cross 0 keeps two plain echoes: each side echoes its own input.

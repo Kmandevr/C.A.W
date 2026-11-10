@@ -22,8 +22,9 @@ class MidiClipSource {
 
 /// What [midiImport] read from a file.
 class MidiImport {
-  const MidiImport({required this.clips, this.bpm, this.beatsPerBar, this.tempoChanges = false});
+  const MidiImport({required this.clips, this.bpm, this.beatsPerBar, this.tempoChanges = false, this.name = 'MIDI'});
   final List<MidiClipSource> clips; // in file order; empty when the file has no notes
+  final String name; // the file's name without its extension
   final double? bpm; // the file's first tempo
   final int? beatsPerBar; // the file's first meter in quarter notes per bar, when it is a whole number 1..16
   final bool tempoChanges; // the file changes tempo (only the first one can apply)
@@ -69,6 +70,7 @@ MidiImport midiImport(Uint8List bytes, {required int beatsPerBar, bool adoptMete
     bpm: f.firstBpm,
     beatsPerBar: meter,
     tempoChanges: f.tempoChanges,
+    name: name,
   );
 }
 
@@ -286,7 +288,11 @@ String placeMidiImport(AppState s, MidiImport m, {LayerDoc? layer, bool adoptTem
   if (m.tempoChanges) notes.add('tempo changes ignored');
   final target = layer != null && !layer.isFolder && p.layers.contains(layer) ? layer : null;
   final modules = [for (final c in m.clips) ModuleDoc(id: newId('m'), name: _freeName(p, c.name), source: c.source)];
-  s.editProject((p) => p.modules.addAll(modules));
+  // The file is listed in Files (Audio & MIDI) with its parts, so it can be dragged onto a track again.
+  s.editProject((p) {
+    p.modules.addAll(modules);
+    p.midiFiles.add(MidiFileDoc(id: newId('mid'), name: m.name, parts: [for (final mod in modules) mod.id]));
+  });
   if (modules.length == 1 && target != null) {
     s.addClip(target, modules.single.id);
   } else {
@@ -299,6 +305,36 @@ String placeMidiImport(AppState s, MidiImport m, {LayerDoc? layer, bool adoptTem
   }
   final what = modules.length == 1 ? '1 clip' : '${modules.length} clips on new tracks';
   return 'Imported ${m.noteCount} notes as $what${notes.isEmpty ? '' : ' (${notes.join('; ')})'}.';
+}
+
+/// Places imported MIDI file [f] dropped on [layer] at [atStep]: one clip per part, the first on [layer] and each
+/// other part on a new track under it, all at the same step. Parts whose pattern was deleted are skipped. Returns
+/// false when nothing was placed.
+bool placeMidiFile(AppState s, MidiFileDoc f, LayerDoc layer, {int? atStep}) {
+  final parts = [for (final id in f.parts) ?s.project.module(id)];
+  if (parts.isEmpty || layer.isFolder) return false;
+  final before = {for (final c in layer.clips) c.id};
+  s.addClip(layer, parts.first.id, startSteps: atStep);
+  final first = layer.clips.where((c) => !before.contains(c.id)).firstOrNull;
+  if (first == null) return false;
+  // The others line up with the first clip, wherever it landed (after the track's last clip without a drop point).
+  final at = first.startSteps;
+  var below = s.project.layers.indexOf(layer);
+  for (final mod in parts.skip(1)) {
+    if (s.project.layers.length >= 64) break;
+    s.addLayer();
+    final l = s.project.layers.last;
+    s.editLayer(l, (l) {
+      l.name = mod.name;
+      l.parentId = layer.parentId;
+    });
+    // Right under the track it was dropped on, in file order.
+    below++;
+    final from = s.project.layers.indexOf(l);
+    if (from != below) s.moveLayer(from, below);
+    s.addClip(s.project.layers[below], mod.id, startSteps: at);
+  }
+  return true;
 }
 
 String _freeName(ProjectDoc p, String name) {

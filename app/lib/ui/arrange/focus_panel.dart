@@ -8,6 +8,8 @@ import '../glass.dart';
 import '../mixer_screen.dart';
 import '../pattern_editor.dart';
 import '../theme.dart';
+import '../volume_fader.dart';
+import 'track_color.dart';
 import 'fx_stack.dart';
 import 'knob.dart';
 
@@ -40,6 +42,10 @@ class FocusPanel extends StatelessWidget {
     this.onNext,
     this.onOpenModule,
     this.bottomSheetStyle = false,
+    this.expanded = false,
+    this.onExpand,
+    this.browsing = false,
+    this.onBrowse,
   });
 
   final AppState state;
@@ -53,14 +59,25 @@ class FocusPanel extends StatelessWidget {
   /// Phone portrait: the panel sits under the pinned track, with a handle; swiping its header down closes it.
   final bool bottomSheetStyle;
 
+  /// Phone portrait: the panel opened up over the pinned track ([onExpand] true), or under it.
+  final bool expanded;
+  final ValueChanged<bool>? onExpand;
+
+  /// The Files browser is open beside the panel; [onBrowse] opens or closes it (drag effects into the FX stack).
+  final bool browsing;
+  final VoidCallback? onBrowse;
+
   @override
   Widget build(BuildContext context) {
-    final color = Neon.layer(layer.color);
+    final color = trackColor(state, layer);
     final header = GestureDetector(
       key: const ValueKey('focus-panel-header'),
       behavior: HitTestBehavior.opaque,
+      // Swipe up to open the panel higher (over the pinned track), down to lower it again or close it.
       onVerticalDragEnd: (d) {
-        if ((d.primaryVelocity ?? 0) > 250) onClose();
+        final v = d.primaryVelocity ?? 0;
+        if (v < -250 && onExpand != null && !expanded) onExpand!(true);
+        if (v > 250) expanded && onExpand != null ? onExpand!(false) : onClose();
       },
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         if (bottomSheetStyle)
@@ -74,6 +91,13 @@ class FocusPanel extends StatelessWidget {
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: color))),
           IconButton(tooltip: 'Next track', iconSize: 18, onPressed: onNext, icon: const Icon(Icons.chevron_right)),
           const Spacer(),
+          if (onBrowse != null)
+            IconButton(key: const ValueKey('focus-browse'), tooltip: 'Files: drag effects or patterns here',
+              iconSize: 18, onPressed: onBrowse, color: browsing ? Neon.blue : null, icon: const Icon(Icons.folder_open)),
+          if (onExpand != null)
+            IconButton(key: const ValueKey('focus-expand'), tooltip: expanded ? 'Lower the panel' : 'Open the panel higher',
+              iconSize: 18, onPressed: () => onExpand!(!expanded),
+              icon: Icon(expanded ? Icons.unfold_less : Icons.unfold_more)),
           IconButton(key: const ValueKey('focus-close'), tooltip: 'All tracks', iconSize: 18, onPressed: onClose,
             icon: Icon(bottomSheetStyle ? Icons.keyboard_arrow_down : Icons.close)),
         ])),
@@ -147,10 +171,11 @@ class _MixerTab extends StatelessWidget {
         Expanded(child: ValueListenableBuilder<int>(
           valueListenable: state.layerValueTick(layer.id),
           builder: (context, _, _) => Wrap(spacing: 8, runSpacing: 8, children: [
-            Knob(key: const ValueKey('mix-volume'), value: layer.volume, min: 0, max: 1, defaultValue: 0.8,
-              label: 'Volume', color: Neon.green, size: 44,
-              valueText: (v) => '${(v * 100).round()}%',
-              onChanged: (v) => state.mixLayer(layer, volume: v)),
+            // On the fader's dB taper: the knob turns through fader positions; double-tap is 0 dB.
+            Knob(key: const ValueKey('mix-volume'), value: VolumeTaper.position(layer.volume), min: 0, max: 1,
+              defaultValue: VolumeTaper.position(1), label: 'Volume', color: Neon.green, size: 44,
+              valueText: (p) => VolumeTaper.label(VolumeTaper.gain(p)),
+              onChanged: (p) => state.mixLayer(layer, volume: VolumeTaper.gain(p))),
             Knob(key: const ValueKey('mix-pan'), value: layer.pan, min: -1, max: 1, defaultValue: 0,
               label: 'Pan', color: Neon.blue, size: 44,
               valueText: (v) => v.abs() < .01 ? 'C' : '${(v.abs() * 100).round()}${v < 0 ? 'L' : 'R'}',

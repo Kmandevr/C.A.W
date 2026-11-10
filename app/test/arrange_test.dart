@@ -11,8 +11,11 @@ import 'package:caw/model/native_trust.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/fx_stack.dart';
+import 'package:caw/ui/arrange/track_color.dart';
+import 'package:caw/ui/theme.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +32,7 @@ ProjectDoc _project() => ProjectDoc(id: 'p', name: 'Arrange test', layers: [
     ]);
 
 void main() {
+  _steppedKnobs();
   late AppState s;
   late SectionController sections;
   late List<String> haptics;
@@ -331,6 +335,111 @@ void main() {
     });
   });
 
+  testWidgets('phone portrait: the focus panel opens higher over the pinned track, and back', (tester) async {
+    await pumpArranger(tester, const Size(412, 900));
+    await tester.tap(find.byKey(const ValueKey('track-header-a')));
+    await settle(tester);
+    final panel = find.byKey(const ValueKey('focus-panel'));
+    final low = tester.getTopLeft(panel).dy;
+    await tester.tap(find.byKey(const ValueKey('focus-expand')));
+    await settle(tester);
+    expect(tester.getTopLeft(panel).dy, lessThan(low - 80));
+    await tester.fling(find.byKey(const ValueKey('focus-panel-header')), const Offset(0, 200), 1000);
+    await settle(tester);
+    expect(tester.getTopLeft(panel).dy, closeTo(low, 1), reason: 'a swipe down lowers it first');
+    expect(sections.focusedLayer, 'a');
+    await tester.fling(find.byKey(const ValueKey('focus-panel-header')), const Offset(0, -200), 1000);
+    await settle(tester);
+    expect(tester.getTopLeft(panel).dy, lessThan(low - 80), reason: 'a swipe up opens it higher');
+  });
+
+  group('track headers', () {
+    testWidgets('drag the headers\' right edge and a row\'s bottom edge to resize them; the sizes are saved',
+        (tester) async {
+      await pumpArranger(tester, const Size(412, 900));
+      final header = find.byKey(const ValueKey('track-header-a'));
+      final w0 = tester.getSize(header).width, h0 = tester.getSize(header).height;
+      await tester.drag(find.byKey(const ValueKey('header-width-grip')), const Offset(-30, 0));
+      await settle(tester);
+      expect(tester.getSize(header).width, closeTo(w0 - 30, 1.5));
+      expect(s.settings.headerWidth, closeTo(w0 - 30, 1.5));
+      await tester.drag(find.byKey(const ValueKey('track-height-grip-a')), const Offset(0, -20));
+      await settle(tester);
+      expect(tester.getSize(header).height, closeTo(h0 - 20, 1.5));
+      expect(s.settings.trackHeight, closeTo(h0 - 20, 1.5));
+      expect(Settings()..fromJson(s.settings.toJson()), isA<Settings>()
+          .having((x) => x.headerWidth, 'width', s.settings.headerWidth)
+          .having((x) => x.trackHeight, 'height', s.settings.trackHeight));
+      await settle(tester);
+    });
+
+    testWidgets('zoom: the zoom bar\'s sliders, a sideways pinch and an upright pinch, Ctrl + wheel', (tester) async {
+      await pumpArranger(tester, const Size(412, 900));
+      await tester.tap(find.byKey(const ValueKey('arrange-zoom')));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('arrange-zoom-bar')), findsOneWidget);
+      double clipW() => tester.getSize(find.text('Hold the track for clips, or drop a pattern here').first).width;
+      expect(clipW(), greaterThan(0));
+      final ruler = find.byWidgetPredicate((w) => w is CustomPaint && w.painter.runtimeType.toString() == '_BarRuler');
+      double barW() => (tester.widget<CustomPaint>(ruler).painter as dynamic).stepW as double;
+      final w0 = barW();
+      await tester.tap(find.byTooltip('Zoom in'));
+      await settle(tester);
+      expect(barW(), closeTo(w0 * 1.4, 0.01));
+      // Sideways pinch: time only.
+      final header = find.byKey(const ValueKey('track-header-a'));
+      final h0 = tester.getSize(header).height;
+      final at = tester.getCenter(find.byKey(const ValueKey('track-header-b'))) + const Offset(200, 0);
+      final a = await tester.startGesture(at - const Offset(40, 0), kind: PointerDeviceKind.touch);
+      final b = await tester.startGesture(at + const Offset(40, 0), kind: PointerDeviceKind.touch);
+      await a.moveBy(const Offset(-40, 0));
+      await b.moveBy(const Offset(40, 0));
+      await a.up();
+      await b.up();
+      await settle(tester);
+      expect(barW(), closeTo(w0 * 2.8, 0.05));
+      expect(tester.getSize(header).height, h0);
+      // Upright pinch: the track height only, saved.
+      final c = await tester.startGesture(at - const Offset(0, 40), kind: PointerDeviceKind.touch);
+      final d = await tester.startGesture(at + const Offset(0, 40), kind: PointerDeviceKind.touch);
+      await c.moveBy(const Offset(0, -20));
+      await d.moveBy(const Offset(0, 20));
+      await c.up();
+      await d.up();
+      await settle(tester);
+      expect(tester.getSize(header).height, closeTo(h0 * 1.5, 1));
+      expect(s.settings.trackHeight, closeTo(h0 * 1.5, 1));
+      // Ctrl + wheel zooms out.
+      final before = barW();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      final mouse = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(mouse.hover(at));
+      await tester.sendEventToBinding(mouse.scroll(const Offset(0, 40)));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await settle(tester);
+      expect(barW(), lessThan(before));
+    });
+
+    test('tracks in a folder take shades of its colour unless they have their own', () {
+      final folder = LayerDoc(id: 'f', name: 'Drums', color: 3, isFolder: true);
+      final kick = LayerDoc(id: 'k', name: 'Kick', color: 0, parentId: 'f');
+      final snare = LayerDoc(id: 'n', name: 'Snare', color: 1, parentId: 'f');
+      final own = LayerDoc(id: 'o', name: 'Own', color: 5, parentId: 'f', ownColor: true);
+      final top = LayerDoc(id: 't', name: 'Top', color: 6);
+      final layers = [folder, kick, snare, own, top];
+      final base = Neon.layer(3);
+      expect(trackColorIn(layers, folder), base);
+      expect(trackColorIn(layers, kick), isNot(base));
+      expect(trackColorIn(layers, kick), isNot(trackColorIn(layers, snare)), reason: 'siblings get different shades');
+      // A shade of the folder's colour: the same hue, give or take rounding.
+      expect(HSVColor.fromColor(trackColorIn(layers, kick)).hue, closeTo(HSVColor.fromColor(base).hue, 3));
+      expect(trackColorIn(layers, own), Neon.layer(5));
+      expect(trackColorIn(layers, top), Neon.layer(6));
+      expect(LayerDoc.fromJson(own.toJson()).ownColor, isTrue);
+      expect(LayerDoc.fromJson(kick.toJson()).ownColor, isFalse);
+    });
+  });
+
   group('long-press menus', () {
     testWidgets('a track opens a compact list near the finger, with a tick; record-arm waits for the engine',
         (tester) async {
@@ -424,6 +533,70 @@ void main() {
     s.setNativeParamLive(layer, 0, 'width', 1.5);
     expect(s.engine!.setComponentParam(layer.id, 0, 'width', 1.5), isTrue);
     expect(layer.components.single.params['width'], 1.5);
+    await tester.pump(const Duration(seconds: 1));
+  }, skip: Platform.environment['CAW_LIB']?.isNotEmpty != true);
+}
+
+void _steppedKnobs() {
+  // Owner (2026-11-10): "the unison knob, I have to touch it any time I want it to move one notch". One slow drag
+  // must move a stepped knob through as many steps as its travel covers, for every stepped built-in knob.
+  testWidgets('with the engine: one slow drag moves a stepped knob through several steps (needs CAW_LIB)',
+      (tester) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject();
+    await tester.runAsync(() async {
+      s.componentCatalog.refreshIfStale();
+      for (var i = 0; i < 250 && s.componentInfo('org.caw.synth.morph') == null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+    final layer = s.project.layers.firstWhere((l) => !l.isFolder);
+    s.setNativeInstrument(layer, 'org.caw.synth.morph');
+    // Every built-in effect with a stepped knob goes on the track too.
+    final stepped = [
+      for (final c in s.componentCatalog.value.values)
+        if (c.builtin && !c.isInstrument && c.parameters.any((p) => p.step > 0 && !p.isChoice)) c,
+    ];
+    for (final c in stepped) {
+      s.addNativeEffect(layer, c.id);
+    }
+    tester.view.physicalSize = const Size(600, 6000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+        body: ListenableBuilder(listenable: s, builder: (_, _) => FxStack(state: s, layer: layer)))));
+    await tester.pump();
+    final knobs = <(String, ComponentParameterInfo)>[
+      for (final c in [s.componentInfo('org.caw.synth.morph')!, ...stepped])
+        for (final p in c.parameters)
+          if (p.step > 0 && !p.isChoice && (p.max - p.min) / p.step >= 4) (c.id, p),
+    ];
+    expect(knobs.map((k) => k.$2.id), contains('unison'));
+    double valueOf(String id, String param) => (id == 'org.caw.synth.morph'
+        ? layer.instrument!.params[param]
+        : layer.components.firstWhere((c) => c.id == id).params[param]) ?? double.nan;
+    for (final (id, p) in knobs) {
+      final knob = find.byKey(ValueKey('knob-$id-${p.id}'));
+      await tester.ensureVisible(knob);
+      await tester.pumpAndSettle();
+      // Set to the minimum first (double-tap goes to the default, so drag far down).
+      await tester.drag(knob, const Offset(0, 400));
+      await tester.pumpAndSettle();
+      expect(valueOf(id, p.id), p.min, reason: '$id ${p.id} at the bottom');
+      // Then one slow drag up, a pixel at a time, over 60% of the travel (200 px covers it all).
+      final g = await tester.startGesture(tester.getCenter(knob));
+      for (var i = 0; i < 140; i++) {
+        await g.moveBy(const Offset(0, -1));
+        await tester.pump();
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      final steps = (valueOf(id, p.id) - p.min) / p.step;
+      expect(steps, greaterThanOrEqualTo(2), reason: '$id ${p.id} moved $steps steps in one slow drag');
+    }
     await tester.pump(const Duration(seconds: 1));
   }, skip: Platform.environment['CAW_LIB']?.isNotEmpty != true);
 }
