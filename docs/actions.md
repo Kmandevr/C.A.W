@@ -2,7 +2,7 @@
 title: Actions, keys and macros
 summary: Implemented action routing, macros, keymap persistence and configurable toolbars, plus clearly identified UI gaps.
 covers: [app/lib/actions/, app/lib/ui/key_router.dart, app/lib/ui/key_bindings.dart, app/lib/ui/pattern_editor.dart, app/lib/ui/touch_quick_actions.dart]
-updated: 2026-11-05
+updated: 2026-11-10
 ---
 
 # Actions, keys and macros
@@ -166,7 +166,7 @@ Grid and view:
 | Drag a length without snapping | hold Shift while dragging |
 | Tools: draw, select, curve, erase | B, V, C, X |
 | Switch piano roll / drum grid | G |
-| Zoom in / out / fit the pattern | Ctrl+= / Ctrl+- / F |
+| Zoom in / out / fit the pattern (also Ctrl + wheel; Ctrl + Shift + wheel for the row height) | Ctrl+= / Ctrl+- / F |
 | Show velocity lane / extras lanes | Alt+V / Alt+X (Ctrl+1/2/3 always switch areas, owner) |
 | Hear notes on / off | ⋮ menu (no default key) |
 
@@ -184,7 +184,7 @@ Generators (buttons; no default keys):
 | --- | --- |
 | Select previous / next layer | W / S, ↑ / ↓ |
 | Pan left / right | A / D |
-| Volume up / down | = / - |
+| Volume up / down (1 dB a press, at most 0 dB) | = / - |
 | Mute / solo the layer | M / Alt+S |
 | Open the layer's menu (generator, pattern, effects, length) | Enter |
 | Layer length shorter / longer | [ / ] |
