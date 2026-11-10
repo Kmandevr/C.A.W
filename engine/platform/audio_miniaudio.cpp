@@ -1,6 +1,7 @@
 // Audio output through miniaudio (AAudio on Android, WASAPI on Windows, Core Audio, ALSA/PulseAudio), with load metering.
 #include <chrono>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 #include "caw.h"
@@ -10,6 +11,15 @@
 namespace {
 
 constexpr int kChunk = 512;
+
+// One audio output per process. When Android recreates the app's screen (it lost focus while playing, say), a new
+// copy of the app starts with a new engine while the old one, which nothing controls any more, may still be
+// playing; the two would sound together. Starting audio on an engine therefore closes any other engine's device.
+// Only start and stop take this lock (never the audio callback).
+std::mutex gDeviceLock;
+CawEngine* gActive = nullptr;
+
+void stopLocked(CawEngine* e);
 
 struct Audio {
     ma_device device;
@@ -42,13 +52,24 @@ void setError(const std::string& msg, char* error, int32_t len) {
     error[len - 1] = '\0';
 }
 
+void stopLocked(CawEngine* e) {
+    if (!e || !e->audio) return;
+    auto* a = static_cast<Audio*>(e->audio);
+    ma_device_uninit(&a->device);
+    delete a;
+    e->audio = nullptr;
+    if (gActive == e) gActive = nullptr;
+}
+
 }  // namespace
 
 extern "C" {
 
 int32_t caw_audio_start(CawEngine* e, char* error, int32_t error_len) {
     if (!e) return 1;
+    std::lock_guard<std::mutex> lock(gDeviceLock);
     if (e->audio) return 0;
+    if (gActive && gActive != e) stopLocked(gActive);  // an orphaned engine from an earlier copy of the app
     auto* a = new Audio();
     a->owner = e;
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
@@ -72,15 +93,14 @@ int32_t caw_audio_start(CawEngine* e, char* error, int32_t error_len) {
         return 1;
     }
     e->audio = a;
+    gActive = e;
     return 0;
 }
 
 void caw_audio_stop(CawEngine* e) {
-    if (!e || !e->audio) return;
-    auto* a = static_cast<Audio*>(e->audio);
-    ma_device_uninit(&a->device);
-    delete a;
-    e->audio = nullptr;
+    if (!e) return;
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    stopLocked(e);
 }
 
 }  // extern "C"
