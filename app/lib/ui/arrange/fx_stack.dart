@@ -1,4 +1,5 @@
-// The FX tab: a track's FX stack (its .caw chain, then its native C++ effects) as cards with knobs, and a Routing view.
+// The FX tab: a track's FX chain like REAPER's (its instrument first, then its .caw chain and native C++ effects) as
+// cards with knobs, and a Routing view.
 import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
@@ -11,6 +12,7 @@ import '../files/asset_picker.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../theme.dart';
+import 'arrange_drag.dart';
 import 'track_color.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
@@ -26,10 +28,19 @@ void openSource(BuildContext context, BuildTab tab, {ValueChanged<String>? onOpe
   }
 }
 
-/// Asks for an effect (the filtered browser) and puts it on [layer].
+/// Asks for an effect or an instrument (the same browser, as in REAPER) and puts it on [layer]; an instrument
+/// replaces the track's, after asking.
 Future<void> addEffectTo(BuildContext context, AppState state, LayerDoc layer) async {
   final pick = await showAssetPicker(context, state, kinds: {AssetKind.nativeEffect, AssetKind.cawModule});
-  if (pick != null) state.dropAsset(layer, pick);
+  if (pick != null && context.mounted) await dropOnTrack(context, state, layer, pick);
+}
+
+/// The same browser showing only instruments: picks [layer]'s instrument (the track menu's Instrument…, the
+/// instrument slot's Add and Replace).
+Future<void> pickInstrument(BuildContext context, AppState state, LayerDoc layer) async {
+  final pick = await showAssetPicker(context, state, kinds: {AssetKind.nativeEffect, AssetKind.cawModule},
+      title: 'Instrument', effects: false);
+  if (pick != null && context.mounted) await dropOnTrack(context, state, layer, pick);
 }
 
 class FxStack extends StatefulWidget {
@@ -61,7 +72,7 @@ class _FxStackState extends State<FxStack> {
     }
     return DragTarget<AssetDrag>(
       onWillAcceptWithDetails: (d) => d.data.kind != AssetKind.pattern && d.data.kind != AssetKind.midiFile,
-      onAcceptWithDetails: (d) => s.dropAsset(layer, d.data),
+      onAcceptWithDetails: (d) => dropOnTrack(context, s, layer, d.data),
       builder: (context, hovering, _) => DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
@@ -90,7 +101,7 @@ class _FxStackState extends State<FxStack> {
       onPressed: () => setState(() => _routing = !_routing),
       icon: Icon(_routing ? Icons.view_agenda_outlined : Icons.account_tree_outlined)),
     IconButton(
-      tooltip: 'Add effect',
+      tooltip: 'Add FX or instrument',
       iconSize: 18,
       color: Neon.green,
       onPressed: () => addEffectTo(context, s, layer),
@@ -100,13 +111,26 @@ class _FxStackState extends State<FxStack> {
   Widget _stack(BuildContext context) {
     final glow = trackColor(s, layer);
     return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 24), children: [
+      // The instrument is the chain's first slot (REAPER: an instrument is FX, usually first in the chain).
       if (layer.instrument != null) ...[
         const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),
         _NativeEffectCard(key: ValueKey('fx-instrument-${layer.instrument!.id}'), state: s, layer: layer, index: -1,
           instrument: true, selected: _selected == ('instrument', 0), glow: glow,
           onSelect: () => setState(() => _selected = ('instrument', 0))),
-        const SizedBox(height: 6),
+      ] else if (layer.generatorId != null && s.project.module(layer.generatorId) != null) ...[
+        const _GroupLabel('INSTRUMENT · .caw', null, note: 'Plays the track\'s notes'),
+        _CawEffectCard(key: ValueKey('fx-instrument-${layer.generatorId}'), state: s, layer: layer, index: -1,
+          instrument: true, selected: _selected == ('instrument', 0), glow: glow,
+          onSelect: () => setState(() => _selected = ('instrument', 0)), onOpenModule: widget.onOpenModule),
+      ] else ...[
+        const _GroupLabel('INSTRUMENT', null, note: 'Nothing plays this track\'s notes yet'),
+        Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+          key: const ValueKey('fx-add-instrument'),
+          onPressed: () => pickInstrument(context, s, layer),
+          icon: const Icon(Icons.piano, size: 18),
+          label: const Text('Instrument'))),
       ],
+      const SizedBox(height: 6),
       _GroupLabel('CODE EFFECTS · .caw', layer.effectIds.isEmpty ? 'None' : null),
       if (layer.effectIds.isNotEmpty)
         ReorderableListView(
@@ -144,7 +168,7 @@ class _FxStackState extends State<FxStack> {
       Align(alignment: Alignment.centerLeft, child: TextButton.icon(
         onPressed: () => addEffectTo(context, s, layer),
         icon: const Icon(Icons.add, size: 18),
-        label: const Text('Effect'))),
+        label: const Text('FX'))),
     ]);
   }
 }
@@ -240,7 +264,10 @@ Widget _iconAction({required String tooltip, required IconData icon, required Vo
 
 class _CawEffectCard extends StatelessWidget {
   const _CawEffectCard({super.key, required this.state, required this.layer, required this.index,
-    required this.selected, required this.glow, required this.onSelect, this.onOpenModule});
+    required this.selected, required this.glow, required this.onSelect, this.onOpenModule, this.instrument = false});
+
+  /// The track's .caw generator in the instrument slot, rather than effect [index] of its chain.
+  final bool instrument;
   final AppState state;
   final LayerDoc layer;
   final int index;
@@ -251,8 +278,9 @@ class _CawEffectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final id = layer.effectIds[index];
+    final id = instrument ? layer.generatorId! : layer.effectIds[index];
     final m = state.project.module(id);
+    void remove() => instrument ? state.editLayer(layer, (l) => l.generatorId = null) : state.removeCawEffect(layer, index);
     final info = state.info[id];
     final failed = info != null && !info.ok;
     final params = info?.params.where((p) => !p.global).toList() ?? const <ParamInfo>[];
@@ -261,19 +289,21 @@ class _CawEffectCard extends StatelessWidget {
       final v = await showLongPressMenu<String>(context, at: at, title: m?.name ?? 'Effect',
         style: state.settings.longPressMenu, actions: [
           const MenuAction('open', 'Open code', Icons.code),
-          if (index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
-          if (index < layer.effectIds.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
+          if (instrument) const MenuAction('replace', 'Replace…', Icons.swap_horiz),
+          if (!instrument && index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
+          if (!instrument && index < layer.effectIds.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
           const MenuAction('remove', 'Remove', Icons.delete_outline, danger: true),
         ]);
       if (v == 'open' && context.mounted) open();
+      if (v == 'replace' && context.mounted) await pickInstrument(context, state, layer);
       if (v == 'up') state.moveCawEffect(layer, index, index - 1);
       if (v == 'down') state.moveCawEffect(layer, index, index + 1);
-      if (v == 'remove') state.removeCawEffect(layer, index);
+      if (v == 'remove') remove();
     }
     return _FxCard(
       index: index,
       title: m?.name ?? 'Missing module',
-      subtitle: failed ? 'Error: ${info.error}' : '.caw effect',
+      subtitle: failed ? 'Error: ${info.error}' : (instrument ? '.caw instrument' : '.caw effect'),
       color: failed ? Neon.pink : Neon.violet,
       glow: glow,
       selected: selected,
@@ -281,8 +311,9 @@ class _CawEffectCard extends StatelessWidget {
       onTitle: open,
       onMenu: menu,
       actions: [
-        _iconAction(tooltip: 'Remove ${m?.name ?? 'effect'}', icon: Icons.close,
-          onPressed: () => state.removeCawEffect(layer, index)),
+        if (instrument) _iconAction(key: const ValueKey('fx-instrument-replace'), tooltip: 'Replace ${m?.name ?? 'instrument'}',
+          icon: Icons.swap_horiz, onPressed: () => pickInstrument(context, state, layer)),
+        _iconAction(tooltip: 'Remove ${m?.name ?? 'effect'}', icon: Icons.close, onPressed: remove),
       ],
       body: params.isEmpty
           ? const SizedBox.shrink()
@@ -337,6 +368,7 @@ class _NativeEffectCard extends StatelessWidget {
         style: state.settings.longPressMenu, actions: [
           MenuAction('bypass', use.bypass ? 'Turn on' : 'Bypass', Icons.power_settings_new, checked: use.bypass),
           if (cpp != null) const MenuAction('open', 'Open code', Icons.code),
+          if (instrument) const MenuAction('replace', 'Replace…', Icons.swap_horiz),
           if (!instrument && index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
           if (!instrument && index < layer.components.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
           if (info != null && info.parameters.isNotEmpty) const MenuAction('reset', 'Reset knobs', Icons.restart_alt),
@@ -344,6 +376,7 @@ class _NativeEffectCard extends StatelessWidget {
         ]);
       if (v == 'bypass') _bypass(!use.bypass);
       if (v == 'open' && context.mounted) open();
+      if (v == 'replace' && context.mounted) await pickInstrument(context, state, layer);
       if (v == 'up') state.moveNativeEffect(layer, index, index - 1);
       if (v == 'down') state.moveNativeEffect(layer, index, index + 1);
       if (v == 'reset' && info != null) {
@@ -374,6 +407,8 @@ class _NativeEffectCard extends StatelessWidget {
           tooltip: use.bypass ? 'Turn on $name' : 'Bypass $name',
           icon: Icons.power_settings_new, color: use.bypass ? Neon.dim : Neon.green,
           onPressed: () => _bypass(!use.bypass)),
+        if (instrument) _iconAction(key: const ValueKey('fx-instrument-replace'), tooltip: 'Replace $name',
+          icon: Icons.swap_horiz, onPressed: () => pickInstrument(context, state, layer)),
         _iconAction(tooltip: 'Remove $name', icon: Icons.close, onPressed: _remove),
       ],
       body: _body(context, status, use, info, cpp, open),

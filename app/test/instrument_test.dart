@@ -3,6 +3,7 @@ import 'package:caw/engine/component_info.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/cpp_component.dart';
+import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/fx_stack.dart';
@@ -112,9 +113,10 @@ void main() {
       sections.dispose();
     });
 
-    testWidgets('the track menu lists C++ instruments next to .caw ones; choosing one makes it the instrument',
+    testWidgets('the track menu has one Instrument… entry: the browser lists C++ and .caw instruments, not effects',
         (tester) async {
       s.componentCatalog.set(const [_synth, _width]);
+      s.nativeCatalog = const [_synth, _width];
       tester.view.physicalSize = const Size(412, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -123,21 +125,32 @@ void main() {
       await tester.pump();
       await tester.longPress(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
-      expect(find.text('Instrument · Saw'), findsOneWidget);
-      expect(find.text('Instrument · Basic synth'), findsOneWidget);
-      expect(find.text('Instrument · Width'), findsNothing, reason: 'an effect is not an instrument');
-      await tester.tap(find.text('Instrument · Basic synth'));
+      expect(find.text('Instrument · Saw…'), findsOneWidget);
+      expect(find.textContaining('Instrument · Basic synth'), findsNothing, reason: 'no long list any more');
+      await tester.tap(find.text('Instrument · Saw…'));
+      await tester.pumpAndSettle();
+      expect(find.text('INSTRUMENTS'), findsOneWidget);
+      expect(find.text('Saw'), findsOneWidget);
+      expect(find.text('Width'), findsNothing, reason: 'an effect is not an instrument');
+      await tester.tap(find.text('Basic synth'));
+      await tester.pumpAndSettle();
+      // The track had the Saw: replacing it asks first.
+      expect(find.text('Replace the instrument?'), findsOneWidget);
+      await tester.tap(find.text('Replace'));
       await tester.pumpAndSettle();
       final layer = s.project.layers.first;
       expect(layer.instrument?.id, 'org.caw.synth.basic');
       expect(layer.generatorId, isNull);
-      // Back to the .caw generator: the C++ instrument goes.
+      // Back to the .caw generator, and Cancel keeps what it has.
       await tester.longPress(find.byKey(const ValueKey('track-header-a')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Instrument · Saw'));
+      await tester.tap(find.text('Instrument · Basic synth…'));
       await tester.pumpAndSettle();
-      expect(layer.instrument, isNull);
-      expect(layer.generatorId, 'gen');
+      await tester.tap(find.text('Saw'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(layer.instrument?.id, 'org.caw.synth.basic');
       await tester.pump(const Duration(seconds: 1));
     });
 

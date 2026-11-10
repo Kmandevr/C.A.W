@@ -21,7 +21,15 @@ updated: 2026-11-10
 - **New tracks by dropping:** dropping below the last track creates a new track. The same applies to files, instruments and effects dropped on the empty area.
 - **Instruments are added exactly like effects:** the same browser and drag and drop, as in REAPER, where an instrument is a plug-in in the track's FX chain. They are no longer picked from a long list on a held track.
 
-REAPER's behaviour is taken from its user guide.
+- **A blueprint, not a list (owner, 2026-11-10):** "The goal is to make the arranger feel like a blueprint and not just like a list. It should work about the same way REAPER does." Clips, tracks, instruments, effects and files are grabbed and dropped where they sit; clips are created, moved, copied and trimmed on the timeline with ghosts and drop targets; long-press menus stay as the secondary path.
+
+REAPER's behaviour is taken from its user guide ([UI design](ui.md#reaper-reference-the-arranger-copies-it)). Built in #172 ([app](app.md), Arranger). **Choices made on the owner's behalf, to confirm:**
+- **Copy on a phone:** a second finger touched down during a clip drag toggles copy (REAPER's Ctrl); the piano roll's resting second finger still means Shift.
+- **Folders:** REAPER's folder tracks hold items, but C.A.W.'s folders have no instrument, so a clip or asset dropped on a folder goes to its first track inside (a new one in an empty folder).
+- **New tracks from a drop are empty but for the drop** (as in REAPER): a clip dragged below the last track gets a track with no instrument, named after its pattern; an instrument's or effect's track is named after it.
+- **Copies have their own notes** (REAPER's plain Ctrl-drag doesn't pool MIDI); a linked copy stays in the clip menu.
+- **Phone gestures where REAPER uses a mouse:** a track header is dragged after a long press (a long press released without moving opens the menu); a double-tap in empty lane space draws a one-bar clip in place of Ctrl+drag.
+- **Not done:** REAPER's S to split (S is C.A.W.'s next-track key; the clip menu and toolbar split), Alt-drag stretch of a clip edge (Alt-drag shifts the source offset), and dragging several selected clips together.
 
 ## 2026-11-10: A flagship synth that can do everything (owner)
 

@@ -158,7 +158,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400)); // the slider's double-tap reset waits this long
   });
 
-  testWidgets('the asset picker lists Built-in and My effects and returns the one tapped', (tester) async {
+  testWidgets('the asset picker lists Built-in and My effects (instruments first) and returns the one tapped', (tester) async {
     final s = _state();
     AssetDrag? picked;
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (context) => TextButton(
@@ -167,7 +167,7 @@ void main() {
     )))));
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    expect(find.text('Add effect'), findsOneWidget);
+    expect(find.text('Add FX'), findsOneWidget);
     expect(find.text('BUILT-IN'), findsOneWidget);
     expect(find.text('MY EFFECTS'), findsOneWidget);
     expect(find.text('Fuzz'), findsOneWidget);
