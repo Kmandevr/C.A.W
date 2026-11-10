@@ -684,7 +684,8 @@ class _SpacerHeader extends StatelessWidget {
 /// The part of a timeline [size] wide that [scroll] shows, in pixels (all of it, up to 4096 px, before layout).
 (double, double) visibleSpan(ScrollController scroll, Size size) {
   if (!scroll.hasClients) return (0, math.min(size.width, 4096));
-  final position = scroll.position;
+  // While the focus view swaps one timeline for another, the old one is attached for a frame too: use the newest.
+  final position = scroll.positions.last;
   final from = position.pixels.clamp(0.0, size.width).toDouble();
   return (from, (position.pixels + position.viewportDimension).clamp(from, size.width).toDouble());
 }

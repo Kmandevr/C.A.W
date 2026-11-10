@@ -61,10 +61,16 @@ class _KnobState extends State<Knob> {
     if (next != widget.value) widget.onChanged(next);
   }
 
-  void _nudge(int dir) {
+  double _stepped(int dir) {
     final range = widget.max - widget.min;
-    final step = widget.step > 0 ? widget.step : range / 100;
-    _set(widget.value + dir * step);
+    return _quantize(widget.value + dir * (widget.step > 0 ? widget.step : range / 100));
+  }
+
+  String _describe(double v) =>
+      widget.valueText?.call(v) ?? v.toStringAsFixed(widget.max - widget.min > 20 ? 0 : 2);
+
+  void _nudge(int dir) {
+    _set(_stepped(dir));
     _dragValue = null;
     widget.onChangeEnd?.call();
   }
@@ -73,12 +79,14 @@ class _KnobState extends State<Knob> {
   Widget build(BuildContext context) {
     final range = widget.max - widget.min;
     final norm = range <= 0 ? 0.0 : ((widget.value - widget.min) / range).clamp(0.0, 1.0).toDouble();
-    final text = widget.valueText?.call(widget.value) ?? widget.value.toStringAsFixed(range > 20 ? 0 : 2);
+    final text = _describe(widget.value);
     final color = widget.enabled ? widget.color : Neon.dim;
     return Semantics(
       label: widget.label,
       value: text,
       slider: true,
+      increasedValue: widget.enabled ? _describe(_stepped(1)) : null,
+      decreasedValue: widget.enabled ? _describe(_stepped(-1)) : null,
       onIncrease: widget.enabled ? () => _nudge(1) : null,
       onDecrease: widget.enabled ? () => _nudge(-1) : null,
       child: Tooltip(
