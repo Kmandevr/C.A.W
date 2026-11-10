@@ -40,8 +40,9 @@ const kPreviewMinStepPx = 2.0, kPreviewMinHeight = 14.0;
 
 /// A pattern parsed once per source text: its notes, loop length and pitch range (bends included).
 class ParsedPattern {
-  ParsedPattern(this.source, this.doc, this.lengthSteps, this.lo, this.hi);
+  ParsedPattern(this.source, this.beatsPerBar, this.doc, this.lengthSteps, this.lo, this.hi);
   final String source;
+  final int beatsPerBar;
   final PatternDoc? doc;
   final int lengthSteps;
   final double lo, hi;
@@ -73,7 +74,9 @@ class ClipPictureCache {
 
   ParsedPattern parsed(String patternId, String source, String runSource, int beatsPerBar) {
     final hit = _parsed[patternId];
-    if (hit != null && (identical(hit.source, source) || hit.source == source)) return hit;
+    if (hit != null && hit.beatsPerBar == beatsPerBar && (identical(hit.source, source) || hit.source == source)) {
+      return hit;
+    }
     final doc = PatternDoc.parse(source).doc ?? PatternDoc.parse(runSource).doc;
     var lo = double.infinity, hi = -double.infinity;
     for (final n in doc?.notes ?? const <PatternNote>[]) {
@@ -86,7 +89,7 @@ class ClipPictureCache {
       hi = math.max(hi, b + n.expr.vibDepth);
     }
     if (lo > hi) (lo, hi) = (60, 60);
-    final p = ParsedPattern(source, doc, math.max(1, doc?.lengthSteps(beatsPerBar) ?? 16), lo, hi);
+    final p = ParsedPattern(source, beatsPerBar, doc, math.max(1, doc?.lengthSteps(beatsPerBar) ?? 16), lo, hi);
     if (_parsed.length > capacity) _parsed.clear();
     return _parsed[patternId] = p;
   }
