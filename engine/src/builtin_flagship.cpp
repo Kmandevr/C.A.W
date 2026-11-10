@@ -780,6 +780,7 @@ public:
         }
         const Params& p = params();
         for (uint32_t k = 0; k < kParamCount; ++k) base_[k] = p.d[k].defaultValue;
+        lastGiven_ = ~0u;  // the next block reads every value
         reset();
         return true;
     }
@@ -938,9 +939,16 @@ protected:
         transport_ = b.transport;
         block_ = &b;
         const Params& p = params();
+        const uint32_t given = b.parameters ? std::min(b.parameterCount, kParamCount) : 0;
+        // The same values as last block, none ramping (a steady chain hands over the same array): nothing to read.
+        // A ramp's samples pointer can stay while its values move, so a block after one with ramps reads them all.
+        if (given == lastGiven_ && rampCount_ == 0 && given > 0 &&
+            std::memcmp(b.parameters, lastValues_, given * sizeof(ParameterValue)) == 0)
+            return;
+        lastGiven_ = given;
+        if (given > 0) std::memcpy(lastValues_, b.parameters, given * sizeof(ParameterValue));
         rampCount_ = 0;
         bool changed = false;
-        const uint32_t given = b.parameters ? std::min(b.parameterCount, kParamCount) : 0;
         for (uint32_t k = 0; k < given; ++k) {  // the host's values (the usual case: every one, none ramping)
             const ParameterValue& pv = b.parameters[k];
             if (pv.samples) {
@@ -1094,39 +1102,21 @@ private:
         const double beat = beatLocked ? transport_->beat + at * tempo_ / (60.0 * sr_) : 0.0;
 
         // The matrix: the slots that move something, and the parameters they move (each once, in slot order).
-        std::memset(targetOf_, 0, sizeof targetOf_);
-        slotCount_ = targetCount_ = 0;
-        used_ = 0;
-        moved_ = 0;
-        for (uint32_t s = 0; s < kSlots; ++s) {
-            const int src = clampi(base_[modParam(s, kModSource)], 0, kSourceCount - 1);
-            const int dst = clampi(base_[modParam(s, kModTarget)], 0, kModTargets) - 1;
-            const double amount = clampd(base_[modParam(s, kModAmount)], -1.0, 1.0);
-            if (src == kSrcNone || dst < 0 || amount == 0.0) continue;
-            if (!targetOf_[dst]) {
-                targetParam_[targetCount_] = static_cast<uint32_t>(dst);
-                targetNorm_[targetCount_] = toNorm(static_cast<uint32_t>(dst), base_[dst]);
-                targetOf_[dst] = static_cast<uint8_t>(++targetCount_);
-            }
-            const int via = clampi(base_[viaParam(s)], 0, kSourceCount - 1);
-            slots_[slotCount_++] = {src, targetOf_[dst] - 1, amount, base_[modParam(s, kModPolarity)] >= 0.5, via};
-            moved_ |= sectionOf(static_cast<uint32_t>(dst));
-            used_ |= (1u << src) | (via != kSrcNone ? 1u << via : 0u);
-        }
+        // It is read from the knobs alone, so it stands while none moved.
+        if (knobsChanged_) buildMatrix();
 
         // The free LFOs run once for the instrument, on their knobs' own values; synced to a playing song,
         // they follow its position.
         for (uint32_t l = 0; l < kLfos; ++l) {
             if (!uses(kSrcLfo1 + l)) continue;
             const int sync = clampi(base_[lfoParam(l, kLfoSync)], 0, 9);
-            lfo_[l].setShape(static_cast<lib::LfoShape>(clampi(base_[lfoParam(l, kLfoShape)], 0, 6)));
-            if (sync > 0) {
-                lfo_[l].setRateBeats(kLfoSyncBeats[sync], tempo_);
-                if (beatLocked && clampi(base_[lfoParam(l, kLfoMode)], 0, 2) != kLfoRunning)
-                    lfo_[l].syncToBeat(beat, kLfoSyncBeats[sync]);
-            } else {
-                lfo_[l].setRateHz(base_[lfoParam(l, kLfoRate)]);
+            if (knobsChanged_) {
+                lfo_[l].setShape(static_cast<lib::LfoShape>(clampi(base_[lfoParam(l, kLfoShape)], 0, 6)));
+                if (sync > 0) lfo_[l].setRateBeats(kLfoSyncBeats[sync], tempo_);
+                else lfo_[l].setRateHz(base_[lfoParam(l, kLfoRate)]);
             }
+            if (sync > 0 && beatLocked && clampi(base_[lfoParam(l, kLfoMode)], 0, 2) != kLfoRunning)
+                lfo_[l].syncToBeat(beat, kLfoSyncBeats[sync]);
             freeLfo_[l] = lfo_[l].value();
         }
 
@@ -1162,7 +1152,8 @@ private:
             }
         });
         volume1_ = clampd(g(kVolume), 0.0, 1.0);
-        configureEffects(g);
+        // The effects read the knobs, the tempo, the quality and the slots moving the instrument's parameters.
+        if (knobsChanged_ || (moved_ & kMovedGlobal)) configureEffects(g);
 
         knobsChanged_ = false;
         // Nothing sounding and the tails below -94 dB for long enough: clear the effects and rest.
@@ -1175,6 +1166,28 @@ private:
             }
         } else {
             quietRun_ = 0;
+        }
+    }
+
+    void buildMatrix() noexcept {
+        std::memset(targetOf_, 0, sizeof targetOf_);
+        slotCount_ = targetCount_ = 0;
+        used_ = 0;
+        moved_ = 0;
+        for (uint32_t s = 0; s < kSlots; ++s) {
+            const int src = clampi(base_[modParam(s, kModSource)], 0, kSourceCount - 1);
+            const int dst = clampi(base_[modParam(s, kModTarget)], 0, kModTargets) - 1;
+            const double amount = clampd(base_[modParam(s, kModAmount)], -1.0, 1.0);
+            if (src == kSrcNone || dst < 0 || amount == 0.0) continue;
+            if (!targetOf_[dst]) {
+                targetParam_[targetCount_] = static_cast<uint32_t>(dst);
+                targetNorm_[targetCount_] = toNorm(static_cast<uint32_t>(dst), base_[dst]);
+                targetOf_[dst] = static_cast<uint8_t>(++targetCount_);
+            }
+            const int via = clampi(base_[viaParam(s)], 0, kSourceCount - 1);
+            slots_[slotCount_++] = {src, targetOf_[dst] - 1, amount, base_[modParam(s, kModPolarity)] >= 0.5, via};
+            moved_ |= sectionOf(static_cast<uint32_t>(dst));
+            used_ |= (1u << src) | (via != kSrcNone ? 1u << via : 0u);
         }
     }
 
@@ -1202,16 +1215,16 @@ private:
             for (int c = 0; c < 2; ++c) v.filter[f].comb[c] = &combs_[index][f * 2 + c];
     }
 
-    // The voice section a parameter belongs to (a bit of moved_), 0 for the instrument-wide ones.
+    // The voice section a parameter belongs to (a bit of moved_), kMovedGlobal for the instrument-wide ones.
     static uint32_t sectionOf(uint32_t k) noexcept {
         if (k < kFltBase) return 1u << (k / kOscCount);                    // osc 1..3: bits 0..2
         if (k < kFltRouting) return 1u << (3 + (k - kFltBase) / kFltCount);  // filter 1, 2: bits 3, 4
         if (k == kFltRouting) return kMovedRouting;
         if (k < kLfoBase) return kMovedEnvs;
         if (k < kVolume) return kMovedLfos;
-        return 0;
+        return kMovedGlobal;
     }
-    static constexpr uint32_t kMovedRouting = 1u << 5, kMovedEnvs = 1u << 6, kMovedLfos = 1u << 7;
+    static constexpr uint32_t kMovedRouting = 1u << 5, kMovedEnvs = 1u << 6, kMovedLfos = 1u << 7, kMovedGlobal = 1u << 8;
 
     void configureVoice(Voice& v, const double* offsets) noexcept {
         const auto P = [&](uint32_t k) noexcept { return value(k, offsets); };
@@ -1611,6 +1624,8 @@ private:
     double base_[kParamCount] = {};
     uint16_t ramp_[kParamCount] = {};  // the parameters ramping in this block
     uint32_t rampCount_ = 0;
+    ParameterValue lastValues_[kParamCount] = {};  // the block's values as last handed over (beginBlock)
+    uint32_t lastGiven_ = ~0u;
     lib::Lfo lfo_[kLfos];
     double freeLfo_[kLfos] = {};
     Slot slots_[kSlots];
