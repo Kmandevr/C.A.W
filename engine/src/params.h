@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 #include "module.h"
 
@@ -84,6 +85,7 @@ public:
     void setInitial(double plain) noexcept;
     void clearTouch() noexcept { touched_ = false; }
     bool touched() const noexcept { return touched_; }
+    bool ramping() const noexcept { return rampLeft_ != 0; }
     // automation: `frames` plain values, or null for no active lane. modulation: null, or one
     // signal per link in id order (linkCount() entries), each null (the link is skipped) or
     // `frames` floats. out: room for `frames` values, and required (non-null, frames > 0) whenever
@@ -103,6 +105,8 @@ private:
     ModulationLink links_[kMaxParameterLinks]{};
     uint32_t linkCount_ = 0;
     double current_ = 0.0, target_ = 0.0, increment_ = 0.0;
+    // The steady value's constrained form, kept for the value it was worked out from (resolve's fast path).
+    double steadyFor_ = std::numeric_limits<double>::quiet_NaN(), steady_ = 0.0;
     uint32_t rampLeft_ = 0;
     bool touched_ = false;
 };
