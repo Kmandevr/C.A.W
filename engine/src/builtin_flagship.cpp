@@ -689,12 +689,7 @@ struct VoiceFilter {
             else if (type == kLadderHp) ladder[0].processPair<lib::LadderMode::HighPass>(ladder[1], L, R, n);
             else ladder[0].processPair<lib::LadderMode::BandPass>(ladder[1], L, R, n);
         }
-        if (type == kSvfLp) {  // both sides in one loop (two independent chains: twice the work per cycle)
-            for (uint32_t i = 0; i < n; ++i) {
-                L[i] = static_cast<float>(svf[0].lowpass(static_cast<double>(L[i])));
-                R[i] = static_cast<float>(svf[1].lowpass(static_cast<double>(R[i])));
-            }
-        }
+        if (type == kSvfLp) svf[0].lowpassPair(svf[1], L, R, n);  // both sides in one loop, as a two-wide vector
         for (int c = 0; c < 2 && type > kSvfLp; ++c) {
             float* x = c ? R : L;
             switch (type) {
