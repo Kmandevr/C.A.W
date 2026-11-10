@@ -29,8 +29,12 @@ IconData kindIcon(String kind) => switch (kind) {
 };
 
 class BuilderScreen extends StatefulWidget {
-  const BuilderScreen({super.key, required this.state});
+  const BuilderScreen({super.key, required this.state, this.embedded = false});
   final AppState state;
+
+  /// Inside a Build tab: the explorer and the tab row replace the module chips, and the track's mix (in Arrange
+  /// and the Mixer) is left out, so the code gets the room.
+  final bool embedded;
 
   @override
   State<BuilderScreen> createState() => _BuilderScreenState();
@@ -496,8 +500,8 @@ class _BuilderScreenState extends State<BuilderScreen> {
     _syncEditor(m);
     return LayoutBuilder(builder: (context, box) {
       final wide = box.maxWidth >= 900;
-      final picker = _ModulePicker(state: s, onNew: _newModule);
-      final trackControls = _BuilderTrackControls(state: s, compact: !wide);
+      final Widget picker = widget.embedded ? const SizedBox.shrink() : _ModulePicker(state: s, onNew: _newModule);
+      final Widget trackControls = widget.embedded ? const SizedBox.shrink() : _BuilderTrackControls(state: s, compact: !wide);
       if (m == null) {
         return Column(children: [
           picker,

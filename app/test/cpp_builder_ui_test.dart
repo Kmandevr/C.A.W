@@ -204,6 +204,90 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
     });
 
+    testWidgets('+ New offers pattern, instrument, effect and a text file in the open component', (tester) async {
+      final sections = SectionController();
+      await tester.pumpWidget(host(SectionScope(controller: sections, child: BuildSection(state: state))));
+      await tester.tap(find.byKey(const ValueKey('new menu')));
+      await tester.pumpAndSettle();
+      expect(find.text('Pattern'), findsOneWidget);
+      expect(find.text('Instrument'), findsOneWidget);
+      // No C++ component open: no text file yet.
+      expect(tester.widget<PopupMenuItem<String>>(find.byKey(const ValueKey('new text'))).enabled, isFalse);
+      await tester.tap(find.text('Effect'));
+      await tester.pumpAndSettle();
+      final doc = state.project.cppComponents.single;
+      expect(sections.buildTabs.single, BuildTab(BuildTabKind.cpp, doc.componentId));
+      await tester.tap(find.byKey(const ValueKey('new menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Text file'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('new file name')), 'notes.txt');
+      await tester.tap(find.byKey(const ValueKey('create file')));
+      await tester.pumpAndSettle();
+      final w = state.cppWorkbench(doc.id);
+      expect(w.currentFile, 'notes.txt');
+      expect(find.textContaining('My effect · notes.txt'), findsOneWidget);
+      // A pattern opens as a .caw tab next to it.
+      await tester.tap(find.byKey(const ValueKey('new menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pattern'));
+      await tester.pumpAndSettle();
+      expect(sections.buildTabs, hasLength(2));
+      expect(state.isPattern(sections.activeBuildTab!.id), isTrue);
+      expect(find.byKey(const ValueKey('pattern name')), findsOneWidget);
+      // × closes a tab.
+      await tester.tap(find.byKey(ValueKey('close ${sections.activeBuildTab!.id}')));
+      await tester.pumpAndSettle();
+      expect(sections.buildTabs, hasLength(1));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets("the explorer (a drawer on a phone) is the Files browser: a tap opens a component's file", (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final doc = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
+      state.project.cppComponents.add(doc);
+      final sections = SectionController()..openBuild(BuildTab(BuildTabKind.cpp, doc.componentId));
+      await tester.pumpWidget(host(SectionScope(controller: sections, child: BuildSection(state: state))));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('explorer')));
+      await tester.pumpAndSettle();
+      // It opens on the component's own folder.
+      expect(find.text('caw-component.json'), findsOneWidget);
+      await tester.tap(find.text('caw-component.json'));
+      await tester.pumpAndSettle();
+      expect(state.cppWorkbench('cpp1').currentFile, 'caw-component.json');
+      expect(find.textContaining('Fuzz · caw-component.json'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('on a wide screen the explorer is a sidebar that hides and drags wider', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final doc = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
+      state.project.cppComponents.add(doc);
+      final sections = SectionController()..openBuild(BuildTab(BuildTabKind.cpp, doc.componentId));
+      await tester.pumpWidget(host(SectionScope(controller: sections, child: BuildSection(state: state))));
+      await tester.pump();
+      final explorer = find.byKey(const ValueKey('build explorer'));
+      expect(explorer, findsOneWidget);
+      final before = tester.getSize(explorer).width;
+      await tester.drag(find.byKey(const ValueKey('explorer sash')), const Offset(60, 0));
+      await tester.pump();
+      expect(tester.getSize(explorer).width, greaterThan(before + 50));
+      await tester.tap(find.byKey(const ValueKey('explorer')));
+      await tester.pump();
+      expect(explorer, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    });
+
     testWidgets('without a SectionScope (tests, a screen alone) it keeps its own tabs', (tester) async {
       await tester.pumpWidget(host(BuildSection(state: state)));
       await tester.tap(find.byKey(const ValueKey('new effect')));

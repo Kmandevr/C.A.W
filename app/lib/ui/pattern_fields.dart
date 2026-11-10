@@ -156,7 +156,7 @@ class _PatternFieldsState extends State<PatternFields> {
               value: current,
               isDense: true,
               isExpanded: true,
-              style: dense.copyWith(color: Neon.text),
+              style: (Theme.of(context).textTheme.bodyMedium ?? dense).copyWith(fontSize: 13, color: Neon.text),
               dropdownColor: Neon.panel,
               items: [for (final c in choices) DropdownMenuItem(value: c.$1, child: Text(c.$2))],
               onChanged: (v) {
