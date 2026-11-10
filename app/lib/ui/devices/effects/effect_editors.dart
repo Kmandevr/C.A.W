@@ -12,6 +12,7 @@ import '../device_registry.dart';
 import '../device_scope.dart';
 import '../kit/device_style.dart';
 import '../visuals/fx_visuals.dart';
+import 'dynamics_editors.dart';
 import 'effect_page.dart';
 import 'eq_editor.dart';
 
@@ -31,8 +32,7 @@ DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
     return singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage());
   }
   if (_has(info, 'threshold') && _has(info, 'ratio')) {
-    return DeviceEditorEntry((_) => [DeviceSection('comp', 'COMP', Icons.compress, (_) => const CompressorEditorPage())],
-        accent: Neon.yellow);
+    return singlePage('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage());
   }
   if (_has(info, 'feedback') && (_has(info, 'time') || _has(info, 'sync'))) {
     return DeviceEditorEntry((_) => [DeviceSection('delay', 'DELAY', Icons.blur_linear, (_) => const DelayEditorPage())],
@@ -55,10 +55,10 @@ DeviceEditorEntry _levels(String id, String label, IconData icon, Color accent) 
 /// The built-in effects without a shape the matchers know (#173): a live view of their levels and display values.
 final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.eq': singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage()),
-  'org.caw.limiter': DeviceEditorEntry((_) => [DeviceSection('limit', 'LIMIT', Icons.vertical_align_top, (_) => const LimiterEditorPage())],
-      accent: Neon.yellow),
-  'org.caw.gate': _levels('gate', 'GATE', Icons.door_sliding_outlined, Neon.yellow),
-  'org.caw.transient': _levels('transient', 'SHAPE', Icons.show_chart, Neon.yellow),
+  'org.caw.compressor': singlePage('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
+  'org.caw.limiter': singlePage('limit', 'LIMIT', Icons.vertical_align_top, DeviceFamily.dynamics, () => const LimiterPage()),
+  'org.caw.gate': singlePage('gate', 'GATE', Icons.door_sliding_outlined, DeviceFamily.dynamics, () => const GatePage()),
+  'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientPage()),
   'org.caw.filter': _levels('filter', 'FILTER', Icons.filter_alt_outlined, Neon.green),
   'org.caw.phaser': _levels('phaser', 'PHASER', Icons.waves, Neon.violet),
   'org.caw.flanger': _levels('flanger', 'FLANGER', Icons.waves, Neon.violet),
@@ -156,44 +156,7 @@ class LevelsEditorPage extends StatelessWidget {
   }
 }
 
-/// The limiter: its curve (the input gain up to the ceiling, flat above) and its gain-reduction meter.
-class LimiterEditorPage extends StatelessWidget {
-  const LimiterEditorPage({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    final gain = t.value('gain'), ceiling = t.value('ceiling');
-    return _page([
-      DeviceCard(title: 'CEILING', color: scope.accent, child: _Display(builder: (context, f) => CompressorGraph(
-        threshold: ceiling - gain, ratio: 50, knee: 0, makeup: gain, color: scope.accent, height: 140,
-        gainReductionDb: f?.gainReductionDb, inputDb: f?.inputDb))),
-      DeviceCard(title: 'LIVE', color: scope.accent, child: const LevelMeters(showValues: false)),
-      const ParamGrid(),
-    ]);
-  }
-}
-
-/// A compressor: its transfer graph from `threshold`, `ratio`, `knee` and `makeup`, with the gain-reduction meter
-/// from the display data.
-class CompressorEditorPage extends StatelessWidget {
-  const CompressorEditorPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    return _page([
-      DeviceCard(title: 'TRANSFER', color: scope.accent, child: _Display(builder: (context, f) => CompressorGraph(
-        threshold: t.value('threshold'), ratio: t.value('ratio'), knee: t.param('knee') == null ? 0 : t.value('knee'),
-        makeup: t.param('makeup') == null ? 0 : t.value('makeup'), color: scope.accent, height: 160,
-        gainReductionDb: f?.gainReductionDb, inputDb: f?.inputDb))),
-      DeviceCard(title: 'LIVE', color: scope.accent, child: const LevelMeters(showValues: false)),
-      const ParamGrid(),
-    ]);
-  }
-}
 
 /// A delay: its echoes from `time` (s or ms) or `sync`, `feedback` and `mix`.
 class DelayEditorPage extends StatelessWidget {

@@ -38,16 +38,24 @@ List<NativeComponentInfo> builtinInfos() => _infos ??= [
 
 NativeComponentInfo builtinInfo(String id) => builtinInfos().firstWhere((c) => c.id == id);
 
-/// A frame like a playing device's: a pink-noise-ish spectrum, −6 dB in, −9 dB out, 4 dB of reduction, and the
-/// component's own values ([values]).
-DeviceDisplayFrame fakeFrame(String id, {Map<String, double> values = const {}}) => DeviceDisplayFrame(
-      inputDb: -6, outputDb: -9, gainReductionDb: id.contains('compressor') || id.contains('limiter') || id.contains('gate') ? -4 : null,
+/// A frame like a playing device's: a pink-noise-ish spectrum, levels that pulse like a drum loop over [tick]
+/// (−6 dB in, −9 dB out and 4 dB of reduction at tick 0), and the component's own values ([values]).
+DeviceDisplayFrame fakeFrame(String id, {int tick = 0, Map<String, double> values = const {}}) {
+  final ph = (tick % 22) / 22;
+  final hit = math.exp(-ph * 5);
+  final dyn = id.contains('compressor') || id.contains('limiter') || id.contains('gate');
+  return DeviceDisplayFrame(
+      inputDb: tick == 0 ? -6 : -40 + 37 * hit,
+      outputDb: tick == 0 ? -9 : -42 + 32 * hit,
+      gainReductionDb: dyn ? (tick == 0 ? -4 : -9 * hit) : null,
       spectrum: [for (var i = 0; i < 128; i++) (0.78 - i / 128 * 0.45 + 0.06 * math.sin(i * 0.7)).clamp(0.0, 1.0)],
       values: {
-        'detector_db': -12, 'open': 1, 'gain_db': 2.5, 'correlation': 0.62, 'cutoff_l': 1600, 'lfo': 0.4, 'envelope': 0.3,
-        'freq_l': 900, 'freq_r': 1400, 'lfo_l': 0.3, 'lfo_r': -0.5, 'delay_l_ms': 2.6, 'delay_r_ms': 3.4, 'wet_db': -14,
+        'detector_db': tick == 0 ? -12 : -40 + 37 * hit, 'open': ph < 0.55 ? 1 : 0, 'gain_db': 2.5, 'correlation': 0.62,
+        'cutoff_l': 1600, 'lfo': 0.4, 'envelope': 0.3, 'freq_l': 900, 'freq_r': 1400, 'lfo_l': 0.3, 'lfo_r': -0.5,
+        'delay_l_ms': 2.6, 'delay_r_ms': 3.4, 'wet_db': -14,
         ...values,
       });
+}
 
 /// Display frames a test sets.
 class FakeDisplay extends DeviceDisplaySource {

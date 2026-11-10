@@ -37,7 +37,7 @@ class HeroCanvas extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    height: height,
+    height: heroHeight(context, height),
     margin: const EdgeInsets.only(bottom: 10),
     clipBehavior: Clip.antiAlias,
     decoration: BoxDecoration(
@@ -59,6 +59,11 @@ class HeroCanvas extends StatelessWidget {
     ]),
   );
 }
+
+/// A hero's height on this screen: [base], grown toward a third of a tall screen (a phone in portrait), at most
+/// half again.
+double heroHeight(BuildContext context, double base) =>
+    math.max(base, math.min(base * 1.45, MediaQuery.sizeOf(context).height * 0.33));
 
 class _GridPainter extends CustomPainter {
   _GridPainter(this.color);

@@ -51,6 +51,13 @@ void main() {
     })), size);
     openDevice(ctx, s, id);
     await tester.pumpAndSettle();
+    if (live) {
+      // A few seconds of playing, so histories fill; the last frame is tick 0's.
+      for (var i = 150; i >= 0; i--) {
+        display.frame.value = fakeFrame(id, tick: i);
+        await tester.pump();
+      }
+    }
     return s;
   }
 
@@ -124,6 +131,56 @@ void main() {
       await tester.pumpAndSettle();
       expect(t.value('b5_type'), 9);
       expect(tester.takeException(), isNull);
+      await close(tester);
+    });
+
+    testWidgets('compressor: up and down on the history sets the threshold; up in the knee graph lowers the ratio', (tester) async {
+      final s = await open(tester, 'org.caw.compressor');
+      final t = targetOf(s, 'org.caw.compressor');
+      final hero = tester.getRect(find.byKey(const ValueKey('comp-hero')));
+      await tester.dragFrom(Offset(hero.left + 40, hero.center.dy), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('threshold'), greaterThan(-18));
+      await tester.dragFrom(Offset(hero.right - 60, hero.center.dy), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('ratio'), lessThan(4));
+      await close(tester);
+    });
+
+    testWidgets('limiter: the ceiling line drags; elsewhere drags the gain', (tester) async {
+      final s = await open(tester, 'org.caw.limiter');
+      final t = targetOf(s, 'org.caw.limiter');
+      final hero = tester.getRect(find.byKey(const ValueKey('limiter-hero')));
+      await tester.dragFrom(Offset(hero.center.dx, hero.bottom - 20), const Offset(0, -50));
+      await tester.pumpAndSettle();
+      expect(t.value('gain'), greaterThan(2));
+      final area = Rect.fromLTRB(hero.left, hero.top + 22, hero.right, hero.bottom - 4);
+      final cy = area.bottom - (-1 + 24) / 27 * area.height;
+      await tester.dragFrom(Offset(hero.center.dx, cy), const Offset(0, 40));
+      await tester.pumpAndSettle();
+      expect(t.value('ceiling'), lessThan(-2));
+      await close(tester);
+    });
+
+    testWidgets('gate: dragging away from the centre raises the threshold', (tester) async {
+      final s = await open(tester, 'org.caw.gate');
+      final t = targetOf(s, 'org.caw.gate');
+      final hero = tester.getRect(find.byKey(const ValueKey('gate-hero')));
+      await tester.dragFrom(Offset(hero.center.dx, hero.top + 50), const Offset(0, -30));
+      await tester.pumpAndSettle();
+      expect(t.value('threshold'), greaterThan(-40));
+      await close(tester);
+    });
+
+    testWidgets('transient shaper: the left of the envelope is attack, the right sustain', (tester) async {
+      final s = await open(tester, 'org.caw.transient');
+      final t = targetOf(s, 'org.caw.transient');
+      final hero = tester.getRect(find.byKey(const ValueKey('transient-hero')));
+      await tester.dragFrom(Offset(hero.left + 30, hero.center.dy), const Offset(0, -40));
+      await tester.dragFrom(Offset(hero.right - 40, hero.center.dy), const Offset(0, 40));
+      await tester.pumpAndSettle();
+      expect(t.value('attack'), greaterThan(0.1));
+      expect(t.value('sustain'), lessThan(-0.1));
       await close(tester);
     });
   });

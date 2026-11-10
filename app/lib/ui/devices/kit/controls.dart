@@ -303,7 +303,8 @@ class LevelReadout extends StatelessWidget {
   });
 }
 
-/// Big knobs, spread evenly across the row and wrapping on narrow screens.
+/// Big knobs spread evenly across the width, in balanced rows when they don't fit on one (six knobs on a phone: two
+/// rows of three, not five and one).
 class KnobRow extends StatelessWidget {
   const KnobRow(this.knobs, {super.key, this.size = 50});
   final List<String> knobs;
@@ -313,12 +314,19 @@ class KnobRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = DeviceScope.of(context).target;
     final ids = [for (final k in knobs) if (t.param(k) != null) k];
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Wrap(alignment: WrapAlignment.spaceEvenly, runSpacing: 6, spacing: 2, children: [
-        for (final id in ids) DeviceKnob(id, size: size),
-      ]),
-    );
+    if (ids.isEmpty) return const SizedBox.shrink();
+    return LayoutBuilder(builder: (context, box) {
+      final item = math.max(52.0, size + 16);
+      final fit = math.max(1, (box.maxWidth / item).floor());
+      final rows = (ids.length / fit).ceil();
+      final per = (ids.length / rows).ceil();
+      return Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Column(mainAxisSize: MainAxisSize.min, children: [
+        for (var r = 0; r < rows; r++)
+          Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : 6), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+            for (final id in ids.skip(r * per).take(per)) DeviceKnob(id, size: size),
+          ])),
+      ]));
+    });
   }
 }
 
