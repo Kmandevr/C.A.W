@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -152,6 +154,20 @@ void main() {
     expect(state.project.master, closeTo(0.42, 0.0001));
     expect(valueTicks, 1);
     expect(appNotifications, 0);
+  });
+
+  test('track and master gain go up to +12 dB, as the engine allows', () {
+    // Owner, 2026-11-10: faders like REAPER's, to +12 dB (a gain of 3.981); the model held them at 0 dB.
+    state.project = ProjectDoc(id: 'project-1', name: 'Gain test', master: 0.7, layers: [LayerDoc(id: 'l', name: 'L', color: 0)]);
+    state.setMaster(2.0);
+    expect(state.project.master, closeTo(2.0, 1e-9));
+    state.setMaster(9.0);
+    expect(state.project.master, closeTo(kMaxMixGain, 1e-9));
+    state.mixLayer(state.project.layers.first, volume: 3.0);
+    expect(state.project.layers.first.volume, closeTo(3.0, 1e-9));
+    state.mixLayer(state.project.layers.first, volume: -1.0);
+    expect(state.project.layers.first.volume, 0.0);
+    expect(kMaxMixGain, closeTo(math.pow(10, 12 / 20), 1e-12));
   });
 
   testWidgets('Mixer inspector divider exposes accessible width adjustments', (tester) async {

@@ -149,6 +149,7 @@ CAW_API int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_
 CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
+/* Track and master volume: linear gain 0..3.981 (+12 dB; more is held there). Pan -1..1. */
 CAW_API void caw_engine_set_layer_mix(CawEngine* e, const char* layer_id, double volume, double pan, int32_t mute,
                                       int32_t solo);
 CAW_API void caw_engine_set_master(CawEngine* e, double volume);

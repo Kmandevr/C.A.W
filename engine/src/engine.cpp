@@ -2314,7 +2314,7 @@ void Engine::setLayerMix(const std::string& layerId, double volume, double pan, 
     auto it = layers_.find(layerId);
     if (it == layers_.end() || it->second.slot < 0) return;
     LayerState& ls = it->second;
-    ls.volume = std::min(1.0, std::max(0.0, volume));
+    ls.volume = std::isfinite(volume) ? std::clamp(volume, 0.0, kMaxMixGain) : 0.0;
     ls.pan = std::min(1.0, std::max(-1.0, pan));
     ls.mute = mute;
     ls.solo = solo;
@@ -2381,7 +2381,7 @@ void Engine::setMaster(double volume) {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::SetMaster;
-    c.master = std::isfinite(volume) ? std::clamp(volume, 0.0, 1.0) : 0.0;
+    c.master = std::isfinite(volume) ? std::clamp(volume, 0.0, kMaxMixGain) : 0.0;
     send(c);
 }
 
@@ -2759,7 +2759,7 @@ void Engine::applyCommands() noexcept {
                 loopLenFlag_.store(loopLen_, std::memory_order_relaxed);
                 break;
             case Cmd::SetMaster:
-                masterTarget_ = std::isfinite(c.master) ? std::clamp(c.master, 0.0, 1.0) : 0.0;
+                masterTarget_ = std::isfinite(c.master) ? std::clamp(c.master, 0.0, kMaxMixGain) : 0.0;
                 masterRamp_ = std::max(1, static_cast<int>(sr_ * kGainSeconds));
                 masterStep_ = (masterTarget_ - master_) / masterRamp_;
                 break;

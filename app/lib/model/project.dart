@@ -188,6 +188,10 @@ class ComponentUseDoc {
       ];
 }
 
+/// The most a track or the master gains: +12 dB, 10^(12/20) (owner, 2026-11-10: faders like REAPER's). The engine
+/// holds gains to the same range.
+const double kMaxMixGain = 3.9810717055349722;
+
 class LayerDoc {
   LayerDoc({
     required this.id,

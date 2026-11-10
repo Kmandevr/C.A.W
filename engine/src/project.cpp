@@ -149,7 +149,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
         return true;
     };
     out.seed = static_cast<uint32_t>(clampd(root.number("seed", 0), 0, 4294967295.0));
-    out.master = clampd(root.number("master", 0.7), 0, 1);
+    out.master = clampd(root.number("master", 0.7), 0, kMaxMixGain);
     out.seamCrossfade = root.boolean("seam_crossfade", true);
     {
         const std::string swap = root.string("swap", "now");
@@ -282,7 +282,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                     if (!lane.points.empty()) spec.automation.push_back(std::move(lane));
                 }
             }
-            spec.volume = clampd(l.number("volume", 0.8), 0, 1);
+            spec.volume = clampd(l.number("volume", 0.8), 0, kMaxMixGain);
             spec.pan = clampd(l.number("pan", 0), -1, 1);
             spec.mute = l.boolean("mute", false);
             spec.solo = l.boolean("solo", false);

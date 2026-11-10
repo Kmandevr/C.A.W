@@ -1342,7 +1342,7 @@ class AppState extends ChangeNotifier {
   /// Volume, pan, mute and solo go straight to the audio thread.
   /// Master gain shares the same project/engine state but updates only value listeners during a drag.
   void setMaster(double value) {
-    project.master = value.clamp(0.0, 1.0).toDouble();
+    project.master = value.clamp(0.0, kMaxMixGain).toDouble();
     engine?.setMaster(project.master);
     _save();
     masterValueTick.value++;
@@ -1350,7 +1350,7 @@ class AppState extends ChangeNotifier {
   }
 
   void mixLayer(LayerDoc l, {double? volume, double? pan, bool? mute, bool? solo}) {
-    if (volume != null) l.volume = volume;
+    if (volume != null) l.volume = volume.clamp(0.0, kMaxMixGain).toDouble();
     if (pan != null) l.pan = pan;
     if (mute != null) l.mute = mute;
     if (solo != null) l.solo = solo;
