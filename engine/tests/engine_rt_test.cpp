@@ -222,6 +222,41 @@ TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_chang
     CHECK_EQ(operations, 0u);
 }
 
+TEST(publishing_and_reading_display_data_never_allocates) {
+    // #173: the fixture's gain component publishes display data every block; reading it through the Engine (as
+    // the UI does) and publishing it on the audio thread must neither allocate nor free.
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    if (!path) return;
+    Engine e(48000);
+    const char* gain = "org.caw.tests.native-loader.gain";
+    CHECK(e.loadNativeComponent(path, gain, NativeModuleTrust::Trusted).success);
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"bass", templateSource("bass.caw"), {}});
+    p.layers = {layer("b", {"bass"})};
+    p.layers[0].components = {{gain, {}}};
+    p.masterComponents = {{gain, {}}};
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);
+    float out[16];
+    int32_t got = 0;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 100; ++k) {
+            e.process(l.data(), r.data(), 192);
+            got += e.componentDisplay("b", 0, out, 16) + e.componentDisplay("", 0, out, 16);
+        }
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK_EQ(got, 400);
+}
+
 TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
     // The built-in synth plays a pattern (loop wraps, a slide, a ratchet, chords) through a .caw effect and a
     // native delay; mid-way it is swapped for another instrument (its held notes move over), previews play and

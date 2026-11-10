@@ -247,6 +247,8 @@ public:
         if (t.get_extension) {
             const auto* q = static_cast<const CawQuietExtension*>(t.get_extension(instance_, CAW_EXTENSION_QUIET));
             if (q && q->struct_size >= sizeof(CawQuietExtension) && q->quiet) quiet_ = q->quiet;
+            const auto* v = static_cast<const CawDisplayExtension*>(t.get_extension(instance_, CAW_EXTENSION_DISPLAY));
+            if (v && v->struct_size >= sizeof(CawDisplayExtension) && v->read) display_ = v->read;
         }
     }
     ~ComponentProcessor() override {
@@ -273,6 +275,12 @@ public:
         if (active_) component_->table->reset(instance_);
     }
     bool quiet() const noexcept override { return active_ && quiet_ && quiet_(instance_) == 1; }
+    // Any thread but the audio thread (CAW_EXTENSION_DISPLAY): never more than `max`, whatever the component says.
+    uint32_t readDisplay(float* out, uint32_t max) const noexcept override {
+        if (!display_ || !out || max == 0) return 0;
+        const uint32_t n = display_(instance_, out, max);
+        return n > max ? max : n;
+    }
 
     bool process(const AudioProcessBlock& block) noexcept override {
         if (!active_ || portsPath_ || !audioProcessBlockValid(block) || block.frames > maxFrames_) return false;
@@ -390,6 +398,7 @@ private:
     void* instance_ = nullptr;
     bool active_ = false;
     int32_t (*quiet_)(void*) = nullptr;  // CAW_EXTENSION_QUIET, when the component offers it
+    uint32_t (*display_)(void*, float*, uint32_t) = nullptr;  // CAW_EXTENSION_DISPLAY, when offered
     bool portsPath_ = false;
     uint32_t maxFrames_ = 0;  // the block size the component prepared for at activate
     uint32_t inChannels_ = 0, outChannels_ = 0;  // the single audio in/out port's channels (non-port path)

@@ -2,7 +2,7 @@
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-10
-covers: [engine/include/caw_component.h, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
+covers: [engine/include/caw_component.h, engine/include/caw/display.hpp, engine/include/caw/library/, engine/src/sample_pack.*, engine/plugin/clap/, engine/cmake/CAWClap.cmake, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
@@ -225,6 +225,14 @@ Creation, destruction, state serialization, graph compilation and asset loading 
 - Hosts must pin module version and preserve project snapshots or report missing/incompatible dependencies.
 - Optional features may be omitted from a build, but a missing dependency must be reported explicitly rather than silently substituted.
 - The v1 interface is stereo-native. Mono and discrete layouts are explicit port declarations, never inferred from buffer count.
+
+## Display data
+
+A component can publish live data for its UI (#173): an EQ's spectrum, a compressor's gain reduction, levels, a position. **[Fact]** (this code, 2026-11-10):
+- **C++:** keep a `caw::DisplayBuffer<N>` (`caw/display.hpp`, N floats up to `caw::kMaxDisplayFloats` = 1024, held inline: no allocation) and a `caw::DisplayClock` (`prepare(sampleRate, 60)` in `activate`). In `process`, when `clock.tick(frames)` says so (about 60 times a second, the leftover carried across blocks), `publish(values, count)`; override `ModuleProcessor::readDisplay(out, max)` to return `display.read(out, max)`. The float layout is the component's own; document it.
+- **How it stays real-time safe:** two slots, each with its own sequence counter (a seqlock). The audio thread writes the slot the reader isn't pointed at (its counter odd while writing), then points the reader at it; a reader keeps a copy only if that slot's counter was even and unchanged across the copy, retries at most four times and otherwise returns 0. It never waits or allocates; every float is a relaxed atomic, so there is no data race. A writer would have to publish twice during one copy to disturb it.
+- **C interface:** extension `CAW_EXTENSION_DISPLAY` (`"caw.display.v1"`, `CawDisplayExtension {struct_size, max_floats, read(instance, destination, capacity)}`), asked once per instance after create, like `caw.quiet.v1`. The host calls `read` from a thread that is not the audio thread at any time between create and destroy, while `process` may run. `CAW_EXPORT_COMPONENT` offers it for every C++ component (0 floats unless the processor publishes).
+- **Host:** `caw_engine_component_display` (below and in [engine](engine.md#display-data)) reads it for the app. A display is not sound: when it publishes may depend on the block size, but it must never change the audio.
 
 ## User interfaces
 

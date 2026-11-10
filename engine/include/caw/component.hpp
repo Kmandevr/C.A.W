@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "display.hpp"
 #include "module.hpp"
 
 #if defined(_WIN32)
@@ -242,11 +243,25 @@ int32_t quiet(void* p) noexcept {
     }
 }
 
-// The extensions every exported component offers: CAW_EXTENSION_QUIET (from ModuleProcessor::quiet()).
+template <class Type>
+uint32_t readDisplay(void* p, float* destination, uint32_t capacity) noexcept {
+    try {
+        if (!p || !destination || capacity == 0) return 0;
+        const uint32_t n = instance<Type>(p)->processor.readDisplay(destination, capacity);
+        return n > capacity ? capacity : n;
+    } catch (...) {
+        return 0;
+    }
+}
+
+// The extensions every exported component offers: CAW_EXTENSION_QUIET (from ModuleProcessor::quiet()) and
+// CAW_EXTENSION_DISPLAY (from ModuleProcessor::readDisplay(); 0 floats unless the processor publishes).
 template <class Type>
 const void* extension(void*, const char* id) noexcept {
     static const CawQuietExtension kQuiet{sizeof(CawQuietExtension), &quiet<Type>};
+    static const CawDisplayExtension kDisplay{sizeof(CawDisplayExtension), kMaxDisplayFloats, &readDisplay<Type>};
     if (id && std::string_view(id) == CAW_EXTENSION_QUIET) return &kQuiet;
+    if (id && std::string_view(id) == CAW_EXTENSION_DISPLAY) return &kDisplay;
     return nullptr;
 }
 

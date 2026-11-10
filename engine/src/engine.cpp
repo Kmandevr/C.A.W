@@ -2309,6 +2309,16 @@ std::string Engine::componentStatesJson(const std::string& layerId) {
     return j + "]}";
 }
 
+int32_t Engine::componentDisplay(const std::string& layerId, uint32_t index, float* out, uint32_t max) {
+    // Never waits: a UI polls this every frame, and a project update can hold ctl_ for a while (it then shows
+    // its last picture). The chains themselves are read without locks (DisplayBuffer).
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);
+    if (!lock.owns_lock()) return 0;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    if (!chain) return -1;
+    return chain->readDisplay(index, out, max);
+}
+
 void Engine::setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo) {
     std::lock_guard<std::mutex> lock(ctl_);
     auto it = layers_.find(layerId);
