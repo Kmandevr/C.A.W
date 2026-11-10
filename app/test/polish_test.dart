@@ -7,6 +7,7 @@ import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/automation_screen.dart';
+import 'package:caw/ui/exporter_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
@@ -106,5 +107,17 @@ void main() {
       expect(find.text('Make and package .caw instruments and effects'), findsOneWidget);
       a.dispose();
     }, skip: skip);
+  });
+
+  group('Export', () {
+    testWidgets('with no saved profiles the picker says how to make one', (tester) async {
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: ExporterScreen(state: s))));
+      expect(find.text('None yet: save these settings with the bookmark'), findsOneWidget);
+    });
+
+    test('recent exports show their time to the minute', () {
+      final ms = DateTime(2026, 11, 10, 9, 5, 33, 120).millisecondsSinceEpoch;
+      expect(exportStamp(ms), '2026-11-10 09:05');
+    });
   });
 }

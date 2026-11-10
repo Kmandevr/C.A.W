@@ -571,7 +571,9 @@ class _ExporterScreenState extends State<ExporterScreen> {
                 Expanded(child: DropdownButton<String>(
                   value: selectedProfile,
                   isExpanded: true,
-                  hint: const Text('Choose a saved profile'),
+                  hint: Text(profiles.isEmpty ? 'None yet: save these settings with the bookmark' : 'Choose a saved profile',
+                      key: const ValueKey('export-profile-hint'),
+                      style: const TextStyle(fontSize: 13, color: Neon.dim), maxLines: 1, overflow: TextOverflow.ellipsis),
                   underline: const SizedBox.shrink(),
                   items: [for (final profile in profiles)
                     DropdownMenuItem(value: profile.name, child: Text(profile.name))],
@@ -596,7 +598,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: Text(entry.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text('${entry.kind} · ${entry.sampleRate ~/ 1000} kHz · ${DateTime.fromMillisecondsSinceEpoch(entry.createdAtMs).toLocal()}',
+                    subtitle: Text('${entry.kind} · ${entry.sampleRate ~/ 1000} kHz · ${exportStamp(entry.createdAtMs)}',
                       style: const TextStyle(color: Neon.dim, fontSize: 10)),
                     trailing: TextButton(
                       onPressed: busy ? null : () => _applyHistory(entry),
@@ -827,4 +829,11 @@ class _ExporterScreenState extends State<ExporterScreen> {
         return 'Export a project pattern as a standard MIDI file using the project tempo and time signature.';
     }
   }
+}
+
+/// When an export was made, to the minute in local time: `2026-11-10 14:03`.
+String exportStamp(int ms) {
+  final t = DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
 }
