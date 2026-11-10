@@ -17,8 +17,20 @@ import 'tokens.dart';
 /// portrait puts it in a drawer and leads with the breadcrumb. Tap selects, double-tap opens in Build, a long
 /// press without moving opens the item's menu and a long press that moves drags it onto a track.
 class FileManagerScreen extends StatefulWidget {
-  const FileManagerScreen({super.key, required this.state, this.onOpenBuilder = _none});
+  const FileManagerScreen({super.key, required this.state, this.onOpenBuilder = _none, this.explorer = false,
+      this.folder, this.onOpenAsset, this.activeKey});
   final AppState state;
+
+  /// Build's explorer (#169): one column (breadcrumb, search, a list of folders and items), no filters, tree
+  /// drawer or inspector, and a tap opens the item ([onOpenAsset], else as a double-tap would).
+  final bool explorer;
+
+  /// The folder shown first (and again whenever it changes), e.g. the open component's.
+  final String? folder;
+  final ValueChanged<FileAsset>? onOpenAsset;
+
+  /// The item open in the editor, highlighted in the explorer.
+  final String? activeKey;
 
   /// Opens the Builder when Files is shown without the three-section frame (no SectionScope).
   final VoidCallback onOpenBuilder;
@@ -30,12 +42,12 @@ class FileManagerScreen extends StatefulWidget {
 }
 
 class _FileManagerScreenState extends State<FileManagerScreen> {
-  String _path = 'fx';
+  late String _path = widget.folder ?? 'fx';
   String? _selected;
   String _query = '';
   bool _searchOpen = false;
   final Set<FileAssetFilter> _filters = {};
-  double _size = 0.35; // 0..1; under [_listBelow] the grid is a list
+  late double _size = widget.explorer ? 0 : 0.35; // 0..1; under [_listBelow] the grid is a list
   static const _listBelow = 0.12;
   final _scaffold = GlobalKey<ScaffoldState>();
   final _search = TextEditingController();
@@ -60,6 +72,13 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     state.refreshNativeCatalog().then((_) {
       if (mounted) setState(() {});
     });
+  }
+
+  @override
+  void didUpdateWidget(FileManagerScreen old) {
+    super.didUpdateWidget(old);
+    final f = widget.folder;
+    if (f != null && f != old.folder) _go(f);
   }
 
   @override
@@ -201,13 +220,32 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     return SizedBox(
       height: 40,
       child: Row(children: [
-        if (!wide) _iconButton(Icons.account_tree_outlined, 'Folders', () => _scaffold.currentState?.openDrawer()),
+        if (!wide && !widget.explorer)
+          _iconButton(Icons.account_tree_outlined, 'Folders', () => _scaffold.currentState?.openDrawer()),
+        // The explorer has no tree beside it: every folder, indented, from one menu.
+        if (widget.explorer)
+          Builder(builder: (c) => _iconButton(Icons.account_tree_outlined, 'Folders', () async {
+                final all = <(FilesFolder, int)>[];
+                void walk(List<FilesFolder> level, int depth) {
+                  for (final f in level) {
+                    all.add((f, depth));
+                    walk(f.children, depth + 1);
+                  }
+                }
+
+                walk(state.filesTree, 0);
+                final path = await showCompactMenu<String>(context, _centerOf(c), [
+                  for (final (f, depth) in all) MenuEntry(f.path, folderIcon(f.kind), '${'    ' * depth}${f.label}'),
+                ]);
+                if (path != null && mounted) _go(path);
+              })),
         Expanded(child: _breadcrumb(trail, searching)),
         if (wide)
           SizedBox(width: 200, child: _searchField())
         else
           _iconButton(Icons.search, 'Search', () => setState(() => _searchOpen = !_searchOpen), selected: _searchOpen),
-        Builder(builder: (c) => _iconButton(Icons.add, 'New', () => _newMenu(_centerOf(c), folder))),
+        // Build's own + New makes new files there.
+        if (!widget.explorer) Builder(builder: (c) => _iconButton(Icons.add, 'New', () => _newMenu(_centerOf(c), folder))),
         Builder(builder: (c) => _iconButton(Icons.more_vert, 'Project files', () => _projectMenu(_centerOf(c), folder))),
       ]),
     );
@@ -276,14 +314,17 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
     final extent = 64 + 96 * ((_size - _listBelow) / (1 - _listBelow)).clamp(0.0, 1.0);
     final actions = _actions;
     Widget assetItem(FileAsset a) {
-      final selected = a.key == _selected;
+      final selected = a.key == (widget.explorer ? widget.activeKey ?? _selected : _selected);
       final fav = state.isFavourite(a);
       final warning = a.type == FileAssetType.cppComponent && state.cppStatus(a.cpp!) != null;
       return AssetGestures(
         key: ValueKey(a.key),
         asset: a,
-        onSelect: () => setState(() => _selected = a.key),
-        onOpen: () => actions.open(a),
+        onSelect: () {
+          setState(() => _selected = a.key);
+          if (widget.explorer) (widget.onOpenAsset ?? actions.open)(a);
+        },
+        onOpen: () => widget.explorer ? null : actions.open(a),
         onMenu: (at) => actions.assetMenu(a, at),
         child: list
             ? AssetRow(asset: a, selected: selected, favourite: fav, warning: warning,
@@ -328,7 +369,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         listenable: state,
         builder: (context, _) => LayoutBuilder(builder: (context, c) {
           // A small docked panel in a landscape window still uses the drawer: the tree needs room beside the grid.
-          final wide = (c.maxWidth > c.maxHeight || c.maxWidth >= 900) && c.maxWidth >= 560;
+          final wide = !widget.explorer && (c.maxWidth > c.maxHeight || c.maxWidth >= 900) && c.maxWidth >= 560;
           final tree = state.filesTree;
           var trail = state.folderTrail(_path);
           if (trail.isEmpty) trail = state.folderTrail('fx');
@@ -362,9 +403,9 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
             _toolbar(trail, wide, searching),
             if (!wide && _searchOpen)
               Padding(padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.xs), child: _searchField(autofocus: true)),
-            _filterBar(subfolders.length + assets.length, narrow: c.maxWidth < 360),
+            if (!widget.explorer) _filterBar(subfolders.length + assets.length, narrow: c.maxWidth < 360),
             Expanded(child: _grid(folder, subfolders, assets, searching)),
-            if (selected != null && !sideInspector)
+            if (selected != null && !sideInspector && !widget.explorer)
               Padding(
                 padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.s),
                 child: GlassPanel(child: inspector(compact: true)),
@@ -389,6 +430,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
                 ),
             ]);
           }
+          if (widget.explorer) return main;
           return Scaffold(
             key: _scaffold,
             backgroundColor: Colors.transparent,

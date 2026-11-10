@@ -14,6 +14,7 @@ import '../../model/cpp_workbench.dart';
 import '../glass.dart';
 import '../theme.dart';
 import 'code_style.dart';
+import 'cpp_library.dart';
 import 'key_row.dart';
 import 'panels.dart';
 
@@ -52,19 +53,14 @@ final _views = Expando<Map<String, CppFileView>>('cpp file views');
 
 Map<String, CppFileView> _viewsOf(CppWorkbench w) => _views[w] ??= {};
 
-/// The Build tabs menu the top row's file name opens (from BuildSection).
-class BuildTabsMenu {
-  const BuildTabsMenu({required this.entries, required this.onSelect, required this.onClose, required this.onStart});
-  final List<({Object tab, String name, bool active, bool cpp})> entries;
-  final ValueChanged<Object> onSelect, onClose;
-  final VoidCallback onStart;
-}
-
 class CppEditor extends StatefulWidget {
-  const CppEditor({super.key, required this.workbench, this.tabs});
+  const CppEditor({super.key, required this.workbench, this.bar});
 
   final CppWorkbench workbench;
-  final BuildTabsMenu? tabs;
+
+  /// Build's tab strip (explorer, open tabs, + New), at the start of the one top row; without it the row names
+  /// the component and file.
+  final Widget? bar;
 
   @override
   State<CppEditor> createState() => CppEditorState();
@@ -244,6 +240,7 @@ class CppEditorState extends State<CppEditor> {
 
   void _scheduleCompletion({bool force = false}) {
     _completionTimer?.cancel();
+    if (languageOf(w.currentFile) == 'plaintext') return _closeCompletion();
     final ctx = _contextNow();
     if (ctx == null || ctx.trigger == 'none') return _closeCompletion();
     if (!force && !ctx.opensAutomatically) return _closeCompletion();
@@ -347,10 +344,7 @@ class CppEditorState extends State<CppEditor> {
         jumpTo(d);
       }));
 
-  void _showRef() => _sheet('Reference', (c) => RefList(onInsert: (t) {
-        Navigator.pop(c);
-        insert(t);
-      }));
+  void showLibrary() => showCppLibrarySheet(context, onInsert: insert);
 
   void _showSnippets() => _sheet('Snippets', (c) => SnippetList(onInsert: (t) {
         Navigator.pop(c);
@@ -499,9 +493,11 @@ class CppEditorState extends State<CppEditor> {
     ]);
   }
 
-  CodeHighlightTheme? _cpp, _json;
-  CodeHighlightTheme _themeFor(String path) =>
-      languageOf(path) == 'json' ? (_json ??= _only(cppHighlightTheme(), 'json')) : (_cpp ??= _only(cppHighlightTheme(), 'cpp'));
+  final Map<String, CodeHighlightTheme> _themes = {};
+  CodeHighlightTheme _themeFor(String path) {
+    final lang = languageOf(path);
+    return _themes[lang] ??= _only(cppHighlightTheme(), lang);
+  }
   static CodeHighlightTheme _only(CodeHighlightTheme t, String lang) =>
       CodeHighlightTheme(languages: {lang: t.languages[lang]!}, theme: t.theme);
 
@@ -564,22 +560,66 @@ class CppEditorState extends State<CppEditor> {
     return null;
   }
 
-  Widget _topRow() {
+  /// Problems and the Library beside the code (landscape and desktop); null until toggled: open on a wide desktop.
+  bool? _side;
+
+  Widget _iconAction(String id, IconData icon, String tip, VoidCallback? onTap, {Color? color}) => IconButton(
+        key: ValueKey(id),
+        tooltip: tip,
+        iconSize: 18,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 34, height: 36),
+        padding: EdgeInsets.zero,
+        onPressed: onTap,
+        icon: Icon(icon, color: color ?? Neon.dim),
+      );
+
+  /// The one slim top row: Build's tabs (or the file's name), the error count only when there are errors, the
+  /// Library, ⋯ (the component's files, Versions, Problems, Snippets, Test) and ▶ Build.
+  Widget _topRow({required bool wide, required bool side}) {
     final errors = w.errorCount;
-    final tabs = widget.tabs;
-    final status = switch (w.phase) {
-      CppBuildPhase.building => ('Building…', Neon.dim),
-      CppBuildPhase.built => (w.buildMessage ?? 'Built', Neon.green),
-      CppBuildPhase.failed => (w.buildMessage ?? 'Build failed', Neon.pink),
-      CppBuildPhase.idle => (w.checking ? 'Checking…' : '', Neon.dim),
-    };
+    final failed = w.phase == CppBuildPhase.failed && errors == 0;
+    final count = w.diagnostics.length;
     return SizedBox(
       height: 36,
       child: Row(children: [
+        Expanded(
+          child: widget.bar ??
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text('${w.name} · ${w.currentFile.split('/').last}',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+              ),
+        ),
+        if (errors > 0)
+          InkWell(
+            key: const ValueKey('error count'),
+            onTap: jumpToNextError,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
+              child: Row(children: [
+                const Icon(Icons.error, size: 15, color: Neon.pink),
+                const SizedBox(width: 3),
+                Text('$errors', style: Neon.code(size: 12, color: Neon.pink)),
+              ]),
+            ),
+          ),
+        // A build that failed without a line to point at (the linker, the loader) says why here.
+        if (failed)
+          _iconAction('build failed', Icons.report_gmailerrorred, w.buildMessage ?? 'Build failed', showProblems, color: Neon.pink),
+        if (wide)
+          _iconAction('side panel', side ? Icons.vertical_split : Icons.vertical_split_outlined,
+              side ? 'Hide Problems and Library' : 'Show Problems and Library', () => setState(() => _side = !side),
+              color: side ? Neon.blue : null)
+        else
+          _iconAction('bar library', Icons.menu_book_outlined, 'Library', showLibrary, color: Neon.blue),
         PopupMenuButton<void Function()>(
-          key: const ValueKey('file menu'),
-          tooltip: 'Files, tabs and versions',
+          key: const ValueKey('more'),
+          tooltip: 'Files, versions and tools',
           padding: EdgeInsets.zero,
+          iconSize: 18,
+          icon: const Icon(Icons.more_vert, color: Neon.dim),
+          constraints: const BoxConstraints(minWidth: 200),
           onSelected: (f) => f(),
           itemBuilder: (c) => [
             for (final f in w.fileOrder)
@@ -589,107 +629,35 @@ class CppEditorState extends State<CppEditor> {
                 child: Row(children: [
                   Icon(f == w.currentFile ? Icons.radio_button_checked : Icons.description_outlined, size: 16, color: Neon.dim),
                   const SizedBox(width: 8),
-                  Text(f, style: Neon.code(size: 12)),
+                  Flexible(child: Text(f, style: Neon.code(size: 12), overflow: TextOverflow.ellipsis)),
                 ]),
               ),
             const PopupMenuDivider(),
-            PopupMenuItem(height: 34, value: _showVersions, child: const Text('Versions…', style: TextStyle(fontSize: 13))),
-            if (tabs != null) ...[
-              const PopupMenuDivider(),
-              for (final t in tabs.entries)
-                PopupMenuItem(
-                  height: 34,
-                  value: () => tabs.onSelect(t.tab),
-                  child: Row(children: [
-                    Icon(t.cpp ? Icons.code : Icons.graphic_eq, size: 16, color: t.active ? Neon.green : Neon.dim),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(t.name, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
-                    IconButton(
-                      tooltip: 'Close tab',
-                      iconSize: 16,
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        Navigator.pop(c);
-                        tabs.onClose(t.tab);
-                      },
-                    ),
-                  ]),
-                ),
-              PopupMenuItem(height: 34, value: tabs.onStart, child: const Text('Start page…', style: TextStyle(fontSize: 13))),
-            ],
-          ],
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 170),
-                child: Text('${w.name} · ${w.currentFile.split('/').last}',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+            if (!side)
+              PopupMenuItem(
+                key: const ValueKey('bar problems'),
+                height: 34,
+                value: showProblems,
+                child: Text(count == 0 ? 'Problems' : 'Problems ($count)', style: const TextStyle(fontSize: 13)),
               ),
-              const Icon(Icons.arrow_drop_down, size: 18),
-            ]),
-          ),
-        ),
-        if (errors > 0)
-          InkWell(
-            key: const ValueKey('error count'),
-            onTap: jumpToNextError,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-              child: Row(children: [
-                const Icon(Icons.error, size: 15, color: Neon.pink),
-                const SizedBox(width: 3),
-                Text('$errors', style: Neon.code(size: 12, color: Neon.pink)),
-              ]),
-            ),
-          ),
-        Expanded(
-          child: Text(status.$1,
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11.5, color: status.$2),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
+            if (wide && !side) PopupMenuItem(height: 34, value: showLibrary, child: const Text('Library', style: TextStyle(fontSize: 13))),
+            PopupMenuItem(key: const ValueKey('bar snippets'), height: 34, value: _showSnippets,
+                child: const Text('Snippets', style: TextStyle(fontSize: 13))),
+            PopupMenuItem(key: const ValueKey('bar test'), height: 34, value: _showTest,
+                child: const Text('♪ Test', style: TextStyle(fontSize: 13))),
+            PopupMenuItem(height: 34, value: _showVersions, child: const Text('Versions…', style: TextStyle(fontSize: 13))),
+          ],
         ),
         IconButton(
           key: const ValueKey('build'),
           tooltip: 'Build (Ctrl+B)',
           iconSize: 20,
+          visualDensity: VisualDensity.compact,
           onPressed: w.phase == CppBuildPhase.building ? null : runBuild,
           icon: w.phase == CppBuildPhase.building
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               : Icon(Icons.play_arrow, color: w.phase == CppBuildPhase.built ? Neon.green : Neon.text),
         ),
-      ]),
-    );
-  }
-
-  Widget _bottomBar({required bool side}) {
-    Widget item(String id, IconData icon, String label, VoidCallback onTap, {Color? color}) => Expanded(
-          child: InkWell(
-            key: ValueKey(id),
-            onTap: onTap,
-            child: SizedBox(
-              height: 36,
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(icon, size: 17, color: color ?? Neon.dim),
-                const SizedBox(width: 5),
-                Text(label, style: TextStyle(fontSize: 12, color: color ?? Neon.text)),
-              ]),
-            ),
-          ),
-        );
-    final count = w.diagnostics.length;
-    return Container(
-      decoration: BoxDecoration(border: Border(top: BorderSide(color: Neon.line))),
-      child: Row(children: [
-        if (!side) ...[
-          item('bar problems', Icons.error_outline, count == 0 ? 'Problems' : 'Problems $count', showProblems,
-              color: w.errorCount > 0 ? Neon.pink : null),
-          item('bar ref', Icons.menu_book_outlined, 'Ref', _showRef),
-        ],
-        item('bar snippets', Icons.content_paste_go, 'Snippets', _showSnippets),
-        item('bar test', Icons.music_note, 'Test', _showTest),
       ]),
     );
   }
@@ -700,30 +668,25 @@ class CppEditorState extends State<CppEditor> {
     // The soft keyboard, from the window itself: a Scaffold above may already have taken it out of viewInsets.
     final view = View.of(context);
     final keyboard = view.viewInsets.bottom / view.devicePixelRatio > 80 || mq.viewInsets.bottom > 80;
-    final wide = mq.size.width > mq.size.height && mq.size.width >= 600;
-    final note = w.checkNote;
-    final column = Column(children: [
-      _topRow(),
-      if (note != null && w.diagnostics.isEmpty)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 0, 10, 2),
-          child: Text(note, style: TextStyle(fontSize: 11, color: Neon.dim), maxLines: 1, overflow: TextOverflow.ellipsis),
-        ),
-      Expanded(child: _editor()),
-      if (keyboard)
-        CodeEditorTapRegion(child: CodeKeyRow(target: _target, onChanged: () => setState(() {})))
-      else
-        _bottomBar(side: wide),
-    ]);
-    if (!wide) return column;
-    return Row(children: [
-      Expanded(child: column),
-      SizedBox(width: 290, child: Padding(padding: const EdgeInsets.all(4), child: _SidePanel(editor: this))),
-    ]);
+    return LayoutBuilder(builder: (context, box) {
+      // Room beside the code: landscape or desktop with at least 600 dp for the editor itself.
+      final wide = mq.size.width > mq.size.height && box.maxWidth >= 600;
+      final side = wide && (_side ?? box.maxWidth >= 1100);
+      final column = Column(children: [
+        _topRow(wide: wide, side: side),
+        Expanded(child: _editor()),
+        if (keyboard) CodeEditorTapRegion(child: CodeKeyRow(target: _target, onChanged: () => setState(() {}))),
+      ]);
+      if (!side) return column;
+      return Row(children: [
+        Expanded(child: column),
+        SizedBox(width: 290, child: Padding(padding: const EdgeInsets.all(4), child: _SidePanel(editor: this))),
+      ]);
+    });
   }
 }
 
-/// Landscape and desktop: Problems and Ref beside the code.
+/// Landscape and desktop: Problems and the Library beside the code.
 class _SidePanel extends StatefulWidget {
   const _SidePanel({required this.editor});
   final CppEditorState editor;
@@ -754,10 +717,10 @@ class _SidePanelState extends State<_SidePanel> {
       child: Column(children: [
         Row(children: [
           tab(count == 0 ? 'Problems' : 'Problems $count', !_ref, () => setState(() => _ref = false)),
-          tab('Ref', _ref, () => setState(() => _ref = true)),
+          tab('Library', _ref, () => setState(() => _ref = true)),
         ]),
         Expanded(
-          child: _ref ? RefList(onInsert: e.insert) : ProblemsList(workbench: e.w, onJump: e.jumpTo),
+          child: _ref ? CppLibraryView(onInsert: e.insert) : ProblemsList(workbench: e.w, onJump: e.jumpTo),
         ),
       ]),
     );

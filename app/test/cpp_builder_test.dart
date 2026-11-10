@@ -149,6 +149,20 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
     }
   });
 
+  test('every built-in in the Library is registered in the engine with those knobs', () {
+    final src = ['../engine/src/builtin_components.cpp', '../engine/src/builtin_instruments.cpp']
+        .map((p) => File(p).readAsStringSync())
+        .join('\n');
+    for (final b in cppBuiltins) {
+      expect(src, contains('"${b.id}"'), reason: '${b.id} is not a built-in');
+      for (final k in b.knobs) {
+        expect(src, contains('"$k"'), reason: '${b.id} has no knob $k');
+      }
+    }
+    final ids = RegExp(r'"(org\.caw\.[a-z.]+)"').allMatches(src).map((m) => m.group(1)).toSet();
+    expect(ids, cppBuiltins.map((b) => b.id).toSet(), reason: 'a built-in is missing from the Library');
+  });
+
   test('check and completion arguments share the build flags, compile nothing and link nothing', () {
     final m = CppComponentManifest.parse(
         '{"format":"caw.component","version":1,"component":{"id":"a.b"},"sources":["src/e.cpp"],"compileDefinitions":["N=2"]}');

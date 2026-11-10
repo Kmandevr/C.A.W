@@ -1,9 +1,8 @@
-// The C++ Builder's sheets and side panels: Problems, Ref (SDK and caw::lib), Snippets and the ♪ Test strip.
+// The C++ Builder's sheets and side panels: Problems, Snippets and the ♪ Test strip.
 import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
 import '../../model/cpp_diagnostics.dart';
-import '../../model/cpp_reference.dart';
 import '../../model/cpp_snippets.dart';
 import '../../model/cpp_workbench.dart';
 import '../theme.dart';
@@ -68,79 +67,6 @@ class ProblemsList extends StatelessWidget {
           );
         },
       );
-}
-
-/// The quick reference: SDK and Library names by group, with a search and an Insert button each.
-class RefList extends StatefulWidget {
-  const RefList({super.key, required this.onInsert});
-  final ValueChanged<String> onInsert;
-
-  @override
-  State<RefList> createState() => _RefListState();
-}
-
-class _RefListState extends State<RefList> {
-  String _query = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final q = _query.toLowerCase();
-    final entries = cppReference
-        .where((e) => q.isEmpty || e.qualified.toLowerCase().contains(q) || e.doc.toLowerCase().contains(q))
-        .toList();
-    final groups = <String, List<CppRefEntry>>{};
-    for (final e in entries) {
-      (groups[e.group] ??= []).add(e);
-    }
-    return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-        child: SizedBox(
-          height: 34,
-          child: TextField(
-            onChanged: (v) => setState(() => _query = v),
-            style: _small(),
-            decoration: const InputDecoration(
-              isDense: true,
-              prefixIcon: Icon(Icons.search, size: 16),
-              hintText: 'Search the SDK and Library',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(vertical: 6),
-            ),
-          ),
-        ),
-      ),
-      Expanded(
-        child: ListView(padding: const EdgeInsets.only(bottom: 12), children: [
-          for (final g in groups.entries) ...[
-            _heading(g.key),
-            for (final e in g.value)
-              Padding(
-                padding: const EdgeInsets.only(left: 12),
-                child: Row(children: [
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text.rich(TextSpan(children: [
-                        TextSpan(text: e.member ? '.${e.name}' : e.qualified, style: Neon.code(size: 12, color: Neon.green)),
-                        TextSpan(text: '  ${e.detail}', style: Neon.code(size: 11, color: Neon.dim)),
-                      ]), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      Text(e.doc, style: _small(color: Neon.dim), maxLines: 2, overflow: TextOverflow.ellipsis),
-                    ]),
-                  ),
-                  IconButton(
-                    key: ValueKey('insert ${e.qualified}'),
-                    tooltip: 'Insert',
-                    iconSize: 18,
-                    icon: const Icon(Icons.input),
-                    onPressed: () => widget.onInsert(e.insert),
-                  ),
-                ]),
-              ),
-          ],
-        ]),
-      ),
-    ]);
-  }
 }
 
 /// The snippets, each with a preview and an Insert button.
