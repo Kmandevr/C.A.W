@@ -304,6 +304,43 @@ class NoteExpression {
     return ((position / grid).round() * grid).clamp(0.0, 1.0).toDouble();
   }
 
+  /// The same curves after the note moved from [oldAt] (steps) and [oldLen] long to [newAt] and [newLen]: every point
+  /// keeps its place on the grid (owner, 2026-11-10: stretching a note doesn't move its slide points). Points that
+  /// fall outside the new note are dropped, and the curve's value where it is cut becomes a point on the new edge.
+  NoteExpression rebased(double oldAt, double oldLen, double newAt, double newLen) {
+    if (isEmpty || newLen <= 0 || oldLen <= 0 || (oldAt == newAt && oldLen == newLen)) return this;
+    List<NotePoint> move(List<NotePoint> c) {
+      if (c.isEmpty) return c;
+      // A fraction of the new note for a fraction of the old one.
+      double t(double u) => (oldAt + u * oldLen - newAt) / newLen;
+      double u(double t) => (newAt + t * newLen - oldAt) / oldLen;
+      final out = <NotePoint>[];
+      final firstT = t(c.first.t);
+      if (firstT < 0 && t(c.last.t) > 0) out.add(NotePoint(0, valueAt(c, u(0)), _segmentAt(c, u(0))));
+      for (final p in c) {
+        final x = t(p.t);
+        if (x >= 0 && x <= 1) out.add(NotePoint(_round(x), p.v, p.k));
+      }
+      if (t(c.last.t) > 1 && firstT < 1) out.add(NotePoint(1, valueAt(c, u(1))));
+      // Every point fell outside: the note holds the value the curve had over it.
+      if (out.isEmpty) out.add(NotePoint(0, valueAt(c, u(firstT < 0 ? 0 : 1))));
+      return out;
+    }
+
+    return copyWith(bend: move(bend), press: move(press), timbre: move(timbre));
+  }
+
+  // The bend of the segment that holds [u], so a cut segment keeps its shape's direction.
+  static double _segmentAt(List<NotePoint> c, double u) {
+    for (var i = 0; i + 1 < c.length; i++) {
+      if (u <= c[i + 1].t) return c[i].k;
+    }
+    return 0;
+  }
+
+  // Point times to 6 decimals, so the pattern text stays short.
+  static double _round(double x) => (x * 1e6).roundToDouble() / 1e6;
+
   /// A curve's value at [u] 0..1, holding the first and last values outside the points (as the engine plays it).
   static double valueAt(List<NotePoint> c, double u, {double empty = 0}) {
     if (c.isEmpty) return empty;
@@ -1014,11 +1051,15 @@ class PatternDoc {
 
   /// Changes lengths by [dLen], each at least [kMinNoteLength] (1/32 step) and at most [kPatternMaxSteps].
   PatternDoc resize(Set<int> sel, Steps dLen) =>
-      _map(sel, (n) => n.copyWith(len: (n.len + dLen).clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
+      _map(sel, (n) => _withLength(n, n.at, (n.len + dLen).clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
 
   /// Sets lengths exactly (clamped like [resize]).
   PatternDoc setNoteLength(Set<int> sel, Steps len) =>
-      _map(sel, (n) => n.copyWith(len: len.clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
+      _map(sel, (n) => _withLength(n, n.at, len.clamp(kMinNoteLength, Steps(kPatternMaxSteps))));
+
+  /// [n] starting at [at] and [len] long, its expression points kept where they were on the grid.
+  static PatternNote _withLength(PatternNote n, Steps at, Steps len) => n.copyWith(at: at, len: len,
+      expr: n.expr.rebased(n.at.toDouble(), n.len.toDouble(), at.toDouble(), len.toDouble()));
 
   /// Stretches every note in [sel] by the same [d] at one end: the end, or with [start] the start, which moves while
   /// the end stays. A note keeps at least [min] (never less than [kMinNoteLength]; one already shorter keeps its
@@ -1027,9 +1068,9 @@ class PatternDoc {
     final lo = Steps.max(kMinNoteLength, min ?? kMinNoteLength);
     return _map(sel, (n) {
       final keep = Steps.min(lo, n.len);
-      if (!start) return n.copyWith(len: (n.len + d).clamp(keep, Steps(kPatternMaxSteps)));
+      if (!start) return _withLength(n, n.at, (n.len + d).clamp(keep, Steps(kPatternMaxSteps)));
       final at = (n.at + d).clamp(Steps.zero, n.end - keep);
-      return n.copyWith(at: at, len: n.end - at);
+      return _withLength(n, at, n.end - at);
     });
   }
 

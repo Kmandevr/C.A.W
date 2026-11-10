@@ -673,4 +673,39 @@ void main() {
     });
   });
 
+
+  group('stretching keeps expression points on the grid (#170)', () {
+    test('a longer note keeps its slide where it was; the value after the last point holds', () {
+      final d = body('0 C3 4 1 bend 0:0 0.5:0 1:-5\n');
+      final n = d.notes.single;
+      final longer = d.stretch({n.id}, Steps(4)).notes.single;
+      expect(longer.len, Steps(8));
+      // Steps 0, 2 and 4 of an 8-step note.
+      expect(longer.expr.bend, const [NotePoint(0, 0), NotePoint(0.25, 0), NotePoint(0.5, -5)]);
+    });
+
+    test('a shorter note drops the points past its end and ends on the curve\'s value there', () {
+      final d = body('0 C3 4 1 bend 0:0 0.5:0 1:-4 press 0:1 1:0\n');
+      final n = d.notes.single;
+      final shorter = d.stretch({n.id}, Steps(-1)).notes.single;
+      expect(shorter.len, Steps(3));
+      // Steps 0, 2 and the new end at 3 (half way down the slide: -2).
+      expect(shorter.expr.bend.map((p) => p.t), [0, closeTo(2 / 3, 1e-6), 1]);
+      expect(shorter.expr.bend.map((p) => p.v), [0, 0, -2]);
+      expect(shorter.expr.press.last.v, closeTo(0.25, 1e-9));
+    });
+
+    test('stretching the start keeps the points too', () {
+      final d = body('4 C3 4 1 bend 0:0 1:6\n');
+      final n = d.notes.single;
+      final earlier = d.stretch({n.id}, Steps(-4), start: true).notes.single;
+      expect(earlier.at, Steps(0));
+      expect(earlier.expr.bend, const [NotePoint(0.5, 0), NotePoint(1, 6)]);
+      final later = d.stretch({n.id}, Steps(2), start: true).notes.single;
+      expect(later.expr.bend.first, const NotePoint(0, 3));
+      expect(later.expr.bend.last, const NotePoint(1, 6));
+      // Keyboard resizes go through the same rule.
+      expect(d.resize({n.id}, Steps(4)).notes.single.expr.bend, const [NotePoint(0, 0), NotePoint(0.5, 6)]);
+    });
+  });
 }

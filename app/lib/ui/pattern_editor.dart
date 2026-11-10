@@ -2535,22 +2535,37 @@ class _RollPainter extends CustomPainter {
       if (bent) {
         // The note's pitch over time, MIDI Sketch style: its row stays faint, the bent line carries it.
         canvas.drawRRect(r, Paint()..color = fill.withValues(alpha: 0.18));
-        final path = Path();
         final lenSec = n.len.toDouble() * secPerStep;
-        // Sampled only where the note is on screen, so a very long note costs no more than the width.
+        // Vibrato is drawn as a wave only while a cycle spans at least 8 px; zoomed out it would alias into spikes
+        // (#170), so the line follows the bend curve alone inside a faint band as wide as the vibrato.
+        final cyclePx = e.vibDepth > 0 && e.vibRate > 0 && lenSec > 0 ? nw / (lenSec * e.vibRate) : double.infinity;
+        final wave = cyclePx >= 8;
+        double pitch(double u) => wave ? e.pitchAt(u, u * lenSec) : NoteExpression.valueAt(e.bend, u);
+        // Sampled every 2 px where the note is on screen (a very long note costs no more than the width), plus at
+        // the curve's own points, so its corners stay sharp at any zoom.
         final from = math.max(0.0, -x), to = math.min(nw, w - x);
-        var first = true;
-        for (var px = (from / 2).floor() * 2.0; px <= to; px += 2) {
-          final u = px / nw;
-          final py = y + rowH / 2 - e.pitchAt(u, u * lenSec) * rowH;
-          first ? path.moveTo(x + px, py) : path.lineTo(x + px, py);
-          first = false;
+        final xs = <double>{for (var px = (from / 2).floor() * 2.0; px <= to; px += 2) px, from, to,
+          for (final q in e.bend) if (q.t * nw >= from && q.t * nw <= to) q.t * nw}.toList()..sort();
+        final path = Path();
+        for (var i = 0; i < xs.length; i++) {
+          final py = y + rowH / 2 - pitch(xs[i] / nw) * rowH;
+          i == 0 ? path.moveTo(x + xs[i], py) : path.lineTo(x + xs[i], py);
+        }
+        final stroke = math.max(3.0, rowH * 0.55);
+        if (!wave && e.vibDepth > 0) {
+          canvas.drawPath(path, Paint()
+            ..color = fill.withValues(alpha: 0.3)
+            ..style = PaintingStyle.stroke
+            ..strokeCap = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round
+            ..strokeWidth = stroke + 2 * e.vibDepth * rowH);
         }
         canvas.drawPath(path, Paint()
           ..color = fill
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
-          ..strokeWidth = math.max(3.0, rowH * 0.55));
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = stroke);
         if (editBend == n.id) {
           for (final p in e.bend) {
             canvas.drawCircle(Offset(x + p.t * nw, y + rowH / 2 - p.v * rowH), 5, Paint()..color = Neon.yellow);
