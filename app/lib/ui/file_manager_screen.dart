@@ -254,20 +254,44 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   Widget _filterBar(int count, {required bool narrow}) {
-    Widget toggle(FileAssetFilter f, IconData icon, String tip) => _iconButton(icon, tip, () => setState(() {
-          if (!_filters.remove(f)) _filters.add(f);
-        }), selected: _filters.contains(f));
+    // Labelled, so what each filter does is plain (the icons alone were guesswork).
+    Widget toggle(FileAssetFilter f, IconData icon, String label) {
+      final on = _filters.contains(f);
+      return Padding(
+        padding: const EdgeInsets.only(right: Space.xs),
+        child: FilterChip(
+          key: ValueKey('filter ${f.name}'),
+          selected: on,
+          showCheckmark: false,
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          labelPadding: const EdgeInsets.only(left: 2, right: 4),
+          avatar: Icon(icon, size: 14, color: on ? Neon.blue : Neon.dim),
+          label: Text(label, style: TextStyle(fontSize: 11.5, color: on ? Neon.text : Neon.dim)),
+          selectedColor: Neon.blue.withValues(alpha: 0.16),
+          side: BorderSide(color: on ? Neon.blue.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.1)),
+          onSelected: (_) => setState(() {
+            if (!_filters.remove(f)) _filters.add(f);
+          }),
+        ),
+      );
+    }
     return SizedBox(
       height: 40,
       child: Row(children: [
-        Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
-          toggle(FileAssetFilter.effects, Icons.auto_awesome, 'Effects'),
-          toggle(FileAssetFilter.instruments, Icons.waves, 'Instruments'),
-          toggle(FileAssetFilter.code, Icons.code, 'Code'),
-          toggle(FileAssetFilter.patterns, Icons.piano, 'Patterns'),
-          const SizedBox(width: Space.xs),
-          Text('$count', style: TypeScale.number(size: TypeScale.caption, color: Neon.dim)),
-        ]))),
+        Expanded(child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.only(left: Space.s),
+          child: Row(children: [
+            toggle(FileAssetFilter.effects, Icons.auto_awesome, 'Effects'),
+            toggle(FileAssetFilter.instruments, Icons.waves, 'Instruments'),
+            toggle(FileAssetFilter.code, Icons.code, 'Code'),
+            toggle(FileAssetFilter.patterns, Icons.piano, 'Patterns'),
+            const SizedBox(width: Space.xs),
+            Text('$count item${count == 1 ? '' : 's'}', style: TypeScale.number(size: TypeScale.caption, color: Neon.dim)),
+          ]),
+        )),
         Tooltip(message: 'List', child: Icon(Icons.view_list, size: 14, color: _size < _listBelow ? Neon.blue : Neon.dim)),
         SizedBox(
           width: narrow ? 64 : 110,
@@ -287,6 +311,51 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         ),
         const Tooltip(message: 'Large icons', child: Icon(Icons.grid_view, size: 14, color: Neon.dim)),
         const SizedBox(width: Space.s),
+      ]),
+    );
+  }
+
+  /// Build's explorer: one tap to each kind of code (C++ components, patterns, .caw modules), with counts; the group
+  /// the explorer stands in is lit.
+  Widget _explorerGroups(String path) {
+    final p = state.project;
+    final patterns = p.modules.where((m) => state.isPattern(m.id)).length;
+    Widget group(String key, String to, IconData icon, Color color, String label, int count) {
+      final on = path == to || path.startsWith('$to/');
+      return Padding(
+        padding: const EdgeInsets.only(right: Space.xs),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: ValueKey('explorer group $key'),
+            borderRadius: BorderRadius.circular(Radii.s),
+            onTap: () => _go(to),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(Radii.s),
+                color: on ? color.withValues(alpha: 0.14) : null,
+                border: Border.all(color: on ? color.withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(icon, size: 13, color: color),
+                const SizedBox(width: 4),
+                Text(label, style: TextStyle(fontSize: 11.5, color: on ? Neon.text : Neon.dim)),
+                const SizedBox(width: 4),
+                Text('$count', style: TypeScale.number(size: 10.5, color: Neon.dim)),
+              ]),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 32,
+      child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: Space.s), children: [
+        group('cpp', 'code/cpp', Icons.memory, Neon.pink, 'C++', p.cppComponents.length),
+        group('patterns', 'audio/patterns', Icons.queue_music, Neon.yellow, 'Patterns', patterns),
+        group('caw', 'code/caw', Icons.graphic_eq, Neon.blue, '.caw', p.modules.length - patterns),
       ]),
     );
   }
@@ -405,6 +474,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
           );
           final main = Column(children: [
             _toolbar(trail, wide, searching),
+            if (widget.explorer && !searching) _explorerGroups(folder.path),
             if (!wide && _searchOpen)
               Padding(padding: const EdgeInsets.fromLTRB(Space.s, 0, Space.s, Space.xs), child: _searchField(autofocus: true)),
             if (!widget.explorer) _filterBar(subfolders.length + assets.length, narrow: c.maxWidth < 360),

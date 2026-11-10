@@ -271,6 +271,11 @@ void main() {
       await tester.tap(find.textContaining('Patterns').last);
       await tester.pumpAndSettle();
       expect(find.text('No patterns yet. Tap + for a new one.'), findsOneWidget);
+      // The group chips jump between kinds of code in one tap.
+      await tester.tap(find.byKey(const ValueKey('explorer group cpp')));
+      await tester.pumpAndSettle();
+      expect(find.text('Fuzz'), findsWidgets);
+      expect(find.text('No patterns yet. Tap + for a new one.'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
     });

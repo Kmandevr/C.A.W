@@ -100,7 +100,7 @@ void main() {
     expect(find.byKey(const ValueKey('mod:crush')), findsNothing);
     expect(find.text('Search'), findsOneWidget); // the breadcrumb
 
-    await tester.tap(find.byTooltip('Patterns'));
+    await tester.tap(find.byKey(const ValueKey('filter patterns')));
     await tester.pump();
     expect(find.byKey(const ValueKey('mod:beat')), findsOneWidget);
     expect(find.byKey(const ValueKey('mod:bass')), findsNothing);
@@ -108,8 +108,8 @@ void main() {
     // A filter without a query narrows the open folder.
     await tester.tap(find.byTooltip('Clear search'));
     await tester.pump();
-    await tester.tap(find.byTooltip('Patterns'));
-    await tester.tap(find.byTooltip('Effects'));
+    await tester.tap(find.byKey(const ValueKey('filter patterns')));
+    await tester.tap(find.byKey(const ValueKey('filter effects')));
     await tester.tap(find.text('.caw modules').first);
     await tester.pump();
     expect(find.byKey(const ValueKey('mod:crush')), findsOneWidget);
@@ -124,7 +124,7 @@ void main() {
     await tester.tap(find.byTooltip('Folders'));
     await tester.pumpAndSettle();
     expect(find.text('FOLDERS'), findsOneWidget);
-    await tester.tap(find.text('Patterns'));
+    await tester.tap(find.text('Patterns').last); // the tree's (the first is the filter chip)
     await tester.pumpAndSettle();
     expect(find.text('FOLDERS'), findsNothing); // the drawer closed
     expect(find.text('Audio & MIDI'), findsOneWidget); // breadcrumb: Audio & MIDI > Patterns
