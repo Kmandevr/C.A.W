@@ -13,6 +13,8 @@ import '../actions/keys.dart';
 import '../actions/macro.dart';
 import '../actions/vim.dart';
 import '../model/app_state.dart';
+import '../model/automation_writer.dart';
+import '../model/live_midi.dart';
 import '../model/settings.dart';
 import 'glass.dart';
 import 'key_bindings.dart';
@@ -240,6 +242,14 @@ class KeyRouterState extends State<KeyRouter> {
         s.stopPlayback();
       case 'transport.tap':
         s.tapTempo();
+      case 'transport.record':
+        LiveMidi.current?.toggleRecord();
+      case 'transport.automate':
+        final w = AutomationWriter.current;
+        w?.setArmed(!w.armed);
+      case 'view.liveKeys':
+        final m = LiveMidi.current;
+        if (m != null) m.keysOpen = !m.keysOpen;
       case 'edit.undo':
         if (!s.undo()) _say('Nothing to undo');
       case 'edit.redo':

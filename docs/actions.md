@@ -89,6 +89,9 @@ Keys marked † are the owner's own scheme (2026-10-28). The rest are proposals 
 | --- | --- |
 | Play / pause (resumes where it paused; the id `transport.playstop` stays, so saved keymaps keep it) | Space |
 | Stop: the next play starts from the beginning | Shift+Space |
+| Record into the armed or selected track; again stops and keeps the take (REAPER's key) | Ctrl+R |
+| Automate on or off (the transport's button; its mode is on the button's long-press) | — |
+| On-screen keys and pads (REAPER's virtual MIDI keyboard key; `view.liveKeys`) | Alt+B |
 | Undo / redo (the piano roll's own history inside it, a text field's own text undo while one has focus, such as the code editor; the project's everywhere else) | Ctrl+Z / Ctrl+Shift+Z (also Ctrl+Y) |
 | Save now (projects also autosave) | Ctrl+S |
 | Action list | ? |

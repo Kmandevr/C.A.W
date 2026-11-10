@@ -41,6 +41,21 @@ updated: 2026-11-10
 - **Where it opens:** on the phone a device opens as a full-screen editor with tabs for its sections.
 - **The flagship synth** gets its visual UI in the same work, mod matrix included.
 
+## 2026-11-10: Recording flow and automation writing, as built (REAPER flow gaps 3 and 4)
+
+**Built** from the owner's choices ("Touch, button in transport"; "Piano keys + pads toggle"; [app](app.md), Frame). **Choices made on the owner's behalf, to confirm:**
+- **Automate's look:** a small lane icon in the transport between the position and the keys button: grey off, a red outline with the mode's letter (T, L, W, R) on, filled red while writing. The mode is saved in Settings.
+- **Held means a finger down anywhere:** a move counts as held while any finger or mouse button is down, so every control is let go when the last finger lifts; a move with none down (a key, a typed value) is held for 0.4 s.
+- **Write overwrites every lane in the project** (no per-lane arming yet) and then falls back to Read (REAPER's option, not its default).
+- **Latch on a new lane keeps its last value after Stop**; on an existing lane it returns to what the lane had. Touch returns over a quarter step.
+- **Thinning** keeps points that bend the line by more than 0.4% of the parameter's range (volume measured in dB).
+- **Volume lanes reach +12 dB** like the faders (engine API 7); the automation screen draws them on the fader's taper in dB.
+- **The click** is the engine's own (a 30 ms sine blip, higher and louder on the bar), not a hidden track: simpler and real-time safe. It clicks while recording by default; *always* and *off* are on Record's long-press, with the count-in (1 bar by default; none or 2).
+- **Takes:** a loop recording keeps every pass as a take of one clip (`ClipDoc.takes`), the newest playing, picked from the clip menu's Takes; there is no take chip on the clip yet. A single pass is a plain clip.
+- **"Keep take?"** is a toast with Undo for 5 s; Undo removes the clip and its take patterns.
+- **Keys:** a piano from C1 to C8 with 30 dp white keys, opening on C3; velocity by where the key is struck (soft at the top, full at the bottom). **Pads:** General MIDI drums MPC-style on a drum track (found by its instrument or name), the project's key elsewhere. Record opens the keys when no USB keyboard is connected.
+- **Keys:** Ctrl+R records and Alt+B shows the keys (REAPER's); Automate has no default key.
+
 ## 2026-11-10: Owner calls for the REAPER flow (owner)
 
 **Decision (owner), from `docs/reaper-flow.md`'s top gaps:**

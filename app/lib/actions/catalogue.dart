@@ -29,6 +29,11 @@ const List<ActionDef> standardActions = [
   // The id stays from when Space stopped, so saved keymaps keep it.
   ActionDef('transport.playstop', 'Play / pause', _g, description: 'Resumes where it paused', defaultKeys: ['Space']),
   ActionDef('transport.stop', 'Stop', _g, description: 'The next play starts from the beginning', defaultKeys: ['Shift+Space']),
+  // REAPER's Ctrl+R records and Alt+B shows its virtual MIDI keyboard (UG 3.31).
+  ActionDef('transport.record', 'Record', _g,
+      description: 'Records into the armed or selected track; again stops and keeps the take', defaultKeys: ['Ctrl+R']),
+  ActionDef('transport.automate', 'Automate', _g, description: 'Writes control moves into their lanes while playing'),
+  ActionDef('view.liveKeys', 'On-screen keys and pads', _g, defaultKeys: ['Alt+B']),
   ActionDef('edit.undo', 'Undo', _g, defaultKeys: ['Ctrl+Z']),
   ActionDef('edit.redo', 'Redo', _g, defaultKeys: ['Ctrl+Shift+Z', 'Ctrl+Y']),
   ActionDef('project.save', 'Save now', _g, description: 'Projects also autosave', defaultKeys: ['Ctrl+S']),
