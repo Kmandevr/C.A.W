@@ -1,0 +1,473 @@
+// The built-in C++ instruments (#157) and the Library kernels they share: listing, timing, drums, mono glides, golden renders.
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "caw/instrument.hpp"
+#include "caw/library/drums.hpp"
+#include "caw/library/envelope.hpp"
+#include "caw/library/filter.hpp"
+#include "caw/library/oscillator.hpp"
+#include "engine.h"
+#include "project.h"
+#include "test.h"
+
+using namespace caw;
+
+namespace {
+
+const char* const kInstruments[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit",
+                                    "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph"};
+
+bool ok(const std::string& result) { return result.find("\"ok\":true") != std::string::npos; }
+
+// Plays `events` (frames from the start) through an activated instrument in 64-frame blocks; returns the left side.
+// `values` overrides parameters by id; the rest keep their defaults.
+std::vector<float> play(ModuleProcessor& p, const std::vector<Event>& events, uint32_t frames,
+                        const std::vector<std::pair<std::string, double>>& values = {}, std::vector<float>* rightOut = nullptr) {
+    const ModuleDescriptor& d = p.descriptor();
+    std::vector<ParameterValue> params(d.parameterCount);
+    for (uint32_t k = 0; k < d.parameterCount; ++k) {
+        params[k].value = d.parameters[k].defaultValue;
+        for (const auto& [id, v] : values)
+            if (d.parameters[k].id == id) params[k].value = v;
+    }
+    std::vector<float> out(frames), right(frames);
+    float left[64], r[64];
+    float* channels[2] = {left, r};
+    const ChannelBufferView audio{channels, 2, 64};
+    size_t next = 0;
+    for (uint32_t start = 0; start < frames; start += 64) {
+        const uint32_t n = std::min<uint32_t>(64, frames - start);
+        std::vector<Event> block;
+        while (next < events.size() && events[next].frame < start + n) {
+            Event e = events[next++];
+            e.frame -= start;
+            block.push_back(e);
+        }
+        const EventInput in{block.data(), static_cast<uint32_t>(block.size())};
+        ProcessBlock b;
+        b.frames = n;
+        b.audioOut = &audio;
+        b.audioOutCount = 1;
+        b.eventIn = &in;
+        b.eventInCount = 1;
+        b.parameters = params.data();
+        b.parameterCount = d.parameterCount;
+        CHECK(p.processPorts(b));
+        for (uint32_t i = 0; i < n; ++i) {
+            out[start + i] = left[i];
+            right[start + i] = r[i];
+        }
+    }
+    if (rightOut) *rightOut = right;
+    return out;
+}
+
+std::unique_ptr<ModuleProcessor> make(Engine& e, const char* id) {
+    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(id);
+    CHECK(p != nullptr);
+    if (p) CHECK(p->activate(48000, 64));
+    return p;
+}
+
+double energy(const std::vector<float>& v, size_t from, size_t to) {
+    double s = 0;
+    for (size_t i = from; i < to && i < v.size(); ++i) s += static_cast<double>(v[i]) * v[i];
+    return s;
+}
+
+// The frequency of a signal from its rising zero crossings over [from, to).
+double frequency(const std::vector<float>& v, size_t from, size_t to, double sr = 48000) {
+    size_t first = 0, last = 0, count = 0;
+    for (size_t i = from + 1; i < to; ++i)
+        if (v[i - 1] < 0.0f && v[i] >= 0.0f) {
+            if (count == 0) first = i;
+            last = i;
+            ++count;
+        }
+    return count < 2 ? 0.0 : sr * static_cast<double>(count - 1) / static_cast<double>(last - first);
+}
+
+std::string pattern(const std::string& notes) { return "---\nkind: pattern\nname: P\nlength: 16\n---\n" + notes; }
+
+uint64_t renderHash(const ProjectSpec& p, int64_t frames, float* peak) {
+    Engine e(48000);
+    if (!ok(e.setProjectOffline(p))) return 0;
+    e.play();
+    uint64_t h = 1469598103934665603ull;
+    std::vector<float> l(256), r(256);
+    for (int64_t done = 0; done < frames; done += 256) {
+        e.process(l.data(), r.data(), 256);
+        for (int i = 0; i < 256; ++i)
+            for (float v : {l[static_cast<size_t>(i)], r[static_cast<size_t>(i)]}) {
+                if (peak) *peak = std::max(*peak, std::fabs(v));
+                uint32_t bits = 0;
+                std::memcpy(&bits, &v, 4);
+                for (int k = 0; k < 4; ++k) {
+                    h ^= (bits >> (8 * k)) & 0xFF;
+                    h *= 1099511628211ull;
+                }
+            }
+    }
+    return h;
+}
+
+ProjectSpec track(const std::string& instrument, const std::string& notes, std::vector<std::pair<std::string, double>> params = {}) {
+    ProjectSpec p;
+    p.bpm = 140;
+    p.loopBars = 1;
+    p.seed = 7;
+    p.master = 0.8;
+    p.modules.push_back({"pat", pattern(notes), {}});
+    LayerSpec l;
+    l.id = "t";
+    l.name = "t";
+    l.pattern = "pat";
+    l.volume = 1.0;
+    l.hasInstrument = true;
+    l.instrument.id = instrument;
+    l.instrument.params = std::move(params);
+    p.layers.push_back(l);
+    return p;
+}
+
+void checkGolden(const char* name, const ProjectSpec& p, uint64_t golden) {
+    float peak = 0;
+    const uint64_t h = renderHash(p, 48000 * 2, &peak);
+    if (!(peak > 0.05f && peak <= 1.0f)) cawtest::fail(__FILE__, __LINE__, std::string(name) + ": peak out of range");
+    if (h != golden) {
+        char buf[128];
+        std::snprintf(buf, sizeof buf, "%s renders 0x%016llxull", name, static_cast<unsigned long long>(h));
+        cawtest::fail(__FILE__, __LINE__, buf);
+    }
+    if (renderHash(p, 48000 * 2, nullptr) != h) cawtest::fail(__FILE__, __LINE__, std::string(name) + ": a second engine differs");
+}
+
+}  // namespace
+
+// ---------- Library kernels ----------
+
+TEST(library_oscillators_are_band_limited_seeded_and_morph_between_the_basic_shapes) {
+    CHECK_NEAR(lib::noteHz(69), 440.0, 1e-9);
+    CHECK_NEAR(lib::noteHz(57), 220.0, 1e-9);
+    CHECK_NEAR(lib::wrap01(1.25), 0.25, 1e-12);
+    CHECK_NEAR(lib::wrap01(-0.25), 0.75, 1e-12);
+    // Far from the edge the waves are the naive shapes; at the edge the step is smoothed.
+    CHECK_NEAR(lib::sawWave(0.5, 0.01), 0.0, 1e-12);
+    CHECK_NEAR(lib::squareWave(0.25, 0.01), 1.0, 1e-12);
+    CHECK_NEAR(lib::squareWave(0.75, 0.01), -1.0, 1e-12);
+    CHECK(std::fabs(lib::sawWave(0.001, 0.01)) < 0.9);
+    CHECK_NEAR(lib::triangleWave(0.25), 1.0, 1e-12);
+    CHECK_NEAR(lib::morphWave(0.1, 0.01, 0.0), lib::sineWave(0.1), 1e-12);
+    CHECK_NEAR(lib::morphWave(0.1, 0.01, 1.0 / 3.0), lib::triangleWave(0.1), 1e-12);
+    CHECK_NEAR(lib::morphWave(0.3, 0.01, 2.0 / 3.0), lib::sawWave(0.3, 0.01), 1e-12);
+    CHECK_NEAR(lib::morphWave(0.3, 0.01, 1.0), lib::squareWave(0.3, 0.01), 1e-12);
+    CHECK_NEAR(lib::morphWave(0.3, 0.01, 0.5), 0.5 * (lib::triangleWave(0.3) + lib::sawWave(0.3, 0.01)), 1e-12);
+    lib::Noise a(3), b(3), c(4);
+    double sum = 0, lo = 1, hi = -1;
+    bool differs = false;
+    for (int i = 0; i < 10000; ++i) {
+        const double x = a.next();
+        CHECK_EQ(x, b.next());
+        differs = differs || x != c.next();
+        sum += x;
+        lo = std::min(lo, x);
+        hi = std::max(hi, x);
+    }
+    CHECK(differs);
+    CHECK(lo >= -1.0 && hi < 1.0 && lo < -0.99 && hi > 0.99);
+    CHECK(std::fabs(sum / 10000) < 0.03);
+    a.reset();
+    CHECK_EQ(a.next(), lib::Noise(3).next());
+}
+
+TEST(library_filters_pass_and_stop_what_they_should) {
+    lib::Svf svf;
+    svf.set(1000, 0.707, 48000);
+    lib::OnePole one;
+    one.set(1000, 48000);
+    lib::Ladder ladder;
+    ladder.set(1000, 0.0, 48000);
+    double low = 0, high = 0, band = 0, pole = 0, lad = 0;
+    for (int i = 0; i < 48000; ++i) {
+        const lib::SvfOutput o = svf.process(0.5);
+        low = o.low, high = o.high, band = o.band;
+        pole = one.low(0.5);
+        lad = ladder.process(0.1);
+    }
+    CHECK_NEAR(low, 0.5, 1e-6);  // DC passes the low-pass, not the high-pass or band-pass
+    CHECK_NEAR(high, 0.0, 1e-6);
+    CHECK_NEAR(band, 0.0, 1e-6);
+    CHECK_NEAR(pole, 0.5, 1e-6);
+    CHECK_NEAR(lad, std::tanh(0.1), 1e-3);  // no resonance: unity at DC after the soft clip
+    // A tone two octaves above the cutoff: about -24 dB through the SVF, about -48 dB through the ladder.
+    auto level = [](auto&& filter) {
+        double peak = 0;
+        for (int i = 0; i < 48000; ++i) {
+            const double y = filter(0.1 * lib::sineWave(i * 4000.0 / 48000.0));
+            if (i > 24000) peak = std::max(peak, std::fabs(y));
+        }
+        return peak / 0.1;
+    };
+    lib::Svf s2;
+    s2.set(1000, 0.707, 48000);
+    lib::Ladder l2;
+    l2.set(1000, 0.0, 48000);
+    const double svfLevel = level([&](double x) { return s2.lowpass(x); });
+    const double ladderLevel = level([&](double x) { return l2.process(x); });
+    CHECK(svfLevel > 0.04 && svfLevel < 0.09);
+    CHECK(ladderLevel > 0.001 && ladderLevel < 0.008);
+    // Resonance peaks the ladder at its cutoff.
+    lib::Ladder flat, peaked;
+    flat.set(1000, 0.0, 48000);
+    peaked.set(1000, 0.9, 48000);
+    double a = 0, b = 0;
+    for (int i = 0; i < 48000; ++i) {
+        const double x = 0.05 * lib::sineWave(i * 1000.0 / 48000.0);
+        const double fa = flat.process(x), fb = peaked.process(x);
+        if (i > 24000) a = std::max(a, std::fabs(fa)), b = std::max(b, std::fabs(fb));
+    }
+    CHECK(b > 2.0 * a);
+    CHECK_NEAR(lib::resonanceQ(0), 0.70710678, 1e-6);
+    CHECK(lib::resonanceQ(1) > 19 && lib::resonanceQ(1) < 21);
+    CHECK_NEAR(lib::shiftCutoff(1000, 1, 48000), 2000, 1e-6);
+    CHECK_NEAR(lib::shiftCutoff(1000, 10, 48000), 0.45 * 48000, 1e-9);
+    CHECK_NEAR(lib::shiftCutoff(1000, -10, 48000), 10, 1e-9);
+}
+
+TEST(library_envelopes_and_glides_keep_their_times) {
+    lib::AdEnvelope ad;
+    ad.set(0.001, 0.1, 48000);
+    ad.trigger();
+    double peakAt = -1;
+    for (int i = 0; i < 48; ++i)
+        if (ad.next() >= 1.0 && peakAt < 0) peakAt = i;
+    CHECK_NEAR(peakAt, 47, 1);  // a 1 ms attack
+    for (int i = 0; i < 4800; ++i) ad.next();
+    CHECK_NEAR(ad.level(), 0.001, 1e-4);  // -60 dB 100 ms later
+    for (int i = 0; i < 48000 && ad.active(); ++i) ad.next();
+    CHECK(!ad.active());
+    CHECK_EQ(ad.level(), 0.0);
+    lib::Adsr env;
+    env.set(0.001, 0.05, 0.4, 0.2, 48000);
+    env.gateOn();
+    for (int i = 0; i < 24000; ++i) env.next();
+    CHECK_NEAR(env.level(), 0.4, 1e-6);  // holds at the sustain
+    CHECK(!env.releasing());
+    env.gateOff();
+    CHECK(env.releasing());
+    for (int i = 0; i < 9600; ++i) env.next();
+    CHECK_NEAR(env.level(), 0.0004, 1e-4);  // -60 dB after the 200 ms release
+    for (int i = 0; i < 48000 && env.active(); ++i) env.next();
+    CHECK(!env.active());
+    lib::Glide g;
+    g.jump(40);
+    CHECK_EQ(g.next(), 40.0);
+    g.glideTo(52, 0.1, 1000);  // 100 steps
+    for (int i = 0; i < 100; ++i) g.next();
+    CHECK_NEAR(g.value(), 52, 0.15);  // 99 % of the way
+    CHECK(g.value() < 52);
+    g.glideTo(30, 0, 1000);
+    CHECK_EQ(g.next(), 30.0);
+}
+
+TEST(library_drum_voices_ring_for_their_decay_then_stop_and_a_choke_cuts_them) {
+    lib::KickVoice kick;
+    kick.set(lib::KickSettings{}, 48000);
+    kick.trigger(1.0);
+    double peak = 0;
+    int length = 0;
+    for (; length < 48000 * 3 && kick.active(); ++length) peak = std::max(peak, std::fabs(kick.next()));
+    CHECK(peak > 0.5 && peak <= 1.0);
+    CHECK(length > 0.65 * 48000 && length < 0.75 * 48000);  // it stops at -120 dB: twice the 0.35 s decay (to -60 dB)
+    CHECK_EQ(kick.next(), 0.0);
+    lib::HatVoice hat;
+    lib::HatSettings open;
+    open.decay = 0.3;
+    hat.set(open, 48000);
+    hat.trigger(1.0);
+    for (int i = 0; i < 480; ++i) hat.next();
+    hat.choke();
+    int rest = 0;
+    for (; rest < 48000 && hat.active(); ++rest) hat.next();
+    CHECK(rest < 48 * 50);  // the choke ends it within 50 ms instead of the 0.3 s decay
+    lib::SnareVoice snare;
+    snare.set(lib::SnareSettings{}, 48000);
+    snare.trigger(0.5);
+    lib::ClapVoice clap;
+    clap.set(lib::ClapSettings{}, 48000);
+    clap.trigger(1.0);
+    double s = 0, c = 0;
+    for (int i = 0; i < 48000; ++i) {
+        s = std::max(s, std::fabs(snare.next()));
+        c = std::max(c, std::fabs(clap.next()));
+    }
+    CHECK(s > 0.05 && s < 1.0);
+    CHECK(c > 0.05 && c < 2.0);
+    CHECK(!snare.active());
+    CHECK(!clap.active());
+}
+
+// ---------- Instruments ----------
+
+TEST(the_built_in_instruments_are_listed_with_readable_names) {
+    Engine e(48000);
+    const std::string list = e.nativeComponentsJson();
+    const char* names[] = {"Kick", "Snare", "Hi-hats", "Drum kit", "Bass", "Acid synth", "Morph synth"};
+    for (int i = 0; i < 7; ++i) {
+        const size_t at = list.find(std::string("\"id\":\"") + kInstruments[i] + "\"");
+        CHECK(at != std::string::npos);
+        if (at == std::string::npos) continue;
+        const size_t end = list.find("\"id\":\"org.caw.", at + 10);
+        const std::string entry = list.substr(at, end == std::string::npos ? std::string::npos : end - at);
+        CHECK(entry.find("\"role\":\"instrument\"") != std::string::npos);
+        CHECK(entry.find(std::string("\"name\":\"") + names[i] + "\"") != std::string::npos);
+    }
+}
+
+TEST(each_built_in_instrument_starts_on_its_frame_and_falls_silent_after_its_note) {
+    Engine e(48000);
+    for (const char* id : kInstruments) {
+        std::unique_ptr<ModuleProcessor> p = make(e, id);
+        if (!p) continue;
+        const uint8_t key = std::strcmp(id, "org.caw.drum.kit") == 0 ? 36 : 45;
+        const std::vector<Event> notes = {notes::noteOn(100, 1, key, 1.0), notes::noteOff(12100, 1, key)};
+        const std::vector<float> out = play(*p, notes, 48000 * 6);
+        bool before = true;
+        for (int i = 0; i < 100; ++i) before = before && out[static_cast<size_t>(i)] == 0.0f;
+        if (!before) cawtest::fail(__FILE__, __LINE__, std::string(id) + " sounds before its note");
+        const double e1 = energy(out, 100, 4900);
+        if (!(e1 > 1e-3)) cawtest::fail(__FILE__, __LINE__, std::string(id) + " is silent after its note");
+        bool after = true;
+        for (size_t i = out.size() - 4800; i < out.size(); ++i) after = after && out[i] == 0.0f;
+        if (!after) cawtest::fail(__FILE__, __LINE__, std::string(id) + " still sounds 5 s after its note ended");
+        float peak = 0;
+        for (float v : out) peak = std::max(peak, std::fabs(v));
+        if (!(peak <= 1.0f)) cawtest::fail(__FILE__, __LINE__, std::string(id) + " clips at default settings");
+        // reset() silences it at once.
+        play(*p, {notes::noteOn(0, 2, key, 1.0)}, 640);
+        p->reset();
+        const std::vector<float> quiet = play(*p, {}, 640);
+        if (energy(quiet, 0, 640) != 0.0) cawtest::fail(__FILE__, __LINE__, std::string(id) + " sounds after reset");
+        p->deactivate();
+    }
+}
+
+TEST(hats_are_closed_or_open_by_note_and_a_closed_hit_chokes_an_open_one) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> hats = make(e, "org.caw.drum.hats");
+    if (!hats) return;
+    const std::vector<float> closed = play(*hats, {notes::noteOn(0, 1, 42, 1)}, 24000);
+    hats->reset();
+    const std::vector<float> open = play(*hats, {notes::noteOn(0, 1, 46, 1)}, 24000);
+    CHECK(energy(open, 4800, 9600) > 100.0 * energy(closed, 4800, 9600));  // A#2 rings, F#2 is short
+    hats->reset();
+    const std::vector<float> choked = play(*hats, {notes::noteOn(0, 1, 46, 1), notes::noteOn(4800, 2, 42, 0.01)}, 24000);
+    CHECK(energy(choked, 9600, 14400) < 0.01 * energy(open, 9600, 14400));
+    hats->reset();
+    const std::vector<float> forced = play(*hats, {notes::noteOn(0, 1, 42, 1)}, 24000, {{"mode", 2}});  // Open
+    CHECK(energy(forced, 4800, 9600) > 100.0 * energy(closed, 4800, 9600));
+}
+
+TEST(the_kit_maps_general_midi_keys_to_its_drums) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> kit = make(e, "org.caw.drum.kit");
+    if (!kit) return;
+    for (uint8_t key : {35, 36, 38, 39, 40, 42, 44, 46}) {
+        kit->reset();
+        const std::vector<float> out = play(*kit, {notes::noteOn(0, 1, key, 1)}, 4800);
+        if (!(energy(out, 0, 4800) > 1e-3)) cawtest::fail(__FILE__, __LINE__, "kit key " + std::to_string(key) + " is silent");
+    }
+    for (uint8_t key : {37, 41, 60}) {
+        kit->reset();
+        const std::vector<float> out = play(*kit, {notes::noteOn(0, 1, key, 1)}, 4800);
+        if (energy(out, 0, 4800) != 0.0) cawtest::fail(__FILE__, __LINE__, "kit key " + std::to_string(key) + " sounds");
+    }
+    // Each drum has its own level.
+    kit->reset();
+    const std::vector<float> muted = play(*kit, {notes::noteOn(0, 1, 36, 1)}, 4800, {{"kick", 0.0}});
+    CHECK_EQ(energy(muted, 0, 4800), 0.0);
+}
+
+TEST(mono_synths_glide_to_an_overlapping_note_and_back_when_it_ends) {
+    Engine e(48000);
+    for (const char* id : {"org.caw.synth.acid", "org.caw.bass"}) {
+        std::unique_ptr<ModuleProcessor> p = make(e, id);
+        if (!p) continue;
+        // A1 (55 Hz) held; E2 (82.4 Hz) over it from 0.5 s to 1 s; then A1 alone again. A dark filter leaves the fundamental.
+        const std::vector<Event> notes = {notes::noteOn(0, 1, 33, 1), notes::noteOn(24000, 2, 40, 1), notes::noteOff(48000, 2, 40),
+                                          notes::noteOff(72000, 1, 33)};
+        const bool acid = std::strcmp(id, "org.caw.synth.acid") == 0;
+        const std::vector<std::pair<std::string, double>> dark =
+            acid ? std::vector<std::pair<std::string, double>>{{"cutoff", 40}, {"resonance", 0}, {"env", 0}, {"drive", 1}}
+                 : std::vector<std::pair<std::string, double>>{{"cutoff", 40}, {"resonance", 0}, {"env", 0}, {"sub", 0},
+                                                               {"sustain", 1}, {"drive", 1}};
+        const std::vector<float> out = play(*p, notes, 72000, dark);
+        const double a = frequency(out, 12000, 24000), up = frequency(out, 36000, 48000), back = frequency(out, 60000, 72000);
+        if (std::fabs(a - 55.0) > 1.5 || std::fabs(up - 82.41) > 1.5 || std::fabs(back - 55.0) > 1.5) {
+            char buf[160];
+            std::snprintf(buf, sizeof buf, "%s plays %.2f, %.2f, %.2f Hz", id, a, up, back);
+            cawtest::fail(__FILE__, __LINE__, buf);
+        }
+        // Legato: the overlap did not restart the envelope (no new attack at 0.5 s, so no jump in level there).
+        if (acid) {
+            const double beforeE = energy(out, 22800, 24000), afterE = energy(out, 24000, 25200);
+            CHECK(afterE < 3.0 * beforeE);
+        }
+    }
+}
+
+TEST(the_morph_synth_spreads_its_unison_across_the_stereo_field) {
+    Engine e(48000);
+    std::unique_ptr<ModuleProcessor> p = make(e, "org.caw.synth.morph");
+    if (!p) return;
+    std::vector<float> right;
+    const std::vector<float> left = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, {{"attack", 0.001}}, &right);
+    double diff = 0;
+    for (size_t i = 0; i < left.size(); ++i) diff += std::fabs(left[i] - right[i]);
+    CHECK(diff > 1.0);  // wide
+    p->reset();
+    const std::vector<float> mono = play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, {{"attack", 0.001}, {"spread", 0}}, &right);
+    for (size_t i = 0; i < mono.size(); ++i) CHECK_EQ(mono[i], right[i]);  // spread 0: both sides the same
+    // One unison voice without detune or drift is a plain morph of the shape: at shape 0, a sine at the note's pitch.
+    p->reset();
+    const std::vector<float> sine =
+        play(*p, {notes::noteOn(0, 1, 57, 1)}, 24000, {{"attack", 0.001}, {"unison", 1}, {"drift", 0}, {"shape", 0}, {"cutoff", 16000}});
+    CHECK_NEAR(frequency(sine, 4800, 24000), 220.0, 0.5);
+}
+
+TEST(the_built_in_instruments_match_their_golden_renders) {
+    // Kick: four on the floor with a pickup, tuned and driven.
+    checkGolden("kick", track("org.caw.drum.kick", "0 C2 1 1\n4 C2 1 0.8\n8 C2 1 1\n10 C2 1 0.6\n12 C2 1 1\n",
+                              {{"tune", 52}, {"drive", 3}, {"click", 0.5}}),
+                0x72ec5eae34b3ec27ull);
+    // Snare: backbeat and a ghost roll.
+    checkGolden("snare", track("org.caw.drum.snare", "4 D2 1 1\n12 D2 1 1\n14 D2 1 0.4\n15 D2 1 0.6\n"), 0xb0184ce1843bca37ull);
+    // Hats: 16ths, open on the off-beats' last 16th, choked by the next closed one.
+    checkGolden("hats", track("org.caw.drum.hats", "0 F#2 1 0.9\n1 F#2 1 0.5\n2 F#2 1 0.8\n3 F#2 1 0.5\n4 F#2 1 0.9\n"
+                                                   "5 F#2 1 0.5\n6 A#2 1 0.8\n7 F#2 1 0.5\n8 F#2 1 0.9\n9 F#2 1 0.5\n"
+                                                   "10 F#2 1 0.8\n11 F#2 1 0.5\n12 F#2 1 0.9\n13 F#2 1 0.5\n14 A#2 1 0.8\n15 F#2 1 0.5\n"),
+                0x7d07c25f99a0806full);
+    // Kit: every drum, and a key it doesn't map.
+    checkGolden("kit", track("org.caw.drum.kit", "0 C2 1 1\n2 F#2 1 0.6\n4 D2 1 1\n4 D#2 1 0.7\n6 A#2 1 0.8\n8 C2 1 1\n"
+                                                 "10 C#2 1 1\n11 B1 1 0.7\n12 E2 1 0.9\n14 G#2 1 0.6\n"),
+                0x7b835ee0bc60d9abull);
+    // Bass: First loop's line, an overlap that glides, a slide.
+    checkGolden("bass", track("org.caw.bass", "0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 2 1\n9 C2 2 0.8\n"
+                                              "11 G1 1 1 slide\n12 A1 2 1\n15 A1 1/2 1\n",
+                              {{"cutoff", 300}, {"resonance", 0.45}, {"env", 0.6}, {"decay", 0.18}, {"sustain", 0.3}}),
+                0xce3f0778dbe4a437ull);
+    // Acid: the Acid line pattern (slides, a ratchet, a note that plays half the time), squelchy.
+    checkGolden("acid", track("org.caw.synth.acid", "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
+                                                    "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n15 E2 1 0.8\n",
+                              {{"resonance", 0.8}, {"wave", 1}}),
+                0x27f9deaaacadbfabull);
+    // Morph synth: a chord with a quarter tone, drifting, wide.
+    checkGolden("morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
+                               {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
+                0x11f522cd538e49d9ull);
+}
