@@ -760,7 +760,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       onPointerUp: _touchUp,
       onPointerCancel: _touchUp,
       child: LayoutBuilder(builder: (context, view) {
-        final zoneH = math.max(view.maxHeight - ruler - rows, math.max(80.0, trackHeight * 1.5));
+        // A pixel short of the view, so a few tracks still don't scroll (the lanes' column fills the view anyway).
+        final zoneH = math.max(view.maxHeight - ruler - rows - 1, math.max(80.0, trackHeight * 1.5));
         return SingleChildScrollView(key: drag?.vViewport, controller: drag?.vScroll, child: Listener(
         onPointerSignal: (e) => _wheel(e, null),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1240,6 +1241,8 @@ class _SpacerHeader extends StatelessWidget {
           child: MouseRegion(cursor: SystemMouseCursors.resizeRow, child: GestureDetector(
             key: ValueKey('spacer-grip-${layer.id}'),
             behavior: HitTestBehavior.opaque,
+            // Follows the finger from where it went down, though the tracks can scroll (the New track zone).
+            dragStartBehavior: DragStartBehavior.down,
             onVerticalDragUpdate: (d) => state.setSpaceBelow(layer, (layer.spaceBelow + d.delta.dy).clamp(8.0, LayerDoc.maxSpaceBelow)),
             child: Center(child: Container(width: 28, height: 3,
               decoration: BoxDecoration(color: Neon.dim.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(2)))),
