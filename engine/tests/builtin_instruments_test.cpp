@@ -1,6 +1,8 @@
 // The built-in C++ instruments (#157) and the Library kernels they share: listing, timing, drums, mono glides, golden renders.
 #include <cmath>
+#include <complex>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -11,6 +13,7 @@
 #include "caw/library/envelope.hpp"
 #include "caw/library/filter.hpp"
 #include "caw/library/oscillator.hpp"
+#include "analysis.h"
 #include "engine.h"
 #include "project.h"
 #include "test.h"
@@ -440,34 +443,182 @@ TEST(the_morph_synth_spreads_its_unison_across_the_stereo_field) {
     CHECK_NEAR(frequency(sine, 4800, 24000), 220.0, 0.5);
 }
 
-TEST(the_built_in_instruments_match_their_golden_renders) {
+namespace {
+
+// The golden renders: a track per built-in instrument, and the effects and settings First loop uses.
+struct Golden {
+    const char* name;
+    ProjectSpec project;
+    uint64_t hash;
+};
+
+std::vector<Golden> goldens() {
+    std::vector<Golden> g;
     // Kick: four on the floor with a pickup, tuned and driven.
-    checkGolden("kick", track("org.caw.drum.kick", "0 C2 1 1\n4 C2 1 0.8\n8 C2 1 1\n10 C2 1 0.6\n12 C2 1 1\n",
-                              {{"tune", 52}, {"drive", 3}, {"click", 0.5}}),
-                0x72ec5eae34b3ec27ull);
+    g.push_back({"kick", track("org.caw.drum.kick", "0 C2 1 1\n4 C2 1 0.8\n8 C2 1 1\n10 C2 1 0.6\n12 C2 1 1\n",
+                               {{"tune", 52}, {"drive", 3}, {"click", 0.5}}),
+                 0x72ec5eae34b3ec27ull});
     // Snare: backbeat and a ghost roll.
-    checkGolden("snare", track("org.caw.drum.snare", "4 D2 1 1\n12 D2 1 1\n14 D2 1 0.4\n15 D2 1 0.6\n"), 0xb0184ce1843bca37ull);
+    g.push_back({"snare", track("org.caw.drum.snare", "4 D2 1 1\n12 D2 1 1\n14 D2 1 0.4\n15 D2 1 0.6\n"), 0xb0184ce1843bca37ull});
     // Hats: 16ths, open on the off-beats' last 16th, choked by the next closed one.
-    checkGolden("hats", track("org.caw.drum.hats", "0 F#2 1 0.9\n1 F#2 1 0.5\n2 F#2 1 0.8\n3 F#2 1 0.5\n4 F#2 1 0.9\n"
-                                                   "5 F#2 1 0.5\n6 A#2 1 0.8\n7 F#2 1 0.5\n8 F#2 1 0.9\n9 F#2 1 0.5\n"
-                                                   "10 F#2 1 0.8\n11 F#2 1 0.5\n12 F#2 1 0.9\n13 F#2 1 0.5\n14 A#2 1 0.8\n15 F#2 1 0.5\n"),
-                0x7d07c25f99a0806full);
+    g.push_back({"hats", track("org.caw.drum.hats", "0 F#2 1 0.9\n1 F#2 1 0.5\n2 F#2 1 0.8\n3 F#2 1 0.5\n4 F#2 1 0.9\n"
+                                                    "5 F#2 1 0.5\n6 A#2 1 0.8\n7 F#2 1 0.5\n8 F#2 1 0.9\n9 F#2 1 0.5\n"
+                                                    "10 F#2 1 0.8\n11 F#2 1 0.5\n12 F#2 1 0.9\n13 F#2 1 0.5\n14 A#2 1 0.8\n15 F#2 1 0.5\n"),
+                 0x7d07c25f99a0806full});
     // Kit: every drum, and a key it doesn't map.
-    checkGolden("kit", track("org.caw.drum.kit", "0 C2 1 1\n2 F#2 1 0.6\n4 D2 1 1\n4 D#2 1 0.7\n6 A#2 1 0.8\n8 C2 1 1\n"
-                                                 "10 C#2 1 1\n11 B1 1 0.7\n12 E2 1 0.9\n14 G#2 1 0.6\n"),
-                0x7b835ee0bc60d9abull);
+    g.push_back({"kit", track("org.caw.drum.kit", "0 C2 1 1\n2 F#2 1 0.6\n4 D2 1 1\n4 D#2 1 0.7\n6 A#2 1 0.8\n8 C2 1 1\n"
+                                                  "10 C#2 1 1\n11 B1 1 0.7\n12 E2 1 0.9\n14 G#2 1 0.6\n"),
+                 0x7b835ee0bc60d9abull});
     // Bass: First loop's line, an overlap that glides, a slide.
-    checkGolden("bass", track("org.caw.bass", "0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 2 1\n9 C2 2 0.8\n"
-                                              "11 G1 1 1 slide\n12 A1 2 1\n15 A1 1/2 1\n",
-                              {{"cutoff", 300}, {"resonance", 0.45}, {"env", 0.6}, {"decay", 0.18}, {"sustain", 0.3}}),
-                0xce3f0778dbe4a437ull);
+    g.push_back({"bass", track("org.caw.bass", "0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 2 1\n9 C2 2 0.8\n"
+                                               "11 G1 1 1 slide\n12 A1 2 1\n15 A1 1/2 1\n",
+                               {{"cutoff", 300}, {"resonance", 0.45}, {"env", 0.6}, {"decay", 0.18}, {"sustain", 0.3}}),
+                 0xce3f0778dbe4a437ull});
     // Acid: the Acid line pattern (slides, a ratchet, a note that plays half the time), squelchy.
-    checkGolden("acid", track("org.caw.synth.acid", "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
-                                                    "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n15 E2 1 0.8\n",
-                              {{"resonance", 0.8}, {"wave", 1}}),
-                0x27f9deaaacadbfabull);
+    g.push_back({"acid", track("org.caw.synth.acid", "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
+                                                     "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n15 E2 1 0.8\n",
+                               {{"resonance", 0.8}, {"wave", 1}}),
+                 0x27f9deaaacadbfabull});
     // Morph synth: a chord with a quarter tone, drifting, wide.
-    checkGolden("morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
-                               {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
-                0x11f522cd538e49d9ull);
+    g.push_back({"morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
+                                {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
+                 0x11f522cd538e49d9ull});
+    return g;
+}
+
+// More sounds whose character must survive a faster implementation (perceptual references only, no hash):
+// First loop's Pad, Lead and Acid tracks with their effects, the basic synth, and the Morph synth's extremes.
+std::vector<Golden> references() {
+    std::vector<Golden> g = goldens();
+    const std::string chords = "0 A3,C4,E4 8 0.8\n8 F3,A3,C4 8 0.75\n";
+    ProjectSpec pad = track("org.caw.synth.morph", chords);
+    pad.layers[0].components = {{"org.caw.chorus", {}}};
+    g.push_back({"pad + chorus", pad, 0});
+    ProjectSpec lead = track("org.caw.synth.morph", "0 E4 2 0.9\n2 A4 2 0.8\n4 C5 3 0.9\n8 B4 2 0.8\n10 A4 2 0.7\n12 G4 4 0.8\n",
+                             {{"shape", 0.66}, {"drift", 0.15}, {"unison", 3}, {"detune", 0.1}, {"cutoff", 2600},
+                              {"attack", 0.005}, {"decay", 0.25}, {"sustain", 0.5}, {"release", 0.3}});
+    lead.layers[0].components = {{"org.caw.delay.pingpong", {{"sync", 3}, {"mix", 0.3}}}};
+    g.push_back({"lead + ping-pong", lead, 0});
+    ProjectSpec acid = g[5].project;
+    acid.layers[0].instrument.params = {{"resonance", 0.8}};
+    acid.layers[0].components = {{"org.caw.distortion", {{"drive", 3}, {"mix", 0.5}}}};
+    g.push_back({"acid + distortion", acid, 0});
+    for (int shape = 1; shape < 4; ++shape) {
+        ProjectSpec d = track("org.caw.synth.morph", "0 A1 4 1\n4 A3 4 1\n8 E5 4 1\n12 A6 4 1\n");
+        d.layers[0].components = {{"org.caw.distortion", {{"shape", static_cast<double>(shape)}, {"drive", 6}, {"bits", 6}}}};
+        g.push_back({shape == 1 ? "hard clip" : shape == 2 ? "fold" : "crush", d, 0});
+    }
+    g.push_back({"morph sine", track("org.caw.synth.morph", "0 A2 8 1\n8 A5 8 1\n",
+                                     {{"unison", 1}, {"shape", 0}, {"drift", 0}, {"cutoff", 16000}}), 0});
+    g.push_back({"morph bright square x16", track("org.caw.synth.morph", "0 A1 8 1\n8 A4,E5 8 1\n",
+                                                  {{"unison", 16}, {"shape", 1}, {"drift", 0}, {"cutoff", 16000},
+                                                   {"detune", 0.5}, {"attack", 0.001}}), 0});
+    g.push_back({"morph saw sweep", track("org.caw.synth.morph", "0 C2,C3,G3,C4,E4,G4,C5,E5 16 1\n",
+                                          {{"shape", 0.5}, {"drift", 1}, {"cutoff", 9000}, {"resonance", 0.6}}), 0});
+    ProjectSpec basic = track("org.caw.synth.basic", "0 C3 4 1\n0 G3 4 0.8\n4 51 2 0.9 slide\n6 F3 2 0.9\n8 60.5 4 0.7 ratchet 3\n"
+                                                     "12 60 4 0.6\n12 63 4 0.6\n12 67 4 0.6\n",
+                              {{"wave2", 1}, {"cutoff", 1200}, {"resonance", 0.4}, {"release", 0.4}});
+    g.push_back({"basic synth", basic, 0});
+    return g;
+}
+
+// What a listener hears of a render, to compare two implementations of one sound: the level of each side, how
+// alike the sides are, and the mid's spectral envelope (mean power in half-octave bands from 31.25 Hz to 16 kHz,
+// averaged over 4096-frame Hann windows).
+constexpr int kSoundBands = 19;
+struct Sound {
+    double rmsL = 0, rmsR = 0, correlation = 0;
+    double bands[kSoundBands] = {};
+};
+
+Sound measure(const ProjectSpec& p, int64_t frames) {
+    Sound s;
+    Engine e(48000);
+    if (!ok(e.setProjectOffline(p))) return s;
+    e.play();
+    std::vector<float> l(static_cast<size_t>(frames)), r(static_cast<size_t>(frames));
+    for (int64_t done = 0; done < frames; done += 256) e.process(l.data() + done, r.data() + done, 256);
+    s.rmsL = analysis::levels(l.data(), l.size()).rmsDb;
+    s.rmsR = analysis::levels(r.data(), r.size()).rmsDb;
+    s.correlation = analysis::stereo(l.data(), r.data(), l.size()).correlation;
+    constexpr size_t kN = 4096;
+    double power[kN / 2] = {};
+    int windows = 0;
+    std::vector<std::complex<double>> d(kN);
+    for (size_t at = 0; at + kN <= l.size(); at += kN / 2, ++windows) {
+        for (size_t i = 0; i < kN; ++i) {
+            const double w = 0.5 - 0.5 * std::cos(2.0 * 3.14159265358979323846 * static_cast<double>(i) / kN);
+            d[i] = 0.5 * (static_cast<double>(l[at + i]) + r[at + i]) * w;
+        }
+        analysis::fft(d, false);
+        for (size_t k = 0; k < kN / 2; ++k) power[k] += std::norm(d[k]);
+    }
+    for (int b = 0; b < kSoundBands; ++b) {
+        const double lo = 31.25 * std::pow(2.0, (b - 0.5) / 2.0), hi = 31.25 * std::pow(2.0, (b + 0.5) / 2.0);
+        double sum = 1e-30;
+        for (size_t k = 1; k < kN / 2; ++k) {
+            const double hz = static_cast<double>(k) * 48000.0 / kN;
+            if (hz >= lo && hz < hi) sum += power[k];
+        }
+        s.bands[b] = 10.0 * std::log10(sum / std::max(1, windows));
+    }
+    return s;
+}
+
+// The renders before the faster implementations (2026-11-10: wavetable Morph synth, control-rate chorus LFO, fast
+// saturation and sines), measured over 2 s by measure(). `CAW_PRINT_SOUNDS=1 caw_tests the_built_in_sounds` prints
+// these rows for the current code.
+struct Reference {
+    const char* name;
+    Sound sound;
+};
+#include "builtin_sounds_reference.inc"
+
+// Perceptually the same (the owner's bar where bit-exactness costs real-time performance): each side's level within
+// 0.5 dB, the sides' correlation within 0.05, and every band within 30 dB of the loudest within 1 dB (2.5 dB for the
+// bands 30 to 50 dB down; quieter ones are not compared).
+void checkSameSound(const char* name, const Sound& was, const Sound& now) {
+    auto fail = [&](const std::string& what, double a, double b) {
+        char buf[200];
+        std::snprintf(buf, sizeof buf, "%s: %s was %.3f, now %.3f", name, what.c_str(), a, b);
+        cawtest::fail(__FILE__, __LINE__, buf);
+    };
+    if (!(std::fabs(was.rmsL - now.rmsL) <= 0.5)) fail("left RMS dB", was.rmsL, now.rmsL);
+    if (!(std::fabs(was.rmsR - now.rmsR) <= 0.5)) fail("right RMS dB", was.rmsR, now.rmsR);
+    if (!(std::fabs(was.correlation - now.correlation) <= 0.05)) fail("correlation", was.correlation, now.correlation);
+    double loudest = -1e9;
+    for (double b : was.bands) loudest = std::max(loudest, b);
+    for (int b = 0; b < kSoundBands; ++b) {
+        const double down = loudest - was.bands[b];
+        const double tolerance = down <= 30 ? 1.0 : down <= 50 ? 2.5 : 1e9;
+        if (!(std::fabs(was.bands[b] - now.bands[b]) <= tolerance))
+            fail("band " + std::to_string(static_cast<int>(31.25 * std::pow(2.0, b / 2.0))) + " Hz dB", was.bands[b], now.bands[b]);
+    }
+}
+
+}  // namespace
+
+TEST(the_built_in_instruments_match_their_golden_renders) {
+    for (const Golden& g : goldens()) checkGolden(g.name, g.project, g.hash);
+}
+
+TEST(the_built_in_sounds_are_perceptually_what_they_were) {
+    const bool print = std::getenv("CAW_PRINT_SOUNDS") != nullptr;
+    for (const Golden& g : references()) {
+        const Sound now = measure(g.project, 48000 * 2);
+        if (print) {
+            std::printf("    {\"%s\", {%.4f, %.4f, %.5f, {", g.name, now.rmsL, now.rmsR, now.correlation);
+            for (int b = 0; b < kSoundBands; ++b) std::printf("%s%.3f", b ? ", " : "", now.bands[b]);
+            std::printf("}}},\n");
+            continue;
+        }
+        const Reference* ref = nullptr;
+        for (const Reference& r : kSoundReferences)
+            if (std::strcmp(r.name, g.name) == 0) ref = &r;
+        if (!ref) {
+            cawtest::fail(__FILE__, __LINE__, std::string(g.name) + ": no reference");
+            continue;
+        }
+        checkSameSound(g.name, ref->sound, now);
+    }
 }
