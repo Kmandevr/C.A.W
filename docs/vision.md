@@ -1,7 +1,7 @@
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Vision and principles
@@ -17,6 +17,8 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 **Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design. **Owner (2026-11-09):** it should *feel* like a full DAW, closest to REAPER, "but better and more specialized": the familiar workflow (tracks, mixer, FX stacks, automation, a browser) with C.A.W.'s own strengths built in, such as writing, building and hearing your own effects inside the song. The layout is in [decisions](decisions.md) ("The app's layout").
 
 **Owner decision (2026-11-05):** ordinary C++ is C.A.W.'s programming language. It is general-purpose, not a music-only DSL; users can write anything ordinary C++ allows. The C.A.W. Library/SDK supplies reusable audio, music, math, bit-manipulation, data and general-purpose building blocks. One shared component model makes each component available to the C++ editor, visual composition, generated/custom performance UI, mixer and later plugin/standalone adapters. These are coordinated views of one project and runtime, not parallel implementations. See [C++ creation platform](cpp-creation-platform.md).
+
+**C++ rules the app (owner, 2026-11-10):** C++ is "the supreme ruler" of C.A.W. and replaces the .caw language entirely ([decisions](decisions.md), "C++ replaces the .caw language"). In C++ you build synths and effects, write custom LFOs and other modulators, and route anything to anywhere. Notes can be written as text-based MIDI, in C.A.W.'s own text form where standard MIDI has none. The mindset, in the owner's words not to be taken verbatim: you could port an entire game into the app and it would just turn into music. [Proposal] Today C++ components are stereo effects with parameters; instruments, modulators, arbitrary routing and text MIDI are planned (#155).
 
 **Current delivery priority (owner, 2026-11-06):** create a working prototype before building out the full architecture. Deliver a narrow, useful end-to-end slice and expand it through working product behavior. Plan for future compatibility and extensibility where they affect today's interfaces, but do not build comprehensive migration systems, marketplace plumbing or speculative frameworks ahead of demonstrated need.
 
