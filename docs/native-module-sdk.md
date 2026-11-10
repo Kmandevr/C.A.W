@@ -2,7 +2,7 @@
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
 updated: 2026-11-10
-covers: [engine/include/caw_component.h, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
+covers: [engine/include/caw_component.h, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*, engine/src/component_test.*, engine/src/analysis.*]
 ---
 
 # Native module SDK v1
@@ -13,6 +13,7 @@ covers: [engine/include/caw_component.h, engine/include/caw/module.hpp, engine/i
 - **In-app compiler:** `engine/compiler/` is built for Android by CI, and in CI it compiles real components to arm64 libraries; its first run on a phone is still to come.
 - **Loading:** explicit trust (Blocked / Trusted; Isolated is refused, since there is no sandbox), and rebuilds that switch in while playing.
 - **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master; instruments (an event input, a stereo output) playing a track's notes, with the same (2026-11-10, #156).
+- **Testing:** an offline testing suite measures an effect (levels, THD+N, impulse response, latency and tail against the declared values, null tests, parameter sweeps, CPU per block) from the C API or `caw test-component`; instruments are not covered yet.
 - **Still to come:** the UI, process isolation, signing, and components with other ports.
 
 ## Writing an effect
@@ -88,6 +89,26 @@ The rules that matter:
 - **Make `saveState` safe while `process` runs:** the host may save a playing project.
 - **Make `reset()` clear what you hold.** The host calls it so the next play starts from silence.
 - **Use the Library for the same sound everywhere:** `caw/library/` (pan law, width, drive and crush, delays) and `caw/detmath.hpp` give the same bits on every device.
+
+## Testing your effect
+
+The testing suite renders your effect offline, with no audio device, and reports what it measured as JSON ([engine reference](engine.md#component-testing) for every key). From the command line, after building:
+
+```
+caw test-component ./build/my-echo.so --id local.my-echo --trust trusted --signal impulse --report text
+caw test-component ./build/my-echo.so --id local.my-echo --trust trusted --signal sine --freq 1000 --param time=250
+caw test-component ./build/my-echo.so --id local.my-echo --trust trusted --sweep time --steps 5
+caw test-component ./build/my-echo-v2.so --id local.my-echo --trust trusted --compare ./build/my-echo.so --signal pink
+```
+
+A library is in-process code, so it loads only with an explicit `--trust trusted`, as in the app. Hosts call `caw_component_test(request_json)` with the same request. What it catches:
+- **Wrong declarations:** the measured latency against `latencyFrames` (an impulse, sweep or noise shows it), and the measured tail (until -90 dB) against `tailFrames`. A mismatch is a warning: the host compensates and rings out by what you declare.
+- **Bad samples:** NaN, Inf and denormals in the raw output, clipping above 0 dBFS, and blocks where `process` returned false.
+- **Sound:** peak, RMS, DC, crest factor and gain per channel; THD and THD+N for a sine; impulse-response length; frequency response from an impulse, sweep or noise; a spectrum; stereo correlation and width.
+- **Changes:** a null test against another component or another build (`--compare`, aligned by declared or measured latency) or against the dry input (`--bypass`): `exact` is true only when every sample matches. A refactor that should not change the sound must null exactly.
+- **Cost:** median and worst time per block, in µs and as a share of the block's real time on the machine that runs the test (a desktop CPU is not a phone's).
+
+Run it at the block sizes and sample rates the app uses (`--block`, `--rate`); a result without `cpu` is the same byte for byte on every run, so it can be checked into a test. `--strict` exits 1 on any warning, for CI.
 
 ## Writing an instrument
 

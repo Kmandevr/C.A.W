@@ -12,7 +12,9 @@
 
 #include "capi_internal.h"
 #include "compile.h"
+#include "component_test.h"
 #include "docs.h"
+#include "json.h"
 #include "midifile.h"
 #include "pattern.h"
 #include "project.h"
@@ -49,7 +51,18 @@ const char* kUsage =
     "  caw templates                         list the bundled starter templates\n"
     "  caw docs [--check] [--dir DIR]        write DIR/library.md and DIR/agent-guide.md (default DIR: docs);\n"
     "                                        --check fails if they're stale, a function is undocumented, or an\n"
-    "                                        example doesn't compile or is silent\n";
+    "                                        example doesn't compile or is silent\n"
+    "  caw test-component ID|LIBRARY [options]  render a C++ effect offline with a test signal and print its\n"
+    "                                        measurements (JSON by default; docs/engine.md \"Component testing\")\n"
+    "      --id ID --trust trusted|isolated|blocked   for a built LIBRARY (required: no default trust)\n"
+    "      --signal impulse|sine|sweep|white|pink|silence|dc|wav (default sine)  --file IN.wav (wav)\n"
+    "      --freq HZ --level DB --seconds S --seed N --decorrelated --from-freq HZ --to-freq HZ\n"
+    "      --rate R --block N --tail S --tempo BPM --param NAME=VALUE (repeatable)\n"
+    "      --sweep PARAM [--steps N] [--from A] [--to B]   render once per value of a parameter\n"
+    "      --compare ID|LIBRARY [--compare-id ID --compare-trust T]   null test against another component or build\n"
+    "      --bypass (null test against the dry input)  --align none|declared|measured (default declared)\n"
+    "      --wav OUT.wav --input-wav IN.wav --no-cpu --fft N --request FILE.json (the request as JSON)\n"
+    "      --report json|text  --strict (exit 1 when the result has warnings)\n";
 
 bool readFile(const std::string& path, std::string& out) {
     std::ifstream f(path, std::ios::binary);
@@ -378,6 +391,197 @@ int docs(int argc, char** argv) {
     return bad ? 1 : 0;
 }
 
+bool isLibraryPath(const std::string& s) {
+    return s.find('/') != std::string::npos || s.find('\\') != std::string::npos || endsWith(s, ".so") ||
+           endsWith(s, ".dll") || endsWith(s, ".dylib");
+}
+
+std::string componentJson(const std::string& target, const std::string& id, const std::string& trust,
+                          const std::string& params) {
+    std::string j = "{";
+    if (isLibraryPath(target)) {
+        // A bare file name would make the system loader search its library path, not this directory.
+        const bool bare = target.find('/') == std::string::npos && target.find('\\') == std::string::npos;
+        j += "\"id\":\"" + caw::jsonEscape(id) + "\",\"library\":\"" + caw::jsonEscape(bare ? "./" + target : target) + "\"";
+        if (!trust.empty()) j += ",\"trust\":\"" + caw::jsonEscape(trust) + "\"";
+    } else {
+        j += "\"id\":\"" + caw::jsonEscape(target) + "\"";
+    }
+    if (!params.empty()) j += ",\"params\":{" + params + "}";
+    return j + "}";
+}
+
+// The result as a few readable lines (the JSON holds everything).
+void printTextReport(const caw::Json& r) {
+    const caw::Json* c = r.get("component");
+    const caw::Json* out = r.get("output");
+    std::printf("%s (%s)\n", c ? c->string("id").c_str() : "?", c ? c->string("role").c_str() : "?");
+    auto db = [](const caw::Json* j, const char* k) {
+        const caw::Json* v = j ? j->get(k) : nullptr;
+        static char buf[4][32];
+        static int at = 0;
+        char* b = buf[at++ % 4];
+        if (!v || v->type != caw::Json::Type::Number) std::snprintf(b, 32, "-inf");
+        else std::snprintf(b, 32, "%.2f", v->num);
+        return b;
+    };
+    if (out) {
+        if (const caw::Json* ch = out->get("channels"))
+            for (std::size_t i = 0; i < ch->arr.size(); ++i)
+                std::printf("  %s: peak %s dBFS, rms %s dBFS, gain %s dB\n", i ? "right" : "left ",
+                            db(&ch->arr[i], "peak_db"), db(&ch->arr[i], "rms_db"), db(&ch->arr[i], "gain_db"));
+        if (const caw::Json* t = out->get("thd"); t && t->type == caw::Json::Type::Object)
+            if (const caw::Json* l = t->get("left"); l && l->type == caw::Json::Type::Object)
+                std::printf("  THD %.5f %%, THD+N %.5f %% (left)\n", l->number("thd_percent", 0),
+                            l->number("thd_n_percent", 0));
+        if (const caw::Json* ir = out->get("impulse_response"); ir && ir->type == caw::Json::Type::Object)
+            std::printf("  impulse response %.0f frames (%.1f ms)%s\n", ir->number("length_frames", 0),
+                        ir->number("length_ms", 0), ir->boolean("truncated", false) ? ", truncated" : "");
+        if (const caw::Json* l = out->get("latency")) {
+            const caw::Json* m = l->get("measured");
+            if (m && m->type == caw::Json::Type::Number)
+                std::printf("  latency %.0f frames measured, %.0f declared\n", m->num, l->number("declared", 0));
+        }
+        if (const caw::Json* t = out->get("tail"); t && t->type == caw::Json::Type::Object)
+            std::printf("  tail %.0f frames measured%s\n", t->number("measured", 0),
+                        t->boolean("within_declared", true) ? "" : " (longer than declared)");
+    }
+    if (const caw::Json* cpu = r.get("cpu"))
+        std::printf("  cpu per block: median %.2f us (%.3f %%), worst %.2f us (%.3f %%)\n", cpu->number("median_us", 0),
+                    cpu->number("median_percent", 0), cpu->number("worst_us", 0), cpu->number("worst_percent", 0));
+    for (const char* k : {"bypass", "compare"})
+        if (const caw::Json* n = r.get(k))
+            std::printf("  %s null: %s, difference peak %s dB, rms %s dB\n", k,
+                        n->boolean("exact", false) ? "exact" : "not exact", db(n, "difference_peak_db"),
+                        db(n, "difference_rms_db"));
+    if (const caw::Json* s = r.get("sweep"))
+        if (const caw::Json* pts = s->get("points"))
+            for (const caw::Json& p : pts->arr) {
+                const caw::Json* ch = p.get("channels");
+                std::printf("  %s = %g: peak %s dBFS, rms %s dBFS\n", s->string("param").c_str(), p.number("value", 0),
+                            ch && !ch->arr.empty() ? db(&ch->arr[0], "peak_db") : "?",
+                            ch && !ch->arr.empty() ? db(&ch->arr[0], "rms_db") : "?");
+            }
+    if (const caw::Json* w = r.get("warnings"))
+        for (const caw::Json& x : w->arr) std::printf("  warning: %s\n", x.str.c_str());
+}
+
+int testComponent(int argc, char** argv) {
+    if (argc < 3) {
+        std::fputs(kUsage, stderr);
+        return 2;
+    }
+    std::string target, id, trust, compare, compareId, compareTrust, params, requestFile, report = "json";
+    std::string signal = "{\"type\":\"sine\"", top, sweep;
+    bool strict = false;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        auto val = [&](const char* name) -> std::string {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "%s needs a value\n", name);
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        auto numberArg = [&](const char* name) {
+            const std::string v = val(name);
+            char* end = nullptr;
+            const double d = std::strtod(v.c_str(), &end);
+            if (v.empty() || *end != '\0' || !std::isfinite(d)) {
+                std::fprintf(stderr, "%s needs a number\n", name);
+                std::exit(2);
+            }
+            return v;
+        };
+        auto str = [](const std::string& v) { return "\"" + caw::jsonEscape(v) + "\""; };
+        if (a == "--id") id = val("--id");
+        else if (a == "--trust") trust = val("--trust");
+        else if (a == "--signal") {
+            const std::string t = val("--signal");
+            signal = "{\"type\":" + str(t == "noise" ? "white" : t);
+        } else if (a == "--freq") signal += ",\"frequency\":" + numberArg("--freq");
+        else if (a == "--from-freq") signal += ",\"start_frequency\":" + numberArg("--from-freq");
+        else if (a == "--to-freq") signal += ",\"end_frequency\":" + numberArg("--to-freq");
+        else if (a == "--level") signal += ",\"level_db\":" + numberArg("--level");
+        else if (a == "--seconds") signal += ",\"seconds\":" + numberArg("--seconds");
+        else if (a == "--seed") signal += ",\"seed\":" + numberArg("--seed");
+        else if (a == "--decorrelated") signal += ",\"decorrelated\":true";
+        else if (a == "--file") signal += ",\"path\":" + str(val("--file"));
+        else if (a == "--rate") top += ",\"sample_rate\":" + numberArg("--rate");
+        else if (a == "--block") top += ",\"block_size\":" + numberArg("--block");
+        else if (a == "--tail") top += ",\"tail_seconds\":" + numberArg("--tail");
+        else if (a == "--tempo") top += ",\"tempo\":" + numberArg("--tempo");
+        else if (a == "--fft") top += ",\"fft_size\":" + numberArg("--fft");
+        else if (a == "--align") top += ",\"align\":" + str(val("--align"));
+        else if (a == "--bypass") top += ",\"bypass\":true";
+        else if (a == "--no-cpu") top += ",\"cpu\":false";
+        else if (a == "--wav") top += ",\"write_wav\":" + str(val("--wav"));
+        else if (a == "--input-wav") top += ",\"write_input_wav\":" + str(val("--input-wav"));
+        else if (a == "--param") {
+            const std::string p = val("--param");
+            const size_t eq = p.find('=');
+            char* end = nullptr;
+            const std::string v = eq == std::string::npos ? "" : p.substr(eq + 1);
+            const double d = std::strtod(v.c_str(), &end);
+            if (eq == std::string::npos || eq == 0 || v.empty() || *end != '\0' || !std::isfinite(d)) {
+                std::fprintf(stderr, "--param needs NAME=VALUE\n");
+                return 2;
+            }
+            params += (params.empty() ? "" : ",") + str(p.substr(0, eq)) + ":" + v;
+        } else if (a == "--sweep") sweep += (sweep.empty() ? "" : ",") + std::string("\"param\":") + str(val("--sweep"));
+        else if (a == "--steps") sweep += (sweep.empty() ? "" : ",") + std::string("\"steps\":") + numberArg("--steps");
+        else if (a == "--from") sweep += (sweep.empty() ? "" : ",") + std::string("\"from\":") + numberArg("--from");
+        else if (a == "--to") sweep += (sweep.empty() ? "" : ",") + std::string("\"to\":") + numberArg("--to");
+        else if (a == "--compare") compare = val("--compare");
+        else if (a == "--compare-id") compareId = val("--compare-id");
+        else if (a == "--compare-trust") compareTrust = val("--compare-trust");
+        else if (a == "--request") requestFile = val("--request");
+        else if (a == "--report") report = val("--report");
+        else if (a == "--strict") strict = true;
+        else if (target.empty() && a.rfind("--", 0) != 0) target = a;
+        else {
+            std::fprintf(stderr, "unknown option %s\n", a.c_str());
+            return 2;
+        }
+    }
+    if (report != "json" && report != "text") {
+        std::fputs("--report must be json or text\n", stderr);
+        return 2;
+    }
+    std::string request;
+    if (!requestFile.empty()) {
+        if (!readFile(requestFile, request)) {
+            std::fprintf(stderr, "can't read %s\n", requestFile.c_str());
+            return 1;
+        }
+    } else {
+        if (target.empty()) {
+            std::fputs("test-component needs a component id or library\n", stderr);
+            return 2;
+        }
+        if (isLibraryPath(target) && id.empty()) {
+            std::fputs("a library needs --id (the component's id) and --trust\n", stderr);
+            return 2;
+        }
+        request = "{\"component\":" + componentJson(target, id, trust, params) + ",\"signal\":" + signal + "}" + top;
+        if (!compare.empty())
+            request += ",\"compare\":" + componentJson(compare, compareId.empty() ? id : compareId,
+                                                       compareTrust.empty() ? trust : compareTrust, "");
+        if (!sweep.empty()) request += ",\"sweep\":{" + sweep + "}";
+        request += "}";
+    }
+    const std::string result = caw::componentTestJson(request);
+    caw::Json parsed;
+    std::string err;
+    const bool parsedOk = caw::parseJson(result, parsed, err);
+    const bool ok = parsedOk && parsed.boolean("ok", false);
+    if (report == "json" || !ok) std::printf("%s\n", result.c_str());
+    else printTextReport(parsed);
+    if (!ok) return 1;
+    const caw::Json* warnings = parsed.get("warnings");
+    return strict && warnings && !warnings->arr.empty() ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fputs(kUsage, stderr);
@@ -388,6 +592,7 @@ int main(int argc, char** argv) {
     if (cmd == "render") return render(argc, argv);
     if (cmd == "docs") return docs(argc, argv);
     if (cmd == "midi") return midi(argc, argv);
+    if (cmd == "test-component") return testComponent(argc, argv);
     if (cmd == "templates") {
         for (int i = 0; i < caw::kTemplateCount; ++i) std::printf("%s\n", caw::kTemplateFiles[i]);
         return 0;

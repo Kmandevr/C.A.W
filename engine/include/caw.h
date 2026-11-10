@@ -239,6 +239,15 @@ CAW_API void caw_job_cancel(CawJob* job);
 CAW_API void caw_job_release(CawJob* job);
 CAW_API void caw_worker_pool_wait_idle(CawWorkerPool* pool);
 
+/* Component testing suite (#163): renders one C++ effect offline (never on the audio thread, no
+   device) with a test signal and returns its measurements as JSON. The request is JSON, e.g.
+   {"component":{"id":"org.caw.distortion","params":{"drive":8}},"signal":{"type":"sine","frequency":1000}};
+   a built library needs "library" and an explicit "trust" ("trusted", "isolated" or "blocked").
+   Keys of the request and the result: docs/engine.md, "Component testing". The result always has
+   "ok" and "error". Blocks the caller for the render; call it from a worker, never the UI or audio
+   thread. Free the result with caw_free. */
+CAW_API char* caw_component_test(const char* request_json);
+
 #ifdef __cplusplus
 }
 #endif

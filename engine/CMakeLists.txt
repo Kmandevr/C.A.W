@@ -162,6 +162,8 @@ target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
 find_package(Threads REQUIRED)
 target_link_libraries(caw_core PUBLIC CAW::SDK Threads::Threads ${CMAKE_DL_LIBS})
 set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+# The component testing suite (#163): offline measurements of C++ effects.
+target_sources(caw_core PRIVATE src/analysis.cpp src/component_test.cpp)
 
 
 # The library the app loads through dart:ffi.
@@ -195,6 +197,7 @@ target_include_directories(caw_cli PRIVATE src)
     tests/golden_test.cpp tests/variables_test.cpp tests/library_test.cpp tests/pattern_test.cpp
     tests/midifile_test.cpp tests/midi2_test.cpp tests/module_registry_test.cpp tests/native_component_test.cpp tests/synth_test.cpp tests/execution_test.cpp tests/execution_capi_test.cpp tests/module_test.cpp tests/graph_test.cpp tests/params_test.cpp tests/sdk_header_test.cpp tests/scheduler_test.cpp tests/dependency_test.cpp tests/hardware_test.cpp tests/worker_api_test.cpp tests/mix_golden_test.cpp tests/public_cpp_sdk_test.cpp tests/track_components_test.cpp tests/instrument_test.cpp
     src/capi.cpp src/execution_capi.cpp src/worker_api.cpp platform/audio_none.cpp)
+  target_sources(caw_tests PRIVATE tests/component_test_test.cpp)  # the component testing suite (#163)
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})

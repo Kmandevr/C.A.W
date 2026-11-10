@@ -20,7 +20,7 @@ The portable C++ core is the single source of processing behavior. Hosts must no
 - **CAW app:** authors projects, browses the library, edits module parameters, previews (modules and single notes) and exports.
 - **Project runtime:** resolves dependencies, instantiates modules and stores user-visible state.
 - **Add-ons:** call the versioned C ABI (`caw.h`, `CAW_API_VERSION` 4; compiled components use the component interface v3 in `caw_component.h`) and use the same module, parameter, render and capability contracts as the app. Add-ons do not reach into private C++ classes.
-- **CLI and CI:** validate, render, package and test the same project/module formats without launching the UI.
+- **CLI and CI:** validate, render, package and test the same project/module formats without launching the UI; `caw test-component` (and `caw_component_test` for add-ons) measures a C++ effect offline ([engine](engine.md#component-testing)).
 - **Future plugin wrappers:** adapt host audio/MIDI buffers to the engine's documented processing contract. They are generated/packaged products, not a requirement to run CAW itself.
 
 Every public capability needs a stable identifier, documented input/output contract, versioning behavior, error reporting and a test. The C ABI remains the compatibility boundary; additive functions and structs must be size/version guarded before any future ABI-breaking redesign.
