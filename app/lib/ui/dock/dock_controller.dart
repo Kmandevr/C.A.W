@@ -87,8 +87,14 @@ class DockController extends ChangeNotifier {
   /// The current screen shape. The shell sets it from its size on every layout, without a notification.
   FormFactor form = FormFactor.desktop;
 
+  /// The desktop frame on a small window (Settings › Layout › Desktop on a phone): until a layout is saved, every
+  /// panel starts as a tab of one full-size group instead of side by side.
+  bool narrow = false;
+
   /// The layout for the current screen shape.
-  DockLayout get layout => _layouts[form] ??= DockLayout.preset(form);
+  DockLayout get layout => _layouts[form] ??= form == FormFactor.desktop && narrow
+      ? DockLayout(TabsNode([Panels.arrangement, for (final p in Panels.all) if (p != Panels.arrangement) p]))
+      : DockLayout.preset(form);
 
   /// The panel touched last; null until one is.
   String? get focused =>

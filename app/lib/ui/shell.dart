@@ -11,6 +11,7 @@ import '../model/cpp_workbench.dart';
 import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
+import '../model/settings.dart';
 import '../platform/system_bars.dart';
 import 'arranger_screen.dart';
 import 'exporter_screen.dart';
@@ -56,13 +57,16 @@ Area _areaOf(String panel) => switch (panel) {
       _ => Area.global,
     };
 
-/// The screen shape that keeps its own layout, from the shell's size. Tablets (shortest side 600 dp or more) get the
-/// desktop layout with touch (owner, 2026-11-09).
-FormFactor formFactorFor(Size size) => size.width >= 900 || size.shortestSide >= 600
-    ? FormFactor.desktop
-    : size.width > size.height
-        ? FormFactor.phoneLandscape
-        : FormFactor.phonePortrait;
+/// The screen shape that keeps its own layout, from the shell's size in logical pixels (the window's pixels over its
+/// density, so a DeX window, an external display or a freeform window counts by its real room, not by the device).
+/// [LayoutMode.auto]: the desktop frame when the window is big enough (a shortest side of 600 dp, as a tablet, owner
+/// 2026-11-09; or 900 dp wide and 480 dp tall, so a phone in landscape stays a phone). [LayoutMode.desktop] forces
+/// it and [LayoutMode.phone] never uses it (owner, 2026-11-10).
+FormFactor formFactorFor(Size size, {LayoutMode mode = LayoutMode.auto}) {
+  final big = size.shortestSide >= 600 || (size.width >= 900 && size.height >= 480);
+  if (mode == LayoutMode.desktop || (mode == LayoutMode.auto && big)) return FormFactor.desktop;
+  return size.width > size.height ? FormFactor.phoneLandscape : FormFactor.phonePortrait;
+}
 
 /// The section a docked panel belongs to (the rail highlights it), or null for the others.
 Section? sectionOfPanel(String panel) => switch (panel) {
@@ -101,9 +105,17 @@ class _ShellState extends State<Shell> {
 
   AppState get s => widget.state;
 
+  // Settings › Layout, followed while running.
+  late LayoutMode _layoutMode = s.settings.layoutMode;
+
+  void _onSettings() {
+    if (s.settings.layoutMode != _layoutMode && mounted) setState(() => _layoutMode = s.settings.layoutMode);
+  }
+
   @override
   void initState() {
     super.initState();
+    s.settings.addListener(_onSettings);
     _sections.addListener(_onSection);
     _life = AppLifecycleListener(
       onPause: () {
@@ -124,6 +136,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    s.settings.removeListener(_onSettings);
     _life.dispose();
     _dock.dispose();
     _sections.removeListener(_onSection);
@@ -137,6 +150,26 @@ class _ShellState extends State<Shell> {
     if (now == _lastSection) return;
     _lastSection = now;
     if (_dock.form == FormFactor.desktop) _dock.reveal(panelOfSection(now));
+  }
+
+  /// A change of frame while running (Settings › Layout, a rotation, a window or display change): the section in
+  /// front stays in front. Desktop shows its docked panel; a phone shows the section of the panel last used.
+  void _switchForm(FormFactor form) {
+    final was = _dock.form;
+    _dock.form = form;
+    if (!_homeShown) return;
+    // After this frame: both notify listeners that are being built now.
+    if (form == FormFactor.desktop) {
+      final section = _sections.current;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _dock.form == FormFactor.desktop) _dock.reveal(panelOfSection(section));
+      });
+    } else if (was == FormFactor.desktop) {
+      final section = sectionOfPanel(_dock.keyPanel);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && section != null && _dock.form != FormFactor.desktop) _sections.show(section);
+      });
+    }
   }
 
   /// Opens the selected .caw module in Build (the older screens' "open in Builder").
@@ -209,7 +242,10 @@ class _ShellState extends State<Shell> {
                   body: Builder(builder: (context) {
                     final pad = MediaQuery.paddingOf(context);
                     return LayoutBuilder(builder: (context, box) {
-                      _dock.form = formFactorFor(pad.deflateSize(box.biggest));
+                      final room = pad.deflateSize(box.biggest);
+                      final form = formFactorFor(room, mode: _layoutMode);
+                      _dock.narrow = formFactorFor(room) != FormFactor.desktop;
+                      if (form != _dock.form) _switchForm(form);
                       SystemBars.apply(fullScreen: _dock.form == FormFactor.phoneLandscape);
                       if (!_homeShown) {
                         _homeShown = true;
@@ -571,99 +607,113 @@ class _TransportBar extends StatelessWidget {
               border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
             )
           : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
-      child: Row(children: [
-        const CrowLogo(size: 30),
-        const SizedBox(width: 8),
-        Expanded(
-          child: InkWell(
-            onTap: () => showProjectMenu(context, state),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              const Text('C.A.W', style: TextStyle(fontSize: 11, letterSpacing: 2, color: Neon.dim, fontWeight: FontWeight.w800)),
-              Row(children: [
-                Flexible(
-                  child: Text(p.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                ),
-                const Icon(Icons.arrow_drop_down, color: Neon.dim),
-              ]),
-            ]),
+      // Desktop on a phone (Settings › Layout) can make the bar narrow: the project name then keeps a modest width and
+      // the readouts and buttons scroll sideways instead of overflowing.
+      child: LayoutBuilder(builder: (context, box) {
+        final narrow = box.maxWidth < 720;
+        Widget name(Widget c) =>
+            narrow ? ConstrainedBox(constraints: const BoxConstraints(maxWidth: 120), child: c) : Expanded(child: c);
+        final tail = <Widget>[
+          ValueListenableBuilder<int>(
+            valueListenable: state.tick,
+            builder: (context, _, _) {
+              final m = state.meters;
+              final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
+              return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+                _BpmButton(state: state),
+                // Paused, it shows where play will resume.
+                Text(m.playing
+                    ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+                    : state.pausedStep != null
+                        ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
+                          ' · CPU $cpu%'
+                    : 'CPU $cpu%',
+                    style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)),
+              ]);
+            },
           ),
-        ),
-        ValueListenableBuilder<int>(
-          valueListenable: state.tick,
-          builder: (context, _, _) {
-            final m = state.meters;
-            final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-            return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-              _BpmButton(state: state),
-              // Paused, it shows where play will resume.
-              Text(m.playing
-                  ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
-                  : state.pausedStep != null
-                      ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
-                        ' · CPU $cpu%'
-                  : 'CPU $cpu%',
-                  style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)),
-            ]);
-          },
-        ),
-        // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
-        IconButton(
-          key: const ValueKey('transport-undo'),
-          tooltip: 'Undo (Ctrl+Z)',
-          color: Neon.text,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.undo),
-          onPressed: state.canUndo ? state.undo : null,
-        ),
-        IconButton(
-          key: const ValueKey('transport-redo'),
-          tooltip: 'Redo (Ctrl+Shift+Z)',
-          color: Neon.text,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.redo),
-          onPressed: state.canRedo ? state.redo : null,
-        ),
-        IconButton(
-          tooltip: 'Layout and panels',
-          color: Neon.dim,
-          icon: const Icon(Icons.dashboard_customize),
-          onPressed: () => showLayoutMenu(context, dock),
-        ),
-        if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
-        if (LiveMidi.current case final m?) KeysButton(midi: m),
-        // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
-        if (playing || state.pausedStep != null) IconButton(
-          key: const ValueKey('transport-stop'),
-          tooltip: 'Stop, back to the start (Shift+Space)',
-          color: Neon.green,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.stop),
-          onPressed: state.stopPlayback,
-        ),
-        Tooltip(
-          message: playing ? 'Pause (Space)' : state.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(28),
-            onTap: state.togglePlay,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: playing ? Neon.green : Colors.transparent,
-                border: Border.all(color: Neon.green, width: 2),
-                boxShadow: Neon.glow(Neon.green, strength: playing ? 0.8 : 0.3),
+          // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
+          IconButton(
+            key: const ValueKey('transport-undo'),
+            tooltip: 'Undo (Ctrl+Z)',
+            color: Neon.text,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.undo),
+            onPressed: state.canUndo ? state.undo : null,
+          ),
+          IconButton(
+            key: const ValueKey('transport-redo'),
+            tooltip: 'Redo (Ctrl+Shift+Z)',
+            color: Neon.text,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.redo),
+            onPressed: state.canRedo ? state.redo : null,
+          ),
+          IconButton(
+            tooltip: 'Layout and panels',
+            color: Neon.dim,
+            icon: const Icon(Icons.dashboard_customize),
+            onPressed: () => showLayoutMenu(context, dock),
+          ),
+          if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
+          if (LiveMidi.current case final m?) KeysButton(midi: m),
+          // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
+          if (playing || state.pausedStep != null) IconButton(
+            key: const ValueKey('transport-stop'),
+            tooltip: 'Stop, back to the start (Shift+Space)',
+            color: Neon.green,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.stop),
+            onPressed: state.stopPlayback,
+          ),
+          Tooltip(
+            message: playing ? 'Pause (Space)' : state.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(28),
+              onTap: state.togglePlay,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: playing ? Neon.green : Colors.transparent,
+                  border: Border.all(color: Neon.green, width: 2),
+                  boxShadow: Neon.glow(Neon.green, strength: playing ? 0.8 : 0.3),
+                ),
+                child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
               ),
-              child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
             ),
           ),
-        ),
-        RecordButton(midi: LiveMidi.current, state: state),
-      ]),
+          RecordButton(midi: LiveMidi.current, state: state),
+        ];
+        return Row(children: [
+          const CrowLogo(size: 30),
+          const SizedBox(width: 8),
+          name(
+            InkWell(
+              onTap: () => showProjectMenu(context, state),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                const Text('C.A.W', style: TextStyle(fontSize: 11, letterSpacing: 2, color: Neon.dim, fontWeight: FontWeight.w800)),
+                Row(children: [
+                  Flexible(
+                    child: Text(p.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
+                  const Icon(Icons.arrow_drop_down, color: Neon.dim),
+                ]),
+              ]),
+            ),
+          ),
+          if (narrow)
+            Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, reverse: true,
+                child: Row(mainAxisSize: MainAxisSize.min, children: tail)))
+          else
+            ...tail,
+        ]);
+      }),
     );
   }
 }
