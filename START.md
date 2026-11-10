@@ -1,12 +1,12 @@
 # C.A.W start file for chat agents
 
-Generated from `3c9666c1db2d0dee536d8146b818dece2110b5dc` on the default branch at 2026-11-09T23:49:04Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
+Generated from `84cab316f5c5162c8fc1965627e7d6d2e7bf983e` on the default branch at 2026-11-10T02:50:01Z by `scripts/agent-context.js`. Don't edit it; edit the files it bundles.
 
 Read this whole file before doing anything else. It replaces separately reading `AGENTS.md`, `CLAUDE.md`, `docs/vision.md` and `.claude/rules/*.md`.
 
 ## Before you start: confirm in your first reply
 
-1. The commit this file was generated from (`3c9666c`).
+1. The commit this file was generated from (`84cab31`).
 2. The task issue number and your branch (`gpt/<issue>-<short-name>`).
 3. The progress comment's next action, or "new task" if there is none yet.
 4. Which area rules below apply to the files you will touch.
@@ -232,7 +232,7 @@ Develop on the branch the session names. Put `Closes #N` in pull requests that f
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Vision and principles
@@ -248,6 +248,8 @@ C.A.W. is a code-driven sound-design and music-production workspace for creating
 **Goal (owner, 2026-11-03):** C.A.W. is not trying to be a conventional DAW, and it doesn't have to work the way one does. It must be able to do everything a good DAW can do, because there is no good DAW for mobile. Its own way of working (code, patterns, one shared project and engine model, phone-first touch) is the means; full production capability is the requirement. It keeps a lightweight architecture so weak phones stay first-class, rather than copying a heavyweight DAW's design. **Owner (2026-11-09):** it should *feel* like a full DAW, closest to REAPER, "but better and more specialized": the familiar workflow (tracks, mixer, FX stacks, automation, a browser) with C.A.W.'s own strengths built in, such as writing, building and hearing your own effects inside the song. The layout is in [decisions](decisions.md) ("The app's layout").
 
 **Owner decision (2026-11-05):** ordinary C++ is C.A.W.'s programming language. It is general-purpose, not a music-only DSL; users can write anything ordinary C++ allows. The C.A.W. Library/SDK supplies reusable audio, music, math, bit-manipulation, data and general-purpose building blocks. One shared component model makes each component available to the C++ editor, visual composition, generated/custom performance UI, mixer and later plugin/standalone adapters. These are coordinated views of one project and runtime, not parallel implementations. See [C++ creation platform](cpp-creation-platform.md).
+
+**C++ rules the app (owner, 2026-11-10):** C++ is "the supreme ruler" of C.A.W. and replaces the .caw language entirely ([decisions](decisions.md), "C++ replaces the .caw language"). In C++ you build synths and effects, write custom LFOs and other modulators, and route anything to anywhere. Notes can be written as text-based MIDI, in C.A.W.'s own text form where standard MIDI has none. The mindset, in the owner's words not to be taken verbatim: you could port an entire game into the app and it would just turn into music. The vision is for C.A.W. to do "literally anything you could imagine". Most DAWs restrict you to the way their engine works. C.A.W. instead gives native engine support for "weird shenanigans", so you can make sounds you can't make anywhere else. That makes it at once a plug-in builder, a DAW, a testing suite and a sample-pack maker: "the jack of all trades while still being specialized". Built so far (2026-11-10): C++ effects and instruments on tracks (#156), an engine-side testing suite for effects (#163), and CLAP export of a component library (#162). [Proposal] Modulators, routing anything anywhere and text MIDI are planned (#155), and so are the sample-pack maker (#164), VST3 export and the app's use of the testing suite.
 
 **Current delivery priority (owner, 2026-11-06):** create a working prototype before building out the full architecture. Deliver a narrow, useful end-to-end slice and expand it through working product behavior. Plan for future compatibility and extensibility where they affect today's interfaces, but do not build comprehensive migration systems, marketplace plumbing or speculative frameworks ahead of demonstrated need.
 
@@ -434,7 +436,7 @@ The design is in `docs/architecture.md` ("Audio and code execution"); this is th
 - **Audio thread.** In the callback and everything it calls: no allocation, no locks, no logging, no I/O, no calls into the app, no exceptions, no unbounded loops. Programs arrive through a lock-free swap and are freed off the audio thread.
 - **`.caw` language boundary.** The user module language has no filesystem, network or system-call access and is subject to explicit source/program/state/execution limits; fail closed with a module-local error when limits are exceeded. This does not sandbox native SDK modules: they execute as trusted in-process code. Do not claim third-party native modules are isolated or safe to load until process isolation and host validation exist.
 - **C API.** The app calls the engine only through a small, versioned C API (plain structs and functions, no C++ types across it), so `dart:ffi` and any future host can bind it.
-- **Defined arithmetic.** Int32 wraparound for bitwise ops, division and modulo by 0 give 0, NaN/Inf become 0, and the safety limiter is always last. Same source and settings give the same samples on every device (golden-render tests check this).
+- **Defined arithmetic.** Int32 wraparound for bitwise ops, division and modulo by 0 give 0, NaN/Inf become 0, and the safety limiter is always last. Same source and settings give the same samples on every device where that is cheap (golden-render tests check this); where exactness would cost real-time performance, output that is perceptually the same is enough (owner, 2026-11-10, `docs/decisions.md`).
 - **Tests.** Every language feature or DSP built-in gets a unit test and, where it makes sound, a golden render. A bug fix starts with a failing test. Never skip or weaken a test to get green.
 - Start each file with a one-line `//` comment saying what it is for (the repo map reads it).
 
