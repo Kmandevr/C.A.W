@@ -30,9 +30,13 @@ updated: 2026-11-10
 - **The Library reference** is liked but out of date: it should cover the C++ SDK and Library.
 - A good sample pack comes later; the owner's focus now is how things feel and work.
 
+## 2026-11-10: Native libraries in the APK are compressed
+
+**Decision (Claude, the owner left it open):** the APK stores native libraries compressed (`useLegacyPackaging = true`). The on-device compiler alone is about 78 MB uncompressed, which made the APK 114 MB. Compressed, the download is much smaller, and Android unpacks the libraries once at install, so the installed size grows a little. For a beta handed out as a download, the download size matters more. Easy to revert if the owner prefers.
+
 ## 2026-11-10: Installables move to GitHub Releases once the current work is done (owner)
 
-**Decision (owner):** once the current roadmap work is done, builds are published as GitHub Releases (a tagged version with the APK and the Windows build attached) instead of being picked up from Actions artifacts. [Proposal, not built] Until then, installables stay Actions artifacts. A release needs a stable signing key (the repository's Android signing secrets) so each APK installs over the last; the version comes from `app/pubspec.yaml` (`app/lib/version.dart` matches it).
+**Decision (owner):** once the current roadmap work is done, builds are published as GitHub Releases (a tagged version with the APK and the Windows build attached) instead of being picked up from Actions artifacts. Built (2026-11-10): `app.yml` publishes a release from a version tag or from Run workflow with **release** ticked (README). No release has been made yet; the first one waits for the current work. A release needs a stable signing key (the repository's Android signing secrets) so each APK installs over the last; the version comes from `app/pubspec.yaml` (`app/lib/version.dart` matches it).
 
 ## 2026-11-10: Sound need only be perceptually the same (owner)
 
