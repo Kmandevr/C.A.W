@@ -1,6 +1,6 @@
 # Handoff
 
-Commit: da5aa71
+Commit: 6252673
 
 Branch: ccr-56285e11-0xrj3h (PR #167 open, subscribed, CI green at aa1ee28)
 
@@ -15,16 +15,13 @@ Owner (2026-11-10): work through everything discussed toward the open beta, with
 - MIDI file import/export in Dart (`app/lib/model/midi_file.dart`, `app/lib/model/midi_clips.dart`, `app/lib/ui/midi_file_actions.dart`).
 
 ## Open
-Agents, each in its own worktree; merge into this branch when done (run full engine + app tests after each):
-- `.claude/worktrees/effects` (stock-effects): #173 engine effects + display API, then wire `app/lib/model/device_display.dart`.
-- `.claude/worktrees/livebend` (live-bend-edit): sounding bent note follows edits during playback.
-- `.claude/worktrees/bentnotes` (bent-notes): bent note drawn as a smoothed ribbon; note tool works on it.
-- `.claude/worktrees/clipedit` (clip-editing): reaper-flow gaps 1-2 (clip bar, S split, multi-select, glue, loop range, markers, regions).
-- `.claude/worktrees/recauto` (record-automate): reaper-flow gaps 3-4 (Touch automation writing, on-screen keys and pads, metronome, count-in, takes).
-- Merged: feel pass, review fixes, flagship synth, REAPER arranger, curve tool, device editors, REAPER flow study (`docs/reaper-flow.md`).
+No agents running. Everything below is merged on this branch and pushed (CI green at the last check):
+feel pass, review fixes, flagship synth (#171), REAPER arranger (#172), curve tool, device editors and effects suite (#173),
+bent-note ribbons, live bend edits, clip editing + loop range + markers (reaper-flow gaps 1-2), recording + automation writing (gaps 3-4).
+Owner choices to confirm are listed in `docs/decisions.md` (entries dated 2026-11-10).
 
 ## Next after merges
-- Built-ins using the new kernels (a reverb effect first), #161 modulators/routing, testing-suite and sample-pack screens, mixer label shows instrument name, #133 leftovers, then #160/#159 (.caw removal, .caw project extension).
+- reaper-flow gaps 5-10 (sends/buses, render parity, actions, MIDI editor flow, mixer parity, templates), #161 modulators/routing, testing-suite and sample-pack screens, mixer label shows instrument name, #133 leftovers, then #160/#159 (.caw removal, .caw project extension).
 - Then build an APK (Run workflow on this branch) and send it to the owner.
 
 ## Owner's calls pending
