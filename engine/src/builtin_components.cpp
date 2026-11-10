@@ -179,11 +179,24 @@ private:
         const float* inR = b.input.channels[1];
         float* outL = b.output.channels[0];
         float* outR = b.output.channels[1];
-        for (uint32_t i = 0; i < b.frames; ++i) {
+        const auto shape = [&](double x, double y) noexcept { return static_cast<float>((x + (y - x) * mix) * out); };
+        uint32_t i = 0;
+        for (; i + 1 < b.frames; i += 2) {  // two frames at a time (Saturator::process2: the same bits)
+            const double l[2] = {inL[i], inL[i + 1]}, r[2] = {inR[i], inR[i + 1]};
+            double yl[2], yr[2];
+            saturator_.process2(l, yl);
+            const bool same = r[0] == l[0] && r[1] == l[1];
+            if (!same) saturator_.process2(r, yr);
+            for (int j = 0; j < 2; ++j) {
+                outL[i + j] = shape(l[j], yl[j]);
+                outR[i + j] = same ? outL[i + j] : shape(r[j], yr[j]);
+            }
+        }
+        for (; i < b.frames; ++i) {
             const double l = inL[i], r = inR[i];
-            const float yl = static_cast<float>((l + (saturator_.process(l) - l) * mix) * out);
+            const float yl = shape(l, saturator_.process(l));
             outL[i] = yl;
-            outR[i] = r == l ? yl : static_cast<float>((r + (saturator_.process(r) - r) * mix) * out);
+            outR[i] = r == l ? yl : shape(r, saturator_.process(r));
         }
         return true;
     }

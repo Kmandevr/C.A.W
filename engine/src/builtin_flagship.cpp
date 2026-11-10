@@ -1708,10 +1708,9 @@ private:
         const auto dist = [&](double x) noexcept { return x == 0.0 ? 0.0 : x + (distort(x) - x) * distMix_; };
         const bool rest = eqOn_ || chorusOn_ || delayOn_ || reverbOn_;
         if (distOn_ && !rest) {  // the distortion alone: in place (to float, as below), then the dry loops
-            for (uint32_t i = 0; i < n; ++i) L[i] = static_cast<float>(dist(L[i]));
+            distortInPlace(L, n, dist);
             if (same) std::memcpy(R, L, n * sizeof(float));
-            else
-                for (uint32_t i = 0; i < n; ++i) R[i] = static_cast<float>(dist(R[i]));
+            else distortInPlace(R, n, dist);
         }
         if (!rest) {  // dry: two plain loops the compiler vectorizes
             for (uint32_t i = 0; i < n; ++i) {
@@ -1785,6 +1784,21 @@ private:
             top = std::max(top, std::max(a, b));
         }
         return std::bit_cast<float>(top);
+    }
+
+    // dist() on each of n samples, in place: the drive two samples at a time (Saturator::process2, the same bits).
+    template <class Dist>
+    void distortInPlace(float* x, uint32_t n, const Dist& dist) const noexcept {
+        uint32_t i = 0;
+        if (distType_ == 0) {
+            for (; i + 1 < n; i += 2) {
+                const double in[2] = {x[i], x[i + 1]};
+                double d[2];
+                saturator_.process2(in, d);
+                for (int j = 0; j < 2; ++j) x[i + j] = static_cast<float>(in[j] == 0.0 ? 0.0 : in[j] + (d[j] - in[j]) * distMix_);
+            }
+        }
+        for (; i < n; ++i) x[i] = static_cast<float>(dist(x[i]));
     }
 
     double distort(double x) const noexcept {
