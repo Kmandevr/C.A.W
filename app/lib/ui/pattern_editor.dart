@@ -32,6 +32,8 @@ import 'widgets.dart';
 import 'arrange/track_color.dart';
 import 'glass.dart';
 import 'adaptive_sheet.dart';
+import 'frame/frame_widgets.dart' show ScrollFade;
+import 'haptics.dart';
 
 enum PatternTool { draw, select, curve, erase }
 
@@ -2307,7 +2309,12 @@ class _Toolbar extends StatelessWidget {
     if (icon != null) {
       return IconButton(
         tooltip: _tip(r),
-        onPressed: enabled ? () => onRun(r) : null,
+        onPressed: enabled
+            ? () {
+                Haptics.tap();
+                onRun(r);
+              }
+            : null,
         icon: Icon(icon, color: isOn(r.id) ? Neon.yellow : Neon.dim),
       );
     }
@@ -2323,9 +2330,13 @@ class _Toolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The tools scroll; zoom, full screen and ⋯ (generators, lanes, MIDI import) stay pinned at the end so they are
+    // never hidden past the edge on a phone, and a fade says there are more tools to scroll to.
     return SizedBox(
       height: 48,
-      child: ListView(scrollDirection: Axis.horizontal, children: [
+      child: Row(children: [
+        Expanded(child: ScrollFade(child: SingleChildScrollView(key: const ValueKey('roll-toolbar'), scrollDirection: Axis.horizontal,
+          child: Row(children: [
         for (final r in items)
           if (r.isMacro || !_notBuilt.contains(r.id)) _item(r),
         if (selectedCount > 0) ...[
@@ -2342,6 +2353,7 @@ class _Toolbar extends StatelessWidget {
             style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
           ),
         ],
+        ])))),
         IconButton(
           key: const ValueKey('roll-zoom'),
           tooltip: 'Zoom (or pinch; Ctrl + wheel)',

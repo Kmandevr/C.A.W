@@ -45,7 +45,7 @@ const startCards = [
   StartCard('new effect', Icons.tune, Neon.pink, 'New effect', 'C++ that shapes a track\'s sound',
       'void process(StereoProcessBlock& b)\n  out[i] = in[i] * drive;'),
   StartCard('new pattern', Icons.queue_music, Neon.yellow, 'New pattern', 'Notes for a track, as text or a piano roll',
-      '// at  note  len  vel\n0     C4    1/4  100'),
+      '// at  note  len  vel\n0     C4    1/4  0.8'),
 ];
 
 /// No tab open: what Build is for, the starting cards, examples, the Library and the project's own code.

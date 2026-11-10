@@ -578,3 +578,56 @@ class _SlideInState extends State<SlideIn> with SingleTickerProviderStateMixin {
     return SlideTransition(position: Tween(begin: widget.from, end: Offset.zero).animate(_t), child: fade);
   }
 }
+
+/// A horizontal scroller with soft fades at the edges that have more past them, so hidden buttons are findable.
+class ScrollFade extends StatefulWidget {
+  const ScrollFade({super.key, required this.child});
+  final SingleChildScrollView child;
+
+  @override
+  State<ScrollFade> createState() => _ScrollFadeState();
+}
+
+class _ScrollFadeState extends State<ScrollFade> {
+  bool _left = false, _right = false;
+
+  bool _onMetrics(ScrollMetrics m) {
+    final l = m.pixels > m.minScrollExtent + 1, r = m.pixels < m.maxScrollExtent - 1;
+    if (l != _left || r != _right) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() { _left = l; _right = r; });
+      });
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget fade(bool left) => Positioned(
+          top: 0, bottom: 0, left: left ? 0 : null, right: left ? null : 0, width: 28,
+          child: IgnorePointer(child: DecoratedBox(
+            key: ValueKey(left ? 'scroll-fade-left' : 'scroll-fade-right'),
+            decoration: BoxDecoration(gradient: LinearGradient(
+              begin: left ? Alignment.centerRight : Alignment.centerLeft,
+              end: left ? Alignment.centerLeft : Alignment.centerRight,
+              colors: [Neon.bg.withValues(alpha: 0), Neon.bg.withValues(alpha: 0.85)],
+            )),
+            child: Align(
+              alignment: left ? Alignment.centerLeft : Alignment.centerRight,
+              child: Icon(left ? Icons.chevron_left : Icons.chevron_right, size: 14, color: Neon.dim),
+            ),
+          )),
+        );
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (n) => _onMetrics(n.metrics),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (n) => _onMetrics(n.metrics),
+        child: Stack(children: [
+          widget.child,
+          if (_left) fade(true),
+          if (_right) fade(false),
+        ]),
+      ),
+    );
+  }
+}

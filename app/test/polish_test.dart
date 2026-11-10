@@ -9,9 +9,9 @@ import 'package:caw/ui/arrange/focus_panel.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
-import 'package:caw/platform/haptics_device.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/haptics.dart';
+import 'package:caw/ui/pattern_editor.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -170,6 +170,27 @@ void main() {
       await tester.pump();
       expect(sections.current, Section.build);
       expect(sections.activeBuildTab, BuildTab(BuildTabKind.caw, pattern.id));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    });
+  });
+
+  group('Piano roll', () {
+    testWidgets('on a phone zoom, full screen and More stay on screen, and the tools fade where they scroll', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final m = ModuleDoc(id: 'line', name: 'line', source: '---\nkind: pattern\n---\n0 C4 1/4 0.8\n');
+      s.project.modules.add(m);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
+      await tester.pump();
+      await tester.pump();
+      for (final tip in ['More', 'Full screen']) {
+        final r = tester.getRect(find.byTooltip(tip));
+        expect(r.right, lessThanOrEqualTo(390), reason: tip);
+      }
+      expect(find.byKey(const ValueKey('roll-zoom')).hitTestable(), findsOneWidget);
+      expect(find.byKey(const ValueKey('scroll-fade-right')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
     });
