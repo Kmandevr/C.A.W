@@ -6,6 +6,10 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: No fixed polyphony cap; the program sets its own (owner)
+
+**Decision (owner):** "remove the cap on how many notes a synth can play at once unless it's specified in the program; if someone wants to crash the program by abusing it, let them." The engine imposes no practical limit on held notes or note events: its note lists are sized very large when an instrument is set up (never grown on the audio thread, which would cause dropouts). A C++ instrument chooses its own voice count (`caw::VoicePool<Voice, N>`); the built-in instruments get generous counts. Overload is the user's responsibility, not a guarded limit.
+
 ## 2026-11-10: Owner feedback on the open beta (look and feel)
 
 **Owner, after trying the APK:** most things feel okay for now. Changes asked for (not built yet):
