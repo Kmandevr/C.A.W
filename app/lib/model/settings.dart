@@ -459,12 +459,22 @@ class Settings extends ChangeNotifier {
     await tmp.rename(f.path);
   }
 
+  /// True while [adjust] tells its listeners: a continuous control on the Settings page is moving, which the app's
+  /// frame doesn't need to rebuild for (the page shows it).
+  bool get adjusting => _adjusting;
+  bool _adjusting = false;
+
   /// Changes settings and shows them without saving, for continuous controls; [save] when the drag ends.
   void adjust(void Function(Settings) change) {
     change(this);
     Neon.active = activeTheme;
     _applyPerformanceMode();
-    notifyListeners();
+    _adjusting = true;
+    try {
+      notifyListeners();
+    } finally {
+      _adjusting = false;
+    }
   }
 
   /// Changes settings, shows them and saves them.

@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../feedback.dart';
+import '../frame/frame_widgets.dart' show Dormant;
 import '../glass.dart';
 import '../haptics.dart';
 import '../motion.dart';
@@ -70,7 +71,8 @@ class _DockViewState extends State<DockView> {
             child: LayoutBuilder(
               builder: (c, box) => MediaQuery(
                 data: MediaQuery.of(c).copyWith(size: box.biggest),
-                child: Builder(builder: (c) => widget.panelBuilder(c, id)),
+                // A tab out of sight doesn't rebuild until it is shown again.
+                child: Dormant(awake: shown, child: Builder(builder: (c) => widget.panelBuilder(c, id))),
               ),
             ),
           ),

@@ -277,6 +277,11 @@ class _ShellState extends State<Shell> {
         },
       );
 
+  /// What the transport shows from the app state: it rebuilds only when one of these changes (frame_widgets.dart,
+  /// Selected), not on every app-state change.
+  Object _transportLook() => (s.transportOn, s.canUndo, s.canRedo, s.pausedStep, s.project, s.project.bpm,
+      s.project.name, LiveMidi.current, AutomationWriter.current);
+
   Widget? _banner() => s.engineError != null || s.audioError != null || s.openError != null
       ? Container(
           width: double.infinity,
@@ -288,16 +293,19 @@ class _ShellState extends State<Shell> {
 
   /// Desktop and tablets: the rail, the transport bar and the docking panels.
   Widget _desktop(BuildContext context, Map<String, Widget> screens) => Row(children: [
-        SectionRail(
-          current: sectionOfPanel(_dock.keyPanel),
-          onSelect: (section) {
-            _sections.show(section);
-            _dock.reveal(panelOfSection(section));
-          },
+        Selected(
+          select: () => sectionOfPanel(_dock.keyPanel),
+          builder: (_) => SectionRail(
+            current: sectionOfPanel(_dock.keyPanel),
+            onSelect: (section) {
+              _sections.show(section);
+              _dock.reveal(panelOfSection(section));
+            },
+          ),
         ),
         Expanded(
           child: Column(children: [
-            _TransportBar(state: s, dock: _dock),
+            Selected(select: _transportLook, builder: (_) => _TransportBar(state: s, dock: _dock)),
             ?_banner(),
             Expanded(
               child: LayoutBuilder(
@@ -381,7 +389,7 @@ class _ShellState extends State<Shell> {
           iconButtonTheme: IconButtonThemeData(style: small.merge(Theme.of(context).iconButtonTheme.style)),
         ),
         child: Row(children: [
-          SectionRail(
+          Selected(select: () => (_sections.current, pad, s.project.name), builder: (_) => SectionRail(
             compact: true,
             inset: EdgeInsets.only(left: pad.left, top: pad.top, bottom: pad.bottom),
             current: _sections.current,
@@ -401,14 +409,14 @@ class _ShellState extends State<Shell> {
               icon: const Icon(Icons.more_vert),
               onPressed: () => _showTools(context),
             )),
-          ),
+          )),
           Expanded(
             child: Column(children: [
               SizedBox(height: pad.top),
               ?_banner(),
               Expanded(child: Padding(padding: EdgeInsets.only(right: pad.right), child: body)),
               if (!keyboard)
-                BottomTransport(
+                Selected(select: () => (_transportLook(), pad), builder: (_) => BottomTransport(
                   state: s,
                   midi: LiveMidi.current,
                   compact: true,
@@ -419,13 +427,14 @@ class _ShellState extends State<Shell> {
                     _CpuReadout(state: s),
                     const SizedBox(width: 8),
                   ],
-                ),
+                )),
             ]),
           ),
         ]),
       );
     }
-    final status = _StatusRow(state: s, onTools: () => _showTools(context));
+    final status = Selected(select: () => (s.project, s.project.name, s.project.bpm),
+        builder: (_) => _StatusRow(state: s, onTools: () => _showTools(context)));
     final bar = Glass.active ? Neon.panel.withValues(alpha: 0.6) : Neon.panel;
     return Column(children: [
       // The system status bar's strip keeps the bar colour; the status row tucks away under it.
@@ -440,8 +449,10 @@ class _ShellState extends State<Shell> {
       Expanded(child: Padding(padding: EdgeInsets.only(left: pad.left, right: pad.right), child: body)),
       if (_reach) status,
       if (!keyboard) ...[
-        BottomTransport(state: s, midi: LiveMidi.current, inset: EdgeInsets.only(left: pad.left, right: pad.right)),
-        SectionBar(sections: _sections, bottomInset: pad.bottom, onReach: () => setState(() => _reach = true)),
+        Selected(select: () => (_transportLook(), pad), builder: (_) =>
+            BottomTransport(state: s, midi: LiveMidi.current, inset: EdgeInsets.only(left: pad.left, right: pad.right))),
+        Selected(select: () => (_sections.current, pad.bottom), builder: (_) =>
+            SectionBar(sections: _sections, bottomInset: pad.bottom, onReach: () => setState(() => _reach = true))),
       ],
     ]);
   }
@@ -526,12 +537,24 @@ class _CpuReadout extends StatelessWidget {
   final AppState state;
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<int>(
-        valueListenable: state.tick,
-        builder: (context, _, _) {
-          final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-          return Text('CPU $cpu%', style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim));
-        },
+  Widget build(BuildContext context) => SizedBox(
+        // A live island (widgets.dart) of a fixed size: read about 30 times a second while playing, it rebuilds, lays
+        // out and repaints alone, not the bar around it.
+        width: 58,
+        height: 16,
+        child: LiveIsland(
+          child: ValueListenableBuilder<int>(
+            valueListenable: state.tick,
+            builder: (context, _, _) {
+              final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
+              return Align(
+                alignment: Alignment.centerRight,
+                child: Text('CPU $cpu%', maxLines: 1, softWrap: false,
+                    style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim)),
+              );
+            },
+          ),
+        ),
       );
 }
 
@@ -616,24 +639,25 @@ class _TransportBar extends StatelessWidget {
         Widget name(Widget c) =>
             narrow ? ConstrainedBox(constraints: const BoxConstraints(maxWidth: 120), child: c) : Expanded(child: c);
         final tail = <Widget>[
-          ValueListenableBuilder<int>(
-            valueListenable: state.tick,
-            builder: (context, _, _) {
-              final m = state.meters;
-              final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-              return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-                _BpmButton(state: state),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+            _BpmButton(state: state),
+            // The position and CPU change about 30 times a second while playing: a live island (widgets.dart).
+            SizedBox(width: 170, height: 15, child: LiveIsland(child: ValueListenableBuilder<int>(
+              valueListenable: state.tick,
+              builder: (context, _, _) {
+                final m = state.meters;
+                final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
                 // Paused, it shows where play will resume.
-                Text(m.playing
+                return Align(alignment: Alignment.centerRight, child: Text(maxLines: 1, softWrap: false, m.playing
                     ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
                     : state.pausedStep != null
                         ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
                           ' · CPU $cpu%'
                     : 'CPU $cpu%',
-                    style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)),
-              ]);
-            },
-          ),
+                    style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)));
+              },
+            ))),
+          ]),
           // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
           Pressable(child: IconButton(
             key: const ValueKey('transport-undo'),

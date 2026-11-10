@@ -11,6 +11,7 @@ import '../../model/files_catalog.dart';
 import '../../model/pattern_doc.dart';
 import '../builder_screen.dart';
 import '../file_manager_screen.dart';
+import '../frame/frame_widgets.dart' show AwakeListenableBuilder;
 import '../frame/sections.dart';
 import '../pattern_fields.dart';
 import '../glass.dart';
@@ -205,7 +206,8 @@ class _BuildSectionState extends State<BuildSection> {
   @override
   Widget build(BuildContext context) {
     final controller = _controller(context);
-    return ListenableBuilder(
+    // Asleep while Build is behind another section (frame_widgets.dart).
+    return AwakeListenableBuilder(
       listenable: Listenable.merge([controller, s]),
       builder: (context, _) {
         final tabs = controller.buildTabs.where(_exists).toList();
@@ -216,7 +218,7 @@ class _BuildSectionState extends State<BuildSection> {
           final wide = box.maxWidth >= 720 && (box.maxWidth > box.maxHeight || box.maxWidth >= 900);
           final showExplorer = wide && (_explorer ?? box.maxWidth >= 900);
           // The tab strip follows the open component's current file (its label shows it).
-          final strip = ListenableBuilder(
+          final strip = AwakeListenableBuilder(
             listenable: workbench ?? s,
             builder: (context, _) => _TabStrip(
               tabs: [

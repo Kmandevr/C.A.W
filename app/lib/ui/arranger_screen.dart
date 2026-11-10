@@ -997,7 +997,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             if (drag != null) SizedBox(width: width,
               child: NewTrackZone(key: drag.newTrackLane, state: s, drag: drag, height: zoneH, stepW: stepW)),
           ])),
-          Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
+          // A live island (widgets.dart): the line moves about 30 times a second while playing, and without it the
+          // timeline around it would lay out and repaint with it.
+          Positioned.fill(child: IgnorePointer(child: LiveIsland(child: ValueListenableBuilder<int>(
             valueListenable: s.tick,
             builder: (context, _, _) {
               // Stopped, a dimmer line shows where play starts and Split cuts (REAPER's edit cursor).
@@ -1005,7 +1007,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
               return CustomPaint(painter: _PlayheadPainter(stepW,
                 playing ? endPosition(s, p, s.meters.loopLength) : s.playheadStep, stopped: !playing));
             },
-          ))),
+          )))),
           if (!pinned) Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<Rect?>(
             valueListenable: _marquee,
             builder: (context, box, _) {

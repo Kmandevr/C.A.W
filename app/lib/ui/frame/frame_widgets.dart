@@ -1,5 +1,6 @@
 // The frame's pieces: the section bar (phone portrait), the rail (landscape, tablet, desktop), the bottom transport
 // (play, stop, record, undo; drag to scrub) and the slim top status row.
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
@@ -10,6 +11,7 @@ import '../glass.dart';
 import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
+import '../widgets.dart' show LiveIsland;
 import 'live_keys.dart';
 import 'record_tools.dart';
 import 'sections.dart';
@@ -51,7 +53,8 @@ class TuckAway extends StatelessWidget {
           curve: Curves.easeOutCubic,
           alignment: Alignment.bottomCenter,
           heightFactor: 1 - hidden,
-          child: Opacity(opacity: (1 - 0.7 * hidden).clamp(0.0, 1.0), child: child),
+          // An Opacity only while it fades: at 1 it would still cost a layer on every repaint of the bar.
+          child: hidden > 0 ? Opacity(opacity: (1 - 0.7 * hidden).clamp(0.0, 1.0), child: child) : child,
         ),
       );
     }
@@ -267,7 +270,8 @@ class _BottomTransportState extends State<BottomTransport> {
             onPressed: s.canRedo ? s.redo : null,
           )),
           Expanded(
-            child: Center(
+            // A live island (widgets.dart): the position changes about 30 times a second while playing.
+            child: SizedBox.expand(child: LiveIsland(child: Center(
               child: _scrubAt != null
                   ? Text('→ ${(_scrubAt! ~/ p.stepsPerBar) + 1}.1', style: Neon.code(size: 13, color: Neon.blue))
                   : ValueListenableBuilder<int>(
@@ -275,7 +279,7 @@ class _BottomTransportState extends State<BottomTransport> {
                       builder: (context, _, _) => Text(midi != null && midi.countInLeft > 0 ? 'Count ${midi.countInLeft}' : _position(),
                           style: Neon.code(size: 13, color: s.meters.playing ? Neon.text : Neon.dim)),
                     ),
-            ),
+            ))),
           ),
           ...widget.extras,
           if (writer != null) AutomateButton(writer: writer, state: s, size: 34),
@@ -413,10 +417,130 @@ class _SectionSwitcherState extends State<SectionSwitcher> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final stack = IndexedStack(index: widget.index, children: widget.children);
+    // The sections behind keep their state but don't rebuild, and their animations stop, until they come forward.
+    final stack = IndexedStack(index: widget.index, children: [
+      for (var i = 0; i < widget.children.length; i++) Dormant(awake: i == widget.index, child: widget.children[i]),
+    ]);
     final fade = FadeTransition(opacity: _curve, child: stack);
     return Motion.of(context) == MotionLevel.full ? SlideTransition(position: _rise, child: fade) : fade;
   }
+}
+
+/// A part of the screen that is out of sight (a section behind, a dock tab not shown): while not [awake] it keeps
+/// showing the child it last had, so an app-state change rebuilds only what is on screen, and its tickers stop.
+/// Awake again, it takes the current child and catches up in one build.
+class Dormant extends StatefulWidget {
+  const Dormant({super.key, required this.awake, required this.child});
+  final bool awake;
+  final Widget child;
+
+  @override
+  State<Dormant> createState() => _DormantState();
+}
+
+class _DormantState extends State<Dormant> {
+  late Widget _shown = widget.child;
+
+  @override
+  Widget build(BuildContext context) {
+    // The same widget instance as last time is not rebuilt: that is what keeps a sleeping subtree still.
+    if (widget.awake) _shown = widget.child;
+    return TickerMode(enabled: widget.awake, child: _shown);
+  }
+}
+
+/// Builds [builder] again only when [select] gives a different value: a frame bar rebuilt with the shell keeps its
+/// last widget when nothing it shows changed (an app-state change elsewhere), so it doesn't rebuild at all. [select]
+/// must cover everything [builder] reads from outside (the widgets built read the theme and the like themselves).
+class Selected extends StatefulWidget {
+  const Selected({super.key, required this.select, required this.builder});
+  final Object? Function() select;
+  final WidgetBuilder builder;
+
+  @override
+  State<Selected> createState() => _SelectedState();
+}
+
+class _SelectedState extends State<Selected> {
+  Object? _value;
+  Widget? _built;
+
+  @override
+  Widget build(BuildContext context) {
+    final v = widget.select();
+    if (_built == null || v != _value) {
+      _value = v;
+      _built = widget.builder(context);
+    }
+    return _built!;
+  }
+}
+
+/// A [ListenableBuilder] that sleeps while its part of the screen is [Dormant] (its tickers off): a notification
+/// then only marks it stale, and it rebuilds once when it is shown again. For screens that listen to the app state
+/// themselves, so a section behind doesn't rebuild on every change.
+class AwakeListenableBuilder extends StatefulWidget {
+  const AwakeListenableBuilder({super.key, required this.listenable, required this.builder, this.child});
+  final Listenable listenable;
+  final TransitionBuilder builder;
+  final Widget? child;
+
+  @override
+  State<AwakeListenableBuilder> createState() => _AwakeListenableBuilderState();
+}
+
+class _AwakeListenableBuilderState extends State<AwakeListenableBuilder> {
+  ValueListenable<TickerModeData>? _awake;
+  bool _stale = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.listenable.addListener(_changed);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final awake = TickerMode.getValuesNotifier(context);
+    if (awake == _awake) return;
+    _awake?.removeListener(_woke);
+    _awake = awake..addListener(_woke);
+  }
+
+  @override
+  void didUpdateWidget(AwakeListenableBuilder old) {
+    super.didUpdateWidget(old);
+    if (old.listenable != widget.listenable) {
+      old.listenable.removeListener(_changed);
+      widget.listenable.addListener(_changed);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.listenable.removeListener(_changed);
+    _awake?.removeListener(_woke);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (_awake?.value.enabled ?? true) {
+      setState(() {});
+    } else {
+      _stale = true;
+    }
+  }
+
+  void _woke() {
+    if ((_awake?.value.enabled ?? true) && _stale) {
+      _stale = false;
+      setState(() {});
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, widget.child);
 }
 
 /// A panel that slides into place when it first appears: from [from] (a fraction of its own size) with a fade,
