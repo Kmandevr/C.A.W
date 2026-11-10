@@ -213,9 +213,8 @@ class _MasterStrip extends StatelessWidget {
           Expanded(child: Row(children: [
             Expanded(child: _Fader(key: const ValueKey('fader-master'), value: s.project.master, color: Neon.pink,
               label: 'Master level', onChanged: s.setMaster)),
-            SizedBox(width: 10, child: PeakMeter(state: s, read: () => s.meters.peakL, color: Neon.blue, vertical: true)),
-            const SizedBox(width: 3),
-            SizedBox(width: 10, child: PeakMeter(state: s, read: () => s.meters.peakR, color: Neon.green, vertical: true)),
+            SizedBox(width: 22, child: PeakMeter(key: const ValueKey('master-meter'), state: s, read: () => s.meters.peakL,
+              readRight: () => s.meters.peakR, color: Neon.blue, vertical: true)),
             const SizedBox(width: 4),
           ])),
           PeakReadout(key: const ValueKey('master-peak-l'), state: s, read: () => s.meters.peakL,

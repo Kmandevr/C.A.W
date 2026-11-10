@@ -127,6 +127,30 @@ class SettingsPage extends StatelessWidget {
                 onChangeEnd: (_) => settings.save(),
               ),
             ),
+            // Meters fall like REAPER's, at a rate in dB per second (owner, 2026-11-10: faster than the old 24).
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.align_vertical_bottom, color: Neon.blue),
+              title: const Text('Meter fall'),
+              subtitle: Text('${settings.meterFall.round()} dB per second', style: TextStyle(color: Neon.dim)),
+              trailing: DropdownButton<double>(
+                key: const ValueKey('meter-fall'),
+                value: Settings.meterFalls.contains(settings.meterFall) ? settings.meterFall : null,
+                underline: const SizedBox.shrink(),
+                items: [
+                  for (final v in Settings.meterFalls)
+                    DropdownMenuItem(value: v, child: Text(switch (v) {
+                      24.0 => 'Slow',
+                      48.0 => 'Medium',
+                      72.0 => 'Fast',
+                      _ => 'Very fast',
+                    })),
+                ],
+                onChanged: (v) {
+                  if (v != null) settings.update((s) => s.meterFall = v);
+                },
+              ),
+            ),
             const Heading('Performance'),
             InputDecorator(
               decoration: const InputDecoration(labelText: 'Performance profile'),

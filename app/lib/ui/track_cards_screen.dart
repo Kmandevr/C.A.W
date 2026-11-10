@@ -103,7 +103,8 @@ class _ProjectStrip extends StatelessWidget {
             const SizedBox(height: 10),
             PeakMeter(
                 state: state,
-                read: () => state.meters.peakL > state.meters.peakR ? state.meters.peakL : state.meters.peakR,
+                read: () => state.meters.peakL,
+                readRight: () => state.meters.peakR,
                 color: Neon.blue),
           ]),
         ),

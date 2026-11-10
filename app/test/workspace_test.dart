@@ -82,6 +82,35 @@ void main() {
     expect(PeakMeter.fraction(PeakMeter.db(2.0)), 1.0);
   });
 
+  testWidgets('a stereo meter shows left and right apart, and the fall rate follows the setting', (tester) async {
+    final wall = PeakMeter.clock, start = tester.binding.clock.now(), fall = PeakMeter.fallDbPerSecond;
+    addTearDown(() { PeakMeter.clock = wall; PeakMeter.fallDbPerSecond = fall; });
+    PeakMeter.clock = () => tester.binding.clock.now().difference(start);
+    final settings = Settings()..fromJson({'meter_fall': 96});
+    expect(settings.meterFall, 96);
+    expect(PeakMeter.fallDbPerSecond, fall, reason: 'fromJson alone does not apply it');
+    settings.adjust((x) => x.meterFall = 96);
+    expect(PeakMeter.fallDbPerSecond, 96);
+    var l = 0.0, r = 0.0;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: PeakMeter(
+        state: state, read: () => l, readRight: () => r, color: Colors.green))));
+    PeakMeterState m() => tester.state<PeakMeterState>(find.byType(PeakMeter));
+    expect(find.byType(Bar), findsNWidgets(2));
+    l = 0.5;
+    r = 0.25;
+    state.tick.value++;
+    await tester.pump();
+    expect(m().shownDb, closeTo(-6.02, 0.01));
+    expect(m().shownRightDb, closeTo(-12.04, 0.01));
+    l = r = 0;
+    state.tick.value++;
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(m().shownDb, closeTo(-6.02 - 96 * .266, 0.05));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('peak meters rise at once, fall on wall-clock time, hold the peak and show a clip', (tester) async {
     final wall = PeakMeter.clock, start = tester.binding.clock.now();
     addTearDown(() => PeakMeter.clock = wall);

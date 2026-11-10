@@ -1388,7 +1388,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
               ),
             ),
           ),
-          SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.meters.peakL > s.meters.peakR ? s.meters.peakL : s.meters.peakR, color: Neon.blue)),
+          SizedBox(width: 120, child: PeakMeter(state: s, read: () => s.meters.peakL, readRight: () => s.meters.peakR, color: Neon.blue)),
         ]),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
