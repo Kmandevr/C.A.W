@@ -6,6 +6,19 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Owner feedback on the open beta (look and feel)
+
+**Owner, after trying the APK:** most things feel okay for now. Changes asked for (not built yet):
+- **Meters** work about the way REAPER's do, and fall faster than today's 24 dB/s while staying smooth. [Fact, 2026-11-10] REAPER sets meter decay in dB/s as a preference; its factory default is not confirmed here, so the app gets a decay setting with a faster default.
+- **Look:** the whole app a little darker, with less green in the background.
+- **Arrange:** track headers can be resized (drag their edge).
+- **Zoom** in Arrange and the piano roll: pinch with two fingers, on-screen buttons or a slider, time and height zoom separately, and Ctrl + scroll on desktop.
+- **Build feels like VS Code:** an explorer sidebar (the Files browser; a drawer on the phone) replaces the row of module chips, the code editor gets the rest of the space (remove what isn't needed), one slim top bar with open-file tabs and Build.
+- **New files:** only broad templates (pattern, instrument, effect, plus plain formats such as JSON or text), hidden behind a "+ New" dropdown.
+- **Pattern files:** the header block (`---`, `caw: 1`, kind, name, summary, length) is hidden from the text and edited as small fields above the notes.
+- **The Library reference** is liked but out of date: it should cover the C++ SDK and Library.
+- A good sample pack comes later; the owner's focus now is how things feel and work.
+
 ## 2026-11-10: Installables move to GitHub Releases once the current work is done (owner)
 
 **Decision (owner):** once the current roadmap work is done, builds are published as GitHub Releases (a tagged version with the APK and the Windows build attached) instead of being picked up from Actions artifacts. [Proposal, not built] Until then, installables stay Actions artifacts. A release needs a stable signing key (the repository's Android signing secrets) so each APK installs over the last; the version comes from `app/pubspec.yaml` (`app/lib/version.dart` matches it).
