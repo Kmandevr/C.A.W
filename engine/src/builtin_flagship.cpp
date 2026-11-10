@@ -1627,14 +1627,15 @@ private:
         }
         // Both sides the same (every voice centred: the bass, the acid line): the distortion, which holds no state,
         // runs on one and gives the other the same bits.
-        bool same = distOn_;
-        for (uint32_t i = 0; i < n && same; ++i) same = L[i] == R[i];
+        // Silence (between notes) stays silence through every type (what the sum below gives for a 0 in: +0).
+        const bool same = distOn_ && std::memcmp(L, R, n * sizeof(float)) == 0;
+        const auto dist = [&](double x) noexcept { return x == 0.0 ? 0.0 : x + (distort(x) - x) * distMix_; };
         for (uint32_t i = 0; i < n; ++i) {
             const double at = static_cast<double>(first + i);
             double l = L[i], r = R[i];
             if (distOn_) {
-                l += (distort(l) - l) * distMix_;
-                r = same ? l : r + (distort(r) - r) * distMix_;
+                l = dist(l);
+                r = same ? l : dist(r);
             }
             if (eqOn_) {
                 l += (eqL_.process(l) - l) * eqMix_;
