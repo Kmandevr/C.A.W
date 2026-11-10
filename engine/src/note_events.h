@@ -16,14 +16,17 @@ namespace caw {
 // The Engine turns a track's pattern notes and note previews into calls here; the instrument's
 // ComponentChain passes events() to the component and clears them after each block.
 //
-// No practical polyphony cap (owner, 2026-11-10: a program sets its own polyphony): 4,096 notes held at
-// once and 16,384 events a block. The held notes are kept packed, so the per-block work follows the notes
-// actually held, not the capacity. Room for every held note's off is kept back from note-ons and per-note
-// motion, so a full block can drop a pitch or pressure update but never an off (no stuck note).
+// No practical polyphony cap (owner, 2026-11-10: a program sets its own polyphony): 1,024 notes held at
+// once on one track and 4,096 events a block, enough for every held note to end and start again in one block
+// with room to spare, in 360 KB per instrument track (4,096 notes and 16,384 events took 1.5 MB, about 94 MB at
+// 64 tracks; second audio review, 2026-11-10). The held notes are kept packed, so the per-block work follows
+// the notes actually held, not the capacity. Room for every held note's off is kept back from note-ons and
+// per-note motion, so a full block can drop a pitch or pressure update but never an off (no stuck note).
 class NoteEvents {
 public:
-    static constexpr uint32_t kCapacity = 16384;  // events per block; more are dropped and counted
-    static constexpr uint32_t kMaxHeld = 4096;    // notes held at once; a new one past it ends the oldest
+    static constexpr uint32_t kCapacity = 4096;  // events per block; more are dropped and counted
+    static constexpr uint32_t kMaxHeld = 1024;   // notes held at once; a new one past it ends the oldest
+    static_assert(kCapacity >= 3 * kMaxHeld, "room for every held note's off, and as many ons again, in one block");
 
     enum class Source : uint8_t { Pattern, Orphan, Preview };
     struct Held {

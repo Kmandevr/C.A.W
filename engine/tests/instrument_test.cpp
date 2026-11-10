@@ -169,6 +169,25 @@ TEST(a_note_list_is_bounded_and_sorted_and_counts_what_overflows) {
     CHECK(notes->findPreview(1) != nullptr);
 }
 
+TEST(a_note_list_holds_plenty_of_notes_in_little_memory) {
+    // Second audio review, fix 4: 4,096 held notes and 2 x 16,384 events came to about 1.5 MB per instrument
+    // track (about 94 MB at 64 tracks, and twice that for a track during a rebuild). No practical polyphony cap
+    // stays (owner, 2026-11-10): a thousand notes at once on one track, room for all their offs and ons again
+    // in one block, in a few hundred KB.
+    CHECK(NoteEvents::kMaxHeld >= 1024u);
+    CHECK(NoteEvents::kCapacity >= 3u * NoteEvents::kMaxHeld);  // every held note ends and starts again in one block
+    CHECK(NoteEvents::kBytes <= 512u * 1024u);
+    // Every held note ends and a new one starts in the same block: every off and every on arrives.
+    auto notes = std::make_unique<NoteEvents>();
+    for (uint32_t i = 0; i < NoteEvents::kMaxHeld; ++i)
+        notes->on(0, NoteEvents::Source::Preview, 0, 0, static_cast<int32_t>(i), 60, 1);
+    notes->clearEvents();
+    for (uint32_t i = 0; i < NoteEvents::kMaxHeld; ++i)
+        notes->on(1, NoteEvents::Source::Preview, 0, 0, static_cast<int32_t>(i), 62, 1);
+    CHECK_EQ(notes->count(), 2u * NoteEvents::kMaxHeld);
+    CHECK_EQ(notes->overflow(), 0u);
+}
+
 TEST(a_full_note_list_still_delivers_every_off) {
     // Audio review fix 5: a block whose list filled up (with per-note motion) dropped a note-off: a stuck note.
     // Room for every held note's off is now kept back from note-ons and motion.
@@ -206,16 +225,17 @@ TEST(a_note_list_sorts_many_runs_in_frame_order_and_keeps_their_order) {
     }
 }
 
-TEST(an_instrument_can_hold_thousands_of_notes) {
-    // Owner, 2026-11-10: no practical polyphony cap from the host; a program sets its own.
+TEST(an_instrument_can_hold_a_thousand_notes) {
+    // Owner, 2026-11-10: no practical polyphony cap from the host; a program sets its own. A track holds 1,024
+    // notes at once (4,096 before the second audio review's memory fix, which took 1.5 MB per track).
     auto notes = std::make_unique<NoteEvents>();
-    for (uint32_t i = 0; i < 4000; ++i) notes->on(0, NoteEvents::Source::Pattern, i, 0, -1, 40 + i % 60, 1);
-    CHECK_EQ(notes->activeCount(), 4000u);
+    for (uint32_t i = 0; i < 1000; ++i) notes->on(0, NoteEvents::Source::Pattern, i, 0, -1, 40 + i % 60, 1);
+    CHECK_EQ(notes->activeCount(), 1000u);
     CHECK(notes->findPattern(0, 0) != nullptr);  // the first is still held
     CHECK_EQ(notes->overflow(), 0u);
     notes->clearEvents();
     notes->releaseAll(0, false);
-    CHECK_EQ(notes->count(), 4000u);
+    CHECK_EQ(notes->count(), 1000u);
     notes->clearEvents();
     CHECK_EQ(notes->activeCount(), 0u);
     uint32_t left = 0;
