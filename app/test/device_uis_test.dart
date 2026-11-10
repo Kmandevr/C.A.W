@@ -35,7 +35,7 @@ void main() {
   });
 
   AppState state(String id) {
-    final s = stateWith(id);
+    final s = stateWith(id, make: PreviewState.new);
     Motion.setting = MotionLevel.off; // the app state applies its settings' motion; visuals stand still for goldens
     states.add(s);
     return s;
@@ -311,6 +311,59 @@ void main() {
       await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('stereo-hero'))), const Offset(-50, 0));
       await tester.pumpAndSettle();
       expect(targetOf(s, 'org.caw.stereo.balance').value('pan'), lessThan(-0.1));
+      await close(tester);
+    });
+
+    testWidgets('kick: the pad plays its note while held; the shape drags decay, tune and punch', (tester) async {
+      final s = await open(tester, 'org.caw.drum.kick') as PreviewState;
+      final t = targetOf(s, 'org.caw.drum.kick');
+      final pad = await tester.startGesture(tester.getCenter(find.byKey(const ValueKey('pad-36'))));
+      await tester.pump();
+      expect(s.played.single.$1, 36);
+      expect(s.held, hasLength(1));
+      await pad.up();
+      await tester.pump();
+      expect(s.held, isEmpty);
+      final hero = tester.getRect(find.byKey(const ValueKey('kick-hero')));
+      await tester.dragFrom(hero.center, const Offset(60, -30));
+      await tester.dragFrom(Offset(hero.left + 20, hero.center.dy), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('decay'), greaterThan(0.35));
+      expect(t.value('tune'), greaterThan(48));
+      expect(t.value('punch'), greaterThan(0.6));
+      await close(tester);
+    });
+
+    testWidgets('snare and hats: halves and ends of the shape drag their own knobs; the hats have two pads', (tester) async {
+      var s = await open(tester, 'org.caw.drum.snare') as PreviewState;
+      var hero = tester.getRect(find.byKey(const ValueKey('snare-hero')));
+      await tester.dragFrom(Offset(hero.center.dx, hero.top + 30), const Offset(40, 0));
+      await tester.dragFrom(Offset(hero.center.dx, hero.bottom - 30), const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(targetOf(s, 'org.caw.drum.snare').value('snappy'), greaterThan(0.18));
+      expect(targetOf(s, 'org.caw.drum.snare').value('tune'), greaterThan(185));
+      await close(tester);
+      s = await open(tester, 'org.caw.drum.hats') as PreviewState;
+      hero = tester.getRect(find.byKey(const ValueKey('hats-hero')));
+      await tester.dragFrom(Offset(hero.right - 30, hero.center.dy), const Offset(-60, 0));
+      await tester.pumpAndSettle();
+      expect(targetOf(s, 'org.caw.drum.hats').value('open'), lessThan(0.3));
+      await tester.tap(find.byKey(const ValueKey('pad-46')));
+      await tester.tap(find.byKey(const ValueKey('pad-42')));
+      expect([for (final p in s.played) p.$1], [46, 42]);
+      await close(tester);
+    });
+
+    testWidgets('kit: a pad plays and picks its section', (tester) async {
+      final s = await open(tester, 'org.caw.drum.kit') as PreviewState;
+      await tester.tap(find.byKey(const ValueKey('pad-38')));
+      await tester.pumpAndSettle();
+      expect(s.played.single.$1, 38);
+      expect(find.text('SNARE'), findsWidgets);
+      final hero = tester.getRect(find.byKey(const ValueKey('kit-hero')));
+      await tester.dragFrom(hero.center, const Offset(50, 0));
+      await tester.pumpAndSettle();
+      expect(targetOf(s, 'org.caw.drum.kit').value('snare_snappy'), greaterThan(0.18));
       await close(tester);
     });
   });

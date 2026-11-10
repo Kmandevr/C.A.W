@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../engine/component_info.dart';
 import '../../model/arrange_fx.dart' show isBuiltinComponent;
 import '../../model/device_target.dart';
+import 'drums/drum_editors.dart';
 import 'effects/effect_editors.dart';
 import 'flagship/flagship_editor.dart';
 import 'generic_device_page.dart';
@@ -30,7 +31,8 @@ class DeviceEditors {
   DeviceEditors._();
 
   static final Map<String, DeviceEditorEntry> _byId = {
-    flagshipComponentId: const DeviceEditorEntry(flagshipSections),
+    flagshipComponentId: const DeviceEditorEntry(flagshipSections, family: DeviceFamily.synth),
+    ...drumEditors,
   };
 
   /// Editors chosen by a built-in effect's parameters (an EQ by its `bandN_` knobs, and so on), so the stock

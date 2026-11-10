@@ -65,8 +65,8 @@ class FakeDisplay extends DeviceDisplaySource {
 }
 
 /// An app state with one track holding [id] (as its instrument or as its only effect).
-AppState stateWith(String id) {
-  final s = AppState(settings: Settings());
+AppState stateWith(String id, {AppState Function()? make}) {
+  final s = make?.call() ?? AppState(settings: Settings());
   s.project = ProjectDoc(id: 'p', name: 'Devices', bpm: 120, modules: [], layers: [LayerDoc(id: 'a', name: 'Track', color: 2)]);
   s.componentCatalog.set(builtinInfos());
   final info = builtinInfo(id);
@@ -76,6 +76,22 @@ AppState stateWith(String id) {
     s.addNativeEffect(s.project.layers.first, id);
   }
   return s;
+}
+
+/// An app state that records note previews instead of playing them.
+class PreviewState extends AppState {
+  PreviewState() : super(settings: Settings());
+  final played = <(double pitch, double velocity)>[];
+  final held = <int>{};
+
+  @override
+  void previewOn(String layerId, int id, double pitch, double velocity) {
+    played.add((pitch, velocity));
+    held.add(id);
+  }
+
+  @override
+  void previewOff(int id) => held.remove(id);
 }
 
 /// The device [id] of [s]'s track.
