@@ -140,4 +140,14 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
     s.dispose();
   });
+  test('the undo steps keep at most maxChars of text, always the newest', () {
+    final h = ProjectHistory(maxChars: 10)..reset('aaaa');
+    for (final next in ['bbbb', 'cccc', 'dddd', 'eeeeeeeeeeeeeeee', 'f']) {
+      h.begin();
+      h.settle(next);
+    }
+    expect(h.undo('f'), 'eeeeeeeeeeeeeeee'); // over the cap alone, but the newest step stays
+    expect(h.undo('eeeeeeeeeeeeeeee'), isNull);
+    expect(h.redo('eeeeeeeeeeeeeeee'), 'f');
+  });
 }
