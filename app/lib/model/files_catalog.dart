@@ -77,14 +77,28 @@ class FileAsset {
 
   /// What dragging it (or picking it in the asset picker) carries; null when it can't go on a track.
   AssetDrag? get drag => switch (type) {
-        FileAssetType.builtinEffect => native!.role == 'instrument' || native!.role == 'generator'
+        // A built-in generator without the instrument shape (an event input, a stereo output) can't play a track.
+        FileAssetType.builtinEffect => native!.role == 'generator' && !native!.isInstrument
             ? null
-            : AssetDrag(AssetKind.nativeEffect, native!.id, name),
-        FileAssetType.cppComponent => cpp!.componentId.isEmpty ? null : AssetDrag(AssetKind.nativeEffect, cpp!.componentId, name),
-        FileAssetType.cawEffect || FileAssetType.cawGenerator => AssetDrag(AssetKind.cawModule, module!.id, name),
+            : AssetDrag(AssetKind.nativeEffect, native!.id, name, instrument: isInstrument),
+        FileAssetType.cppComponent => cpp!.componentId.isEmpty
+            ? null
+            : AssetDrag(AssetKind.nativeEffect, cpp!.componentId, name, instrument: isInstrument),
+        FileAssetType.cawEffect => AssetDrag(AssetKind.cawModule, module!.id, name),
+        FileAssetType.cawGenerator => AssetDrag(AssetKind.cawModule, module!.id, name, instrument: true),
         FileAssetType.pattern => AssetDrag(AssetKind.pattern, module!.id, name),
         FileAssetType.midiFile => AssetDrag(AssetKind.midiFile, midi!.id, name),
         FileAssetType.cppFile || FileAssetType.cawLibrary => null,
+      };
+
+  /// An instrument plays a track's notes: a native one by its descriptor (or, before a project C++ component is
+  /// built, by deriving from `caw::InstrumentProcessor`), and every .caw generator.
+  bool get isInstrument => switch (type) {
+        FileAssetType.builtinEffect => native!.isInstrument || native!.role == 'instrument',
+        FileAssetType.cppComponent => native?.isInstrument ??
+            cpp!.files.values.any((source) => source.contains('InstrumentProcessor')),
+        FileAssetType.cawGenerator => true,
+        _ => false,
       };
 
   /// The Build tab double-tap opens; null for built-ins (nothing to edit).
