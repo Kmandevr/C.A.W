@@ -3,6 +3,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arranger_screen.dart';
+import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -57,6 +58,16 @@ void main() {
       expect(find.byKey(const ValueKey('scroll-fade-right')), findsNothing);
       expect(find.byKey(const ValueKey('scroll-fade-left')), findsOneWidget);
       expect(find.byTooltip('Grid: clips snap to this'), findsOneWidget);
+    });
+  });
+
+  group('Automation', () {
+    testWidgets('empty lanes point to recording with Automate; tracks show their colour', (tester) async {
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: AutomationScreen(state: s))));
+      expect(find.byKey(const ValueKey('automate-hint')), findsOneWidget);
+      expect(find.textContaining('no .caw module parameters'), findsOneWidget);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: TrackAutomationPanel(state: s, layer: s.project.layers.first))));
+      expect(find.byKey(const ValueKey('automate-hint')), findsOneWidget);
     });
   });
 }

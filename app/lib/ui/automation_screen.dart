@@ -24,9 +24,12 @@ class AutomationScreen extends StatelessWidget {
           const Text('TRACK VOLUME AND PAN', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800, fontSize: 12)),
           for (final layer in tracks.where((l) => l.automation.isEmpty))
             Row(children: [
+              Container(width: 8, height: 8, margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: Neon.layer(layer.color))),
               Expanded(child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
               _AddLane(state: state, layer: layer),
             ]),
+          const _WriteHint(),
         ])),
     ]);
   }
@@ -46,9 +49,12 @@ class TrackAutomationPanel extends StatelessWidget {
     }
     return ListView(padding: const EdgeInsets.fromLTRB(8, 8, 8, 48), children: [
       if (layer.automation.isEmpty)
-        NeonPanel(color: Neon.blue, child: Row(children: [
-          const Expanded(child: Text('No lanes yet: add volume or pan automation.', style: TextStyle(color: Neon.dim))),
-          _AddLane(state: state, layer: layer),
+        NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Expanded(child: Text('No lanes yet: add volume or pan automation.', style: TextStyle(color: Neon.dim))),
+            _AddLane(state: state, layer: layer),
+          ]),
+          const _WriteHint(),
         ]))
       else
         _TrackAutomation(state: state, layer: layer),
@@ -100,8 +106,11 @@ class _ProjectAutomation extends StatelessWidget {
         ),
       ]),
       if (state.project.automation.isEmpty)
-        const Text('Add a module parameter or shared global to automate it across the song.',
-          style: TextStyle(color: Neon.dim, fontSize: 12)),
+        Text(options.isEmpty
+            ? 'This project has no .caw module parameters to automate here. Instrument and effect knobs are '
+              'automated on their track: see below.'
+            : 'Add a module parameter or shared global to automate it across the song.',
+          style: const TextStyle(color: Neon.dim, fontSize: 12)),
       for (final lane in state.project.automation)
         _ProjectAutomationLane(state: state, lane: lane),
     ]));
@@ -226,6 +235,22 @@ class _TrackAutomation extends StatelessWidget {
 }
 
 /// The + that adds a track's volume or pan lane.
+/// How to write automation by playing (the transport's Automate button), which the lane lists don't show.
+class _WriteHint extends StatelessWidget {
+  const _WriteHint();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.only(top: 6),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.fiber_manual_record, size: 12, color: Neon.pink),
+          SizedBox(width: 6),
+          Expanded(child: Text('Or record it: turn on Automate in the transport, play, and move any fader or knob.',
+              key: ValueKey('automate-hint'), style: TextStyle(color: Neon.dim, fontSize: 12))),
+        ]),
+      );
+}
+
 class _AddLane extends StatelessWidget {
   const _AddLane({required this.state, required this.layer});
   final AppState state;
