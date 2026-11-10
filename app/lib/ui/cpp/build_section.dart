@@ -15,8 +15,12 @@ import '../frame/frame_widgets.dart' show AwakeListenableBuilder;
 import '../frame/sections.dart';
 import '../pattern_fields.dart';
 import '../glass.dart';
+import '../haptics.dart';
 import '../theme.dart';
+import 'build_start.dart';
 import 'cpp_editor.dart';
+import 'cpp_library.dart';
+import 'quick_open.dart';
 
 /// Build's tabs are project C++ components (the C++ editor) and .caw modules and patterns (the module Builder).
 /// Wide screens (landscape or desktop) show the explorer as a sidebar that can be dragged wider or hidden
@@ -141,28 +145,98 @@ class _BuildSectionState extends State<BuildSection> {
       constraints: const BoxConstraints(minWidth: 230, maxWidth: 280),
       color: Neon.panel,
       items: [
-        item('pattern', Icons.piano, Neon.yellow, 'Pattern', 'Notes for a track to play'),
         item('instrument', Icons.piano_outlined, Neon.green, 'Instrument', 'C++: plays notes (a polyphonic sine)'),
         item('effect', Icons.tune, Neon.pink, 'Effect', 'C++: changes the sound (a pass-through)'),
+        item('pattern', Icons.queue_music, Neon.yellow, 'Pattern', 'Notes for a track to play'),
         item('text', Icons.notes, Neon.blue, 'Text file',
             cpp == null ? 'Open a C++ component to add one' : 'A file in ${cpp.name}: notes, a header…', enabled: cpp != null),
+        const PopupMenuDivider(),
+        item('start', Icons.home_outlined, Neon.dim, 'Start page', 'Examples, the Library, all your code'),
       ],
     );
     if (pick == null || !mounted) return;
     switch (pick) {
       case 'pattern':
-        // With its header at once (the header is fields, not text, so the file needs one), named like the module.
-        final id = s.addModule(Template('Pattern.caw', PatternDoc.blank().serialize()));
-        final m = s.project.module(id)!;
-        m.source = m.runSource = editPatternHeader(m.source, m.name, name: m.name) ?? m.source;
-        _open(c, BuildTab(BuildTabKind.caw, id));
+        _newPattern(c);
       case 'instrument' || 'effect':
         final doc = s.newCppEffect(instrument: pick == 'instrument');
         _open(c, BuildTab(BuildTabKind.cpp, doc.componentId));
       case 'text':
         if (cpp != null) await _newTextFile(s.cppWorkbench(cpp.id));
+      case 'start':
+        _showHome(c);
     }
   }
+
+  /// A new pattern, with its header at once (the header is fields, not text, so the file needs one), named like the
+  /// module, opened in a tab.
+  void _newPattern(SectionController c) {
+    final id = s.addModule(Template('Pattern.caw', PatternDoc.blank().serialize()));
+    final m = s.project.module(id)!;
+    m.source = m.runSource = editPatternHeader(m.source, m.name, name: m.name) ?? m.source;
+    _open(c, BuildTab(BuildTabKind.caw, id));
+  }
+
+  // ---------- quick switcher ----------
+
+  /// Ctrl+P (or the search button): the start page, the project's C++ files, patterns and .caw modules, and the
+  /// classes and functions of the open C++ file.
+  Future<void> _quickOpen(SectionController c, BuildTab? active) {
+    final items = <QuickItem>[];
+    final open = activeCppEditor;
+    final cpp = active?.kind == BuildTabKind.cpp ? s.cppComponent(active!.id) : null;
+    if (cpp != null && open != null) {
+      final w = s.cppWorkbench(cpp.id);
+      for (final sym in cppOutline(w.texts[w.currentFile] ?? '')) {
+        items.add(QuickItem('symbol ${sym.name} ${sym.line}', sym.name, '${sym.kind} · line ${sym.line + 1}',
+            sym.kind == 'function' ? Icons.functions : Icons.data_object, Neon.violet,
+            () => open.goToLine(sym.line),
+            group: 'In ${w.currentFile.split('/').last}'));
+      }
+    }
+    for (final comp in s.project.cppComponents) {
+      final instrument = cppIsInstrument(comp.files.values);
+      final files = s.cppWorkbench(comp.id).fileOrder;
+      for (final f in files) {
+        items.add(QuickItem('file ${comp.id}/$f', f.split('/').last, '${comp.name} › $f',
+            f.endsWith('.json') ? Icons.data_object : Icons.code, instrument ? Neon.green : Neon.pink, () {
+          _open(c, BuildTab(BuildTabKind.cpp, comp.componentId));
+          s.cppWorkbench(comp.id).selectFile(f);
+        }, group: 'C++ files'));
+      }
+    }
+    for (final m in s.project.modules) {
+      final pattern = s.isPattern(m.id);
+      items.add(QuickItem('mod ${m.id}', m.name, pattern ? 'pattern' : '.caw ${s.info[m.id]?.kind ?? 'module'}',
+          pattern ? Icons.queue_music : Icons.graphic_eq, pattern ? Neon.yellow : Neon.blue, () {
+        s.selectModule(m.id);
+        _open(c, BuildTab(BuildTabKind.caw, m.id));
+      }, group: pattern ? 'Patterns' : '.caw modules'));
+    }
+    items.add(QuickItem('start', 'Start page', 'new code, examples, the Library', Icons.home_outlined, Neon.dim,
+        () => _showHome(c), group: 'Build'));
+    Haptics.tap();
+    return showQuickOpen(context, items);
+  }
+
+  /// The C++ editor on screen, if one is.
+  CppEditorState? get activeCppEditor {
+    for (final k in _editorKeys.values) {
+      if (k.currentState?.mounted ?? false) return k.currentState;
+    }
+    return null;
+  }
+
+  final _editorKeys = <String, GlobalKey<CppEditorState>>{};
+
+  /// The start page in front of the open tabs (they stay open); it goes when a tab is opened or picked.
+  BuildTab? _homeOver;
+  bool _home = false;
+
+  void _showHome(SectionController c) => setState(() {
+        _home = true;
+        _homeOver = c.activeBuildTab;
+      });
 
   Future<void> _newTextFile(CppWorkbench w) async {
     final controller = TextEditingController(text: 'notes.txt');
@@ -211,7 +285,10 @@ class _BuildSectionState extends State<BuildSection> {
       listenable: Listenable.merge([controller, s]),
       builder: (context, _) {
         final tabs = controller.buildTabs.where(_exists).toList();
-        final active = tabs.contains(controller.activeBuildTab) ? controller.activeBuildTab : tabs.lastOrNull;
+        final current = tabs.contains(controller.activeBuildTab) ? controller.activeBuildTab : tabs.lastOrNull;
+        // The start page stays in front until a tab is opened or picked.
+        if (_home && current != _homeOver) _home = false;
+        final active = _home ? null : current;
         final activeCpp = active?.kind == BuildTabKind.cpp ? s.cppComponent(active!.id) : null;
         final workbench = activeCpp == null ? null : s.cppWorkbench(activeCpp.id);
         return LayoutBuilder(builder: (context, box) {
@@ -225,10 +302,8 @@ class _BuildSectionState extends State<BuildSection> {
                 for (final t in tabs)
                   (
                     tab: t,
-                    label: t == active && workbench != null
-                        ? '${_name(t)} · ${workbench.currentFile.split('/').last}'
-                        : _name(t),
-                    icon: t.kind == BuildTabKind.cpp ? Icons.code : (s.isPattern(t.id) ? Icons.piano : Icons.graphic_eq),
+                    label: _name(t),
+                    look: buildKindLook(s, t),
                   ),
               ],
               active: active,
@@ -236,7 +311,12 @@ class _BuildSectionState extends State<BuildSection> {
               newButton: _newButton,
               wideNew: box.maxWidth >= 520,
               onExplorer: () => _toggleExplorer(wide),
-              onSelect: controller.activateBuild,
+              onSelect: (t) {
+                Haptics.tap();
+                if (_home) setState(() => _home = false);
+                controller.activateBuild(t);
+              },
+              onFind: () => _quickOpen(controller, active),
               onClose: controller.closeBuild,
               onNew: () => _newMenu(controller, active),
             ),
@@ -245,10 +325,31 @@ class _BuildSectionState extends State<BuildSection> {
           if (active == null) {
             body = Column(children: [
               SizedBox(height: 36, child: strip),
-              Expanded(child: _StartView(state: s, onOpen: (t) => _open(controller, t))),
+              Expanded(
+                child: BuildStartView(
+                  state: s,
+                  onOpen: (t) {
+                    _home = false;
+                    _open(controller, t);
+                  },
+                  onNewPattern: () {
+                    _home = false;
+                    _newPattern(controller);
+                  },
+                  onLibrary: () => showCppLibrarySheet(context, onInsert: (text) {
+                    Clipboard.setData(ClipboardData(text: text));
+                    ScaffoldMessenger.maybeOf(context)
+                        ?.showSnackBar(const SnackBar(content: Text('Copied: paste it into your code')));
+                  }),
+                  onFind: () => _quickOpen(controller, active),
+                ),
+              ),
             ]);
           } else if (activeCpp != null) {
-            body = CppEditor(key: ValueKey('cpp ${activeCpp.id}'), workbench: workbench!, bar: strip);
+            body = CppEditor(
+                key: _editorKeys.putIfAbsent(activeCpp.id, () => GlobalKey<CppEditorState>(debugLabel: 'cpp ${activeCpp.id}')),
+                workbench: workbench!,
+                bar: strip);
           } else {
             body = _CawTab(state: s, moduleId: active.id, bar: strip);
           }
@@ -304,6 +405,7 @@ class _BuildSectionState extends State<BuildSection> {
             bindings: {
               const SingleActivator(LogicalKeyboardKey.keyE, control: true, shift: true): () => _toggleExplorer(wide),
               const SingleActivator(LogicalKeyboardKey.keyN, control: true, shift: true): () => _newMenu(controller, active),
+              const SingleActivator(LogicalKeyboardKey.keyP, control: true): () => _quickOpen(controller, active),
               const SingleActivator(LogicalKeyboardKey.pageDown, control: true): () => _step(controller, tabs, active, 1),
               const SingleActivator(LogicalKeyboardKey.pageUp, control: true): () => _step(controller, tabs, active, -1),
             },
@@ -315,7 +417,7 @@ class _BuildSectionState extends State<BuildSection> {
   }
 }
 
-typedef _TabEntry = ({BuildTab tab, String label, IconData icon});
+typedef _TabEntry = ({BuildTab tab, String label, ({IconData icon, Color color}) look});
 
 /// ☰ (the explorer), the open tabs (tap to switch, × to close) and + New, in 36 dp.
 class _TabStrip extends StatelessWidget {
@@ -329,13 +431,14 @@ class _TabStrip extends StatelessWidget {
     required this.onSelect,
     required this.onClose,
     required this.onNew,
+    required this.onFind,
   });
 
   final List<_TabEntry> tabs;
   final BuildTab? active;
   final bool explorerOpen, wideNew;
   final GlobalKey newButton;
-  final VoidCallback onExplorer, onNew;
+  final VoidCallback onExplorer, onNew, onFind;
   final ValueChanged<BuildTab> onSelect, onClose;
 
   @override
@@ -350,6 +453,17 @@ class _TabStrip extends StatelessWidget {
           onPressed: onExplorer,
           icon: Icon(Icons.folder_open_outlined, color: explorerOpen ? Neon.blue : Neon.dim),
         ),
+        IconButton(
+          key: const ValueKey('quick open'),
+          tooltip: 'Find a file or symbol (Ctrl+P)',
+          iconSize: 18,
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints.tightFor(width: 32, height: 36),
+          padding: EdgeInsets.zero,
+          onPressed: onFind,
+          icon: const Icon(Icons.search, color: Neon.dim),
+        ),
+        Container(width: 1, height: 18, color: Colors.white.withValues(alpha: 0.08)),
         Expanded(
           child: ListView(scrollDirection: Axis.horizontal, children: [
             for (final t in tabs) _Tab(entry: t, active: t.tab == active, onSelect: onSelect, onClose: onClose),
@@ -396,10 +510,10 @@ class _Tab extends StatelessWidget {
           padding: const EdgeInsets.only(left: 8),
           decoration: BoxDecoration(
             color: active ? Neon.text.withValues(alpha: 0.05) : null,
-            border: Border(bottom: BorderSide(color: active ? Neon.green : Colors.transparent, width: 2)),
+            border: Border(bottom: BorderSide(color: active ? entry.look.color : Colors.transparent, width: 2)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(entry.icon, size: 14, color: active ? Neon.green : Neon.dim),
+            Icon(entry.look.icon, size: 14, color: active ? entry.look.color : entry.look.color.withValues(alpha: 0.55)),
             const SizedBox(width: 5),
             Flexible(
               child: Text(entry.label,
@@ -438,79 +552,6 @@ class _CawTab extends StatelessWidget {
     return Column(children: [
       SizedBox(height: 36, child: bar),
       Expanded(child: BuilderScreen(state: state, embedded: true)),
-    ]);
-  }
-}
-
-/// No tab open: the broad starting points and the project's C++ components and .caw modules to open.
-class _StartView extends StatelessWidget {
-  const _StartView({required this.state, required this.onOpen});
-  final AppState state;
-  final ValueChanged<BuildTab> onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final cpp = state.project.cppComponents;
-    final modules = state.project.modules;
-    Widget row(String id, IconData icon, String title, String subtitle, VoidCallback onTap) => InkWell(
-          key: ValueKey(id),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            child: Row(children: [
-              Icon(icon, size: 18, color: Neon.dim),
-              const SizedBox(width: 10),
-              Expanded(child: Text(title, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis)),
-              Text(subtitle, style: TextStyle(fontSize: 11, color: Neon.dim)),
-            ]),
-          ),
-        );
-    Widget heading(String t) => Padding(
-          padding: const EdgeInsets.fromLTRB(12, 14, 12, 4),
-          child: Text(t.toUpperCase(),
-              style: const TextStyle(fontSize: 10.5, letterSpacing: 1.3, fontWeight: FontWeight.w700, color: Neon.dim)),
-        );
-    return ListView(padding: const EdgeInsets.only(bottom: 24), children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-        child: Wrap(spacing: 8, runSpacing: 6, children: [
-          FilledButton.icon(
-            key: const ValueKey('new effect'),
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('New effect'),
-            onPressed: () {
-              final doc = state.newCppEffect();
-              onOpen(BuildTab(BuildTabKind.cpp, doc.componentId));
-            },
-          ),
-          FilledButton.tonalIcon(
-            key: const ValueKey('new instrument'),
-            icon: const Icon(Icons.piano_outlined, size: 18),
-            label: const Text('New instrument'),
-            onPressed: () {
-              final doc = state.newCppEffect(instrument: true);
-              onOpen(BuildTab(BuildTabKind.cpp, doc.componentId));
-            },
-          ),
-        ]),
-      ),
-      heading('C++ components'),
-      if (cpp.isEmpty)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Text('None yet. A new effect starts as a stereo pass-through you can build and play at once.',
-              style: TextStyle(fontSize: 12, color: Neon.dim)),
-        ),
-      for (final c in cpp)
-        row('open cpp ${c.componentId}', Icons.code, c.name, '${c.files.length} files',
-            () => onOpen(BuildTab(BuildTabKind.cpp, c.componentId))),
-      if (modules.isNotEmpty) heading('.caw modules and patterns'),
-      for (final m in modules)
-        row('open caw ${m.id}', state.isPattern(m.id) ? Icons.piano : Icons.graphic_eq, m.name, state.info[m.id]?.kind ?? '',
-            () {
-          state.selectModule(m.id);
-          onOpen(BuildTab(BuildTabKind.caw, m.id));
-        }),
     ]);
   }
 }

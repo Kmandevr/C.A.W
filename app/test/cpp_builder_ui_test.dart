@@ -1,6 +1,7 @@
 // The C++ Builder's widgets: the key row and cursor key, the Problems list jump, and BuildSection's tabs.
 import 'dart:io';
 
+import 'package:caw/engine/engine.dart' show Template;
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/cpp_diagnostics.dart';
@@ -11,6 +12,7 @@ import 'package:caw/ui/cpp/cpp_editor.dart';
 import 'package:caw/ui/cpp/cpp_library.dart';
 import 'package:caw/ui/cpp/key_row.dart';
 import 'package:caw/ui/cpp/panels.dart';
+import 'package:caw/ui/cpp/quick_open.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -158,7 +160,7 @@ void main() {
       final doc = state.project.cppComponents.single;
       expect(sections.buildTabs, [BuildTab(BuildTabKind.cpp, doc.componentId)]);
       expect(find.byType(CppEditor), findsOneWidget);
-      expect(find.textContaining('My effect · effect.cpp'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('breadcrumb')), matching: find.textContaining('My effect › src › effect.cpp')), findsOneWidget);
       // No errors: no error count (owner: show only what matters).
       expect(find.byKey(const ValueKey('error count')), findsNothing);
       await tester.pumpWidget(const SizedBox());
@@ -226,7 +228,7 @@ void main() {
       await tester.pumpAndSettle();
       final w = state.cppWorkbench(doc.id);
       expect(w.currentFile, 'notes.txt');
-      expect(find.textContaining('My effect · notes.txt'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('breadcrumb')), matching: find.textContaining('My effect › notes.txt')), findsOneWidget);
       // A pattern opens as a .caw tab next to it.
       await tester.tap(find.byKey(const ValueKey('new menu')));
       await tester.pumpAndSettle();
@@ -260,7 +262,7 @@ void main() {
       await tester.tap(find.text('caw-component.json'));
       await tester.pumpAndSettle();
       expect(state.cppWorkbench('cpp1').currentFile, 'caw-component.json');
-      expect(find.textContaining('Fuzz · caw-component.json'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('breadcrumb')), matching: find.textContaining('caw-component.json')), findsOneWidget);
       // Folders jumps anywhere in the tree.
       await tester.tap(find.byKey(const ValueKey('explorer')));
       await tester.pumpAndSettle();
@@ -303,6 +305,175 @@ void main() {
       expect(find.byType(CppEditor), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
+    });
+  });
+
+  group('Build: start page and navigation', () {
+    late Directory dir;
+    late AppState state;
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('caw-build-nav');
+      state = AppState(settings: Settings());
+      state.cppServices = CppBuilderServices(compiler: null, workDirectory: () async => dir);
+    });
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    Future<SectionController> pump(WidgetTester tester, {SectionController? sections}) async {
+      final c = sections ?? SectionController();
+      await tester.pumpWidget(host(SectionScope(controller: c, child: BuildSection(state: state))));
+      await tester.pump();
+      return c;
+    }
+
+    Future<void> done(WidgetTester tester) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 2));
+    }
+
+    testWidgets('the start page says what Build is for and starts an instrument, an effect or a pattern', (tester) async {
+      final sections = await pump(tester);
+      expect(find.text('Write C++ instruments, effects and patterns, then hear them on your tracks.'), findsOneWidget);
+      for (final id in ['new instrument', 'new effect', 'new pattern']) {
+        expect(find.byKey(ValueKey(id)), findsOneWidget);
+      }
+      expect(find.textContaining('InstrumentProcessor'), findsOneWidget); // the tiny code preview
+      expect(find.byKey(const ValueKey('start library')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('new instrument')));
+      await tester.pump();
+      final doc = state.project.cppComponents.single;
+      expect(sections.activeBuildTab, BuildTab(BuildTabKind.cpp, doc.componentId));
+      expect(state.cppWorkbench(doc.id).isInstrument, isTrue);
+      expect(find.byKey(const ValueKey('cpp badge')), findsOneWidget);
+      expect(find.text('Not built yet'), findsOneWidget);
+      // + New › Start page brings the start page back; the tab stays open.
+      await tester.tap(find.byKey(const ValueKey('new menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Start page'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('build start')), findsOneWidget);
+      expect(sections.buildTabs, hasLength(1));
+      await tester.tap(find.byKey(const ValueKey('new pattern')));
+      await tester.pumpAndSettle();
+      expect(state.isPattern(sections.activeBuildTab!.id), isTrue);
+      await done(tester);
+    });
+
+    testWidgets('Open an example lists the starter modules by kind and opens a copy', (tester) async {
+      state.templates = const [
+        Template('fold.caw', '---\ncaw: 1\nkind: effect\nname: Fold\nsummary: Wavefolder\n---\nout = in;\n'),
+        Template('chords.caw', '---\ncaw: 1\nkind: pattern\nname: Chords\nsummary: Four bars\n---\n'),
+      ];
+      final sections = await pump(tester);
+      await tester.tap(find.byKey(const ValueKey('open example')));
+      await tester.pumpAndSettle();
+      expect(find.text('EFFECTS'), findsOneWidget);
+      expect(find.text('PATTERNS'), findsOneWidget);
+      expect(find.text('Wavefolder'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('example fold.caw')));
+      await tester.pumpAndSettle();
+      final m = state.project.modules.single;
+      expect(m.name, 'Fold');
+      expect(sections.activeBuildTab, BuildTab(BuildTabKind.caw, m.id));
+      await done(tester);
+    });
+
+    testWidgets('the quick switcher finds a file and a symbol', (tester) async {
+      final doc = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
+      state.project.cppComponents.add(doc);
+      await pump(tester, sections: SectionController()..openBuild(BuildTab(BuildTabKind.cpp, doc.componentId)));
+      await tester.tap(find.byKey(const ValueKey('quick open')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('quick open field')), 'compjson');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('quick file cpp1/caw-component.json')));
+      await tester.pumpAndSettle();
+      expect(state.cppWorkbench('cpp1').currentFile, 'caw-component.json');
+      // A symbol of the open file: the cursor goes to its line.
+      state.cppWorkbench('cpp1').selectFile('src/effect.cpp');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('quick open')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('quick open field')), 'process');
+      await tester.pumpAndSettle();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      final editor = tester.state<CppEditorState>(find.byType(CppEditor));
+      final line = editor.view.controller.selection.extentIndex;
+      expect(editor.view.controller.codeLines[line].text, contains('process('));
+      await done(tester);
+    });
+
+    test('quick matching ranks contiguous and word-start matches first, and drops non-matches', () {
+      expect(quickScore('fx', 'effect.cpp'), isNull);
+      expect(quickScore('eff', 'effect.cpp')!, greaterThan(quickScore('ect', 'effect.cpp')!));
+      expect(quickScore('cjs', 'caw-component.json'), isNotNull);
+      final outline = cppOutline('class Fuzz final : public X {\n  void process(int b) {\n  }\n  if (x) {\n};');
+      expect([for (final o in outline) o.name], ['Fuzz', 'process']);
+    });
+
+    testWidgets('the status chip counts errors; next and previous go between them', (tester) async {
+      final doc = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
+      state.project.cppComponents.add(doc);
+      final w = state.cppWorkbench('cpp1');
+      w.diagnostics = const [
+        CppDiagnostic(file: 'src/effect.cpp', line: 4, column: 1, severity: CppSeverity.error, message: 'one'),
+        CppDiagnostic(file: 'src/effect.cpp', line: 9, column: 5, severity: CppSeverity.error, message: 'two'),
+      ];
+      await pump(tester, sections: SectionController()..openBuild(BuildTab(BuildTabKind.cpp, doc.componentId)));
+      expect(find.text('2 errors'), findsOneWidget);
+      final editor = tester.state<CppEditorState>(find.byType(CppEditor));
+      int line() => editor.view.controller.selection.extentIndex + 1;
+      await tester.tap(find.byKey(const ValueKey('build status'))); // go to the next error
+      await tester.pump();
+      expect(line(), 4);
+      await tester.tap(find.byKey(const ValueKey('next error')));
+      await tester.pump();
+      expect(line(), 9);
+      await tester.tap(find.byKey(const ValueKey('next error'))); // wraps
+      await tester.pump();
+      expect(line(), 4);
+      await tester.tap(find.byKey(const ValueKey('previous error'))); // wraps back
+      await tester.pump();
+      expect(line(), 9);
+      await done(tester);
+    });
+
+    testWidgets('after a build, "Try it on a track" puts an effect on the picked track and an instrument on a new one',
+        (tester) async {
+      state.addLayer(empty: true);
+      final kick = state.project.layers.single..name = 'Kick';
+      state.selectLayer(kick);
+      final fx = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
+      final synth = CppComponentDoc.blankInstrument(id: 'cpp2', name: 'Synth');
+      state.project.cppComponents.addAll([fx, synth]);
+      state.cppWorkbench('cpp1').phase = CppBuildPhase.built;
+      state.cppWorkbench('cpp2').phase = CppBuildPhase.built;
+      final sections = await pump(tester, sections: SectionController()..openBuild(BuildTab(BuildTabKind.cpp, fx.componentId)));
+      expect(find.text('Built'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('try on track')));
+      await tester.pumpAndSettle();
+      expect(find.text('selected'), findsOneWidget);
+      await tester.tap(find.byKey(ValueKey('try ${kick.id}')));
+      await tester.pumpAndSettle();
+      expect(kick.components.map((c) => c.id), [fx.componentId]);
+      expect(find.text('Fuzz is on Kick'), findsOneWidget);
+      // Now the chip says where it plays; tapping it shows that track in Arrange.
+      expect(find.text('Built · on Kick'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('build status')));
+      await tester.pump();
+      expect(sections.focusedLayer, kick.id);
+      // An instrument on a new track named after it.
+      sections.openBuild(BuildTab(BuildTabKind.cpp, synth.componentId));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('try on track')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('try new track')));
+      await tester.pumpAndSettle();
+      final added = state.project.layers.last;
+      expect(added.name, 'Synth');
+      expect(added.instrument?.id, synth.componentId);
+      expect(state.selectedLayerId, added.id);
+      await done(tester);
     });
   });
 }

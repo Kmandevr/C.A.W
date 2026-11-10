@@ -137,3 +137,23 @@ CppDiagnostic? nextError(List<CppDiagnostic> diagnostics, {String? file, int lin
   if (file == null) return errors.first;
   return errors.firstWhere((d) => cmp(d, file, line, column) > 0, orElse: () => errors.first);
 }
+
+/// The error before ([file], [line], [column]) in the same order as [nextError], wrapping to the last one.
+CppDiagnostic? previousError(List<CppDiagnostic> diagnostics,
+    {String? file, int line = 0, int column = 0, List<String> order = const []}) {
+  final errors = diagnostics.where((d) => d.isError).toList();
+  if (errors.isEmpty) return null;
+  int rank(String f) {
+    final i = order.indexOf(f);
+    return i < 0 ? order.length : i;
+  }
+
+  int cmp(CppDiagnostic a, String f, int l, int c) {
+    if (a.file != f) return rank(a.file) != rank(f) ? rank(a.file) - rank(f) : a.file.compareTo(f);
+    return a.line != l ? a.line - l : a.column - c;
+  }
+
+  errors.sort((a, b) => cmp(a, b.file, b.line, b.column));
+  if (file == null) return errors.last;
+  return errors.lastWhere((d) => cmp(d, file, line, column) < 0, orElse: () => errors.last);
+}

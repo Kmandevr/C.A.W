@@ -11,6 +11,7 @@ import '../engine/engine.dart';
 import '../platform/cpp_build.dart';
 import '../platform/cpp_compiler.dart';
 import 'app_state.dart';
+import 'arrange_fx.dart';
 import 'cpp_completion.dart';
 import 'cpp_component.dart';
 import 'cpp_diagnostics.dart';
@@ -556,6 +557,32 @@ class CppWorkbench extends ChangeNotifier {
         for (var i = 0; i < state.project.masterComponents.length; i++)
           if (state.project.masterComponents[i].id == componentId) CppEffectUse(null, i, state.project.masterComponents[i]),
       ];
+
+  /// Whether this component plays notes (an instrument) rather than shaping sound: its descriptor once built, else
+  /// its code deriving from `caw::InstrumentProcessor`.
+  bool get isInstrument => info?.isInstrument ?? texts.values.any((s) => s.contains('InstrumentProcessor'));
+
+  /// "Try it on a track": an instrument plays [layer] (its notes stay), an effect joins the end of its chain. With no
+  /// [layer] (or a folder) a new track named after the component gets it. The track is selected and returned; null
+  /// when nothing changed (it is already there). One project undo step.
+  LayerDoc? tryOn(LayerDoc? layer) {
+    final c = component;
+    if (c == null) return null;
+    var target = layer;
+    if (target == null || target.isFolder) {
+      state.addLayer(empty: true);
+      target = state.project.layers.last..name = c.name;
+    }
+    if (isInstrument) {
+      if (target.instrument?.id == componentId && target.generatorId == null) return null;
+      state.setNativeInstrument(target, componentId);
+    } else {
+      if (target.components.any((u) => u.id == componentId)) return null;
+      if (state.addNativeEffect(target, componentId) == null) return null;
+    }
+    state.selectLayer(target);
+    return target;
+  }
 
   /// The use's index in the engine's chain, which leaves out components the engine hasn't loaded.
   int? engineIndex(CppEffectUse u) {

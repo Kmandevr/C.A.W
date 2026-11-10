@@ -222,13 +222,7 @@ class _ShellState extends State<Shell> {
         listenable: s,
         builder: (context, _) {
           if (!s.ready) return const Scaffold(body: Center(child: CrowLogo(size: 64)));
-          // Build opens on the selected .caw module until the user opens something else.
-          final selected = s.selectedModuleId;
-          if (_sections.buildTabs.isEmpty && selected != null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted && _sections.buildTabs.isEmpty) _sections.addBuild(BuildTab(BuildTabKind.caw, selected));
-            });
-          }
+          // Build opens on its start page (what it is for, new code, examples) until something is opened.
           // Built once per app-state change; a layout change (a divider drag, a tab) reuses them, so it rebuilds
           // only the dock, not the screens.
           final screens = _screens();
