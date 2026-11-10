@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../engine/component_info.dart';
 import '../../model/mod_matrix.dart';
 import '../arrange/knob.dart' show Taper;
+import '../feedback.dart';
 import '../motion.dart';
 import '../theme.dart';
 import '../widgets.dart' show ResetOnDoubleTap;
@@ -540,40 +541,42 @@ class DeviceChoice extends StatelessWidget {
     final i = (t.value(p.id) - p.min).round().clamp(0, names.length - 1);
     final c = color ?? scope.accent;
     void pick(int k) {
-      Motion.tick();
+      DeviceFeel.tap();
       t.set(p.id, p.min + k);
     }
 
     final Widget body;
     if (names.length <= maxSegments) {
+      // 32 dp segments that dip and glow while pressed (feedback.dart), a haptic on pick.
       body = Container(
-        height: 26,
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(6), border: Border.all(color: Neon.line)),
+        height: 32,
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Neon.line)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           for (var k = 0; k < names.length; k++)
-            Flexible(child: InkWell(
+            Flexible(child: GestureDetector(
               key: ValueKey('dchoice-${p.id}-$k'),
+              behavior: HitTestBehavior.opaque,
               onTap: () => pick(k),
-              child: AnimatedContainer(
+              child: Pressable(glow: c, radius: 7, child: AnimatedContainer(
                 duration: Motion.fade(Motion.small, Motion.of(context)),
                 padding: const EdgeInsets.symmetric(horizontal: 7),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: k == i ? c.withValues(alpha: 0.22) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(5)),
+                  borderRadius: BorderRadius.circular(7)),
                 child: Text(names[k], maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(
-                  fontSize: 10, fontWeight: k == i ? FontWeight.w800 : FontWeight.w500, color: k == i ? c : Neon.dim)),
-              ),
+                  fontSize: 11, fontWeight: k == i ? FontWeight.w800 : FontWeight.w500, color: k == i ? c : Neon.dim)),
+              )),
             )),
         ]),
       );
     } else {
-      body = SizedBox(height: 26, child: DropdownButtonHideUnderline(child: DropdownButton<int>(
+      body = SizedBox(height: 32, child: DropdownButtonHideUnderline(child: DropdownButton<int>(
         key: ValueKey('dchoice-${p.id}'),
         value: i,
         isDense: true,
-        style: Theme.of(context).textTheme.bodySmall!.copyWith(fontSize: 11, color: c, fontWeight: FontWeight.w700),
-        iconSize: 16,
+        style: Theme.of(context).textTheme.bodySmall!.copyWith(fontSize: 12, color: c, fontWeight: FontWeight.w700),
+        iconSize: 18,
         items: [for (var k = 0; k < names.length; k++) DropdownMenuItem(value: k, child: Text(names[k]))],
         onChanged: (k) { if (k != null) pick(k); },
       )));
@@ -604,12 +607,12 @@ class DevicePower extends StatelessWidget {
     return IconButton(
       key: ValueKey('dpower-${p.id}'),
       tooltip: on ? 'Turn ${p.label} off' : 'Turn ${p.label} on',
-      iconSize: 16,
+      iconSize: 18,
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
       color: on ? c : Neon.dim,
       onPressed: () {
-        Motion.tick();
+        DeviceFeel.tap();
         t.set(p.id, on ? p.min : p.max);
       },
       icon: Icon(Icons.power_settings_new, shadows: on ? [Shadow(color: c, blurRadius: 6)] : null),
@@ -641,10 +644,16 @@ class DeviceSlider extends StatelessWidget {
         return GestureDetector(
           key: ValueKey('dslider-${p.id}'),
           behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart: (d) => at(d.localPosition.dx),
+          onHorizontalDragStart: (d) {
+            DeviceFeel.grab();
+            at(d.localPosition.dx);
+          },
           onHorizontalDragUpdate: (d) => at(d.localPosition.dx),
-          onHorizontalDragEnd: (_) => t.commit(),
-          child: SizedBox(height: 30, child: CustomPaint(
+          onHorizontalDragEnd: (_) {
+            DeviceFeel.release();
+            t.commit();
+          },
+          child: SizedBox(height: 40, child: CustomPaint(
             painter: _SliderPainter(taper.position(v), c, bipolar),
             child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: Row(children: [
               Text(label ?? shortParamLabel(p, p.id), style: const TextStyle(fontSize: 10, color: Neon.text)),
