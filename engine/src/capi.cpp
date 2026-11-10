@@ -9,6 +9,7 @@
 #include "caw.h"
 #include "capi_internal.h"
 #include "compile.h"
+#include "component_test.h"
 #include "docs.h"
 #include "json.h"
 #include "midifile.h"
@@ -328,6 +329,13 @@ const char* caw_template_file(int32_t i) {
 
 const char* caw_template_source(int32_t i) {
     return i >= 0 && i < caw::kTemplateCount ? caw::kTemplateSources[i] : nullptr;
+}
+
+char* caw_component_test(const char* request_json) try {
+    if (!request_json) return dup("{\"ok\":false,\"error\":\"missing request\"}");
+    return dup(caw::componentTestJson(request_json));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
 }
 
 }  // extern "C"
