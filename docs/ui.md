@@ -99,6 +99,10 @@ The app has three sections, Build, Files and Arrange; the Mixer, Automation, Exp
 
 The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 
+## Device editors
+
+**Owner (2026-11-10, #173):** every device's UI is "completely visual, fun to use and easy to use"; today's knob pages are "strictly going to be a fallback if there's no UI built in". On a phone a device opens as a full-screen editor with tabs for its sections and Back returns; it keeps the app's glass look, neon accents and compact sizes ("don't make the UI too big"). Built so far: the frame, the fallback page and the flagship synth's editor, with grabbable visuals (wavetable, unison fan, filter curves, envelopes, LFOs, EQ nodes) and a Vital-style mod matrix: drag a source chip onto any knob, then drag the knob's coloured ring for the amount ([app](app.md), Arranger: Device editors). On wide screens it is a floating glass window rather than a docking panel, since the dock's panels are fixed screens. [Assumption] The tab names, the per-oscillator picker on phones, the ring drag starting on the knob's outer edge and a new route's 25 % amount are first choices for the owner to confirm.
+
 ## One gesture vocabulary
 
 The same meaning everywhere, so nothing has to be learned twice:

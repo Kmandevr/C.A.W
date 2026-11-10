@@ -36,7 +36,7 @@ REAPER's behaviour is taken from its user guide ([UI design](ui.md#reaper-refere
 **Decision (owner):** "the goal is to build one synth that can do all the things", with unison and detune that work "as it does in Vital". It is a new built-in instrument beside Morph, which stays as the simple one (#171).
 - **First version, in order:** three wavetable oscillators with Vital-style unison (up to 16 voices, detune with a power curve, stereo spread, blend, random phase, stack modes); two filters; a mod matrix (envelopes, LFOs, random to any knob); a built-in effects rack reusing the Library kernels.
 - **Not Vital's code:** Vital is GPL-3.0 and C.A.W. takes permissive dependencies only, so nothing of Vital's code, presets or wavetables is copied. The behaviour is reproduced from public descriptions in original code.
-- The mod matrix's UI waits for the owner's direction.
+- The mod matrix's UI (owner, 2026-11-10, #173): Vital-style, a source dragged onto any knob makes a route, and the knob's ring shows and sets its amount.
 
 ## 2026-11-10: MIDI files are an import and export format (on the owner's behalf, to confirm)
 
