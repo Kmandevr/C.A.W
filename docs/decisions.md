@@ -6,6 +6,15 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: The arranger works like REAPER's (owner)
+
+**Decision (owner):** "I would like the arranger to work like REAPER… Look at how REAPER does it and we're going to copy them" (#172). It covers:
+- **Clips:** clips drag between tracks.
+- **New tracks by dropping:** dropping below the last track creates a new track. The same applies to files, instruments and effects dropped on the empty area.
+- **Instruments are added exactly like effects:** the same browser and drag and drop, as in REAPER, where an instrument is a plug-in in the track's FX chain. They are no longer picked from a long list on a held track.
+
+REAPER's behaviour is taken from its user guide.
+
 ## 2026-11-10: A flagship synth that can do everything (owner)
 
 **Decision (owner):** "the goal is to build one synth that can do all the things", with unison and detune that work "as it does in Vital". It is a new built-in instrument beside Morph, which stays as the simple one (#171).
