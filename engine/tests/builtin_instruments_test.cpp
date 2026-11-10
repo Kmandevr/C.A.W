@@ -627,11 +627,11 @@ std::vector<Golden> goldens() {
     g.push_back({"morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
                                 {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
                  0xcd3342395d322d32ull});
-    // Flagship: its default patch (a warm, wide saw stack of seven, a ladder, env 2 on the cutoff, reverb) on a
+    // Flagship: its default patch (a warm, wide saw stack of seven, a ladder, env 2 on the cutoff) on a
     // chord, a line over it and a bent note.
     g.push_back({"flagship", track("org.caw.synth.flagship", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n"
                                                              "8 C4 6 0.7\n10 A4 1 1\n11 C5 1 0.9\n12 E5 3 0.8 bend 0:0 1:2\n"),
-                 0x31e09b5d1c44ef48ull});
+                 0xcd4c531f0b919162ull});
     return g;
 }
 

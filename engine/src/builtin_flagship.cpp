@@ -203,7 +203,7 @@ public:
         expo("fx_delay_time", "Delay time", 0.3, 0.01, 4.0, "s");
         num("fx_delay_feedback", "Delay feedback", 0.35, 0.0, 0.95);
         num("fx_delay_mix", "Delay mix", 0.25, 0.0, 1.0);
-        pick("fx_reverb_on", "Reverb", 1.0, kOffOn, count(kOffOn));
+        pick("fx_reverb_on", "Reverb", 0.0, kOffOn, count(kOffOn));  // off: a track's own reverb costs CPU
         num("fx_reverb_size", "Reverb size", 0.6, 0.0, 1.0);
         expo("fx_reverb_decay", "Reverb decay", 2.2, 0.1, 20.0, "s");
         num("fx_reverb_damping", "Reverb damping", 0.45, 0.0, 1.0);
@@ -556,17 +556,23 @@ struct VoiceFilter {
     // In place: drive (when above 1) into the filter, then the dry/wet mix.
     void process(float* L, float* R, uint32_t n) noexcept {
         if (!on) return;
-        if (type <= kLadderBp) ladder[0].flushDenormals(), ladder[1].flushDenormals();
-        for (int c = 0; c < 2; ++c) {
+        float dryL[kControlFrames], dryR[kControlFrames];
+        const bool wet = mix >= 1.0f;
+        if (!wet) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
+        if (drive) {
+            each(L, n, [&](double v) noexcept { return saturator.process(v); });
+            each(R, n, [&](double v) noexcept { return saturator.process(v); });
+        }
+        if (type <= kLadderBp) {  // both sides in one loop
+            ladder[0].flushDenormals();
+            ladder[1].flushDenormals();
+            if (type == kLadderLp) ladder[0].processPair<lib::LadderMode::LowPass>(ladder[1], L, R, n);
+            else if (type == kLadderHp) ladder[0].processPair<lib::LadderMode::HighPass>(ladder[1], L, R, n);
+            else ladder[0].processPair<lib::LadderMode::BandPass>(ladder[1], L, R, n);
+        }
+        for (int c = 0; c < 2 && type > kLadderBp; ++c) {
             float* x = c ? R : L;
-            float dry[kControlFrames];
-            const bool wet = mix >= 1.0f;
-            if (!wet) std::copy(x, x + n, dry);
-            if (drive) each(x, n, [&](double v) noexcept { return saturator.process(v); });
             switch (type) {
-                case kLadderLp: ladder[c].process<lib::LadderMode::LowPass>(x, n); break;
-                case kLadderHp: ladder[c].process<lib::LadderMode::HighPass>(x, n); break;
-                case kLadderBp: ladder[c].process<lib::LadderMode::BandPass>(x, n); break;
                 case kSvfLp: each(x, n, [&](double v) noexcept { return svf[c].process(v).low; }); break;
                 case kSvfHp: each(x, n, [&](double v) noexcept { return svf[c].process(v).high; }); break;
                 case kSvfBp: each(x, n, [&](double v) noexcept { return svf[c].process(v).band; }); break;
@@ -577,9 +583,12 @@ struct VoiceFilter {
                 case kFormant: each(x, n, [&](double v) noexcept { return formant[c].process(v); }); break;
                 default: break;
             }
-            if (!wet)
-                for (uint32_t i = 0; i < n; ++i) x[i] = dry[i] + (x[i] - dry[i]) * mix;
         }
+        if (!wet)
+            for (uint32_t i = 0; i < n; ++i) {
+                L[i] = dryL[i] + (L[i] - dryL[i]) * mix;
+                R[i] = dryR[i] + (R[i] - dryR[i]) * mix;
+            }
     }
 };
 

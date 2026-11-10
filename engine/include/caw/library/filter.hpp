@@ -213,28 +213,23 @@ public:
     // A block in place: the same as process<Mode>() per sample, with the state held in registers across it.
     template <LadderMode Mode>
     void process(float* x, uint32_t frames) noexcept {
-        double s0 = s_[0], s1 = s_[1], s2 = s_[2], s3 = s_[3];
-        const double G = G_, in = in_, c0 = c_[0], c1 = c_[1], c2 = c_[2], c3 = c_[3];
+        Lane a = lane();
+        for (uint32_t i = 0; i < frames; ++i) x[i] = static_cast<float>(a.template step<Mode>(x[i]));
+        store(a);
+    }
+    // A stereo pair's blocks, `left` through this filter and `right` through `other`, in one loop: the two
+    // feedback chains are independent, so a CPU overlaps them (a ladder sample is a long chain of dependent
+    // operations, and running the sides one after the other leaves it waiting). The same bits as two process()
+    // calls.
+    template <LadderMode Mode>
+    void processPair(MultiLadder& other, float* left, float* right, uint32_t frames) noexcept {
+        Lane a = lane(), b = other.lane();
         for (uint32_t i = 0; i < frames; ++i) {
-            const double u = softClip(finiteOr0(x[i]) * in - (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3));
-            const double v0 = (u - s0) * G, y0 = v0 + s0;
-            s0 = y0 + v0;
-            const double v1 = (y0 - s1) * G, y1 = v1 + s1;
-            s1 = y1 + v1;
-            const double v2 = (y1 - s2) * G, y2 = v2 + s2;
-            s2 = y2 + v2;
-            const double v3 = (y2 - s3) * G, y3 = v3 + s3;
-            s3 = y3 + v3;
-            double y;
-            if constexpr (Mode == LadderMode::LowPass) y = y3;
-            else if constexpr (Mode == LadderMode::HighPass) y = u - 4.0 * y0 + 6.0 * y1 - 4.0 * y2 + y3;
-            else y = 4.0 * (y1 - 2.0 * y2 + y3);
-            x[i] = static_cast<float>(y);
+            left[i] = static_cast<float>(a.template step<Mode>(left[i]));
+            right[i] = static_cast<float>(b.template step<Mode>(right[i]));
         }
-        s_[0] = s0;
-        s_[1] = s1;
-        s_[2] = s2;
-        s_[3] = s3;
+        store(a);
+        other.store(b);
     }
     // A silent tail would decay into subnormal numbers (slow on many CPUs): a caller that knows its input is
     // silent can flush the state with this once per block.
@@ -245,6 +240,32 @@ public:
     void clear() noexcept { s_[0] = s_[1] = s_[2] = s_[3] = 0.0; }
 
 private:
+    // The state and constants in locals, for a block loop.
+    struct Lane {
+        double s0, s1, s2, s3, G, in, c0, c1, c2, c3;
+        template <LadderMode Mode>
+        double step(double input) noexcept {
+            const double u = softClip(finiteOr0(input) * in - (c0 * s0 + c1 * s1 + c2 * s2 + c3 * s3));
+            const double v0 = (u - s0) * G, y0 = v0 + s0;
+            s0 = y0 + v0;
+            const double v1 = (y0 - s1) * G, y1 = v1 + s1;
+            s1 = y1 + v1;
+            const double v2 = (y1 - s2) * G, y2 = v2 + s2;
+            s2 = y2 + v2;
+            const double v3 = (y2 - s3) * G, y3 = v3 + s3;
+            s3 = y3 + v3;
+            if constexpr (Mode == LadderMode::LowPass) return y3;
+            else if constexpr (Mode == LadderMode::HighPass) return u - 4.0 * y0 + 6.0 * y1 - 4.0 * y2 + y3;
+            else return 4.0 * (y1 - 2.0 * y2 + y3);
+        }
+    };
+    Lane lane() const noexcept { return {s_[0], s_[1], s_[2], s_[3], G_, in_, c_[0], c_[1], c_[2], c_[3]}; }
+    void store(const Lane& a) noexcept {
+        s_[0] = a.s0;
+        s_[1] = a.s1;
+        s_[2] = a.s2;
+        s_[3] = a.s3;
+    }
     double s_[4] = {0, 0, 0, 0};
     double G_ = 0.5, in_ = 1.0, c_[4] = {0, 0, 0, 0};
     double cutoff_ = -1, resonance_ = -1, rate_ = -1;  // what set() last worked out

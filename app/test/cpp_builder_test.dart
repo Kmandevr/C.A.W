@@ -110,7 +110,12 @@ void main() {
       List<String> labels(String line, {String file = '', List<CppCompletion> knobs = const []}) =>
           staticCompletions(CppCompletionContext.at(line, line.length), file, knobs: knobs).map((c) => c.label).toList();
       expect(labels('p.def'), contains('defaultValue'));
-      expect(labels('caw::lib::'), containsAll(['drive', 'PingPongDelay', 'noteSeconds']));
+      // The bare list holds the 40 shortest of the Library's names; longer ones come with the letters typed.
+      expect(labels('caw::lib::'), contains('drive'));
+      expect(labels('caw::lib::'), hasLength(40));
+      expect(labels('caw::lib::Ping'), contains('PingPongDelay'));
+      expect(labels('caw::lib::note'), contains('noteSeconds'));
+      expect(labels('caw::lib::uni'), contains('unisonLayout'));
       expect(labels('caw::lib::'), isNot(contains('ModuleDescriptor')));
       expect(labels('ret'), contains('return'));
       expect(labels('fee', file: 'double feedbackAmount = 0;'), contains('feedbackAmount'));
@@ -150,7 +155,7 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
   });
 
   test('every built-in in the Library is registered in the engine with those knobs', () {
-    final src = ['../engine/src/builtin_components.cpp', '../engine/src/builtin_instruments.cpp']
+    final src = ['../engine/src/builtin_components.cpp', '../engine/src/builtin_instruments.cpp', '../engine/src/builtin_flagship.cpp']
         .map((p) => File(p).readAsStringSync())
         .join('\n');
     for (final b in cppBuiltins) {

@@ -188,6 +188,18 @@ table_.setFrameFunction(0, [](double p) { return 2 * p - 1; });"""),
       member: true, group: 'Oscillators'),
   CppRefEntry('caw::lib::sawHarmonics', 'void (double* out, int count)', 'Harmonic amplitudes of a saw, for setFrameHarmonics.',
       insertText: 'caw::lib::sawHarmonics(amps, 64)', group: 'Oscillators'),
+  CppRefEntry('caw::lib::Wavetable::levelData', 'const float* (int frame, int level) const noexcept',
+      'One mip level\'s samples (levelSize + 1, the last repeats the first), for a renderer reading many copies at once.',
+      member: true, group: 'Oscillators'),
+  // Unison (library/unison.hpp).
+  CppRefEntry('caw::lib::unisonLayout', 'int (const UnisonSettings& s, UnisonVoice* out) noexcept',
+      'Lays out up to 16 unison copies: detune with a power curve, stereo spread, centre blend, stack intervals.',
+      group: 'Oscillators', example: """caw::lib::UnisonSettings s;
+s.voices = 7;
+s.detune = 0.25;  // semitones of the outer copies
+s.spread = 0.8;
+caw::lib::UnisonVoice copies[16];
+const int n = caw::lib::unisonLayout(s, copies);  // each: semitones, pan, gain"""),
   // Filters (library/filter.hpp).
   CppRefEntry('caw::lib::Svf', 'class', 'State-variable filter, 12 dB/octave: low, band, high and notch at once.',
       insertText: 'caw::lib::Svf filter_;', group: 'Filters', example: """filter_.set(cutoff, caw::lib::resonanceQ(0.5), rate);  // every 16 frames is plenty
@@ -200,6 +212,19 @@ const double y = filter_.lowpass(x);"""),
   CppRefEntry('caw::lib::Ladder', 'class', '4-pole (24 dB/octave) ladder low-pass with a soft-clipped input: the acid squelch. resonance 0..1.',
       insertText: 'caw::lib::Ladder ladder_;', group: 'Filters', example: """ladder_.set(cutoff, 0.7, rate);
 const double y = ladder_.process(x);"""),
+  CppRefEntry('caw::lib::MultiLadder', 'class', 'The 4-pole ladder with low-, high- and band-pass outputs (pole mixing); a block call keeps its state in registers.',
+      insertText: 'caw::lib::MultiLadder ladder_;', group: 'Filters', example: """ladder_.set(cutoff, 0.4, rate);
+ladder_.process<caw::lib::LadderMode::HighPass>(block, frames);  // in place"""),
+  CppRefEntry('caw::lib::CombFilter', 'class', 'A tuned feedback comb: resonates at a frequency and its multiples. prepare() allocates.',
+      insertText: 'caw::lib::CombFilter comb_;', group: 'Filters', example: """comb_.prepare(rate, 20.0);  // in activate()
+comb_.set(220.0, 0.9, 0.3);  // Hz, feedback, damping
+const double y = comb_.process(x);"""),
+  CppRefEntry('caw::lib::FormantFilter', 'class', 'Three band-passes at a vowel\'s formants; vowel 0..1 morphs A, E, I, O, U.',
+      insertText: 'caw::lib::FormantFilter vowel_;', group: 'Filters', example: """vowel_.set(0.25, 1.0, 10.0, rate);  // E, natural size, q
+const double y = vowel_.process(x);"""),
+  CppRefEntry('caw::lib::ThreeBandEq', 'class', 'Low shelf, mid bell and high shelf in series; gains in dB. One per channel.',
+      insertText: 'caw::lib::ThreeBandEq eq_;', group: 'Filters', example: """eq_.set(3.0, -2.0, 1.5, 1000.0, rate);  // low, mid, high dB; mid Hz
+const double y = eq_.process(x);"""),
   CppRefEntry('caw::lib::OnePole', 'class', 'One-pole low-pass (6 dB/octave); high() is the input minus it.', insertText: 'caw::lib::OnePole tone_;',
       group: 'Filters'),
   CppRefEntry('caw::lib::resonanceQ', 'double (double resonance)', 'Resonance 0..1 to a filter Q (0: 0.707, 1: about 20).',
@@ -296,8 +321,9 @@ reverb_.process(left, right, static_cast<int>(frames));"""),
 ];
 
 /// A component that ships in every engine (org.caw.*): put on a track from Files or "+ effect"; its id names it in
-/// code and project files. Hand-kept from `engine/src/builtin_components.cpp` and `builtin_instruments.cpp` (a test
-/// checks the ids and knobs are still there).
+/// code and project files. Hand-kept from `engine/src/builtin_components.cpp`, `builtin_instruments.cpp` and
+/// `builtin_flagship.cpp` (a test checks the ids and knobs are still there; the flagship lists only the knobs it
+/// names whole, not the per-section ones it builds from a prefix).
 class CppBuiltin {
   const CppBuiltin(this.id, this.name, this.instrument, this.doc, this.knobs);
   final String id, name, doc;
@@ -310,6 +336,13 @@ const cppBuiltins = <CppBuiltin>[
       ['wave1', 'wave2', 'detune', 'mix', 'cutoff', 'resonance', 'env', 'attack', 'decay', 'sustain', 'release', 'volume']),
   CppBuiltin('org.caw.synth.morph', 'Morph synth', true, 'A sine-to-square morph with unison, drift, a low-pass and an ADSR.',
       ['shape', 'drift', 'unison', 'detune', 'spread', 'cutoff', 'resonance', 'attack', 'decay', 'sustain', 'release', 'volume']),
+  CppBuiltin('org.caw.synth.flagship', 'Flagship', true,
+      'Three wavetable oscillators with unison (up to 16 copies), two filters, a 16-slot mod matrix and effects. Its 191 '
+      'knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, lfo1_..lfo3_, rnd_, mod1_..mod16_ and fx_.',
+      ['flt_routing', 'rnd_rate', 'rnd_mode', 'volume', 'velocity', 'bend_range', 'fx_dist_on', 'fx_dist_type', 'fx_dist_drive',
+       'fx_dist_mix', 'fx_eq_on', 'fx_eq_low', 'fx_eq_mid', 'fx_eq_mid_freq', 'fx_eq_high', 'fx_eq_mix', 'fx_chorus_on',
+       'fx_chorus_rate', 'fx_chorus_depth', 'fx_chorus_mix', 'fx_delay_on', 'fx_delay_sync', 'fx_delay_time', 'fx_delay_feedback',
+       'fx_delay_mix', 'fx_reverb_on', 'fx_reverb_size', 'fx_reverb_decay', 'fx_reverb_damping', 'fx_reverb_mix']),
   CppBuiltin('org.caw.synth.acid', 'Acid synth', true, 'One saw or square voice into a 4-pole ladder; accents and slides.',
       ['wave', 'cutoff', 'resonance', 'env', 'decay', 'accent', 'slide', 'drive', 'volume']),
   CppBuiltin('org.caw.bass', 'Bass', true, 'A saw or square with a sub an octave below, a low-pass and glide.',
