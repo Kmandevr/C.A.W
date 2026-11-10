@@ -221,3 +221,107 @@ TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_chang
     }
     CHECK_EQ(operations, 0u);
 }
+
+TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
+    // The built-in synth plays a pattern (loop wraps, a slide, a ratchet, chords) through a .caw effect and a
+    // native delay; mid-way it is swapped for another instrument (its held notes move over), previews play and
+    // it is stopped: the audio thread must not allocate or free through any of it.
+    ProjectSpec p;
+    p.bpm = 160;
+    p.loopBars = 1;
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C3 4 1\n0 G3 4 1\n4 D3 2 1 slide\n"
+                                "6 F3 2 1\n8 A3 4 1 ratchet 4\n12 C4 4 1\n", {}});
+    p.modules.push_back({"fold", templateSource("fold.caw"), {}});
+    LayerSpec l = layer("s", {"fold"});
+    l.pattern = "pat";
+    l.hasInstrument = true;
+    l.instrument.id = "org.caw.synth.basic";
+    l.components = {{"org.caw.delay.pingpong", {}}};
+    p.layers = {l, layer("t", {})};
+    p.layers[1].pattern = "pat";
+    p.layers[1].hasInstrument = true;
+    p.layers[1].instrument.id = "org.caw.synth.basic";
+    Engine e(48000);
+    const char* path = caw::test::nativeComponentPath();
+    const bool recorder = path && e.loadNativeComponent(path, "org.caw.tests.native-loader.recorder", NativeModuleTrust::Trusted).success;
+    CHECK(recorder);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l2(192), r2(192);
+    for (int k = 0; k < 250; ++k) e.process(l2.data(), r2.data(), 192);  // warm up
+    if (recorder) p.layers[1].instrument.id = "org.caw.tests.native-loader.recorder";
+    p.layers[0].instrument.params = {{"cutoff", 800}};
+    e.setProject(p);
+    e.noteOn("s", 1, 64, 1);
+    e.setComponentParam("s", Engine::kInstrumentIndex, "resonance", 0.8);
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 500; ++k) {
+            e.process(l2.data(), r2.data(), 192);
+            for (float v : l2) peak = v > peak ? v : peak;
+        }
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+    e.noteOff(1);
+    e.stop();
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 250; ++k) e.process(l2.data(), r2.data(), 192);  // the stop, the release tails
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
+TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
+    // Every built-in instrument (#157) on its own track plays a dense pattern (drum keys, chords, a slide, a
+    // ratchet), takes knob moves and previews, and stops: no allocation or free on the audio thread.
+    ProjectSpec p;
+    p.bpm = 150;
+    p.loopBars = 1;
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C2 2 1\n0 F#2 1 0.7\n2 A#2 2 0.8\n"
+                                "4 D2 2 1 slide\n4 D#2 1 1\n6 A1 2 0.9\n8 E2 4 1 ratchet 4\n8 C4 4 0.7\n8 E4 4 0.7\n"
+                                "12 G#2 2 0.6\n12 B1 4 1\n", {}});
+    const char* ids[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit",
+                         "org.caw.bass",      "org.caw.synth.acid", "org.caw.synth.morph"};
+    for (const char* id : ids) {
+        LayerSpec l = layer(id, {});
+        l.pattern = "pat";
+        l.hasInstrument = true;
+        l.instrument.id = id;
+        p.layers.push_back(l);
+    }
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 250; ++k) e.process(l.data(), r.data(), 192);  // warm up
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    for (int round = 0; round < 5; ++round) {
+        e.setComponentParam("org.caw.synth.morph", Engine::kInstrumentIndex, "unison", 1 + 3 * round);
+        e.setComponentParam("org.caw.synth.acid", Engine::kInstrumentIndex, "cutoff", 300 + 200 * round);
+        e.setComponentParam("org.caw.drum.hats", Engine::kInstrumentIndex, "mode", round % 3);
+        e.noteOn("org.caw.bass", 100 + round, 40 + round, 1);
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 100; ++k) {
+            e.process(l.data(), r.data(), 192);
+            for (float v : l) peak = v > peak ? v : peak;
+        }
+        operations += scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+    e.notesOff();
+    e.stop();
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 250; ++k) e.process(l.data(), r.data(), 192);  // the stop, the release tails
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+}

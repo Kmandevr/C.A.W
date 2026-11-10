@@ -101,6 +101,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final s = widget.state;
     final index = s.project.layers.indexOf(layer);
     final gens = s.project.modules.where((m) => s.isGenerator(m.id)).toList();
+    s.componentCatalog.refreshIfStale();
+    final natives = s.nativeInstruments..sort((a, b) => a.label.compareTo(b.label));
     final hasVolume = layer.automation.any((a) => a.target == 'volume');
     final hasPan = layer.automation.any((a) => a.target == 'pan');
     final canAutomate = !layer.isFolder || layer.busEnabled;
@@ -116,7 +118,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
             hint: midi == null || midi.devices.isEmpty ? 'Connect a MIDI keyboard' : null),
         MenuAction('input', 'Input · ${midi == null || midi.devices.isEmpty ? 'none' : midi.devices.join(', ')}', Icons.input,
             enabled: false, hint: 'MIDI keyboards play the selected track; audio input comes later'),
-        for (final g in gens) MenuAction('gen:${g.id}', 'Instrument · ${g.name}', Icons.piano, checked: g.id == layer.generatorId),
+        for (final g in gens)
+          MenuAction('gen:${g.id}', 'Instrument · ${g.name}', Icons.piano,
+              checked: layer.instrument == null && g.id == layer.generatorId),
+        // C++ instruments: the engine's built-ins and the project's loaded (trusted) ones.
+        for (final c in natives)
+          MenuAction('inst:${c.id}', 'Instrument · ${c.label}', Icons.piano_outlined,
+              checked: layer.instrument?.id == c.id, hint: c.builtin ? 'Built-in C++' : 'Project C++'),
         for (final pattern in patterns) MenuAction('clip:${pattern.id}', 'Add clip · ${pattern.name}', Icons.add_box_outlined),
       ],
       const MenuAction('rename', 'Rename', Icons.edit_outlined),
@@ -137,7 +145,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     if (v == null || !mounted) return;
     if (v == 'fx') _openTrack(layer, tab: FocusTab.fx);
     if (v == 'arm') midi?.toggleRecord(layer.id);
-    if (v.startsWith('gen:')) s.editLayer(layer, (l) => l.generatorId = v.substring(4));
+    if (v.startsWith('gen:')) s.setCawGenerator(layer, v.substring(4));
+    if (v.startsWith('inst:')) s.setNativeInstrument(layer, v.substring(5));
     if (v.startsWith('clip:')) s.addClip(layer, v.substring(5));
     if (v == 'rename') await _rename(layer);
     if (v == 'color') s.editLayer(layer, (l) => l.color = (l.color + 1) % LayerDoc.trackColors);
@@ -557,7 +566,8 @@ class _TimelineHeader extends StatelessWidget {
           Expanded(child: Tooltip(
             message: layer.isFolder
                 ? (layer.busEnabled ? 'Folder with a group bus' : 'Folder')
-                : 'Instrument: ${gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'none'} · hold for more',
+                : 'Instrument: ${layer.instrument != null ? state.componentInfo(layer.instrument!.id)?.label ?? layer.instrument!.id
+                    : gens.where((g) => g.id == layer.generatorId).firstOrNull?.name ?? 'none'} · hold for more',
             child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: selected ? Color.lerp(Neon.text, color, 0.35) : null)))),
           if (oneRow) ...[mute, const SizedBox(width: 3), solo],

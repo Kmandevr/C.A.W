@@ -1,0 +1,11 @@
+{
+  "format": "caw.component",
+  "version": 1,
+  "component": {
+    "id": "org.caw.examples.poly-synth",
+    "name": "Poly synth"
+  },
+  "sources": [
+    "src/poly_synth.cpp"
+  ]
+}

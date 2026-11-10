@@ -9,6 +9,8 @@
 #include "caw.h"
 #include "capi_internal.h"
 #include "compile.h"
+#include "component_test.h"
+#include "sample_pack.h"
 #include "docs.h"
 #include "json.h"
 #include "midifile.h"
@@ -34,6 +36,8 @@ void copyError(const std::string& msg, char* out, int32_t len) {
 }  // namespace
 
 extern "C" {
+
+static_assert(CAW_INSTRUMENT_INDEX == caw::Engine::kInstrumentIndex, "the C API and the Engine name the instrument alike");
 
 int32_t caw_api_version(void) { return CAW_API_VERSION; }
 
@@ -328,6 +332,34 @@ const char* caw_template_file(int32_t i) {
 
 const char* caw_template_source(int32_t i) {
     return i >= 0 && i < caw::kTemplateCount ? caw::kTemplateSources[i] : nullptr;
+}
+
+char* caw_component_test(const char* request_json, int32_t trust_level, const char* output_dir,
+                         const char* input_dir) try {
+    if (!request_json) return dup("{\"ok\":false,\"error\":\"missing request\"}");
+    caw::ComponentTestHost host;
+    host.trust = trust_level == CAW_NATIVE_TRUST_TRUSTED    ? caw::NativeModuleTrust::Trusted
+                 : trust_level == CAW_NATIVE_TRUST_ISOLATED ? caw::NativeModuleTrust::Isolated
+                                                             : caw::NativeModuleTrust::Blocked;
+    host.outputDir = output_dir ? output_dir : "";
+    host.inputDir = input_dir ? input_dir : "";
+    return dup(caw::componentTestJson(request_json, host));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
+}
+
+char* caw_sample_pack_render(const char* request_json, int32_t trust_level, int32_t* progress, int32_t* cancel) try {
+    if (!request_json) return dup("{\"ok\":false,\"error\":\"missing request\"}");
+    caw::NativeModuleTrust trust;
+    switch (trust_level) {
+        case CAW_NATIVE_TRUST_BLOCKED: trust = caw::NativeModuleTrust::Blocked; break;
+        case CAW_NATIVE_TRUST_ISOLATED: trust = caw::NativeModuleTrust::Isolated; break;
+        case CAW_NATIVE_TRUST_TRUSTED: trust = caw::NativeModuleTrust::Trusted; break;
+        default: return dup("{\"ok\":false,\"error\":\"invalid native component trust level\"}");
+    }
+    return dup(caw::samplePackJson(request_json, trust, progress, cancel));
+} catch (...) {
+    return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
 }
 
 }  // extern "C"

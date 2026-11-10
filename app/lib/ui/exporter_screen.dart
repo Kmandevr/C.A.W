@@ -3,12 +3,12 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import '../platform/save_copy.dart';
 import '../model/settings.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -286,16 +286,10 @@ class _ExporterScreenState extends State<ExporterScreen> {
 
       if (!mounted) return false;
       setState(() => _saving = true);
-      final bytes = await outputFile.readAsBytes();
       final midi = item.kind == ExportKind.midi;
-      final saved = await FilePicker.saveFile(
-        fileName: item.fileName,
-        bytes: bytes,
-        mimeType: midi ? 'audio/midi' : 'audio/wav',
-        type: midi ? FileType.custom : FileType.audio,
-        allowedExtensions: midi ? const ['mid'] : null,
-      );
-      if (saved == null) {
+      final saved = await saveCopyOf(outputFile,
+          name: item.fileName, mimeType: midi ? 'audio/midi' : 'audio/wav', extension: midi ? 'mid' : 'wav');
+      if (!saved) {
         if (mounted) {
           setState(() { _message = 'Queue paused: destination picker closed.'; _messageIsError = false; });
         }
@@ -461,17 +455,11 @@ class _ExporterScreenState extends State<ExporterScreen> {
         return;
       }
 
-      final bytes = await outputFile.readAsBytes();
-      final saved = await FilePicker.saveFile(
-        fileName: name,
-        bytes: bytes,
-        mimeType: 'audio/wav',
-        type: FileType.audio,
-      );
-      final historyWarning = saved == null ? null : await _recordExport(name);
+      final saved = await saveCopyOf(outputFile, name: name, mimeType: 'audio/wav', extension: 'wav');
+      final historyWarning = saved ? await _recordExport(name) : null;
       if (!mounted) return;
       setState(() {
-        _message = historyWarning ?? (saved == null ? 'Not saved (picker closed).' : 'Saved $name');
+        _message = historyWarning ?? (!saved ? 'Not saved (picker closed).' : 'Saved $name');
         _messageIsError = historyWarning != null;
       });
     } catch (e) {
@@ -515,13 +503,11 @@ class _ExporterScreenState extends State<ExporterScreen> {
       final error = await Isolate.run(() => Engine.exportPattern(source, outputPath,
         bpm: bpm, beatsPerBar: beatsPerBar));
       if (error != null) throw StateError(error);
-      final bytes = await file.readAsBytes();
-      final saved = await FilePicker.saveFile(fileName: name, bytes: bytes,
-        mimeType: 'audio/midi', type: FileType.custom, allowedExtensions: const ['mid']);
-      final historyWarning = saved == null ? null : await _recordExport(name);
+      final saved = await saveCopyOf(file, name: name, mimeType: 'audio/midi', extension: 'mid');
+      final historyWarning = saved ? await _recordExport(name) : null;
       if (!mounted) return;
       setState(() {
-        _message = historyWarning ?? (saved == null ? 'Not saved (picker closed).' : 'Saved $name');
+        _message = historyWarning ?? (!saved ? 'Not saved (picker closed).' : 'Saved $name');
         _messageIsError = historyWarning != null;
       });
     } catch (e) {
@@ -541,7 +527,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   @override
   Widget build(BuildContext context) {
     final p = s.project;
-    final layers = p.layers.where((l) => l.generatorId != null).toList();
+    final layers = p.layers.where((l) => l.generatorId != null || l.instrument != null).toList();
     if (_layerId == null || !layers.any((l) => l.id == _layerId)) _layerId = layers.firstOrNull?.id;
     final modules = p.modules.where((m) => (s.info[m.id]?.ok ?? false) && !s.isLibrary(m.id)).toList();
     final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();

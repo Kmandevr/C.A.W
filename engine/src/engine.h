@@ -91,20 +91,22 @@ public:
     std::string nativeComponentsJson();
     void setParam(const std::string& moduleId, const std::string& name, double value);
     void setGlobal(const std::string& name, double value);
+    // Component index that names a layer's native instrument instead of one of its inserts.
+    static constexpr uint32_t kInstrumentIndex = 0xFFFFFFFFu;
     // A native component's parameter while it plays: component `index` of the layer's inserts (an
-    // empty layer id: the master chain). Ramps over the parameter's smoothing. False if there is no
+    // empty layer id: the master chain; kInstrumentIndex: the layer's instrument). Ramps over the parameter's smoothing. False if there is no
     // such component or parameter. A later project update sets the values it names again.
     bool setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value);
     // Bypasses (or brings back) a playing native component, crossfaded. False if there is none.
     bool setComponentBypass(const std::string& layerId, uint32_t index, bool bypass);
     // {"ok":true,"components":[{"index","ok","version","state"(base64)}]} for a layer's chain (empty
-    // id: the master's), as each component's save_state writes it now; store it in the project so a
+    // id: the master's; its instrument has index kInstrumentIndex), as each component's save_state writes it now; store it in the project so a
     // reload or an export starts from it. {"ok":false,...} if the layer has no chain.
     std::string componentStatesJson(const std::string& layerId);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
-    // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play a pattern
-    // (a voiced chain) can preview.
+    // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play notes
+    // (a voiced chain, or a native instrument) can preview.
     void noteOn(const std::string& layerId, int32_t id, double pitch, double velocity);
     void notePitch(int32_t id, double pitch);  // glides a held preview to [pitch] without a new attack
     void noteOff(int32_t id);
@@ -171,6 +173,12 @@ private:
     void runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0, int len, double* out, Slot* exportTo,
                    int offset, const BlockCtx& base) noexcept;
     void noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int64_t repeat) noexcept;
+    // A native instrument's track (module node 0): its pattern notes and note motion as events, then
+    // the instrument (and one it replaced, crossfading out) into the slot's instL/instR.
+    void runInstrument(Slot& s, int m) noexcept;
+    void instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept;
+    void instrumentMotion(NoteEvents& notes, int m) noexcept;
+    static bool playsNotes(const Slot& s) noexcept;
     struct Voice& pickVoice(Chain& c) noexcept;
     void previewCommand(const Cmd& c) noexcept;
     void updatePreviewing(int frames) noexcept;
@@ -301,6 +309,9 @@ private:
         std::string parameterAutomationSig;
         ComponentChain* inserts = nullptr;  // the native effects last sent to the slot (alive while it plays)
         std::string insertsAutomationKey;   // the lanes their automation table was made from
+        ComponentChain* instrument = nullptr;  // the native instrument last sent to the slot (alive while it plays)
+        std::string instrumentAutomationKey;
+        bool native = false;                // the chain was built for a native instrument
         int64_t compensation = 0;           // the latency-compensation delay last sent, in frames
     };
     std::map<std::string, ModuleState> modules_;
@@ -322,14 +333,15 @@ private:
     double ctlSr_ = 0;
     int64_t ctlLoopLen_ = 0;
 
-    Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced,
+    Chain* buildChain(const std::vector<std::string>& ids, const std::vector<const double*>& wiring, bool voiced, bool native,
                       const Chain* prev, const std::shared_ptr<const std::vector<ProjectAutomationLaneSpec>>& automation,
                       size_t expressionCapacity);
     void swapIn(Slot& s, Chain* c) noexcept;  // hot swap with a crossfade, keeping what can keep playing
     void writeParams(Chain& c);
     void writeMix(int slot, double vol, double pan, bool mute, bool solo);
     int freeSlot();
-    ComponentChain* ctlComponentChain(const std::string& layerId) noexcept;  // control thread; null: none
+    // Control thread; null: none. `index` kInstrumentIndex names the layer's instrument (and becomes 0).
+    ComponentChain* ctlComponentChain(const std::string& layerId, uint32_t& index) noexcept;
     bool updateCompensation(std::map<std::string, std::vector<std::string>>& warnings);
 };
 

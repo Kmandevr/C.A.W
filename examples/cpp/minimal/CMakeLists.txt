@@ -9,6 +9,13 @@ caw_add_component(
   TARGET caw_minimal_component
 )
 
+# The same component as a CLAP plug-in (caw-minimal.clap next to the library); fetches the CLAP headers.
+option(CAW_BUILD_CLAP "Also build the component as a CLAP plug-in" OFF)
+if(CAW_BUILD_CLAP)
+  caw_add_clap_plugin(TARGET caw_minimal_clap COMPONENT caw_minimal_component
+    OUTPUT_NAME caw-minimal VENDOR "C.A.W examples" VERSION "1.0.0")
+endif()
+
 include(CTest)
 if(BUILD_TESTING AND NOT ANDROID)
   add_executable(caw_component_contract_test

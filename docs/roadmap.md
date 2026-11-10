@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # C.A.W. roadmap
@@ -57,6 +57,13 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | AI/video | No in-app AI; video sync is not planned | AI remains excluded; video sync remains off-roadmap |
 
 ## Roadmap sequence
+
+**Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. Anything unclear, needing the owner's direction, or seeming to conflict with an earlier decision is not started: the owner gets a notification with the question, and work moves on to the next clear item. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):
+1. #156 C++ instruments, then #157 C++ built-in instruments and a starter project (with #122, the useful .caw built-ins ported to the Library), #17 and #127 (independent instances, per-note and per-channel processing for instruments).
+2. #158 note clips as standard MIDI with a text form; #161 C++ modulators and routing anything anywhere (with #32).
+3. #160 remove the .caw language, then #159 `.caw` project files.
+4. #163 testing suite, #164 sample-pack maker, #162 plug-in builder (CLAP first).
+5. Then the stages below, in order, skipping what the .caw removal makes obsolete.
 
 The stages are ordered by dependency and product value: first the **C++ creation-platform foundation**, then the existing **Engine graph/N-channel Foundation**, then the **unified authoring interfaces**, then Stages 0–7 and **Release 1**. Stages 8–10 ship as updates after Release 1. Work may be split into smaller issues and pull requests, but keep the stage dependencies and exit gates. The owner can reprioritize explicitly.
 
@@ -264,7 +271,7 @@ These stages ship as updates. Their order still holds.
 |---|---|---|---|---|---|
 | 9.1 | Native module host and lifecycle with three user-chosen modes per plugin/module: Isolated (separate process), Trusted (in-process) or Blocked (owner, 2026-11-03) | Partial | engine | F4 | The native SDK, static registry and module lifecycle contract exist; no dynamic loading, isolation or trust modes. The default mode for unseen code is an open owner question |
 | 9.2 | External CLAP hosting, then VST3 and AU where licensing and platforms allow | Conditional | engine | 9.1 | Not built. **[Assumption]** Out-of-process isolation on Android is unverified and may be desktop-first |
-| 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Planned | engine | CP.2–CP.4, F4 | Not built; the processor implementation must be reused rather than duplicated per format |
+| 9.3 | Export any C.A.W graph/component as CLAP, then VST3, using adapters around the shared component and parameter contracts | Partial | engine | CP.2–CP.4, F4 | CLAP export of component libraries is built for Linux and Windows (#162, `engine/plugin/clap/`); missing: graphs, VST3, macOS bundles, the app's Export button, a third-party host check |
 | 9.4 | iOS, macOS and Linux app builds with platform audio/device testing | Conditional | both | — | Not configured in CI; iOS ships without C++ authoring (owner, 2026-11-09) |
 | 9.5 | Plugin Builder packages C++ components; binary plugin hosting/export remains a separate adapter workflow | Partial | app | CP.1–CP.4, UI.1 | The current Plugin Builder validates/packages .caw source; it must move to the shared C++ component build and descriptor contract |
 

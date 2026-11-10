@@ -132,7 +132,7 @@ class _CawTab extends StatelessWidget {
   }
 }
 
-/// No tab open: New effect, and the project's C++ effects and .caw modules to open.
+/// No tab open: New effect and New instrument, and the project's C++ components and .caw modules to open.
 class _StartView extends StatelessWidget {
   const _StartView({required this.state, required this.onOpen, this.onBack});
   final AppState state;
@@ -174,9 +174,8 @@ class _StartView extends StatelessWidget {
       ),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: FilledButton.icon(
+        child: Wrap(spacing: 8, runSpacing: 6, children: [
+          FilledButton.icon(
             key: const ValueKey('new effect'),
             icon: const Icon(Icons.add, size: 18),
             label: const Text('New effect'),
@@ -185,7 +184,16 @@ class _StartView extends StatelessWidget {
               onOpen(BuildTab(BuildTabKind.cpp, doc.componentId));
             },
           ),
-        ),
+          FilledButton.tonalIcon(
+            key: const ValueKey('new instrument'),
+            icon: const Icon(Icons.piano_outlined, size: 18),
+            label: const Text('New instrument'),
+            onPressed: () {
+              final doc = state.newCppEffect(instrument: true);
+              onOpen(BuildTab(BuildTabKind.cpp, doc.componentId));
+            },
+          ),
+        ]),
       ),
       heading('C++ effects'),
       if (cpp.isEmpty)

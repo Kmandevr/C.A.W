@@ -38,6 +38,22 @@ std::string quoted(const std::string& s) { return "'" + jsonEscape(s) + "'"; }
 
 }  // namespace
 
+bool ComponentChain::isInstrument(const ModuleDescriptor& d) noexcept {
+    if (d.portCount != 2 || !d.ports) return false;
+    bool events = false, out = false;
+    for (uint32_t k = 0; k < 2; ++k) {
+        const PortDescriptor& p = d.ports[k];
+        if (p.type == PortType::Event && p.input) events = true;
+        else if (p.type == PortType::Audio && !p.input && p.layout == ChannelLayout::Stereo && portChannelCount(p) == 2) out = true;
+    }
+    return events && out;
+}
+
+std::unique_ptr<ComponentChain> ComponentChain::buildInstrument(const ModuleRegistry& registry, const ComponentSpec& spec,
+                                                                double sampleRate, std::string& error) {
+    return make(registry, {spec}, sampleRate, true, error);
+}
+
 ComponentChain::~ComponentChain() {
     for (auto& e : entries_)
         if (e->processor) e->processor->deactivate();
@@ -62,8 +78,14 @@ int ComponentChain::parameterIndex(const Entry& e, const std::string& id) const 
 std::unique_ptr<ComponentChain> ComponentChain::build(const ModuleRegistry& registry,
                                                       const std::vector<ComponentSpec>& specs, double sampleRate,
                                                       std::string& error) {
+    return make(registry, specs, sampleRate, false, error);
+}
+
+std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& registry, const std::vector<ComponentSpec>& specs,
+                                                     double sampleRate, bool instrument, std::string& error) {
     std::unique_ptr<ComponentChain> chain(new ComponentChain());
     chain->sampleRate_ = sampleRate;
+    if (instrument) chain->notes_ = std::make_unique<NoteEvents>();
     chain->entries_.reserve(specs.size());
     for (const ComponentSpec& spec : specs) {
         const ModuleDescriptor* d = registry.find(spec.id);
@@ -71,7 +93,16 @@ std::unique_ptr<ComponentChain> ComponentChain::build(const ModuleRegistry& regi
             error = "native component " + quoted(spec.id) + " is not loaded; load it with an explicit trust choice first";
             return nullptr;
         }
-        if (!isStereoEffect(*d)) {
+        if (instrument && !isInstrument(*d)) {
+            error = "native component " + quoted(spec.id) +
+                    " can't be an instrument: an instrument has one event input and one stereo audio output";
+            return nullptr;
+        }
+        if (!instrument && isInstrument(*d)) {
+            error = "native component " + quoted(spec.id) + " is an instrument: choose it as the track's instrument";
+            return nullptr;
+        }
+        if (!instrument && !isStereoEffect(*d)) {
             error = "native component " + quoted(spec.id) +
                     " must currently expose one stereo audio input and one stereo audio output";
             return nullptr;
@@ -218,10 +249,11 @@ bool ComponentChain::uses(const std::string& id) const noexcept {
     return false;
 }
 
-std::string ComponentChain::automationKey(const std::vector<ProjectAutomationLaneSpec>& lanes, const std::string& layer) {
+std::string ComponentChain::automationKey(const std::vector<ProjectAutomationLaneSpec>& lanes, const std::string& layer,
+                                          const char* targetType) {
     std::string key;
     for (const ProjectAutomationLaneSpec& lane : lanes) {
-        if (lane.targetType != "component" || lane.moduleId != layer) continue;
+        if (lane.targetType != targetType || lane.moduleId != layer) continue;
         key += std::to_string(lane.component) + "|" + lane.target + "|";
         for (const AutomationPointSpec& p : lane.points) {
             // Exact: the bits, so the smallest edit gives a new key.
@@ -238,13 +270,14 @@ std::unique_ptr<ComponentAutomation> ComponentChain::automationFor(
     table->lanes = lanes;
     table->byParam.resize(entries_.size());
     bool any = false;
+    const char* targetType = instrument() ? "instrument" : "component";
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         const ModuleDescriptor& d = entries_[i]->processor->descriptor();
         table->byParam[i].assign(d.parameterCount, nullptr);
         for (uint32_t k = 0; k < d.parameterCount; ++k) {
             if (!d.parameters[k].automatable) continue;  // the descriptor's flag: lanes never drive it
             for (const ProjectAutomationLaneSpec& lane : *lanes)
-                if (lane.targetType == "component" && lane.moduleId == layer &&
+                if (lane.targetType == targetType && lane.moduleId == layer &&
                     lane.component == static_cast<int>(i) && lane.target == d.parameters[k].id && !lane.points.empty()) {
                     table->byParam[i][k] = &lane;
                     any = true;
@@ -276,6 +309,11 @@ void ComponentChain::reset() noexcept {
 
 void ComponentChain::process(float* left, float* right, uint32_t m, double sampleRate, const ChainTime* time) noexcept {
     if (m == 0 || m > kMaxFrames) return;
+    if (notes_) {  // an instrument makes its sound from silence: bypassed, it crossfades to silence
+        std::fill_n(left, m, 0.0f);
+        std::fill_n(right, m, 0.0f);
+        notes_->sort();
+    }
     const bool playing = time && time->playing;
     const bool newPlay = playing && time->playEpoch != playEpoch_;
     if (playing) playEpoch_ = time->playEpoch;
@@ -328,7 +366,25 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         block.parameters = count ? e.values.data() : nullptr;
         block.parameterCount = static_cast<uint32_t>(count);
         block.transport = time ? &transport : nullptr;
-        if (!e.processor->process(block)) {
+        bool processed;
+        if (notes_) {
+            const ChannelBufferView audioOut{out, 2, m};
+            const EventInput events{notes_->events(), notes_->count()};
+            ProcessBlock ports;
+            ports.frames = m;
+            ports.sampleRate = sampleRate;
+            ports.audioOut = &audioOut;
+            ports.audioOutCount = 1;
+            ports.eventIn = &events;
+            ports.eventInCount = 1;
+            ports.parameters = block.parameters;
+            ports.parameterCount = block.parameterCount;
+            ports.transport = block.transport;
+            processed = e.processor->usesProcessPorts() && e.processor->processPorts(ports);
+        } else {
+            processed = e.processor->process(block);
+        }
+        if (!processed) {
             std::copy_n(stageL_.data(), m, left);
             std::copy_n(stageR_.data(), m, right);
         }
@@ -345,6 +401,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
             }
         }
     }
+    if (notes_) notes_->clearEvents();  // delivered (or dropped while bypassed): the next block starts empty
 }
 
 }  // namespace caw

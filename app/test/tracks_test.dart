@@ -21,6 +21,10 @@ void main() {
     s.engine = Engine.create();
     s.templates = Engine.templates();
     s.project = s.starterProject();
+    // The First loop plays C++ instruments; this test is about a .caw generator, so a .caw kick track leads.
+    final cawKick = s.moduleFromTemplate(s.template('kick.caw')!);
+    s.project.modules.insert(0, cawKick);
+    s.project.layers.insert(0, LayerDoc(id: 'caw-kick', name: 'Kick', color: 0, generatorId: cawKick.id, lengthSteps: 16));
     s.selectedModuleId = s.project.modules.last.id;
     s.ready = true;
     s.starting = false;

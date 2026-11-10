@@ -18,8 +18,14 @@ extern "C" {
    audition are CAW_SCOPE_MASTER and CAW_SCOPE_AUDITION, not fixed slot numbers (F7.3).
    3 (2026-11-09): native components on tracks ("components" per layer) and parameter values in
    both chains ({"id","params","bypass","state","state_version"} entries), component automation
-   lanes ("target_type":"component"); caw_engine_set_component_param, _bypass and _states. */
-#define CAW_API_VERSION 3
+   lanes ("target_type":"component"); caw_engine_set_component_param, _bypass and _states.
+   4 (2026-11-10): native instruments: a layer's "instrument" entry (same shape as a component entry)
+   plays its notes instead of a .caw generator; component index CAW_INSTRUMENT_INDEX addresses it in
+   _set_component_param, _bypass and _states; automation lanes "target_type":"instrument". Older
+   fields work as before. */
+#define CAW_API_VERSION 4
+/* The component index that names a layer's native instrument rather than one of its "components". */
+#define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
 typedef struct CawEngine CawEngine;
 
@@ -128,7 +134,8 @@ CAW_API char* caw_engine_reload_component(CawEngine* e, const char* library_path
 CAW_API char* caw_engine_components(CawEngine* e);
 CAW_API void caw_engine_set_param(CawEngine* e, const char* module_id, const char* name, double value);
 /* A playing native component's parameter: component `index` (0-based) of a layer's "components"
-   chain, or of "master_components" when layer_id is NULL or empty. It ramps over the parameter's
+   chain, or of "master_components" when layer_id is NULL or empty; CAW_INSTRUMENT_INDEX: the layer's
+   "instrument". It ramps over the parameter's
    smoothing. 1 on success, 0 if there is no such component or parameter, or value is not finite. */
 CAW_API int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_id, uint32_t index,
                                                const char* param_id, double value);
@@ -136,7 +143,8 @@ CAW_API int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_i
    bypassed component is not run. 1 on success, 0 if there is no such component. */
 CAW_API int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_id, uint32_t index, int32_t bypass);
 /* Each component's state as it saves it now, as JSON (free with caw_free):
-   {"ok":true,"components":[{"index","ok","version","state" (base64)}]}. Store "state" and
+   {"ok":true,"components":[{"index","ok","version","state" (base64)}]} (the layer's instrument has
+   index CAW_INSTRUMENT_INDEX). Store "state" and
    "version" (as "state_version") in the project's entry so a reload or an export starts from it. */
 CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
@@ -147,7 +155,8 @@ CAW_API void caw_engine_set_master(CawEngine* e, double volume);
 /* Note previews: a held note on a layer's instrument, heard through the layer's effects and mix (mute and solo
    apply), while playing or stopped; stopped, the transport stays where it is. `id` is the caller's handle: a second
    note on with the same id ends the first. Pitch is a MIDI note number (fractions allowed), velocity 0..1. Only a
-   layer that plays a pattern can preview. note_pitch glides a held preview to a new pitch without a new attack. */
+   layer that plays a pattern, or has a native instrument, can preview; a native instrument gets them as note
+   events with their own note ids (a MIDI keyboard plays through these too). note_pitch glides a held preview to a new pitch without a new attack. */
 CAW_API void caw_engine_note_on(CawEngine* e, const char* layer_id, int32_t id, double pitch, double velocity);
 CAW_API void caw_engine_note_pitch(CawEngine* e, int32_t id, double pitch);
 CAW_API void caw_engine_note_off(CawEngine* e, int32_t id);
@@ -229,6 +238,29 @@ CAW_API char* caw_job_error(CawJob* job);
 CAW_API void caw_job_cancel(CawJob* job);
 CAW_API void caw_job_release(CawJob* job);
 CAW_API void caw_worker_pool_wait_idle(CawWorkerPool* pool);
+
+/* Component testing suite (#163): renders one C++ effect offline (never on the audio thread, no
+   device) with a test signal and returns its measurements as JSON. The request is JSON, e.g.
+   {"component":{"id":"org.caw.distortion","params":{"drive":8}},"signal":{"type":"sine","frequency":1000}};
+   a built library needs "library"; its trust is [trust_level] (CAW_NATIVE_TRUST_*: the user's own choice for that
+   library), and a request naming a "trust" is refused. "write_wav"/"write_input_wav" are plain file names written
+   inside [output_dir] (NULL: no files) and a WAV test signal's "path" a plain name inside [input_dir] (NULL: none).
+   Keys of the request and the result: docs/engine.md, "Component testing". The result always has
+   "ok" and "error". Blocks the caller for the render; call it from a worker, never the UI or audio
+   thread. Free the result with caw_free. */
+CAW_API char* caw_component_test(const char* request_json, int32_t trust_level, const char* output_dir,
+                                 const char* input_dir);
+
+/* Sample-pack maker (#164): renders an instrument (and an optional effect chain) offline over a grid of
+   notes x velocities x parameter steps, each a note held then released until its tail is quiet, and writes
+   named WAV files (16/24-bit PCM or 32-bit float, smpl chunk with root note and optional loop), a manifest
+   JSON and optionally SFZ files, all directly inside the request's "output_dir". Request and result keys:
+   docs/engine.md, "Sample packs". trust_level (CAW_NATIVE_TRUST_*) applies to every library the request
+   names; only TRUSTED loads one, and a "trust" key in the request is refused. progress gets 0..1000 and a
+   non-zero *cancel stops it (either may be NULL). Blocks the caller for the whole render: call it from a
+   worker, never the UI or audio thread. The result always has "ok" and "error"; free it with caw_free. */
+CAW_API char* caw_sample_pack_render(const char* request_json, int32_t trust_level, int32_t* progress,
+                                     int32_t* cancel);
 
 #ifdef __cplusplus
 }

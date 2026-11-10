@@ -12,6 +12,13 @@ import 'project.dart';
 /// The engine's built-in stereo tools (`org.caw.*`): always loaded, no trust choice (docs/engine.md).
 bool isBuiltinComponent(String id) => id.startsWith('org.caw.');
 
+/// A readable name for a built-in before its descriptor arrives: `org.caw.delay.pingpong` → "Delay pingpong".
+String builtinComponentName(String id) {
+  if (!isBuiltinComponent(id)) return id;
+  final text = id.substring('org.caw.'.length).split('.').join(' ');
+  return text.isEmpty ? id : text[0].toUpperCase() + text.substring(1);
+}
+
 /// What a native effect in a track's stack is doing now, for its card.
 enum NativeEffectState { playing, needsTrust, blocked, buildFailed, loadFailed, waiting }
 
@@ -66,6 +73,9 @@ extension ArrangeFx on AppState {
   /// The project's C++ component that defines [componentId], or null (a built-in, or code that isn't in the project).
   CppComponentDoc? cppComponentFor(String componentId) =>
       project.cppComponents.where((c) => c.componentId == componentId).firstOrNull;
+
+  /// A component's display name: its descriptor's, else the project code's, else one made from a built-in's id.
+  String componentLabel(String id) => componentInfo(id)?.label ?? cppComponentFor(id)?.name ?? builtinComponentName(id);
 
   /// The same rule the project sync uses (`toEngineJson(playableComponents:)`): without an in-app compiler every
   /// component is sent; with one, the built-ins and the components it loaded.
@@ -143,6 +153,49 @@ extension ArrangeFx on AppState {
 
   void commitNativeParams(LayerDoc layer) => editLayer(layer, (_) {});
 
+  /// The C++ instruments a track can play: the engine's built-ins and the project's loaded (trusted) ones.
+  List<NativeComponentInfo> get nativeInstruments =>
+      [for (final c in componentCatalog.value.values) if (c.isInstrument && componentPlayable(c.id)) c];
+
+  /// Makes native component [componentId] [layer]'s instrument in place of its .caw generator (null: none). Lanes of
+  /// a replaced instrument go with it.
+  void setNativeInstrument(LayerDoc layer, String? componentId) {
+    if (layer.isFolder || (layer.instrument?.id == componentId && layer.generatorId == null)) return;
+    editProject((p) {
+      if (layer.instrument?.id != componentId) {
+        p.automation.removeWhere((a) => a.targetType == 'instrument' && a.layerId == layer.id);
+      }
+      layer.setInstrument(componentId);
+    });
+  }
+
+  /// Makes .caw module [moduleId] [layer]'s instrument, replacing a native one.
+  void setCawGenerator(LayerDoc layer, String moduleId) {
+    if (layer.isFolder) return;
+    editProject((p) {
+      if (layer.instrument != null) p.automation.removeWhere((a) => a.targetType == 'instrument' && a.layerId == layer.id);
+      layer.instrument = null;
+      layer.generatorId = moduleId;
+    });
+  }
+
+  /// Bypasses (or brings back) [layer]'s native instrument: live in the engine, and stored in the project.
+  void setInstrumentBypass(LayerDoc layer, bool bypass) {
+    final use = layer.instrument;
+    if (use == null) return;
+    if (componentPlayable(use.id)) engine?.setComponentBypass(layer.id, ProjectDoc.instrumentIndex, bypass);
+    editLayer(layer, (l) => l.instrument?.bypass = bypass);
+  }
+
+  /// A knob move on [layer]'s native instrument: live at once, kept in the project ([commitNativeParams] saves it).
+  void setInstrumentParamLive(LayerDoc layer, String param, double value) {
+    final use = layer.instrument;
+    if (use == null) return;
+    use.params[param] = value;
+    if (componentPlayable(use.id)) engine?.setComponentParam(layer.id, ProjectDoc.instrumentIndex, param, value);
+    layerValueTick(layer.id).value++;
+  }
+
   /// Adds .caw effect module [moduleId] to [layer]'s chain (at [at], or the end).
   bool addCawEffect(LayerDoc layer, String moduleId, {int? at}) {
     if (layer.isFolder || project.module(moduleId) == null || layer.effectIds.length >= 32) return false;
@@ -167,12 +220,17 @@ extension ArrangeFx on AppState {
     if (layer.isFolder) return false;
     switch (asset.kind) {
       case AssetKind.nativeEffect:
+        if (componentInfo(asset.id)?.isInstrument ?? false) {  // an instrument plays the track instead
+          if (layer.instrument?.id == asset.id) return false;
+          setNativeInstrument(layer, asset.id);
+          return true;
+        }
         return addNativeEffect(layer, asset.id) != null;
       case AssetKind.cawModule:
         if (isPattern(asset.id)) return _dropPattern(layer, asset.id, atStep);
         if (isGenerator(asset.id)) {
-          if (layer.generatorId == asset.id) return false;
-          editLayer(layer, (l) => l.generatorId = asset.id);
+          if (layer.generatorId == asset.id && layer.instrument == null) return false;
+          setCawGenerator(layer, asset.id);
           return true;
         }
         return addCawEffect(layer, asset.id);
