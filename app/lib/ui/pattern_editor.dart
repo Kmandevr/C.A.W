@@ -884,7 +884,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       for (var dx = -reach; dx <= reach; dx += 2) {
         final x = p.dx + dx;
         if (x < x0 || x > x0 + w) continue;
-        final y = mid - NoteExpression.valueAt(pts, (x - x0) / w) * _rowH;
+        final y = mid - displayCurveAt(pts, (x - x0) / w, w) * _rowH;
         final dist = Offset(dx, p.dy - y).distance;
         if (dist <= lineD) {
           lineD = dist;
@@ -1497,18 +1497,30 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   double _stepAt(double x) => (x + _scrollX) / _pxPerStep;
   double _pitchAt(double y) => 127 - ((y + _scrollY) / _rowH).floorToDouble();
 
+  /// Whether [p] is on [n]'s row or, for a bent note, on its ribbon where it is drawn above [p] (clamped to the note's
+  /// ends, so a touch just past an end tests the ribbon's end). Time is the caller's test.
+  bool _onNote(PatternNote n, Offset p) {
+    final e = n.expr;
+    if (!_isBent(e)) return n.pitch.round() == _pitchAt(p.dy);
+    final nw = _noteW(n), lenSec = n.len.toDouble() * _secPerStep;
+    final at = _ribbonAt(e, p.dx - _noteX(n), nw, _rowH, lenSec, _vibWave(e, nw, lenSec));
+    return (p.dy - (_noteMid(n) - at.dy)).abs() <= at.half + 1;
+  }
+
+  double get _secPerStep => 15 / widget.state.project.bpm;
+
   int? _noteAt(Offset p) {
     final d = _doc;
     if (d == null) return null;
-    final t = _stepAt(p.dx), pitch = _pitchAt(p.dy);
+    final t = _stepAt(p.dx);
     for (final n in d.notes.reversed) {
-      if (n.pitch.round() == pitch && t >= n.at.toDouble() && t < n.end.toDouble()) return n.id;
+      if (t >= n.at.toDouble() && t < n.end.toDouble() && _onNote(n, p)) return n.id;
     }
     // A short note is easier to grab: a touch beside it, within the grab zone, counts as on it, but only inside the
     // tap cell the note starts in, so a tap in the next cell still draws there.
     final cell = _tapLevel.toDouble(), touchCell = (t / cell).floor();
     for (final n in d.notes.reversed) {
-      if (n.pitch.round() != pitch || (n.at.toDouble() / cell).floor() != touchCell) continue;
+      if ((n.at.toDouble() / cell).floor() != touchCell || !_onNote(n, p)) continue;
       final w = n.len.toDouble() * _pxPerStep, pad = math.max(0.0, _look.grab * 2 - w) / 2 / _pxPerStep;
       if (t >= n.at.toDouble() - pad && t < n.end.toDouble() + pad) return n.id;
     }
@@ -1533,9 +1545,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   ({int id, int edge})? _edgeAt(Offset p) {
     final d = _doc;
     if (d == null || _tool == PatternTool.erase) return null;
-    final pitch = _pitchAt(p.dy);
     for (final n in d.notes.reversed) {
-      if (!_sel.contains(n.id) || n.pitch.round() != pitch) continue;
+      if (!_sel.contains(n.id) || !_onNote(n, p)) continue;
       final part = _partAt(n, p.dx);
       if (part != null && part != 0) return (id: n.id, edge: part);
     }
@@ -2625,67 +2636,117 @@ class _CurveView {
   final bool drawing;
 }
 
-/// A note's pitch line as the roll draws it, for a note at [x] (row top [y], [nw] wide) on a grid [w] wide: sampled
-/// every 2 px where it is on screen plus at its points, so corners stay sharp at any zoom. Vibrato is drawn as a wave
-/// only while a cycle spans at least 8 px; zoomed out it would alias into spikes (#170), so the line follows the bend
-/// alone and [band] says to draw the vibrato as a faint band around it.
-({Path path, bool band}) _pitchPath(NoteExpression e,
-    {required double x, required double y, required double nw, required double w, required double rowH,
-    required double lenSec}) {
-  final cyclePx = e.vibDepth > 0 && e.vibRate > 0 && lenSec > 0 ? nw / (lenSec * e.vibRate) : double.infinity;
-  final wave = cyclePx >= 8;
-  double pitch(double u) => wave ? e.pitchAt(u, u * lenSec) : NoteExpression.valueAt(e.bend, u);
-  final from = math.max(0.0, -x), to = math.min(nw, w - x);
-  final xs = <double>{for (var px = (from / 2).floor() * 2.0; px <= to; px += 2) px, from, to,
-    for (final q in e.bend) if (q.t * nw >= from && q.t * nw <= to) q.t * nw}.toList()..sort();
-  final path = Path();
-  for (var i = 0; i < xs.length; i++) {
-    final py = y + rowH / 2 - pitch(xs[i] / nw) * rowH;
-    i == 0 ? path.moveTo(x + xs[i], py) : path.lineTo(x + xs[i], py);
-  }
-  return (path: path, band: !wave && e.vibDepth > 0);
+/// Whether [e] bends its note away from its row (a pitch curve or vibrato): the roll then draws it as a ribbon.
+bool _isBent(NoteExpression e) => e.bend.isNotEmpty || e.vibDepth > 0;
+
+/// Whether a note [nw] px wide, [lenSec] long, draws its vibrato as a wave: only while a cycle spans at least 8 px;
+/// zoomed out it would alias into spikes (#170), so the ribbon follows the bend alone inside a faint band.
+bool _vibWave(NoteExpression e, double nw, double lenSec) =>
+    e.vibDepth > 0 && e.vibRate > 0 && lenSec > 0 && nw / (lenSec * e.vibRate) >= 8;
+
+/// The pitch the roll draws [px] into a note [nw] px wide (clamped to the note, so a stretch in progress holds its
+/// ends): the smoothed curve ([displayCurveAt]), plus the vibrato while it is drawn as a wave. In rows above the
+/// note's own; the sound follows the stored curve.
+double _drawnPitch(NoteExpression e, double px, double nw, double lenSec, bool wave) {
+  final u = nw > 0 ? (px / nw).clamp(0.0, 1.0) : 0.0;
+  final bend = displayCurveAt(e.bend, u, nw);
+  return wave ? bend + e.pitchAt(u, u * lenSec) - NoteExpression.valueAt(e.bend, u) : bend;
 }
 
+/// A bent note's ribbon at [px] into it: its centre's height above the row's middle, its [slope] on screen (px down
+/// per px across) and [half] its height straight up and down there. The ribbon keeps the note's thickness across its
+/// slope, so a glide stays as solid as the note; [half] grows with the slope (up to 8 times, for a near-vertical
+/// jump). The painter and the note tool's hit test both use this.
+({double dy, double slope, double half}) _ribbonAt(
+    NoteExpression e, double px, double nw, double rowH, double lenSec, bool wave) {
+  final c = _drawnPitch(e, px, nw, lenSec, wave);
+  final slope = -(_drawnPitch(e, px + 1, nw, lenSec, wave) - _drawnPitch(e, px - 1, nw, lenSec, wave)) * rowH / 2;
+  return (dy: c * rowH, slope: slope, half: (rowH - 2) / 2 * math.min(8.0, math.sqrt(1 + slope * slope)));
+}
+
+/// A bent note's pitch line as the roll draws it, for a note at [x] (row top [y], [nw] wide) on a grid [w] wide, its
+/// ends at [left] and [right] (a stretch in progress moves one): the ribbon's centre, and [band]: draw the vibrato as
+/// a faint band (zoomed out). Sampled every 2 px where it is on screen plus at its points, so it draws cleanly at any
+/// zoom.
+({Path line, bool band}) _pitchPath(NoteExpression e,
+    {required double x, required double y, required double nw, required double w, required double rowH,
+    required double lenSec, double? left, double? right}) {
+  final wave = _vibWave(e, nw, lenSec);
+  final l = (left ?? x) - x, r = (right ?? x + nw) - x;
+  final from = math.max(l, -x), to = math.min(r, w - x);
+  final xs = <double>{for (var px = (from / 2).ceil() * 2.0; px < to; px += 2) px, from, to,
+    for (final q in e.bend) if (q.t * nw > from && q.t * nw < to) q.t * nw}.toList()..sort();
+  final line = Path(), mid = y + rowH / 2;
+  for (var i = 0; i < xs.length; i++) {
+    final py = mid - _drawnPitch(e, xs[i], nw, lenSec, wave) * rowH;
+    i == 0 ? line.moveTo(x + xs[i], py) : line.lineTo(x + xs[i], py);
+  }
+  return (line: line, band: drawsVibratoAsBand(e, nw, lenSec));
+}
+
+/// Whether the roll draws [e]'s vibrato as a faint band round the ribbon (zoomed out, a note [nw] px wide and
+/// [lenSec] long) instead of as a wave.
+@visibleForTesting
+bool drawsVibratoAsBand(NoteExpression e, double nw, double lenSec) => e.vibDepth > 0 && !_vibWave(e, nw, lenSec);
+
 /// One note of the roll in [box] (its row at [x], [y], [nw] wide, its stretch already applied to [box]): layer
-/// colour, brighter when louder. A bent note keeps its row faint and its pitch line carries it, MIDI Sketch style;
-/// [points] 1 shows its pitch points dim, 2 bright. White outline when [selected].
+/// colour, brighter when louder. A bent note is itself bent (owner, 2026-11-10: "the actual MIDI note itself to be
+/// the one that's bent"): a ribbon of its own height whose centre follows the smoothed pitch, a bright thread
+/// through its middle, and its start row kept as a faint anchor. [points] 1 shows its pitch points dim, 2 bright, on
+/// their true values. White outline when [selected].
 void _paintNote(Canvas canvas, PatternNote n, NoteExpression e, Rect box,
     {required double x, required double y, required double nw, required double w, required double rowH,
     required Color color, required double secPerStep, required bool selected, int points = 0}) {
   final r = RRect.fromRectAndRadius(box, const Radius.circular(3));
   final fill = color.withValues(alpha: 0.35 + 0.65 * n.vel);
-  if (e.bend.isNotEmpty || e.vibDepth > 0) {
-    canvas.drawRRect(r, Paint()..color = fill.withValues(alpha: 0.18));
-    final line = _pitchPath(e, x: x, y: y, nw: nw, w: w, rowH: rowH, lenSec: n.len.toDouble() * secPerStep);
-    final stroke = math.max(3.0, rowH * 0.55);
-    if (line.band) {
-      canvas.drawPath(line.path, Paint()
-        ..color = fill.withValues(alpha: 0.3)
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..strokeWidth = stroke + 2 * e.vibDepth * rowH);
-    }
-    canvas.drawPath(line.path, Paint()
-      ..color = fill
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..strokeWidth = stroke);
-    if (points > 0) {
-      final dot = Paint()..color = points > 1 ? Neon.yellow : Neon.yellow.withValues(alpha: 0.55);
-      for (final p in e.bend) {
-        canvas.drawCircle(Offset(x + p.t * nw, y + rowH / 2 - p.v * rowH), points > 1 ? 5 : 3.5, dot);
-      }
-    }
-  } else {
+  if (!_isBent(e)) {
     canvas.drawRRect(r, Paint()..color = fill);
+    if (selected) {
+      canvas.drawRRect(r, Paint()
+        ..color = Neon.text
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5);
+    }
+    return;
   }
-  if (selected) {
-    canvas.drawRRect(r, Paint()
-      ..color = Neon.text
+  // The anchor: the row the note is written on, faint.
+  canvas.drawRRect(r, Paint()..color = fill.withValues(alpha: 0.12));
+  canvas.drawRRect(r, Paint()
+    ..color = fill.withValues(alpha: 0.3)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 0.8);
+  final shape = _pitchPath(e,
+      x: x, y: y, nw: nw, w: w, rowH: rowH, lenSec: n.len.toDouble() * secPerStep, left: box.left, right: box.right);
+  if (shape.band) {
+    canvas.drawPath(shape.line, Paint()
+      ..color = fill.withValues(alpha: 0.3)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5);
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = rowH - 2 + 2 * e.vibDepth * rowH);
+  }
+  // The ribbon: the line stroked as thick as the note, square to it at its ends, in the note's colour made opaque
+  // over the grid so where a tight turn folds the stroke over itself it doesn't show darker. Selected, a white
+  // stroke a little wider underneath outlines it.
+  final ribbon = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeJoin = StrokeJoin.round
+    ..strokeWidth = rowH - 2;
+  if (selected) canvas.drawPath(shape.line, ribbon..color = Neon.text..strokeWidth = rowH + 1);
+  canvas.drawPath(shape.line, ribbon
+    ..color = Color.alphaBlend(fill, Neon.panel)
+    ..strokeWidth = rowH - 2);
+  if (rowH >= 6) {
+    canvas.drawPath(shape.line, Paint()
+      ..color = Color.lerp(color, Neon.text, 0.55)!.withValues(alpha: 0.85)
+      ..style = PaintingStyle.stroke
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = 1.2);
+  }
+  if (points > 0) {
+    final dot = Paint()..color = points > 1 ? Neon.yellow : Neon.yellow.withValues(alpha: 0.55);
+    for (final p in e.bend) {
+      canvas.drawCircle(Offset(x + p.t * nw, y + rowH / 2 - p.v * rowH), points > 1 ? 5 : 3.5, dot);
+    }
   }
 }
 
@@ -2781,12 +2842,12 @@ class _CurveOverlayPainter extends CustomPainter {
           ..strokeWidth = 2);
       } else if (hit.line) {
         final line = _pitchPath(e, x: x, y: y, nw: nw, w: w, rowH: rowH, lenSec: hn.len.toDouble() * secPerStep);
-        canvas.drawPath(line.path, Paint()
+        canvas.drawPath(line.line, Paint()
           ..color = Neon.yellow.withValues(alpha: 0.35)
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round
           ..strokeJoin = StrokeJoin.round
-          ..strokeWidth = math.max(3.0, rowH * 0.55) + 6);
+          ..strokeWidth = rowH + 4);
       }
     }
     canvas.restore();
@@ -2920,9 +2981,9 @@ class _RollPainter extends CustomPainter {
       if (x > w || x + nw < 0) continue;
       final y = (127 - n.pitch.round()) * rowH - scrollY;
       final e = n.expr;
-      final bent = e.bend.isNotEmpty || e.vibDepth > 0;
+      final bent = _isBent(e);
       // A bent note can sound far from its row: keep it on screen while any of its curve is.
-      final reach = bent ? (e.bend.fold(0.0, (m, p) => math.max(m, p.v.abs())) + e.vibDepth + 1) * rowH : 0.0;
+      final reach = bent ? (e.bend.fold(0.0, (m, p) => math.max(m, p.v.abs())) + e.vibDepth + 2) * rowH : 0.0;
       if (y - reach > h || y + rowH + reach < 0 || n.id == hide) continue;
       var box = Rect.fromLTWH(x, y + 1, nw, rowH - 2);
       if (lag != 0 && lagIds.contains(n.id)) {
@@ -2940,7 +3001,9 @@ class _RollPainter extends CustomPainter {
           x: x, y: y, nw: nw, w: w, rowH: rowH, color: color, secPerStep: secPerStep, selected: sel.contains(n.id),
           points: !curveMode || !bent ? 0 : (sel.contains(n.id) ? 2 : 1));
       if (n.prob < 1 || n.ratchet > 1 || n.slide) {
-        canvas.drawCircle(Offset(x + 4, y + rowH / 2), 2, Paint()..color = Neon.bg);
+        // On the ribbon where a bent note starts.
+        final lift = bent ? _drawnPitch(e, 4, nw, n.len.toDouble() * secPerStep, false) * rowH : 0.0;
+        canvas.drawCircle(Offset(x + 4, y + rowH / 2 - lift), 2, Paint()..color = Neon.bg);
       }
     }
     final g = ghost;
@@ -2965,7 +3028,12 @@ class _RollPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       )..layout();
       final end = lenNote.end.toDouble() * pxPerStep - scrollX + (lagIds.contains(lenNote.id) && lagEdge > 0 ? lag : 0);
-      final top = (127 - lenNote.pitch.round()) * rowH - scrollY - label.height - 4;
+      // Above the note's end, where its ribbon ends if it is bent.
+      final endPx = math.max(3.0, lenNote.len.toDouble() * pxPerStep - 1);
+      final lift = _isBent(lenNote.expr)
+          ? _drawnPitch(lenNote.expr, endPx, endPx, lenNote.len.toDouble() * secPerStep, false) * rowH
+          : 0.0;
+      final top = (127 - lenNote.pitch.round()) * rowH - scrollY - lift - label.height - 4;
       final at = Offset((end - label.width / 2).clamp(0.0, math.max(0.0, w - label.width)), math.max(0.0, top));
       canvas.drawRRect(RRect.fromRectAndRadius((at - const Offset(4, 1)) & Size(label.width + 8, label.height + 2),
           const Radius.circular(4)), Paint()..color = Neon.bg.withValues(alpha: 0.85));
