@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:caw/model/settings.dart';
 import 'package:caw/platform/haptics_device.dart';
+import 'package:caw/ui/devices/kit/feel.dart';
 import 'package:caw/ui/haptics.dart';
 import 'package:caw/ui/motion.dart';
 import 'package:flutter/services.dart';
@@ -44,6 +45,14 @@ void main() {
     expect(rec.played.map((p) => p.$1), [
       HapticKind.tap, HapticKind.tick, HapticKind.grab, HapticKind.drop, HapticKind.threshold, HapticKind.error,
     ]);
+  });
+
+  test("the device editors' hook plays the semantic haptics", () {
+    for (final call in [DeviceFeel.grab, DeviceFeel.detent, DeviceFeel.tap, DeviceFeel.release]) {
+      call();
+      t += const Duration(milliseconds: 300);
+    }
+    expect(rec.played.map((p) => p.$1), [HapticKind.grab, HapticKind.tick, HapticKind.tap, HapticKind.drop]);
   });
 
   test('off plays nothing, and Motion.haptics is the same switch', () {

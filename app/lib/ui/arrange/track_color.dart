@@ -14,7 +14,8 @@ Color trackColor(AppState state, LayerDoc layer) => trackColorIn(state.project.l
 
 Color trackColorIn(List<LayerDoc> layers, LayerDoc layer, [int depth = 0]) {
   final parentId = layer.parentId;
-  if (layer.ownColor || parentId == null || depth > 16) return Neon.layer(layer.color);
+  // Any depth (folders nest without a limit); the walk ends at the layer count, so a broken loop ends too.
+  if (layer.ownColor || parentId == null || depth > layers.length) return Neon.layer(layer.color);
   final folder = layers.where((l) => l.id == parentId).firstOrNull;
   if (folder == null) return Neon.layer(layer.color);
   final base = trackColorIn(layers, folder, depth + 1);

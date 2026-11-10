@@ -6,6 +6,7 @@ import '../../motion.dart';
 import '../../theme.dart';
 import '../device_controls.dart';
 import '../device_scope.dart';
+import '../kit/device_style.dart';
 import '../visuals/envelope_view.dart';
 import '../visuals/fx_visuals.dart';
 import '../visuals/lfo_view.dart';
@@ -116,59 +117,62 @@ class FlagshipFxPage extends StatelessWidget {
     final bpm = t.state.project.bpm;
     final sync = v('fx_delay_sync').round().clamp(0, _delayWholes.length - 1);
     final delaySeconds = sync == 0 ? v('fx_delay_time') : _delayWholes[sync] * 4 * 60 / bpm;
-    return ListView(key: const ValueKey('flagship-fx'), padding: const EdgeInsets.fromLTRB(8, 8, 8, 24), children: [
+    // Each effect in its family's colour, as the stand-alone devices.
+    final drive = deviceStyle(DeviceFamily.drive).primary, eq = deviceStyle(DeviceFamily.eq).primary;
+    final mod = deviceStyle(DeviceFamily.modulation).primary, space = deviceStyle(DeviceFamily.space);
+    return ListView(key: ValueKey('flagship-fx'), padding: EdgeInsets.fromLTRB(8, 8, 8, 24), children: [
       DeviceColumns(minWidth: 330, children: [
-        DeviceCard(title: 'DISTORTION', color: Neon.pink, dimmed: !on('fx_dist_on'),
-          leading: const DevicePower('fx_dist_on', color: Neon.pink),
-          actions: const [DeviceChoice('fx_dist_type', color: Neon.pink)],
+        DeviceCard(title: 'DISTORTION', color: drive, dimmed: !on('fx_dist_on'),
+          leading: DevicePower('fx_dist_on', color: drive),
+          actions: [DeviceChoice('fx_dist_type', color: drive)],
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             SaturationCurve(type: v('fx_dist_type').round(), drive: v('fx_dist_drive'), mix: v('fx_dist_mix')),
-            knobRow(const [DeviceKnob('fx_dist_drive', label: 'Drive', color: Neon.pink),
-              DeviceKnob('fx_dist_mix', label: 'Mix', color: Neon.pink)]),
+            knobRow([DeviceKnob('fx_dist_drive', label: 'Drive', color: drive),
+              DeviceKnob('fx_dist_mix', label: 'Mix', color: drive)]),
           ])),
-        DeviceCard(title: 'EQ', color: Neon.yellow, dimmed: !on('fx_eq_on'),
-          leading: const DevicePower('fx_eq_on', color: Neon.yellow),
+        DeviceCard(title: 'EQ', color: eq, dimmed: !on('fx_eq_on'),
+          leading: DevicePower('fx_eq_on', color: eq),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            const EqCurve(color: Neon.yellow, height: 96, bands: [
+            EqCurve(color: eq, height: 96, bands: [
               EqBand(kind: EqKind.lowShelf, fixedFreq: 250, gainParam: 'fx_eq_low', label: 'LOW'),
               EqBand(kind: EqKind.peak, freqParam: 'fx_eq_mid_freq', gainParam: 'fx_eq_mid', label: 'MID'),
               EqBand(kind: EqKind.highShelf, fixedFreq: 4000, gainParam: 'fx_eq_high', label: 'HIGH'),
             ]),
-            knobRow(const [
-              DeviceKnob('fx_eq_low', label: 'Low', color: Neon.yellow), DeviceKnob('fx_eq_mid', label: 'Mid', color: Neon.yellow),
-              DeviceKnob('fx_eq_mid_freq', label: 'Freq', color: Neon.yellow),
-              DeviceKnob('fx_eq_high', label: 'High', color: Neon.yellow), DeviceKnob('fx_eq_mix', label: 'Mix', color: Neon.yellow),
-            ]),
-          ])),
-        DeviceCard(title: 'CHORUS', color: Neon.blue, dimmed: !on('fx_chorus_on'),
-          leading: const DevicePower('fx_chorus_on', color: Neon.blue),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            LfoView(rateParam: 'fx_chorus_rate', height: 48, bpm: bpm, color: Neon.blue),
-            knobRow(const [DeviceKnob('fx_chorus_rate', label: 'Rate', color: Neon.blue),
-              DeviceKnob('fx_chorus_depth', label: 'Depth', color: Neon.blue),
-              DeviceKnob('fx_chorus_mix', label: 'Mix', color: Neon.blue)]),
-          ])),
-        DeviceCard(title: 'DELAY', color: Neon.green, dimmed: !on('fx_delay_on'),
-          leading: const DevicePower('fx_delay_on', color: Neon.green),
-          actions: const [DeviceChoice('fx_delay_sync', maxSegments: 0, color: Neon.green)],
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            DelayEchoes(seconds: delaySeconds, feedback: v('fx_delay_feedback'), mix: v('fx_delay_mix'), color: Neon.green),
             knobRow([
-              if (sync == 0) const DeviceKnob('fx_delay_time', label: 'Time', color: Neon.green),
-              const DeviceKnob('fx_delay_feedback', label: 'Feedback', color: Neon.green),
-              const DeviceKnob('fx_delay_mix', label: 'Mix', color: Neon.green),
+              DeviceKnob('fx_eq_low', label: 'Low', color: eq), DeviceKnob('fx_eq_mid', label: 'Mid', color: eq),
+              DeviceKnob('fx_eq_mid_freq', label: 'Freq', color: eq),
+              DeviceKnob('fx_eq_high', label: 'High', color: eq), DeviceKnob('fx_eq_mix', label: 'Mix', color: eq),
             ]),
           ])),
-        DeviceCard(title: 'REVERB', color: Neon.violet, dimmed: !on('fx_reverb_on'),
-          leading: const DevicePower('fx_reverb_on', color: Neon.violet),
+        DeviceCard(title: 'CHORUS', color: mod, dimmed: !on('fx_chorus_on'),
+          leading: DevicePower('fx_chorus_on', color: mod),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            LfoView(rateParam: 'fx_chorus_rate', height: 48, bpm: bpm, color: mod),
+            knobRow([DeviceKnob('fx_chorus_rate', label: 'Rate', color: mod),
+              DeviceKnob('fx_chorus_depth', label: 'Depth', color: mod),
+              DeviceKnob('fx_chorus_mix', label: 'Mix', color: mod)]),
+          ])),
+        DeviceCard(title: 'DELAY', color: space.secondary, dimmed: !on('fx_delay_on'),
+          leading: DevicePower('fx_delay_on', color: space.secondary),
+          actions: [DeviceChoice('fx_delay_sync', maxSegments: 0, color: space.secondary)],
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            DelayEchoes(seconds: delaySeconds, feedback: v('fx_delay_feedback'), mix: v('fx_delay_mix'), color: space.secondary),
+            knobRow([
+              if (sync == 0) DeviceKnob('fx_delay_time', label: 'Time', color: space.secondary),
+              DeviceKnob('fx_delay_feedback', label: 'Feedback', color: space.secondary),
+              DeviceKnob('fx_delay_mix', label: 'Mix', color: space.secondary),
+            ]),
+          ])),
+        DeviceCard(title: 'REVERB', color: space.primary, dimmed: !on('fx_reverb_on'),
+          leading: DevicePower('fx_reverb_on', color: space.primary),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             ReverbTail(decaySeconds: v('fx_reverb_decay'), size: v('fx_reverb_size'), damping: v('fx_reverb_damping'),
               mix: v('fx_reverb_mix')),
-            knobRow(const [DeviceKnob('fx_reverb_size', label: 'Size', color: Neon.violet),
-              DeviceKnob('fx_reverb_decay', label: 'Decay', color: Neon.violet),
-              DeviceKnob('fx_reverb_damping', label: 'Damping', color: Neon.violet),
-              DeviceKnob('fx_reverb_mix', label: 'Mix', color: Neon.violet)]),
-            if (!on('fx_reverb_on')) const Text('Off by default: a reverb on every track costs about two voices.',
+            knobRow([DeviceKnob('fx_reverb_size', label: 'Size', color: space.primary),
+              DeviceKnob('fx_reverb_decay', label: 'Decay', color: space.primary),
+              DeviceKnob('fx_reverb_damping', label: 'Damping', color: space.primary),
+              DeviceKnob('fx_reverb_mix', label: 'Mix', color: space.primary)]),
+            if (!on('fx_reverb_on')) Text('Off by default: a reverb on every track costs about two voices.',
               style: TextStyle(fontSize: 9, color: Neon.dim)),
           ])),
       ]),

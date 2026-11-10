@@ -308,6 +308,43 @@ TEST(nested_folder_buses_route_child_audio_once) {
     CHECK_NEAR(left[200], 0.8 * std::cos(kPi / 4.0) * 0.25, 1e-5);
 }
 
+// REAPER nests folders to any depth and "any action taken on a folder will effect its entire contents" (UG 5.13.5,
+// p. 102): three levels, with an organization-only folder between two buses, sum once and follow solo and mute.
+TEST(three_level_folders_sum_once_and_follow_folder_solo_and_mute) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.8"}, {"b", std::string(kFloat) + "0.3"}});
+    LayerSpec outer;
+    outer.id = "outer"; outer.folder = true; outer.busEnabled = true; outer.volume = 0.5;
+    LayerSpec mid;
+    mid.id = "mid"; mid.folder = true; mid.busEnabled = false; mid.parentId = "outer";
+    LayerSpec inner;
+    inner.id = "inner"; inner.folder = true; inner.busEnabled = true; inner.parentId = "mid"; inner.volume = 0.5;
+    p.layers.insert(p.layers.begin(), {outer, mid, inner});
+    p.layers[3].parentId = "inner";  // l0 plays 0.8 three folders down; l1 plays 0.3 at the top level
+    const double c = std::cos(kPi / 4.0);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    CHECK_NEAR(run(e, 256)[200], 0.8 * c * 0.25 + 0.3 * c, 1e-5);
+
+    // Soloing the top folder solos everything inside it: the top-level track goes quiet.
+    p.layers[0].solo = true;
+    e.setProject(p);
+    CHECK_NEAR(run(e, 4096)[4000], 0.8 * c * 0.25, 1e-5);
+
+    // Soloing the grandchild alone keeps every bus above it open.
+    p.layers[0].solo = false;
+    p.layers[3].solo = true;
+    e.setProject(p);
+    CHECK_NEAR(run(e, 4096)[4000], 0.8 * c * 0.25, 1e-5);
+
+    // Muting the organization-only folder in the middle mutes what is under it.
+    p.layers[3].solo = false;
+    p.layers[1].mute = true;
+    e.setProject(p);
+    CHECK_NEAR(run(e, 4096)[4000], 0.3 * c, 1e-5);
+}
+
 TEST(track_pan_automation_moves_between_stereo_channels) {
     ProjectSpec p = project({{"a", std::string(kFloat) + "1"}});
     p.layers[0].automation.push_back({"pan", {{0, -1}, {16, 1}}});
