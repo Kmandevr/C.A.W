@@ -522,7 +522,7 @@ class _KitPageState extends State<KitPage> {
             region: region,
             paint: (canvas, r, a) => shape(_pad, canvas, r.deflate(8), c, scope.secondary, a?.$1 == 'hat_open' ? 'open' : (a == null ? null : 'closed')),
           ),
-          KnobRow(knobs, size: 50, labels: const {
+          KnobRow(knobs, size: 50, color: c, labels: const {
             'kick_tune': 'Tune', 'kick_punch': 'Punch', 'kick_decay': 'Decay', 'kick': 'Level', 'snare_tune': 'Tune',
             'snare_snappy': 'Snappy', 'snare': 'Level', 'clap_decay': 'Decay', 'clap': 'Level', 'hat_closed': 'Closed',
             'hat_open': 'Open', 'hat_tone': 'Tone', 'hats': 'Level',

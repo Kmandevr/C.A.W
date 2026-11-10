@@ -1,5 +1,8 @@
 // The built-in devices' plugin UIs: each opens its own UI (not the fallback), its main gestures edit the right
 // parameters, live display data draws, presets and A/B work, and goldens at phone (and some desktop) size.
+import 'dart:io';
+
+import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
 import 'package:caw/model/device_display.dart';
 import 'package:caw/ui/devices/device_registry.dart';
@@ -92,6 +95,49 @@ void main() {
         await close(tester);
       });
     }
+  });
+
+  group('goldens, desktop', () {
+    for (final id in ['org.caw.eq', 'org.caw.compressor', 'org.caw.delay.pro', 'org.caw.drum.kit']) {
+      testWidgets(id, (tester) async {
+        await open(tester, id, size: const Size(1280, 800));
+        await expectLater(goldenScreen, matchesGoldenFile('goldens/devices/${id.substring(8).replaceAll('.', '_')}_desktop.png'));
+        await close(tester);
+      });
+    }
+  });
+
+  testWidgets('the flagship\'s preset browser lists Init and the starters; picking one loads it and names it', (tester) async {
+    final s = await open(tester, 'org.caw.synth.flagship');
+    final t = targetOf(s, 'org.caw.synth.flagship');
+    await tester.tap(find.byKey(const ValueKey('device-presets')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('preset-browser')), findsOneWidget);
+    expect(find.byKey(const ValueKey('preset-Init')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('preset-Sub bass')));
+    await tester.pumpAndSettle();
+    expect(t.value('osc1_octave'), -1);
+    expect(t.value('osc1_unison'), 1);
+    expect(find.text('Sub bass'), findsOneWidget, reason: 'the header names the preset');
+    t.set('osc1_level', 0.2);
+    await tester.pumpAndSettle();
+    expect(find.text('Sub bass *'), findsOneWidget, reason: 'an edit marks it changed');
+    await close(tester);
+  });
+
+  testWidgets('the header\'s A/B switch swaps two settings', (tester) async {
+    final s = await open(tester, 'org.caw.eq');
+    final t = targetOf(s, 'org.caw.eq');
+    await tester.tap(find.byKey(const ValueKey('device-ab-b')));
+    await tester.pumpAndSettle();
+    t.set('b4_gain', 9);
+    await tester.tap(find.byKey(const ValueKey('device-ab-a')));
+    await tester.pumpAndSettle();
+    expect(t.value('b4_gain'), 0);
+    await tester.tap(find.byKey(const ValueKey('device-ab-b')));
+    await tester.pumpAndSettle();
+    expect(t.value('b4_gain'), 9);
+    await close(tester);
   });
 
   group('gestures', () {
@@ -367,6 +413,19 @@ void main() {
       await close(tester);
     });
   });
+
+  test('the descriptor fixture matches the engine\'s built-ins', () async {
+    final e = Engine.create();
+    final engine = {for (final c in await e.nativeComponents()) c.id: c};
+    e.dispose();
+    for (final id in [...builtinEffects, ...builtinInstruments]) {
+      final want = engine[id], have = builtinInfo(id);
+      expect(want, isNotNull, reason: id);
+      expect([for (final p in have.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))],
+          [for (final p in want!.parameters) (p.id, p.min, p.max, p.defaultValue, p.choices.join('|'))],
+          reason: '$id changed: refresh test/fixtures/builtin_components.json');
+    }
+  }, skip: (Platform.environment['CAW_LIB'] ?? '').isEmpty ? 'set CAW_LIB to the built engine library' : null);
 
   test('presets: Init is always first; applying one sets every value, and the label tracks edits', () {
     final s = state('org.caw.compressor');

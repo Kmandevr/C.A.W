@@ -164,14 +164,24 @@ class _EqEditorPageState extends State<EqEditorPage> {
         title: 'BAND $sel',
         color: selBand.color,
         trailing: DevicePower(id(sel, 'on'), color: selBand.color),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          _TypeGrid(paramId: id(sel, 'type'), color: selBand.color),
-          KnobRow([id(sel, 'freq'), if (eqHasGain(selBand.shape)) id(sel, 'gain'), id(sel, 'q')], size: 54),
-          Row(children: [
-            const SizedBox(width: 64, child: Text('CHANNEL', style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim))),
-            Expanded(child: Align(alignment: Alignment.centerLeft, child: DeviceChoice(id(sel, 'channel'), color: selBand.color))),
-          ]),
-        ]),
+        child: LayoutBuilder(builder: (context, box) {
+          final types = _TypeGrid(paramId: id(sel, 'type'), color: selBand.color);
+          final knobs = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+            KnobRow([id(sel, 'freq'), if (eqHasGain(selBand.shape)) id(sel, 'gain'), id(sel, 'q')], size: 54, color: selBand.color),
+            Row(children: [
+              const SizedBox(width: 64, child: Text('CHANNEL', style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim))),
+              Expanded(child: Align(alignment: Alignment.centerLeft, child: DeviceChoice(id(sel, 'channel'), color: selBand.color))),
+            ]),
+          ]);
+          if (box.maxWidth < 700) {
+            return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [types, knobs]);
+          }
+          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(flex: 5, child: types),
+            const SizedBox(width: 16),
+            Expanded(flex: 4, child: knobs),
+          ]);
+        }),
       ),
       ControlGroup(title: 'OUTPUT', color: scope.accent, child: ParamGrid(skip: {
         for (final p in params) if (_bandId.hasMatch(p.id)) p.id,

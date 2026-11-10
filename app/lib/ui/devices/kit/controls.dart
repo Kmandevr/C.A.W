@@ -306,9 +306,10 @@ class LevelReadout extends StatelessWidget {
 /// Big knobs spread evenly across the width, in balanced rows when they don't fit on one (six knobs on a phone: two
 /// rows of three, not five and one).
 class KnobRow extends StatelessWidget {
-  const KnobRow(this.knobs, {super.key, this.size = 50, this.labels = const {}});
+  const KnobRow(this.knobs, {super.key, this.size = 50, this.labels = const {}, this.color});
   final List<String> knobs;
   final double size;
+  final Color? color;
 
   /// Shorter labels by parameter id (inside an "LFO" group, "Amount" rather than "LFO amount").
   final Map<String, String> labels;
@@ -326,7 +327,7 @@ class KnobRow extends StatelessWidget {
       return Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Column(mainAxisSize: MainAxisSize.min, children: [
         for (var r = 0; r < rows; r++)
           Padding(padding: EdgeInsets.only(top: r == 0 ? 0 : 6), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            for (final id in ids.skip(r * per).take(per)) DeviceKnob(id, size: size, label: labels[id]),
+            for (final id in ids.skip(r * per).take(per)) DeviceKnob(id, size: size, label: labels[id], color: color),
           ])),
       ]));
     });

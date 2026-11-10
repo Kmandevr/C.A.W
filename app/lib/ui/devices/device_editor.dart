@@ -142,6 +142,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
     }
     final info = t.info;
     final entry = DeviceEditors.of(use.id, info);
+    if (entry.presets.isNotEmpty) DevicePresets.register(use.id, entry.presets);
     final style = entry.family == null ? null : deviceStyle(entry.family!);
     final color = entry.accent ?? style?.primary ?? trackColor(s, layer);
     if (info == null) {

@@ -122,23 +122,32 @@ class DeviceCard extends StatelessWidget {
     duration: const Duration(milliseconds: 120),
     opacity: dimmed ? 0.5 : 1,
     child: Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(10, 4, 8, 8),
+      margin: const EdgeInsets.only(bottom: 10),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        color: Color.lerp(Neon.panel, color, 0.06)!.withValues(alpha: 0.55),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
+        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
+          Color.lerp(Neon.panel, color, 0.12)!.withValues(alpha: 0.7),
+          Color.lerp(Neon.panel, color, 0.03)!.withValues(alpha: 0.6),
+        ]),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(height: 30, child: Row(children: [
-          ?leading,
-          if (leading != null) const SizedBox(width: 6),
-          Text(title, style: TextStyle(fontSize: 11, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: color)),
-          const SizedBox(width: 8),
-          Expanded(child: Align(alignment: Alignment.centerRight,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [for (final a in actions) Flexible(child: a)]))),
-        ])),
-        child,
+        Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
+          color.withValues(alpha: 0.9), color.withValues(alpha: 0.0)]))),
+        Padding(padding: const EdgeInsets.fromLTRB(10, 2, 8, 8), child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(height: 32, child: Row(children: [
+              ?leading,
+              if (leading != null) const SizedBox(width: 6),
+              Text(title, style: TextStyle(fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w800, color: color,
+                shadows: [Shadow(color: color.withValues(alpha: 0.5), blurRadius: 8)])),
+              const SizedBox(width: 8),
+              Expanded(child: Align(alignment: Alignment.centerRight,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [for (final a in actions) Flexible(child: a)]))),
+            ])),
+            child,
+          ])),
       ]),
     ),
   );
