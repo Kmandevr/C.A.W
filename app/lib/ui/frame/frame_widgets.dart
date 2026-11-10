@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../model/app_state.dart';
 import '../../model/live_midi.dart';
 import '../glass.dart';
+import '../motion.dart';
 import '../theme.dart';
 import 'sections.dart';
 
@@ -68,7 +69,7 @@ class _SectionButton extends StatelessWidget {
       child: InkWell(
         key: ValueKey('section-${section.name}'),
         onTap: () {
-          HapticFeedback.selectionClick();
+          if (Motion.haptics) HapticFeedback.selectionClick();
           onTap();
         },
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -150,7 +151,7 @@ class _BottomTransportState extends State<BottomTransport> {
     final clamped = at.clamp(0.0, (s.project.engineLoopSteps - 1).toDouble()).toDouble();
     if (clamped != _scrubAt) {
       _scrubAt = clamped;
-      HapticFeedback.selectionClick();
+      if (Motion.haptics) HapticFeedback.selectionClick();
       setState(() {});
     }
   }
@@ -222,7 +223,7 @@ class _BottomTransportState extends State<BottomTransport> {
               key: const ValueKey('transport-play'),
               radius: 24,
               onTap: () {
-                HapticFeedback.selectionClick();
+                if (Motion.haptics) HapticFeedback.selectionClick();
                 s.togglePlay();
               },
               child: AnimatedContainer(
@@ -280,7 +281,7 @@ class RecordButton extends StatelessWidget {
           icon: const Icon(Icons.fiber_manual_record),
           onPressed: can || recording
               ? () {
-                  HapticFeedback.selectionClick();
+                  if (Motion.haptics) HapticFeedback.selectionClick();
                   m!.toggleRecord();
                 }
               : null,
