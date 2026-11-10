@@ -60,4 +60,12 @@ echo "== a compile error comes back as a diagnostic with its line"
 printf 'int main() { return undefined_name; }\n' > "$work/bad.cpp"
 if out=$(build "$work/bad.so" "$work/bad.cpp" 2>&1); then echo "FAIL: a broken source built"; exit 1; fi
 echo "$out" | grep -q "bad.cpp:1:21: error:" || { echo "FAIL: unexpected diagnostics: $out"; exit 1; }
+echo "== code completion: results come back with the output (what cc1 prints to standard output)"
+printf '#include <caw/component.hpp>\nvoid f() { caw::ParameterDescriptor p; p.\n' > "$work/complete.cpp"
+col=$(( $(sed -n 2p "$work/complete.cpp" | wc -c) ))  # just after the dot (wc counts the newline too: 1-based)
+out=$("$cc" "$tc/bin/clang++" --target=aarch64-linux-android26 --sysroot="$tc/sysroot" \
+  -resource-dir="$tc/lib/clang/$(ls "$tc/lib/clang")" -std=c++20 -fsyntax-only -I"$tc/caw-sdk/include" \
+  -Xclang "-code-completion-at=$work/complete.cpp:2:$col" "$work/complete.cpp" 2>&1 || true)
+echo "$out" | grep -q "^COMPLETION: defaultValue" || { echo "FAIL: no completion of ParameterDescriptor::defaultValue: $out"; exit 1; }
+echo "$out" | grep -q "^COMPLETION: minimum" || { echo "FAIL: no completion of ParameterDescriptor::minimum: $out"; exit 1; }
 echo "PASS"

@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- MIDI keyboards are optional: the app installs on devices without MIDI support. -->
+    <uses-feature android:name="android.software.midi" android:required="false" />
     <application
         android:label="C.A.W"
         android:name="${applicationName}"

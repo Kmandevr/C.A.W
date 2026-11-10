@@ -1,10 +1,26 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Decisions
+
+## 2026-11-10: C++ replaces the .caw language (owner)
+
+**Decision (owner):** the .caw sound language is removed completely and replaced by C++. [Proposal, not built] Status: .caw still runs today; nothing below is built yet.
+- **Order (owner):** C++ instruments come first, then .caw is removed. Today every instrument is a .caw module and C++ components are stereo effects only, so note-playing C++ instruments (and C++ built-ins for the starter sounds) must exist before the language goes, and the app never goes silent in between.
+- **Patterns (owner):** note clips are stored as standard MIDI instead of .caw-style pattern text. [Fact, 2026-11-10] a Standard MIDI File is binary, and so is MIDI 2.0's MIDI Clip File (midi.org M2-116-U, June 2023); midi.org publishes no official text form of either. So the app stores standard MIDI and keeps its readable text view of notes in the editor, rather than inventing a text MIDI format. The owner asked that a text form be supported if MIDI has one; it has none today.
+- **Project files (owner):** the project file itself takes the `.caw` extension (today `.cawproj`).
+- **Old projects (owner):** dropped. Projects and the "First loop" template made of .caw sounds are not converted; this follows "no project compatibility before Release 1" (2026-11-03).
+- **Sharing (owner):** shared sounds are C++, so each asks Trust / Block once per exact code, as now; Isolated (a separate process) stays planned. The sandbox that made a downloaded .caw module safe goes with the language.
+
+## 2026-11-10: The C++ Builder's editor is re_editor
+
+- **Dependency:** `re_editor` 0.10.0 (published 2026-07-01, MIT, Reqable; LICENSE read in the pub.dev archive 2026-11-10), with `re_highlight` 0.0.3 (MIT, Reqable; its C++ and JSON modes) and, through it, `isolate_manager` 4.1.5+1 (MIT; it runs the highlighter off the UI isolate).
+- **Why re_editor over code_forge:** `code_forge` 11.7.1 (MIT) needs Dart 3.13.7 (the app's SDK is 3.13.5) and brings an LSP client stack (`http`, `web_socket_channel`, `markdown_widget`, a colour picker) the Builder doesn't use. `re_editor` is lean, keeps per-controller undo, draws only the visible lines, has Android selection handles and IME input, and its controller takes programmatic cursor moves and span decoration (squiggles), which the key row and checks need.
+- **Built around it:** line numbers and error marks in our own gutter; error messages and knob values painted over the code from the editor's visible-line positions (re_editor's lines have one fixed height, so "under the line" is a band over the next line, shown for the cursor's or jumped-to error; other errors show dim after their line).
+- **[Assumption]** speed on a few-thousand-line file and Samsung keyboard behaviour on the owner's S22+ are not yet measured; neither is the cost of a live check or a Clang completion per call on the phone.
 
 ## 2026-11-09: Faster CI: pull requests test, Main builds (owner)
 

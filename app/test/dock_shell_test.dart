@@ -8,6 +8,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/dock/dock_controller.dart';
 import 'package:caw/ui/dock/layout.dart';
+import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
@@ -77,10 +78,37 @@ void main() {
       c.dispose();
     });
 
+    test('a panel floats out of the layout, moves, is saved, and docks back', () async {
+      final s = await Settings.open(base: dir);
+      final c = DockController(s)..form = FormFactor.desktop;
+      c.float(Panels.mixer);
+      expect(c.isFloating(Panels.mixer), isTrue);
+      expect(c.layout.contains(Panels.mixer), isFalse);
+      c.placeFloating(Panels.mixer, const Rect.fromLTWH(5, -3, 0.01, 2));
+      final r = c.floating.single.rect;
+      expect(r.top, 0.0, reason: 'the title bar stays on screen');
+      expect(r.width, closeTo(0.2, 1e-9), reason: 'at least a fifth of the area');
+      expect(r.height, closeTo(1.0, 1e-9));
+      c.reveal(Panels.mixer);
+      expect(c.isFloating(Panels.mixer), isTrue, reason: 'showing a floating panel raises its window');
+      await c.flush();
+      final back = DockController(await Settings.open(base: dir))..form = FormFactor.desktop;
+      expect(back.floating.single.id, Panels.mixer);
+      expect(back.layout.contains(Panels.mixer), isFalse);
+      back.unfloat(Panels.mixer);
+      expect(back.layout.visible, contains(Panels.mixer));
+      expect(back.floating, isEmpty);
+      for (final c in [c, back]) {
+        await c.flush();
+        c.dispose();
+      }
+    });
+
     test('the shell picks the screen shape from its size', () {
       expect(formFactorFor(const Size(390, 780)), FormFactor.phonePortrait);
       expect(formFactorFor(const Size(844, 330)), FormFactor.phoneLandscape);
       expect(formFactorFor(const Size(1280, 800)), FormFactor.desktop);
+      expect(formFactorFor(const Size(800, 1280)), FormFactor.desktop, reason: 'a tablet in portrait');
     });
   });
 
@@ -106,11 +134,29 @@ void main() {
       expect(tester.takeException(), isNull);
       await expectLater(goldenScreen, matchesGoldenFile('goldens/shell_${size.key}.png'));
       final dock = DockController.of(tester.element(find.byType(Scaffold).first));
-      for (final id in Panels.all) {
-        dock.reveal(id);
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull, reason: '$id at ${size.key}');
-        expect(dock.layout.visible, contains(id));
+      if (dock.form == FormFactor.desktop) {
+        for (final id in Panels.all) {
+          dock.reveal(id);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: '$id at ${size.key}');
+          expect(dock.layout.visible, contains(id));
+        }
+      } else {
+        // A phone shows one section at a time and the other workspaces as pages from More.
+        for (final section in Section.values) {
+          await tester.tap(find.byKey(ValueKey('section-${section.name}')));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: '${section.name} at ${size.key}');
+        }
+        for (final title in const ['Mixer', 'Automation']) {
+          await tester.tap(find.byKey(const ValueKey('more-tools')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(title).last);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: '$title at ${size.key}');
+          await tester.pageBack();
+          await tester.pumpAndSettle();
+        }
       }
       s.dispose();
     }, skip: skip);

@@ -32,6 +32,29 @@ class AutomationScreen extends StatelessWidget {
 }
 
 
+/// One track's lanes (the focus view's Automation tab): its volume and pan lanes with their points, or a way to add one.
+class TrackAutomationPanel extends StatelessWidget {
+  const TrackAutomationPanel({super.key, required this.state, required this.layer});
+  final AppState state;
+  final LayerDoc layer;
+
+  @override
+  Widget build(BuildContext context) {
+    if (layer.isFolder && !layer.busEnabled) {
+      return const Center(child: Text('Turn on the folder\'s group bus to automate it.', style: TextStyle(color: Neon.dim)));
+    }
+    return ListView(padding: const EdgeInsets.fromLTRB(8, 8, 8, 48), children: [
+      if (layer.automation.isEmpty)
+        NeonPanel(color: Neon.blue, child: Row(children: [
+          const Expanded(child: Text('No lanes yet: add volume or pan automation.', style: TextStyle(color: Neon.dim))),
+          _AddLane(state: state, layer: layer),
+        ]))
+      else
+        _TrackAutomation(state: state, layer: layer),
+    ]);
+  }
+}
+
 class _ProjectAutomation extends StatelessWidget {
   const _ProjectAutomation({required this.state});
   final AppState state;

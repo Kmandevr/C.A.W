@@ -1,4 +1,5 @@
 // Builds a C++ component's sources into a loadable library with the in-app compiler (Clang and LLD), offline.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
@@ -20,7 +21,9 @@ abstract class CppCompiler {
 }
 
 /// This device's in-app compiler, or null where there is none (desktop builds use the CMake runner).
-CppCompiler? platformCppCompiler() => Platform.isAndroid ? AndroidCppCompiler() : null;
+/// One instance for the app, so builds, checks and completions take turns.
+CppCompiler? platformCppCompiler() => Platform.isAndroid ? (_platform ??= SerialCppCompiler(AndroidCppCompiler())) : null;
+SerialCppCompiler? _platform;
 
 class AndroidCppCompiler implements CppCompiler {
   static const _channel = MethodChannel('caw/compiler');
@@ -43,6 +46,47 @@ class AndroidCppCompiler implements CppCompiler {
   Future<({int code, String output})> run(List<String> args) async {
     final result = await _channel.invokeMapMethod<String, Object?>('run', {'args': args});
     return (code: (result?['code'] as int?) ?? 1, output: (result?['output'] as String?) ?? '');
+  }
+}
+
+/// Runs compiler calls one at a time (the compiler process takes one at a time). [runLatest] is for checks and
+/// completions: a pending one that a newer call with the same key replaces is dropped (it completes with null);
+/// [run] (a build) always runs. A busy reply (the previous call's process still closing) is retried after a wait.
+class SerialCppCompiler implements CppCompiler {
+  SerialCppCompiler(this.inner, {this.busyRetryDelay = const Duration(milliseconds: 350)});
+
+  final CppCompiler inner;
+  final Duration busyRetryDelay;
+  static const busyCode = -3; // CompilerService.CODE_BUSY
+
+  Future<void> _tail = Future.value();
+  final Map<String, int> _generation = {};
+
+  @override
+  Future<String> toolchainDirectory() => inner.toolchainDirectory();
+
+  @override
+  Future<({int code, String output})> run(List<String> args) async => (await _enqueue(args, null))!;
+
+  Future<({int code, String output})?> runLatest(List<String> args, {required String key}) => _enqueue(args, key);
+
+  Future<({int code, String output})?> _enqueue(List<String> args, String? key) {
+    final gen = key == null ? 0 : (_generation[key] = (_generation[key] ?? 0) + 1);
+    final done = Completer<({int code, String output})?>();
+    _tail = _tail.then((_) async {
+      if (key != null && _generation[key] != gen) return done.complete(null);
+      try {
+        var result = await inner.run(args);
+        for (var tries = 0; result.code == busyCode && tries < 6; tries++) {
+          await Future<void>.delayed(busyRetryDelay);
+          result = await inner.run(args);
+        }
+        done.complete(result);
+      } catch (e, st) {
+        done.completeError(e, st);
+      }
+    });
+    return done.future;
   }
 }
 
@@ -107,6 +151,56 @@ class CppSourceBuilder {
     required String output,
     bool optimize = true,
   }) {
+    return [
+      ..._compileFlags(toolchain, sourceDirectory, manifest),
+      optimize ? '-O2' : '-O0',
+      '-fPIC',
+      '-shared',
+      '-static-libstdc++',
+      for (final source in manifest.sources) '$sourceDirectory/$source',
+      '-o',
+      output,
+    ];
+  }
+
+  /// A check-only compile of [sources] (the manifest's by default): the same headers, definitions and language
+  /// rules as a build, no code made and no link. Source ranges are printed so the editor can underline them.
+  static List<String> checkArguments({
+    required String toolchain,
+    required String sourceDirectory,
+    required CppComponentManifest manifest,
+    List<String>? sources,
+  }) =>
+      [
+        ..._compileFlags(toolchain, sourceDirectory, manifest),
+        '-fsyntax-only',
+        '-fdiagnostics-print-source-range-info',
+        '-fno-caret-diagnostics',
+        '-ferror-limit=50',
+        for (final source in sources ?? manifest.sources) '$sourceDirectory/$source',
+      ];
+
+  /// Clang's completion at [line]:[column] (1-based) of [source]: cc1 prints `COMPLETION: ...` lines, which the
+  /// compiler library returns with the diagnostics.
+  static List<String> completionArguments({
+    required String toolchain,
+    required String sourceDirectory,
+    required CppComponentManifest manifest,
+    required String source,
+    required int line,
+    required int column,
+  }) =>
+      [
+        ..._compileFlags(toolchain, sourceDirectory, manifest),
+        '-fsyntax-only',
+        '-fno-caret-diagnostics',
+        '-Xclang',
+        '-code-completion-at=$sourceDirectory/$source:$line:$column',
+        '$sourceDirectory/$source',
+      ];
+
+  // What every compile of a component shares: target, sysroot, language, the engine's float rules, headers.
+  static List<String> _compileFlags(String toolchain, String sourceDirectory, CppComponentManifest manifest) {
     // Clang's headers live in lib/clang/<major version>, as the bundle lays them out.
     final clangDir = Directory('$toolchain/lib/clang');
     final clangVersion =
@@ -117,10 +211,6 @@ class CppSourceBuilder {
       '--sysroot=$toolchain/sysroot',
       if (clangVersion != null) '-resource-dir=$toolchain/lib/clang/$clangVersion',
       '-std=c++20',
-      optimize ? '-O2' : '-O0',
-      '-fPIC',
-      '-shared',
-      '-static-libstdc++',
       // The engine's floating-point rules, so a component sounds the same on every device (CAW::SDK passes them too).
       '-ffp-contract=off',
       '-fno-fast-math',
@@ -129,9 +219,6 @@ class CppSourceBuilder {
       '-I$toolchain/caw-sdk/include',
       for (final dir in manifest.includeDirectories) '-I$sourceDirectory/$dir',
       for (final d in manifest.definitions) '-D$d',
-      for (final source in manifest.sources) '$sourceDirectory/$source',
-      '-o',
-      output,
     ];
   }
 

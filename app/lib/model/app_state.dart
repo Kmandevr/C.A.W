@@ -90,6 +90,8 @@ class AppState extends ChangeNotifier {
   /// Why the last project didn't open on launch (the template opened instead); cleared by opening another.
   String? openError;
   ProjectStorage? _storage;
+  /// The project storage once opened (the C++ Builder's desktop build materializes sources through it).
+  ProjectStorage? get storage => _storage;
   List<Template> templates = const [];
 
   ProjectDoc project = ProjectDoc(id: newId('p'), name: 'Untitled');
@@ -424,7 +426,12 @@ class AppState extends ChangeNotifier {
         auditionOnly: previewOnly,
         voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
         swap: settings.swapTiming.name,
-        playableComponents: nativeComponents?.loaded);
+        // The engine's built-ins (org.caw.*) are always loaded, so they play beside the project's loaded ones.
+        playableComponents: nativeComponents == null ? null : {
+          ...nativeComponents!.loaded,
+          for (final c in [...project.masterComponents, for (final l in project.layers) ...l.components])
+            if (c.id.startsWith('org.caw.')) c.id,
+        });
     try {
       info = await e.setProject(json);
       engineError = null;
@@ -620,6 +627,28 @@ class AppState extends ChangeNotifier {
       _poller.wake();
     }
     notifyListeners();
+  }
+
+  /// Moves the playhead to [step] (sixteenth steps into the song; the transport's scrub). While playing, playback
+  /// jumps there; otherwise the next play starts there.
+  void seekTo(double step) {
+    final e = engine;
+    final at = step.clamp(0.0, math.max(0, project.engineLoopSteps - 1).toDouble()).toDouble();
+    if (_transportOn && e != null) {
+      e.playAt(at);
+      meters = e.meters();
+      _poller.wake();
+    } else {
+      pausedStep = at;
+    }
+    notifyListeners();
+  }
+
+  /// Where the playhead is now, in sixteenth steps (paused: where play resumes; stopped: 0).
+  double get playheadStep {
+    final m = meters;
+    if (m.playing && m.loopLength > 0) return m.position * project.engineLoopSteps / m.loopLength;
+    return pausedStep ?? 0;
   }
 
   void clearOverload() {

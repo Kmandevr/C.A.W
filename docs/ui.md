@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across eight shared-state workspaces, with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-09
+updated: 2026-11-10
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -57,7 +57,7 @@ The Arranger is the main composition view. It is a horizontal song timeline (any
 - **Song end (owner, 2026-11-09: no length cap, loop back like Reaper):** the song ends at its last clip or automation point, rounded up to whole bars, and playback loops back to the start there; a pink line marks it. The timeline always reaches 64 bars past the end, so a clip can go anywhere and the song grows with it. Project settings' **Length** (− / + or a typed number of bars, no fixed list) is only the shortest the song can be, for a project with few or no clips. The export and the seconds readout use the song end.
 - A clip instance has a timeline start, visible length, source offset and loop setting. Moving a clip does not rewrite its source. Independent duplication clones the pattern source; linked duplication shares it.
 - Drag the clip body to move it, Alt-drag to shift its source offset, drag its right edge to resize it, tap to select, Shift-tap to add clips to the selection, and double-tap to open the existing piano roll. Companion sources appear as faint references by default. Explicit multi-edit mode mirrors note additions, deletions, moves, resizes and expression changes to selected independent pattern sources while keeping each source's note IDs local; linked clips still share one source.
-- The track header keeps mute/solo and generator selection close to the timeline. The mixer panel edits the same track values, not a second copy of them.
+- The track header keeps mute, solo and the FX button close to the timeline; the rest (instrument, record arm, folders, automation) is in its long-press menu. Tapping a track opens the **focus view**: the track pinned on top with its FX / Mixer / Clip / Automation panel below (phone portrait) or beside it (landscape, desktop). The FX tab is a plain FX stack of cards, with a Routing toggle ([app](app.md), Arranger). The mixer panel and card edit the same track values, not a second copy of them.
 - Folders nest, can collapse, and can be organization-only or enabled as stereo group buses. Children route through the nearest enabled ancestor bus; folder volume and pan act on the summed group.
 - Volume and pan automation lanes remain editable under each track. A separate project automation panel adds song-time lanes for module parameters and named globals, with curve previews, point editing and automation undo/redo. The native engine interpolates these lanes per sample; clip-following automation remains unimplemented.
 - Tapping empty timeline space sets the edit cursor; long-press-drag creates a time selection without blocking horizontal scrolling. Selected clips can be split at the selection end. Snap resolution is adjustable and Shift bypasses snapping. Audio clips are planned for a later roadmap stage; they are not implemented in the current app.
@@ -70,13 +70,13 @@ The application shell shows eight workspaces as docking panels: Builder (Code), 
 
 **Glass (on by default):** a soft ambient background behind see-through panels, cards, track headers and the transport; bottom sheets slide up as frosted glass; sliders, level bars, switches, buttons, M/S toggles and clips have a light fill and a solid outline ([App](app.md), Look).
 
-**Transport:** the project menu, the tempo (tap the BPM to type it, long-press it for a tap-tempo pad; T taps too), the playhead as bar.beat while playing, CPU, undo and redo of project edits, the layout button and Play.
+**The frame (owner, 2026-11-09):** three sections, Build, Files and Arrange; the other workspaces fold into them or open from ⋮ More ([app](app.md), Frame).
 
-**Phone (portrait):** transport at the top, the arrangement above, and the other panels as tabs below it. Inside the arrangement, the track headers sit beside a horizontally scrolling song timeline, with the Arranger's compact mixer panel below the timeline.
+**Phone (portrait):** a slim status row (project, tempo, CPU, More) on top; the section; then the transport in thumb reach (undo, redo, position, stop, play, record; drag sideways to scrub) and the section bar. Both hide while the keyboard is open, and a downward swipe on the section bar brings the status row within reach.
 
-**Phone (landscape):** the arrangement and the other panels side by side. Track headers stay aligned with their lanes while the song timeline scrolls horizontally.
+**Phone (landscape):** a slim rail on the left, the section, the transport at the bottom.
 
-**Desktop / wide:** persistent transport, and the arrangement beside the other panels. Track headers remain fixed beside the horizontally scrolling timeline; the Arranger's mixer panel can be opened without replacing the arrangement, and the dedicated Mixer remains a separate detailed workspace; Files exposes portable project/module import and export.
+**Desktop, tablets:** the rail, the transport bar and docking panels, which can also float in windows. Files is a Unity-style tree, grid and inspector here; on a phone the tree is a drawer.
 
 The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 

@@ -1,4 +1,5 @@
-// The Android host: thermal and battery-saver signals for the resource adapter, and the C++ compiler channel.
+// The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel and MIDI
+// keyboard input.
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -51,6 +52,9 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, MIDI_EVENT_CHANNEL)
+            .setStreamHandler(MidiInput(applicationContext))
 
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, RESOURCE_EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
@@ -135,5 +139,6 @@ class MainActivity : FlutterActivity() {
         private const val RESOURCE_METHOD_CHANNEL = "caw/resource_signals"
         private const val RESOURCE_EVENT_CHANNEL = "caw/resource_signals/events"
         private const val COMPILER_METHOD_CHANNEL = "caw/compiler"
+        private const val MIDI_EVENT_CHANNEL = "caw/midi"
     }
 }

@@ -1,6 +1,7 @@
 // The on-device compiler library: Clang's driver plans the build, cc1 and LLD run in this process.
 #include "caw_compiler.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -30,6 +31,11 @@
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Host.h"
+
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 LLD_HAS_DRIVER(elf)
 
@@ -65,6 +71,66 @@ bool runLld(const llvm::opt::ArgStringList& args, llvm::raw_ostream& out) {
     return result.retCode == 0;
 }
 
+// What cc1 writes to standard output while a job runs: code-completion results (-code-completion-at), which
+// Clang prints to llvm::outs(). File descriptor 1 is pointed at a temporary file for the run and restored after,
+// so the results reach the caller with the diagnostics. Not on Windows, where hosts use clang's executable.
+class StdoutCapture {
+public:
+    StdoutCapture() {
+#if !defined(_WIN32)
+        llvm::outs().flush();
+        std::fflush(stdout);
+        const char* dir = std::getenv("TMPDIR");
+        std::string path = std::string(dir && *dir ? dir : "/tmp") + "/caw-compiler-out-XXXXXX";
+        std::vector<char> name(path.begin(), path.end());
+        name.push_back('\0');
+        file_ = mkstemp(name.data());
+        if (file_ < 0) return;
+        unlink(name.data());  // gone when closed
+        saved_ = dup(STDOUT_FILENO);
+        if (saved_ < 0 || dup2(file_, STDOUT_FILENO) < 0) {
+            if (saved_ >= 0) close(saved_);
+            close(file_);
+            saved_ = file_ = -1;
+        }
+#endif
+    }
+
+    // Restores standard output and returns what was written to it.
+    std::string finish() {
+        std::string text;
+#if !defined(_WIN32)
+        if (file_ < 0) return text;
+        llvm::outs().flush();
+        std::fflush(stdout);
+        dup2(saved_, STDOUT_FILENO);
+        close(saved_);
+        saved_ = -1;
+        if (lseek(file_, 0, SEEK_SET) == 0) {
+            char buffer[4096];
+            // Capped, so a reply always fits Android's Binder transaction (about 1 MB, sent as UTF-16).
+            constexpr size_t kMaxCapture = 256 * 1024;
+            for (ssize_t n; text.size() < kMaxCapture && (n = read(file_, buffer, sizeof buffer)) > 0;) {
+                text.append(buffer, static_cast<size_t>(n));
+            }
+            if (text.size() > kMaxCapture) text.resize(kMaxCapture);
+        }
+        close(file_);
+        file_ = -1;
+#endif
+        return text;
+    }
+
+    ~StdoutCapture() { finish(); }
+
+    StdoutCapture(const StdoutCapture&) = delete;
+    StdoutCapture& operator=(const StdoutCapture&) = delete;
+
+private:
+    int file_ = -1;
+    int saved_ = -1;
+};
+
 char* copyText(const std::string& text) {
     char* p = static_cast<char*>(std::malloc(text.size() + 1));
     if (p) std::memcpy(p, text.c_str(), text.size() + 1);
@@ -78,6 +144,7 @@ extern "C" int caw_compiler_run(int argc, const char* const* argv, char** output
     std::string text;
     llvm::raw_string_ostream out(text);
     int code = 1;
+    StdoutCapture capture;
     if (argc >= 1 && argv && argv[0]) {
         // Clang recurses deeply; with this it moves deep work onto a thread with 8 MB of stack when needed.
         clang::noteBottomOfStack();
@@ -118,6 +185,8 @@ extern "C" int caw_compiler_run(int argc, const char* const* argv, char** output
             compilation->CleanupFileList(compilation->getTempFiles());
         }
     }
+    // Completion results (and anything else cc1 printed to standard output) follow the diagnostics.
+    out << capture.finish();
     out.flush();
     if (output) *output = copyText(text);
     return code;

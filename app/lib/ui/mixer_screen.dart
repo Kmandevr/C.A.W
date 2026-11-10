@@ -75,7 +75,7 @@ class _MixerScreenState extends State<MixerScreen> {
         for (var i = 0; i < layers.length; i++)
           Padding(
             padding: const EdgeInsets.only(right: 6),
-            child: _ChannelStrip(state: s, layer: layers[i], index: i, onSlot: (id) => _openSlot(layers[i], id, wide: wide)),
+            child: ChannelStrip(state: s, layer: layers[i], index: i, onSlot: (id) => _openSlot(layers[i], id, wide: wide)),
           ),
       ],
     ));
@@ -231,9 +231,9 @@ class _MasterStrip extends StatelessWidget {
 }
 
 /// One track's or folder's strip, top to bottom: name, chain slots (or the folder's bus switch), route, pan, fader
-/// and meter, level and peak, M and S.
-class _ChannelStrip extends StatelessWidget {
-  const _ChannelStrip({required this.state, required this.layer, required this.index, required this.onSlot});
+/// and meter, level and peak, M and S. The Mixer, Arrange's mixer card and the focus view's Mixer tab share it.
+class ChannelStrip extends StatelessWidget {
+  const ChannelStrip({super.key, required this.state, required this.layer, required this.index, required this.onSlot});
   final AppState state;
   final LayerDoc layer;
   final int index;

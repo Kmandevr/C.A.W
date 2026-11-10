@@ -14,7 +14,7 @@ import 'package:caw/ui/builder_screen.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/engine_lab_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
-import 'package:caw/ui/file_manager_screen.dart';
+import 'package:caw/ui/files/library_manager.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/key_router.dart';
 import 'package:caw/ui/plugin_builder_screen.dart';
@@ -573,7 +573,7 @@ void main() {
     state.saveLibrarySearch('Bass search', 'bass');
 
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
+      home: Scaffold(body: LibraryManagerView(state: state, onOpenBuilder: () {})),
     ));
 
     expect(find.text('CURRENT PROJECT'), findsOneWidget);
@@ -621,7 +621,7 @@ void main() {
       modules: [module], libraryFolders: ['Synths', 'Synths/Bass']);
 
     await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: FileManagerScreen(state: state, onOpenBuilder: () {})),
+      home: Scaffold(body: LibraryManagerView(state: state, onOpenBuilder: () {})),
     ));
 
     await tester.enterText(find.byType(TextField).first, 'bass');
