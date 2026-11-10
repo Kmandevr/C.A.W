@@ -6,6 +6,10 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Sound need only be perceptually the same (owner)
+
+**Decision (owner):** "so long as someone can't perceive the difference it's fine." Where making output bit-identical (every device, playback against export) is expensive, a cheaper way that sounds effectively the same is acceptable. Golden renders still pin the sound so changes are deliberate; they check bit-exactness where it is cheap (offline renders of the same build), and a comparison within an inaudible tolerance where exactness would cost real-time performance (for example live playback against export with different block sizes).
+
 ## 2026-11-10: CLAP headers for the plug-in builder (#162)
 
 - **Dependency:** the CLAP headers, free-audio/clap **1.2.9** (tag dated 2026-06-18, commit `cd94482b`; the latest tag on 2026-11-10, newer than the 1.2.6 first noted), **MIT** (its `LICENSE` read in the fetched tree, 2026-11-10). Fetched at configure time by `caw_add_clap_plugin` (`engine/cmake/CAWClap.cmake`), headers only, and the build stops if the fetched licence is not MIT. Not vendored, not in the app or the engine library.
