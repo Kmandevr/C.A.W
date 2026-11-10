@@ -43,8 +43,8 @@ void main() {
     for (var i = 0; i < 3; i++) { await storage.list(); await storage.load(id); } // warm up
     final list = await _measure(() => storage.list());
     final open = await _measure(() => storage.load(id));
-    // ignore: avoid_print
     String ms(int us) => (us / 1000).toStringAsFixed(1);
+    // ignore: avoid_print
     print('BENCH 20 saved projects: list ${ms(list.$1)} ms (UI blocked ${ms(list.$3)} ms, longest ${ms(list.$2)}); '
         'open one ${ms(open.$1)} ms (UI blocked ${ms(open.$3)} ms, longest ${ms(open.$2)})');
     expect((await storage.list()).length, 20);

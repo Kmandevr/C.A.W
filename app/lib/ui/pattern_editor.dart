@@ -1918,8 +1918,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         // MIDI 2.0 clips still come from the engine's converter.
         final dir = await getTemporaryDirectory();
         final path = '${dir.path}${Platform.pathSeparator}caw-export-${DateTime.now().microsecondsSinceEpoch}';
-        final err = Engine.exportPattern(d.serialize(), path,
-            bpm: s.project.bpm.toDouble(), beatsPerBar: s.project.beatsPerBar, clip: true);
+        final source = d.serialize(), bpm = s.project.bpm.toDouble(), beats = s.project.beatsPerBar;
+        // The engine's converter writes the file: off the UI isolate, as the exporter does.
+        final err = await Isolate.run(() => Engine.exportPattern(source, path, bpm: bpm, beatsPerBar: beats, clip: true));
         if (err != null) throw Exception(err);
         final file = File(path);
         bytes = await file.readAsBytes();
