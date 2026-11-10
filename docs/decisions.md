@@ -17,6 +17,8 @@ updated: 2026-11-10
 - **Look:** the whole app a little darker, with less green in the background.
 - **Arrange:** track headers can be resized (drag their edge).
 - **Track headers, REAPER-style:** the track's colour tints the header panel and its edge, instead of a thin colour stripe. Colours carry meaning by folder: tracks in a folder take shades of the folder's colour (a top-level track keeps its own); the user can still override a colour.
+- **Phone landscape** feels bad and everything is too big (owner screenshot: the status row and the toolbar take a third of the height, the rail's icons and labels are large, the FX panel's knob labels are cut off). Make landscape compact: one combined top row, smaller icons, a narrow rail without labels, more height for the tracks.
+- **Bars hide on scroll:** scrolling down tucks the top bars (status row, toolbar) away so the main content gets the screen; scrolling up brings them back, snapping fully shown or fully hidden.
 - **Zoom** in Arrange and the piano roll: pinch with two fingers, on-screen buttons or a slider, time and height zoom separately, and Ctrl + scroll on desktop.
 - **Build feels like VS Code:** an explorer sidebar (the Files browser; a drawer on the phone) replaces the row of module chips, the code editor gets the rest of the space (remove what isn't needed), one slim top bar with open-file tabs and Build.
 - **New files:** only broad templates (pattern, instrument, effect, plus plain formats such as JSON or text), hidden behind a "+ New" dropdown.
