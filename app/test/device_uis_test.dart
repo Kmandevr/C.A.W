@@ -238,6 +238,20 @@ void main() {
       expect(find.byKey(const ValueKey('dknob-bits')), findsOneWidget, reason: 'Crush shows its bits');
       await close(tester);
     });
+
+    testWidgets('filter: the handle drags the cutoff and resonance; type and LFO shape are tiles', (tester) async {
+      final s = await open(tester, 'org.caw.filter');
+      final t = targetOf(s, 'org.caw.filter');
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('filter-hero'))), const Offset(60, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('cutoff'), greaterThan(1300));
+      expect(t.value('resonance'), greaterThan(0.2));
+      await tester.tap(find.byKey(const ValueKey('mode-type-4')));
+      await tester.tap(find.byKey(const ValueKey('mode-lfo_shape-2')));
+      await tester.pumpAndSettle();
+      expect((t.value('type'), t.value('lfo_shape')), (4, 2));
+      await close(tester);
+    });
   });
 
   test('presets: Init is always first; applying one sets every value, and the label tracks edits', () {
