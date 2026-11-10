@@ -180,7 +180,7 @@ The in-app build and toolchain install exist (see the C++ platform note). When a
     - **Motion:** Full, Reduced (fades only) or Off. The Minimal profile turns it off, and the system's reduce-motion setting caps it at Reduced.
     - **Haptic ticks:** on by default.
     - **Glass** (`lib/ui/glass.dart`): on by default; glass off, or the Minimal profile, brings back the solid look. **Frosted blur** (on by default) blurs behind sheets and overlays; off, or the Lightweight profile, keeps the glass look with a denser tint and no blur, which costs far less.
-      - A soft ambient background (faint glows of the accent colours) sits behind every screen, and the docked panels, cards, track headers and transport are see-through over it, with no blur.
+      - A soft grey-to-black ambient background (owner, 2026-11-10: not green; faint neutral light, one touch of the accent blue and a diagonal sheen, so it reads as frosted glass rather than a flat colour) sits behind every screen, and the docked panels, cards, track headers and transport are see-through over it, with no blur.
       - Bottom sheets slide up as frosted glass (a real blur); dialogs and menus are translucent with a bright edge.
       - Sliders, level bars, switches, filled and segmented buttons, M/S toggles and clips have a light see-through fill and a thin solid outline. Slider knobs are opaque (their colour mixed into the panel), so the track doesn't show through them.
       - Pushed pages (Settings, the theme editor, the full-screen roll) have their own glass background, so the page below doesn't show through while they slide in.
