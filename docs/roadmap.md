@@ -58,7 +58,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 
 ## Roadmap sequence
 
-**Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):
+**Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. Anything unclear, needing the owner's direction, or seeming to conflict with an earlier decision is not started: the owner gets a notification with the question, and work moves on to the next clear item. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):
 1. #156 C++ instruments, then #157 C++ built-in instruments and a starter project (with #122, the useful .caw built-ins ported to the Library), #17 and #127 (independent instances, per-note and per-channel processing for instruments).
 2. #158 note clips as standard MIDI with a text form; #161 C++ modulators and routing anything anywhere (with #32).
 3. #160 remove the .caw language, then #159 `.caw` project files.
