@@ -8,6 +8,7 @@ import 'package:caw/model/cpp_workbench.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/cpp/build_section.dart';
 import 'package:caw/ui/cpp/cpp_editor.dart';
+import 'package:caw/ui/cpp/cpp_library.dart';
 import 'package:caw/ui/cpp/key_row.dart';
 import 'package:caw/ui/cpp/panels.dart';
 import 'package:caw/ui/frame/sections.dart';
@@ -116,6 +117,24 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('problem src/effect.cpp:12:3')));
     expect(jumped!.line, 12);
     w.dispose();
+  });
+
+  testWidgets('the Library finds an SDK type with its members, built-ins and the pattern format, and inserts', (tester) async {
+    final inserted = <String>[];
+    await tester.pumpWidget(host(CppLibraryView(onInsert: inserted.add)));
+    expect(find.text('DESCRIBE'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('library search')), 'caw::lib::Adsr');
+    await tester.pump();
+    // One match opens; its members are listed and a tap types `.gateOn`.
+    expect(find.textContaining('.gateOn: ', findRichText: true), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('insert caw::lib::Adsr')));
+    expect(inserted.single, 'caw::lib::Adsr env_;');
+    await tester.enterText(find.byKey(const ValueKey('library search')), 'org.caw.drum.kit');
+    await tester.pump();
+    expect(find.text('BUILT-IN INSTRUMENTS'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('library search')), 'ratchet');
+    await tester.pump();
+    expect(find.text('TEXT FORMATS'), findsOneWidget);
   });
 
   group('BuildSection', () {

@@ -14,6 +14,7 @@ import '../../model/cpp_workbench.dart';
 import '../glass.dart';
 import '../theme.dart';
 import 'code_style.dart';
+import 'cpp_library.dart';
 import 'key_row.dart';
 import 'panels.dart';
 
@@ -347,10 +348,7 @@ class CppEditorState extends State<CppEditor> {
         jumpTo(d);
       }));
 
-  void _showRef() => _sheet('Reference', (c) => RefList(onInsert: (t) {
-        Navigator.pop(c);
-        insert(t);
-      }));
+  void showLibrary() => showCppLibrarySheet(context, onInsert: insert);
 
   void _showSnippets() => _sheet('Snippets', (c) => SnippetList(onInsert: (t) {
         Navigator.pop(c);
@@ -686,7 +684,7 @@ class CppEditorState extends State<CppEditor> {
         if (!side) ...[
           item('bar problems', Icons.error_outline, count == 0 ? 'Problems' : 'Problems $count', showProblems,
               color: w.errorCount > 0 ? Neon.pink : null),
-          item('bar ref', Icons.menu_book_outlined, 'Ref', _showRef),
+          item('bar library', Icons.menu_book_outlined, 'Library', showLibrary),
         ],
         item('bar snippets', Icons.content_paste_go, 'Snippets', _showSnippets),
         item('bar test', Icons.music_note, 'Test', _showTest),
@@ -723,7 +721,7 @@ class CppEditorState extends State<CppEditor> {
   }
 }
 
-/// Landscape and desktop: Problems and Ref beside the code.
+/// Landscape and desktop: Problems and the Library beside the code.
 class _SidePanel extends StatefulWidget {
   const _SidePanel({required this.editor});
   final CppEditorState editor;
@@ -754,10 +752,10 @@ class _SidePanelState extends State<_SidePanel> {
       child: Column(children: [
         Row(children: [
           tab(count == 0 ? 'Problems' : 'Problems $count', !_ref, () => setState(() => _ref = false)),
-          tab('Ref', _ref, () => setState(() => _ref = true)),
+          tab('Library', _ref, () => setState(() => _ref = true)),
         ]),
         Expanded(
-          child: _ref ? RefList(onInsert: e.insert) : ProblemsList(workbench: e.w, onJump: e.jumpTo),
+          child: _ref ? CppLibraryView(onInsert: e.insert) : ProblemsList(workbench: e.w, onJump: e.jumpTo),
         ),
       ]),
     );
