@@ -113,6 +113,7 @@ The project model stores C++ component entries alongside existing project module
   - the same serialized points are consumed by the Arranger and native engine; plugin parameter, modulation-link and processing-behavior automation remain engine/API dependencies
 - **Exporter** (`lib/ui/exporter_screen.dart`):
   - Quick Export renders the current project loop; Advanced offers loop, free-length, one-shot, wavetable and MIDI pattern exports
+  - saving copies the finished file to the place picked, in chunks (`lib/platform/save_copy.dart`; Android through the system's create-document picker), so a long WAV never has to fit in memory
   - audio renders use the native offline render job, with progress and cancellation, at 44.1 or 48 kHz and 24-bit or 32-bit float
   - MIDI pattern import/export uses the native C API synchronously from the UI isolate and preserves the project tempo and time signature. These conversions are not currently routed through the native worker pool; measure large-file responsiveness before claiming they are off-thread.
   - named export profiles persist in settings; the last 20 successful exports are recorded with reproducible settings that can be reapplied

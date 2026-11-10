@@ -1,5 +1,5 @@
-// The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel and MIDI
-// keyboard input.
+// The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
+// keyboard input and saving exports.
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -17,6 +17,7 @@ class MainActivity : FlutterActivity() {
     private var eventSink: EventChannel.EventSink? = null
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
     private var powerSaveReceiver: BroadcastReceiver? = null
+    private var pendingSave: Pair<String, MethodChannel.Result>? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -50,6 +51,30 @@ class MainActivity : FlutterActivity() {
                     }.start()
                 } else {
                     result.notImplemented()
+                }
+            }
+
+        // Saving an export: the system picker asks where, then the file is copied there a chunk at a time, so a long
+        // WAV never has to fit in memory (#91).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FILES_METHOD_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                val path = call.argument<String>("path")
+                val name = call.argument<String>("name")
+                if (call.method != "saveCopy" || path == null || name == null || pendingSave != null) {
+                    if (pendingSave != null) result.error("busy", "a save is already open", null) else result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                pendingSave = Pair(path, result)
+                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = call.argument<String>("mime") ?: "application/octet-stream"
+                    putExtra(Intent.EXTRA_TITLE, name)
+                }
+                try {
+                    startActivityForResult(intent, SAVE_REQUEST)
+                } catch (e: Exception) {
+                    pendingSave = null
+                    result.error("unavailable", e.message, null)
                 }
             }
 
@@ -130,6 +155,27 @@ class MainActivity : FlutterActivity() {
         eventSink = null
     }
 
+    @Deprecated("startActivityForResult keeps this simple; the app has one save at a time")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != SAVE_REQUEST) return super.onActivityResult(requestCode, resultCode, data)
+        val (path, result) = pendingSave ?: return
+        pendingSave = null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) return result.success(null)
+        val main = android.os.Handler(mainLooper)
+        Thread {
+            try {
+                java.io.FileInputStream(path).use { input ->
+                    val output = contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("cannot open the destination")
+                    output.use { input.copyTo(it, 1 shl 16) }
+                }
+                main.post { result.success(uri.toString()) }
+            } catch (e: Exception) {
+                main.post { result.error("failed", e.message, null) }
+            }
+        }.start()
+    }
+
     override fun onDestroy() {
         stopMonitoring()
         super.onDestroy()
@@ -140,5 +186,7 @@ class MainActivity : FlutterActivity() {
         private const val RESOURCE_EVENT_CHANNEL = "caw/resource_signals/events"
         private const val COMPILER_METHOD_CHANNEL = "caw/compiler"
         private const val MIDI_EVENT_CHANNEL = "caw/midi"
+        private const val FILES_METHOD_CHANNEL = "caw/files"
+        private const val SAVE_REQUEST = 4711
     }
 }
