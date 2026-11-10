@@ -5,6 +5,8 @@ import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/arrange_fx.dart';
+import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/dock/dock_controller.dart';
 import 'package:caw/ui/dock/layout.dart';
@@ -174,6 +176,40 @@ void main() {
     expect(tester.getTopLeft(find.byKey(const ValueKey('section-build'))).dx, greaterThanOrEqualTo(80));
     expect(tester.getTopLeft(find.byKey(ValueKey('track-header-${s.project.layers.first.id}'))).dx, greaterThan(80));
     expect(find.byKey(const ValueKey('transport-bpm')), findsOneWidget, reason: 'the tempo moves into the transport');
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('Arrange\'s Files browser: an effect dragged from it lands on a track', (tester) async {
+    final s = await startState(tester);
+    await tester.runAsync(() async {
+      s.componentCatalog.set(await s.refreshNativeCatalog());
+    });
+    await pumpGolden(tester, Shell(state: s), const Size(390, 844));
+    await tester.tap(find.byKey(const ValueKey('arrange-browse')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('arrange-browser')), findsOneWidget);
+    await tester.tap(find.text('Built-in').last);
+    await tester.pumpAndSettle();
+    final layer = s.project.layers.first;
+    final before = layer.components.length;
+    final item = find.descendant(of: find.byKey(const ValueKey('arrange-browser')), matching: find.text('Distortion'));
+    expect(item, findsOneWidget);
+    final lane = tester.getCenter(find.byKey(ValueKey('track-header-${layer.id}'))) + const Offset(180, 0);
+    await tester.ensureVisible(item);
+    await tester.pumpAndSettle();
+    final g = await tester.startGesture(tester.getCenter(item));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 400));
+    await g.moveBy(const Offset(0, -30));
+    await tester.pump();
+    await g.moveTo(lane - const Offset(0, 20));
+    await tester.pump();
+
+    await g.moveTo(lane);
+    await tester.pump();
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(s.project.layers.firstWhere((l) => l.id == layer.id).components.length, before + 1);
     s.dispose();
   }, skip: skip);
 

@@ -18,6 +18,7 @@ import 'motion.dart';
 import 'param_control.dart';
 import 'theme.dart';
 import 'arrange/track_color.dart';
+import 'file_manager_screen.dart';
 import 'frame/frame_widgets.dart';
 import 'widgets.dart';
 import 'track_cards_screen.dart';
@@ -50,6 +51,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   /// Phone portrait: the focus panel opened up over the pinned track (owner, 2026-11-10: it can open higher).
   bool _panelHigh = false;
+
+  /// The Files browser beside (or under) the tracks, so files can be dragged onto a track or into the FX stack
+  /// without leaving Arrange (owner, 2026-11-10).
+  bool _browser = false;
 
   /// Time zoom: pixels per 16th step (× 0.85 at compact density).
   double zoom = 18.0;
@@ -389,6 +394,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       onPrevious: fi > 0 ? () => _step(-1) : null,
       onNext: fi >= 0 && fi < focusable.length - 1 ? () => _step(1) : null,
       onOpenModule: widget.onOpenModule,
+      browsing: _browser,
+      onBrowse: () => setState(() => _browser = !_browser),
     );
 
     final Widget body;
@@ -424,11 +431,46 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       body = _arrangement(context, callbacks);
     }
 
+    final withBrowser = !_browser ? body : LayoutBuilder(builder: (context, box) {
+      // The same Files browser as Build's explorer; hold an item and drag it onto a track or the FX stack.
+      final pane = SlideIn(
+        from: box.maxWidth >= 600 ? const Offset(0.15, 0) : const Offset(0, 0.15),
+        child: Padding(padding: const EdgeInsets.all(4), child: GlassPanel(key: const ValueKey('arrange-browser'),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SizedBox(height: 30, child: Row(children: [
+              const SizedBox(width: 10),
+              const Icon(Icons.drag_indicator, size: 14, color: Neon.dim),
+              const SizedBox(width: 4),
+              const Expanded(child: Text('Hold an item, drag it onto a track', maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Neon.dim, fontSize: 11))),
+              IconButton(tooltip: 'Close the browser', iconSize: 16, visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() => _browser = false), icon: const Icon(Icons.close)),
+            ])),
+            Expanded(child: FileManagerScreen(key: const ValueKey('arrange explorer'), state: s, explorer: true,
+              onOpenAsset: (_) {})),
+          ]))));
+      if (box.maxWidth >= 600) {
+        return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(child: body),
+          SizedBox(width: math.min(300.0, box.maxWidth * 0.32), child: pane),
+        ]);
+      }
+      return Column(children: [
+        Expanded(child: body),
+        SizedBox(height: math.max(160.0, box.maxHeight * 0.4), child: pane),
+      ]);
+    });
+
     return PopScope(
-      // Android Back leaves the focus view first (owner, 2026-11-09).
-      canPop: focused == null,
+      // Android Back closes the browser, then leaves the focus view (owner, 2026-11-09).
+      canPop: focused == null && !_browser,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && focused != null) _focus(null);
+        if (didPop) return;
+        if (_browser) {
+          setState(() => _browser = false);
+        } else if (focused != null) {
+          _focus(null);
+        }
       },
       child: Column(children: [
         if (s.meters.overloaded > 0) _OverloadBanner(state: s),
@@ -440,7 +482,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             child: zoomBar ? _zoomBar() : const SizedBox(width: double.infinity)),
         ])),
         if (settings) _settingsPanel(),
-        Expanded(child: body),
+        Expanded(child: withBrowser),
         if (mixer) _ArrangementMixer(state: s),
       ]),
     );
@@ -466,6 +508,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
           else
             TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
               icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
+          IconButton(key: const ValueKey('arrange-browse'), onPressed: () => setState(() => _browser = !_browser),
+            color: _browser ? Neon.blue : Neon.dim, icon: const Icon(Icons.folder_open),
+            tooltip: 'Files: drag one onto a track'),
           if (selectedLayer != null && selectedClip != null && splitAt != null && splitAt > selectedClip.startSteps && splitAt < selectedClip.startSteps + selectedClip.lengthSteps)
             IconButton(onPressed: () => s.splitClipAt(selectedLayer, selectedClip, splitAt),
               icon: const Icon(Icons.content_cut), tooltip: 'Split at time selection'),
@@ -615,7 +660,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         SizedBox(height: ruler, child: Padding(
           padding: EdgeInsets.only(left: 10, top: pinned ? 4 : 8),
           child: Align(alignment: Alignment.centerLeft,
-            child: Text(pinned ? 'FOCUS · swipe ⇆' : 'TRACKS',
+            child: Text(pinned ? 'FOCUS · swipe ‹ ›' : 'TRACKS',
               style: const TextStyle(color: Neon.dim, fontSize: 10, letterSpacing: 1.3))))),
         for (final layer in layers) ...[
           _TimelineHeader(state: s, layer: layer, index: p.layers.indexOf(layer),

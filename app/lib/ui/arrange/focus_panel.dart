@@ -43,6 +43,8 @@ class FocusPanel extends StatelessWidget {
     this.bottomSheetStyle = false,
     this.expanded = false,
     this.onExpand,
+    this.browsing = false,
+    this.onBrowse,
   });
 
   final AppState state;
@@ -59,6 +61,10 @@ class FocusPanel extends StatelessWidget {
   /// Phone portrait: the panel opened up over the pinned track ([onExpand] true), or under it.
   final bool expanded;
   final ValueChanged<bool>? onExpand;
+
+  /// The Files browser is open beside the panel; [onBrowse] opens or closes it (drag effects into the FX stack).
+  final bool browsing;
+  final VoidCallback? onBrowse;
 
   @override
   Widget build(BuildContext context) {
@@ -84,6 +90,9 @@ class FocusPanel extends StatelessWidget {
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: color))),
           IconButton(tooltip: 'Next track', iconSize: 18, onPressed: onNext, icon: const Icon(Icons.chevron_right)),
           const Spacer(),
+          if (onBrowse != null)
+            IconButton(key: const ValueKey('focus-browse'), tooltip: 'Files: drag effects or patterns here',
+              iconSize: 18, onPressed: onBrowse, color: browsing ? Neon.blue : null, icon: const Icon(Icons.folder_open)),
           if (onExpand != null)
             IconButton(key: const ValueKey('focus-expand'), tooltip: expanded ? 'Lower the panel' : 'Open the panel higher',
               iconSize: 18, onPressed: () => onExpand!(!expanded),
