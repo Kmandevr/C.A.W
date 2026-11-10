@@ -3486,6 +3486,12 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
                 continue;
             }
         }
+        // The same note still held ends first, with its motion up to here, as an off, an orphan and a slide do
+        // (on() would end it too, but without the motion, so its last pitch would depend on the block split).
+        if (NoteEvents::Held* same = notes.findPattern(pe.note, pe.sub)) {
+            noteMotion(notes, *same, static_cast<int>(frame));
+            notes.off(frame, *same);
+        }
         NoteEvents::Held& h = notes.on(frame, NoteEvents::Source::Pattern, pe.note, pe.sub, -1, n.pitch, n.vel);
         express(h, n, frame);
     }

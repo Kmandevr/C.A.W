@@ -415,6 +415,37 @@ TEST(a_looping_clip_plays_its_notes_on_every_repeat) {
     }
 }
 
+TEST(a_note_played_again_while_held_gets_its_motion_up_to_its_end_at_any_block_size) {
+    // Second audio review, fix 5: NoteEvents::on() ends a pattern note still held without the pitch points due
+    // before its end, so its last pitch could depend on where the block split fell. The Engine now ends it first
+    // with its motion, as an off, an orphan and a slide do. Today a pattern's restart ends its notes before
+    // they start again (here a bent note longer than its 3-step pattern, restarting mid-chunk), so this checks
+    // that the motion up to a note's end and its new start land on the same frames at any block size.
+    auto recordAt = [](int block) {
+        Engine e(48000);
+        std::vector<Rec> rec;
+        if (!loadFixture(e, kRecorder)) return rec;
+        ProjectSpec p = instrumentTrack(kRecorder, "");
+        p.modules[0].source = pattern("0 C4 7/2 1 bend 0:0 0.8:0 1:12\n", 3);
+        p.layers[0].pattern = "pat";
+        if (!ok(e.setProject(p))) return rec;
+        e.play();
+        run(e, 6000 * 3 + 7001, block);  // past the restart at step 3 (mid-chunk), ending mid-block
+        return records(e);
+    };
+    const std::vector<Rec> a = recordAt(64), b = recordAt(37);
+    CHECK(a.size() > 4u);
+    uint32_t ons = 0;
+    for (const Rec& r : a) ons += r.type == kOn;
+    CHECK(ons >= 2u);
+    CHECK_EQ(a.size(), b.size());
+    for (size_t i = 0; i < a.size() && i < b.size(); ++i) {
+        CHECK_EQ(a[i].frame, b[i].frame);
+        CHECK_EQ(a[i].type, b[i].type);
+        CHECK_EQ(a[i].pitch, b[i].pitch);
+    }
+}
+
 TEST(a_slide_glides_the_held_note_without_a_new_on) {
     Engine e(48000);
     CHECK(loadFixture(e, kRecorder));
