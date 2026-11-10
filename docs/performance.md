@@ -257,6 +257,40 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 - Found while timing: the gate cost 18,000 because its dB envelope settled on a steady target through subnormal numbers; the followers now land on a steady target (1,800).
 - Next, if it matters: the EQ runs its bands sample by sample with a branch per band; a block loop per band (or stereo pairs interleaved, as the flagship's ladder) would cut the many-band case.
 
+## One synth (2026-11-10)
+
+The owner's measure after the evening round (#174): the basic project at 35–40 % CPU on the S22+. The bass, acid, morph and basic synths became Flagship presets ([engine](engine.md)); then a pass to make Flagship and the host cheaper. `caw_bench 1 100 K` under callgrind (`--toggle-collect='caw::Engine::process(float*, float*, int)'`: the audio path only, setup excluded), **millions of instructions per second of audio**, GCC 13 `-O3`, x86-64; columns: before the change (`a6e5374`, the retired synths), the presets before the pass, and after the pass (`426a0e5`):
+
+| | Retired synths | Presets, before the pass | After the pass | Eco quality |
+| --- | --- | --- | --- | --- |
+| First loop (6 tracks, all unmuted) | 173.0 | 381.7 | 276.4 | 259.2 |
+| Kick | 27.9 | 28.1 | 27.6 | |
+| Hats | 28.9 | 28.9 | 28.5 | |
+| Bass (Mono bass) | 25.2 | 65.0 | 42.5 | |
+| Lead (Morph pad ×3 + ping-pong) | 42.1 | 92.2 | 65.7 | 65.7 |
+| Acid (Acid 303 + distortion) | 38.8 | 79.7 | 57.8 | |
+| Pad (Morph pad ×7 + chorus) | 55.6 | 133.4 | 99.7 | 82.5 |
+| An idle instrument track | 14.2 | 14.2 | 13.7 | |
+| Busy Flagship default (×7, ladder, reverb) | 189.3 | 191.7 | 149.9 | |
+| Busy Flagship ×1, no filter, no effects | 83.6 | 85.9 | 52.1 | |
+| Busy Flagship ×16, no filter, no effects | 222.4 | 224.7 | 173.4 | |
+| Busy Flagship 3 oscillators ×16, 2 filters, all effects | 771.3 | 774.5 | 648.9 | |
+
+**Flagship, 8 held notes** (`caw_bench 3 200`, µs of CPU per second of audio, shared server, noisy), before → after: a voice 519 → 292; a unison copy 141 → 66; an SVF pair 523 → 197; a ladder pair 951 → 909; a slot per voice 127 → 156 (noise); the default patch per voice 2,522 → 1,786. The effects (`caw_bench 3 300`) were not changed and measure as before.
+
+- **What the one synth costs:** Flagship plays the same sounds at about 1.5–1.8× the retired synths' instructions per track (they were written for one sound each: no mod matrix, three oscillators, two filters, a per-voice filter where Morph shared one). The First loop is 1.6× what it was. **[Assumption: the phone scales like these counts; not measured on a device]** on the owner's numbers this is about 4 % of the device's CPU for the engine's audio work: the callback's measured load is about 1.5–3 % of one server core for the whole First loop, so the 35–40 % the owner sees is mostly not the audio engine (the app's UI, meters and redraws are the next thing to measure on the phone).
+- **The pass** (each change measured alone; all bit-identical but the oscillator phase):
+  - A component chain resolved all of its parameters every 64-frame block (Flagship's 209 on four tracks): it now keeps last block's values while no value, touch, lane or play state changed and nothing ramps (a generation counter the control thread bumps), and a steady resolver caches its constrained value. First loop −18 %.
+  - The unwarped oscillator (the usual case) reads its table with a 32-bit fixed-point phase: it wraps by itself and its top bits are the index, so no floor and no float-to-int per sample. A copy is about half the cost. The only change in sound: the phase is finer than the float one was (goldens re-recorded; the perceptual references pass unchanged).
+  - A control works out again only the voice sections a knob or a slot moved, and what follows the pitch; a table sweep only re-points each copy at its new frames. A slot whose source is at 0 leaves its knob alone (no exp, the filter keeps its coefficients).
+  - An SVF pair shares one tan and runs both sides in one loop; its q is worked out only when the resonance moves.
+  - A centred voice (every copy in the middle: the Mono bass, Acid 303 and Basic presets) filters one side and uses it for both.
+  - Dry output (no effects on) in one vectorizable loop; a block's knob values read in one tight loop.
+- **SIMD:** the per-sample loops are written to be vectorized by the compiler (fixed trip counts, no calls, selects): the dry output, the voice sums, the mixer and meters (earlier pass). The table reads are gathers, which NEON does not have, so the oscillator stays scalar per sample; on Arm64 GCC and Clang vectorize the rest with NEON at `-O3` without intrinsics. No SIMD library was added.
+- **Multi-core: not built.** The First loop's audio work is about 280 M instructions a second, about 375,000 per 64-frame chunk (the engine's step), split over six tracks of 30,000–130,000. Handing tracks to worker threads needs a wake-up and a barrier per chunk, 750 a second per worker; on Android a futex wake and the barrier's return take [Assumption, typical figures, not measured here] 5–20 µs, about what a whole track's chunk costs, and spinning instead keeps big cores awake, which costs battery. It would cut the callback's time on heavy projects (16+ busy tracks), not the CPU used; so it waits for a phone measurement showing the callback near its budget, and would be gated on the chunk's measured cost (more than about 200 µs) and on there being at least four heavy tracks.
+- **The phone's hardware:** the device is opened with miniaudio's low-latency profile, which asks AAudio for its low-latency (MMAP) path ([engine](engine.md), the device buffer); the new buffer setting's Auto mode opens a 1024-frame buffer while not recording (about 47 callbacks a second instead of 250–500), and Battery also leaves the fast path. Flush-to-zero stays off (the owner has not decided; the kernels keep their own denormal guards).
+- **Quality:** Eco caps unison at 4 copies, turns the saturator's oversampling off and thins the reverbs: the Pad −17 %, the First loop −6 % (the Lead has 3 copies, below the cap).
+
 ## Remaining bottlenecks and next steps
 
 - **Measure on the phone.** Build a release APK, then:
