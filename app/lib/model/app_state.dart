@@ -1132,6 +1132,16 @@ class AppState extends ChangeNotifier {
     return true;
   }).toList();
 
+  /// Whether [layer] is somewhere inside the folder [folderId], at any depth.
+  bool isInside(LayerDoc layer, String folderId) {
+    var parent = layer.parentId;
+    for (var depth = 0; parent != null && depth < project.layers.length; depth++) {
+      if (parent == folderId) return true;
+      parent = project.layers.where((x) => x.id == parent).firstOrNull?.parentId;
+    }
+    return false;
+  }
+
   int folderDepth(LayerDoc layer) {
     var depth = 0, parent = layer.parentId;
     final seen = <String>{layer.id};
@@ -1585,10 +1595,20 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A new folder at the end, or at the end of [parentId]'s contents: a folder inside a folder, to any depth
+  /// (REAPER, UG 5.13.5).
   void addFolder({String? parentId}) {
+    final parent = parentId == null ? null : project.layers.where((l) => l.id == parentId && l.isFolder).firstOrNull;
     final folder = LayerDoc(id: newId('l'), name: 'Group', color: project.layers.length % LayerDoc.trackColors,
-        parentId: parentId, isFolder: true, busEnabled: true);
-    project.layers.add(folder);
+        parentId: parent?.id, isFolder: true, busEnabled: true);
+    var at = project.layers.length;
+    if (parent != null) {
+      at = project.layers.indexOf(parent) + 1;
+      while (at < project.layers.length && isInside(project.layers[at], parent.id)) {
+        at++;
+      }
+    }
+    project.layers.insert(at, folder);
     selectedLayerId = folder.id;
     _changed();
   }

@@ -404,9 +404,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       if (layer.ownColor && layer.parentId != null) const MenuAction('folder-color', "Use the folder's colour", Icons.format_color_reset_outlined),
       if (index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
       if (index < s.project.layers.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
-      if (layer.parentId != null) const MenuAction('unparent', 'Move out of folder', Icons.drive_file_move_rtl_outlined),
-      for (final folder in s.project.layers.where((f) => f.isFolder && f.id != layer.id && f.id != layer.parentId))
+      // Out one level, as REAPER's folders nest (UG 5.13.5): into the folder above, or to the top.
+      if (layer.parentId != null) MenuAction('unparent', 'Move out of ${s.project.layers
+          .where((f) => f.id == layer.parentId).firstOrNull?.name ?? 'folder'}', Icons.drive_file_move_rtl_outlined),
+      // Any folder at any depth, except this one, its folder and the folders inside it.
+      for (final folder in s.project.layers.where((f) => f.isFolder && f.id != layer.id && f.id != layer.parentId &&
+          !s.isInside(f, layer.id)))
         MenuAction('parent:${folder.id}', 'Move into ${folder.name}', Icons.drive_file_move_outlined),
+      if (layer.isFolder) const MenuAction('subfolder', 'New folder inside', Icons.create_new_folder_outlined),
       if (layer.isFolder) MenuAction('bus', layer.busEnabled ? 'Disable group bus' : 'Enable group bus', Icons.account_tree_outlined),
       if (canAutomate && !hasVolume) const MenuAction('automation-volume', 'Add volume automation', Icons.show_chart),
       if (canAutomate && !hasPan) const MenuAction('automation-pan', 'Add pan automation', Icons.show_chart),
@@ -429,7 +434,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == 'folder-color') s.editLayer(layer, (l) => l.ownColor = false);
     if (v == 'up' && index > 0) s.moveLayer(index, index - 1);
     if (v == 'down' && index < s.project.layers.length - 1) s.moveLayer(index, index + 2);
-    if (v == 'unparent') s.moveLayerIntoFolder(layer, null);
+    if (v == 'unparent') {
+      // Just below its folder, in that folder's own parent.
+      final folder = s.project.layers.where((f) => f.id == layer.parentId).firstOrNull;
+      folder == null ? s.moveLayerIntoFolder(layer, null) : s.moveTrack(layer, folder, TrackDrop.below);
+    }
+    if (v == 'subfolder') s.addFolder(parentId: layer.id);
     if (v.startsWith('parent:')) s.moveLayerIntoFolder(layer, v.substring(7));
     if (v == 'bus') s.setFolderBus(layer, !layer.busEnabled);
     if (v == 'automation-volume') s.addAutomationLane(layer, 'volume');
@@ -1094,7 +1104,7 @@ class _TimelineHeader extends StatelessWidget {
     // REAPER-style (owner, 2026-11-10): the track's colour tints the whole header and its left edge, no outline.
     final edge = BorderSide(color: selected ? color : color.withValues(alpha: 0.75), width: selected ? 4 : 3);
     final box = Container(height: trackHeight + layer.automation.length * 34.0,
-      padding: EdgeInsets.fromLTRB(6 + depth * 10, thin ? 2 : 4, 2, thin ? 2 : 4),
+      padding: EdgeInsets.fromLTRB(6 + folderIndent(depth), thin ? 2 : 4, 2, thin ? 2 : 4),
       decoration: Glass.active
           ? BoxDecoration(
               gradient: LinearGradient(begin: Alignment.centerLeft, end: Alignment.centerRight, colors: [
@@ -1111,7 +1121,7 @@ class _TimelineHeader extends StatelessWidget {
               border: Border(left: edge, bottom: const BorderSide(color: Neon.bg))),
       child: LayoutBuilder(builder: (context, box) {
         final oneRow = box.maxHeight < 56;
-        final chip = box.maxWidth < 150 ? 24.0 : 30.0;
+        final chip = box.maxWidth < 86 ? 20.0 : box.maxWidth < 150 ? 24.0 : 30.0;
         final mute = ToggleChip(label: 'M', size: chip, tooltip: layer.isFolder ? 'Mute folder' : 'Mute',
             on: layer.mute, color: Neon.yellow,
             onTap: () => layer.isFolder
@@ -1157,8 +1167,9 @@ class _TimelineHeader extends StatelessWidget {
             child: Text(layer.name, maxLines: 1, overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
                 color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15))))),
-          if (oneRow) ...[mute, const SizedBox(width: 2), solo],
-          if (showFx || layer.isFolder) fx,
+          // A deep folder's header can get narrow: M and S move to their own row's place, the icons go first.
+          if (oneRow && box.maxWidth >= 72) ...[mute, const SizedBox(width: 2), solo],
+          if (showFx) fx,
         ]));
         if (oneRow) {
           return Column(mainAxisSize: MainAxisSize.min, children: [top, SizedBox(height: thin ? 2 : 4), meter]);
@@ -1195,8 +1206,23 @@ class _TimelineHeader extends StatelessWidget {
         ]);
       },
       child: box);
-    final resizable = onResize == null ? target : Stack(children: [
+    // One thin line per folder above, in that folder's colour (REAPER's nested folder indent, UG 5.13.5).
+    final ancestors = <LayerDoc>[];
+    for (var id = layer.parentId; id != null && ancestors.length < depth;) {
+      final folder = state.project.layers.where((l) => l.id == id).firstOrNull;
+      if (folder == null) break;
+      ancestors.insert(0, folder);
+      id = folder.parentId;
+    }
+    final guided = ancestors.isEmpty ? target : Stack(children: [
       target,
+      for (var i = 0; i < ancestors.length; i++)
+        Positioned(left: folderIndent(i + 1) - 4, top: 0, bottom: 0, width: 1.5,
+          child: IgnorePointer(child: ColoredBox(key: ValueKey('folder-guide-${layer.id}-$i'),
+            color: trackColor(state, ancestors[i]).withValues(alpha: 0.55)))),
+    ]);
+    final resizable = onResize == null ? guided : Stack(children: [
+      guided,
       // The row's bottom edge: drag it to make every track thinner or taller (saved).
       Positioned(left: 0, right: 0, bottom: 0, height: 8, child: _ResizeGrip(
         key: ValueKey('track-height-grip-${layer.id}'), axis: Axis.vertical, label: 'Resize tracks',
@@ -1231,6 +1257,10 @@ class _TimelineHeader extends StatelessWidget {
     );
   }
 }
+
+/// How far a track [depth] folders down is indented: 10 px a level for four levels, then 3 px a level up to
+/// 60 px, so a deep tree still leaves a phone's narrow header room for the name.
+double folderIndent(int depth) => depth <= 4 ? depth * 10.0 : math.min(60.0, 40.0 + (depth - 4) * 3.0);
 
 /// A track header's drag, as the header reports it: a long press ([press]) that may become a drag once it moves, or
 /// a mouse drag ([grab]) that is one at once.

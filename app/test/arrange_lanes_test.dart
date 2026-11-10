@@ -1,5 +1,6 @@
 // Arrange, REAPER-style (#174): MIDI notes drawn inside clips from cached pictures, folders nested to any depth, and
 // each track's automation lanes under it behind an arrow.
+import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -10,6 +11,9 @@ import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arrange/clip_preview.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/frame/sections.dart';
+import 'package:caw/model/arrange_fx.dart';
+import 'package:caw/ui/arrange/track_color.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -98,6 +102,89 @@ void main() {
       s.selectClip(s.project.layers.first, s.project.layers.first.clips.first);
       await tester.pump();
       expect(ClipPictureCache.instance.recorded, recorded, reason: 'a selection does not redraw the notes');
+      await tester.pump(const Duration(seconds: 2));
+    });
+  });
+
+  group('folders nest to any depth', () {
+    // outer > mid > inner > Keys; Bass at the top level.
+    void nest() {
+      s.addFolder();
+      final outer = s.project.layers.last..name = 'Outer';
+      s.addFolder(parentId: outer.id);
+      final mid = s.project.layers.last..name = 'Mid';
+      s.addFolder(parentId: mid.id);
+      final inner = s.project.layers.firstWhere((l) => l.parentId == mid.id)..name = 'Inner';
+      expect(s.moveTrack(s.project.layers.firstWhere((l) => l.id == 'a'), inner, TrackDrop.into), isTrue);
+    }
+
+    LayerDoc named(String n) => s.project.layers.firstWhere((l) => l.name == n);
+
+    test('three levels: order, depth, a cycle refused, collapse hides the whole subtree', () {
+      nest();
+      expect(s.project.layers.map((l) => l.name), ['Bass', 'Outer', 'Mid', 'Inner', 'Keys']);
+      expect([for (final l in s.project.layers) s.folderDepth(l)], [0, 0, 1, 2, 3]);
+      expect(s.isInside(named('Keys'), named('Outer').id), isTrue);
+      // A folder can't go inside itself or its own folders.
+      expect(s.moveTrack(named('Outer'), named('Inner'), TrackDrop.into), isFalse);
+      // The engine gets every parent as it is.
+      final engine = (jsonDecode(s.project.toEngineJson()) as Map<String, dynamic>)['layers'] as List;
+      expect([for (final l in engine) (l as Map)['parent']],
+          [null, null, named('Outer').id, named('Mid').id, named('Inner').id]);
+      // Colours shade down the tree from the top folder.
+      expect(trackColor(s, named('Keys')), isNot(trackColor(s, named('Outer'))));
+      s.setFolderCollapsed(named('Mid'), true);
+      expect(s.visibleLayers.map((l) => l.name), ['Bass', 'Outer', 'Mid']);
+      s.setFolderCollapsed(named('Mid'), false);
+      s.setFolderCollapsed(named('Outer'), true);
+      expect(s.visibleLayers.map((l) => l.name), ['Bass', 'Outer']);
+      s.setFolderCollapsed(named('Outer'), false);
+      expect(s.visibleLayers, hasLength(5));
+    });
+
+    test('out of a folder one level at a time; dropped beside a track it joins that track\'s folder', () {
+      nest();
+      expect(s.moveTrack(named('Keys'), named('Inner'), TrackDrop.below), isTrue);
+      expect(named('Keys').parentId, named('Mid').id);
+      expect(s.moveTrack(named('Bass'), named('Keys'), TrackDrop.above), isTrue);
+      expect(named('Bass').parentId, named('Mid').id);
+      expect(s.folderDepth(named('Bass')), 2);
+    });
+
+    testWidgets('headers indent per level with a guide per folder; collapse and expand from the arrow', (tester) async {
+      nest();
+      await pumpArranger(tester, const Size(412, 900));
+      double nameX(String n) => tester.getTopLeft(find.text(n)).dx;
+      expect(nameX('Mid'), greaterThan(nameX('Outer')));
+      expect(nameX('Inner'), greaterThan(nameX('Mid')));
+      expect(find.byKey(const ValueKey('folder-guide-a-2')), findsOneWidget);
+      await tester.tap(find.descendant(of: find.byKey(ValueKey('track-header-${named('Mid').id}')),
+          matching: find.byIcon(Icons.expand_more)));
+      await tester.pump();
+      expect(find.text('Inner'), findsNothing);
+      expect(find.text('Keys'), findsNothing);
+      await tester.tap(find.descendant(of: find.byKey(ValueKey('track-header-${named('Mid').id}')),
+          matching: find.byIcon(Icons.chevron_right)));
+      await tester.pump();
+      expect(find.text('Inner'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a header dragged into the middle of a folder three levels down goes inside it', (tester) async {
+      nest();
+      await pumpArranger(tester, const Size(1200, 900));
+      final from = tester.getCenter(find.byKey(const ValueKey('track-header-b')));
+      final to = tester.getCenter(find.byKey(ValueKey('track-header-${named('Inner').id}')));
+      final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+      for (var i = 1; i <= 6; i++) {
+        await g.moveTo(Offset.lerp(from, to, i / 6)!);
+        await tester.pump();
+      }
+      expect(find.byKey(const ValueKey('track-drop-into')), findsOneWidget);
+      await g.up();
+      await tester.pumpAndSettle();
+      expect(named('Bass').parentId, named('Inner').id);
+      expect(s.folderDepth(named('Bass')), 3);
       await tester.pump(const Duration(seconds: 2));
     });
   });
