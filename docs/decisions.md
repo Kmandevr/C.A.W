@@ -6,6 +6,15 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: C++ replaces the .caw language (owner)
+
+**Decision (owner):** the .caw sound language is removed completely and replaced by C++. [Proposal, not built] Status: .caw still runs today; nothing below is built yet.
+- **Order (owner):** C++ instruments come first, then .caw is removed. Today every instrument is a .caw module and C++ components are stereo effects only, so note-playing C++ instruments (and C++ built-ins for the starter sounds) must exist before the language goes, and the app never goes silent in between.
+- **Patterns (owner):** note clips are stored as standard MIDI instead of .caw-style pattern text. [Fact, 2026-11-10] a Standard MIDI File is binary, and so is MIDI 2.0's MIDI Clip File (midi.org M2-116-U, June 2023); midi.org publishes no official text form of either. So the app stores standard MIDI and keeps its readable text view of notes in the editor, rather than inventing a text MIDI format. The owner asked that a text form be supported if MIDI has one; it has none today.
+- **Project files (owner):** the project file itself takes the `.caw` extension (today `.cawproj`).
+- **Old projects (owner):** dropped. Projects and the "First loop" template made of .caw sounds are not converted; this follows "no project compatibility before Release 1" (2026-11-03).
+- **Sharing (owner):** shared sounds are C++, so each asks Trust / Block once per exact code, as now; Isolated (a separate process) stays planned. The sandbox that made a downloaded .caw module safe goes with the language.
+
 ## 2026-11-10: The C++ Builder's editor is re_editor
 
 - **Dependency:** `re_editor` 0.10.0 (published 2026-07-01, MIT, Reqable; LICENSE read in the pub.dev archive 2026-11-10), with `re_highlight` 0.0.3 (MIT, Reqable; its C++ and JSON modes) and, through it, `isolate_manager` 4.1.5+1 (MIT; it runs the highlighter off the UI isolate).
