@@ -425,6 +425,7 @@ class _NativeEffectCard extends StatelessWidget {
               else
                 Knob(key: ValueKey('knob-${use.id}-${p.id}'), value: use.params[p.id] ?? p.defaultValue,
                   min: p.min, max: p.max, step: p.step, defaultValue: p.defaultValue, label: p.label,
+                  exponential: p.exponential,
                   enabled: !use.bypass,
                   color: isBuiltinComponent(use.id) ? Neon.blue : Neon.green,
                   valueText: (v) => '${v.toStringAsFixed(p.max - p.min > 20 ? 0 : 2)}${p.unit.isEmpty ? '' : ' ${p.unit}'}',

@@ -5,6 +5,7 @@ import '../../engine/component_info.dart';
 import '../../model/cpp_diagnostics.dart';
 import '../../model/cpp_snippets.dart';
 import '../../model/cpp_workbench.dart';
+import '../arrange/knob.dart' show Taper;
 import '../theme.dart';
 
 TextStyle _small({Color color = Neon.text, FontWeight? weight}) => TextStyle(fontSize: 12, color: color, fontWeight: weight);
@@ -228,18 +229,30 @@ class _Knob extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = parameter;
     final value = (use.use.params[p.id] ?? p.defaultValue).clamp(p.min, p.max).toDouble();
+    // An exponential parameter's slider moves along its taper (fine at the start, coarse at the end).
+    final taper = Taper(p.min, p.max, exponential: p.exponential);
     return SizedBox(
       height: 36,
       child: Row(children: [
         SizedBox(width: 80, child: Text(p.label, style: _small(), overflow: TextOverflow.ellipsis)),
         Expanded(
-          child: Slider(
-            value: value,
-            min: p.min,
-            max: p.max > p.min ? p.max : p.min + 1,
-            divisions: p.step > 0 && p.max > p.min ? ((p.max - p.min) / p.step).round().clamp(1, 1000) : null,
-            onChanged: (v) => workbench.setKnob(use, p.id, v),
-            onChangeEnd: (v) => workbench.setKnob(use, p.id, v, commit: true),
+          child: GestureDetector(
+            // Double-tap: back to the descriptor's default.
+            onDoubleTap: () => workbench.setKnob(use, p.id, p.defaultValue, commit: true),
+            child: p.exponential && p.max > p.min
+                ? Slider(
+                    value: taper.position(value),
+                    onChanged: (t) => workbench.setKnob(use, p.id, _snap(taper.value(t), p)),
+                    onChangeEnd: (t) => workbench.setKnob(use, p.id, _snap(taper.value(t), p), commit: true),
+                  )
+                : Slider(
+                    value: value,
+                    min: p.min,
+                    max: p.max > p.min ? p.max : p.min + 1,
+                    divisions: p.step > 0 && p.max > p.min ? ((p.max - p.min) / p.step).round().clamp(1, 1000) : null,
+                    onChanged: (v) => workbench.setKnob(use, p.id, v),
+                    onChangeEnd: (v) => workbench.setKnob(use, p.id, v, commit: true),
+                  ),
           ),
         ),
         SizedBox(
@@ -251,5 +264,9 @@ class _Knob extends StatelessWidget {
     );
   }
 }
+
+/// [v] on [p]'s step, when it has one.
+double _snap(double v, ComponentParameterInfo p) =>
+    p.step > 0 ? (p.min + ((v - p.min) / p.step).round() * p.step).clamp(p.min, p.max).toDouble() : v;
 
 String formatKnob(double v) => v.abs() >= 100 ? v.toStringAsFixed(0) : v.abs() >= 10 ? v.toStringAsFixed(1) : v.toStringAsFixed(2);
