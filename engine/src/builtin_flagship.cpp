@@ -1701,7 +1701,19 @@ private:
         const double volumeStep = (volume1_ - volume0_) / kControlFrames;
         const double delayStep = (delayTime1_ - delayTime0_) / kControlFrames;
         float peak = periodPeak_;
-        if (!(distOn_ || eqOn_ || chorusOn_ || delayOn_ || reverbOn_)) {  // dry: two plain loops the compiler vectorizes
+        // Both sides the same (every voice centred: the bass, the acid line): the distortion, which holds no state,
+        // runs on one and gives the other the same bits.
+        // Silence (between notes) stays silence through every type (what the sum below gives for a 0 in: +0).
+        const bool same = distOn_ && std::memcmp(L, R, n * sizeof(float)) == 0;
+        const auto dist = [&](double x) noexcept { return x == 0.0 ? 0.0 : x + (distort(x) - x) * distMix_; };
+        const bool rest = eqOn_ || chorusOn_ || delayOn_ || reverbOn_;
+        if (distOn_ && !rest) {  // the distortion alone: in place (to float, as below), then the dry loops
+            for (uint32_t i = 0; i < n; ++i) L[i] = static_cast<float>(dist(L[i]));
+            if (same) std::memcpy(R, L, n * sizeof(float));
+            else
+                for (uint32_t i = 0; i < n; ++i) R[i] = static_cast<float>(dist(R[i]));
+        }
+        if (!rest) {  // dry: two plain loops the compiler vectorizes
             for (uint32_t i = 0; i < n; ++i) {
                 const double volume = volume0_ + volumeStep * static_cast<double>(first + i);
                 left[i] = static_cast<float>(finite0(L[i] * volume));
@@ -1710,11 +1722,6 @@ private:
             periodPeak_ = peakOf(left, right, n, peak);
             return;
         }
-        // Both sides the same (every voice centred: the bass, the acid line): the distortion, which holds no state,
-        // runs on one and gives the other the same bits.
-        // Silence (between notes) stays silence through every type (what the sum below gives for a 0 in: +0).
-        const bool same = distOn_ && std::memcmp(L, R, n * sizeof(float)) == 0;
-        const auto dist = [&](double x) noexcept { return x == 0.0 ? 0.0 : x + (distort(x) - x) * distMix_; };
         for (uint32_t i = 0; i < n; ++i) {
             const double at = static_cast<double>(first + i);
             double l = L[i], r = R[i];
