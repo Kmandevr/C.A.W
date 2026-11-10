@@ -58,6 +58,7 @@ class AppState extends ChangeNotifier {
 
   // Lightweight/Minimal change the engine's voice budget; UI meter cadence stays fixed.
   void _settingsChanged() {
+    _engineDocChanged(); // the swap timing and the voice budget are in the engine JSON
     final nextMode = settings.performanceMode;
     final nextDensity = settings.density;
     final nextLook = settings.lookRevision;
@@ -163,12 +164,14 @@ class AppState extends ChangeNotifier {
 
   /// Aggregate value tick retained for diagnostics and external listeners. Workspaces use the scoped ticks below
   /// so parameter, track and master drags don't rebuild unrelated controls.
-  final ValueNotifier<int> values = ValueNotifier(0);
-  final ValueNotifier<int> masterValueTick = ValueNotifier(0);
+  late final ValueNotifier<int> values = ValueNotifier(0)..addListener(_engineDocChanged);
+  late final ValueNotifier<int> masterValueTick = ValueNotifier(0)..addListener(_engineDocChanged);
   final Map<String, ValueNotifier<int>> _moduleValueTicks = {};
   final Map<String, ValueNotifier<int>> _layerValueTicks = {};
-  ValueNotifier<int> moduleValueTick(String id) => _moduleValueTicks.putIfAbsent(id, () => ValueNotifier(0));
-  ValueNotifier<int> layerValueTick(String id) => _layerValueTicks.putIfAbsent(id, () => ValueNotifier(0));
+  ValueNotifier<int> moduleValueTick(String id) =>
+      _moduleValueTicks.putIfAbsent(id, () => ValueNotifier(0)..addListener(_engineDocChanged));
+  ValueNotifier<int> layerValueTick(String id) =>
+      _layerValueTicks.putIfAbsent(id, () => ValueNotifier(0)..addListener(_engineDocChanged));
   EngineMeters meters = const EngineMeters();
 
   /// Set when an overload switched light mode on, so the app can say so once.
@@ -454,6 +457,7 @@ class AppState extends ChangeNotifier {
     final e = engine;
     if (e == null) return;
     _livePending = null; // the project as it is now supersedes a drag step not yet sent
+    _engineDocGen++;
     final json = _engineJson();
     try {
       info = await e.setProject(json);
@@ -488,6 +492,29 @@ class AppState extends ChangeNotifier {
     if (!_liveBusy) await _liveSend();
   }
 
+  // A live drag step's engine JSON is the project's with one module source changed: the rest is built once, around
+  // a marker, and each step only splices the new text in (#174). Any edit, value move or sync drops it.
+  int _engineDocGen = 0;
+  ({int gen, ProjectDoc project, String id, String head, String tail})? _liveTemplate;
+  static const _liveMarker = '\u0001caw-live-source\u0001';
+
+  void _engineDocChanged() => _engineDocGen++;
+
+  /// The engine JSON of a live drag step: the project with [text] as module [moduleId]'s source.
+  @visibleForTesting
+  String liveEngineJson(String moduleId, String text) {
+    var t = _liveTemplate;
+    if (t == null || t.gen != _engineDocGen || !identical(t.project, project) || t.id != moduleId) {
+      final json = _engineJson(sourceOverrides: {moduleId: _liveMarker});
+      final marker = jsonEncode(_liveMarker);
+      final at = json.indexOf(marker);
+      if (at < 0 || json.indexOf(marker, at + 1) >= 0) return _engineJson(sourceOverrides: {moduleId: text});
+      t = _liveTemplate = (gen: _engineDocGen, project: project, id: moduleId, head: json.substring(0, at),
+          tail: json.substring(at + marker.length));
+    }
+    return '${t.head}${jsonEncode(text)}${t.tail}';
+  }
+
   Future<void> _liveSend() async {
     _liveBusy = true;
     try {
@@ -502,7 +529,7 @@ class AppState extends ChangeNotifier {
           continue;
         }
         try {
-          await e.setProject(_engineJson(sourceOverrides: {next.id: text}));
+          await e.setProject(liveEngineJson(next.id, text));
         } catch (_) {
           // A live step that fails (the engine busy or gone) is dropped: the edit is sent in full on release.
         }
@@ -514,11 +541,13 @@ class AppState extends ChangeNotifier {
 
   /// Sends the project to the engine soon (edits in quick succession are sent once).
   void _sync() {
+    _engineDocGen++;
     _syncTimer?.cancel();
     _syncTimer = Timer(const Duration(milliseconds: 40), _syncNow);
   }
 
   void _save() {
+    _engineDocGen++;
     _recordHistory();
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 500), flush);

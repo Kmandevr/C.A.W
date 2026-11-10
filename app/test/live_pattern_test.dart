@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:caw/engine/engine.dart';
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/project.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -23,6 +24,25 @@ void main() {
       expect(x['source'], s.project.modules.firstWhere((y) => y.id == x['id']).runSource);
     }
     expect(m.runSource, isNot('live text'));
+  });
+
+  test('a live step built from the cached project matches a full build, and an edit between steps shows', () {
+    final s = AppState();
+    s.project = s.starterProject();
+    s.starting = false;
+    addTearDown(s.dispose);
+    final m = s.project.modules.first;
+    String full(String text) =>
+        s.project.toEngineJson(voices: 32, swap: s.settings.swapTiming.name, sourceOverrides: {m.id: text});
+    expect(s.liveEngineJson(m.id, 'a "quoted" step\n'), full('a "quoted" step\n'));
+    // A knob moved live while the drag goes on (no save yet) and a volume change both reach the next step.
+    s.setNativeParamLive(s.project.layers[3], 0, 'mix', 0.77);
+    s.setInstrumentParamLive(s.project.layers.first, 'decay', 0.42);
+    expect(s.liveEngineJson(m.id, 'b'), full('b'));
+    s.mixLayer(s.project.layers[1], volume: 0.123);
+    expect(s.liveEngineJson(m.id, 'c'), full('c'));
+    expect(s.liveEngineJson(s.project.modules[1].id, 'd'),
+        s.project.toEngineJson(voices: 32, swap: s.settings.swapTiming.name, sourceOverrides: {s.project.modules[1].id: 'd'}));
   });
 
   test('a live pattern step reaches the engine without touching the model or notifying', () async {
