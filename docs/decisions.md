@@ -6,6 +6,12 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: No fixed polyphony cap; the engine carries inefficient plug-ins (owner)
+
+- **Polyphony (owner):** the host sets no practical cap; a program sets its own. Built: a native instrument's note list holds 4,096 notes and 16,384 events a block, set aside when its chain is built (never grown on the audio thread); the built-in basic and Morph synths have 128 voices; a C++ instrument picks its own with `caw::VoicePool<Voice, N>`, which walks only the voices sounding.
+- **CPU (owner, verbatim):** "if you can just change the engine to get 15 to 20% with the existing inefficient instruments that would be very impressive. Unfortunately we have to build around people who aren't going to make very efficient plugins. We should also make it very easy to make them efficient as well." The First loop measured 25–30% on the owner's Galaxy S22+; the target is 15–20%. Measured results and what is left: [performance](performance.md#native-instruments-first-loop-2026-11-10).
+- **Chosen for that:** the host skips a component that has fallen silent. A component may say so (`ModuleProcessor::quiet()`; C interface extension `caw.quiet.v1`, read through `get_extension` so older hosts never see it, rather than a new `process` return code, which hosts that check for 1 would treat as a failure; CLAP export: `CLAP_PROCESS_SLEEP`), and without it the host relies on the declared tail (input silent past `tailFrames`, output all zeros). An instrument with no declared tail is never put to sleep by the host's own rule, since a lazy plug-in could sound without notes (a metronome). The engine and SDK build with `-fno-trapping-math` (no result changes; Clang's default), so GCC builds vectorize too.
+
 ## 2026-11-10: Installables move to GitHub Releases once the current work is done (owner)
 
 **Decision (owner):** once the current roadmap work is done, builds are published as GitHub Releases (a tagged version with the APK and the Windows build attached) instead of being picked up from Actions artifacts. [Proposal, not built] Until then, installables stay Actions artifacts. A release needs a stable signing key (the repository's Android signing secrets) so each APK installs over the last; the version comes from `app/pubspec.yaml` (`app/lib/version.dart` matches it).

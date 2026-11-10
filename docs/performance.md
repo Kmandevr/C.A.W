@@ -177,6 +177,38 @@ The legacy `light_mode` setting is still read for migration: true maps to Lightw
 
 No phone frame-time, battery or thermal measurements have been made for these profiles yet. Verify them on physical Android hardware before claiming a quantified performance improvement.
 
+## Native instruments: First loop (2026-11-10)
+
+The owner's measure: the whole First loop (all six tracks, Acid and Pad unmuted) ran at 25–30% CPU on their Galaxy S22+, and the target is 15–20% (owner's words in [decisions](decisions.md)). `caw_bench SECONDS 100` plays it on the built-in instruments, each track alone, and each built-in under a busy pattern (`caw_bench S 100 K` plays case K only).
+
+**Instructions for 4 s of playback** (callgrind, millions, the setup of a 0 s run subtracted; 192-frame callbacks at 48 kHz; GCC 13 `-O3`, x86-64):
+
+| | Before (`dcb8a78`) | Instrument speed-ups (`f2a9856`) and review fixes | Plus the engine work below |
+| --- | --- | --- | --- |
+| First loop, all tracks | 1,624 | 818 | 757 |
+| Kick | 196 | 123 | 115 |
+| Hats | 152 | 127 | 119 |
+| Bass | 156 | 113 | 104 |
+| Lead (Morph ×3 + ping-pong) | 337 | 194 | 183 |
+| Acid (+ distortion) | 322 | 175 | 160 |
+| Pad (Morph ×7 + chorus) | 657 | 286 | 273 |
+
+- **The engine work alone, on the old instruments** (the instrument code of `1fc4122` in both trees): the First loop 1,603 → 1,518 (−5.3%); Kick 193 → 183, Hats 150 → 140, Bass 154 → 142, Lead 334 → 313, Acid 318 → 304, Pad 655 → 632. On the new instruments: 818 → 757 (−7.5%).
+- **Clang 18** (the Android NDK's compiler family; Clang already defaults to no trapping maths): the First loop 1,818 → 880 → 795 (the engine work −9.7%).
+- **Time** (one 10 s run each on the shared server, noisy): the First loop's mean callback 167.6 µs (4.2% of the 4 ms budget) before, 85.6 µs after the instrument speed-ups, 71.9 µs (1.8%) now.
+- **On the phone [Assumption: the phone's cost scales like these instruction counts; not measured on a device]:** 25–30% becomes about 12–14% with everything, which meets the target; the engine work alone on the old instruments gives about 24–28%, which does not. Most of the cost is inside the instruments and effects (about three quarters at the end); the host's own share fell from about 240 M to 178 M instructions per 4 s.
+- **What the engine work did** (bit-identical: every golden render and the block-size test unchanged):
+  - The track node has a fast path for the usual case (volume settled, no lanes), and skips the mono mix a stereo native instrument does not use.
+  - The mixer's saturating route maths, the output sanitizer and the meters are written as selects and integer maxima, and the engine and SDK build with `-fno-trapping-math`, so GCC vectorizes them (it changes no result).
+  - Components that have fallen silent sleep (`ModuleProcessor::quiet()`, or an honest declared tail; [SDK](native-module-sdk.md)): the kick, hats, snare, kit and acid stop running between hits. In the First loop they are rarely silent long, so it gives about 6% on Kick and Hats alone; an idle track gains most.
+  - Note lists and voice pools walk only the notes and voices in use, so the larger capacities (4,096 notes, 128 voices) cost nothing per block.
+- **Bigger ideas, not built** (each needs the owner or an `architect` review first):
+  - Run independent tracks on the worker pool's cores (the S22+ has 8): the callback's load falls, the total CPU does not.
+  - Per-component CPU in the meters, with the decided auto-bypass on overruns, so a user sees which plug-in is costly.
+  - SDK helpers that make plug-ins cheap by default: block-wise vectorized Library kernels, a control-rate helper (the built-ins' 16-frame grid), and a cost-per-voice figure in `caw test-component`.
+  - Tell a component how long it slept when it wakes (an extension), so timed state such as an LFO can catch up and more instruments can sleep without changing their sound.
+  - Flush-to-zero on the audio thread: cheaper denormals on x86, but it changes results below the smallest normal number and differs in detail between x86 and ARM, so it needs the owner's word on determinism.
+
 ## Remaining bottlenecks and next steps
 
 - **Measure on the phone.** Build a release APK, then:
