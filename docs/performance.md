@@ -259,37 +259,42 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 
 ## One synth (2026-11-10)
 
-The owner's measure after the evening round (#174): the basic project at 35–40 % CPU on the S22+. The bass, acid, morph and basic synths became Flagship presets ([engine](engine.md)); then a pass to make Flagship and the host cheaper. `caw_bench 1 100 K` under callgrind (`--toggle-collect='caw::Engine::process(float*, float*, int)'`: the audio path only, setup excluded), **millions of instructions per second of audio**, GCC 13 `-O3`, x86-64; columns: before the change (`a6e5374`, the retired synths), the presets before the pass, and after the pass (`426a0e5`):
+The owner's measure after the evening round (#174): the basic project at 35–40 % CPU on the S22+. The bass, acid, morph and basic synths became Flagship presets ([engine](engine.md)); then two passes to make Flagship and the host cheaper, the second with the target of every preset at or below the synth it replaced and the whole First loop below the retired synths' 173 M, without an audible change. `caw_bench 1 100 K` under callgrind (`--toggle-collect='caw::Engine::process(float*, float*, int)'`: the audio path only, setup excluded), **millions of instructions per second of audio**, GCC 13 `-O3`, x86-64; columns: before the change (`a6e5374`, the retired synths), the presets before the passes, after the first pass (`426a0e5`) and after the second (`efc1ce5`, branch `flagship-perf`):
 
-| | Retired synths | Presets, before the pass | After the pass | Eco quality |
-| --- | --- | --- | --- | --- |
-| First loop (6 tracks, all unmuted) | 173.0 | 381.7 | 276.4 | 259.2 |
-| Kick | 27.9 | 28.1 | 27.6 | |
-| Hats | 28.9 | 28.9 | 28.5 | |
-| Bass (Mono bass) | 25.2 | 65.0 | 42.5 | |
-| Lead (Morph pad ×3 + ping-pong) | 42.1 | 92.2 | 65.7 | 65.7 |
-| Acid (Acid 303 + distortion) | 38.8 | 79.7 | 57.8 | |
-| Pad (Morph pad ×7 + chorus) | 55.6 | 133.4 | 99.7 | 82.5 |
-| An idle instrument track | 14.2 | 14.2 | 13.7 | |
-| Busy Flagship default (×7, ladder, reverb) | 189.3 | 191.7 | 149.9 | |
-| Busy Flagship ×1, no filter, no effects | 83.6 | 85.9 | 52.1 | |
-| Busy Flagship ×16, no filter, no effects | 222.4 | 224.7 | 173.4 | |
-| Busy Flagship 3 oscillators ×16, 2 filters, all effects | 771.3 | 774.5 | 648.9 | |
+| | Retired synths | Presets, before | First pass | Second pass | Eco quality |
+| --- | --- | --- | --- | --- | --- |
+| First loop (6 tracks, all unmuted) | 173.0 | 381.7 | 276.4 | 172.3 | 164.4 |
+| Kick | 27.9 | 28.1 | 27.6 | 27.6 | |
+| Hats | 28.9 | 28.9 | 28.5 | 28.5 | |
+| Bass (Mono bass) | 25.2 | 65.0 | 42.5 | 26.6 | |
+| Lead (Morph pad ×3 + ping-pong) | 42.1 | 92.2 | 65.7 | 42.2 | 42.2 |
+| Acid (Acid 303 + distortion) | 38.8 | 79.7 | 57.8 | 34.6 | |
+| Pad (Morph pad ×7 + chorus) | 55.6 | 133.4 | 99.7 | 58.2 | 50.3 |
+| An idle instrument track | 14.2 | 14.2 | 13.7 | 13.7 | |
+| Busy Flagship default (×7, ladder, reverb) | 189.3 | 191.7 | 149.9 | 114.6 | |
+| Busy Flagship ×1, no filter, no effects | 83.6 | 85.9 | 52.1 | 44.3 | |
+| Busy Flagship ×16, no filter, no effects | 222.4 | 224.7 | 173.4 | 104.0 | |
+| Busy Flagship 3 oscillators ×16, 2 filters, all effects | 771.3 | 774.5 | 648.9 | 374.5 | |
 
-**Flagship, 8 held notes** (`caw_bench 3 200`, µs of CPU per second of audio, shared server, noisy), before → after: a voice 519 → 292; a unison copy 141 → 66; an SVF pair 523 → 197; a ladder pair 951 → 909; a slot per voice 127 → 156 (noise); the default patch per voice 2,522 → 1,786. The effects (`caw_bench 3 300`) were not changed and measure as before.
+The instrument alone (callgrind's inclusive count of `processPorts`, so without the track, the mixer and the effects after it), retired synth → before the second pass → after: Bass 10.2 → 26.3 → 12.3, Lead 16.2 → 39.1 → 19.8, Acid 13.1 → 31.2 → 16.9, Pad 32.2 → 75.5 → 36.5. So the presets still cost 13–27 % more than the synths they replaced (Flagship's mod matrix, three oscillators and two filters, and a wavetable read where the Morph synth worked out its shapes in vectorized float); the tracks come out at or near the old ones because the second pass also made the distortion, chorus and ping-pong effects cheaper, which the retired synths' tracks would have gained too. Clang 18 (the Android NDK's compiler), the same counts on x86-64: retired 180.6, after the second pass 197.5 (`-O3`; `-O2` costs about 3 % more, GCC `-O2` 36 % more, and LTO gained nothing: the hot loops are inside one file).
 
-- **What the one synth costs:** Flagship plays the same sounds at about 1.5–1.8× the retired synths' instructions per track (they were written for one sound each: no mod matrix, three oscillators, two filters, a per-voice filter where Morph shared one). The First loop is 1.6× what it was. **[Assumption: the phone scales like these counts; not measured on a device]** on the owner's numbers this is about 4 % of the device's CPU for the engine's audio work: the callback's measured load is about 1.5–3 % of one server core for the whole First loop, so the 35–40 % the owner sees is mostly not the audio engine (the app's UI, meters and redraws are the next thing to measure on the phone).
-- **The pass** (each change measured alone; all bit-identical but the oscillator phase):
-  - A component chain resolved all of its parameters every 64-frame block (Flagship's 209 on four tracks): it now keeps last block's values while no value, touch, lane or play state changed and nothing ramps (a generation counter the control thread bumps), and a steady resolver caches its constrained value. First loop −18 %.
-  - The unwarped oscillator (the usual case) reads its table with a 32-bit fixed-point phase: it wraps by itself and its top bits are the index, so no floor and no float-to-int per sample. A copy is about half the cost. The only change in sound: the phase is finer than the float one was (goldens re-recorded; the perceptual references pass unchanged).
-  - A control works out again only the voice sections a knob or a slot moved, and what follows the pitch; a table sweep only re-points each copy at its new frames. A slot whose source is at 0 leaves its knob alone (no exp, the filter keeps its coefficients).
-  - An SVF pair shares one tan and runs both sides in one loop; its q is worked out only when the resonance moves.
-  - A centred voice (every copy in the middle: the Mono bass, Acid 303 and Basic presets) filters one side and uses it for both.
-  - Dry output (no effects on) in one vectorizable loop; a block's knob values read in one tight loop.
-- **SIMD:** the per-sample loops are written to be vectorized by the compiler (fixed trip counts, no calls, selects): the dry output, the voice sums, the mixer and meters (earlier pass). The table reads are gathers, which NEON does not have, so the oscillator stays scalar per sample; on Arm64 GCC and Clang vectorize the rest with NEON at `-O3` without intrinsics. No SIMD library was added.
+**Flagship, 8 held notes** (`caw_bench 3 200`, µs of CPU per second of audio, shared server, noisy), before the passes → first → second: a voice 519 → 292 → 234; a unison copy 141 → 66 → 37; an SVF pair 523 → 197 → 46 (the held notes now share one filter); a ladder pair 951 → 909 → 879; a slot per voice 127 → 156 → 61; the default patch per voice 2,522 → 1,786 → 1,535. The effects (`caw_bench 3 300`) were not changed and measure as before.
+
+- **What the one synth costs:** see the instrument-alone figures above. **[Assumption: the phone scales like these counts; not measured on a device]** on the owner's numbers the engine's audio work is a few % of the device's CPU: the callback's measured load is about 1–2 % of one server core for the whole First loop, so the 35–40 % the owner sees is mostly not the audio engine (the app's UI, meters and redraws are the next thing to measure on the phone).
+- **The first pass** (all bit-identical but the oscillator phase): a component chain keeps last block's parameter values while nothing changed (First loop −18 %); the unwarped oscillator reads its table with a 32-bit fixed-point phase; a control works out again only the voice sections a knob or a slot moved; an SVF pair shares one tan; a centred voice (every copy in the middle) filters one side for both; the dry output in one vectorizable loop.
+- **The second pass** (each measured alone and kept only if it won; bit-identical unless marked):
+  - Off costs nothing: a Play no longer clears the 4 s delay line and the reverb (1.5 MB) of an instrument that never used them, nor rewrites all 64 voices (8 KB each; `VoicePool::clear` clears only the voices started since the last clear).
+  - An unchanged block's knobs are not read again (a memcmp against the last block's), and the mod matrix, the free LFOs' rates and the effects' settings are worked out only when a knob, the tempo or the quality moved.
+  - A voice section is worked out again only when a value a slot moves actually changed (a timbre slot at rest no longer re-runs the filter); a filter follows the pitch only through its key tracking; a frame sweep only re-points the frames; a glide only retunes the copies. A voice advances only the LFOs that are its own.
+  - The unwarped copy in three passes: indices and fractions (vectorized), the table reads as 8-byte pairs (a gather: scalar), the interpolation, morph and mix (vectorized; NEON `ld2` on Arm64): 36 → 21 instructions per copy and sample.
+  - An SVF pair as one two-wide double vector (GCC and Clang vector extensions, SSE2 or NEON; MSVC scalar), and the drive saturator two samples at a time the same way (`Saturator::process2`, used by Flagship's distortion and the distortion effect). A side identical to the other (a centred instrument) is driven once; silence passes the distortion without a tanh; the distortion alone runs in place before the vectorized dry loops; the output peak is an integer max of the bits (a float max does not vectorize without fast-math).
+  - **Changed bits, perceptually the same:** poly voices whose filter 1 is set alike (a linear SVF without drive, no slot moving it for that voice, no key tracking, filter 2 off) share one filter with their level before it, as the Morph synth did; a voice whose filter is moved apart keeps its own to the note's end, which by linearity sums to the same signal (a test checks it doesn't click). The oscillator phases move on in 32-bit fixed point (the step rounded to 2^-32 of a cycle: under 0.001 cent). Measured on the perceptual references: levels within 0.001 dB, every band within 0.01 dB, bands 60 dB down within 0.3 dB; goldens re-recorded for flagship, bass, acid, morph and the Basic preset; `the_presets_sound_like_the_synths_they_replace` passes unchanged.
+  - The chorus and ping-pong effects read their knobs once per block while none ramps; the distortion effect's Drive too.
+  - Tried and dropped (no gain or a loss): an envelope filled per block while held at sustain, a fully unrolled 16-frame oscillator (GCC unrolls it before vectorizing), the gather with pointer increments or unrolled by two (better on Clang by 3 M on the Pad, worse on GCC), `-O2`, LTO.
+- **SIMD:** the per-sample loops are written for the compiler to vectorize (fixed or small trip counts, no calls, selects): the oscillator's index and interpolation passes, the dry output, the voice sums, the mixer and meters; explicit two-wide double vectors for the SVF pair and the saturator. Checked for Arm64 with Clang 18 (`--target=aarch64`, `-Rpass=loop-vectorize`: the oscillator's first and third passes vectorize four wide) and by building the engine with GCC 13 for aarch64 and running `caw_tests` under qemu-user: every DSP and golden test passes there with the same hashes (the native-component loading test needs CTest's environment and was not run). The table reads stay scalar (NEON has no gather). No SIMD library was added.
 - **Multi-core: not built.** The First loop's audio work is about 280 M instructions a second, about 375,000 per 64-frame chunk (the engine's step), split over six tracks of 30,000–130,000. Handing tracks to worker threads needs a wake-up and a barrier per chunk, 750 a second per worker; on Android a futex wake and the barrier's return take [Assumption, typical figures, not measured here] 5–20 µs, about what a whole track's chunk costs, and spinning instead keeps big cores awake, which costs battery. It would cut the callback's time on heavy projects (16+ busy tracks), not the CPU used; so it waits for a phone measurement showing the callback near its budget, and would be gated on the chunk's measured cost (more than about 200 µs) and on there being at least four heavy tracks.
 - **The phone's hardware:** the device is opened with miniaudio's low-latency profile, which asks AAudio for its low-latency (MMAP) path ([engine](engine.md), the device buffer); the new buffer setting's Auto mode opens a 1024-frame buffer while not recording (about 47 callbacks a second instead of 250–500), and Battery also leaves the fast path. Flush-to-zero stays off (the owner has not decided; the kernels keep their own denormal guards).
-- **Quality:** Eco caps unison at 4 copies, turns the saturator's oversampling off and thins the reverbs: the Pad −17 %, the First loop −6 % (the Lead has 3 copies, below the cap).
+- **Quality:** Eco caps unison at 4 copies, turns the saturator's oversampling off and thins the reverbs: the Pad −14 %, the First loop −5 % (the Lead has 3 copies, below the cap).
 
 ## Remaining bottlenecks and next steps
 

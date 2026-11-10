@@ -513,11 +513,23 @@ CAW_FORCE_INLINE void addCopy(const float* A, const float* B, uint32_t p, uint32
         fr[i] = static_cast<float>(static_cast<int32_t>(p & mask)) * scale;
         p += step;
     }
-    for (uint32_t i = 0; i < count; ++i) {  // each pair of neighbours in one 8-byte load and store
+    // Each pair of neighbours in one 8-byte load and store. Written per compiler (the same loads and stores):
+    // Clang (the Android build) makes tighter code from pointers that step on, GCC from indices.
+#if defined(__clang__)
+    float* pa = a;
+    float* pb = b;
+    for (uint32_t i = 0; i < count; ++i, pa += 2, pb += 2) {
+        const size_t k = static_cast<uint32_t>(index[i]);
+        __builtin_memcpy(pa, A + k, 2 * sizeof(float));
+        if constexpr (Morph) __builtin_memcpy(pb, B + k, 2 * sizeof(float));
+    }
+#else
+    for (uint32_t i = 0; i < count; ++i) {
         const int32_t k = index[i];
         std::memcpy(a + 2 * i, A + k, 2 * sizeof(float));
         if constexpr (Morph) std::memcpy(b + 2 * i, B + k, 2 * sizeof(float));
     }
+#endif
     for (uint32_t i = 0; i < count; ++i) {  // the pairs split apart again (NEON's ld2)
         float v = a[2 * i] + (a[2 * i + 1] - a[2 * i]) * fr[i];
         if constexpr (Morph) {
