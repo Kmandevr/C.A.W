@@ -26,6 +26,7 @@ import 'motion.dart';
 import 'param_control.dart';
 import 'theme.dart';
 import 'arrange/track_color.dart';
+import 'arrange/track_lanes.dart';
 import 'file_manager_screen.dart';
 import 'frame/frame_widgets.dart';
 import 'frame/record_tools.dart' show showTakePicker;
@@ -413,6 +414,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         MenuAction('parent:${folder.id}', 'Move into ${folder.name}', Icons.drive_file_move_outlined),
       if (layer.isFolder) const MenuAction('subfolder', 'New folder inside', Icons.create_new_folder_outlined),
       if (layer.isFolder) MenuAction('bus', layer.busEnabled ? 'Disable group bus' : 'Enable group bus', Icons.account_tree_outlined),
+      if (canAutomate) MenuAction('lanes', layer.showLanes ? 'Hide automation lanes' : 'Show automation lanes',
+          Icons.show_chart, checked: layer.showLanes),
       if (canAutomate && !hasVolume) const MenuAction('automation-volume', 'Add volume automation', Icons.show_chart),
       if (canAutomate && !hasPan) const MenuAction('automation-pan', 'Add pan automation', Icons.show_chart),
       if (hasVolume) const MenuAction('remove-automation-volume', 'Remove volume automation', Icons.remove_circle_outline),
@@ -442,6 +445,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == 'subfolder') s.addFolder(parentId: layer.id);
     if (v.startsWith('parent:')) s.moveLayerIntoFolder(layer, v.substring(7));
     if (v == 'bus') s.setFolderBus(layer, !layer.busEnabled);
+    if (v == 'lanes') s.setLanesShown(layer, !layer.showLanes);
     if (v == 'automation-volume') s.addAutomationLane(layer, 'volume');
     if (v == 'automation-pan') s.addAutomationLane(layer, 'pan');
     if (v == 'remove-automation-volume') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'volume'));
@@ -936,8 +940,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final focusId = _focusId;
     final drag = pinned ? null : _drag;
     // The rows' total height, so the New track zone fills the rest of the view below the last track.
-    final rows = layers.fold<double>(0, (h, l) => h + trackHeight + l.automation.length * 34.0
-        + (pinned ? 0 : l.spaceBelow) + gap);
+    final rows = layers.fold<double>(0, (h, l) => h + trackHeight + (pinned ? 0 : lanesHeight(s, l) + l.spaceBelow) + gap);
     // Two fingers scroll by their average, so a pinch zooms without dragging the view; the pointers are read raw.
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(multitouchDragStrategy: MultitouchDragStrategy.averageBoundaryPointers),
@@ -971,6 +974,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             onResize: pinned ? null : (dy) => setState(() => _dragTrackH = (_trackHeight + dy)
                 .clamp(Settings.minTrackHeight, Settings.maxTrackHeight).toDouble()),
             onResizeEnd: _saveHeaderSize),
+          // The track's automation lanes, open under it (REAPER's envelope lanes, UG 18.16).
+          if (!pinned && layer.showLanes && canHaveLanes(layer))
+            TrackLaneHeaders(key: ValueKey('lane-headers-${layer.id}'), state: s, layer: layer,
+              indent: folderIndent(s.folderDepth(layer))),
           if (layer.spaceBelow > 0 && !pinned) _SpacerHeader(state: s, layer: layer),
           SizedBox(height: gap),
         ],
@@ -1007,6 +1014,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             for (final layer in layers) ...[
               _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width, stepW: stepW,
                 trackHeight: trackHeight, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag),
+              if (!pinned && layer.showLanes && canHaveLanes(layer))
+                TrackLaneRows(state: s, layer: layer, stepW: stepW, width: width),
               // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
               if (layer.spaceBelow > 0 && !pinned) SizedBox(height: layer.spaceBelow),
               SizedBox(height: gap),
@@ -1103,7 +1112,7 @@ class _TimelineHeader extends StatelessWidget {
     final thin = trackHeight < 52;
     // REAPER-style (owner, 2026-11-10): the track's colour tints the whole header and its left edge, no outline.
     final edge = BorderSide(color: selected ? color : color.withValues(alpha: 0.75), width: selected ? 4 : 3);
-    final box = Container(height: trackHeight + layer.automation.length * 34.0,
+    final box = Container(height: trackHeight,
       padding: EdgeInsets.fromLTRB(6 + folderIndent(depth), thin ? 2 : 4, 2, thin ? 2 : 4),
       decoration: Glass.active
           ? BoxDecoration(
@@ -1150,6 +1159,19 @@ class _TimelineHeader extends StatelessWidget {
                   if (fxCount > 0) Positioned(right: 3, top: 2, child: Container(width: 5, height: 5,
                     decoration: BoxDecoration(color: color, shape: BoxShape.circle))),
                 ]))));
+        // The envelope button (REAPER's, UG 18.16): opens the track's automation lanes under it; lit while open,
+        // a dot while they are closed but there are some.
+        final laneCount = canHaveLanes(layer) ? arrangeLanes(state, layer).length : 0;
+        Widget? lanesButton(double w, double h) => !canHaveLanes(layer) || onTrackDrag == null ? null : Tooltip(
+          message: layer.showLanes ? 'Hide automation lanes' : 'Show automation lanes',
+          child: InkResponse(key: ValueKey('lanes-button-${layer.id}'), radius: 18,
+            onTap: () => state.setLanesShown(layer, !layer.showLanes),
+            child: SizedBox(width: w, height: h, child: Stack(alignment: Alignment.center, children: [
+              Icon(layer.showLanes ? Icons.keyboard_arrow_down : Icons.show_chart, size: math.min(17, h),
+                color: layer.showLanes ? Neon.blue : laneCount > 0 ? color : Neon.dim),
+              if (!layer.showLanes && laneCount > 0) Positioned(right: 2, top: 2, child: Container(width: 5, height: 5,
+                decoration: const BoxDecoration(color: Neon.blue, shape: BoxShape.circle))),
+            ]))));
         final top = SizedBox(height: thin ? 24 : 28, child: Row(children: [
           if (layer.isFolder)
             IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
@@ -1169,11 +1191,18 @@ class _TimelineHeader extends StatelessWidget {
                 color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15))))),
           // A deep folder's header can get narrow: M and S move to their own row's place, the icons go first.
           if (oneRow && box.maxWidth >= 72) ...[mute, const SizedBox(width: 2), solo],
-          if (showFx) fx,
+          // A folder's icon only says what it is: a narrow header gives its room to the name.
+          if (showFx && (!layer.isFolder || box.maxWidth >= 140)) fx,
         ]));
         if (oneRow) {
-          return Column(mainAxisSize: MainAxisSize.min, children: [top, SizedBox(height: thin ? 2 : 4), meter]);
+          // One row (a phone's default height): the envelope button sits at the meter's end, as high as the room
+          // under the name allows.
+          final room = box.maxHeight - (thin ? 26 : 32);
+          final lanes = room >= 12 ? lanesButton(30, math.min(18.0, room)) : null;
+          return Column(mainAxisSize: MainAxisSize.min, children: [top, SizedBox(height: thin ? 2 : 4),
+            lanes == null ? meter : Row(children: [Expanded(child: meter), lanes])]);
         }
+        final lanes = lanesButton(26, 26);
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           top,
           const SizedBox(height: 4),
@@ -1183,7 +1212,8 @@ class _TimelineHeader extends StatelessWidget {
             solo,
             const SizedBox(width: 8),
             Expanded(child: meter),
-            const SizedBox(width: 4),
+            // A very narrow header leaves it to the long-press menu's Show automation lanes.
+            if (lanes != null && box.maxWidth >= 100) lanes else const SizedBox(width: 4),
           ])),
         ]);
       }),
@@ -1383,7 +1413,7 @@ class _TimelineLaneState extends State<_TimelineLane> {
   @override
   Widget build(BuildContext context) {
     final trackHeight = widget.trackHeight, stepW = widget.stepW;
-    final height = trackHeight + layer.automation.length * 34.0;
+    final height = trackHeight;
     final color = trackColor(state, layer);
     // A dropped effect or instrument goes on this track (an instrument asks before replacing one); a dropped
     // pattern or MIDI file becomes clips where it lands. On a folder, its first track inside takes it.
@@ -1449,9 +1479,6 @@ class _TimelineLaneState extends State<_TimelineLane> {
       if (layer.clips.isEmpty && !layer.isFolder)
         Positioned(left: 10, top: trackHeight * 0.38, child: const IgnorePointer(child: Text(
           'Double-tap for a clip, or drop a pattern here', style: TextStyle(color: Neon.dim, fontSize: 10)))),
-      for (var i = 0; i < layer.automation.length; i++)
-        Positioned(left: 0, right: 0, top: trackHeight + i * 34.0, height: 34,
-          child: _AutomationLaneView(state: state, layer: layer, lane: layer.automation[i], stepW: stepW, width: widget.width)),
     ]),
   ));
     final drag = widget.drag;
@@ -1943,62 +1970,6 @@ class _GhostView extends StatelessWidget {
             ]))),
       ]))));
     });
-}
-
-class _AutomationLaneView extends StatelessWidget {
-  const _AutomationLaneView({required this.state, required this.layer, required this.lane, required this.stepW, required this.width});
-  final AppState state;
-  final LayerDoc layer;
-  final AutomationLaneDoc lane;
-  final double stepW, width;
-
-  double _y(double value) => lane.target == 'volume' ? 28 - value * 24 : 16 - value * 12;
-
-  @override
-  Widget build(BuildContext context) => Stack(children: [
-    GestureDetector(behavior: HitTestBehavior.opaque,
-      onTapUp: (d) {
-        final step = (d.localPosition.dx / stepW).clamp(0.0, state.project.maxArrangementSteps.toDouble()).toDouble();
-        final value = (lane.target == 'volume' ? (1 - d.localPosition.dy / 32).clamp(0.0, 1.0)
-            : (1 - d.localPosition.dy / 16).clamp(-1.0, 1.0)).toDouble();
-        state.addAutomationPoint(layer, lane, step, value);
-      },
-      child: CustomPaint(size: Size(width, 34), painter: _AutomationCurvePainter(lane, stepW))),
-    for (var i = 0; i < lane.points.length; i++)
-      Positioned(left: lane.points[i].step * stepW - 5, top: _y(lane.points[i].value) + 2,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {}, // Keep the lane's add-point tap recognizer from firing on an existing handle.
-          onPanUpdate: (d) => state.updateAutomationPoint(layer, lane, i,
-            lane.points[i].step + d.delta.dx / stepW,
-            lane.points[i].value - d.delta.dy / (lane.target == 'volume' ? 24 : 12)),
-          child: Container(width: 10, height: 10, decoration: BoxDecoration(
-            color: Neon.blue, shape: BoxShape.circle, border: Border.all(color: Neon.text, width: 1))),
-        )),
-    Positioned(left: 6, top: 1, child: Text(lane.target.toUpperCase(),
-      style: const TextStyle(color: Neon.dim, fontSize: 8, letterSpacing: 1))),
-  ]);
-}
-
-class _AutomationCurvePainter extends CustomPainter {
-  _AutomationCurvePainter(this.lane, this.stepW);
-  final AutomationLaneDoc lane;
-  final double stepW;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Neon.blue.withValues(alpha: .75)..strokeWidth = 1.5..style = PaintingStyle.stroke;
-    final path = Path();
-    for (var i = 0; i < lane.points.length; i++) {
-      final p = lane.points[i];
-      final y = lane.target == 'volume' ? 28 - p.value * 24 : 16 - p.value * 12;
-      final at = Offset(p.step * stepW, y + 7);
-      if (i == 0) { path.moveTo(at.dx, at.dy); } else { path.lineTo(at.dx, at.dy); }
-    }
-    canvas.drawPath(path, paint);
-    canvas.drawLine(Offset(0, 33), Offset(size.width, 33), Paint()..color = Neon.line);
-  }
-  @override
-  bool shouldRepaint(covariant _AutomationCurvePainter old) => true;
 }
 
 class _ArrangementMixer extends StatelessWidget {

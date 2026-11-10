@@ -1203,6 +1203,14 @@ class AppState extends ChangeNotifier {
     _changed(engine: false);
   }
 
+  /// Opens or closes [layer]'s automation lanes under it in the arrangement (REAPER's envelope button). Only the
+  /// screen changes, so the engine isn't re-sent.
+  void setLanesShown(LayerDoc layer, bool shown) {
+    if (layer.showLanes == shown) return;
+    layer.showLanes = shown;
+    _changed(engine: false);
+  }
+
   void setFolderCollapsed(LayerDoc folder, bool collapsed) {
     if (!folder.isFolder) return;
     editLayer(folder, (l) => l.collapsed = collapsed);
