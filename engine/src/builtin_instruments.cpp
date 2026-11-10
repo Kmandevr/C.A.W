@@ -10,6 +10,7 @@
 #include "caw/library/distortion.hpp"
 #include "caw/library/drums.hpp"
 #include "caw/library/envelope.hpp"
+#include "caw/library/fastmath.hpp"
 #include "caw/library/filter.hpp"
 #include "caw/library/oscillator.hpp"
 #include "caw/library/stereo.hpp"
@@ -86,15 +87,38 @@ double clampd(double v, double lo, double hi) noexcept {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Renders `frames` frames in control chunks: control(at) once per chunk (at = the chunk's first frame in the
-// block), then sample(i) for each of its frames (i = the frame in this render call).
-template <class Control, class Sample>
-void inChunks(uint32_t frames, uint32_t offset, Control&& control, Sample&& sample) noexcept {
-    for (uint32_t start = 0; start < frames; start += kControlFrames) {
-        const uint32_t end = std::min(frames, start + kControlFrames);
-        control(offset + start);
-        for (uint32_t i = start; i < end; ++i) sample(i);
+// An instrument's control grid: control(at) once every kControlFrames frames of the instrument's own time
+// (at = that frame in the block), carried from one render call to the next, so neither a block's size nor
+// where events split it moves the grid (live playback and an export render the same). restart() puts the
+// next control on the next frame: a note-on does that, so the note starts with the knobs' values at its frame.
+class ControlClock {
+public:
+    // run(i, n) renders frames i .. i + n of this call, all within one control period.
+    template <class Control, class Run>
+    void run(uint32_t frames, uint32_t offset, Control&& control, Run&& run) noexcept {
+        for (uint32_t i = 0; i < frames;) {
+            if (left_ == 0) {
+                control(offset + i);
+                left_ = kControlFrames;
+            }
+            const uint32_t n = std::min(left_, frames - i);
+            run(i, n);
+            i += n;
+            left_ -= n;
+        }
     }
+    void restart() noexcept { left_ = 0; }
+
+private:
+    uint32_t left_ = 0;
+};
+
+// The grid, frame by frame: sample(i) for each frame i of this render call.
+template <class Control, class Sample>
+void inChunks(ControlClock& clock, uint32_t frames, uint32_t offset, Control&& control, Sample&& sample) noexcept {
+    clock.run(frames, offset, control, [&](uint32_t i, uint32_t n) noexcept {
+        for (const uint32_t end = i + n; i < end; ++i) sample(i);
+    });
 }
 
 // A drum voice played in turn from N copies: a new hit chokes the ringing ones (5 ms) and starts a free one,
@@ -171,25 +195,30 @@ public:
         kick_.set(lib::KickSettings{}, sr_);
         return true;
     }
-    void reset() noexcept override { kick_.clear(); }
+    void reset() noexcept override {
+        kick_.clear();
+        clock_.restart();
+    }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
-        if (m.type == NoteMessageType::On) kick_.hit(m.velocity);
+        if (m.type != NoteMessageType::On) return;
+        kick_.hit(m.velocity);
+        clock_.restart();
     }
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
-        double volume = 0.8;
-        inChunks(frames, offset,
+        inChunks(clock_, frames, offset,
                  [&](uint32_t at) noexcept {
                      kick_.set(kickSettings(b, at, 0), sr_);
-                     volume = parameterAt(b, 6, at, 0.8);
+                     volume_ = parameterAt(b, 6, at, 0.8);
                  },
-                 [&](uint32_t i) noexcept { left[i] = right[i] = static_cast<float>(kick_.sample() * volume); });
+                 [&](uint32_t i) noexcept { left[i] = right[i] = static_cast<float>(kick_.sample() * volume_); });
     }
 
 private:
-    DrumSlot<lib::KickVoice, 2> kick_;
-    double sr_ = 48000.0;
+    DrumSlot<lib::FastKickVoice, 2> kick_;
+    ControlClock clock_;
+    double sr_ = 48000.0, volume_ = 0.8;
 };
 
 // ---------- Snare ----------
@@ -223,25 +252,30 @@ public:
         snare_.set(lib::SnareSettings{}, sr_);
         return true;
     }
-    void reset() noexcept override { snare_.clear(); }
+    void reset() noexcept override {
+        snare_.clear();
+        clock_.restart();
+    }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
-        if (m.type == NoteMessageType::On) snare_.hit(m.velocity);
+        if (m.type != NoteMessageType::On) return;
+        snare_.hit(m.velocity);
+        clock_.restart();
     }
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
-        double volume = 0.8;
-        inChunks(frames, offset,
+        inChunks(clock_, frames, offset,
                  [&](uint32_t at) noexcept {
                      snare_.set(snareSettings(b, at, 0), sr_);
-                     volume = parameterAt(b, 5, at, 0.8);
+                     volume_ = parameterAt(b, 5, at, 0.8);
                  },
-                 [&](uint32_t i) noexcept { left[i] = right[i] = static_cast<float>(snare_.sample() * volume); });
+                 [&](uint32_t i) noexcept { left[i] = right[i] = static_cast<float>(snare_.sample() * volume_); });
     }
 
 private:
     DrumSlot<lib::SnareVoice, 2> snare_;
-    double sr_ = 48000.0;
+    ControlClock clock_;
+    double sr_ = 48000.0, volume_ = 0.8;
 };
 
 // ---------- Hi-hats ----------
@@ -318,29 +352,34 @@ public:
     const ModuleDescriptor& descriptor() const noexcept override { return kHats; }
     bool activate(double sampleRate, uint32_t) noexcept override {
         sr_ = sampleRate;
-        hats_.clear();
+        reset();
         return true;
     }
-    void reset() noexcept override { hats_.clear(); }
+    void reset() noexcept override {
+        hats_.clear();
+        clock_.restart();
+    }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
-        if (m.type == NoteMessageType::On) hats_.hit(m.key, m.velocity);
+        if (m.type != NoteMessageType::On) return;
+        hats_.hit(m.key, m.velocity);
+        clock_.restart();  // the hit starts at the next control: this frame
     }
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
-        double volume = 0.8;
-        inChunks(frames, offset,
+        inChunks(clock_, frames, offset,
                  [&](uint32_t at) noexcept {
                      hats_.update(static_cast<int>(parameterAt(b, 0, at, 0.0)), parameterAt(b, 3, at, 7000.0),
                                   parameterAt(b, 4, at, 0.5), parameterAt(b, 1, at, 0.045), parameterAt(b, 2, at, 0.3), sr_);
-                     volume = parameterAt(b, 5, at, 0.8);
+                     volume_ = parameterAt(b, 5, at, 0.8);
                  },
-                 [&](uint32_t i) noexcept { left[i] = right[i] = static_cast<float>(hats_.sample() * volume); });
+                 [&](uint32_t i) noexcept { left[i] = right[i] = static_cast<float>(hats_.sample() * volume_); });
     }
 
 private:
     HatPair hats_;
-    double sr_ = 48000.0;
+    ControlClock clock_;
+    double sr_ = 48000.0, volume_ = 0.8;
 };
 
 // ---------- Drum kit ----------
@@ -385,6 +424,7 @@ public:
 protected:
     void onNote(const NoteMessage& m) noexcept override {
         if (m.type != NoteMessageType::On) return;
+        clock_.restart();
         switch (m.key) {
             case kKeyKickLow:
             case kKeyKick: kick_.hit(m.velocity); break;
@@ -398,8 +438,12 @@ protected:
         }
     }
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
-        double kick = 1, snare = 0.8, clap = 0.7, hats = 0.6, volume = 0.8;
-        inChunks(frames, offset,
+        double& kick = level_[0];
+        double& snare = level_[1];
+        double& clap = level_[2];
+        double& hats = level_[3];
+        double& volume = level_[4];
+        inChunks(clock_, frames, offset,
                  [&](uint32_t at) noexcept {
                      lib::KickSettings k;
                      k.tune = parameterAt(b, kKitKickTune, at, 48.0);
@@ -434,12 +478,15 @@ private:
         snare_.clear();
         clap_.clear();
         hats_.clear();
+        clock_.restart();
     }
-    DrumSlot<lib::KickVoice, 2> kick_;
+    DrumSlot<lib::FastKickVoice, 2> kick_;
     DrumSlot<lib::SnareVoice, 2> snare_;
     DrumSlot<lib::ClapVoice, 2> clap_;
     HatPair hats_;
+    ControlClock clock_;
     double sr_ = 48000.0;
+    double level_[5] = {1.0, 0.8, 0.7, 0.6, 0.8};  // the kick, snare, clap and hats levels and the volume, at the last control
 };
 
 // ---------- Mono note handling (bass, acid) ----------
@@ -569,12 +616,14 @@ public:
         fenv_.clear();
         filter_.clear();
         phase_ = sub_ = 0.0;
+        clock_.restart();
     }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
         switch (m.type) {
             case NoteMessageType::On:
+                clock_.restart();  // the new pitch and envelope settings from this frame
                 if (!amp_.active()) phase_ = sub_ = 0.0;
                 if (notes_.on(m, legato_, amp_.active(), glide_, sr_) == MonoNotes::Action::Start) {
                     amp_.gateOn();
@@ -589,9 +638,11 @@ protected:
         }
     }
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
-        int wave = 0;
-        double sub = 0.5, drive = 1.2, gain = 0.0, dt = 0.0;
-        inChunks(frames, offset,
+        int& wave = wave_;
+        double& sub = subLevel_;
+        double& gain = gain_;
+        double& dt = dt_;
+        inChunks(clock_, frames, offset,
                  [&](uint32_t at) noexcept {
                      wave = static_cast<int>(parameterAt(b, kBassWave, at, 0.0));
                      sub = parameterAt(b, kBassSub, at, 0.5);
@@ -600,7 +651,7 @@ protected:
                      fenv_.set(0.001, decay, sr_);
                      glide_ = parameterAt(b, kBassGlide, at, 0.04);
                      legato_ = parameterAt(b, kBassLegato, at, 1.0) >= 0.5;
-                     drive = parameterAt(b, kBassDrive, at, 1.2);
+                     drive_.set(parameterAt(b, kBassDrive, at, 1.2));
                      dt = std::min(0.45, lib::noteHz(notes_.nextPitch()) / sr_);
                      const double octaves = 5.0 * parameterAt(b, kBassEnv, at, 0.5) * fenv_.level();
                      filter_.set(lib::shiftCutoff(parameterAt(b, kBassCutoff, at, 600.0), octaves, sr_),
@@ -614,11 +665,11 @@ protected:
                          return;
                      }
                      const double osc = wave == 1 ? lib::squareWave(phase_, dt) : lib::sawWave(phase_, dt);
-                     const double x = osc * 0.7 + lib::sineWave(sub_) * sub * 0.8;
+                     const double x = osc * 0.7 + lib::fastSinCycles(sub_) * sub * 0.8;
                      phase_ = lib::wrap01(phase_ + dt);
                      sub_ = lib::wrap01(sub_ + 0.5 * dt);
                      fenv_.next();
-                     const double y = lib::drive(filter_.lowpass(x) * amp_.next(), drive) * gain;
+                     const double y = drive_.process(filter_.lowpass(x) * amp_.next()) * gain;
                      left[i] = right[i] = static_cast<float>(y);
                      if (!amp_.active()) filter_.clear();
                  });
@@ -629,7 +680,11 @@ private:
     lib::Adsr amp_;
     lib::AdEnvelope fenv_;
     lib::Svf filter_;
+    lib::Saturator drive_;
+    ControlClock clock_;
     double sr_ = 48000.0, phase_ = 0.0, sub_ = 0.0, glide_ = 0.04;
+    double subLevel_ = 0.5, gain_ = 0.0, dt_ = 0.0;  // at the last control
+    int wave_ = 0;
     bool legato_ = true;
 };
 
@@ -668,12 +723,14 @@ public:
         filter_.clear();
         phase_ = 0.0;
         accentLevel_ = 0.0;
+        clock_.restart();
     }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
         switch (m.type) {
             case NoteMessageType::On:
+                clock_.restart();
                 if (!amp_.active()) phase_ = 0.0;
                 if (notes_.on(m, true, amp_.active(), slide_, sr_) == MonoNotes::Action::Start) {
                     amp_.gateOn();
@@ -689,9 +746,10 @@ protected:
         }
     }
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
-        int wave = 0;
-        double drive = 2.0, gain = 0.0, dt = 0.0;
-        inChunks(frames, offset,
+        int& wave = wave_;
+        double& gain = gain_;
+        double& dt = dt_;
+        inChunks(clock_, frames, offset,
                  [&](uint32_t at) noexcept {
                      wave = static_cast<int>(parameterAt(b, kAcidWave, at, 0.0));
                      const double accent = parameterAt(b, kAcidAccent, at, 0.5) * accentLevel_;
@@ -699,7 +757,7 @@ protected:
                      amp_.set(0.002, decay, 0.5, 0.04, sr_);
                      fenv_.set(0.001, decay * (1.0 - 0.5 * accent), sr_);
                      slide_ = parameterAt(b, kAcidSlide, at, 0.06);
-                     drive = parameterAt(b, kAcidDrive, at, 2.0);
+                     drive_.set(parameterAt(b, kAcidDrive, at, 2.0));
                      dt = std::min(0.45, lib::noteHz(notes_.nextPitch()) / sr_);
                      const double octaves = (5.0 * parameterAt(b, kAcidEnv, at, 0.6) + 2.5 * accent) * fenv_.level();
                      filter_.set(lib::shiftCutoff(parameterAt(b, kAcidCutoff, at, 500.0), octaves, sr_),
@@ -714,7 +772,7 @@ protected:
                      }
                      const double osc = wave == 1 ? lib::squareWave(phase_, dt) : lib::sawWave(phase_, dt);
                      phase_ = lib::wrap01(phase_ + dt);
-                     const double y = lib::drive(filter_.process(osc * 0.7) * amp_.next(), drive) * gain;
+                     const double y = drive_.process(filter_.processFast(osc * 0.7) * amp_.next()) * gain;
                      left[i] = right[i] = static_cast<float>(y);
                      if (!amp_.active()) filter_.clear();
                  });
@@ -725,7 +783,11 @@ private:
     lib::Adsr amp_;
     lib::AdEnvelope fenv_;
     lib::Ladder filter_;
+    lib::Saturator drive_;
+    ControlClock clock_;
     double sr_ = 48000.0, phase_ = 0.0, slide_ = 0.06, accentLevel_ = 0.0;
+    double gain_ = 0.0, dt_ = 0.0;  // at the last control
+    int wave_ = 0;
 };
 
 // ---------- Morph synth ----------
@@ -755,6 +817,13 @@ const ModuleDescriptor kMorph = instrument("org.caw.synth.morph", "Morph synth",
 // waveform that morphs from sine through triangle and saw to square (`shape`; the .caw wavetable pad's
 // table.basic). `drift` sweeps the shape with a slow sine over 16 beats. A resonant low-pass per side (a
 // note's timbre opens it), an ADSR envelope; velocity and pressure set the level.
+//
+// Made for real time (2026-11-10): the copies run a control period at a time through lib::addMorphStack
+// (float, vectorizable), and the voices without timbre share one filter pair, their envelopes applied
+// before it instead of after (the filter is linear, so this is the same sound but for the envelope's
+// edges, which it smooths by well under a millisecond); a voice with timbre has its own pair. Several times
+// cheaper than morphWave() per copy and per sample with a filter pair per voice, and perceptually the same
+// (tests/builtin_sounds_reference.inc).
 class MorphInstrument final : public InstrumentProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kMorph; }
@@ -765,10 +834,14 @@ public:
     }
     void reset() noexcept override {
         voices_.clear();
+        sharedL_.clear();
+        sharedR_.clear();
+        sharedQuiet_ = true;
         lfo_ = 0.0;
         started_ = 0;
         unison_ = 0;
         detune_ = spread_ = -1.0;
+        clock_.restart();
     }
 
 protected:
@@ -791,6 +864,7 @@ protected:
                     v.left.clear();
                     v.right.clear();
                 }
+                clock_.restart();  // the voice's steps and envelope from this frame
                 break;
             }
             case NoteMessageType::Off:
@@ -806,53 +880,25 @@ protected:
                 if (Voice* v = voices_.find(m.noteId)) v->pressure = m.value;
                 break;
             case NoteMessageType::Timbre:
-                if (Voice* v = voices_.find(m.noteId)) v->timbre = m.value;
+                if (Voice* v = voices_.find(m.noteId)) {
+                    if (v->timbre == 0.0 && m.value != 0.0) {  // leaves the shared filter: its own starts clean
+                        v->left.clear();
+                        v->right.clear();
+                    }
+                    v->timbre = m.value;
+                }
                 break;
             case NoteMessageType::Other: break;
         }
     }
 
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
-        for (uint32_t i = 0; i < frames; ++i) left[i] = right[i] = 0.0f;
         const double tempo = b.transport && b.transport->tempo > 0.0 ? b.transport->tempo : 120.0;
-        for (uint32_t start = 0; start < frames; start += kControlFrames) {
-            const uint32_t end = std::min(frames, start + kControlFrames);
-            const uint32_t at = offset + start;
-            updateUnison(static_cast<uint32_t>(clampd(parameterAt(b, kMorphUnison, at, 7.0), 1.0, kMaxUnison)),
-                         clampd(parameterAt(b, kMorphDetune, at, 0.18), 0.0, 1.0),
-                         clampd(parameterAt(b, kMorphSpread, at, 0.7), 0.0, 1.0));
-            const double drift = parameterAt(b, kMorphDrift, at, 0.25) * detSin(kTwoPi * lfo_);
-            const double shape = clampd(parameterAt(b, kMorphShape, at, 0.45) + drift, 0.0, 1.0);
-            lfo_ = lib::wrap01(lfo_ + static_cast<double>(end - start) * tempo / (60.0 * 16.0 * sr_));
-            const double attack = parameterAt(b, kMorphAttack, at, 0.3), decay = parameterAt(b, kMorphDecay, at, 0.5);
-            const double sustain = parameterAt(b, kMorphSustain, at, 0.8), release = parameterAt(b, kMorphRelease, at, 0.8);
-            const double cutoff = parameterAt(b, kMorphCutoff, at, 1800.0);
-            const double q = lib::resonanceQ(parameterAt(b, kMorphResonance, at, 0.15));
-            const double volume = parameterAt(b, kMorphVolume, at, 0.5) * 0.6 * unisonGain_;
-            for (Voice& v : voices_) {
-                if (!v.active) continue;
-                v.amp.set(attack, decay, sustain, release, sr_);
-                const double fc = lib::shiftCutoff(cutoff, 4.0 * v.timbre, sr_);
-                v.left.set(fc, q, sr_);
-                v.right.set(fc, q, sr_);
-                double dt[kMaxUnison];
-                for (uint32_t u = 0; u < unison_; ++u) dt[u] = std::min(0.45, v.freq * ratio_[u] / sr_);
-                const double level = (0.5 + 0.5 * v.velocity) * v.pressure * volume;
-                for (uint32_t i = start; i < end; ++i) {
-                    double l = 0.0, r = 0.0;
-                    for (uint32_t u = 0; u < unison_; ++u) {
-                        const double x = lib::morphWave(v.phase[u], dt[u], shape);
-                        v.phase[u] = lib::wrap01(v.phase[u] + dt[u]);
-                        l += x * gainL_[u];
-                        r += x * gainR_[u];
-                    }
-                    const double a = v.amp.next() * level;
-                    left[i] += static_cast<float>(v.left.lowpass(l) * a);
-                    right[i] += static_cast<float>(v.right.lowpass(r) * a);
-                }
-                if (!v.amp.active()) v.active = false;
-            }
-        }
+        clock_.run(frames, offset, [&](uint32_t at) noexcept { control(b, at); },
+                   [&](uint32_t start, uint32_t n) noexcept {
+                       lfo_ = lib::wrap01(lfo_ + static_cast<double>(n) * tempo / (60.0 * 16.0 * sr_));
+                       renderPeriod(left + start, right + start, n);
+                   });
     }
 
 private:
@@ -861,10 +907,89 @@ private:
         uint32_t noteId = 0;
         uint64_t age = 0;
         lib::Adsr amp;
-        lib::Svf left, right;
+        lib::Svf left, right;  // only while it has timbre
         double phase[kMaxUnison] = {};
         double freq = 261.6255653005986, velocity = 1.0, pressure = 1.0, timbre = 0.0;
+        double dt[kMaxUnison] = {};  // each copy's step, at the last control
+        double level = 0.0;
     };
+
+    // Once per control period: the knobs, the shape (with its drift) and each sounding voice's settings.
+    void control(const ProcessBlock& b, uint32_t at) noexcept {
+        updateUnison(static_cast<uint32_t>(clampd(parameterAt(b, kMorphUnison, at, 7.0), 1.0, kMaxUnison)),
+                     clampd(parameterAt(b, kMorphDetune, at, 0.18), 0.0, 1.0),
+                     clampd(parameterAt(b, kMorphSpread, at, 0.7), 0.0, 1.0));
+        const double drift = parameterAt(b, kMorphDrift, at, 0.25) * detSin(kTwoPi * lfo_);
+        shape_ = clampd(parameterAt(b, kMorphShape, at, 0.45) + drift, 0.0, 1.0);
+        const double attack = parameterAt(b, kMorphAttack, at, 0.3), decay = parameterAt(b, kMorphDecay, at, 0.5);
+        const double sustain = parameterAt(b, kMorphSustain, at, 0.8), release = parameterAt(b, kMorphRelease, at, 0.8);
+        const double cutoff = parameterAt(b, kMorphCutoff, at, 1800.0);
+        const double q = lib::resonanceQ(parameterAt(b, kMorphResonance, at, 0.15));
+        const double volume = parameterAt(b, kMorphVolume, at, 0.5) * 0.6 * unisonGain_;
+        const double fc = lib::shiftCutoff(cutoff, 0.0, sr_);
+        sharedL_.set(fc, q, sr_);
+        sharedR_.set(fc, q, sr_);
+        for (Voice& v : voices_) {
+            if (!v.active) continue;
+            v.amp.set(attack, decay, sustain, release, sr_);
+            if (v.timbre != 0.0) {
+                const double own = lib::shiftCutoff(cutoff, 4.0 * v.timbre, sr_);
+                v.left.set(own, q, sr_);
+                v.right.set(own, q, sr_);
+            }
+            const double perSample = v.freq / sr_;
+            for (uint32_t u = 0; u < unison_; ++u) v.dt[u] = std::min(0.45, perSample * ratio_[u]);
+            v.level = (0.5 + 0.5 * v.velocity) * v.pressure * volume;
+        }
+    }
+
+    // One control period (frames <= kControlFrames).
+    void renderPeriod(float* left, float* right, uint32_t frames) noexcept {
+        float sharedL[kControlFrames] = {}, sharedR[kControlFrames] = {};
+        bool shared = false;
+        for (uint32_t i = 0; i < frames; ++i) left[i] = right[i] = 0.0f;
+        for (Voice& v : voices_) {
+            if (!v.active) continue;
+            float sumL[kControlFrames] = {}, sumR[kControlFrames] = {};
+            lib::addMorphStack(sumL, sumR, frames, v.phase, v.dt, unison_, shape_, gainL_, gainR_);
+            if (v.timbre == 0.0) {
+                // The envelope steps linearly over the period (from where it is to where n samples take it):
+                // the same curve to well under a millisecond, for a few multiplies instead of a step a sample.
+                shared = true;
+                const float from = static_cast<float>(v.amp.level() * v.level);
+                const float to = static_cast<float>(v.amp.skip(frames) * v.level);
+                const float step = (to - from) / static_cast<float>(frames);
+                for (uint32_t i = 0; i < frames; ++i) {
+                    const float a = from + step * static_cast<float>(static_cast<int32_t>(i + 1));
+                    sharedL[i] += sumL[i] * a;
+                    sharedR[i] += sumR[i] * a;
+                }
+            } else {
+                for (uint32_t i = 0; i < frames; ++i) {
+                    const double a = v.amp.next() * v.level;
+                    left[i] += static_cast<float>(v.left.lowpass(sumL[i]) * a);
+                    right[i] += static_cast<float>(v.right.lowpass(sumR[i]) * a);
+                }
+            }
+            if (!v.amp.active()) v.active = false;
+        }
+        // The shared pair rings on after its last voice until it is quiet, then rests (no denormal decay).
+        if (!shared && sharedQuiet_) return;
+        float peak = 0.0f;
+        for (uint32_t i = 0; i < frames; ++i) {
+            const float l = static_cast<float>(sharedL_.lowpass(sharedL[i]));
+            const float r = static_cast<float>(sharedR_.lowpass(sharedR[i]));
+            left[i] += l;
+            right[i] += r;
+            peak = std::max(peak, std::max(std::fabs(l), std::fabs(r)));
+        }
+        sharedQuiet_ = !shared && peak < 1e-7f;
+        if (sharedQuiet_) {
+            sharedL_.clear();
+            sharedR_.clear();
+        }
+    }
+
     // Unison copies spread evenly over +-detune semitones and, by `spread`, from left to right.
     void updateUnison(uint32_t unison, double detune, double spread) noexcept {
         if (unison == unison_ && detune == detune_ && spread == spread_) return;
@@ -876,15 +1001,19 @@ private:
             const double at = unison == 1 ? 0.0 : 2.0 * u / (unison - 1) - 1.0;
             ratio_[u] = detExp(detune * at * (0.69314718055994530942 / 12.0));
             const lib::PanGains g = lib::constantPowerPan(spread * at);
-            gainL_[u] = g.left * 1.41421356237309505;  // the centre stays at unity
-            gainR_[u] = g.right * 1.41421356237309505;
+            gainL_[u] = static_cast<float>(g.left * 1.41421356237309505);  // the centre stays at unity
+            gainR_[u] = static_cast<float>(g.right * 1.41421356237309505);
         }
     }
     VoicePool<Voice, 8> voices_;
-    double sr_ = 48000.0, lfo_ = 0.0;
+    lib::Svf sharedL_, sharedR_;  // the filter pair of the voices without timbre
+    bool sharedQuiet_ = true;
+    ControlClock clock_;
+    double sr_ = 48000.0, lfo_ = 0.0, shape_ = 0.45;
     uint32_t started_ = 0, unison_ = 0;
     double detune_ = -1.0, spread_ = -1.0, unisonGain_ = 1.0;
-    double ratio_[kMaxUnison] = {}, gainL_[kMaxUnison] = {}, gainR_[kMaxUnison] = {};
+    double ratio_[kMaxUnison] = {};
+    float gainL_[kMaxUnison] = {}, gainR_[kMaxUnison] = {};
 };
 
 template <class T>

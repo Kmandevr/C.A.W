@@ -171,7 +171,7 @@ ProjectSpec firstLoop(const std::string& only = "") {
 // One native instrument (and effects) under a busy pattern: 16th-note hits for drums, overlapping 4-note
 // chords every beat (8 voices sounding) for the poly synths, a 16th line for the mono ones.
 ProjectSpec busy(const std::string& instrument, std::vector<std::pair<std::string, double>> params,
-                 std::vector<ComponentSpec> effects = {}) {
+                 std::vector<ComponentSpec> effects = {}, bool notes_ = true) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
@@ -185,6 +185,7 @@ ProjectSpec busy(const std::string& instrument, std::vector<std::pair<std::strin
         const char* chords[] = {"A3,C4,E4,G4", "F3,A3,C4,E4", "C3,E3,G3,B3", "G3,B3,D4,F4"};
         for (int at = 0; at < 4; ++at) notes += std::to_string(at * 4) + " " + chords[at] + " 4 0.8\n";
     }
+    if (!notes_) notes.clear();  // the engine's own cost of a track
     p.modules = {{"busy", patternSource("Busy", "16", notes), {}}};
     addInstrumentLayer(p, "t", instrument, std::move(params), "busy", 0.6, std::move(effects));
     return p;
@@ -383,6 +384,7 @@ int main(int argc, char** argv) {
             {"  track Lead (morph x3 + delay)", firstLoop("Lead")},
             {"  track Acid (+ distortion)", firstLoop("Acid")},
             {"  track Pad (morph x7 + chorus)", firstLoop("Pad")},
+            {"idle track (instrument, no notes)", busy("org.caw.drum.kick", {}, {}, false)},
             {"busy kick", busy("org.caw.drum.kick", {})},
             {"busy snare", busy("org.caw.drum.snare", {})},
             {"busy hats", busy("org.caw.drum.hats", {})},

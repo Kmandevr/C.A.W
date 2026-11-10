@@ -10,6 +10,7 @@
 #include "caw/instrument.hpp"
 #include "caw/library/delay.hpp"
 #include "caw/library/distortion.hpp"
+#include "caw/library/fastmath.hpp"
 #include "caw/library/stereo.hpp"
 
 namespace caw {
@@ -116,6 +117,8 @@ double paramAt(const AudioProcessBlock& b, uint32_t k, uint32_t i, double fallba
     return b.parameters[k].samples ? b.parameters[k].samples[i] : b.parameters[k].value;
 }
 
+// The shapes' per-sample maths is the Library's fast kind (fastmath.hpp: the same curves within 1e-9), and
+// what depends only on the knobs is worked out once per value, not per sample.
 class Distortion final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDistortion; }
@@ -126,20 +129,30 @@ public:
             const int shape = static_cast<int>(paramAt(b, 0, i, 0.0));
             const double amount = paramAt(b, 1, i, 4.0), bits = paramAt(b, 2, i, 8.0);
             const double mix = paramAt(b, 3, i, 1.0), out = paramAt(b, 4, i, 1.0);
+            if (shape == 0) saturator_.set(amount);
+            if (shape == 3 && bits != bits_) {
+                bits_ = bits;
+                const double whole = bits < 1.0 ? 1.0 : (bits > 24.0 ? 24.0 : bits);
+                steps_ = detPow(2.0, std::floor(whole) - 1.0);
+            }
             for (uint32_t c = 0; c < 2; ++c) {
                 const double x = b.input.channels[c][i];
                 double y = 0.0;
                 switch (shape) {
                     case 1: y = lib::hardClip(x, amount); break;
-                    case 2: y = lib::fold(x, amount); break;
-                    case 3: y = lib::crush(x, bits); break;
-                    default: y = lib::drive(x, amount); break;
+                    case 2: y = lib::fastSinCycles(finiteOr0(x) * amount * 0.25); break;  // lib::fold
+                    case 3: y = std::floor(finiteOr0(x) * steps_ + 0.5) / steps_; break;  // lib::crush
+                    default: y = saturator_.process(x); break;                             // lib::drive
                 }
                 b.output.channels[c][i] = static_cast<float>((x + (y - x) * mix) * out);
             }
         }
         return true;
     }
+
+private:
+    lib::Saturator saturator_;
+    double bits_ = -1.0, steps_ = 128.0;
 };
 
 // Ping-pong delay: synced to the song's tempo (a note division) or free (milliseconds), with feedback,
@@ -237,13 +250,23 @@ public:
         }
         return true;
     }
-    void reset() noexcept override { chorus_.clear(); }
+    void reset() noexcept override {
+        chorus_.clear();
+        left_ = 0;
+    }
     using ModuleProcessor::process;
+    // The LFO runs at the control rate (lib::Chorus::control every 16 frames, carried across blocks so a
+    // block's size doesn't move it), the sweep gliding in between: perceptually the per-sample sweep.
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
         for (uint32_t i = 0; i < b.frames; ++i) {
+            if (left_ == 0) {
+                chorus_.control(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), kControlFrames);
+                left_ = kControlFrames;
+            }
+            --left_;
             float l = b.input.channels[0][i], r = b.input.channels[1][i];
-            chorus_.process(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), paramAt(b, 2, i, 0.5), l, r);
+            chorus_.step(paramAt(b, 2, i, 0.5), l, r);
             b.output.channels[0][i] = l;
             b.output.channels[1][i] = r;
         }
@@ -251,7 +274,9 @@ public:
     }
 
 private:
+    static constexpr uint32_t kControlFrames = 16;
     lib::Chorus chorus_;
+    uint32_t left_ = 0;  // frames until the next control
 };
 
 
