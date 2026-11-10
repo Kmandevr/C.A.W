@@ -6,6 +6,10 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: The logo is the faceted crow head, "C5" (owner)
+
+**Decision (owner):** the placeholder outline crow and Flutter's default launcher icon are replaced. The owner wanted it abstract ("like a kernel"), glitchy and fun, coloured like a real crow and in the app's colours, and approved only after many rounds of drafts ("let's go with C5"): a tilted, faceted crow head in black glass with an iridescent feather sheen (green, cyan, purple), a large beak with a neon-green edge that doesn't reach the top of the head, a chin under it, a back that hangs a little lower, and a pink eye, on a frosted graphite tile. The chip "pins" and circuit traces were tried and dropped. It is the in-app mark and the Android and Windows launcher icon (`docs/app.md`); the source drawings are in `app/assets/logo/`. Logo changes need the owner's explicit yes.
+
 ## 2026-11-10: The engine carries inefficient plug-ins; efficient ones are easy to write (owner)
 
 **Decision (owner):** "we have to build around people who aren't going to make very efficient plugins. We should also make it very easy to make them efficient as well." The performance goal for a whole project on the owner's phone (Galaxy S22+, 25–30% CPU on 2026-11-10) is 15–20%, reached by engine and host work with the existing instruments unchanged; the built-in instruments are optimized later and separately. The SDK and the testing suite should make the efficient path the easy one (for example block-based helpers, letting the host skip silent voices, and showing each component's CPU cost). [Proposal] Which helpers to build is not decided yet.
