@@ -54,7 +54,7 @@ This is the implementation ledger for the unified modular engine. A documented c
 - Native routing for remaining generation and analysis work; the app currently uses the native worker pool for project compilation, source checks and offline WAV renders. Android thermal/battery signals and app lifecycle/audio transitions now update the active worker budget; other platform adapters remain unimplemented.
 - A true adaptive quality ladder with measurable preview-quality modes and guaranteed unchanged offline exports.
 - Drawn LFO curves, FM and fold warps, and the complete custom/imported table draw/render pipeline (the flagship synth has bend, sync, mirror and quantize warps on its code-generated tables).
-- The flagship synth's app side: its mod matrix UI and a sectioned layout of its 191 knobs wait for the owner's direction (#171); the app lists it with the other built-ins.
+- The flagship synth's app side: a device editor with OSC, FILTER, MOD and FX pages and a drag-a-source mod matrix ([app](app.md)); the envelope playhead and live display data (an engine → UI channel) are not built.
 - MIDI 2.0 device input/output, Engine voice routing, output scheduling and full per-note controller/attribute mapping. The decoder/queue do not by themselves provide device support.
 - Project manifest writing/round-tripping, dependency snapshots, content-hash generation and library/app integration for the new resolver.
 - App-side rendering/runtime for declarative and custom module interfaces.

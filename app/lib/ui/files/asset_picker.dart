@@ -1,4 +1,5 @@
-// The filtered browser sheet that "+ effect" and "+ on a wire" open: pick an asset of the given kinds, or nothing.
+// The filtered browser sheet that "+ FX", "Instrument…" and "+ on a wire" open: pick an asset of the given kinds, or
+// nothing. Like REAPER's FX browser it lists instruments beside effects.
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
@@ -10,28 +11,32 @@ import '../tokens.dart';
 import 'asset_actions.dart';
 import 'asset_views.dart';
 
-/// Slides up a half sheet listing [kinds] of assets (effects: built-in, the project's C++ effects, .caw effect
-/// modules), with search and preview; returns the one tapped, or null when dismissed.
+/// Slides up a half sheet listing [kinds] of assets (instruments: built-in, the project's C++ ones and .caw ones;
+/// effects: built-in, the project's C++ effects, .caw effect modules), with search and preview; returns the one
+/// tapped, or null when dismissed. [instruments] and [effects] leave either group out.
 Future<AssetDrag?> showAssetPicker(BuildContext context, AppState state, {required Set<AssetKind> kinds,
-    String title = 'Add effect'}) {
+    String title = 'Add FX', bool instruments = true, bool effects = true}) {
   final height = MediaQuery.sizeOf(context).height;
   return showGlassSheet<AssetDrag>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     constraints: BoxConstraints(maxHeight: height * 0.62, maxWidth: 640),
-    builder: (_) => AssetPickerSheet(state: state, kinds: kinds, title: title),
+    builder: (_) => AssetPickerSheet(state: state, kinds: kinds, title: title, instruments: instruments,
+        effects: effects),
   );
 }
 
-/// The sheet's body: a title, search, and the assets grouped as Built-in, My effects, My instruments, Patterns
+/// The sheet's body: a title, search, and the assets grouped as Instruments, Built-in, My effects, Patterns
 /// and Packs (each only when it has something). A project C++ effect that isn't built or trusted yet is still
 /// listed, with a badge saying so.
 class AssetPickerSheet extends StatefulWidget {
-  const AssetPickerSheet({super.key, required this.state, required this.kinds, required this.title});
+  const AssetPickerSheet({super.key, required this.state, required this.kinds, required this.title,
+    this.instruments = true, this.effects = true});
   final AppState state;
   final Set<AssetKind> kinds;
   final String title;
+  final bool instruments, effects;
 
   @override
   State<AssetPickerSheet> createState() => _AssetPickerSheetState();
@@ -59,13 +64,19 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
   List<(String, List<FileAsset>)> _groups() {
     final k = widget.kinds;
     final modules = state.moduleAssets;
+    final native = k.contains(AssetKind.nativeEffect);
     final groups = <(String, List<FileAsset>)>[
-      if (k.contains(AssetKind.nativeEffect)) ('Built-in', state.builtinAssets.where((a) => a.drag != null).toList()),
-      ('My effects', [
-        if (k.contains(AssetKind.nativeEffect)) ...state.cppAssets.where((a) => a.drag != null),
+      // Instruments first, as REAPER puts the instrument first in a track's FX chain.
+      if (widget.instruments) ('Instruments', [
+        if (native) ...state.builtinAssets.where((a) => a.drag != null && a.isInstrument),
+        if (native) ...state.cppAssets.where((a) => a.drag != null && a.isInstrument),
+        if (k.contains(AssetKind.cawModule)) ...modules.where((a) => a.type == FileAssetType.cawGenerator),
+      ]),
+      if (widget.effects && native) ('Built-in', state.builtinAssets.where((a) => a.drag != null && !a.isInstrument).toList()),
+      if (widget.effects) ('My effects', [
+        if (native) ...state.cppAssets.where((a) => a.drag != null && !a.isInstrument),
         if (k.contains(AssetKind.cawModule)) ...modules.where((a) => a.type == FileAssetType.cawEffect),
       ]),
-      if (k.contains(AssetKind.cawModule)) ('My instruments', modules.where((a) => a.type == FileAssetType.cawGenerator).toList()),
       if (k.contains(AssetKind.pattern)) ('Patterns', modules.where((a) => a.type == FileAssetType.pattern).toList()),
       // Packs: the app has no packs yet, so there is no group.
     ];
@@ -152,7 +163,8 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
               style: const TextStyle(fontSize: TypeScale.label))),
           if (status != null)
             Padding(padding: const EdgeInsets.only(right: Space.xs), child: TypeBadge(status, color: Neon.yellow)),
-          TypeBadge(a.type.badge, color: assetColor(a.type)),
+          TypeBadge(a.isInstrument && a.type != FileAssetType.cawGenerator ? 'INST' : a.type.badge,
+              color: assetColor(a.type)),
           if (a.previewable)
             IconButton(
               tooltip: previewing ? 'Stop preview' : 'Preview',
