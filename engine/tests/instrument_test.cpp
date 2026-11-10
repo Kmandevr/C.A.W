@@ -517,3 +517,21 @@ TEST(live_playback_plays_a_bent_note_on_a_builtin_instrument) {
         CHECK(level[1] > level[0] * 0.25);
     }
 }
+
+// Owner (2026-11-10, #170): a note's bend in a clip never played. Laying the clips out into the song copied each
+// note but not its expression, so a clip's note lost its bend (and vibrato, pressure and timbre).
+TEST(a_clips_note_keeps_its_bend_when_the_clips_are_laid_out) {
+    Engine e(48000);
+    CHECK(loadFixture(e, kRecorder));
+    ProjectSpec p = instrumentTrack(kRecorder, "0 C4 4 1  bend 0:0 1:-12\n");
+    p.layers[0].pattern.clear();
+    p.layers[0].clips.push_back(ClipSpec{"c", "pat", 0, 16, 0, true});
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    run(e, 30000, 256);
+    double lowest = 1000;
+    for (const Rec& r : records(e))
+        if (r.type == kPitch) lowest = std::min(lowest, static_cast<double>(r.pitch));
+    // The recorder keeps its first 256 events (about 4,000 frames of pitch steps): the bend has begun.
+    CHECK(lowest < 59.0);
+}

@@ -397,6 +397,14 @@ std::shared_ptr<const Pattern> compileArrangement(
                 PatternNote note = original;
                 note.at = timeline + (clippedStart - sourcePos);
                 note.len = clippedEnd - clippedStart;
+                // The note's expression (bend, vibrato, pressure, timbre) comes along: `extra` indexes the
+                // source's list, so it is copied into the arrangement's and pointed there.
+                if (original.extra >= 0 && static_cast<size_t>(original.extra) < src.expressions.size()) {
+                    note.extra = static_cast<int>(out->expressions.size());
+                    out->expressions.push_back(src.expressions[static_cast<size_t>(original.extra)]);
+                } else {
+                    note.extra = -1;
+                }
                 if (trimmedAtStart || trimmedAtEnd) note.slideFrom = note.slideTo = -1;
                 remap[i] = static_cast<int>(out->notes.size());
                 out->notes.push_back(note);
