@@ -90,6 +90,8 @@ class AppState extends ChangeNotifier {
   /// Why the last project didn't open on launch (the template opened instead); cleared by opening another.
   String? openError;
   ProjectStorage? _storage;
+  /// The project storage once opened (the C++ Builder's desktop build materializes sources through it).
+  ProjectStorage? get storage => _storage;
   List<Template> templates = const [];
 
   ProjectDoc project = ProjectDoc(id: newId('p'), name: 'Untitled');
