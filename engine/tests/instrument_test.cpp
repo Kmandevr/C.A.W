@@ -494,3 +494,26 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     caw_free(states);
     caw_engine_destroy(engine);
 }
+
+// Owner (2026-11-10): during playback a Morph synth note with a bend went silent. Live playback, device-sized
+// blocks: the bent note must sound like an unbent one.
+TEST(live_playback_plays_a_bent_note_on_a_builtin_instrument) {
+    for (const char* inst : {"org.caw.synth.morph", "org.caw.synth.basic"}) {
+        double level[2] = {0, 0};
+        const char* patterns[2] = {"0 C3 8 1\n", "0 C3 8 1  bend 0:0~0.6 1:-12\n"};
+        for (int k = 0; k < 2; ++k) {
+            Engine e(48000);
+            CHECK(ok(e.setProject(instrumentTrack(inst, patterns[k]))));
+            e.play();
+            std::vector<float> l(256), r(256);
+            double sum = 0;
+            for (int done = 0; done < 24000; done += 256) {
+                e.process(l.data(), r.data(), 256);
+                if (done >= 4800)
+                    for (float x : l) sum += static_cast<double>(x) * x;
+            }
+            level[k] = sum;
+        }
+        CHECK(level[1] > level[0] * 0.25);
+    }
+}
