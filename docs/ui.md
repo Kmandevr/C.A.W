@@ -49,6 +49,21 @@ The owner's goal (2026-10-28) is a capable, lightweight music-production workspa
 - **Curves drawn on the note** (any number of points; F7.1, 2026-11-04).
   - Bitwig draws micro-pitch on the note itself. Its curves are edited by adding points, moving them and bending the segments between them ([Bitwig user guide](https://www.bitwig.com/userguide/latest/inspecting_note_clips), [Admiral Bumblebee](https://www.admiralbumblebee.com/music/2017/06/16/bitwig-feature-review-note-expression)).
 
+## REAPER reference (the arranger copies it)
+
+The owner asked for the arranger to work like REAPER's (#172, [decisions](decisions.md)). **[Fact]** unless marked, from *Up and Running: A REAPER User Guide* v7.85, November 2026 ([PDF](https://www.reaper.fm/userguide/ReaperUserGuide785c.pdf); "UG" below, with section and page) and the [REAPER Quick Start](https://www.reaper.fm/guides/REAPER%20Quick%20Start.pdf) ("QS"), both checked 2026-11-10. These are REAPER's defaults; its mouse modifiers can be reassigned (UG 7.35, p. 149).
+
+- **Moving items:** select and drag; Shift-drag ignores snap (UG 7.2, p. 124). A plain drag has no axis lock; a modifier can be assigned to move only horizontally or only vertically (UG 7.5, p. 132).
+- **Copying items:** Ctrl-drag copies; Shift+Ctrl-drag copies ignoring snap (UG 7.2, p. 125; the "Media item, left drag" defaults, UG 7.5, p. 132). Shift+Ctrl+Alt-drag copies "pooling MIDI source data", so a plain Ctrl copy has its own notes (UG 7.2, p. 125).
+- **Below the last track:** a razor selection dragged (move) or Ctrl-dragged (copy) to below the last track goes to a new track (UG 7.2, p. 125). Preferences › Editing Behavior has "automatically delete empty tracks created when dragging items below last track" (UG 22.8, p. 442), so dragging items there creates tracks. Double-clicking the track panel below the last track inserts a track at the end (UG 3.4, p. 59; QS).
+- **Effects:** drag FX from the FX browser onto a track (track panel or mixer) or an item to add it; drag FX "to empty area of track panel" to create a new track with that FX; double-click an FX in the browser adds it (UG 2.10, p. 39; 6.1, p. 111). Each FX in the chain has a bypass check box; an FX is replaced by Alt-dragging the new one onto it, or with Ctrl+R in the chain (UG 2.12, p. 41).
+- **Instruments are FX:** a VSTi goes in the track's FX chain, "usually the first item in the chain" (UG 2.8, p. 38). The FX browser lists instruments in its own folder too (UG 6.3, p. 113). Insert › Virtual instrument on new track creates a named track with the instrument, or "drag and drop the instrument from an open FX Browser window to an empty area of the track control panel" (UG 3.33, p. 73; 17.18, p. 357).
+- **Media and MIDI files:** files are dragged in from the Media Explorer or the system's file browser (UG 4.10, p. 90). With "Allow drag import to insert tracks", a file dropped near the top of an item shows an "Insert track" tooltip and goes on a new track above it (UG 4.7, p. 88). **[Assumption]** a file dropped below the last track goes on a new track; the guide doesn't say so for files.
+- **Folders:** a folder track is a track and can hold items itself (UG 5.13.4, p. 101: items move between a folder and its hidden child tracks).
+- **Snapping:** Alt+S toggles snap; snap settings decide whether items snap to the grid, other items, markers or the cursor, within a snap distance in pixels (UG 7.26, p. 141).
+- **Clicks on an item:** a click selects it and moves the edit cursor; Shift adds to the selection, Ctrl toggles it (UG 7.5, p. 132; 7.35, p. 149). A double-click opens the item's properties (UG 7.5, p. 132); on a MIDI item it opens the MIDI editor (UG 13.5, p. 242). Shift+double-click sets the time selection to the item, Ctrl+double-click the loop (UG 2.17, p. 46).
+- **[Assumption]** what the edit cursor does while an item is dragged, and how REAPER scrolls while dragging at the view's edge, are not described in the guide.
+
 ## Arrangement workspace
 
 The Arranger is the main composition view. It is a horizontal song timeline (any length, since F7.2) with one row per track, a bar ruler, reusable MIDI clips, and a separate mixer panel. It is not a session grid or clip launcher.
