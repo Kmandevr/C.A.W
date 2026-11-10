@@ -1218,6 +1218,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             }
             if (!l.folder && l.hasInstrument) {
                 charge({l.instrument});
+                masterChainBytes += sizeof(NoteEvents);  // its note list and held notes
                 ++total;
             }
         }

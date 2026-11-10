@@ -1,8 +1,8 @@
 ---
 title: Native module SDK
 summary: C ABI host contract and C++ component SDK, validation, real-time rules, state and packaging.
-updated: 2026-11-09
-covers: [engine/include/caw_component.h, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
+updated: 2026-11-10
+covers: [engine/include/caw_component.h, engine/include/caw/module.hpp, engine/include/caw/component.hpp, engine/include/caw/instrument.hpp, engine/CMakeLists.txt, engine/cmake/, examples/cpp/minimal/, examples/cpp/poly-synth/, scripts/caw-component-build.js, .github/workflows/cpp-components.yml, engine/src/module.*, engine/src/module_registry.*, engine/src/graph.*]
 ---
 
 # Native module SDK v1
@@ -12,8 +12,8 @@ covers: [engine/include/caw_component.h, engine/include/caw/module.hpp, engine/i
 - **Desktop build:** a manifest-driven CMake build, and CI for Linux, Windows and Android.
 - **In-app compiler:** `engine/compiler/` is built for Android by CI, and in CI it compiles real components to arm64 libraries; its first run on a phone is still to come.
 - **Loading:** explicit trust (Blocked / Trusted; Isolated is refused, since there is no sandbox), and rebuilds that switch in while playing.
-- **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master.
-- **Still to come:** the UI, process isolation, signing, and effects with other ports.
+- **Playback:** stereo effects with parameters, automation, bypass, state, tails and latency compensation, on tracks and the master; instruments (an event input, a stereo output) playing a track's notes, with the same (2026-11-10, #156).
+- **Still to come:** the UI, process isolation, signing, and components with other ports.
 
 ## Writing an effect
 
@@ -88,6 +88,31 @@ The rules that matter:
 - **Make `saveState` safe while `process` runs:** the host may save a playing project.
 - **Make `reset()` clear what you hold.** The host calls it so the next play starts from silence.
 - **Use the Library for the same sound everywhere:** `caw/library/` (pan law, width, drive and crush, delays) and `caw/detmath.hpp` give the same bits on every device.
+
+## Writing an instrument
+
+An instrument plays a track's notes in place of a .caw generator (#156). Its ports are one event input and one stereo audio output, and nothing else; `role` is `Instrument`. A new one starts from the blank template (`CppComponentDoc.blankInstrument`, "New instrument" in Build and Files): a polyphonic sine with a 10 ms attack and release. `examples/cpp/poly-synth/` is a fuller example (sine or saw, attack, release, volume; CI builds and plays it), and the engine's built-in `org.caw.synth.basic` is a third (`engine/src/builtin_components.cpp`).
+
+The instrument owns its polyphony, as a CLAP instrument does: the host sends note events, the instrument decides which voice plays each. `caw/instrument.hpp` makes that short:
+- **`caw::InstrumentProcessor`** implements `processPorts` for you. It calls `onNote(const caw::NoteMessage&)` for each event on its frame and `render(left, right, frames, offset, block)` for the frames between, so a note starts on its exact sample. Read a knob with `caw::parameterAt(block, k, offset + i, fallback)`. A block with more than 64 distinct event frames starts the rest together at the 64th split.
+- **`caw::NoteMessage`**: `type` (`On`, `Off`, `Pitch`, `Pressure`, `Timbre`), `noteId` (the host's id: the off, pitch and pressure of a note carry its on's id), `pitch` (a MIDI note number with fraction), `velocity` 0..1, `value` 0..1 for pressure and timbre, and `frame`.
+- **`caw::VoicePool<Voice, N>`** hands out voices by note id: a free one, else the oldest released, else the oldest held. `Voice` needs `bool active, held`, `uint32_t noteId` and `uint64_t age`.
+- **`caw::readNote`** and `caw::notes::noteOn/noteOff/notePitch/notePressure/noteTimbre` decode and encode the events, for an instrument that implements `processPorts` itself.
+
+```cpp
+void onNote(const caw::NoteMessage& m) noexcept override {
+    if (m.type == caw::NoteMessageType::On) voices_.start(m.noteId).step = hz(m.pitch) / rate_;
+    else if (Voice* v = voices_.find(m.noteId); v && m.type == caw::NoteMessageType::Off) v->held = false;
+}
+```
+
+What the host sends, as `caw::Event` records of kind `Note` (MIDI 2.0 Channel Voice UMP words plus the note id; the field meanings follow the MIDI 2.0 UMP specification M2-104-UM **[Assumption: as recalled; not re-checked against the specification on 2026-11-10]**):
+- Note On, with attribute type 3 (Pitch 7.9) giving the exact pitch, so microtones arrive exactly; the key is the nearest semitone; the 16-bit velocity is at least 1.
+- Note Off, with the same note id and key.
+- Registered Per-Note Controller 3 (Pitch 7.25): the note's absolute pitch now, sent every 16 frames while it glides (a slide, a preview's new pitch) or bends (the note's bend curve and vibrato).
+- Poly Pressure and Registered Per-Note Controller 74 (timbre) from the note's pressure and timbre curves.
+
+The rules of an effect hold too: allocate in `activate`, make `reset()` silence every voice (the host calls it at Play and after the track was muted), and declare `tailFrames` for the longest release. The host ends every held note at Stop and lets the instrument ring out until it is quiet; the [engine reference](engine.md) has the details.
 
 ## One module system
 
