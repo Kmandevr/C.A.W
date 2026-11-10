@@ -1637,15 +1637,13 @@ private:
         const double volumeStep = (volume1_ - volume0_) / kControlFrames;
         const double delayStep = (delayTime1_ - delayTime0_) / kControlFrames;
         float peak = periodPeak_;
-        if (!(distOn_ || eqOn_ || chorusOn_ || delayOn_ || reverbOn_)) {  // dry: one plain loop the compiler vectorizes
+        if (!(distOn_ || eqOn_ || chorusOn_ || delayOn_ || reverbOn_)) {  // dry: two plain loops the compiler vectorizes
             for (uint32_t i = 0; i < n; ++i) {
                 const double volume = volume0_ + volumeStep * static_cast<double>(first + i);
-                const float ol = static_cast<float>(finiteOr0(L[i] * volume)), orr = static_cast<float>(finiteOr0(R[i] * volume));
-                left[i] = ol;
-                right[i] = orr;
-                peak = std::max(peak, std::max(std::fabs(ol), std::fabs(orr)));
+                left[i] = static_cast<float>(finite0(L[i] * volume));
+                right[i] = static_cast<float>(finite0(R[i] * volume));
             }
-            periodPeak_ = peak;
+            periodPeak_ = peakOf(left, right, n, peak);
             return;
         }
         // Both sides the same (every voice centred: the bass, the acid line): the distortion, which holds no state,
@@ -1675,6 +1673,19 @@ private:
             peak = std::max(peak, std::max(std::fabs(ol), std::fabs(orr)));
         }
         periodPeak_ = peak;
+    }
+
+    // finiteOr0 as a select (x - x is 0 exactly when x is finite), which vectorizes.
+    static double finite0(double x) noexcept { return x - x == 0.0 ? x : 0.0; }
+    // The largest |x| of both sides and `peak`: as integers (the bits of non-negative floats sort as the floats
+    // do), so the loop vectorizes; a float max reduction does not without fast-math.
+    static float peakOf(const float* l, const float* r, uint32_t n, float peak) noexcept {
+        int32_t top = std::bit_cast<int32_t>(peak);
+        for (uint32_t i = 0; i < n; ++i) {
+            const int32_t a = std::bit_cast<int32_t>(l[i]) & 0x7FFFFFFF, b = std::bit_cast<int32_t>(r[i]) & 0x7FFFFFFF;
+            top = std::max(top, std::max(a, b));
+        }
+        return std::bit_cast<float>(top);
     }
 
     double distort(double x) const noexcept {
