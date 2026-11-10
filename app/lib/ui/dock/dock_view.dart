@@ -33,7 +33,11 @@ class DockView extends StatefulWidget {
     required this.onChanged,
     required this.panelBuilder,
     this.titleOf = dockPanelTitle,
+    this.onFloat,
   });
+
+  /// Takes a panel into a floating window (desktop); null hides the button.
+  final ValueChanged<String>? onFloat;
 
   final DockLayout layout;
   final ValueChanged<DockLayout> onChanged;
@@ -125,6 +129,7 @@ class _DockViewState extends State<DockView> {
         if (target != id) widget.onChanged(widget.layout.dock(id, target: target, edge: edge));
       },
       accepts: (id) => t.panels.length > 1 || t.panels.first != id,
+      onFloat: widget.onFloat,
       body: IndexedStack(
         index: t.active,
         sizing: StackFit.expand,
@@ -314,9 +319,11 @@ class _Group extends StatefulWidget {
     required this.onDrop,
     required this.accepts,
     required this.body,
+    this.onFloat,
   });
 
   final TabsNode tabs;
+  final ValueChanged<String>? onFloat;
   final bool Function(String id) accepts;
   final String Function(String) title;
   final bool maximised;
@@ -361,6 +368,7 @@ class _GroupState extends State<_Group> {
               maximised: widget.maximised,
               onActivate: widget.onActivate,
               onMaximise: widget.onMaximise,
+              onFloat: widget.onFloat,
             ),
             Expanded(
               child: DragTarget<String>(
@@ -445,16 +453,19 @@ class _TabStrip extends StatelessWidget {
     required this.maximised,
     required this.onActivate,
     required this.onMaximise,
+    this.onFloat,
   });
 
   final TabsNode tabs;
   final String Function(String) title;
   final bool maximised;
   final ValueChanged<String> onActivate, onMaximise;
+  final ValueChanged<String>? onFloat;
 
   @override
   Widget build(BuildContext context) {
     final h = Targets.of(context) - 8;
+    final float = onFloat;
     final shown = tabs.activePanel;
     return SizedBox(
       height: h,
@@ -470,6 +481,16 @@ class _TabStrip extends StatelessWidget {
               ],
             ),
           ),
+          if (float != null && !maximised)
+            IconButton(
+              key: ValueKey('dock-float-${tabs.activePanel}'),
+              tooltip: 'Float ${title(tabs.activePanel)} in a window',
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              color: Neon.dim,
+              icon: const Icon(Icons.picture_in_picture_alt),
+              onPressed: () => float(tabs.activePanel),
+            ),
           IconButton(
             key: ValueKey('dock-max-$shown'),
             tooltip: maximised ? 'Restore layout' : 'Maximise ${title(shown)}',

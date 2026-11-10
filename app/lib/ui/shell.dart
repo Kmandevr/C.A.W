@@ -16,6 +16,7 @@ import 'automation_screen.dart';
 import 'cpp/build_section.dart';
 import 'dock/dock_controller.dart';
 import 'dock/dock_view.dart';
+import 'dock/floating_window.dart';
 import 'dock/layout.dart';
 import 'engine_lab_screen.dart';
 import 'file_manager_screen.dart';
@@ -251,14 +252,36 @@ class _ShellState extends State<Shell> {
             _TransportBar(state: s, dock: _dock),
             ?_banner(),
             Expanded(
-              child: DockView(
-                layout: _dock.layout,
-                onChanged: _dock.set,
-                panelBuilder: (_, id) => Listener(
-                  behavior: HitTestBehavior.translucent,
-                  onPointerDown: (_) => _dock.touch(id),
-                  child: screens[id] ?? const SizedBox.shrink(),
-                ),
+              child: LayoutBuilder(
+                builder: (context, box) => Stack(children: [
+                  Positioned.fill(
+                    child: DockView(
+                      layout: _dock.layout,
+                      onChanged: _dock.set,
+                      onFloat: _dock.float,
+                      panelBuilder: (_, id) => Listener(
+                        behavior: HitTestBehavior.translucent,
+                        onPointerDown: (_) => _dock.touch(id),
+                        child: screens[id] ?? const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+                  // Panels floating over the layout, front last.
+                  for (final f in _dock.floating)
+                    FloatingWindow(
+                      key: ValueKey('float-${f.id}'),
+                      panel: f,
+                      area: box.biggest,
+                      title: dockPanelTitle(f.id),
+                      onPlace: (r, {save = true}) => _dock.placeFloating(f.id, r, save: save),
+                      onDock: () => _dock.unfloat(f.id),
+                      onRaise: () {
+                        _dock.touch(f.id);
+                        _dock.raise(f.id);
+                      },
+                      child: screens[f.id] ?? const SizedBox.shrink(),
+                    ),
+                ]),
               ),
             ),
           ]),

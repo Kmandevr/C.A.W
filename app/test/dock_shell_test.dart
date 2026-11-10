@@ -78,6 +78,32 @@ void main() {
       c.dispose();
     });
 
+    test('a panel floats out of the layout, moves, is saved, and docks back', () async {
+      final s = await Settings.open(base: dir);
+      final c = DockController(s)..form = FormFactor.desktop;
+      c.float(Panels.mixer);
+      expect(c.isFloating(Panels.mixer), isTrue);
+      expect(c.layout.contains(Panels.mixer), isFalse);
+      c.placeFloating(Panels.mixer, const Rect.fromLTWH(5, -3, 0.01, 2));
+      final r = c.floating.single.rect;
+      expect(r.top, 0.0, reason: 'the title bar stays on screen');
+      expect(r.width, closeTo(0.2, 1e-9), reason: 'at least a fifth of the area');
+      expect(r.height, closeTo(1.0, 1e-9));
+      c.reveal(Panels.mixer);
+      expect(c.isFloating(Panels.mixer), isTrue, reason: 'showing a floating panel raises its window');
+      await c.flush();
+      final back = DockController(await Settings.open(base: dir))..form = FormFactor.desktop;
+      expect(back.floating.single.id, Panels.mixer);
+      expect(back.layout.contains(Panels.mixer), isFalse);
+      back.unfloat(Panels.mixer);
+      expect(back.layout.visible, contains(Panels.mixer));
+      expect(back.floating, isEmpty);
+      for (final c in [c, back]) {
+        await c.flush();
+        c.dispose();
+      }
+    });
+
     test('the shell picks the screen shape from its size', () {
       expect(formFactorFor(const Size(390, 780)), FormFactor.phonePortrait);
       expect(formFactorFor(const Size(844, 330)), FormFactor.phoneLandscape);
