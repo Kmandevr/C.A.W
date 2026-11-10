@@ -31,8 +31,12 @@ extern "C" {
    caw_engine_release_touches; track volume lanes up to +12 dB, as the faders.
    8 (2026-11-10): built-in presets ("presets" in caw_engine_components, "preset" in a component entry),
    caw_migrate_instrument (the retired synths as Flagship presets), caw_engine_set_quality and
-   caw_audio_set_buffer_mode. */
-#define CAW_API_VERSION 8
+   caw_audio_set_buffer_mode.
+   9 (2026-11-10, #175): routing. A layer's "sends" ([{"to": bus folder id, "level", "pre", "mute"}], at most 8),
+   caw_engine_set_send; bus folders run their "components"; a component entry's "key" ({"layer", "tap": "pre" |
+   "post", "level"}) feeds a component's sidechain input (org.caw.ducker, the compressor, the gate); routing
+   loops are refused; latency compensation covers buses and sends. */
+#define CAW_API_VERSION 9
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -165,6 +169,12 @@ CAW_API int32_t caw_engine_component_display(CawEngine* e, const char* layer_id,
    index CAW_INSTRUMENT_INDEX). Store "state" and
    "version" (as "state_version") in the project's entry so a reload or an export starts from it. */
 CAW_API char* caw_engine_component_states(CawEngine* e, const char* layer_id);
+/* A send while it plays (API version 9): send `index` (0-based) of the layer's project "sends" gets `level`
+   (linear gain 0..3.981, +12 dB), pre-fader (pre != 0: after the layer's effects, before its volume and pan) or
+   post-fader, and mute; the level glides over 5 ms. 1 on success, 0 if the layer has no such send. A later
+   project update sets the values it names again, so write the new values into the project too. */
+CAW_API int32_t caw_engine_set_send(CawEngine* e, const char* layer_id, uint32_t index, double level, int32_t pre,
+                                    int32_t mute);
 /* Sets a project-wide `global` control; every module declaring it reads the new value. */
 CAW_API void caw_engine_set_global(CawEngine* e, const char* name, double value);
 /* Track and master volume: linear gain 0..3.981 (+12 dB; more is held there). Pan -1..1. */

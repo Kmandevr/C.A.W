@@ -299,3 +299,41 @@ TEST(a_bus_reverb_rings_on_after_stop) {
     for (size_t i = 6000; i < out.size(); ++i) tail = std::max(tail, std::fabs(out[i]));
     CHECK(tail > 1e-4f);  // the bus's reverb tail, after the track itself has stopped
 }
+
+TEST(a_compressor_keyed_by_another_track_ducks_it_even_while_that_track_is_muted) {
+    ProjectSpec p = twoTracksAndABus();
+    p.layers.pop_back();  // a (the key) and b (the keyed one)
+    ComponentSpec comp;
+    comp.id = "org.caw.compressor";
+    comp.params = {{"sidechain", 1.0}, {"threshold", -30.0}, {"ratio", 20.0}, {"knee", 0.0},
+                   {"auto_makeup", 0.0}, {"attack", 0.05}};
+    comp.hasKey = true;
+    comp.key.layer = "a";
+    p.layers[1].components = {comp};
+    p.layers[0].mute = true;  // the kick is muted: it still keys the compressor
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    auto out = run(e, 9600);
+    // b alone sounds, held down by about 20 dB: the key is 6 dB over the -30 dB threshold at 20:1.
+    CHECK(out[9000] < 0.25 * kCentre * 0.2);
+    CHECK(out[9000] > 0.0f);
+
+    // Without the key the detector hears silence: no reduction at all.
+    p.layers[1].components[0].hasKey = false;
+    Engine f(48000);
+    f.setMasterBypass(true);
+    CHECK(ok(f.setProject(p)));
+    f.play();
+    out = run(f, 9600);
+    CHECK_NEAR(out[9000], 0.25 * kCentre, 1e-4);
+
+    // A key on a component without a sidechain input is ignored, with a warning.
+    ProjectSpec q = p;
+    q.layers[1].components[0].id = "org.caw.utility";
+    q.layers[1].components[0].params.clear();
+    q.layers[1].components[0].hasKey = true;
+    const std::string result = f.setProject(q);
+    CHECK(result.find("no sidechain input") != std::string::npos);
+}

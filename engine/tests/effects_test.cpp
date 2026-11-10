@@ -38,7 +38,7 @@ const char* const kSuite[] = {"org.caw.eq",        "org.caw.compressor", "org.ca
                               "org.caw.delay.pro", "org.caw.saturator",  "org.caw.gate",    "org.caw.transient",
                               "org.caw.filter",    "org.caw.phaser",     "org.caw.flanger", "org.caw.utility"};
 // How many floats each publishes (docs/engine.md, "Display data").
-const uint32_t kDisplaySizes[] = {439, 11, 7, 8, 9, 73, 7, 5, 73, 7, 6, 6};
+const uint32_t kDisplaySizes[] = {439, 11, 7, 8, 9, 73, 8, 5, 73, 7, 6, 6};  // the gate: 8 since its sidechain (#175)
 
 struct Stereo {
     std::vector<float> l, r;

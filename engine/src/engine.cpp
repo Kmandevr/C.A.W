@@ -2199,7 +2199,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             LayerState::Route r;
             auto to = layers_.find(send.to);
             if (to != layers_.end() && to->second.slot >= 0 && to->second.bus) r.dest = to->second.slot;
-            else warnings[l.id].push_back("send to '" + send.to + "': that bus isn't playing, so the send is silent");
+            else warnings["project"].push_back("layer '" + l.id + "': send to '" + send.to + "': that bus isn't playing, so the send is silent");
             r.level = send.level;
             r.pre = send.pre;
             r.mute = send.mute;
@@ -2214,16 +2214,16 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             const ComponentSpec& c = l.components[i];
             if (!c.hasKey) continue;
             if (!it->second.inserts || !it->second.inserts->keyed(i)) {
-                warnings[l.id].push_back("component '" + c.id + "' has no sidechain input, so its key is ignored");
+                warnings["project"].push_back("layer '" + l.id + "': component '" + c.id + "' has no sidechain input, so its key is ignored");
                 continue;
             }
             auto from = layers_.find(c.key.layer);
             if (from == layers_.end() || from->second.slot < 0) {
-                warnings[l.id].push_back("component '" + c.id + "': its key '" + c.key.layer + "' isn't playing");
+                warnings["project"].push_back("layer '" + l.id + "': component '" + c.id + "': its key '" + c.key.layer + "' isn't playing");
                 continue;
             }
             if (from->second.routes.size() >= static_cast<size_t>(kMaxRoutes)) {
-                warnings[c.key.layer].push_back("keys more than " + std::to_string(kMaxRoutes - kMaxSends) +
+                warnings["project"].push_back("layer '" + c.key.layer + "' keys more than " + std::to_string(kMaxRoutes - kMaxSends) +
                                                 " components; the rest hear no key");
                 continue;
             }

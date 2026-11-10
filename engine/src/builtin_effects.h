@@ -101,6 +101,10 @@ constexpr int kSyncCount = static_cast<int>(sizeof(kSyncWholeNotes) / sizeof(kSy
 // A stereo effect's descriptor: one stereo input, one stereo output (what a track's chain takes).
 ModuleDescriptor effectDescriptor(std::string_view id, std::string_view name, const ParamTable& params,
                                   uint32_t latencyFrames, uint32_t tailFrames);
+// A keyed effect's: the stereo input, a stereo "sidechain" input (the key another layer sends it), with `notes`
+// an event input "key_notes" (the notes the key's layer plays), and the stereo output (ComponentChain::isKeyedEffect).
+ModuleDescriptor keyedEffectDescriptor(std::string_view id, std::string_view name, const ParamTable& params,
+                                       uint32_t latencyFrames, uint32_t tailFrames, bool notes);
 
 // What every effect of the suite shares:
 // - a control grid: control() reads the knobs every 16 frames, counted across blocks, so any block size gives
@@ -120,6 +124,10 @@ public:
     bool quiet() const noexcept override { return idle_; }
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override;
+    // A keyed effect (its descriptor has a "sidechain" input) takes its ports: the main input and output, the key
+    // and the key's notes; the rest is process() as for any effect.
+    bool usesProcessPorts() const noexcept override { return keyed_; }
+    bool processPorts(const ProcessBlock& b) noexcept override;
     uint32_t readDisplay(float* out, uint32_t max) const noexcept override { return display_.read(out, max); }
 
 protected:
@@ -136,6 +144,13 @@ protected:
     // The display floats (at most kMaxDisplayFloats) into out; returns the count. `watched`: a UI read lately
     // (skip expensive work otherwise).
     virtual uint32_t fillDisplay(float* out, bool watched) noexcept = 0;
+
+    // A keyed effect, inside run(): the key's frames from run()'s first one (null when the host gives no key:
+    // silence), and that frame's place in the block (for the key's notes, whose frames count from the block).
+    const float* keyLeft() const noexcept { return keyL_ ? keyL_ + runAt_ : nullptr; }
+    const float* keyRight() const noexcept { return keyR_ ? keyR_ + runAt_ : nullptr; }
+    uint32_t runStart() const noexcept { return runAt_; }
+    const EventInput& keyNotes() const noexcept { return keyNotes_; }
 
     // Parameter k at frame `at` of the current block (its default when the host resolves none).
     double param(uint32_t k, uint32_t at) const noexcept {
@@ -167,6 +182,11 @@ protected:
 
 private:
     const AudioProcessBlock* block_ = nullptr;
+    bool keyed_ = false;                          // the descriptor has a "sidechain" input (activate)
+    const float* keyL_ = nullptr;                 // this block's key (processPorts), else null
+    const float* keyR_ = nullptr;
+    EventInput keyNotes_{};
+    uint32_t runAt_ = 0;                          // the frame of the block run() starts at
     const std::atomic<int>* quality_ = nullptr;  // the building Engine's (activate)
     bool skipPublish_ = false;                   // Eco publishes every other display tick (30 a second)
     double rate_ = 48000.0, tempo_ = 120.0;

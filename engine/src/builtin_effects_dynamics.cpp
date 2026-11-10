@@ -29,9 +29,11 @@ float positive(double db) { return static_cast<float>(db < 0.0 ? -db : 0.0); }
 
 enum CompParam : uint32_t {
     kThreshold, kRatio, kKnee, kAttack, kRelease, kAutoRelease, kMakeup, kAutoMakeup, kMix, kLookahead, kDetect, kLink,
-    kScHpf, kScListen, kCompCount
+    kScHpf, kScListen, kSidechain, kCompCount
 };
 constexpr std::string_view kDetectModes[] = {"Peak", "RMS"};
+// What the detector hears: the effect's own input, or the key another track sends it (its sidechain input).
+constexpr std::string_view kSidechainSources[] = {"Internal", "External"};
 
 const ParamTable& compParams() {
     static const ParamTable t = [] {
@@ -50,12 +52,14 @@ const ParamTable& compParams() {
         p.num("link", "Stereo link", 1.0, 0.0, 1.0);
         p.expo("sc_hpf", "Sidechain high-pass", 20.0, 20.0, 1000.0, "Hz");
         p.pick("sc_listen", "Sidechain listen", 0.0, kOffOn);
+        p.pick("sidechain", "Sidechain", 0.0, kSidechainSources);
         return p;
     }();
     return t;
 }
 const ModuleDescriptor& compDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.compressor", "Compressor", compParams(), kLookaheadFrames, 0);
+    static const ModuleDescriptor d =
+        keyedEffectDescriptor("org.caw.compressor", "Compressor", compParams(), kLookaheadFrames, 0, false);
     return d;
 }
 
@@ -71,6 +75,7 @@ protected:
     }
     void clearState() noexcept override {
         for (auto& c : ring_) for (float& v : c) v = 0.0f;
+        for (auto& c : keyRing_) for (float& v : c) v = 0.0f;
         pos_ = 0;
         for (int c = 0; c < 2; ++c) {
             hpf_[c].clear();
@@ -102,16 +107,22 @@ protected:
         useHpf_ = hpf > 20.5;
         for (auto& f : hpf_) f.set(hpf, 0.70710678118654752, sr);
         listen_ = on(kScListen, at);
+        external_ = choice(kSidechain, at) == 1;
     }
 
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
         const uint32_t mask = kRing - 1;
         const uint32_t detectBack = kLookaheadFrames - lookahead_;
+        const float* keyL = keyLeft();
+        const float* keyR = keyRight();
         for (uint32_t i = 0; i < n; ++i) {
             ring_[0][pos_] = inL[i];
             ring_[1][pos_] = inR[i];
+            keyRing_[0][pos_] = keyL ? keyL[i] : 0.0f;  // the key runs through the same look-ahead
+            keyRing_[1][pos_] = keyR ? keyR[i] : 0.0f;
             const uint32_t d = (pos_ - detectBack) & mask, a = (pos_ - kLookaheadFrames) & mask;
-            double sc[2] = {ring_[0][d], ring_[1][d]};
+            const float (*src)[kRing] = external_ ? keyRing_ : ring_;
+            double sc[2] = {src[0][d], src[1][d]};
             double level[2];
             for (int c = 0; c < 2; ++c) {
                 if (useHpf_) sc[c] = hpf_[c].highpass(sc[c]);
@@ -166,7 +177,7 @@ protected:
         out[7] = static_cast<float>(knee_);
         out[8] = static_cast<float>(makeupDb_);
         out[9] = static_cast<float>(lookahead_ * 1000.0 / rate());
-        out[10] = 0.0f;  // the sidechain: internal (an external one waits for components with a second input)
+        out[10] = external_ ? 1.0f : 0.0f;  // the sidechain: 0 internal, 1 external (the key)
         grMax_ = 0.0;
         levelMax_ = 0.0;
         return 11;
@@ -174,9 +185,11 @@ protected:
 
 private:
     float ring_[2][kRing] = {};
+    float keyRing_[2][kRing] = {};
     uint32_t pos_ = 0, lookahead_ = 0;
     lib::Svf hpf_[2];
     double ms_[2] = {}, env_[2] = {};
+    bool external_ = false;
     double threshold_ = -18, ratio_ = 4, knee_ = 6, attack_ = 0, release_ = 0, makeupDb_ = 0;
     double mix_ = 1, link_ = 1, rmsCoef_ = 0, sustainCoef_ = 0, sustained_ = 0;
     double grMax_ = 0, grNow_ = 0, levelMax_ = 0;
@@ -321,7 +334,7 @@ private:
 
 // ---------- Gate / expander ----------
 
-enum GateParam : uint32_t { kGThreshold, kGRange, kGRatio, kGAttack, kGHold, kGRelease, kGKnee, kGScHpf, kGateCount };
+enum GateParam : uint32_t { kGThreshold, kGRange, kGRatio, kGAttack, kGHold, kGRelease, kGKnee, kGScHpf, kGSidechain, kGateCount };
 
 const ParamTable& gateParams() {
     static const ParamTable t = [] {
@@ -334,12 +347,13 @@ const ParamTable& gateParams() {
         p.expo("release", "Release", 120.0, 5.0, 2000.0, "ms");
         p.num("knee", "Knee", 3.0, 0.0, 12.0, "dB");
         p.expo("sc_hpf", "Sidechain high-pass", 20.0, 20.0, 2000.0, "Hz");
+        p.pick("sidechain", "Sidechain", 0.0, kSidechainSources);
         return p;
     }();
     return t;
 }
 const ModuleDescriptor& gateDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.gate", "Gate", gateParams(), 0, 0);
+    static const ModuleDescriptor d = keyedEffectDescriptor("org.caw.gate", "Gate", gateParams(), 0, 0, false);
     return d;
 }
 
@@ -371,10 +385,14 @@ protected:
         const double hpf = param(kGScHpf, at);
         useHpf_ = hpf > 20.5;
         for (auto& f : hpf_) f.set(hpf, 0.70710678118654752, sr);
+        external_ = choice(kGSidechain, at) == 1;
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
+        // External: the key opens and closes the gate (a hi-hat gated by the kick); with no key it stays shut.
+        const float* keyL = external_ ? keyLeft() : nullptr;
+        const float* keyR = external_ ? keyRight() : nullptr;
         for (uint32_t i = 0; i < n; ++i) {
-            double l = inL[i], r = inR[i];
+            double l = external_ ? (keyL ? keyL[i] : 0.0) : inL[i], r = external_ ? (keyR ? keyR[i] : 0.0) : inR[i];
             if (useHpf_) l = hpf_[0].highpass(l), r = hpf_[1].highpass(r);
             const double level = detector_.process(std::max(l < 0 ? -l : l, r < 0 ? -r : r));
             levelMax_ = std::max(levelMax_, level);
@@ -399,9 +417,10 @@ protected:
         out[4] = static_cast<float>(lib::gainToDb(levelMax_));
         out[5] = static_cast<float>(threshold_);
         out[6] = env_ > -1.0 ? 1.0f : 0.0f;
+        out[7] = external_ ? 1.0f : 0.0f;  // the sidechain: 0 internal, 1 external (the key)
         grMax_ = 0.0;
         levelMax_ = 0.0;
-        return 7;
+        return 8;
     }
 
 private:
@@ -410,7 +429,7 @@ private:
     double threshold_ = -40, range_ = -80, ratio_ = 10, knee_ = 3, attack_ = 0, release_ = 0, env_ = -80;
     double grMax_ = 0, levelMax_ = 0;
     uint32_t hold_ = 0, holdLeft_ = 0;
-    bool useHpf_ = false;
+    bool useHpf_ = false, external_ = false;
 };
 
 // ---------- Transient shaper ----------
