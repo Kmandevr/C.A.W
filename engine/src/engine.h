@@ -93,6 +93,10 @@ public:
     void setGlobal(const std::string& name, double value);
     // Component index that names a layer's native instrument instead of one of its inserts.
     static constexpr uint32_t kInstrumentIndex = 0xFFFFFFFFu;
+    // Play after Stop: an instrument still ringing fades out over its next 5 ms, rendered at Play (inside one
+    // callback). All the ringing instruments share this many frames of that work, so Play never costs more than
+    // two 5 ms tails at 48 kHz: one or two fade over 5 ms, more over less each (16: 0.6 ms).
+    static constexpr int kPlayTailBudgetFrames = 480;
     // A native component's parameter while it plays: component `index` of the layer's inserts (an
     // empty layer id: the master chain; kInstrumentIndex: the layer's instrument). Ramps over the parameter's smoothing. False if there is no
     // such component or parameter. A later project update sets the values it names again.
@@ -179,7 +183,8 @@ private:
     void instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept;
     void instrumentMotion(NoteEvents& notes, int m) noexcept;
     void noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcept;
-    void playTail(Slot& s) noexcept;
+    bool ringsAtPlay(const Slot& s) const noexcept;
+    void playTail(Slot& s, int most) noexcept;
     static bool playsNotes(const Slot& s) noexcept;
     struct Voice& pickVoice(Chain& c) noexcept;
     void previewCommand(const Cmd& c) noexcept;

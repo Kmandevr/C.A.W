@@ -2872,42 +2872,50 @@ void Engine::applyCommands() noexcept {
                 epoch_ = 0;
                 dcL_[0] = dcL_[1] = dcR_[0] = dcR_[1] = 0;
                 limEnv_ = 0;
-                for (int i = 0; i < slotCount_; ++i) {
-                    Slot& s = slotAt(i);
-                    if (!s.active) continue;
-                    retire(s.old, nullptr);
-                    s.old = nullptr;
-                    if (s.pending) {
-                        retire(s.cur, nullptr);
-                        s.cur = s.pending;
-                        s.pending = nullptr;
-                    }
-                    s.swapLeft = 0;
-                    s.seamLeft = 0;
-                    if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
-                    s.playTailLen = s.playTailAt = 0;
-                    if (s.instrument) {
-                        // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
-                        NoteEvents& notes = *s.instrument->notes();
-                        notes.releaseAll(0, true);
-                        if (!notes.holdsPreview()) {
-                            // Still sounding (a release after Stop): its next 5 ms fade out over the new pass's start.
-                            if (!s.instrumentIdle && s.active && s.previewQuiet < static_cast<int64_t>(kPlayTailQuietSeconds * sr_))
-                                playTail(s);
-                            s.instrument->reset();
-                            notes.forget(false);
-                            notes.clearEvents();
+                // The instruments still ringing share the play-tail budget, so Play's callback stays bounded.
+                {
+                    int ringing = 0;
+                    for (int i = 0; i < slotCount_; ++i)
+                        if (ringsAtPlay(slotAt(i))) ++ringing;
+                    const int tailLen = ringing > 0 ? std::max(1, kPlayTailBudgetFrames / ringing) : 0;
+                    for (int i = 0; i < slotCount_; ++i) {
+                        Slot& s = slotAt(i);
+                        if (!s.active) continue;
+                        retire(s.old, nullptr);
+                        s.old = nullptr;
+                        if (s.pending) {
+                            retire(s.cur, nullptr);
+                            s.cur = s.pending;
+                            s.pending = nullptr;
                         }
+                        s.swapLeft = 0;
+                        s.seamLeft = 0;
+                        if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
+                        s.playTailLen = s.playTailAt = 0;
+                        if (s.instrument) {
+                            // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
+                            NoteEvents& notes = *s.instrument->notes();
+                            const bool rings = ringsAtPlay(s);
+                            notes.releaseAll(0, true);
+                            if (!notes.holdsPreview()) {
+                                // Still sounding (a release after Stop): its next 5 ms (less when many ring) fade out
+                                // over the new pass's start.
+                                if (rings) playTail(s, tailLen);
+                                s.instrument->reset();
+                                notes.forget(false);
+                                notes.clearEvents();
+                            }
+                        }
+                        s.fresh = true;
+                        s.contiguous = false;
+                        s.k = -1;
+                        s.epoch = -1;
+                        updateSolo();
+                        const double target = slotTarget(s);
+                        s.gain = target > 0.0
+                            ? (s.automation ? automationValue(s.automation->volume, 0.0, target) : target)
+                            : 0.0;
                     }
-                    s.fresh = true;
-                    s.contiguous = false;
-                    s.k = -1;
-                    s.epoch = -1;
-                    updateSolo();
-                    const double target = slotTarget(s);
-                    s.gain = target > 0.0
-                        ? (s.automation ? automationValue(s.automation->volume, 0.0, target) : target)
-                        : 0.0;
                 }
                 break;
             case Cmd::Stop:
@@ -3522,10 +3530,18 @@ void Engine::instrumentMotion(NoteEvents& notes, int m) noexcept {
     }
 }
 
-// Renders the instrument's next few milliseconds (its notes already let go) into the slot's play tail, faded
-// to silence, before Play resets it; runInstrument mixes the tail into the first chunks of the new pass.
-void Engine::playTail(Slot& s) noexcept {
-    const int len = std::min(Slot::kPlayTailMax, std::max(1, static_cast<int>(kPlayTailSeconds * sr_ + 0.5)));
+// Whether Play finds the slot's instrument still ringing out after Stop (it sounded within the last 0.1 s and
+// holds no preview, which plays on into the new pass): Play then renders a short tail of it (playTail).
+bool Engine::ringsAtPlay(const Slot& s) const noexcept {
+    return s.instrument && !s.instrumentIdle && s.active &&
+           s.previewQuiet < static_cast<int64_t>(kPlayTailQuietSeconds * sr_) && !s.instrument->notes()->holdsPreview();
+}
+
+// Renders the instrument's next few milliseconds (at most 5 ms and `most` frames; its notes already let go) into
+// the slot's play tail, faded to silence, before Play resets it; runInstrument mixes the tail into the first
+// chunks of the new pass.
+void Engine::playTail(Slot& s, int most) noexcept {
+    const int len = std::min({Slot::kPlayTailMax, std::max(1, most), std::max(1, static_cast<int>(kPlayTailSeconds * sr_ + 0.5))});
     const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), false};
     for (int done = 0; done < len;) {
         const int n = std::min(kBlock, len - done);

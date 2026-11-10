@@ -504,6 +504,47 @@ TEST(play_after_stop_fades_a_ringing_instrument_out_instead_of_cutting_it) {
     CHECK(jump < 0.25f * before);    // no step: the tail fades over a few milliseconds
 }
 
+TEST(play_after_stop_caps_the_tail_work_when_many_instruments_ring) {
+    // Second audio review, fix 3: Play rendered 5 ms of every instrument still ringing, all inside one callback,
+    // so with many tracks Play itself could overrun on a phone. The tails now share a fixed budget of frames
+    // (Engine::kPlayTailBudgetFrames): one or two ringing instruments still fade over 5 ms, many over less each.
+    auto ringing = [](int tracks) {
+        ProjectSpec p = instrumentTrack("org.caw.synth.morph", "8 C4 4 1\n");
+        p.layers[0].instrument.params = {{"release", 3.0}, {"sustain", 1.0}, {"shape", 0.0}, {"drift", 0.0}, {"unison", 1}, {"attack", 0.01}};
+        p.layers[0].volume = 1.0 / tracks;
+        for (int k = 1; k < tracks; ++k) {
+            LayerSpec l = p.layers[0];
+            l.id = l.name = "t" + std::to_string(k);
+            p.layers.push_back(l);
+        }
+        return p;
+    };
+    // The frames after Play that still carry a tail (the new pass starts silent).
+    auto tailFrames = [](const ProjectSpec& p) {
+        Engine e(48000);
+        e.setMasterBypass(true);
+        if (!ok(e.setProject(p))) return -1;
+        e.play();
+        std::vector<float> l(64), r(64);
+        for (int i = 0; i < 62400 / 64; ++i) e.process(l.data(), r.data(), 64);
+        e.stop();
+        for (int i = 0; i < 4800 / 64; ++i) e.process(l.data(), r.data(), 64);
+        e.play();
+        int last = -1;
+        for (int i = 0; i < 8; ++i) {
+            e.process(l.data(), r.data(), 64);
+            for (int k = 0; k < 64; ++k)
+                if (l[static_cast<size_t>(k)] != 0.0f) last = i * 64 + k;
+        }
+        return last + 1;
+    };
+    const int one = tailFrames(ringing(1)), many = tailFrames(ringing(16));
+    CHECK(one >= 200);  // 5 ms: 240 frames
+    CHECK(one <= 240);
+    CHECK(many > 0);    // still a fade, not a cut
+    CHECK(many * 16 <= Engine::kPlayTailBudgetFrames);
+}
+
 TEST(an_instruments_values_bypass_and_automation_work_as_for_an_effect) {
     Engine e(48000);
     CHECK(loadFixture(e, kRecorder));
