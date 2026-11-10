@@ -86,6 +86,10 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   double _cursorPitch = 60;
   Steps? _lastLen;
   Timer? _sendTimer;
+  // A drag heard while the song plays (#170): its newest state goes to the engine at most every 33 ms.
+  Timer? _liveTimer;
+  PatternDoc? _liveDoc;
+  bool _liveSent = false;
   // Drag state.
   int? _dragNote;
   int _edge = 0; // the note end a drag stretches: 1 the end, -1 the start, 0 none (it moves)
@@ -227,6 +231,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   @override
   void dispose() {
     _hold?.cancel();
+    _liveEnd();
     _hearStop();
     _curveView.dispose();
     _spring.dispose();
@@ -336,6 +341,41 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         s.editSource(entry.key, source);
         s.run(entry.key);
       }
+    }
+  }
+
+  /// A drag step while the song plays: a sounding note follows it (AppState.livePattern). The roll doesn't rebuild:
+  /// only the text goes, about 30 times a second.
+  void _live(PatternDoc d) {
+    if (!s.meters.playing) return;
+    _liveDoc = d;
+    _liveTimer ??= Timer(const Duration(milliseconds: 33), () {
+      _liveTimer = null;
+      final next = _liveDoc;
+      _liveDoc = null;
+      if (next == null || !mounted) return;
+      _liveSent = true;
+      s.livePattern(widget.module.id, next.serialize());
+    });
+  }
+
+  /// Stops sending drag steps; whether any went.
+  bool _liveEnd() {
+    _liveTimer?.cancel();
+    _liveTimer = null;
+    _liveDoc = null;
+    final sent = _liveSent;
+    _liveSent = false;
+    return sent;
+  }
+
+  /// After a drag that was heard live: the result goes now (no pause), or the engine gets the pattern back as it is.
+  void _liveDone() {
+    final d = _doc;
+    if (d != null && d.serialize() != widget.module.source) {
+      _flush();
+    } else {
+      s.livePattern(widget.module.id, null);
     }
   }
 
@@ -1032,6 +1072,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       pts[seg] = NotePoint(pts[seg].t, pts[seg].v, (k * 100).roundToDouble() / 100);
       _showLive(pts);
     }
+    _live(d.setExpression({id}, n.expr.copyWith(bend: List.unmodifiable(pts))));
     _hearBendAt(p);
   }
 
@@ -1477,6 +1518,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _cancelEdit() {
     _hold?.cancel();
     _hold = null;
+    if (_liveEnd()) s.livePattern(widget.module.id, null);
     _hearStop();
     _scroller.stop();
     _bypass = false;
@@ -1673,6 +1715,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
         _lagEdge = _edge;
         _lag = p.dx - start.dx - moved;
       });
+      _live(next);
     } else {
       final dt = free ? Steps.fromDouble(dSteps, maxDenominator: 384) : _resSteps.times((dSteps / _resSteps.toDouble()).round());
       final dp = -((p.dy - start.dy) / _rowH).roundToDouble();
@@ -1680,6 +1723,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _dragMovedT = dt;
       _dragMovedP = dp;
       setState(() => _doc = base.move(_sel, dt, dp));
+      _live(_doc!);
       _hearFollow();
     }
   }
@@ -1687,6 +1731,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _up() {
     _hold?.cancel();
     _hold = null;
+    final live = _liveEnd();
     _scroller.stop();
     _edge = 0;
     // A note tapped in (drawn quickly, not stretched) plays out its own length, at most 4 s; anything held stops now.
@@ -1720,8 +1765,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       // One undo step for the whole drag.
       _undo.add(_dragBase!);
       _redo.clear();
-      _scheduleSend();
+      if (!live) _scheduleSend();
     }
+    if (live) _liveDone();
     setState(() {
       _dragStart = null;
       _dragBase = null;

@@ -485,7 +485,7 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now',
-      Set<String>? playableComponents}) {
+      Set<String>? playableComponents, Map<String, String>? sourceOverrides}) {
     final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
     // Native components the engine hasn't loaded (awaiting trust, blocked, failed to build) are left out, so the
     // rest of the song still plays; their automation lanes go with them and the others are renumbered.
@@ -524,7 +524,8 @@ class ProjectDoc {
         'globals': globals,
         'automation': engineAutomation,
         'modules': [
-          for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
+          for (final m in modules)
+            {'id': m.id, 'name': m.name, 'source': sourceOverrides?[m.id] ?? m.runSource, 'params': m.params},
         ],
         'master_components': [for (final c in playable(masterComponents)) c.toJson()],
         'layers': [
