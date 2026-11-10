@@ -344,15 +344,19 @@ public:
     const ModuleDescriptor& descriptor() const noexcept override { return kSynth; }
     bool activate(double sampleRate, uint32_t) noexcept override {
         sampleRate_ = sampleRate;
-        voices_.clear();
+        reset();
         return true;
     }
-    void reset() noexcept override { voices_.clear(); }
+    void reset() noexcept override {
+        voices_.clear();
+        controlLeft_ = 0;
+    }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
         switch (m.type) {
             case NoteMessageType::On: {
+                controlLeft_ = 0;  // the control grid restarts here
                 Voice& v = voices_.start(m.noteId);
                 v.stage = Stage::Attack;
                 v.velocity = m.velocity;
@@ -384,60 +388,20 @@ protected:
         }
     }
 
+    // The control grid (envelope rates and each voice's steps and filter, every 16 frames) runs on from one
+    // render call to the next and restarts at a note-on, so blocks and event splits don't move it.
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
         for (uint32_t i = 0; i < frames; ++i) left[i] = right[i] = 0.0f;
-        const double sr = sampleRate_;
-        for (Voice& v : voices_) {
-            if (!v.active) continue;
-            for (uint32_t i = 0; i < frames; ++i) {
-                const uint32_t at = offset + i;
-                if ((i & 15u) == 0) {  // control rate: envelope rates and the filter every 16 frames
-                    const double detune = parameterAt(b, kDetune, at, 7.0);
-                    v.inc1 = v.freq / sr;
-                    v.inc2 = v.freq * detPow(2.0, detune / 1200.0) / sr;
-                    attackStep_ = 1.0 / std::max(1.0, parameterAt(b, kAttack, at, 0.005) * sr);
-                    decayCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kDecay, at, 0.3) * sr / 5.0));
-                    releaseCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kRelease, at, 0.25) * sr / 5.0));
-                    const double octaves = 5.0 * parameterAt(b, kEnv, at, 0.5) * v.level + 4.0 * v.timbre;
-                    double fc = parameterAt(b, kCutoff, at, 2400.0) * detPow(2.0, octaves);
-                    fc = std::clamp(fc, 20.0, 0.45 * sr);
-                    const double g = detTan(3.14159265358979323846 * fc / sr);
-                    const double k = 2.0 - 1.9 * std::clamp(parameterAt(b, kResonance, at, 0.2), 0.0, 1.0);
-                    v.a1 = 1.0 / (1.0 + g * (g + k));
-                    v.a2 = g * v.a1;
-                    v.a3 = g * v.a2;
-                }
-                const double sustain = parameterAt(b, kSustain, at, 0.7);
-                switch (v.stage) {
-                    case Stage::Attack:
-                        v.level += attackStep_;
-                        if (v.level >= 1.0) { v.level = 1.0; v.stage = Stage::Decay; }
-                        break;
-                    case Stage::Decay: v.level = sustain + (v.level - sustain) * decayCoef_; break;
-                    case Stage::Release: v.level *= releaseCoef_; break;
-                }
-                const double o1 = oscillator(static_cast<int>(parameterAt(b, kWave1, at, 0.0)), v.phase1, v.inc1);
-                const double o2 = oscillator(static_cast<int>(parameterAt(b, kWave2, at, 1.0)), v.phase2, v.inc2);
-                const double mix = parameterAt(b, kMix, at, 0.5);
-                const double x = o1 * (1.0 - 0.5 * mix) + o2 * mix;
-                v.phase1 += v.inc1;
-                v.phase1 -= std::floor(v.phase1);
-                v.phase2 += v.inc2;
-                v.phase2 -= std::floor(v.phase2);
-                // Low-pass state-variable filter (topology-preserving form).
-                const double v3 = x - v.ic2;
-                const double v1 = v.a1 * v.ic1 + v.a2 * v3;
-                const double v2 = v.ic2 + v.a2 * v.ic1 + v.a3 * v3;
-                v.ic1 = 2.0 * v1 - v.ic1;
-                v.ic2 = 2.0 * v2 - v.ic2;
-                const double y = v2 * v.level * v.velocity * v.pressure * parameterAt(b, kVolume, at, 0.5) * 0.3;
-                left[i] += static_cast<float>(y);
-                right[i] += static_cast<float>(y);
+        for (uint32_t start = 0; start < frames;) {
+            if (controlLeft_ == 0) {
+                control(b, offset + start);
+                controlLeft_ = kControlFrames;
             }
-            if (v.stage == Stage::Release && v.level < 1e-5) {
-                v.active = false;
-                v.level = 0.0;
-            }
+            const uint32_t n = std::min(controlLeft_, frames - start);
+            for (Voice& v : voices_)
+                if (v.active) renderVoice(v, left, right, start, start + n, offset, b);
+            start += n;
+            controlLeft_ -= n;
         }
     }
 
@@ -452,6 +416,70 @@ private:
         double freq = 261.6255653005986, inc1 = 0, inc2 = 0, phase1 = 0, phase2 = 0;
         double ic1 = 0, ic2 = 0, a1 = 1, a2 = 0, a3 = 0;
     };
+    void control(const ProcessBlock& b, uint32_t at) noexcept {
+        const double sr = sampleRate_;
+        const double detune = parameterAt(b, kDetune, at, 7.0);
+        const double ratio = detPow(2.0, detune / 1200.0);
+        attackStep_ = 1.0 / std::max(1.0, parameterAt(b, kAttack, at, 0.005) * sr);
+        decayCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kDecay, at, 0.3) * sr / 5.0));
+        releaseCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kRelease, at, 0.25) * sr / 5.0));
+        const double env = parameterAt(b, kEnv, at, 0.5), cutoff = parameterAt(b, kCutoff, at, 2400.0);
+        const double k = 2.0 - 1.9 * std::clamp(parameterAt(b, kResonance, at, 0.2), 0.0, 1.0);
+        for (Voice& v : voices_) {
+            if (!v.active) continue;
+            v.inc1 = v.freq / sr;
+            v.inc2 = v.freq * ratio / sr;
+            const double octaves = 5.0 * env * v.level + 4.0 * v.timbre;
+            double fc = cutoff * detPow(2.0, octaves);
+            fc = std::clamp(fc, 20.0, 0.45 * sr);
+            const double g = detTan(3.14159265358979323846 * fc / sr);
+            v.a1 = 1.0 / (1.0 + g * (g + k));
+            v.a2 = g * v.a1;
+            v.a3 = g * v.a2;
+        }
+    }
+    void renderVoice(Voice& v, float* left, float* right, uint32_t from, uint32_t to, uint32_t offset,
+                     const ProcessBlock& b) noexcept {
+        for (uint32_t i = from; i < to; ++i) {
+            const uint32_t at = offset + i;
+            const double sustain = parameterAt(b, kSustain, at, 0.7);
+            switch (v.stage) {
+                case Stage::Attack:
+                    v.level += attackStep_;
+                    if (v.level >= 1.0) { v.level = 1.0; v.stage = Stage::Decay; }
+                    break;
+                case Stage::Decay:
+                    v.level = sustain + (v.level - sustain) * decayCoef_;
+                    // At the sustain level (within 1e-9) it stays there: a held note at sustain 0 doesn't decay
+                    // into denormal numbers.
+                    if (v.level - sustain < 1e-9 && sustain - v.level < 1e-9) v.level = sustain;
+                    break;
+                case Stage::Release: v.level *= releaseCoef_; break;
+            }
+            const double o1 = oscillator(static_cast<int>(parameterAt(b, kWave1, at, 0.0)), v.phase1, v.inc1);
+            const double o2 = oscillator(static_cast<int>(parameterAt(b, kWave2, at, 1.0)), v.phase2, v.inc2);
+            const double mix = parameterAt(b, kMix, at, 0.5);
+            const double x = o1 * (1.0 - 0.5 * mix) + o2 * mix;
+            v.phase1 += v.inc1;
+            v.phase1 -= std::floor(v.phase1);
+            v.phase2 += v.inc2;
+            v.phase2 -= std::floor(v.phase2);
+            // Low-pass state-variable filter (topology-preserving form).
+            const double v3 = x - v.ic2;
+            const double v1 = v.a1 * v.ic1 + v.a2 * v3;
+            const double v2 = v.ic2 + v.a2 * v.ic1 + v.a3 * v3;
+            v.ic1 = 2.0 * v1 - v.ic1;
+            v.ic2 = 2.0 * v2 - v.ic2;
+            const double y = v2 * v.level * v.velocity * v.pressure * parameterAt(b, kVolume, at, 0.5) * 0.3;
+            left[i] += static_cast<float>(y);
+            right[i] += static_cast<float>(y);
+        }
+        if (v.stage == Stage::Release && v.level < 1e-5) {
+            v.active = false;
+            v.level = 0.0;
+        }
+    }
+    static constexpr uint32_t kControlFrames = 16;
     static void setPitch(Voice& v, double pitch) noexcept { v.freq = 440.0 * detPow(2.0, (pitch - 69.0) / 12.0); }
     // PolyBLEP: the step of a saw or square smoothed over one sample, so high notes alias less.
     static double blep(double t, double dt) noexcept {
@@ -479,6 +507,7 @@ private:
     VoicePool<Voice, 16> voices_;
     double sampleRate_ = 48000.0;
     double attackStep_ = 0, decayCoef_ = 0, releaseCoef_ = 0;
+    uint32_t controlLeft_ = 0;  // frames until the next control
 };
 
 template <class T>

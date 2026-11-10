@@ -39,6 +39,7 @@ public:
         double exLen = 1;      // the note's length in samples, for the curves' 0..1 time
         int64_t since = 0;     // samples since the note (or its expression) started
         uint32_t motionFrom = 0;  // the frame of this block its motion starts from (its on's frame)
+        int motionWait = 0;       // frames from there to its next control point (the grid runs on across blocks)
         double sentPitch = 60, sentPress = 1, sentTimbre = 0;  // what the instrument last heard
     };
 

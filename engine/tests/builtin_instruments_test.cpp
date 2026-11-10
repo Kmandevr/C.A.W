@@ -617,16 +617,16 @@ std::vector<Golden> goldens() {
     g.push_back({"bass", track("org.caw.bass", "0 A1 1/2 1\n2 A1 1/2 1\n3 C2 1/2 1\n4 A2 1/2 1\n6 G1 1/2 1\n8 E2 2 1\n9 C2 2 0.8\n"
                                                "11 G1 1 1 slide\n12 A1 2 1\n15 A1 1/2 1\n",
                                {{"cutoff", 300}, {"resonance", 0.45}, {"env", 0.6}, {"decay", 0.18}, {"sustain", 0.3}}),
-                 0x6ec4f477fa2bc5e3ull});
+                 0xa6502b79039ea747ull});
     // Acid: the Acid line pattern (slides, a ratchet, a note that plays half the time), squelchy.
     g.push_back({"acid", track("org.caw.synth.acid", "0 A1 2 1\n2 A2 1 0.7\n3 A1 1 0.8 slide\n4 C2 2 0.9\n6 A1 1 0.6 prob 0.5\n"
                                                      "8 E2 2 1 ratchet 2\n10 G1 1 0.7\n11 A1 1 0.8 slide\n12 A2 2 0.9\n14 G2 1 0.6\n15 E2 1 0.8\n",
                                {{"resonance", 0.8}, {"wave", 1}}),
-                 0x9bd893704cadbb67ull});
+                 0x96341f4427792447ull});
     // Morph synth: a chord with a quarter tone, drifting, wide.
     g.push_back({"morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
                                 {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
-                 0x61f288b9464178a7ull});
+                 0x6633d948d078431bull});
     return g;
 }
 
@@ -741,6 +741,60 @@ void checkSameSound(const char* name, const Sound& was, const Sound& now) {
 }
 
 }  // namespace
+
+TEST(the_built_in_instruments_render_the_same_at_any_block_size) {
+    // Audio review fix 4: the 16-frame control grid (the built-in synths) and the expression grid (the host's
+    // per-note pitch, pressure and timbre) restarted at every block and event split, so live playback (a
+    // device's callback size) and an export differed. They now run on from block to block.
+    auto render = [](const ProjectSpec& p, int block) {
+        Engine e(48000);
+        std::vector<float> out;
+        if (!ok(e.setProjectOffline(p))) return out;
+        e.play();
+        std::vector<float> l(static_cast<size_t>(block)), r(static_cast<size_t>(block));
+        for (int done = 0; done < 48000; done += block) {
+            e.process(l.data(), r.data(), block);
+            for (int i = 0; i < block; ++i) out.push_back(l[static_cast<size_t>(i)]), out.push_back(r[static_cast<size_t>(i)]);
+        }
+        out.resize(48000 * 2);
+        return out;
+    };
+    const std::string expressive = "0 A3 6 0.9 bend 0:0 0.5:2 1:-1 vib 0.3 5.5 press 0:1 1:0.3 timbre 0:0 1:0.8\n"
+                                   "2 C4 3 0.7 slide\n6 E4,G4 4 0.8 bend 0:0 1:-3\n10 C3 4 1\n12 D3 2 0.6 ratchet 3\n";
+    std::vector<Golden> cases = goldens();
+    for (const char* id : {"org.caw.synth.morph", "org.caw.synth.basic", "org.caw.bass", "org.caw.synth.acid"})
+        cases.push_back({id, track(id, expressive, {{"attack", 0.002}}), 0});
+    for (const Golden& g : cases) {
+        const std::vector<float> a = render(g.project, 256), b = render(g.project, 37);
+        size_t differ = 0;
+        for (size_t i = 0; i < a.size() && i < b.size(); ++i) differ += a[i] != b[i];
+
+        if (a.size() != b.size() || differ != 0)
+            cawtest::fail(__FILE__, __LINE__, std::string(g.name) + ": " + std::to_string(differ) + " samples differ by block size");
+    }
+}
+
+TEST(a_note_held_at_sustain_zero_settles_instead_of_decaying_into_denormals) {
+    // Audio review fix 7: the basic synth's level (and lib::Adsr's, which the bass and Morph synth use) fell
+    // toward a sustain of 0 forever, through denormal numbers (slow on many CPUs). It now settles at 0.
+    Engine e(48000);
+    struct Case {
+        const char* id;
+        std::vector<std::pair<std::string, double>> values;
+    };
+    const Case cases[] = {{"org.caw.synth.basic", {{"sustain", 0}, {"decay", 0.01}}},
+                          {"org.caw.synth.morph", {{"sustain", 0}, {"decay", 0.01}, {"attack", 0.001}}},
+                          {"org.caw.bass", {{"sustain", 0}, {"decay", 0.02}}}};
+    for (const Case& c : cases) {
+        std::unique_ptr<ModuleProcessor> p = make(e, c.id);
+        if (!p) continue;
+        std::vector<float> right;
+        const std::vector<float> left = play(*p, {notes::noteOn(0, 1, 57, 1)}, 48000 * 4, c.values, &right);
+        const analysis::Levels l = analysis::levels(left.data(), left.size());
+        CHECK_EQ(l.denormal, 0u);
+        CHECK_EQ(left.back(), 0.0f);  // silent while still held
+    }
+}
 
 TEST(the_built_in_instruments_match_their_golden_renders) {
     for (const Golden& g : goldens()) checkGolden(g.name, g.project, g.hash);

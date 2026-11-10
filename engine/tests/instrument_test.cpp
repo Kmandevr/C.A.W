@@ -519,7 +519,7 @@ TEST(the_built_in_synth_matches_its_golden_render) {
     const uint64_t h = renderHash(p, 48000 * 2, &peak);
     CHECK(peak > 0.05f);
     CHECK(peak <= 1.0f);
-    constexpr uint64_t kGolden = 0xa00fa2d9ae2c8b6bull;
+    constexpr uint64_t kGolden = 0x3acbcf05300aedbbull;
     if (h != kGolden) {
         char buf[96];
         std::snprintf(buf, sizeof buf, "the basic synth renders 0x%016llxull", static_cast<unsigned long long>(h));

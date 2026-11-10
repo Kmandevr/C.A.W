@@ -3199,6 +3199,7 @@ void Engine::previewCommand(const Cmd& c) noexcept {
             held->glideLeft = std::max(1, static_cast<int>(std::floor(kPreviewGlideSeconds * sr_ + 0.5)));
             held->glideStep = (held->target - held->pitch) / held->glideLeft;
             held->motionFrom = 0;
+            held->motionWait = 0;
             return;
         }
         if (c.previewOp == 2) {
@@ -3423,8 +3424,11 @@ bool Engine::playsNotes(const Slot& s) noexcept { return s.cur && (s.cur->voiced
 void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     const int64_t n0 = s.n0, end = n0 + m;
     for (NoteEvents::Held& h : notes.held())
-        if (h.active && h.source == NoteEvents::Source::Orphan && h.offAt < end)
-            notes.off(static_cast<uint32_t>(std::max<int64_t>(0, h.offAt - n0)), h);
+        if (h.active && h.source == NoteEvents::Source::Orphan && h.offAt < end) {
+            const uint32_t frame = static_cast<uint32_t>(std::max<int64_t>(0, h.offAt - n0));
+            noteMotion(notes, h, static_cast<int>(frame));
+            notes.off(frame, h);
+        }
     const Pattern* pat = s.pat;
     if (!pat) return;
     auto sampleOf = [this](double step) { return static_cast<int64_t>(std::floor(step * stepLen_ + 0.5)); };
@@ -3438,19 +3442,24 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
         h.exLen = std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_);
         h.since = 0;
         h.motionFrom = frame;
+        h.motionWait = 0;
     };
     for (; e < ne && sampleOf(ev[e].step) < end; ++e) {
         const PatternEvent& pe = ev[e];
         const PatternNote& n = pat->notes[pe.note];
         const uint32_t frame = static_cast<uint32_t>(std::max<int64_t>(0, sampleOf(pe.step) - n0));
         if (!pe.on) {
-            if (NoteEvents::Held* h = notes.findPattern(pe.note, pe.sub)) notes.off(frame, *h);
+            if (NoteEvents::Held* h = notes.findPattern(pe.note, pe.sub)) {
+                noteMotion(notes, *h, static_cast<int>(frame));
+                notes.off(frame, *h);
+            }
             continue;
         }
         if (!notePlays(n, pe.note, s.repeat, seed_)) continue;
         if (pe.sub == 0 && n.slideFrom >= 0) {
             const PatternNote& from = pat->notes[static_cast<size_t>(n.slideFrom)];
             if (NoteEvents::Held* h = notes.findPattern(static_cast<uint32_t>(n.slideFrom), static_cast<uint16_t>(from.ratchet - 1))) {
+                noteMotion(notes, *h, static_cast<int>(frame));  // its glide and expression up to the slide
                 h->note = pe.note;
                 h->sub = 0;
                 h->pitch = h->sentPitch;  // from the pitch being heard, bend included
@@ -3467,32 +3476,41 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
 }
 
 // Glides and expression as per-note pitch, pressure and timbre events, worked out every kExpressionStep frames (as a
-// .caw voice works out its curves), sent only when a value changes.
+// .caw voice works out its curves), sent only when a value changes. The grid runs on from the note's start (or its
+// slide) across blocks, and a note that ends or slides mid-block first gets its points up to there, so the events
+// land on the same frames, with the same values, at any block size.
+void Engine::noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcept {
+    if (h.glideLeft <= 0 && !h.ex) {
+        h.motionFrom = static_cast<uint32_t>(end);
+        h.motionWait = 0;
+        return;
+    }
+    int f = static_cast<int>(h.motionFrom) + h.motionWait;
+    for (; f < end; f += kExpressionStep) {
+        double bend = 0, press = 1, timbre = 0;
+        if (h.ex) expressionAt(*h.ex, static_cast<double>(h.since), h.exLen, sr_, bend, press, timbre);
+        const uint32_t frame = static_cast<uint32_t>(f);
+        notes.pitch(frame, h, h.pitch + bend);
+        if (h.ex) {
+            if (!h.ex->press.points.empty()) notes.pressure(frame, h, std::clamp(press, 0.0, 1.0));
+            if (!h.ex->timbre.points.empty()) notes.timbre(frame, h, std::clamp(timbre, 0.0, 1.0));
+        }
+        if (h.glideLeft > 0) {
+            const int k = std::min(kExpressionStep, h.glideLeft);
+            h.glideLeft -= k;
+            h.pitch = h.glideLeft == 0 ? h.target : h.pitch + h.glideStep * k;
+        }
+        h.since += kExpressionStep;
+    }
+    h.motionWait = f - end;  // the next point, that many frames on
+    h.motionFrom = static_cast<uint32_t>(end);
+}
+
 void Engine::instrumentMotion(NoteEvents& notes, int m) noexcept {
     for (NoteEvents::Held& h : notes.held()) {
         if (!h.active) continue;
-        if (h.glideLeft <= 0 && !h.ex) {
-            h.motionFrom = 0;
-            continue;
-        }
-        for (int f = static_cast<int>(h.motionFrom); f < m; f += kExpressionStep) {
-            const int step = std::min(kExpressionStep, m - f);
-            double bend = 0, press = 1, timbre = 0;
-            if (h.ex) expressionAt(*h.ex, static_cast<double>(h.since), h.exLen, sr_, bend, press, timbre);
-            const uint32_t frame = static_cast<uint32_t>(f);
-            notes.pitch(frame, h, h.pitch + bend);
-            if (h.ex) {
-                if (!h.ex->press.points.empty()) notes.pressure(frame, h, std::clamp(press, 0.0, 1.0));
-                if (!h.ex->timbre.points.empty()) notes.timbre(frame, h, std::clamp(timbre, 0.0, 1.0));
-            }
-            if (h.glideLeft > 0) {
-                const int k = std::min(step, h.glideLeft);
-                h.glideLeft -= k;
-                h.pitch = h.glideLeft == 0 ? h.target : h.pitch + h.glideStep * k;
-            }
-            h.since += step;
-        }
-        h.motionFrom = 0;
+        noteMotion(notes, h, m);
+        h.motionFrom = 0;  // the next block starts at its frame 0
     }
 }
 

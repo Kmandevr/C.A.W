@@ -178,6 +178,7 @@ private:
     void runInstrument(Slot& s, int m) noexcept;
     void instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept;
     void instrumentMotion(NoteEvents& notes, int m) noexcept;
+    void noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcept;
     void playTail(Slot& s) noexcept;
     static bool playsNotes(const Slot& s) noexcept;
     struct Voice& pickVoice(Chain& c) noexcept;

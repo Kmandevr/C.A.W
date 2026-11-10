@@ -818,10 +818,11 @@ const ModuleDescriptor kMorph = instrument("org.caw.synth.morph", "Morph synth",
 // table.basic). `drift` sweeps the shape with a slow sine over 16 beats. A resonant low-pass per side (a
 // note's timbre opens it), an ADSR envelope; velocity and pressure set the level.
 //
-// Made for real time (2026-11-10): the copies run a control period at a time through lib::addMorphStack
+// Made for real time (2026-11-10): the copies run a control period at a time through lib::addMorphStackAt
 // (float, vectorizable), and the voices without timbre share one filter pair, their envelopes applied
 // before it instead of after (the filter is linear, so this is the same sound but for the envelope's
-// edges, which it smooths by well under a millisecond); a voice with timbre has its own pair. Several times
+// edges, which it smooths by well under a millisecond); a voice with timbre has its own pair. Every
+// block size renders the same bits (the control grid and the LFO don't depend on where blocks split). Several times
 // cheaper than morphWave() per copy and per sample with a filter pair per voice, and perceptually the same
 // (tests/builtin_sounds_reference.inc).
 class MorphInstrument final : public InstrumentProcessor {
@@ -837,7 +838,10 @@ public:
         sharedL_.clear();
         sharedR_.clear();
         sharedQuiet_ = true;
+        sharedUsed_ = false;
+        sharedPeak_ = 0.0f;
         lfo_ = 0.0;
+        sinceControl_ = 0;
         started_ = 0;
         unison_ = 0;
         detune_ = spread_ = -1.0;
@@ -848,6 +852,7 @@ protected:
     void onNote(const NoteMessage& m) noexcept override {
         switch (m.type) {
             case NoteMessageType::On: {
+                settle();  // the sounding voices move on to this frame first
                 Voice& v = voices_.start(m.noteId);
                 const bool fresh = !v.amp.active();
                 v.velocity = m.velocity;
@@ -894,10 +899,15 @@ protected:
 
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
         const double tempo = b.transport && b.transport->tempo > 0.0 ? b.transport->tempo : 120.0;
-        clock_.run(frames, offset, [&](uint32_t at) noexcept { control(b, at); },
+        tempo_ = tempo;
+        clock_.run(frames, offset,
+                   [&](uint32_t at) noexcept {
+                       settle();
+                       control(b, at);
+                   },
                    [&](uint32_t start, uint32_t n) noexcept {
-                       lfo_ = lib::wrap01(lfo_ + static_cast<double>(n) * tempo / (60.0 * 16.0 * sr_));
                        renderPeriod(left + start, right + start, n);
+                       sinceControl_ += n;
                    });
     }
 
@@ -913,6 +923,30 @@ private:
         double dt[kMaxUnison] = {};  // each copy's step, at the last control
         double level = 0.0;
     };
+
+    // The copies' phases, the drift's LFO and the shared filter's rest move on by the frames since the last
+    // control, at once: the same sums however blocks split the time between (and a note-on settles them
+    // before its voice starts).
+    void settle() noexcept {
+        if (sinceControl_ == 0) return;
+        const double n = static_cast<double>(sinceControl_);
+        lfo_ = lib::wrap01(lfo_ + n * tempo_ / (60.0 * 16.0 * sr_));
+        for (Voice& v : voices_) {
+            if (!v.active) continue;
+            for (uint32_t u = 0; u < unison_; ++u)
+                if (v.dt[u] > 0.0 && v.dt[u] < 0.5) v.phase[u] = lib::wrap01(v.phase[u] + n * v.dt[u]);
+        }
+        // A period of the shared pair below -140 dB clears it (its ringing would decay into denormal numbers,
+        // with or without a voice held at level 0), and without voices it rests until one uses it again.
+        sharedQuiet_ = !sharedUsed_ && sharedPeak_ < 1e-7f;
+        if (sharedPeak_ < 1e-7f) {
+            sharedL_.clear();
+            sharedR_.clear();
+        }
+        sharedUsed_ = false;
+        sharedPeak_ = 0.0f;
+        sinceControl_ = 0;
+    }
 
     // Once per control period: the knobs, the shape (with its drift) and each sounding voice's settings.
     void control(const ProcessBlock& b, uint32_t at) noexcept {
@@ -951,16 +985,11 @@ private:
         for (Voice& v : voices_) {
             if (!v.active) continue;
             float sumL[kControlFrames] = {}, sumR[kControlFrames] = {};
-            lib::addMorphStack(sumL, sumR, frames, v.phase, v.dt, unison_, shape_, gainL_, gainR_);
+            lib::addMorphStackAt(sumL, sumR, frames, sinceControl_, v.phase, v.dt, unison_, shape_, gainL_, gainR_);
             if (v.timbre == 0.0) {
-                // The envelope steps linearly over the period (from where it is to where n samples take it):
-                // the same curve to well under a millisecond, for a few multiplies instead of a step a sample.
                 shared = true;
-                const float from = static_cast<float>(v.amp.level() * v.level);
-                const float to = static_cast<float>(v.amp.skip(frames) * v.level);
-                const float step = (to - from) / static_cast<float>(frames);
                 for (uint32_t i = 0; i < frames; ++i) {
-                    const float a = from + step * static_cast<float>(static_cast<int32_t>(i + 1));
+                    const float a = static_cast<float>(v.amp.next() * v.level);
                     sharedL[i] += sumL[i] * a;
                     sharedR[i] += sumR[i] * a;
                 }
@@ -973,9 +1002,12 @@ private:
             }
             if (!v.amp.active()) v.active = false;
         }
-        // The shared pair rings on after its last voice until it is quiet, then rests (no denormal decay).
+        // The shared pair rings on after its last voice until a period of it is quiet, then rests (no
+        // denormal decay) until a voice uses it again.
+        sharedUsed_ = sharedUsed_ || shared;
         if (!shared && sharedQuiet_) return;
-        float peak = 0.0f;
+        sharedQuiet_ = false;
+        float peak = sharedPeak_;
         for (uint32_t i = 0; i < frames; ++i) {
             const float l = static_cast<float>(sharedL_.lowpass(sharedL[i]));
             const float r = static_cast<float>(sharedR_.lowpass(sharedR[i]));
@@ -983,11 +1015,7 @@ private:
             right[i] += r;
             peak = std::max(peak, std::max(std::fabs(l), std::fabs(r)));
         }
-        sharedQuiet_ = !shared && peak < 1e-7f;
-        if (sharedQuiet_) {
-            sharedL_.clear();
-            sharedR_.clear();
-        }
+        sharedPeak_ = peak;
     }
 
     // Unison copies spread evenly over +-detune semitones and, by `spread`, from left to right.
@@ -1007,9 +1035,11 @@ private:
     }
     VoicePool<Voice, 8> voices_;
     lib::Svf sharedL_, sharedR_;  // the filter pair of the voices without timbre
-    bool sharedQuiet_ = true;
+    bool sharedQuiet_ = true, sharedUsed_ = false;  // resting; used in this control period
+    float sharedPeak_ = 0.0f;                        // its loudest output in this control period
     ControlClock clock_;
-    double sr_ = 48000.0, lfo_ = 0.0, shape_ = 0.45;
+    uint32_t sinceControl_ = 0;  // frames rendered since the last control
+    double sr_ = 48000.0, lfo_ = 0.0, shape_ = 0.45, tempo_ = 120.0;
     uint32_t started_ = 0, unison_ = 0;
     double detune_ = -1.0, spread_ = -1.0, unisonGain_ = 1.0;
     double ratio_[kMaxUnison] = {};

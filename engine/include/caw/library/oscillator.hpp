@@ -116,11 +116,11 @@ inline float shape(float t, float idt) noexcept {
     else return square(t, idt);
 }
 template <int A, bool Blend>
-inline void addMorph(float* sumL, float* sumR, uint32_t frames, float t0, float dt, float mix, float gainL,
-                     float gainR) noexcept {
+inline void addMorph(float* sumL, float* sumR, uint32_t frames, uint32_t first, float t0, float dt, float mix,
+                     float gainL, float gainR) noexcept {
     const float idt = 1.0f / dt;
     for (uint32_t i = 0; i < frames; ++i) {
-        float t = t0 + static_cast<float>(static_cast<int32_t>(i)) * dt;
+        float t = t0 + static_cast<float>(static_cast<int32_t>(first + i)) * dt;
         t -= whole(t);
         const float a = shape<A>(t, idt);
         float x = a;
@@ -130,16 +130,37 @@ inline void addMorph(float* sumL, float* sumR, uint32_t frames, float t0, float 
     }
 }
 template <int A, bool Blend>
-inline void addStack(float* sumL, float* sumR, uint32_t frames, double* phases, const double* dts, uint32_t copies,
-                     float mix, const float* gainsL, const float* gainsR) noexcept {
+inline void addStack(float* sumL, float* sumR, uint32_t frames, uint32_t first, const double* phases, const double* dts,
+                     uint32_t copies, float mix, const float* gainsL, const float* gainsR) noexcept {
     for (uint32_t u = 0; u < copies; ++u) {
         const double dt = dts[u];
         if (!(dt > 0.0 && dt < 0.5)) continue;
-        addMorph<A, Blend>(sumL, sumR, frames, static_cast<float>(phases[u]), static_cast<float>(dt), mix, gainsL[u], gainsR[u]);
-        phases[u] = wrap01(phases[u] + static_cast<double>(frames) * dt);
+        addMorph<A, Blend>(sumL, sumR, frames, first, static_cast<float>(phases[u]), static_cast<float>(dt), mix,
+                           gainsL[u], gainsR[u]);
     }
 }
 }  // namespace block_detail
+
+// addMorphStack without moving the phases: the frames `first` .. `first + frames` after them. A renderer
+// that splits a short period at events can render each piece from the period's phases and move them on
+// once at its end (the same bits however the period was split).
+inline void addMorphStackAt(float* sumL, float* sumR, uint32_t frames, uint32_t first, const double* phases,
+                            const double* dts, uint32_t copies, double shape, const float* gainsL,
+                            const float* gainsR) noexcept {
+    using namespace block_detail;
+    const double pos = (shape < 0.0 ? 0.0 : (shape > 1.0 ? 1.0 : shape)) * 3.0;
+    const int k = pos >= 3.0 ? 3 : static_cast<int>(pos);
+    const float mix = static_cast<float>(pos - k);
+    switch (k == 3 || mix == 0.0f ? k + 4 : k) {
+        case 0: addStack<0, true>(sumL, sumR, frames, first, phases, dts, copies, mix, gainsL, gainsR); break;
+        case 1: addStack<1, true>(sumL, sumR, frames, first, phases, dts, copies, mix, gainsL, gainsR); break;
+        case 2: addStack<2, true>(sumL, sumR, frames, first, phases, dts, copies, mix, gainsL, gainsR); break;
+        case 4: addStack<0, false>(sumL, sumR, frames, first, phases, dts, copies, mix, gainsL, gainsR); break;
+        case 5: addStack<1, false>(sumL, sumR, frames, first, phases, dts, copies, mix, gainsL, gainsR); break;
+        case 6: addStack<2, false>(sumL, sumR, frames, first, phases, dts, copies, mix, gainsL, gainsR); break;
+        default: addStack<3, false>(sumL, sumR, frames, first, phases, dts, copies, mix, gainsL, gainsR); break;
+    }
+}
 
 // Adds `frames` frames of a stack of `copies` oscillators, each morphWave(phases[u], dts[u], shape), to sumL
 // and sumR, scaled by gainsL[u] and gainsR[u], and moves each phase (cycles, 0..1) on: a unison stack, or any
@@ -147,19 +168,9 @@ inline void addStack(float* sumL, float* sumR, uint32_t frames, double* phases, 
 // short (up to a few hundred frames: each copy's phase within the block is worked out in float).
 inline void addMorphStack(float* sumL, float* sumR, uint32_t frames, double* phases, const double* dts, uint32_t copies,
                           double shape, const float* gainsL, const float* gainsR) noexcept {
-    using namespace block_detail;
-    const double pos = (shape < 0.0 ? 0.0 : (shape > 1.0 ? 1.0 : shape)) * 3.0;
-    const int k = pos >= 3.0 ? 3 : static_cast<int>(pos);
-    const float mix = static_cast<float>(pos - k);
-    switch (k == 3 || mix == 0.0f ? k + 4 : k) {
-        case 0: addStack<0, true>(sumL, sumR, frames, phases, dts, copies, mix, gainsL, gainsR); break;
-        case 1: addStack<1, true>(sumL, sumR, frames, phases, dts, copies, mix, gainsL, gainsR); break;
-        case 2: addStack<2, true>(sumL, sumR, frames, phases, dts, copies, mix, gainsL, gainsR); break;
-        case 4: addStack<0, false>(sumL, sumR, frames, phases, dts, copies, mix, gainsL, gainsR); break;
-        case 5: addStack<1, false>(sumL, sumR, frames, phases, dts, copies, mix, gainsL, gainsR); break;
-        case 6: addStack<2, false>(sumL, sumR, frames, phases, dts, copies, mix, gainsL, gainsR); break;
-        default: addStack<3, false>(sumL, sumR, frames, phases, dts, copies, mix, gainsL, gainsR); break;
-    }
+    addMorphStackAt(sumL, sumR, frames, 0, phases, dts, copies, shape, gainsL, gainsR);
+    for (uint32_t u = 0; u < copies; ++u)
+        if (dts[u] > 0.0 && dts[u] < 0.5) phases[u] = wrap01(phases[u] + static_cast<double>(frames) * dts[u]);
 }
 // One oscillator of addMorphStack.
 inline void addMorphBlock(float* sumL, float* sumR, uint32_t frames, double& phase, double dt, double shape,
