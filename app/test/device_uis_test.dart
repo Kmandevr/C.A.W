@@ -141,7 +141,7 @@ void main() {
   });
 
   group('gestures', () {
-    testWidgets('EQ: drag a node for frequency and gain, pinch for Q, double-tap toggles, a tile sets the type', (tester) async {
+    testWidgets('EQ: drag a node for frequency and gain, pinch for Q, double-tap resets, power and + in the strip, a tile sets the type', (tester) async {
       final s = await open(tester, 'org.caw.eq');
       final t = targetOf(s, 'org.caw.eq');
       final view = tester.getRect(find.byKey(const ValueKey('eq-view')));
@@ -165,12 +165,34 @@ void main() {
       await b.up();
       await tester.pumpAndSettle();
       expect(t.value('b5_q'), lessThan(q0));
-      // Double-tap band 6 (6 kHz) switches it off.
-      await tester.tapAt(node(6000, 0));
+      // Double-tap band 4 resets it (gain back to 0 dB); it stays on.
+      final at4 = node(t.value('b4_freq'), t.value('b4_gain'));
+      await tester.tapAt(at4);
       await tester.pump(const Duration(milliseconds: 60));
-      await tester.tapAt(node(6000, 0));
+      await tester.tapAt(at4);
+      await tester.pumpAndSettle();
+      expect(t.value('b4_gain'), 0);
+      expect(t.value('b4_on'), 1);
+      // The band's power is a button of its own.
+      await tester.tap(find.byKey(const ValueKey('eq-band-6')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('eq-band-power')));
+      await tester.tap(find.byKey(const ValueKey('eq-band-power')));
       await tester.pumpAndSettle();
       expect(t.value('b6_on'), 0);
+      // "+" then a tap on the curve turns the first off band on there, selected, its values readable.
+      await tester.ensureVisible(find.byKey(const ValueKey('eq-add')));
+      await tester.tap(find.byKey(const ValueKey('eq-add')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('eq-add-hint')), findsOneWidget);
+      final firstOff = [for (var n = 1; n <= 8; n++) if (t.param('b${n}_on') != null && t.value('b${n}_on') < 0.5) n].first;
+      final v2 = tester.getRect(find.byKey(const ValueKey('eq-view')));
+      await tester.tapAt(Offset(v2.left + freqToX(300, v2.width), v2.center.dy - 30));
+      await tester.pumpAndSettle();
+      expect(t.value('b${firstOff}_on'), 1);
+      expect(t.value('b${firstOff}_freq'), closeTo(300, 30));
+      expect(find.byKey(const ValueKey('eq-add-hint')), findsNothing);
+      expect(find.descendant(of: find.byKey(const ValueKey('eq-readout')), matching: find.text('BAND $firstOff')), findsOneWidget);
       // The band chips select; the selected band's type tiles set its type (Notch is tile 9).
       await tester.tap(find.byKey(const ValueKey('eq-band-5')));
       await tester.pumpAndSettle();
