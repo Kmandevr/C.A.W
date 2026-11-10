@@ -87,7 +87,8 @@ class _GridPainter extends CustomPainter {
 }
 
 /// Seconds since the visual started, for motion that shows state (a ping-pong ball, a sweeping notch, an LFO dot).
-/// It runs only with full motion; with reduced or no motion [builder] gets a fixed time, so the drawing stands still.
+/// It runs only with full motion (so the Minimal profile and reduced motion stop it), and redraws at about 30 Hz,
+/// the display data's rate, to keep the editor light on CPU; otherwise [builder] gets a fixed time.
 class DevicePhase extends StatefulWidget {
   const DevicePhase({super.key, required this.builder, this.still = 0.35});
   final Widget Function(BuildContext context, double seconds) builder;
@@ -100,7 +101,10 @@ class DevicePhase extends StatefulWidget {
 }
 
 class _DevicePhaseState extends State<DevicePhase> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker = createTicker((d) => _t.value = d.inMicroseconds / 1e6);
+  late final Ticker _ticker = createTicker((d) {
+    final s = d.inMicroseconds / 1e6;
+    if (s - _t.value >= 1 / 30) _t.value = s;
+  });
   final _t = ValueNotifier<double>(0);
 
   @override
