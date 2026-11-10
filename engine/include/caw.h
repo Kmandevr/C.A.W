@@ -298,8 +298,9 @@ CAW_API char* caw_sample_pack_render(const char* request_json, int32_t trust_lev
 /* The retired synths (org.caw.synth.morph, org.caw.bass, org.caw.synth.acid, org.caw.synth.basic) are Flagship
    presets. For an instrument entry {"id": ..., "params": {...}} returns {"ok": true, "migrated": bool, "id": ...,
    "params": {...}} and, when migrated, "preset" (its name) and "lanes" ({old knob: Flagship knob} for automation
-   lanes; a knob not listed has no Flagship knob in its units). An entry with another id comes back unchanged
-   ("migrated": false). Needs no engine; free with caw_free. The engine migrates a project it is given too. */
+   lanes; a knob not listed has no Flagship knob in its units). Another entry comes back with "migrated": false,
+   and, when it names a "preset", that preset's values under its own params (an unknown preset: "ok": false).
+   Needs no engine; free with caw_free. The engine migrates a project it is given too. */
 CAW_API char* caw_migrate_instrument(const char* entry_json);
 
 /* Sound quality, for the device's budget: Eco lowers oversampling, caps unison copies at 4, halves display

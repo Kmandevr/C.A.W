@@ -535,6 +535,31 @@ class Engine {
   /// The engine's built-in metronome click on every beat while playing.
   void setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0);
 
+  /// Sound quality (CAW_QUALITY_*: 0 Eco, 1 Normal, 2 High): what the built-ins spend on oversampling, unison
+  /// copies, reverb density and display updates.
+  void setQuality(int quality) => _b.setQuality(_handle, quality);
+
+  /// The device buffer (CAW_BUFFER_*: 0 Auto, 1 Low latency, 2 Battery) and whether a recording is running (Auto
+  /// uses the small buffer only then). A running device reopens when the size changes.
+  void setBufferMode(int mode, {required bool recording}) => _b.audioSetBufferMode(_handle, mode, recording ? 1 : 0);
+
+  /// The device's callback size in frames while it plays (0 when stopped).
+  int get bufferFrames => _b.audioBufferFrames(_handle);
+
+  /// An instrument entry ({"id", "params", "preset"}) as the engine plays it (caw_migrate_instrument): a retired
+  /// synth becomes Flagship with its preset and knobs mapped ("migrated": true, "lanes": old knob to new), and an
+  /// entry naming a preset gets the preset's values under its own. Null when the engine refuses it.
+  static Map<String, dynamic>? resolveInstrument(Map<String, dynamic> entry) {
+    final b = Bindings.instance;
+    final s = jsonEncode(entry).toNativeUtf8();
+    final r = b.migrateInstrument(s);
+    calloc.free(s);
+    if (r == nullptr) return null;
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    b.free(r);
+    return j['ok'] == true ? j : null;
+  }
+
   /// Ends every knob touch, so automation lanes rule again without a restart (Touch mode letting go).
   void releaseTouches() => _b.releaseTouches(_handle);
 

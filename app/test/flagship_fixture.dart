@@ -16,7 +16,7 @@ NativeComponentInfo flagshipFixture() {
   for (var o = 1; o <= 3; o++) {
     final p = 'osc${o}_', n = 'Osc $o ';
     pick('${p}on', '${n}on', o == 1 ? 1 : 0, offOn);
-    pick('${p}table', '${n}table', 0, const ['Basic', 'Analog', 'Vocal', 'Harmonic']);
+    pick('${p}table', '${n}table', 0, const ['Basic', 'Analog', 'Vocal', 'Harmonic', 'Classic']);
     num('${p}frame', '${n}frame', 1 / 3, 0, 1);
     num('${p}level', '${n}level', 0.7, 0, 1);
     num('${p}pan', '${n}pan', 0, -1, 1);
@@ -61,7 +61,7 @@ NativeComponentInfo flagshipFixture() {
     pick('${p}shape', '${n}shape', 0, const ['Sine', 'Triangle', 'Saw up', 'Saw down', 'Square', 'Sample & hold', 'Smooth random']);
     expo('${p}rate', '${n}rate', 2, 0.01, 40, 'Hz');
     pick('${p}sync', '${n}sync', 0, const ['Off', '1/32', '1/16', '1/8', '1/4', '1/2', '1 bar', '2 bars', '4 bars', '8 bars']);
-    pick('${p}mode', '${n}mode', 0, const ['Free', 'Retrigger']);
+    pick('${p}mode', '${n}mode', 0, const ['Free', 'Retrigger', 'Running']);
   }
   expo('rnd_rate', 'Random rate', 4, 0.01, 40, 'Hz');
   pick('rnd_mode', 'Random mode', 0, const ['Sample & hold', 'Smooth']);
@@ -93,14 +93,21 @@ NativeComponentInfo flagshipFixture() {
   num('fx_reverb_damping', 'Reverb damping', 0.45, 0, 1);
   num('fx_reverb_mix', 'Reverb mix', 0.18, 0, 1);
   final targets = ['None', for (final p in ps) p.label];
+  const sources = ['None', 'Env 1', 'Env 2', 'Env 3', 'LFO 1', 'LFO 2', 'LFO 3', 'Random', 'Velocity', 'Note', 'Pitch bend',
+    'Pressure', 'Timbre', 'Mod wheel', 'Accent'];
   final cutoff1 = ps.indexWhere((p) => p.id == 'flt1_cutoff');
   for (var s = 1; s <= 16; s++) {
     final p = 'mod${s}_', n = 'Mod $s ';
-    pick('${p}src', '${n}source', s == 1 ? 2 : 0, const ['None', 'Env 1', 'Env 2', 'Env 3', 'LFO 1', 'LFO 2', 'LFO 3',
-      'Random', 'Velocity', 'Note', 'Pitch bend', 'Pressure', 'Timbre', 'Mod wheel']);
+    pick('${p}src', '${n}source', s == 1 ? 2 : 0, sources);
     pick('${p}dst', '${n}destination', s == 1 ? cutoff1 + 1.0 : 0, targets);
     num('${p}amt', '${n}amount', s == 1 ? 0.15 : 0, -1, 1);
     pick('${p}bipolar', '${n}polarity', 0, const ['Unipolar', 'Bipolar']);
+  }
+  // After the slots (one synth, 2026-11-10), so the slots' destination numbers stay put.
+  pick('voice_mode', 'Voice mode', 0, const ['Poly', 'Mono', 'Legato']);
+  expo('glide', 'Glide', 0.05, 0.001, 2, 's');
+  for (var s = 1; s <= 16; s++) {
+    pick('mod${s}_via', 'Mod $s scaled by', 0, sources);
   }
   return NativeComponentInfo(id: 'org.caw.synth.flagship', name: 'Flagship', role: 'instrument', builtin: true,
       ports: const [

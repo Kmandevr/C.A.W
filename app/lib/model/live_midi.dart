@@ -85,6 +85,7 @@ class LiveMidi extends ChangeNotifier {
 
   /// The engine's click: always, or while recording (with its count-in), as the Record long-press sets it.
   void _applyMetronome() {
+    state.applyAudioSettings(recording: recording);  // Auto's buffer: the small one while recording
     final want = switch (state.settings.metronome) {
       Metronome.off => false,
       Metronome.recording => recording,

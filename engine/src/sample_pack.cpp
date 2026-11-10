@@ -1,7 +1,7 @@
 // Sample-pack maker: batch-renders an instrument (and effects) over notes, velocities and parameter steps to named WAV files.
 #include "sample_pack.h"
 
-#include "builtin_presets.h"
+#include "presets.h"
 
 #include <algorithm>
 #include <atomic>

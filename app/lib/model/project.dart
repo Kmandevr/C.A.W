@@ -165,8 +165,16 @@ class ProjectAutomationLaneDoc {
 /// A native C++ component placed in a chain (a track's inserts or the master's), with the parameter
 /// values the project sets. Placing one is not a trust grant: the component must be loaded first.
 class ComponentUseDoc {
-  ComponentUseDoc(this.id, [Map<String, double>? params, this.bypass = false, this.state, this.stateVersion = 1])
+  ComponentUseDoc(this.id, [Map<String, double>? params, this.bypass = false, this.state, this.stateVersion = 1, this.preset])
       : params = params ?? {};
+
+  /// The synths that became Flagship presets (one synth, 2026-11-10): a project naming one plays Flagship with the
+  /// matching preset ([ProjectDoc.resolveInstruments]).
+  static const retiredInstruments = {'org.caw.synth.morph', 'org.caw.bass', 'org.caw.synth.acid', 'org.caw.synth.basic'};
+
+  /// The built-in preset the values start from (Flagship's "Mono bass"...), or null. The engine puts the preset's
+  /// values under [params]; [ProjectDoc.resolveInstruments] fills them in so the knobs show them.
+  String? preset;
 
   final String id;
   Map<String, double> params;
@@ -180,10 +188,11 @@ class ComponentUseDoc {
   int stateVersion;
 
   /// A bare id when nothing else is set, as older projects stored it.
-  Object toJson() => params.isEmpty && !bypass && state == null
+  Object toJson() => params.isEmpty && !bypass && state == null && preset == null
       ? id
       : {
           'id': id,
+          if (preset != null) 'preset': preset,
           if (params.isNotEmpty) 'params': params,
           if (bypass) 'bypass': true,
           if (state != null) ...{'state': state, 'state_version': stateVersion},
@@ -215,6 +224,7 @@ class ComponentUseDoc {
       j['bypass'] == true,
       state is String && state.length <= (16 << 20) && RegExp(r'^[A-Za-z0-9+/]*={0,2}$').hasMatch(state) ? state : null,
       version is int && version >= 0 && version <= 0xFFFFFFFF ? version : 1,
+      switch (_boundedProjectText(j['preset'], 64)) { '' => null, final name => name },
     );
   }
 
@@ -685,6 +695,42 @@ class ProjectDoc {
         if (hasLoopRange) ...{'loop_range': loopRange, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         if (markers.isNotEmpty) 'markers': [for (final m in markers) m.toJson()],
       };
+
+  /// Brings each track's instrument up to what the engine plays, with [resolve] (`Engine.resolveInstrument`): a
+  /// retired synth (one synth, 2026-11-10) becomes Flagship with the matching preset and its knobs mapped, its
+  /// lanes moved to the knobs they map to (and dropped when there is none), and an instrument naming a preset gets
+  /// the preset's values under its own so its knobs show them. Returns whether anything changed.
+  bool resolveInstruments(Map<String, dynamic>? Function(Map<String, dynamic> entry) resolve) {
+    var changed = false;
+    for (final l in layers) {
+      final use = l.instrument;
+      if (l.isFolder || use == null) continue;
+      final retired = ComponentUseDoc.retiredInstruments.contains(use.id);
+      if (!retired && use.preset == null) continue;
+      final r = resolve({'id': use.id, 'params': use.params, if (use.preset != null) 'preset': use.preset});
+      if (r == null) continue;
+      final params = <String, double>{
+        for (final e in ((r['params'] as Map?) ?? const {}).entries)
+          if (e.value is num) e.key as String: (e.value as num).toDouble(),
+      };
+      if (r['migrated'] == true) {
+        final lanes = (r['lanes'] as Map?) ?? const {};
+        automation.removeWhere((lane) {
+          if (lane.targetType != 'instrument' || lane.layerId != l.id) return false;
+          final to = lanes[lane.target];
+          if (to is! String) return true;  // an old knob with no Flagship knob in its units
+          lane.target = to;
+          return false;
+        });
+        l.instrument = ComponentUseDoc(r['id'] as String, params, use.bypass, null, 1, r['preset'] as String?);
+        changed = true;
+      } else if (params.length != use.params.length || params.entries.any((e) => use.params[e.key] != e.value)) {
+        use.params = params;
+        changed = true;
+      }
+    }
+    return changed;
+  }
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
     final project = ProjectDoc(

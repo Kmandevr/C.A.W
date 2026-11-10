@@ -361,7 +361,7 @@ void main() {
   test('the fixture matches the engine\'s flagship descriptor', () async {
     final e = Engine.create();
     final real = (await e.nativeComponents()).firstWhere((c) => c.id == flagshipComponentId);
-    expect(real.parameters.length, 191);
+    expect(real.parameters.length, 209);
     expect([for (final p in real.parameters) p.id], [for (final p in flagship.parameters) p.id]);
     for (var i = 0; i < real.parameters.length; i++) {
       final a = real.parameters[i], b = flagship.parameters[i];

@@ -1,5 +1,5 @@
 // Built-in presets (named parameter sets of built-in components) and the migration of the retired synths to Flagship presets.
-#include "builtin_presets.h"
+#include "presets.h"
 
 #include <cmath>
 #include <cstdio>
@@ -320,8 +320,15 @@ std::string migrateInstrumentJson(std::string_view entryJson) {
     std::string preset;
     const std::string legacy = id;
     const bool migrated = migrateLegacyInstrument(id, params, &preset);
+    if (!migrated)
+        if (const Json* named = j.get("preset"); named && named->type == Json::Type::String) {
+            if (!applyBuiltinPreset(id, named->str, params))
+                return "{\"ok\":false,\"error\":\"" + jsonEscape("'" + id + "' has no preset '" + named->str + "'") + "\"}";
+            preset = named->str;
+        }
     std::string json = std::string("{\"ok\":true,\"migrated\":") + (migrated ? "true" : "false") + ",\"id\":\"" +
                        jsonEscape(id) + "\"";
+    if (!migrated && !preset.empty()) json += ",\"preset\":\"" + jsonEscape(preset) + "\"";
     if (migrated) {
         json += ",\"preset\":\"" + jsonEscape(preset) + "\",\"lanes\":{";
         bool first = true;

@@ -44,7 +44,8 @@ bool migrateLegacyInstrument(std::string& id, std::vector<std::pair<std::string,
 std::string migratedLegacyParameter(std::string_view legacyId, std::string_view param);
 
 // The JSON result of caw_migrate_instrument: {"ok": true, "migrated": bool, "id": ..., "preset": ...,
-// "params": {...}} for an entry {"id": ..., "params": {...}}.
+// "params": {...}} for an entry {"id": ..., "params": {...}, "preset": ...}: a retired synth migrated, or an
+// entry naming a preset with the preset's values under its params.
 std::string migrateInstrumentJson(std::string_view entryJson);
 
 }  // namespace caw

@@ -332,21 +332,14 @@ class CppBuiltin {
 }
 
 const cppBuiltins = <CppBuiltin>[
-  CppBuiltin('org.caw.synth.basic', 'Basic synth', true, 'Two oscillators, a resonant low-pass and an ADSR; 16 voices.',
-      ['wave1', 'wave2', 'detune', 'mix', 'cutoff', 'resonance', 'env', 'attack', 'decay', 'sustain', 'release', 'volume']),
-  CppBuiltin('org.caw.synth.morph', 'Morph synth', true, 'A sine-to-square morph with unison, drift, a low-pass and an ADSR.',
-      ['shape', 'drift', 'unison', 'detune', 'spread', 'cutoff', 'resonance', 'attack', 'decay', 'sustain', 'release', 'volume']),
   CppBuiltin('org.caw.synth.flagship', 'Flagship', true,
-      'Three wavetable oscillators with unison (up to 16 copies), two filters, a 16-slot mod matrix and effects. Its 191 '
-      'knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, lfo1_..lfo3_, rnd_, mod1_..mod16_ and fx_.',
-      ['flt_routing', 'rnd_rate', 'rnd_mode', 'volume', 'velocity', 'bend_range', 'fx_dist_on', 'fx_dist_type', 'fx_dist_drive',
+      'Three wavetable oscillators with unison (up to 16 copies), two filters, a 16-slot mod matrix and effects; poly, '
+      'mono or legato with glide. Its 209 knobs are grouped by prefix: osc1_..osc3_, flt1_, flt2_, flt_routing, env1_..env3_, '
+      'lfo1_..lfo3_, rnd_, mod1_..mod16_ and fx_. Presets: Init, Morph pad, Mono bass, Acid 303 and Basic.',
+      ['voice_mode', 'glide', 'flt_routing', 'rnd_rate', 'rnd_mode', 'volume', 'velocity', 'bend_range', 'fx_dist_on', 'fx_dist_type', 'fx_dist_drive',
        'fx_dist_mix', 'fx_eq_on', 'fx_eq_low', 'fx_eq_mid', 'fx_eq_mid_freq', 'fx_eq_high', 'fx_eq_mix', 'fx_chorus_on',
        'fx_chorus_rate', 'fx_chorus_depth', 'fx_chorus_mix', 'fx_delay_on', 'fx_delay_sync', 'fx_delay_time', 'fx_delay_feedback',
        'fx_delay_mix', 'fx_reverb_on', 'fx_reverb_size', 'fx_reverb_decay', 'fx_reverb_damping', 'fx_reverb_mix']),
-  CppBuiltin('org.caw.synth.acid', 'Acid synth', true, 'One saw or square voice into a 4-pole ladder; accents and slides.',
-      ['wave', 'cutoff', 'resonance', 'env', 'decay', 'accent', 'slide', 'drive', 'volume']),
-  CppBuiltin('org.caw.bass', 'Bass', true, 'A saw or square with a sub an octave below, a low-pass and glide.',
-      ['wave', 'sub', 'cutoff', 'resonance', 'env', 'decay', 'sustain', 'glide', 'legato', 'drive', 'volume']),
   CppBuiltin('org.caw.drum.kit', 'Drum kit', true, 'Kick, snare, clap and hi-hats on General MIDI keys (C2 kick, D2 snare, F#2 hat).',
       ['kick_tune', 'kick_decay', 'kick_punch', 'snare_tune', 'snare_snappy', 'clap_decay', 'hat_closed', 'hat_open', 'hat_tone', 'kick',
        'snare', 'clap', 'hats', 'volume']),
@@ -371,7 +364,7 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.delay.pro', 'Delay', false, 'Stereo, ping-pong or dual; synced (dotted, triplet) or free; a filtered, driven loop.',
       ['mode', 'sync', 'time', 'sync_r', 'time_r', 'offset', 'feedback', 'low_cut', 'high_cut', 'drive', 'mod_depth', 'mod_rate',
        'duck', 'freeze', 'mix']),
-  CppBuiltin('org.caw.saturator', 'Saturator', false, 'Tape, tube, soft and hard clip, fold and crush, 2x oversampled.',
+  CppBuiltin('org.caw.saturator', 'Saturator', false, 'Tape, tube, soft and hard clip, fold and crush, 2x oversampled (4x at High quality).',
       ['mode', 'drive', 'bias', 'tone', 'bits', 'rate', 'oversample', 'auto_gain', 'output', 'mix']),
   CppBuiltin('org.caw.gate', 'Gate', false, 'A gate or expander with hold and a sidechain filter.',
       ['threshold', 'range', 'ratio', 'attack', 'hold', 'release', 'knee', 'sc_hpf']),

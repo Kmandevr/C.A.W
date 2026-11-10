@@ -18,7 +18,7 @@
 #include "caw/library/unison.hpp"
 #include "caw/library/wavetable.hpp"
 #include "analysis.h"
-#include "builtin_presets.h"
+#include "presets.h"
 #include "caw.h"
 #include "engine.h"
 #include "project.h"
@@ -788,4 +788,15 @@ TEST(an_old_project_s_retired_synth_plays_as_flagship_with_its_preset_and_knobs)
     char* other = caw_migrate_instrument(R"({"id":"org.caw.drum.kick","params":{"tune":50}})");
     CHECK(std::string(other).find("\"migrated\":false") != std::string::npos);
     caw_free(other);
+    // An entry naming a preset comes back with the preset's values under its own (the app fills its knobs).
+    char* named = caw_migrate_instrument(R"({"id":"org.caw.synth.flagship","preset":"Acid 303","params":{"glide":0.2}})");
+    const std::string resolved = named;
+    caw_free(named);
+    CHECK(resolved.find("\"migrated\":false") != std::string::npos);
+    CHECK(resolved.find("\"preset\":\"Acid 303\"") != std::string::npos);
+    CHECK(resolved.find("\"glide\":0.20000000000000001") != std::string::npos);
+    CHECK(resolved.find("\"voice_mode\":2") != std::string::npos);
+    char* bad = caw_migrate_instrument(R"({"id":"org.caw.synth.flagship","preset":"Nope"})");
+    CHECK(std::string(bad).find("\"ok\":false") != std::string::npos);
+    caw_free(bad);
 }
