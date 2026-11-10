@@ -11,7 +11,7 @@ import 'layout.dart';
 /// A panel's tab title.
 String dockPanelTitle(String id) => switch (id) {
   Panels.arrangement => 'Arrange',
-  Panels.builder => 'Code',
+  Panels.builder => 'Build',
   Panels.mixer => 'Mixer',
   Panels.engineLab => 'Engine lab',
   Panels.automation => 'Automation',

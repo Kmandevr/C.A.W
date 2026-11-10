@@ -8,6 +8,7 @@ import 'package:caw/model/app_state.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/dock/dock_controller.dart';
 import 'package:caw/ui/dock/layout.dart';
+import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
@@ -81,6 +82,7 @@ void main() {
       expect(formFactorFor(const Size(390, 780)), FormFactor.phonePortrait);
       expect(formFactorFor(const Size(844, 330)), FormFactor.phoneLandscape);
       expect(formFactorFor(const Size(1280, 800)), FormFactor.desktop);
+      expect(formFactorFor(const Size(800, 1280)), FormFactor.desktop, reason: 'a tablet in portrait');
     });
   });
 
@@ -106,11 +108,29 @@ void main() {
       expect(tester.takeException(), isNull);
       await expectLater(goldenScreen, matchesGoldenFile('goldens/shell_${size.key}.png'));
       final dock = DockController.of(tester.element(find.byType(Scaffold).first));
-      for (final id in Panels.all) {
-        dock.reveal(id);
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull, reason: '$id at ${size.key}');
-        expect(dock.layout.visible, contains(id));
+      if (dock.form == FormFactor.desktop) {
+        for (final id in Panels.all) {
+          dock.reveal(id);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: '$id at ${size.key}');
+          expect(dock.layout.visible, contains(id));
+        }
+      } else {
+        // A phone shows one section at a time and the other workspaces as pages from More.
+        for (final section in Section.values) {
+          await tester.tap(find.byKey(ValueKey('section-${section.name}')));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: '${section.name} at ${size.key}');
+        }
+        for (final title in const ['Mixer', 'Automation']) {
+          await tester.tap(find.byKey(const ValueKey('more-tools')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(title).last);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: '$title at ${size.key}');
+          await tester.pageBack();
+          await tester.pumpAndSettle();
+        }
       }
       s.dispose();
     }, skip: skip);

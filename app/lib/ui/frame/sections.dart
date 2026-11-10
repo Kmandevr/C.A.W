@@ -49,6 +49,14 @@ class SectionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Adds [tab] to Build without bringing Build to the front (the shell opens the selected .caw module at start).
+  void addBuild(BuildTab tab) {
+    if (_tabs.contains(tab)) return;
+    _tabs.add(tab);
+    _activeTab ??= tab;
+    notifyListeners();
+  }
+
   void activateBuild(BuildTab tab) {
     if (!_tabs.contains(tab) || _activeTab == tab) return;
     _activeTab = tab;

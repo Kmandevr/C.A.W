@@ -1,4 +1,5 @@
-// App shell: transport, project menu, and the eight workspaces as docking panels (one layout per screen shape).
+// App shell: the frame (Build, Files, Arrange; bottom transport on phones, a rail and docking panels when wide) and
+// the project menu.
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
@@ -7,10 +8,10 @@ import 'package:flutter/services.dart';
 import '../actions/actions.dart';
 import '../model/app_state.dart';
 import 'arranger_screen.dart';
-import 'builder_screen.dart';
 import 'exporter_screen.dart';
 import 'mixer_screen.dart';
 import 'automation_screen.dart';
+import 'cpp/build_section.dart';
 import 'dock/dock_controller.dart';
 import 'dock/dock_view.dart';
 import 'dock/layout.dart';
@@ -22,6 +23,9 @@ import 'theme.dart';
 import 'theme_editor.dart';
 import 'widgets.dart';
 import 'glass.dart';
+import 'frame/frame_widgets.dart';
+import 'frame/sections.dart';
+import 'frame/strain.dart';
 
 /// The panel each view shortcut shows, by the index KeyRouter's `onView` passes.
 const _viewPanels = [
@@ -43,12 +47,28 @@ Area _areaOf(String panel) => switch (panel) {
       _ => Area.global,
     };
 
-/// The screen shape that keeps its own layout, from the shell's size.
-FormFactor formFactorFor(Size size) => size.width >= 900
+/// The screen shape that keeps its own layout, from the shell's size. Tablets (shortest side 600 dp or more) get the
+/// desktop layout with touch (owner, 2026-11-09).
+FormFactor formFactorFor(Size size) => size.width >= 900 || size.shortestSide >= 600
     ? FormFactor.desktop
     : size.width > size.height
         ? FormFactor.phoneLandscape
         : FormFactor.phonePortrait;
+
+/// The section a docked panel belongs to (the rail highlights it), or null for the others.
+Section? sectionOfPanel(String panel) => switch (panel) {
+      Panels.builder => Section.build,
+      Panels.files => Section.files,
+      Panels.arrangement => Section.arrange,
+      _ => null,
+    };
+
+/// The docked panel that shows [section] on desktop.
+String panelOfSection(Section section) => switch (section) {
+      Section.build => Panels.builder,
+      Section.files => Panels.files,
+      Section.arrange => Panels.arrangement,
+    };
 
 class Shell extends StatefulWidget {
   const Shell({super.key, required this.state});
@@ -61,6 +81,11 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> {
   late final AppLifecycleListener _life;
   late final DockController _dock = DockController(s.settings);
+  final SectionController _sections = SectionController();
+  Section _lastSection = Section.arrange;
+
+  // Phone: the top row brought down within thumb reach (a downward swipe on the bottom bar); a tap anywhere ends it.
+  bool _reach = false;
 
   // The arrangement is home (UI plan U1): shown in front once at launch, whatever panel the saved layout had there.
   bool _homeShown = false;
@@ -70,6 +95,7 @@ class _ShellState extends State<Shell> {
   @override
   void initState() {
     super.initState();
+    _sections.addListener(_onSection);
     _life = AppLifecycleListener(
       onPause: () {
         _dock.flush();
@@ -88,13 +114,46 @@ class _ShellState extends State<Shell> {
   void dispose() {
     _life.dispose();
     _dock.dispose();
+    _sections.removeListener(_onSection);
+    _sections.dispose();
     super.dispose();
   }
 
-  void _openBuilder() => _dock.reveal(Panels.builder);
+  /// On desktop a section change (an "open in Build" from another screen) shows its docked panel.
+  void _onSection() {
+    final now = _sections.current;
+    if (now == _lastSection) return;
+    _lastSection = now;
+    if (_dock.form == FormFactor.desktop) _dock.reveal(panelOfSection(now));
+  }
+
+  /// Opens the selected .caw module in Build (the older screens' "open in Builder").
+  void _openBuilder() {
+    final id = s.selectedModuleId;
+    id == null ? _sections.show(Section.build) : _sections.openBuild(BuildTab(BuildTabKind.caw, id));
+    if (_dock.form == FormFactor.desktop) _dock.reveal(Panels.builder);
+  }
+
+  /// Shows [panel]: docked on desktop; on a phone its section, or a page of its own for the other workspaces.
+  void _reveal(BuildContext context, String panel) {
+    if (_dock.form == FormFactor.desktop) return _dock.reveal(panel);
+    final section = sectionOfPanel(panel);
+    if (section != null) return _sections.show(section);
+    final screen = _screens()[panel];
+    if (screen == null) return;
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => GlassPage(
+        child: Scaffold(
+          backgroundColor: Glass.active ? Colors.transparent : null,
+          appBar: AppBar(title: Text(dockPanelTitle(panel)), backgroundColor: Colors.transparent),
+          body: SafeArea(top: false, child: screen),
+        ),
+      ),
+    ));
+  }
 
   Map<String, Widget> _screens() => {
-        Panels.builder: BuilderScreen(state: s),
+        Panels.builder: BuildSection(state: s),
         Panels.arrangement: ArrangerScreen(
           state: s,
           onOpenPattern: _openBuilder,
@@ -116,57 +175,211 @@ class _ShellState extends State<Shell> {
         listenable: s,
         builder: (context, _) {
           if (!s.ready) return const Scaffold(body: Center(child: CrowLogo(size: 64)));
+          // Build opens on the selected .caw module until the user opens something else.
+          final selected = s.selectedModuleId;
+          if (_sections.buildTabs.isEmpty && selected != null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _sections.buildTabs.isEmpty) _sections.addBuild(BuildTab(BuildTabKind.caw, selected));
+            });
+          }
           // Built once per app-state change; a layout change (a divider drag, a tab) reuses them, so it rebuilds
           // only the dock, not the screens.
           final screens = _screens();
-          return DockScope(
-            controller: _dock,
-            child: Scaffold(
-              body: SafeArea(
-                child: LayoutBuilder(builder: (context, box) {
-                  _dock.form = formFactorFor(box.biggest);
-                  if (!_homeShown) {
-                    _homeShown = true;
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) _dock.reveal(Panels.arrangement);
-                    });
-                  }
-                  return ListenableBuilder(
-                    listenable: _dock,
-                    builder: (context, _) => KeyRouter(
-                      state: s,
-                      screenArea: _areaOf(_dock.keyPanel),
-                      onView: (i) => _dock.reveal(_viewPanels[i]),
-                      child: Column(children: [
-                        _TransportBar(state: s, dock: _dock),
-                        if (s.engineError != null || s.audioError != null || s.openError != null)
-                          Container(
-                            width: double.infinity,
-                            color: Neon.pink.withValues(alpha: 0.15),
-                            padding: const EdgeInsets.all(8),
-                            child: Text(s.engineError ?? s.audioError ?? s.openError!,
-                                style: const TextStyle(color: Neon.pink)),
-                          ),
-                        Expanded(
-                          child: DockView(
-                            layout: _dock.layout,
-                            onChanged: _dock.set,
-                            panelBuilder: (_, id) => Listener(
-                              behavior: HitTestBehavior.translucent,
-                              onPointerDown: (_) => _dock.touch(id),
-                              child: screens[id] ?? const SizedBox.shrink(),
-                            ),
-                          ),
+          return SectionScope(
+            controller: _sections,
+            child: DockScope(
+              controller: _dock,
+              child: GlassStrainWatcher(
+                state: s,
+                child: Scaffold(
+                  body: SafeArea(
+                    child: LayoutBuilder(builder: (context, box) {
+                      _dock.form = formFactorFor(box.biggest);
+                      if (!_homeShown) {
+                        _homeShown = true;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted && _dock.form == FormFactor.desktop) _dock.reveal(Panels.arrangement);
+                        });
+                      }
+                      return ListenableBuilder(
+                        listenable: Listenable.merge([_dock, _sections]),
+                        builder: (context, _) => KeyRouter(
+                          state: s,
+                          screenArea: _dock.form == FormFactor.desktop
+                              ? _areaOf(_dock.keyPanel)
+                              : _areaOf(panelOfSection(_sections.current)),
+                          onView: (i) => _reveal(context, _viewPanels[i]),
+                          child: _dock.form == FormFactor.desktop
+                              ? _desktop(context, screens)
+                              : _phone(context, screens, landscape: _dock.form == FormFactor.phoneLandscape),
                         ),
-                      ]),
-                    ),
-                  );
-                }),
+                      );
+                    }),
+                  ),
+                ),
               ),
             ),
           );
         },
       );
+
+  Widget? _banner() => s.engineError != null || s.audioError != null || s.openError != null
+      ? Container(
+          width: double.infinity,
+          color: Neon.pink.withValues(alpha: 0.15),
+          padding: const EdgeInsets.all(8),
+          child: Text(s.engineError ?? s.audioError ?? s.openError!, style: const TextStyle(color: Neon.pink)),
+        )
+      : null;
+
+  /// Desktop and tablets: the rail, the transport bar and the docking panels.
+  Widget _desktop(BuildContext context, Map<String, Widget> screens) => Row(children: [
+        SectionRail(
+          current: sectionOfPanel(_dock.keyPanel),
+          onSelect: (section) {
+            _sections.show(section);
+            _dock.reveal(panelOfSection(section));
+          },
+        ),
+        Expanded(
+          child: Column(children: [
+            _TransportBar(state: s, dock: _dock),
+            ?_banner(),
+            Expanded(
+              child: DockView(
+                layout: _dock.layout,
+                onChanged: _dock.set,
+                panelBuilder: (_, id) => Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (_) => _dock.touch(id),
+                  child: screens[id] ?? const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ]);
+
+  /// Phones: one section at a time. Portrait has the status row on top and the transport and section bar at the
+  /// bottom (both hide while the keyboard is open); landscape has the rail on the left.
+  Widget _phone(BuildContext context, Map<String, Widget> screens, {required bool landscape}) {
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final status = _StatusRow(state: s, onTools: () => _showTools(context));
+    final body = Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) {
+        if (_reach) setState(() => _reach = false);
+      },
+      child: IndexedStack(
+        index: sectionOrder.indexOf(_sections.current),
+        children: [
+          for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
+        ],
+      ),
+    );
+    if (landscape) {
+      return Row(children: [
+        SectionRail(current: _sections.current, onSelect: _sections.show),
+        Expanded(
+          child: Column(children: [
+            status,
+            ?_banner(),
+            Expanded(child: body),
+            if (!keyboard) BottomTransport(state: s, compact: true),
+          ]),
+        ),
+      ]);
+    }
+    return Column(children: [
+      if (!_reach) status,
+      ?_banner(),
+      Expanded(child: body),
+      if (_reach) status,
+      if (!keyboard) ...[
+        BottomTransport(state: s),
+        SectionBar(sections: _sections, onReach: () => setState(() => _reach = true)),
+      ],
+    ]);
+  }
+
+  /// The phone's other workspaces (the mixer, automation, export, the engine lab, the .caw plugin builder).
+  Future<void> _showTools(BuildContext context) => showGlassSheet<void>(
+        context: context,
+        backgroundColor: Neon.panel,
+        isScrollControlled: true,
+        builder: (sheet) => SafeArea(
+          child: ListView(shrinkWrap: true, children: [
+            const Heading('More'),
+            for (final id in const [Panels.mixer, Panels.automation, Panels.exporter, Panels.engineLab, Panels.pluginBuilder])
+              ListTile(
+                dense: true,
+                leading: Icon(_panelIcon(id), color: Neon.dim, size: 19),
+                title: Text(dockPanelTitle(id)),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _reveal(context, id);
+                },
+              ),
+          ]),
+        ),
+      );
+}
+
+/// The phone's slim top row: the project (tap for its menu), the tempo, the song position and CPU, and More.
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({required this.state, required this.onTools});
+  final AppState state;
+  final VoidCallback onTools;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = state.project;
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: Glass.active
+          ? BoxDecoration(
+              color: Neon.panel.withValues(alpha: 0.6),
+              border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+            )
+          : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
+      child: Row(children: [
+        const CrowLogo(size: 22),
+        const SizedBox(width: 6),
+        Expanded(
+          child: InkWell(
+            key: const ValueKey('project-menu'),
+            onTap: () => showProjectMenu(context, state),
+            child: Row(children: [
+              Flexible(
+                child: Text(p.name,
+                    overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              ),
+              const Icon(Icons.arrow_drop_down, color: Neon.dim, size: 18),
+            ]),
+          ),
+        ),
+        _BpmButton(state: state),
+        const SizedBox(width: 8),
+        ValueListenableBuilder<int>(
+          valueListenable: state.tick,
+          builder: (context, _, _) {
+            final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
+            return Text('CPU $cpu%', style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim));
+          },
+        ),
+        IconButton(
+          key: const ValueKey('more-tools'),
+          tooltip: 'More: mixer, automation, export…',
+          iconSize: 19,
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          color: Neon.dim,
+          icon: const Icon(Icons.more_vert),
+          onPressed: onTools,
+        ),
+      ]),
+    );
+  }
 }
 
 /// The layout menu: the presets, and every panel (tap to show it).

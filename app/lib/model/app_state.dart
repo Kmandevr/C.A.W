@@ -622,6 +622,28 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Moves the playhead to [step] (sixteenth steps into the song; the transport's scrub). While playing, playback
+  /// jumps there; otherwise the next play starts there.
+  void seekTo(double step) {
+    final e = engine;
+    final at = step.clamp(0.0, math.max(0, project.engineLoopSteps - 1).toDouble()).toDouble();
+    if (_transportOn && e != null) {
+      e.playAt(at);
+      meters = e.meters();
+      _poller.wake();
+    } else {
+      pausedStep = at;
+    }
+    notifyListeners();
+  }
+
+  /// Where the playhead is now, in sixteenth steps (paused: where play resumes; stopped: 0).
+  double get playheadStep {
+    final m = meters;
+    if (m.playing && m.loopLength > 0) return m.position * project.engineLoopSteps / m.loopLength;
+    return pausedStep ?? 0;
+  }
+
   void clearOverload() {
     engine?.clearOverload();
     _poller.wake();
