@@ -150,7 +150,7 @@ Each file is a fresh instance: a note on at the first frame, held for `--hold` s
 
 ## The Library
 
-`engine/include/caw/library/` is header-only C++ in `namespace caw::lib`: what the engine's built-ins are made of, for your components to reuse. It uses only the deterministic maths of `caw/detmath.hpp`, so a component built with `CAW::SDK` gets the same bits as the engine, and nothing in it allocates except the delay lines' `prepare()`. Objects with coefficients have a `set()` that costs an exp or a tan (call it when a knob moves, or every 16 frames) and a per-sample call.
+`engine/include/caw/library/` is header-only C++ in `namespace caw::lib`: what the engine's built-ins are made of, for your components to reuse. It uses only the deterministic maths of `caw/detmath.hpp`, so a component built with `CAW::SDK` gets the same bits as the engine, and nothing in it allocates except a `prepare()` (the delay lines, the reverb and the wavetable; call it in `activate`, never in `process`). Objects with coefficients have a `set()` that costs an exp or a tan (call it when a knob moves, or every 16 frames) and a per-sample call. Each header explains its method in comments, as a worked example of an efficient real-time kernel.
 - `stereo.hpp`: `constantPowerPan` (the mixer's pan law), `balanceGains`, `applyWidth`.
 - `distortion.hpp`: `drive`, `hardClip`, `fold`, `crush` (the .caw `fx.*` call the same code).
 - `delay.hpp`: `PingPongDelay`, `Chorus`, `noteSeconds`.
@@ -158,6 +158,10 @@ Each file is a fresh instance: a note on at the first frame, held for `--hold` s
 - `filter.hpp`: `Svf` (12 dB state-variable: low, band, high and notch at once; the .caw `lpf`/`hpf`/`bpf`/`notch` maths), `OnePole`, `Ladder` (24 dB low-pass with a soft-clipped input, resonance 0..1), `resonanceQ` (0..1 to a Q) and `shiftCutoff` (a cutoff moved by octaves, held in range).
 - `envelope.hpp`: `AdEnvelope` (as the .caw `ad`), `Adsr` (as `env.adsr`), `Glide` (portamento), `decayCoefficient` and `attackStep`.
 - `drums.hpp`: `KickVoice`, `SnareVoice`, `ClapVoice` and `HatVoice` with their settings structs: `set()`, `trigger(velocity)`, `next()`, `choke()`.
+- `smoothing.hpp`: `OnePoleSmoother` (99 % of a step in its time, then lands exactly) and `LinearSmoother` (a ramp that ends in exactly its time); `setTime()` pays once, `setTarget()` is free. Smooth every knob that scales audio.
+- `lfo.hpp`: `Lfo` with `LfoShape` sine, triangle, saw up and down, square (pulse width), sample-and-hold and smooth random; rate in Hz or tempo-synced (`setRateBeats(beats, bpm)`), phase offset, unipolar or bipolar, `retrigger()` and `syncToBeat(position, beats)`. `next()` per sample, `block(frames)` once per block. The random shapes are a function of seed and cycle number, so they repeat with the song.
+- `wavetable.hpp`: `Wavetable` (frames you fill with `setFrameFunction` or `setFrameHarmonics`, sized at `prepare(maxFrames, frameSize)`) and `WavetableOscillator` (`setFrequency`, `setPosition` 0..1 morphing linearly between frames). Each frame keeps one mip level per octave, built additively from its harmonics (a function is measured with a direct DFT), and the oscillator plays the level whose harmonics all stay below Nyquist, so it does not alias; aliasing and interpolation images measure below −60 dB for a saw. Building costs about 6 ms per 2048-sample frame: do it off the audio thread, and swap tables between blocks. `sawHarmonics`, `squareHarmonics`, `triangleHarmonics` fill amplitude arrays.
+- `reverb.hpp`: `Reverb` with `ReverbSettings` (`size`, `decay` as RT60 seconds, `damping`, `preDelay`, `width`, `mix`): an 8-line feedback delay network with Hadamard mixing and input all-passes, original code. `prepare(rate, maxBlock, maxPreDelay)` allocates; `process` is denormal-safe and NaN-proof, and the measured RT60 is within 5 % of `decay`. `tailFrames()` gives a component's tail. Changing `size` can click on a ringing tail.
 
 ```cpp
 lib::Svf filter;
