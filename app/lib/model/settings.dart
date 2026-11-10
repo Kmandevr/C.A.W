@@ -11,6 +11,9 @@ import '../ui/theme.dart';
 
 enum Density { comfortable, compact }
 
+/// How a long-press menu opens (owner, 2026-11-09): a compact list near the finger, or a Bitwig-style ring.
+enum LongPressMenuStyle { list, ring }
+
 /// When a code change swaps into the playing sound.
 enum SwapTiming { now, beat, bar }
 
@@ -180,6 +183,9 @@ class Settings extends ChangeNotifier {
   double trackGap = 6;
   static const maxTrackGap = 24.0;
 
+  /// Long-press menus on tracks, clips and effects: a list by default, a ring as a choice.
+  LongPressMenuStyle longPressMenu = LongPressMenuStyle.list;
+
   /// Frosted blur on floating surfaces while glass is on; off keeps the glass look with no blur (much cheaper).
   bool glassBlur = true;
 
@@ -256,6 +262,7 @@ class Settings extends ChangeNotifier {
         'glass': glass,
         'quick_actions': quickActions,
         'track_gap': trackGap,
+        'long_press_menu': longPressMenu.name,
         'glass_blur': glassBlur,
         'dock_layouts': dockLayouts,
         'reactive_glow': reactiveGlow,
@@ -287,6 +294,7 @@ class Settings extends ChangeNotifier {
     if (j['quick_actions'] is bool) quickActions = j['quick_actions'] as bool;
     final gap = j['track_gap'];
     if (gap is num && gap.isFinite) trackGap = gap.toDouble().clamp(0.0, maxTrackGap);
+    longPressMenu = pick(LongPressMenuStyle.values, j['long_press_menu'], longPressMenu);
     if (j['glass_blur'] is bool) glassBlur = j['glass_blur'] as bool;
     final dock = j['dock_layouts'];
     if (dock is Map) dockLayouts = {for (final e in dock.entries) if (e.key is String) e.key as String: e.value};
