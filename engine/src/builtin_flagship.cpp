@@ -479,6 +479,7 @@ struct OscVoice {
     uint32_t step[kMaxCopies] = {};  // dt in 32-bit fixed point (2^32 a cycle), for the unwarped read
     int shift[kMaxCopies] = {};      // 32 - log2(the mip level's size): a fixed-point phase's index bits
     int level[kMaxCopies] = {};      // the mip level each copy reads
+    bool centred = false;            // every copy plays the same on both sides (no pan, no spread)
     float gainL[kMaxCopies] = {}, gainR[kMaxCopies] = {};
     // The layout and pan gains, worked out again only when their settings change.
     lib::UnisonSettings layoutKey{-1};
@@ -628,8 +629,36 @@ struct VoiceFilter {
         for (uint32_t i = 0; i < n; ++i) x[i] = static_cast<float>(f(static_cast<double>(x[i])));
     }
     // In place: drive (when above 1) into the filter, then the dry/wet mix.
+    // A centred voice (both sides the same): only the left side is filtered, and stands for both. Ladder and SVF
+    // low-pass only; the right side's state takes the left's when it is filtered again (it was the same).
+    bool monoCapable() const noexcept { return !on || type <= kLadderBp || type == kSvfLp; }
+    void processMono(float* L, uint32_t n) noexcept {
+        if (!on) return;
+        monoUsed = true;
+        float dry[kControlFrames];
+        const bool wet = mix >= 1.0f;
+        if (!wet) std::copy(L, L + n, dry);
+        if (drive) each(L, n, [&](double v) noexcept { return saturator.process(v); });
+        if (type == kLadderLp || type == kLadderHp || type == kLadderBp) {
+            ladder[0].flushDenormals();
+            if (type == kLadderLp) ladder[0].process<lib::LadderMode::LowPass>(L, n);
+            else if (type == kLadderHp) ladder[0].process<lib::LadderMode::HighPass>(L, n);
+            else ladder[0].process<lib::LadderMode::BandPass>(L, n);
+        } else {
+            for (uint32_t i = 0; i < n; ++i) L[i] = static_cast<float>(svf[0].lowpass(static_cast<double>(L[i])));
+        }
+        if (!wet)
+            for (uint32_t i = 0; i < n; ++i) L[i] = dry[i] + (L[i] - dry[i]) * mix;
+    }
+    bool monoUsed = false;  // the left side ran alone: the right's state is behind
+
     void process(float* L, float* R, uint32_t n) noexcept {
         if (!on) return;
+        if (monoUsed) {  // back to stereo: the right side continues from the left's state, which both had
+            monoUsed = false;
+            ladder[1] = ladder[0];
+            svf[1] = svf[0];
+        }
         float dryL[kControlFrames], dryR[kControlFrames];
         const bool wet = mix >= 1.0f;
         if (!wet) std::copy(L, L + n, dryL), std::copy(R, R + n, dryR);
@@ -1343,6 +1372,8 @@ private:
             o.gainL[c] = static_cast<float>(o.panL[c] * key.level);
             o.gainR[c] = static_cast<float>(o.panR[c] * key.level);
         }
+        o.centred = true;
+        for (int c = 0; c < o.count; ++c) o.centred = o.centred && (!o.a[c] || o.gainL[c] == o.gainR[c]);
     }
 
     template <class Get>
@@ -1444,6 +1475,27 @@ private:
                     }
                     [[fallthrough]];  // in series, filter 1 feeds filter 2 anyway
                 default: addOscillator(o, f1L, f1R, n, first); break;
+            }
+        }
+        // A centred voice through filter 1 alone (the bass, the acid line, Basic): one side filtered, both sides
+        // the same bits as before at half the filter's cost (2026-11-10 performance pass).
+        if (!second && !bypass && v.filter[0].monoCapable()) {
+            bool centred = true;
+            for (const OscVoice& o : v.osc)
+                if (o.on && o.count > 0) centred = centred && o.centred;
+            if (centred) {
+                v.filter[0].processMono(f1L, n);
+                float amp[kControlFrames];
+                const double step = (v.gain1 - v.gain0) / kControlFrames;
+                for (uint32_t i = 0; i < n; ++i)
+                    amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
+                for (uint32_t i = 0; i < n; ++i) {
+                    const float y = f1L[i] * amp[i];
+                    outL[i] += y;
+                    outR[i] += y;
+                }
+                if (!v.env[0].active()) v.active = false;
+                return;
             }
         }
         v.filter[0].process(f1L, f1R, n);
