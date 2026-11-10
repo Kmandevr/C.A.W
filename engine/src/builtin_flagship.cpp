@@ -1381,11 +1381,13 @@ private:
         const bool dist = g(kDistOn) >= 0.5, eq = g(kEqOn) >= 0.5, chorus = g(kChorusOn) >= 0.5,
                    delay = g(kDelayOn) >= 0.5, reverb = g(kReverbOn) >= 0.5;
         // An effect switched on starts from silence (not from a tail it held when it was switched off).
-        if (eq && !eqOn_) eqL_.clear(), eqR_.clear();
-        if (chorus && !chorusOn_) chorus_.clear();
-        if (delay && !delayOn_) delay_.clear();
-        if (reverb && !reverbOn_) reverb_.clear();
+        // (Only one that ran since its last clear holds anything: the delay and reverb hold seconds of memory.)
+        if (eq && !eqOn_ && (fxDirty_ & kFxEq)) eqL_.clear(), eqR_.clear();
+        if (chorus && !chorusOn_ && (fxDirty_ & kFxChorus)) chorus_.clear();
+        if (delay && !delayOn_ && (fxDirty_ & kFxDelay)) delay_.clear();
+        if (reverb && !reverbOn_ && (fxDirty_ & kFxReverb)) reverb_.clear();
         const bool delayWasOn = delayOn_;
+        fxDirty_ |= (eq ? kFxEq : 0u) | (chorus ? kFxChorus : 0u) | (delay ? kFxDelay : 0u) | (reverb ? kFxReverb : 0u);
         distOn_ = dist;
         eqOn_ = eq;
         chorusOn_ = chorus;
@@ -1429,13 +1431,15 @@ private:
         }
     }
 
+    // The delay and reverb hold seconds of memory (a 4 s delay line is 1.5 MB): a clear (every Play, every rest)
+    // touches them only when they ran since the last one.
     void clearEffects() noexcept {
-        eqL_.clear();
-        eqR_.clear();
-        chorus_.clear();
-        delay_.clear();
-        reverb_.clear();
         quietRun_ = 0;
+        if (fxDirty_ & kFxEq) eqL_.clear(), eqR_.clear();
+        if (fxDirty_ & kFxChorus) chorus_.clear();
+        if (fxDirty_ & kFxDelay) delay_.clear();
+        if (fxDirty_ & kFxReverb) reverb_.clear();
+        fxDirty_ = 0;
     }
 
     static void zero(float* x) noexcept {
@@ -1632,6 +1636,8 @@ private:
     lib::PingPongDelay delay_;
     double delayTime0_ = 0.0, delayTime1_ = 0.0, delayFeedback_ = 0.35, delayMix_ = 0.25;
     lib::Reverb reverb_;
+    static constexpr uint32_t kFxEq = 1, kFxChorus = 2, kFxDelay = 4, kFxReverb = 8;
+    uint32_t fxDirty_ = kFxEq | kFxChorus | kFxDelay | kFxReverb;  // the effects that were on since their last clear
 };
 
 ModuleProcessor* makeFlagship() noexcept { return new (std::nothrow) FlagshipInstrument(); }
