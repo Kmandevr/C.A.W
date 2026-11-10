@@ -4,6 +4,7 @@ import 'dart:isolate';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -32,6 +33,15 @@ import 'arrange/track_color.dart';
 import 'glass.dart';
 
 enum PatternTool { draw, select, curve, erase }
+
+/// Paint counts of the roll's layers, for the frame benchmark in the tests: the whole roll, and the live curve on top.
+@visibleForTesting
+class RollPaintStats {
+  static int roll = 0, live = 0;
+  static String? label; // the pitch label the overlay last drew, if any
+  static Offset? anchor; // where it last drew a curve's start, if anywhere
+  static void reset() => roll = live = 0;
+}
 
 /// A note length as a fraction of a whole note (a step is a 16th): `1/4`, `3/8`, `1`, `5/4`, or `1/12` in triplets.
 String noteLengthLabel(Steps len) {
@@ -132,11 +142,8 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   double _cBend0 = 0;
   Offset? _cStart;
   bool _cAddOnTap = false; // a touch inside a segment: a tap adds a point there, a drag bends it
-  // The Curve tool on a selected note: editing its pitch curve (bend points) right on the roll.
-  int? _bNote, _bPoint, _bSeg;
-  double _bK0 = 0;
-  Offset? _bStart;
-  bool _bAddOnTap = false;
+  // The Curve tool's overlay: the curve under the mouse or finger, and a pitch curve while it is dragged.
+  final _curveView = ValueNotifier(const _CurveView());
   double _gridH = 0;
   Timer? _hold; // long press on a note opens its extras panel
   Offset? _holdAt;
@@ -221,6 +228,7 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void dispose() {
     _hold?.cancel();
     _hearStop();
+    _curveView.dispose();
     _spring.dispose();
     _scroller.dispose();
     s.settings.removeListener(_settingsChanged);
@@ -356,12 +364,6 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// A curve point's time (in steps) on the time grid while snapping applies.
   double _snapAt(double steps) => math.max(0.0, _free ? steps : Snap.to(steps, _resSteps.toDouble()));
-
-  /// A pitch point's place along note [n] (0..1) on the time grid while snapping applies.
-  double _snapU(double u, PatternNote n) {
-    final g = _resSteps.toDouble() / n.len.toDouble();
-    return (_free || g >= 1 ? u : Snap.to(u, g)).clamp(0.0, 1.0).toDouble();
-  }
 
   void _snapMenu(String v) {
     if (v == 'toggle') {
@@ -843,6 +845,9 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   }
 
   // ---------- pitch curves on notes (Curve tool) ----------
+  // Any note's curve is edited where it is drawn, no selection first (owner, 2026-11-10, #170): the nearest point
+  // under the touch, else the nearest line, else the note itself. While a drag is under way its points live in
+  // [_curveView] and only the overlay repaints, once a frame; the model and undo get them when the finger lifts.
 
   static const _bendRange = 12.0; // the owner's default: +-12 semitones on screen (the file allows +-48)
 
@@ -851,67 +856,122 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   double _noteMid(PatternNote n) => (127 - n.pitch.round()) * _rowH - _scrollY + _rowH / 2;
   Offset _bendPx(PatternNote n, NotePoint q) => Offset(_noteX(n) + q.t * _noteW(n), _noteMid(n) - q.v * _rowH);
 
-  /// The selected note whose row or bent line is under [p] (a tap on an unselected note selects it instead).
-  int? _bendNoteAt(Offset p) {
+  /// How far a curve's touch zone reaches: 24 dp for a finger or pen, the grab setting for a mouse.
+  double _curveReach(PointerDeviceKind kind) =>
+      kind == PointerDeviceKind.mouse || kind == PointerDeviceKind.trackpad ? _look.grab : math.max(24.0, _look.grab);
+
+  /// What a touch at [p] on the grid grabs with the Curve tool: the nearest pitch point within [reach] of any note,
+  /// else the nearest pitch line (a plain note's line is its row's middle), else the note under it.
+  _CurveHit? _curveHitAt(Offset p, double reach) {
     final d = _doc;
-    if (d == null) return null;
-    final secPerStep = 15 / s.project.bpm;
-    for (final id in _sel) {
-      final n = d.byId(id);
-      if (n == null) continue;
+    if (d == null || p.dy >= _gridH) return null;
+    _CurveHit? point, line;
+    var pointD = reach, lineD = reach;
+    for (final n in d.notes) {
       final x0 = _noteX(n), w = _noteW(n);
-      if (p.dx < x0 - 12 || p.dx > x0 + w + 12) continue;
-      final u = ((p.dx - x0) / w).clamp(0.0, 1.0);
-      final lineY = _noteMid(n) - n.expr.pitchAt(u, u * n.len.toDouble() * secPerStep) * _rowH;
-      if ((p.dy - lineY).abs() < math.max(_rowH, 16) || (p.dy - _noteMid(n)).abs() < _rowH / 2) return id;
+      if (p.dx < x0 - reach || p.dx > x0 + w + reach) continue;
+      final pts = n.expr.bend;
+      for (var i = 0; i < pts.length; i++) {
+        final dist = (_bendPx(n, pts[i]) - p).distance;
+        if (dist <= pointD) {
+          pointD = dist;
+          point = _CurveHit(n.id, point: i);
+        }
+      }
+      if (point != null) continue; // a point anywhere wins over every line
+      // The line near the touch, every 2 px across the reach.
+      final mid = _noteMid(n);
+      for (var dx = -reach; dx <= reach; dx += 2) {
+        final x = p.dx + dx;
+        if (x < x0 || x > x0 + w) continue;
+        final y = mid - NoteExpression.valueAt(pts, (x - x0) / w) * _rowH;
+        final dist = Offset(dx, p.dy - y).distance;
+        if (dist <= lineD) {
+          lineD = dist;
+          line = _CurveHit(n.id, line: true);
+        }
+      }
     }
-    return null;
+    if (point != null) return point;
+    if (line != null) return line;
+    final body = _noteAt(p);
+    return body == null ? null : _CurveHit(body);
   }
 
-  double _bendValue(double y, PatternNote n) {
+  /// Where the finger at [y] puts a pitch point of [n]: on a semitone while snapping applies, sticking to [prev]
+  /// until the finger is well past halfway to the next one, so a finger resting on a boundary doesn't flicker.
+  double _bendValue(double y, PatternNote n, {double? prev}) {
     var v = (_noteMid(n) - y) / _rowH;
-    if (!_free) v = v.roundToDouble();
+    if (!_free) v = _sticky(v, prev, 1);
     return v.clamp(-_bendRange, _bendRange).toDouble();
   }
 
-  void _setBend(int id, List<NotePoint> pts) {
-    final d = _doc!, n = d.byId(id)!;
-    setState(() => _doc = d.setExpression({id}, n.expr.copyWith(bend: List.unmodifiable(pts))));
+  /// A point's place along [n] (0..1) under the finger at [x], on the time grid (sticky, as above) while snapping.
+  double _bendU(double x, PatternNote n, {double? prev}) {
+    final u = (x - _noteX(n)) / _noteW(n), g = _resSteps.toDouble() / n.len.toDouble();
+    return (_free || g >= 1 ? u : _sticky(u, prev, g)).clamp(0.0, 1.0).toDouble();
   }
 
-  void _bendDown(Offset p, int id) {
-    final d = _doc!, n = d.byId(id)!;
+  /// [raw] on a grid of [g], staying on [prev] until [raw] is 0.65 of a grid step from it.
+  static double _sticky(double raw, double? prev, double g) =>
+      prev != null && (raw - prev).abs() < g * 0.65 ? prev : Snap.to(raw, g);
+
+  // The pitch edit under way: the note, what was grabbed and how.
+  int? _bNote, _bPoint, _bSeg;
+  _CurveHit? _bHit;
+  double _bK0 = 0;
+  Offset? _bStart, _bAt, _bSmooth;
+  bool _bMoved = false, _bFrame = false;
+  ({int id, int point, DateTime at})? _bTapped; // the last point tapped: a second tap soon after removes it
+
+  List<NotePoint> get _livePoints => _curveView.value.points ?? _doc!.byId(_bNote!)!.expr.bend;
+
+  /// Shows [points] as note [_bNote]'s curve, [active] the point that follows the finger. The roll itself repaints
+  /// only when a drag starts showing points (it then leaves that note to the overlay).
+  void _showLive(List<NotePoint> points, {int? active, bool drawing = false}) {
+    final first = _curveView.value.points == null;
+    _curveView.value = _CurveView(hit: _bHit, id: _bNote, points: points, active: active, drawing: drawing);
+    if (first) setState(() {});
+  }
+
+  void _bendDown(Offset p, _CurveHit hit) {
+    final d = _doc!, n = d.byId(hit.id)!;
     _dragBase = d;
-    _bNote = id;
-    _bStart = p;
+    _bNote = hit.id;
+    _bHit = hit;
+    _bStart = _bAt = _bSmooth = p;
+    _bMoved = false;
+    _bPoint = _bSeg = null;
+    _curveView.value = _CurveView(hit: hit);
     final pts = n.expr.bend;
-    for (var i = 0; i < pts.length; i++) {
-      if ((_bendPx(n, pts[i]) - p).distance < math.max(16, _look.grab)) {
-        _bPoint = i;
-        _holdAt = p;
-        _hold = Timer(Duration(milliseconds: _look.holdMs), () {
-          final now = _doc!.byId(id)!.expr.bend;
-          if (i < now.length) _setBend(id, [...now]..removeAt(i));
-          _bPoint = null;
-        });
-        return;
+    if (hit.point != null) {
+      final i = hit.point!;
+      _bPoint = i;
+      _showLive(pts, active: i);
+      _holdAt = p;
+      _hold = Timer(Duration(milliseconds: _look.holdMs), () {
+        final now = _livePoints;
+        if (i < now.length) _showLive([...now]..removeAt(i));
+        // Held down: the point is gone and the rest of this touch does nothing.
+        _bPoint = null;
+        _bSeg = -1;
+        _bMoved = true;
+        _hearStop();
+      });
+      _hearBendAt(p);
+      return;
+    }
+    if (hit.line && pts.length > 1) {
+      final raw = ((p.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0);
+      for (var i = 0; i + 1 < pts.length; i++) {
+        if (raw > pts[i].t && raw < pts[i + 1].t) {
+          _bSeg = i;
+          _bK0 = pts[i].k;
+          return; // a tap adds a point here, a drag bends the segment
+        }
       }
     }
-    // The segment test uses where the finger is; only a new point lands on the grid.
-    final raw = ((p.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0), u = _snapU(raw, n);
-    for (var i = 0; i + 1 < pts.length; i++) {
-      if (raw > pts[i].t && raw < pts[i + 1].t) {
-        _bSeg = i;
-        _bK0 = pts[i].k;
-        _bAddOnTap = true;
-        return;
-      }
-    }
-    // No points yet: the curve starts at the note's own pitch, then the touched point. Outside the points: a new one.
-    final q = NotePoint(u, _bendValue(p.dy, n));
-    final next = pts.isEmpty && u > 0.02 ? [const NotePoint(0, 0), q] : _insertPoint(pts, q);
-    _bPoint = next.indexOf(q);
-    _setBend(id, next);
+    // Elsewhere on the line or the note: a tap selects, a drag places a new point.
   }
 
   List<NotePoint> _insertPoint(List<NotePoint> pts, NotePoint q) {
@@ -921,47 +981,124 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     return out;
   }
 
+  /// A move during a pitch edit: kept, and applied once on the next frame however many events arrive before it.
   void _bendMove(Offset p) {
-    final id = _bNote, start = _bStart, d = _doc;
-    if (id == null || start == null || d == null) return;
-    final n = d.byId(id);
-    if (n == null) return;
+    _bAt = p;
     if (_hold != null && (p - _holdAt!).distance > 8) {
       _hold!.cancel();
       _hold = null;
     }
-    final pts = [...n.expr.bend];
-    final i = _bPoint, seg = _bSeg;
-    if (i != null && i < pts.length) {
-      final lo = i > 0 ? pts[i - 1].t : 0.0, hi = i + 1 < pts.length ? pts[i + 1].t : 1.0;
-      final u = _snapU((p.dx - _noteX(n)) / _noteW(n), n).clamp(lo, hi);
-      pts[i] = NotePoint(u, _bendValue(p.dy, n), pts[i].k);
-      _setBend(id, pts);
-    } else if (seg != null && seg < pts.length) {
-      if (_bAddOnTap && (p - start).distance <= kTouchSlop) return;
-      _bAddOnTap = false;
-      // Dragging the line up bends it to rise late (eases in), down to rise early, as on the lanes.
-      final k = (_bK0 - (p.dy - start.dy) / 120).clamp(-1.0, 1.0);
-      pts[seg] = NotePoint(pts[seg].t, pts[seg].v, (k * 100).roundToDouble() / 100);
-      _setBend(id, pts);
+    if (_bFrame) return;
+    _bFrame = true;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      if (_bFrame) _bendApply();
+    });
+  }
+
+  void _bendApply({bool last = false}) {
+    _bFrame = false;
+    final id = _bNote, start = _bStart, raw = _bAt, d = _dragBase;
+    if (id == null || start == null || raw == null || d == null || !mounted) return;
+    final n = d.byId(id);
+    if (n == null || _bSeg == -1) return;
+    // A point follows the finger at once (snapping keeps it still); a line or a note waits past the touch slop to
+    // tell a drag from a tap. Past the slop, it is no longer a tap.
+    if (!_bMoved && (raw - start).distance > kTouchSlop) {
+      _bMoved = true;
+      _tapClear();
     }
+    if (!_bMoved && (_bPoint == null || (raw - start).distance < 2)) return;
+    _selectForCurve(id);
+    // Free (unsnapped) drags follow a lightly smoothed finger; the release lands where the finger is.
+    final s0 = _bSmooth ?? raw;
+    final p = _bSmooth = last || !_free ? raw : s0 + (raw - s0) * 0.6;
+    var pts = [..._livePoints];
+    var i = _bPoint;
+    final seg = _bSeg;
+    if (i == null && seg == null) {
+      // Placing a new point. A plain note's curve starts at its own pitch: that anchor, then the point.
+      final q = NotePoint(_bendU(p.dx, n), _bendValue(p.dy, n));
+      pts = pts.isEmpty && q.t > 0.02 ? [const NotePoint(0, 0), q] : _insertPoint(pts, q);
+      i = _bPoint = pts.indexOf(q);
+      _showLive(pts, active: i, drawing: true);
+    } else if (i != null && i < pts.length) {
+      final lo = i > 0 ? pts[i - 1].t : 0.0, hi = i + 1 < pts.length ? pts[i + 1].t : 1.0;
+      final u = _bendU(p.dx, n, prev: pts[i].t).clamp(lo, hi);
+      pts[i] = NotePoint(u, _bendValue(p.dy, n, prev: pts[i].v), pts[i].k);
+      _showLive(pts, active: i, drawing: _curveView.value.drawing);
+    } else if (seg != null && seg < pts.length) {
+      // Dragging the line up bends it to rise late (eases in), down to rise early, as on the lanes.
+      final k = (_bK0 - (raw.dy - start.dy) / 120).clamp(-1.0, 1.0);
+      pts[seg] = NotePoint(pts[seg].t, pts[seg].v, (k * 100).roundToDouble() / 100);
+      _showLive(pts);
+    }
+    _hearBendAt(p);
+  }
+
+  void _tapClear() => _bTapped = null;
+
+  /// Editing a note's curve selects it, unless it already is.
+  void _selectForCurve(int id) {
+    if (!_sel.contains(id)) setState(() => _sel = {id});
   }
 
   void _bendEnd({required bool cancel}) {
-    final id = _bNote, start = _bStart;
+    final id = _bNote, start = _bStart, base = _dragBase, hit = _bHit;
     if (id == null) return;
-    _hearStop();
     _hold?.cancel();
     _hold = null;
-    if (!cancel && _bAddOnTap && start != null && _doc != null) {
-      final n = _doc!.byId(id)!;
-      final u = _snapU(((start.dx - _noteX(n)) / _noteW(n)).clamp(0.0, 1.0), n);
-      _setBend(id, _insertPoint(n.expr.bend, NotePoint(u, _bendValue(start.dy, n))));
+    if (!cancel && _bAt != null) _bendApply(last: true);
+    _hearStop();
+    final n = base?.byId(id);
+    var pts = _curveView.value.points;
+    if (!cancel && !_bMoved && n != null && start != null && hit != null) {
+      final now = DateTime.now();
+      if (hit.point != null) {
+        // A tap on a point: a second one on the same point soon after removes it.
+        final t = _bTapped;
+        if (t != null && t.id == id && t.point == hit.point && now.difference(t.at) < kDoubleTapTimeout) {
+          pts = [...n.expr.bend]..removeAt(hit.point!);
+          _bTapped = null;
+        } else {
+          _bTapped = (id: id, point: hit.point!, at: now);
+        }
+        _selectForCurve(id);
+      } else if (hit.line && n.expr.bend.length > 1) {
+        // A tap on a bent line adds a point there, on the line, so the curve keeps its shape.
+        final u = _bendU(start.dx, n);
+        pts = _insertPoint(n.expr.bend, NotePoint(u, NoteExpression.valueAt(n.expr.bend, u)));
+        _bTapped = null;
+        _selectForCurve(id);
+      } else {
+        // A tap on a plain note (or beside a bent one's line): picks it for the lane curves, or unpicks it.
+        _bTapped = null;
+        setState(() => _sel = _sel.contains(id) ? (Set.of(_sel)..remove(id)) : {..._sel, id});
+      }
+    }
+    if (!cancel && base != null && n != null && pts != null && !_samePoints(pts, n.expr.bend)) {
+      _doc = base.setExpression({id}, n.expr.copyWith(bend: List.unmodifiable(pts)));
     }
     _bNote = _bPoint = _bSeg = null;
-    _bStart = null;
-    _bAddOnTap = false;
+    _bHit = null;
+    _bStart = _bAt = _bSmooth = null;
+    _bMoved = _bFrame = false;
+    _curveView.value = const _CurveView();
     cancel ? _cancelEdit() : _up();
+  }
+
+  static bool _samePoints(List<NotePoint> a, List<NotePoint> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  /// The mouse over the roll with the Curve tool: highlights what a click would grab.
+  void _curveHover(PointerHoverEvent e) {
+    if (_tool != PatternTool.curve || _bNote != null) return;
+    final hit = _curveHitAt(e.localPosition - _origin, _curveReach(e.kind));
+    if (hit != _curveView.value.hit) _curveView.value = _CurveView(hit: hit);
   }
 
   // ---------- generators ----------
@@ -1052,11 +1189,11 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
 
   /// While a pitch point is dragged the note sounds at that point's pitch; on a segment, at the curve under the finger.
   void _hearBendAt(Offset p) {
-    final id = _bNote, d = _doc, layer = _hearLayer;
+    final id = _bNote, d = _dragBase ?? _doc, layer = _hearLayer;
     if (id == null || d == null || layer == null) return;
     final n = d.byId(id);
     if (n == null) return;
-    final pts = n.expr.bend, i = _bPoint;
+    final pts = _curveView.value.points ?? n.expr.bend, i = _bPoint;
     final pitch = (n.pitch +
             (i != null && i < pts.length
                 ? pts[i].v
@@ -1099,13 +1236,13 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
       _touch = e.kind == PointerDeviceKind.touch;
       _lastP = p;
       if (_tool == PatternTool.curve) {
-        // Curve tool: the lanes edit their curve; on the grid a tap picks notes and a drag scrolls.
-        final bendOn = p.dy < _gridH ? _bendNoteAt(p) : null;
+        // Curve tool: the lanes edit their curve; on the grid any note's curve edits where it is touched, and on
+        // empty grid a tap clears the selection and a drag scrolls.
+        final hit = p.dy < _gridH ? _curveHitAt(p, _curveReach(e.kind)) : null;
         if (p.dy >= _gridH) {
           _curveDown(p);
-        } else if (bendOn != null) {
-          _bendDown(p, bendOn);
-          _hearBendAt(p);
+        } else if (hit != null) {
+          _bendDown(p, hit);
         } else {
           _pending = p;
           _panning = false;
@@ -1943,42 +2080,66 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
                     });
                   }
                 },
-                child: RepaintBoundary(
-                  child: CustomPaint(
-                    size: Size.infinite,
-                    painter: _RollPainter(
-                      doc: d,
-                      references: references,
-                      sel: _sel,
-                      length: length,
-                      beatsPerBar: s.project.beatsPerBar,
-                      pxPerStep: _pxPerStep,
-                      rowH: _rowH,
-                      scrollX: _scrollX,
-                      scrollY: _scrollY,
-                      line: _lineLevel,
-                      key: _key,
-                      color: _noteColor,
-                      cursorAt: _cursorAt,
-                      cursorPitch: _cursorPitch,
-                      rect: _rectEnd == null || _dragStart == null ? null : Rect.fromPoints(_dragStart!, _rectEnd!),
-                      gridRows: grid,
-                      focused: _focus.hasFocus,
-                      velH: _velLane ? _velH : 0,
-                      xH: _extrasLane ? _xH : 0,
-                      gridStrength: _look.gridStrength,
-                      curves: _tool == PatternTool.curve ? _curves : null,
-                      secPerStep: 15 / s.project.bpm,
-                      editBend: _tool == PatternTool.curve && _sel.length == 1 ? _sel.first : null,
-                      keyLabels: _look.keyLabels,
-                      lag: _lag,
-                      lagIds: _lagIds,
-                      lagEdge: _lagEdge,
-                      lengthOf: _edge != 0 ? _dragNote : null,
-                      ghost: _ghost,
+                onPointerHover: _curveHover,
+                // The roll repaints when the notes or the view change; the Curve tool's overlay above it repaints on
+                // its own while a curve is hovered or dragged.
+                child: Stack(fit: StackFit.expand, children: [
+                  RepaintBoundary(
+                    child: CustomPaint(
+                      size: Size.infinite,
+                      painter: _RollPainter(
+                        doc: d,
+                        references: references,
+                        sel: _sel,
+                        length: length,
+                        beatsPerBar: s.project.beatsPerBar,
+                        pxPerStep: _pxPerStep,
+                        rowH: _rowH,
+                        scrollX: _scrollX,
+                        scrollY: _scrollY,
+                        line: _lineLevel,
+                        key: _key,
+                        color: _noteColor,
+                        cursorAt: _cursorAt,
+                        cursorPitch: _cursorPitch,
+                        rect: _rectEnd == null || _dragStart == null ? null : Rect.fromPoints(_dragStart!, _rectEnd!),
+                        gridRows: grid,
+                        focused: _focus.hasFocus,
+                        velH: _velLane ? _velH : 0,
+                        xH: _extrasLane ? _xH : 0,
+                        gridStrength: _look.gridStrength,
+                        curves: _tool == PatternTool.curve ? _curves : null,
+                        secPerStep: 15 / s.project.bpm,
+                        curveMode: _tool == PatternTool.curve,
+                        hide: _curveView.value.points == null ? null : _curveView.value.id,
+                        keyLabels: _look.keyLabels,
+                        lag: _lag,
+                        lagIds: _lagIds,
+                        lagEdge: _lagEdge,
+                        lengthOf: _edge != 0 ? _dragNote : null,
+                        ghost: _ghost,
+                      ),
                     ),
                   ),
-                ),
+                  if (_tool == PatternTool.curve)
+                    RepaintBoundary(
+                      child: CustomPaint(
+                        size: Size.infinite,
+                        painter: _CurveOverlayPainter(
+                          view: _curveView,
+                          doc: d,
+                          sel: _sel,
+                          pxPerStep: _pxPerStep,
+                          rowH: _rowH,
+                          scrollX: _scrollX,
+                          scrollY: _scrollY,
+                          gridH: h,
+                          color: _noteColor,
+                          secPerStep: 15 / s.project.bpm,
+                        ),
+                      ),
+                    ),
+                ]),
               ),
             );
           }),
@@ -2438,6 +2599,216 @@ class _ActionPickerState extends State<_ActionPicker> {
   }
 }
 
+/// What a touch grabs with the Curve tool: a note's pitch point [point], its line ([line]), or the note itself.
+@immutable
+class _CurveHit {
+  const _CurveHit(this.id, {this.point, this.line = false});
+  final int id;
+  final int? point;
+  final bool line;
+
+  @override
+  bool operator ==(Object o) => o is _CurveHit && o.id == id && o.point == point && o.line == line;
+  @override
+  int get hashCode => Object.hash(id, point, line);
+}
+
+/// The Curve tool's overlay: what the mouse or finger would grab ([hit]), and while a drag is under way note [id]'s
+/// [points] as they will be committed, [active] the one that follows the finger; [drawing]: a new point being placed.
+@immutable
+class _CurveView {
+  const _CurveView({this.hit, this.id, this.points, this.active, this.drawing = false});
+  final _CurveHit? hit;
+  final int? id;
+  final List<NotePoint>? points;
+  final int? active;
+  final bool drawing;
+}
+
+/// A note's pitch line as the roll draws it, for a note at [x] (row top [y], [nw] wide) on a grid [w] wide: sampled
+/// every 2 px where it is on screen plus at its points, so corners stay sharp at any zoom. Vibrato is drawn as a wave
+/// only while a cycle spans at least 8 px; zoomed out it would alias into spikes (#170), so the line follows the bend
+/// alone and [band] says to draw the vibrato as a faint band around it.
+({Path path, bool band}) _pitchPath(NoteExpression e,
+    {required double x, required double y, required double nw, required double w, required double rowH,
+    required double lenSec}) {
+  final cyclePx = e.vibDepth > 0 && e.vibRate > 0 && lenSec > 0 ? nw / (lenSec * e.vibRate) : double.infinity;
+  final wave = cyclePx >= 8;
+  double pitch(double u) => wave ? e.pitchAt(u, u * lenSec) : NoteExpression.valueAt(e.bend, u);
+  final from = math.max(0.0, -x), to = math.min(nw, w - x);
+  final xs = <double>{for (var px = (from / 2).floor() * 2.0; px <= to; px += 2) px, from, to,
+    for (final q in e.bend) if (q.t * nw >= from && q.t * nw <= to) q.t * nw}.toList()..sort();
+  final path = Path();
+  for (var i = 0; i < xs.length; i++) {
+    final py = y + rowH / 2 - pitch(xs[i] / nw) * rowH;
+    i == 0 ? path.moveTo(x + xs[i], py) : path.lineTo(x + xs[i], py);
+  }
+  return (path: path, band: !wave && e.vibDepth > 0);
+}
+
+/// One note of the roll in [box] (its row at [x], [y], [nw] wide, its stretch already applied to [box]): layer
+/// colour, brighter when louder. A bent note keeps its row faint and its pitch line carries it, MIDI Sketch style;
+/// [points] 1 shows its pitch points dim, 2 bright. White outline when [selected].
+void _paintNote(Canvas canvas, PatternNote n, NoteExpression e, Rect box,
+    {required double x, required double y, required double nw, required double w, required double rowH,
+    required Color color, required double secPerStep, required bool selected, int points = 0}) {
+  final r = RRect.fromRectAndRadius(box, const Radius.circular(3));
+  final fill = color.withValues(alpha: 0.35 + 0.65 * n.vel);
+  if (e.bend.isNotEmpty || e.vibDepth > 0) {
+    canvas.drawRRect(r, Paint()..color = fill.withValues(alpha: 0.18));
+    final line = _pitchPath(e, x: x, y: y, nw: nw, w: w, rowH: rowH, lenSec: n.len.toDouble() * secPerStep);
+    final stroke = math.max(3.0, rowH * 0.55);
+    if (line.band) {
+      canvas.drawPath(line.path, Paint()
+        ..color = fill.withValues(alpha: 0.3)
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..strokeWidth = stroke + 2 * e.vibDepth * rowH);
+    }
+    canvas.drawPath(line.path, Paint()
+      ..color = fill
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = stroke);
+    if (points > 0) {
+      final dot = Paint()..color = points > 1 ? Neon.yellow : Neon.yellow.withValues(alpha: 0.55);
+      for (final p in e.bend) {
+        canvas.drawCircle(Offset(x + p.t * nw, y + rowH / 2 - p.v * rowH), points > 1 ? 5 : 3.5, dot);
+      }
+    }
+  } else {
+    canvas.drawRRect(r, Paint()..color = fill);
+  }
+  if (selected) {
+    canvas.drawRRect(r, Paint()
+      ..color = Neon.text
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5);
+  }
+}
+
+/// The Curve tool's overlay on the roll, repainted on its own as [view] changes (a drag repaints only this, once a
+/// frame): the curve under the mouse or finger lit, and a curve being dragged with its start, the point that follows
+/// the finger, a guide at that point's time and its pitch as a label (`+2.0 st`).
+class _CurveOverlayPainter extends CustomPainter {
+  _CurveOverlayPainter({
+    required this.view,
+    required this.doc,
+    required this.sel,
+    required this.pxPerStep,
+    required this.rowH,
+    required this.scrollX,
+    required this.scrollY,
+    required this.gridH,
+    required this.color,
+    required this.secPerStep,
+  }) : super(repaint: view);
+  final ValueListenable<_CurveView> view;
+  final PatternDoc doc;
+  final Set<int> sel;
+  final double pxPerStep, rowH, scrollX, scrollY, gridH, secPerStep;
+  final Color color;
+
+  static const keyW = _PatternEditorState._keyW, rulerH = _PatternEditorState._rulerH;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    RollPaintStats.live++;
+    RollPaintStats.label = null;
+    RollPaintStats.anchor = null;
+    final v = view.value, w = size.width - keyW;
+    canvas.save();
+    canvas.translate(keyW, rulerH);
+    canvas.clipRect(Rect.fromLTWH(0, 0, w, gridH));
+    PatternNote? note(int? id) => id == null ? null : doc.byId(id);
+    double nx(PatternNote n) => n.at.toDouble() * pxPerStep - scrollX;
+    double nwOf(PatternNote n) => math.max(3.0, n.len.toDouble() * pxPerStep - 1);
+    double ny(PatternNote n) => (127 - n.pitch.round()) * rowH - scrollY;
+    final live = note(v.id), pts = v.points;
+    if (live != null && pts != null) {
+      final x = nx(live), y = ny(live), nw = nwOf(live), mid = y + rowH / 2;
+      final e = live.expr.copyWith(bend: pts);
+      _paintNote(canvas, live, e, Rect.fromLTWH(x, y + 1, nw, rowH - 2),
+          x: x, y: y, nw: nw, w: w, rowH: rowH, color: color, secPerStep: secPerStep,
+          selected: sel.contains(live.id), points: 2);
+      if (pts.isNotEmpty) {
+        // Where the curve starts: a ring round its first point.
+        final a = Offset(x + pts.first.t * nw, mid - pts.first.v * rowH);
+        RollPaintStats.anchor = a;
+        canvas.drawCircle(a, 8, Paint()
+          ..color = Neon.text
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5);
+      }
+      final i = v.active;
+      if (i != null && i < pts.length) {
+        final q = pts[i], at = Offset(x + q.t * nw, mid - q.v * rowH);
+        // A guide at the point's time, the point itself, and its pitch.
+        canvas.drawLine(Offset(at.dx, 0), Offset(at.dx, gridH), Paint()
+          ..color = Neon.yellow.withValues(alpha: 0.45)
+          ..strokeWidth = 1);
+        canvas.drawCircle(at, 7, Paint()..color = Neon.yellow);
+        canvas.drawCircle(at, 7, Paint()
+          ..color = Neon.bg
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5);
+        final text = bendLabel(q.v);
+        RollPaintStats.label = text;
+        final label = TextPainter(
+          text: TextSpan(text: text, style: const TextStyle(color: Neon.text, fontSize: 11, fontWeight: FontWeight.w600)),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final top = at.dy - label.height - 14;
+        final lp = Offset((at.dx - label.width / 2).clamp(0.0, math.max(0.0, w - label.width)),
+            top < 0 ? at.dy + 12 : top);
+        canvas.drawRRect(RRect.fromRectAndRadius((lp - const Offset(4, 1)) & Size(label.width + 8, label.height + 2),
+            const Radius.circular(4)), Paint()..color = Neon.bg.withValues(alpha: 0.85));
+        label.paint(canvas, lp);
+      }
+    }
+    // What the mouse or finger would grab: its point ringed, or its line lit.
+    final hit = v.hit, hn = note(hit?.id);
+    if (hit != null && hn != null && v.active == null) {
+      final e = hit.id == v.id && pts != null ? hn.expr.copyWith(bend: pts) : hn.expr;
+      final x = nx(hn), y = ny(hn), nw = nwOf(hn);
+      if (hit.point != null && hit.point! < e.bend.length) {
+        final q = e.bend[hit.point!];
+        canvas.drawCircle(Offset(x + q.t * nw, y + rowH / 2 - q.v * rowH), 9, Paint()
+          ..color = Neon.yellow
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2);
+      } else if (hit.line) {
+        final line = _pitchPath(e, x: x, y: y, nw: nw, w: w, rowH: rowH, lenSec: hn.len.toDouble() * secPerStep);
+        canvas.drawPath(line.path, Paint()
+          ..color = Neon.yellow.withValues(alpha: 0.35)
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..strokeWidth = math.max(3.0, rowH * 0.55) + 6);
+      }
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_CurveOverlayPainter o) =>
+      !identical(o.doc, doc) ||
+      o.view != view ||
+      o.sel != sel ||
+      o.pxPerStep != pxPerStep ||
+      o.rowH != rowH ||
+      o.scrollX != scrollX ||
+      o.scrollY != scrollY ||
+      o.gridH != gridH ||
+      o.color != color ||
+      o.secPerStep != secPerStep;
+}
+
+/// A pitch point's value as the Curve tool labels it: `+2.0 st`, `-1.5 st`, `0.0 st`.
+String bendLabel(double v) => '${v > 0 ? '+' : v < 0 ? '-' : ''}${v.abs().toStringAsFixed(1)} st';
+
 class _RollPainter extends CustomPainter {
   _RollPainter({
     required this.doc,
@@ -2463,7 +2834,8 @@ class _RollPainter extends CustomPainter {
     required this.keyLabels,
     required this.curves,
     required this.secPerStep,
-    required this.editBend,
+    required this.curveMode,
+    this.hide,
     this.lag = 0,
     this.lagIds = const {},
     this.lagEdge = 1,
@@ -2478,7 +2850,8 @@ class _RollPainter extends CustomPainter {
   final ({Steps at, double pitch, Steps len})? ghost; // where a tap would draw
   final Map<int, LaneCurve>? curves;
   final double secPerStep; // seconds per 16th at the project tempo, for drawing vibrato
-  final int? editBend; // the note whose pitch points show (the Curve tool's selected note)
+  final bool curveMode; // the Curve tool: every bent note shows its pitch points (brighter when selected)
+  final int? hide; // the note the curve overlay draws while its curve is dragged
   final double velH, xH, gridStrength;
   final KeyLabels keyLabels;
   final PatternDoc doc;
@@ -2498,6 +2871,7 @@ class _RollPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    RollPaintStats.roll++;
     final w = size.width - keyW, h = size.height - velH - xH - rulerH;
     final bg = Paint()..color = Neon.bg;
     canvas.drawRect(Offset.zero & size, bg);
@@ -2549,7 +2923,7 @@ class _RollPainter extends CustomPainter {
       final bent = e.bend.isNotEmpty || e.vibDepth > 0;
       // A bent note can sound far from its row: keep it on screen while any of its curve is.
       final reach = bent ? (e.bend.fold(0.0, (m, p) => math.max(m, p.v.abs())) + e.vibDepth + 1) * rowH : 0.0;
-      if (y - reach > h || y + rowH + reach < 0) continue;
+      if (y - reach > h || y + rowH + reach < 0 || n.id == hide) continue;
       var box = Rect.fromLTWH(x, y + 1, nw, rowH - 2);
       if (lag != 0 && lagIds.contains(n.id)) {
         // The snapped length as a faint ghost; the note itself follows the finger.
@@ -2562,56 +2936,9 @@ class _RollPainter extends CustomPainter {
             ? Rect.fromLTRB(box.left, box.top, math.max(box.left + 3, box.right + lag), box.bottom)
             : Rect.fromLTRB(math.min(box.right - 3, box.left + lag), box.top, box.right, box.bottom);
       }
-      final r = RRect.fromRectAndRadius(box, const Radius.circular(3));
-      final fill = color.withValues(alpha: 0.35 + 0.65 * n.vel);
-      if (bent) {
-        // The note's pitch over time, MIDI Sketch style: its row stays faint, the bent line carries it.
-        canvas.drawRRect(r, Paint()..color = fill.withValues(alpha: 0.18));
-        final lenSec = n.len.toDouble() * secPerStep;
-        // Vibrato is drawn as a wave only while a cycle spans at least 8 px; zoomed out it would alias into spikes
-        // (#170), so the line follows the bend curve alone inside a faint band as wide as the vibrato.
-        final cyclePx = e.vibDepth > 0 && e.vibRate > 0 && lenSec > 0 ? nw / (lenSec * e.vibRate) : double.infinity;
-        final wave = cyclePx >= 8;
-        double pitch(double u) => wave ? e.pitchAt(u, u * lenSec) : NoteExpression.valueAt(e.bend, u);
-        // Sampled every 2 px where the note is on screen (a very long note costs no more than the width), plus at
-        // the curve's own points, so its corners stay sharp at any zoom.
-        final from = math.max(0.0, -x), to = math.min(nw, w - x);
-        final xs = <double>{for (var px = (from / 2).floor() * 2.0; px <= to; px += 2) px, from, to,
-          for (final q in e.bend) if (q.t * nw >= from && q.t * nw <= to) q.t * nw}.toList()..sort();
-        final path = Path();
-        for (var i = 0; i < xs.length; i++) {
-          final py = y + rowH / 2 - pitch(xs[i] / nw) * rowH;
-          i == 0 ? path.moveTo(x + xs[i], py) : path.lineTo(x + xs[i], py);
-        }
-        final stroke = math.max(3.0, rowH * 0.55);
-        if (!wave && e.vibDepth > 0) {
-          canvas.drawPath(path, Paint()
-            ..color = fill.withValues(alpha: 0.3)
-            ..style = PaintingStyle.stroke
-            ..strokeCap = StrokeCap.round
-            ..strokeJoin = StrokeJoin.round
-            ..strokeWidth = stroke + 2 * e.vibDepth * rowH);
-        }
-        canvas.drawPath(path, Paint()
-          ..color = fill
-          ..style = PaintingStyle.stroke
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round
-          ..strokeWidth = stroke);
-        if (editBend == n.id) {
-          for (final p in e.bend) {
-            canvas.drawCircle(Offset(x + p.t * nw, y + rowH / 2 - p.v * rowH), 5, Paint()..color = Neon.yellow);
-          }
-        }
-      } else {
-        canvas.drawRRect(r, Paint()..color = fill);
-      }
-      if (sel.contains(n.id)) {
-        canvas.drawRRect(r, Paint()
-          ..color = Neon.text
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5);
-      }
+      _paintNote(canvas, n, e, box,
+          x: x, y: y, nw: nw, w: w, rowH: rowH, color: color, secPerStep: secPerStep, selected: sel.contains(n.id),
+          points: !curveMode || !bent ? 0 : (sel.contains(n.id) ? 2 : 1));
       if (n.prob < 1 || n.ratchet > 1 || n.slide) {
         canvas.drawCircle(Offset(x + 4, y + rowH / 2), 2, Paint()..color = Neon.bg);
       }
@@ -2753,7 +3080,8 @@ class _RollPainter extends CustomPainter {
       o.keyLabels != keyLabels ||
       o.curves != curves ||
       o.secPerStep != secPerStep ||
-      o.editBend != editBend ||
+      o.curveMode != curveMode ||
+      o.hide != hide ||
       o.lag != lag ||
       o.lagIds != lagIds ||
       o.lagEdge != lagEdge ||
