@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
 import '../model/cpp_workbench.dart';
+import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
 import '../platform/system_bars.dart';
@@ -29,6 +30,8 @@ import 'theme_editor.dart';
 import 'widgets.dart';
 import 'glass.dart';
 import 'frame/frame_widgets.dart';
+import 'frame/live_keys.dart';
+import 'frame/record_tools.dart';
 import 'frame/sections.dart';
 import 'frame/strain.dart';
 
@@ -290,6 +293,8 @@ class _ShellState extends State<Shell> {
                 ]),
               ),
             ),
+            // The on-screen keys and pads slide up from the bottom edge here.
+            if (LiveMidi.current case final m?) TakeToast(midi: m, child: LiveKeysPanel(midi: m, state: s)),
           ]),
         ),
       ]);
@@ -633,6 +638,8 @@ class _TransportBar extends StatelessWidget {
           icon: const Icon(Icons.dashboard_customize),
           onPressed: () => showLayoutMenu(context, dock),
         ),
+        if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
+        if (LiveMidi.current case final m?) KeysButton(midi: m),
         // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
         if (playing || state.pausedStep != null) IconButton(
           key: const ValueKey('transport-stop'),
@@ -662,6 +669,7 @@ class _TransportBar extends StatelessWidget {
             ),
           ),
         ),
+        RecordButton(midi: LiveMidi.current, state: state),
       ]),
     );
   }

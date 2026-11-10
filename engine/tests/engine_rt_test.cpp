@@ -335,3 +335,43 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
     }
     CHECK_EQ(operations, 0u);
 }
+
+TEST(count_in_metronome_and_released_touches_never_allocate_on_the_audio_thread) {
+    ProjectSpec p;
+    p.bpm = 140;
+    p.loopBars = 1;
+    for (const char* file : {"acid-synth.caw", "bitcrush.caw", "acid-line.caw"}) {
+        std::string id(file);
+        id.resize(id.size() - 4);
+        p.modules.push_back({id, templateSource(file), {}});
+    }
+    p.layers = {layer("a", {"acid-synth", "bitcrush"})};
+    p.layers[0].pattern = "acid-line";
+    Engine e(48000);
+    e.setProject(p);
+    std::vector<float> l(192), r(192);
+    e.noteOn("a", 1, 50, 0.8);  // a preview over the count-in (the control-side map grows here)
+    e.setMetronome(true);
+    e.playCountIn(0, 2);
+    std::size_t operations = 0;
+    double sum = 0.0;
+    {
+        cawtest::AllocationScope scope;
+        // Two beats of count-in at 140 BPM (about 0.86 s), then playback with the metronome: 2 s in all.
+        for (int k = 0; k < 500; ++k) {
+            e.process(l.data(), r.data(), 192);
+            for (float v : l) sum += std::fabs(v);
+        }
+        operations = scope.count();
+    }
+    CHECK(e.meters().playing);
+    e.releaseTouches();
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 50; ++k) e.process(l.data(), r.data(), 192);
+        operations += scope.count();
+    }
+    e.noteOff(1);
+    CHECK(sum > 0.0);
+    CHECK_EQ(operations, 0u);
+}

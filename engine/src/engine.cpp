@@ -257,7 +257,7 @@ struct Engine::DelayLine {
 static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
@@ -278,6 +278,7 @@ struct Engine::Cmd {
     uint64_t playCount = 0;    // Play: the control thread's play count, which ends touches
     double fromStep = 0;       // Play: where in the project loop to start, in sixteenth steps
     uint32_t touchStamp = 0;   // Play: the last touch stamp before it (later stamps are touches after it)
+    int countInBeats = 0;      // Play: beats of count-in clicks before it starts
     // Preview: what to do with preview [previewId] on [slot]: 0 note on, 1 glide to [pitch], 2 note off, 3 all off.
     int previewOp = 0;
     int32_t previewId = 0;
@@ -2399,11 +2400,136 @@ void Engine::play(double fromStep) {
     touchedGlobals_.clear();
 }
 
+void Engine::playCountIn(double fromStep, int beats) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    drainRetired();
+    Cmd c;
+    c.type = Cmd::Play;
+    c.fromStep = fromStep;
+    c.countInBeats = std::clamp(beats, 0, 64);
+    c.playCount = playCount_ + 1;
+    c.touchStamp = touchCounter_;
+    if (!send(c)) return;
+    playCount_ = c.playCount;
+    touchedParams_.clear();
+    touchedGlobals_.clear();
+}
+
+void Engine::setMetronome(bool on) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    Cmd c;
+    c.type = Cmd::Metronome;
+    c.flag = on;
+    send(c);
+}
+
+void Engine::releaseTouches() {
+    // The same bookkeeping as a Play, without moving the transport: chains drop their touches at their next chunk.
+    std::lock_guard<std::mutex> lock(ctl_);
+    Cmd c;
+    c.type = Cmd::ReleaseTouches;
+    c.playCount = playCount_ + 1;
+    c.touchStamp = touchCounter_;
+    if (!send(c)) return;
+    playCount_ = c.playCount;
+    touchedParams_.clear();
+    touchedGlobals_.clear();
+}
+
 void Engine::stop() {
     std::lock_guard<std::mutex> lock(ctl_);
     Cmd c;
     c.type = Cmd::Stop;
     send(c);
+}
+
+void Engine::startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept {
+    playing_ = true;
+    // Ringing tails play on into the new pass (state kept), as the effects would have.
+    masterTailLeft_ = 0;
+    masterTailFade_ = 0;
+    for (int i = 0; i < slotCount_; ++i) {
+        slotAt(i).insertTail = false;
+        slotAt(i).tailFade = 0;
+    }
+    touchEpoch_ = playCount;  // chains from before this Play drop their touches at their next chunk
+    touchPlayStamp_ = touchStamp;
+    // Resuming starts mid-loop: each track works out its own loop pass from g_ at its next chunk. Code
+    // there may be far from zero, and a Play during a stop fade cuts it short, so both fade in.
+    // In steps, converted with the tempo the Transport commands before it set, so a tempo change made
+    // while paused still resumes on the same beat.
+    {
+        const double at = std::isfinite(fromStep) && fromStep > 0 ? std::floor(fromStep * stepLen_ + 0.5) : 0.0;
+        g_ = at > 0 && at < static_cast<double>(loopLen_) ? static_cast<int64_t>(at) : 0;
+    }
+    playRampIn_ = g_ > 0 || stopFade_ > 0 ? std::max(1, static_cast<int>(kStopSeconds * sr_)) : 0;
+    stopFade_ = 0;
+    epoch_ = 0;
+    dcL_[0] = dcL_[1] = dcR_[0] = dcR_[1] = 0;
+    limEnv_ = 0;
+    // The instruments still ringing share the play-tail budget, so Play's callback stays bounded.
+    {
+        int ringing = 0;
+        for (int i = 0; i < slotCount_; ++i)
+            if (ringsAtPlay(slotAt(i))) ++ringing;
+        const int tailLen = ringing > 0 ? std::max(1, kPlayTailBudgetFrames / ringing) : 0;
+        for (int i = 0; i < slotCount_; ++i) {
+            Slot& s = slotAt(i);
+            if (!s.active) continue;
+            retire(s.old, nullptr);
+            s.old = nullptr;
+            if (s.pending) {
+                retire(s.cur, nullptr);
+                s.cur = s.pending;
+                s.pending = nullptr;
+            }
+            s.swapLeft = 0;
+            s.seamLeft = 0;
+            if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
+            s.playTailLen = s.playTailAt = 0;
+            if (s.instrument) {
+                // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
+                NoteEvents& notes = *s.instrument->notes();
+                const bool rings = ringsAtPlay(s);
+                notes.releaseAll(0, true);
+                if (!notes.holdsPreview()) {
+                    // Still sounding (a release after Stop): its next 5 ms (less when many ring) fade out
+                    // over the new pass's start.
+                    if (rings) playTail(s, tailLen);
+                    s.instrument->reset();
+                    notes.forget(false);
+                    notes.clearEvents();
+                }
+            }
+            s.fresh = true;
+            s.contiguous = false;
+            s.k = -1;
+            s.epoch = -1;
+            updateSolo();
+            const double target = slotTarget(s);
+            s.gain = target > 0.0
+                ? (s.automation ? automationValue(s.automation->volume, 0.0, target) : target)
+                : 0.0;
+        }
+    }
+}
+
+// The metronome's click: 30 ms of a decaying sine, higher and louder on the bar's first beat. At most 0.5, so it
+// stays under the safety limiter's ceiling even where it is mixed after it (the count-in's own output).
+void Engine::startClick(bool accent) noexcept {
+    clickLen_ = clickLeft_ = std::max(1, static_cast<int>(0.03 * sr_));
+    clickPhase_ = 0;
+    clickInc_ = kTwoPi * (accent ? 1760.0 : 1320.0) / sr_;
+    clickAmp_ = accent ? 0.5 : 0.32;
+}
+
+double Engine::nextClick() noexcept {
+    if (clickLeft_ <= 0) return 0.0;
+    const double t = 1.0 - static_cast<double>(clickLeft_--) / clickLen_;  // 0..1 through the click
+    const double env = (1.0 - t) * (1.0 - t);
+    const double v = clickAmp_ * env * std::sin(clickPhase_);
+    clickPhase_ += clickInc_;
+    return v;
 }
 
 void Engine::clearOverload() {
@@ -2853,76 +2979,29 @@ void Engine::applyCommands() noexcept {
                 break;
             }
             case Cmd::Play:
-                playing_ = true;
-                // Ringing tails play on into the new pass (state kept), as the effects would have.
-                masterTailLeft_ = 0;
-                masterTailFade_ = 0;
-                for (int i = 0; i < slotCount_; ++i) {
-                    slotAt(i).insertTail = false;
-                    slotAt(i).tailFade = 0;
+                countInLeft_ = 0;
+                if (c.countInBeats > 0 && stepLen_ > 0 && !playing_) {
+                    // Count-in: clicks first; process() starts the playback when they end.
+                    countInBeat_ = std::max<int64_t>(1, static_cast<int64_t>(std::llround(4.0 * stepLen_)));
+                    countInLeft_ = countInBeat_ * c.countInBeats;
+                    countInAt_ = 0;
+                    countInFrom_ = c.fromStep;
+                    countInPlayCount_ = c.playCount;
+                    countInTouchStamp_ = c.touchStamp;
+                    if (!playing_) break;  // while playing it starts at once, as a Play
+                    countInLeft_ = 0;
                 }
-                touchEpoch_ = c.playCount;  // chains from before this Play drop their touches at their next chunk
+                startPlay(c.fromStep, c.playCount, c.touchStamp);
+                break;
+            case Cmd::Metronome:
+                metronome_ = c.flag;
+                break;
+            case Cmd::ReleaseTouches:
+                touchEpoch_ = c.playCount;  // as a Play: chains end their touches at their next chunk
                 touchPlayStamp_ = c.touchStamp;
-                // Resuming starts mid-loop: each track works out its own loop pass from g_ at its next chunk. Code
-                // there may be far from zero, and a Play during a stop fade cuts it short, so both fade in.
-                // In steps, converted with the tempo the Transport commands before it set, so a tempo change made
-                // while paused still resumes on the same beat.
-                {
-                    const double at = std::isfinite(c.fromStep) && c.fromStep > 0 ? std::floor(c.fromStep * stepLen_ + 0.5) : 0.0;
-                    g_ = at > 0 && at < static_cast<double>(loopLen_) ? static_cast<int64_t>(at) : 0;
-                }
-                playRampIn_ = g_ > 0 || stopFade_ > 0 ? std::max(1, static_cast<int>(kStopSeconds * sr_)) : 0;
-                stopFade_ = 0;
-                epoch_ = 0;
-                dcL_[0] = dcL_[1] = dcR_[0] = dcR_[1] = 0;
-                limEnv_ = 0;
-                // The instruments still ringing share the play-tail budget, so Play's callback stays bounded.
-                {
-                    int ringing = 0;
-                    for (int i = 0; i < slotCount_; ++i)
-                        if (ringsAtPlay(slotAt(i))) ++ringing;
-                    const int tailLen = ringing > 0 ? std::max(1, kPlayTailBudgetFrames / ringing) : 0;
-                    for (int i = 0; i < slotCount_; ++i) {
-                        Slot& s = slotAt(i);
-                        if (!s.active) continue;
-                        retire(s.old, nullptr);
-                        s.old = nullptr;
-                        if (s.pending) {
-                            retire(s.cur, nullptr);
-                            s.cur = s.pending;
-                            s.pending = nullptr;
-                        }
-                        s.swapLeft = 0;
-                        s.seamLeft = 0;
-                        if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
-                        s.playTailLen = s.playTailAt = 0;
-                        if (s.instrument) {
-                            // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
-                            NoteEvents& notes = *s.instrument->notes();
-                            const bool rings = ringsAtPlay(s);
-                            notes.releaseAll(0, true);
-                            if (!notes.holdsPreview()) {
-                                // Still sounding (a release after Stop): its next 5 ms (less when many ring) fade out
-                                // over the new pass's start.
-                                if (rings) playTail(s, tailLen);
-                                s.instrument->reset();
-                                notes.forget(false);
-                                notes.clearEvents();
-                            }
-                        }
-                        s.fresh = true;
-                        s.contiguous = false;
-                        s.k = -1;
-                        s.epoch = -1;
-                        updateSolo();
-                        const double target = slotTarget(s);
-                        s.gain = target > 0.0
-                            ? (s.automation ? automationValue(s.automation->volume, 0.0, target) : target)
-                            : 0.0;
-                    }
-                }
                 break;
             case Cmd::Stop:
+                countInLeft_ = 0;  // a Stop during the count-in cancels it
                 if (playing_ && stopFade_ == 0) stopFade_ = std::max(1, static_cast<int>(kStopSeconds * sr_));
                 playRampIn_ = 0;
                 break;
@@ -4387,7 +4466,20 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
     const bool bypass = bypass_.load(std::memory_order_relaxed);
     int sp = masterScopePos_.load(std::memory_order_relaxed);
 
+    // The metronome, while the song plays: a click as the playhead crosses each beat.
+    const bool clicks = metronome_ && playing_ && !previewChunk_ && stepLen_ > 0;
+    const double beatLen = 4.0 * stepLen_;
     auto finishSample = [&](int frame, double yl, double yr) noexcept {
+        if (clicks) {
+            const double pos = static_cast<double>(g_ + frame);
+            const double beat = std::floor(pos / beatLen);
+            if (pos - beat * beatLen < 1.0) startClick(static_cast<int64_t>(beat) % std::max(1, beatsPerBar_) == 0);
+        }
+        if (clickLeft_ > 0) {
+            const double v = nextClick();
+            yl += v;
+            yr += v;
+        }
         const double env = std::max(std::fabs(yl), std::fabs(yr));
         limEnv_ = env > limEnv_ ? env : env + (limEnv_ - env) * rel;
         const double gain = bypass ? 1.0 : (limEnv_ > kLimitCeiling ? kLimitCeiling / limEnv_ : 1.0);
@@ -4525,6 +4617,34 @@ void Engine::process(float* left, float* right, int frames) noexcept {
     }
     int i = 0;
     while (i < frames) {
+        if (countInLeft_ > 0) {
+            // Count-in: the transport waits while the clicks play (previews play over them), then starts on the
+            // sample after the last beat, once the retire queue has room for a Play (else a chunk later).
+            const int m = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, countInLeft_}));
+            int done = m;
+            if (previewing_) {
+                previewChunk_ = true;
+                done = processChunk(left + i, right + i, m);
+                previewChunk_ = false;
+            } else {
+                std::fill(left + i, left + i + m, 0.0f);
+                std::fill(right + i, right + i + m, 0.0f);
+            }
+            for (int j = 0; j < done; ++j) {
+                if (countInAt_ % countInBeat_ == 0) startClick((countInAt_ / countInBeat_) % std::max(1, beatsPerBar_) == 0);
+                ++countInAt_;
+                const float v = static_cast<float>(nextClick());
+                left[i + j] = std::clamp(left[i + j] + v, -1.0f, 1.0f);
+                right[i + j] = std::clamp(right[i + j] + v, -1.0f, 1.0f);
+            }
+            countInLeft_ -= done;
+            i += done;
+            if (countInLeft_ == 0) {
+                if (canRetire(static_cast<size_t>(2 * slotCount_))) startPlay(countInFrom_, countInPlayCount_, countInTouchStamp_);
+                else countInLeft_ = 1;  // [Assumption] a full retire queue is rare; the start slips by a sample
+            }
+            continue;
+        }
         if (!playing_) {
             if (!previewing_) {
                 std::fill(left + i, left + frames, 0.0f);

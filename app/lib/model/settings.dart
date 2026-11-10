@@ -135,6 +135,9 @@ class ExportHistoryEntry {
   }
 }
 
+/// When the metronome clicks: never, while recording (and its count-in), or whenever the song plays.
+enum Metronome { off, recording, always }
+
 class Settings extends ChangeNotifier {
   /// Settings kept in [dir] (settings.json and themes/); with no folder they live in memory only.
   Settings({this.dir}) {
@@ -213,6 +216,13 @@ class Settings extends ChangeNotifier {
   /// Vim editing in the code editor (WASD moves; I types). Off by default.
   bool vimCode = false;
 
+  /// Recording (owner, 2026-11-10): when the metronome clicks, and how many bars the count-in has (0: none).
+  Metronome metronome = Metronome.recording;
+  int countInBars = 1;
+
+  /// The transport's Automate button's write mode ('touch', 'latch', 'write', 'read'; owner, 2026-11-10: Touch).
+  String automationMode = 'touch';
+
   /// The piano roll's sizes, look and touch choices.
   RollLook roll = const RollLook();
 
@@ -285,6 +295,9 @@ class Settings extends ChangeNotifier {
         'export_history': [for (final entry in exportHistory) entry.toJson()],
         'roll': roll.toJson(),
         'editor': editor.toJson(),
+        'metronome': metronome.name,
+        'count_in_bars': countInBars,
+        'automation_mode': automationMode,
       };
 
   void fromJson(Map<String, dynamic> j) {
@@ -316,6 +329,10 @@ class Settings extends ChangeNotifier {
     final fall = j['meter_fall'];
     if (fall is num && fall.isFinite) meterFall = fall.toDouble().clamp(6.0, 240.0);
     longPressMenu = pick(LongPressMenuStyle.values, j['long_press_menu'], longPressMenu);
+    metronome = pick(Metronome.values, j['metronome'], metronome);
+    final countIn = j['count_in_bars'];
+    if (countIn is num && countIn.isFinite) countInBars = countIn.toInt().clamp(0, 4);
+    if (const ['touch', 'latch', 'write', 'read'].contains(j['automation_mode'])) automationMode = j['automation_mode'] as String;
     if (j['glass_blur'] is bool) glassBlur = j['glass_blur'] as bool;
     final dock = j['dock_layouts'];
     if (dock is Map) dockLayouts = {for (final e in dock.entries) if (e.key is String) e.key as String: e.value};
@@ -371,6 +388,14 @@ class Settings extends ChangeNotifier {
     notifyListeners();
     await save();
     return true;
+  }
+
+  /// Record's long-press: the metronome and the count-in, saved at once.
+  Future<void> setRecording({Metronome? metronome, int? countInBars}) async {
+    if (metronome != null) this.metronome = metronome;
+    if (countInBars != null) this.countInBars = countInBars.clamp(0, 4);
+    notifyListeners();
+    await save();
   }
 
   Future<void> deleteExportProfile(String name) async {

@@ -11,6 +11,7 @@ import '../platform/resource_signals.dart';
 import 'poller.dart';
 import 'native_components.dart';
 import 'project.dart';
+import 'automation_writer.dart' show AutomationTarget;
 import 'history.dart';
 import 'pattern_doc.dart';
 import 'settings.dart';
@@ -438,6 +439,7 @@ class AppState extends ChangeNotifier {
         auditionOnly: previewOnly,
         voices: settings.lightMode ? 4 : 32, // global cap; each generator chooses its own voice count
         swap: settings.swapTiming.name,
+        suspendLanes: suspendedLanes,
         // The engine's built-ins (org.caw.*) are always loaded, so they play beside the project's loaded ones.
         playableComponents: nativeComponents == null ? null : {
           ...nativeComponents!.loaded,
@@ -455,6 +457,16 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  /// Automation lanes the engine leaves out while they are being written ([automationKey]s; the automation writer).
+  final Set<String> suspendedLanes = {};
+
+  /// A control moved by hand (volume, pan, a module, global or native parameter), before its value is stored: the
+  /// automation writer (lib/model/automation_writer.dart) records it while Automate is on and the song plays.
+  void Function(AutomationTarget target, double value)? onParamMove;
+
+  /// Sends the project to the engine soon, with no edit (the automation writer after [suspendedLanes] changes).
+  void resyncEngine() => _sync();
 
   /// Sends the project to the engine soon (edits in quick succession are sent once).
   void _sync() {
@@ -484,6 +496,7 @@ class AppState extends ChangeNotifier {
     // Drags save without notifying (so they stay light); the transport's buttons still need to see a flip.
     if ((history.canUndo, history.canRedo) != could) notifyListeners();
     _historyTimer?.cancel();
+    if (_historyHeld) return; // a take of automation writing: it settles when the take ends
     _historyTimer = Timer(const Duration(milliseconds: 600), () {
       final was = (history.canUndo, history.canRedo);
       history.settle(_snapshot());
@@ -493,6 +506,18 @@ class AppState extends ChangeNotifier {
 
   bool get canUndo => history.canUndo;
   bool get canRedo => history.canRedo;
+
+  bool _historyHeld = false;
+
+  /// Keeps the burst of edits open while [hold] is true, so a whole take of automation writing is one undo step;
+  /// edits made before it settle first, as their own step.
+  void holdHistory(bool hold) {
+    if (hold == _historyHeld) return;
+    _historyTimer?.cancel();
+    if (!starting) history.settle(_snapshot());
+    _historyHeld = hold;
+    notifyListeners();
+  }
 
   /// Goes back one step of project edits (the transport's undo, Ctrl+Z outside an editor with its own).
   bool undo() => _restore(history.undo(_snapshot()));
@@ -607,7 +632,8 @@ class AppState extends ChangeNotifier {
   bool useAudioDevice = true;
 
   /// Play and pause (Space, the transport's play button): a pause keeps the position and the next play resumes there.
-  void togglePlay() {
+  /// [countInBeats] (recording): starting from a stop, the engine clicks that many beats first.
+  void togglePlay({int countInBeats = 0}) {
     final e = engine;
     if (e == null) return;
     if (_transportOn) {
@@ -622,7 +648,11 @@ class AppState extends ChangeNotifier {
         if (audioError != null) return notifyListeners(); // no sound card: the pause stays where it was
       }
       final from = pausedStep;
-      from == null ? e.play() : e.playAt(from);
+      if (countInBeats > 0) {
+        e.playCountIn(from ?? 0, countInBeats);
+      } else {
+        from == null ? e.play() : e.playAt(from);
+      }
       pausedStep = null;
       _transportOn = true;
     }
@@ -981,6 +1011,7 @@ class AppState extends ChangeNotifier {
   void setParam(String moduleId, String name, double value) {
     final m = project.module(moduleId);
     if (m == null) return;
+    onParamMove?.call(AutomationTarget('param', name, moduleId: moduleId), value);
     m.params[name] = value;
     engine?.setParam(moduleId, name, value);
     _save();
@@ -1003,6 +1034,7 @@ class AppState extends ChangeNotifier {
   double globalValue(ParamInfo p) => project.globals[p.name] ?? p.defaultValue;
 
   void setGlobal(String name, double value) {
+    onParamMove?.call(AutomationTarget('global', name), value);
     project.globals[name] = value;
     engine?.setGlobal(name, value);
     _save();
@@ -1248,7 +1280,7 @@ class AppState extends ChangeNotifier {
       final lower = position > 0 ? sorted[position - 1].step + 0.01 : 0.0;
       final upper = position >= 0 && position < sorted.length - 1 ? sorted[position + 1].step - 0.01 : project.maxArrangementSteps.toDouble();
       p.step = step.clamp(lower, math.min(upper, project.maxArrangementSteps.toDouble())).toDouble();
-      p.value = value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
+      p.value = value.clamp(lane.target == 'volume' ? 0.0 : -1.0, lane.target == 'volume' ? kMaxMixGain : 1.0).toDouble();
       // Clamp to neighboring points instead of reordering during a drag; the dragged handle stays stable.
     });
   }
@@ -1260,7 +1292,7 @@ class AppState extends ChangeNotifier {
     editLayer(layer, (l) {
       l.automation.firstWhere((a) => a.target == lane.target).points.add(
         AutomationPointDoc(step: at,
-          value: value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble()));
+          value: value.clamp(lane.target == 'volume' ? 0.0 : -1.0, lane.target == 'volume' ? kMaxMixGain : 1.0).toDouble()));
       l.automation.firstWhere((a) => a.target == lane.target).points.sort((a, b) => a.step.compareTo(b.step));
     });
   }
@@ -1351,7 +1383,10 @@ class AppState extends ChangeNotifier {
   }
 
   void mixLayer(LayerDoc l, {double? volume, double? pan, bool? mute, bool? solo}) {
-    if (volume != null) l.volume = volume.clamp(0.0, kMaxMixGain).toDouble();
+    if (volume != null) volume = volume.clamp(0.0, kMaxMixGain).toDouble();
+    if (volume != null) onParamMove?.call(AutomationTarget('track', 'volume', layerId: l.id), volume);
+    if (pan != null) onParamMove?.call(AutomationTarget('track', 'pan', layerId: l.id), pan);
+    if (volume != null) l.volume = volume;
     if (pan != null) l.pan = pan;
     if (mute != null) l.mute = mute;
     if (solo != null) l.solo = solo;

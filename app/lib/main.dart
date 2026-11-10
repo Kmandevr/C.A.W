@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'model/app_state.dart';
+import 'model/automation_writer.dart';
 import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
@@ -31,6 +32,8 @@ Future<void> main() async {
   final state = AppState(settings: settings);
   // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
   LiveMidi.current = LiveMidi(state, platformMidiInput());
+  AutomationWriter.current = AutomationWriter(state); // the transport's Automate button
+
   runApp(CawApp(state: state));
   state.init();
 }

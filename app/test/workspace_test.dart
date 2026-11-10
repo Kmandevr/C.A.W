@@ -458,7 +458,7 @@ void main() {
     expect(sliders.length, 4);
     sliders[1].onChanged!(0.55);
     await tester.pump();
-    expect(lane.points.first.value, closeTo(0.55, 0.0001));
+    expect(lane.points.first.value, closeTo(VolumeTaper.gain(0.55), 0.0001), reason: 'volume points ride the fader taper');
 
     await tester.tap(find.byTooltip('Add midpoint point'));
     await tester.pump();
@@ -470,7 +470,7 @@ void main() {
     updatedPointSliders[5].onChanged!(0.6);
     await tester.pump();
     expect(lane.points.last.step, greaterThan(512));
-    expect(lane.points.last.value, greaterThan(0.5));
+    expect(lane.points.last.value, closeTo(VolumeTaper.gain(0.6), 1e-9));
 
     await tester.tap(find.byTooltip('Remove automation point').last);
     await tester.pump();
@@ -505,7 +505,7 @@ void main() {
     final valueSlider = tester.widgetList<Slider>(find.byType(Slider)).last;
     valueSlider.onChanged!(0.45);
     await tester.pump();
-    expect(lane.points.last.value, closeTo(0.45, 0.0001));
+    expect(lane.points.last.value, closeTo(VolumeTaper.gain(0.45), 0.0001));
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(milliseconds: 600));
   });

@@ -52,9 +52,15 @@ class ModuleDoc {
 }
 
 class ClipDoc {
-  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0, this.loop = true, this.linked = false});
+  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0, this.loop = true, this.linked = false,
+      List<String>? takes})
+      : takes = takes ?? [];
   final String id;
   String patternId;
+
+  /// Loop-recorded takes (pattern ids, oldest first; empty for an ordinary clip): the clip plays one of them,
+  /// [patternId], and the clip's Takes picker switches between them (lib/model/live_midi.dart).
+  List<String> takes;
   int startSteps;
   int lengthSteps;
   int sourceOffsetSteps;
@@ -64,6 +70,7 @@ class ClipDoc {
   Map<String, dynamic> toJson() => {
         'id': id, 'pattern': patternId, 'start_steps': startSteps,
         'length_steps': lengthSteps, 'source_offset_steps': sourceOffsetSteps, 'loop': loop, 'linked': linked,
+        if (takes.isNotEmpty) 'takes': takes,
       };
 
   static ClipDoc fromJson(Map<String, dynamic> j) => ClipDoc(
@@ -74,8 +81,14 @@ class ClipDoc {
         sourceOffsetSteps: (j['source_offset_steps'] as num?)?.toInt() ?? 0,
         loop: j['loop'] != false,
         linked: j['linked'] == true,
+        takes: [for (final t in (j['takes'] as List?) ?? const []) if (t is String) t].take(64).toList(),
       );
 }
+
+/// The one name of an automation lane's target, for track lanes (`track`) and project lanes alike: the automation
+/// writer (lib/model/automation_writer.dart) and [ProjectDoc.toEngineJson]'s `suspendLanes` use it.
+String automationKey(String type, String target, {String? layerId, String? moduleId, int? component}) =>
+    '$type|${layerId ?? ''}|${moduleId ?? ''}|${component ?? ''}|$target';
 
 class AutomationPointDoc {
   AutomationPointDoc({required this.step, required this.value});
@@ -107,6 +120,8 @@ class ProjectAutomationLaneDoc {
   String? layerId;
   int? component;
   List<AutomationPointDoc> points;
+
+  String get key => automationKey(targetType, target, layerId: layerId, moduleId: moduleId, component: component);
 
   Map<String, dynamic> toJson() => {
         'target_type': targetType,
@@ -485,7 +500,7 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now',
-      Set<String>? playableComponents}) {
+      Set<String>? playableComponents, Set<String> suspendLanes = const {}}) {
     final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
     // Native components the engine hasn't loaded (awaiting trust, blocked, failed to build) are left out, so the
     // rest of the song still plays; their automation lanes go with them and the others are renumbered.
@@ -500,9 +515,11 @@ class ProjectDoc {
         layerId == null ? masterComponents : layers.where((l) => l.id == layerId).firstOrNull?.components ?? const [];
     bool instrumentPlays(LayerDoc l) =>
         !l.isFolder && l.instrument != null && (playableComponents == null || playableComponents.contains(l.instrument!.id));
+    // Lanes being written (automation Write and Touch, [automationKey]) are left out: the control's live value plays.
     final engineAutomation = [
       for (final lane in automation)
-        if (lane.targetType == 'instrument') ...[
+        if (suspendLanes.contains(lane.key)) ...[]
+        else if (lane.targetType == 'instrument') ...[
           if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l)) lane.toJson(),
         ] else if (lane.targetType != 'component')
           lane.toJson()
@@ -537,7 +554,10 @@ class ProjectDoc {
               // A C++ instrument not loaded yet (awaiting trust, building) is left out: the track is silent until it is.
               if (instrumentPlays(l)) 'instrument': l.instrument!.toJson(),
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
-              'automation': [for (final a in l.automation) a.toJson()],
+              'automation': [
+                for (final a in l.automation)
+                  if (!suspendLanes.contains(automationKey('track', a.target, layerId: l.id))) a.toJson(),
+              ],
               if (l.clips.isEmpty && l.patternId != null) 'pattern': l.patternId,
               if (l.clips.isNotEmpty) 'clips': [
                 for (final clip in l.clips) {
@@ -680,7 +700,7 @@ class ProjectDoc {
         lane.points = lane.points.toList()
           ..forEach((point) {
             point.step = point.step.clamp(0, project.maxArrangementSteps.toDouble()).toDouble();
-            point.value = point.value.clamp(lane.target == 'volume' ? 0.0 : -1.0, 1.0).toDouble();
+            point.value = point.value.clamp(lane.target == 'volume' ? 0.0 : -1.0, lane.target == 'volume' ? kMaxMixGain : 1.0).toDouble();
           })
           ..sort((a, b) => a.step.compareTo(b.step));
       }

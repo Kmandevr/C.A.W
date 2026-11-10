@@ -22,6 +22,7 @@ import 'theme.dart';
 import 'arrange/track_color.dart';
 import 'file_manager_screen.dart';
 import 'frame/frame_widgets.dart';
+import 'frame/record_tools.dart' show showTakePicker;
 import 'widgets.dart';
 import 'volume_fader.dart';
 import 'track_cards_screen.dart';
@@ -269,12 +270,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final v = await showLongPressMenu<String>(context, at: at, title: layer.name, style: s.settings.longPressMenu, actions: [
       if (!layer.isFolder) ...[
         const MenuAction('fx', 'Effects', Icons.graphic_eq),
-        // MIDI keyboards record into a track (lib/model/live_midi.dart); audio recording needs the engine's input.
+        // MIDI keyboards and the on-screen keys record into a track (lib/model/live_midi.dart); audio recording needs
+        // the engine's input.
         // While any track records, this stops that take (one take at a time).
+        // With no USB keyboard, recording opens the on-screen keys and pads.
         MenuAction('arm', midi?.recording ?? false ? 'Stop recording' : 'Record arm', Icons.fiber_manual_record,
-            enabled: midi != null && (midi.devices.isNotEmpty || midi.recording),
-            checked: midi?.armedLayerId == layer.id,
-            hint: midi == null || midi.devices.isEmpty ? 'Connect a MIDI keyboard' : null),
+            enabled: midi != null, checked: midi?.armedLayerId == layer.id),
         MenuAction('input', 'Input · ${midi == null || midi.devices.isEmpty ? 'none' : midi.devices.join(', ')}', Icons.input,
             enabled: false, hint: 'MIDI keyboards play the selected track; audio input comes later'),
         // The same browser as the FX stack's (REAPER: instruments are FX), filtered to instruments.
@@ -437,6 +438,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     final v = await showLongPressMenu<String>(context, at: at, title: s.project.module(clip.patternId)?.name ?? 'Clip',
       style: s.settings.longPressMenu, actions: [
         const MenuAction('notes', 'Edit notes', Icons.piano),
+        // Loop-recorded takes (lib/model/live_midi.dart): pick the one the clip plays.
+        if (clip.takes.length > 1) MenuAction('takes', 'Takes (${clip.takes.length})…', Icons.layers_outlined),
         if (widget.onOpenPattern != null) const MenuAction('edit', 'Open in Sounds', Icons.open_in_new),
         MenuAction('select', s.selectedClipIds.contains(clip.id) ? 'Deselect' : 'Add to selection', Icons.select_all),
         const MenuAction('copy', 'Duplicate independently', Icons.copy),
@@ -448,6 +451,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       ]);
     if (v == null || !mounted) return;
     if (v == 'notes') { s.activateClip(layer, clip); _focus(layer.id, tab: FocusTab.clip); }
+    if (v == 'takes') return showTakePicker(context, s, layer, clip, at);
     if (v == 'edit') { s.activateClip(layer, clip); widget.onOpenPattern?.call(); }
     if (v == 'select') s.selectClip(layer, clip, additive: true);
     if (v == 'copy') s.duplicateClip(layer, clip);

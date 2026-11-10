@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 5;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 6;  // must equal CAW_API_VERSION in engine/include/caw.h
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -153,6 +153,12 @@ class Bindings {
         play = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_play'),
         playAt = lib.lookupFunction<Void Function(Pointer<Void>, Double), void Function(Pointer<Void>, double)>(
             'caw_engine_play_at'),
+        playCountIn = lib.lookupFunction<Void Function(Pointer<Void>, Double, Int32), void Function(Pointer<Void>, double, int)>(
+            'caw_engine_play_count_in'),
+        setMetronome = lib.lookupFunction<Void Function(Pointer<Void>, Int32), void Function(Pointer<Void>, int)>(
+            'caw_engine_set_metronome'),
+        releaseTouches = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+            'caw_engine_release_touches'),
         stop = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>('caw_engine_stop'),
         clearOverload = lib.lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
             'caw_engine_clear_overload'),
@@ -255,6 +261,9 @@ class Bindings {
   final void Function(Pointer<Void>) notesOff;
   final void Function(Pointer<Void>) play;
   final void Function(Pointer<Void>, double) playAt;
+  final void Function(Pointer<Void>, double, int) playCountIn;
+  final void Function(Pointer<Void>, int) setMetronome;
+  final void Function(Pointer<Void>) releaseTouches;
   final void Function(Pointer<Void>) stop;
   final void Function(Pointer<Void>) clearOverload;
   final void Function(Pointer<Void>, Pointer<CawMetersStruct>) meters;

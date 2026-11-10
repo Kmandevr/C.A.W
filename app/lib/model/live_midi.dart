@@ -1,5 +1,6 @@
-// Plays a MIDI keyboard on a track and records it: notes go to the armed track (else the selected one) as live
-// previews; while recording they are captured against the playhead and become a new pattern clip at Stop.
+// Plays a MIDI keyboard (or the on-screen keys and pads) on a track and records it: notes go to the armed track
+// (else the selected one) as live previews; while recording, after a count-in, they are captured against the
+// playhead and become a new pattern clip at Stop, one take per loop pass, with a "Keep take?" undo.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -9,6 +10,15 @@ import '../platform/midi_input.dart';
 import 'app_state.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
+import 'settings.dart';
+
+/// What one recording added (for the "Keep take?" toast's Undo): its clip and the take patterns on [layerId].
+class RecordedTake {
+  const RecordedTake(this.layerId, this.clipIds, this.moduleIds);
+  final String layerId;
+  final List<String> clipIds, moduleIds;
+  int get takes => moduleIds.length;
+}
 
 /// One captured note, in sixteenth steps of the song.
 class TakenNote {
@@ -22,6 +32,9 @@ class LiveMidi extends ChangeNotifier {
   static LiveMidi? current;
 
   LiveMidi(this.state, this.input) {
+    state.addListener(_onState);
+    state.tick.addListener(_onTick);
+    state.settings.addListener(_applyMetronome);
     final i = input;
     if (i == null) return;
     _subs.add(i.messages.listen(handle));
@@ -31,8 +44,54 @@ class LiveMidi extends ChangeNotifier {
       devices = names;
       notifyListeners();
     }));
-    state.addListener(_onState);
-    state.tick.addListener(_onTick);
+  }
+
+  /// The on-screen keys and pads (owner, 2026-11-10): a slide-up panel over the transport.
+  bool get keysOpen => _keysOpen;
+  bool _keysOpen = false;
+  set keysOpen(bool open) {
+    if (open == _keysOpen) return;
+    _keysOpen = open;
+    if (!open) _releaseAll();
+    notifyListeners();
+  }
+
+  /// The last recording's clip and takes, for the "Keep take?" toast; null once dealt with.
+  final ValueNotifier<RecordedTake?> lastTake = ValueNotifier(null);
+
+  /// When the count-in ends (wall clock, for the transport's countdown), or null when none runs.
+  DateTime? countInEnds;
+  int countInBeats = 0;
+
+  /// The count-in's beats still to come (0 when none runs).
+  int get countInLeft {
+    final end = countInEnds;
+    if (end == null || !recording || state.meters.playing) return 0;
+    final ms = end.difference(DateTime.now()).inMilliseconds;
+    final beatMs = 60000 / state.project.bpm;
+    return ms <= 0 ? 0 : (ms / beatMs).ceil().clamp(0, countInBeats);
+  }
+
+  /// A key or pad on screen pressed: a note on at [velocity] (0..1), as a USB keyboard's.
+  void keyDown(int note, double velocity) =>
+      handle(MidiMessage(0x90, note.clamp(0, 127), (velocity * 127).round().clamp(1, 127)));
+
+  void keyUp(int note) => handle(MidiMessage(0x80, note.clamp(0, 127), 0));
+
+  bool _metronomeOn = false;
+
+  /// The engine's click: always, or while recording (with its count-in), as the Record long-press sets it.
+  void _applyMetronome() {
+    final want = switch (state.settings.metronome) {
+      Metronome.off => false,
+      Metronome.recording => recording,
+      Metronome.always => true,
+    };
+    if (want == _metronomeOn) return;
+    final e = state.engine;
+    if (e == null) return;
+    _metronomeOn = want;
+    e.setMetronome(want);
   }
 
   void _onTick() {
@@ -64,6 +123,10 @@ class LiveMidi extends ChangeNotifier {
   /// The playhead now, in steps since the song's start, counting every pass since recording began.
   double _now() {
     // Stopped, the playhead is where play would resume, or (after Stop) where it last was.
+    // During a count-in (and until the engine starts), notes count from where recording begins.
+    if (recording && state.transportOn && !state.meters.playing && state.engine != null) {
+      return _lastNow = _recordFrom ?? _lastNow;
+    }
     final step = state.transportOn ? state.playheadStep : state.pausedStep;
     if (step == null) return _lastNow;
     if (recording && step + 1 < _lastStep) _wraps += state.project.engineLoopSteps;
@@ -78,7 +141,8 @@ class LiveMidi extends ChangeNotifier {
     return ok(armedLayerId) ?? ok(state.selectedLayerId) ?? layers.where((l) => !l.isFolder).firstOrNull?.id;
   }
 
-  /// Arms [layerId] and starts recording (and playback, if stopped); a call while recording stops and keeps the take.
+  /// Arms [layerId] and starts recording (and playback, if stopped, after the count-in); a call while recording
+  /// stops and keeps the take. With no USB keyboard the on-screen keys open, so Record always has something to play.
   void toggleRecord([String? layerId]) {
     if (recording) {
       _commit();
@@ -87,15 +151,39 @@ class LiveMidi extends ChangeNotifier {
     }
     final id = layerId ?? targetLayerId;
     if (id == null) return;
+    if (devices.isEmpty) keysOpen = true;
     armedLayerId = id;
     taken.clear();
-    if (!state.transportOn) state.togglePlay();
+    lastTake.value = null;
+    final from = state.playheadStep; // where play starts (a pause resumes there)
+    _applyMetronome();
+    if (!state.transportOn) {
+      countInBeats = state.settings.countInBars * state.project.beatsPerBar;
+      state.togglePlay(countInBeats: countInBeats);
+      countInEnds = countInBeats > 0 && state.transportOn
+          ? DateTime.now().add(Duration(microseconds: (countInBeats * 60e6 / state.project.bpm).round()))
+          : null;
+    }
     _wraps = 0;
-    _lastStep = state.playheadStep;
-    _lastNow = _lastStep;
-    _recordFrom = _lastStep;
+    _lastStep = from;
+    _lastNow = from;
+    _recordFrom = from;
     notifyListeners();
   }
+
+  /// The toast's Undo: takes the last recording back out (its clip and its take patterns).
+  void discardTake() {
+    final t = lastTake.value;
+    lastTake.value = null;
+    if (t == null) return;
+    state.editProject((p) {
+      for (final l in p.layers) {
+        l.clips.removeWhere((c) => t.clipIds.contains(c.id));
+      }
+      p.modules.removeWhere((m) => t.moduleIds.contains(m.id));
+    });
+  }
+
 
   void handle(MidiMessage m) {
     final layer = targetLayerId;
@@ -145,6 +233,7 @@ class LiveMidi extends ChangeNotifier {
 
   void _onState() {
     if (!state.transportOn && recording) _commit(); // Stop (or a pause) ends the take
+    _applyMetronome();
   }
 
   /// Writes the take as new pattern clips on the armed track: one per pass through the song, the first from the bar
@@ -155,8 +244,10 @@ class LiveMidi extends ChangeNotifier {
     _releaseAll(); // keys still down end where the playhead last was
     armedLayerId = null;
     _recordFrom = null;
+    countInEnds = null;
     final notes = List.of(taken);
     taken.clear();
+    _applyMetronome();
     notifyListeners();
     if (layerId == null || from == null || notes.isEmpty) return;
     final layer = state.project.layers.where((l) => l.id == layerId).firstOrNull;
@@ -170,24 +261,48 @@ class LiveMidi extends ChangeNotifier {
       // A note held past the song's end stops there; the next pass starts fresh.
       (passes[pass] ??= []).add(TakenNote(at, math.min(n.len, loop - at), n.pitch, n.vel));
     }
-    for (final pass in passes.keys.toList()..sort()) {
-      final start = pass == 0 ? (from / bar).floor() * bar : 0;
-      final m = takeModule(passes[pass]!, start: start, stepsPerBar: bar, name: _takeName());
+    final order = passes.keys.toList()..sort();
+    final firstStart = order.first == 0 ? (from / bar).floor() * bar : 0;
+    if (order.length == 1) {
+      final m = takeModule(passes[order.first]!, start: firstStart, stepsPerBar: bar, name: _takeName());
       state.editProject((p) => p.modules.add(m));
-      state.addClip(layer, m.id, startSteps: start);
+      state.addClip(layer, m.id, startSteps: firstStart);
+      final clip = layer.clips.lastOrNull;
+      lastTake.value = RecordedTake(layer.id, [?clip?.id], [m.id]);
+      return;
     }
+    // Loop recording: every pass is a take of one clip over the span they share; the newest plays (REAPER's
+    // default), and the clip's Takes picker switches.
+    final start = order.any((p) => p > 0) ? 0 : firstStart;
+    final end = notes.isEmpty ? start + bar : passes.values.expand((n) => n).map((n) => n.at + n.len).fold<double>(0, math.max);
+    final bars = math.max(1, ((end - start) / bar).ceil());
+    final modules = [
+      for (final pass in order) takeModule(passes[pass]!, start: start, stepsPerBar: bar, name: _takeName(order.indexOf(pass)), bars: bars),
+    ];
+    state.editProject((p) => p.modules.addAll(modules));
+    state.addClip(layer, modules.last.id, startSteps: start);
+    final clip = layer.clips.lastOrNull;
+    if (clip == null || clip.patternId != modules.last.id) return;
+    state.editLayer(layer, (_) {
+      clip.takes = [for (final m in modules) m.id];
+      clip.lengthSteps = bars * bar;
+    });
+    lastTake.value = RecordedTake(layer.id, [clip.id], [for (final m in modules) m.id]);
   }
 
-  String _takeName() {
+  /// "Take 3", the first free number; [skip] more for the later passes of one recording, which aren't added yet.
+  String _takeName([int skip = 0]) {
     var n = 1;
     while (state.project.modules.any((m) => m.name == 'Take $n')) {
       n++;
     }
-    return 'Take $n';
+    return 'Take ${n + skip}';
   }
 
   /// A pattern module holding [notes] (song steps) relative to [start], whole bars long; times on a 1/8-step grid.
-  static ModuleDoc takeModule(List<TakenNote> notes, {required int start, required int stepsPerBar, required String name}) {
+  /// At least [bars] long (the takes of one loop recording share a length).
+  static ModuleDoc takeModule(List<TakenNote> notes,
+      {required int start, required int stepsPerBar, required String name, int bars = 1}) {
     Steps grid(double v) => Steps.fromDouble((v * 8).round() / 8);
     final rel = [
       for (final (i, n) in notes.indexed)
@@ -200,9 +315,9 @@ class LiveMidi extends ChangeNotifier {
         ),
     ];
     final end = notes.map((n) => n.at - start + n.len).fold<double>(0, math.max);
-    final bars = math.max(1, (end / stepsPerBar).ceil());
+    final length = math.max(bars, (end / stepsPerBar).ceil());
     final span = rel.map((n) => n.end).fold<Steps>(Steps.zero, Steps.max);
-    final doc = PatternDoc.blank(name: name, bars: bars).paste(PatternClip(rel, span), Steps.zero).doc;
+    final doc = PatternDoc.blank(name: name, bars: length).paste(PatternClip(rel, span), Steps.zero).doc;
     return ModuleDoc(id: newId('m'), name: name, source: doc.serialize());
   }
 
@@ -213,10 +328,10 @@ class LiveMidi extends ChangeNotifier {
     for (final s in _subs) {
       s.cancel();
     }
-    if (input != null) {
-      state.removeListener(_onState);
-      state.tick.removeListener(_onTick);
-    }
+    state.removeListener(_onState);
+    state.tick.removeListener(_onTick);
+    state.settings.removeListener(_applyMetronome);
+    lastTake.dispose();
     super.dispose();
   }
 }

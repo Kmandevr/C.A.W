@@ -502,6 +502,15 @@ class Engine {
   /// Plays from [step] sixteenth steps into the project loop (fractions allowed); outside it, from 0.
   void playAt(double step) => _b.playAt(_handle, step);
 
+  /// Clicks [beats] beats at the tempo, then plays from [step] (the recording count-in); a stop cancels it.
+  void playCountIn(double step, int beats) => _b.playCountIn(_handle, step, beats);
+
+  /// The engine's built-in metronome click on every beat while playing.
+  void setMetronome(bool on) => _b.setMetronome(_handle, on ? 1 : 0);
+
+  /// Ends every knob touch, so automation lanes rule again without a restart (Touch mode letting go).
+  void releaseTouches() => _b.releaseTouches(_handle);
+
   /// Runs [frames] of audio with no device, discarding it: for tests, which play the transport without a sound card.
   /// Never call it while the device is on.
   void pullForTest(int frames) {

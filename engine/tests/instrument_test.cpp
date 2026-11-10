@@ -814,7 +814,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 5);  // 5: stereo track meters (4 brought instruments)
+    CHECK_EQ(caw_api_version(), 6);  // 6: count-in, metronome, released touches (5 stereo meters, 4 instruments)
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
             "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.basic","params":{"cutoff":900}}}]})");
