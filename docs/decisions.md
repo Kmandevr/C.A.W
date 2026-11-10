@@ -6,6 +6,13 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: A flagship synth that can do everything (owner)
+
+**Decision (owner):** "the goal is to build one synth that can do all the things", with unison and detune that work "as it does in Vital". It is a new built-in instrument beside Morph, which stays as the simple one (#171).
+- **First version, in order:** three wavetable oscillators with Vital-style unison (up to 16 voices, detune with a power curve, stereo spread, blend, random phase, stack modes); two filters; a mod matrix (envelopes, LFOs, random to any knob); a built-in effects rack reusing the Library kernels.
+- **Not Vital's code:** Vital is GPL-3.0 and C.A.W. takes permissive dependencies only, so nothing of Vital's code, presets or wavetables is copied. The behaviour is reproduced from public descriptions in original code.
+- The mod matrix's UI waits for the owner's direction.
+
 ## 2026-11-10: MIDI files are an import and export format (on the owner's behalf, to confirm)
 
 **Decision (made on the owner's behalf during autonomous work on #158; the owner has not confirmed it):** note clips keep being stored as C.A.W.'s own text note form (pattern text, `app/lib/model/pattern_doc.dart`) inside the project; project storage does not change. C.A.W. imports and exports Standard MIDI Files (SMF format 0 and 1, MIDI 1.0; format 2 reads as format 1) so clips move to and from other DAWs. Per-note pitch bend and expression export as MIDI 1.0 pitch bend, channel pressure and CC74 on per-note channels (MPE lower zone: channel 1 manages, channels 2–16 carry one note each, with an MPE Configuration Message and each channel's bend range by RPN) when a clip has any; otherwise plain notes on channel 1. MIDI 2.0 clip files for clips are later.
