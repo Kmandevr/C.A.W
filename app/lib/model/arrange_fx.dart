@@ -8,6 +8,7 @@ import '../ui/frame/sections.dart';
 import 'app_state.dart';
 import 'midi_clips.dart';
 import 'cpp_component.dart';
+import 'automation_writer.dart' show AutomationTarget;
 import 'native_trust.dart';
 import 'pattern_doc.dart';
 import 'project.dart';
@@ -152,6 +153,7 @@ extension ArrangeFx on AppState {
   /// [commitNativeParams] when the gesture ends to save it (an update with the same chain keeps the running state).
   void setNativeParamLive(LayerDoc layer, int index, String param, double value) {
     if (index < 0 || index >= layer.components.length) return;
+    onParamMove?.call(AutomationTarget('component', param, layerId: layer.id, component: index), value);
     layer.components[index].params[param] = value;
     final engineIndex = engineComponentIndex(layer, index);
     if (engineIndex != null) engine?.setComponentParam(layer.id, engineIndex, param, value);
@@ -198,6 +200,7 @@ extension ArrangeFx on AppState {
   void setInstrumentParamLive(LayerDoc layer, String param, double value) {
     final use = layer.instrument;
     if (use == null) return;
+    onParamMove?.call(AutomationTarget('instrument', param, layerId: layer.id), value);
     use.params[param] = value;
     if (componentPlayable(use.id)) engine?.setComponentParam(layer.id, ProjectDoc.instrumentIndex, param, value);
     layerValueTick(layer.id).value++;

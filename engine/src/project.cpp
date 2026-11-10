@@ -286,7 +286,8 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                         for (const Json& point : points->arr) {
                             if (point.type != Json::Type::Object) continue;
                             lane.points.push_back({point.number("step", 0),
-                                clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1, 1)});
+                                clampd(point.number("value", lane.target == "volume" ? 0.8 : 0), lane.target == "volume" ? 0 : -1,
+                                       lane.target == "volume" ? kMaxMixGain : 1)});  // volume: a gain to +12 dB, as the faders
                         }
                     }
                     std::stable_sort(lane.points.begin(), lane.points.end(), [](const auto& a, const auto& b) { return a.step < b.step; });

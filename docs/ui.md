@@ -110,7 +110,9 @@ The app has three sections, Build, Files and Arrange; the Mixer, Automation, Exp
 
 **The frame (owner, 2026-11-09):** three sections, Build, Files and Arrange; the other workspaces fold into them or open from ⋮ More ([app](app.md), Frame).
 
-**Phone (portrait):** a slim status row (project, tempo, CPU, More) on top; the section; then the transport in thumb reach (undo, redo, position, stop, play, record; drag sideways to scrub) and the section bar. Both hide while the keyboard is open, and a downward swipe on the section bar brings the status row within reach.
+**Phone (portrait):** a slim status row (project, tempo, CPU, More) on top; the section; then the transport in thumb reach (undo, redo, position, Automate, ♪ keys, stop, play, record; drag sideways to scrub) and the section bar. The on-screen keys and pads slide up above the transport, so the section stays in view while playing them ([app](app.md), Frame). Both hide while the keyboard is open, and a downward swipe on the section bar brings the status row within reach.
+
+**Recording and automation in the transport (owner, 2026-11-10; REAPER flow gaps 3 and 4):** the choices are kept compact, REAPER's depth behind a long-press. Automate is a small lane icon: grey off, a red outline with T, L, W or R when on, filled red while writing; its long-press lists Touch, Latch, Write and Read. Record's long-press holds the metronome and count-in. The keys panel is one glass strip: Keys | Pads, the track it plays, ‹ octave ›, a miniature range strip to drag, and ✕. After a recording a toast offers Undo instead of REAPER's keep-or-delete dialog, and loop takes are picked from the clip's long-press menu.
 
 **Phone (landscape):** compact (owner, 2026-11-10): a narrow icon rail on the left (with the project and More), the section, the transport at the bottom with the tempo and CPU; edge to edge under the camera cutout, controls kept clear of it. In both orientations the top bars tuck away while the content scrolls down ([app](app.md), Frame).
 
@@ -198,7 +200,7 @@ The broader UI specification below records design intent as well as current beha
 
 ## Not yet implemented
 
-Audio recording, audio clips and clip-following automation are not part of the current implementation; MIDI recording is limited to a connected USB keyboard ([app](app.md), Frame: Record). They are planned at the later stages in the permanent [roadmap](roadmap.md).
+Audio recording, audio clips and clip-following automation are not part of the current implementation; MIDI recording takes a USB keyboard or the on-screen keys and pads ([app](app.md), Frame: Record). They are planned at the later stages in the permanent [roadmap](roadmap.md).
 
 ## Performance profiles
 

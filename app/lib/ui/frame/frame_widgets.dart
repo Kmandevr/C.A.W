@@ -4,10 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../model/app_state.dart';
+import '../../model/automation_writer.dart';
 import '../../model/live_midi.dart';
 import '../glass.dart';
 import '../motion.dart';
 import '../theme.dart';
+import 'live_keys.dart';
+import 'record_tools.dart';
 import 'sections.dart';
 
 /// The icon and name of each section.
@@ -152,10 +155,11 @@ class SectionRail extends StatelessWidget {
       );
 }
 
-/// Play, stop, record and undo within thumb reach. A sideways drag on it scrubs the playhead (one bar per 48 px).
+/// Play, stop, record and undo within thumb reach, with Automate and the on-screen keys (which slide up above it).
+/// A sideways drag on it scrubs the playhead (one bar per 48 px).
 class BottomTransport extends StatefulWidget {
-  const BottomTransport({super.key, required this.state, this.midi, this.compact = false, this.extras = const [],
-      this.inset = EdgeInsets.zero});
+  const BottomTransport({super.key, required this.state, this.midi, this.automation, this.compact = false,
+      this.extras = const [], this.inset = EdgeInsets.zero});
   final AppState state;
   final bool compact;
 
@@ -165,8 +169,11 @@ class BottomTransport extends StatefulWidget {
   /// The screen's edge insets under and beside the bar: its background reaches under them, its buttons stay clear.
   final EdgeInsets inset;
 
-  /// The MIDI keyboard input; Record is on while a keyboard is connected or a take is running.
+  /// The MIDI keyboard input and the on-screen keys.
   final LiveMidi? midi;
+
+  /// The Automate button's writer (AutomationWriter.current when omitted).
+  final AutomationWriter? automation;
 
   @override
   State<BottomTransport> createState() => _BottomTransportState();
@@ -212,7 +219,10 @@ class _BottomTransportState extends State<BottomTransport> {
     final playing = s.transportOn;
     final p = s.project;
     final small = BoxConstraints(minWidth: 40, minHeight: 40);
-    return GestureDetector(
+    final narrow = BoxConstraints(minWidth: 34, minHeight: 40);
+    final midi = widget.midi;
+    final writer = widget.automation ?? AutomationWriter.current;
+    final bar = GestureDetector(
       behavior: HitTestBehavior.translucent,
       onHorizontalDragStart: _start,
       onHorizontalDragUpdate: _update,
@@ -246,12 +256,14 @@ class _BottomTransportState extends State<BottomTransport> {
                   ? Text('→ ${(_scrubAt! ~/ p.stepsPerBar) + 1}.1', style: Neon.code(size: 13, color: Neon.blue))
                   : ValueListenableBuilder<int>(
                       valueListenable: s.tick,
-                      builder: (context, _, _) => Text(_position(),
+                      builder: (context, _, _) => Text(midi != null && midi.countInLeft > 0 ? 'Count ${midi.countInLeft}' : _position(),
                           style: Neon.code(size: 13, color: s.meters.playing ? Neon.text : Neon.dim)),
                     ),
             ),
           ),
           ...widget.extras,
+          if (writer != null) AutomateButton(writer: writer, state: s, size: 34),
+          if (midi != null) KeysButton(midi: midi, constraints: narrow),
           IconButton(
             key: const ValueKey('transport-stop'),
             tooltip: 'Stop, back to the start (Shift+Space)',
@@ -286,10 +298,18 @@ class _BottomTransportState extends State<BottomTransport> {
             ),
           ),
           const SizedBox(width: 4),
-          // Record takes a MIDI keyboard for now; audio recording needs the engine's audio input (#152).
-          RecordButton(midi: widget.midi, constraints: small),
+          // Record plays a USB keyboard or the on-screen keys; audio recording needs the engine's audio input (#152).
+          RecordButton(midi: widget.midi, state: s, constraints: small),
         ]),
       ),
+    );
+    if (midi == null) return bar;
+    return TakeToast(
+      midi: midi,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        LiveKeysPanel(midi: midi, state: s, compact: widget.compact),
+        bar,
+      ]),
     );
   }
 
@@ -302,37 +322,41 @@ class _BottomTransportState extends State<BottomTransport> {
   }
 }
 
-/// Records a MIDI keyboard into the selected track: on while a keyboard is connected (or a take is running).
+/// Records into the armed (else selected) track from a USB keyboard or the on-screen keys, which open when no
+/// keyboard is connected; a long-press sets the metronome and the count-in.
 class RecordButton extends StatelessWidget {
-  const RecordButton({super.key, required this.midi, this.constraints});
+  const RecordButton({super.key, required this.midi, this.state, this.constraints});
   final LiveMidi? midi;
+  final AppState? state;
   final BoxConstraints? constraints;
 
   @override
   Widget build(BuildContext context) {
     final m = midi;
-    Widget button(bool recording, bool can) => IconButton(
-          key: const ValueKey('transport-record'),
-          tooltip: recording
-              ? 'Stop recording'
-              : can
-                  ? 'Record the MIDI keyboard into the selected track'
-                  : 'Record: connect a MIDI keyboard (audio recording comes later)',
-          iconSize: 19,
-          constraints: constraints,
-          color: Neon.pink,
-          isSelected: recording,
-          selectedIcon: const Icon(Icons.stop_circle),
-          icon: const Icon(Icons.fiber_manual_record),
-          onPressed: can || recording
-              ? () {
-                  if (Motion.haptics) HapticFeedback.selectionClick();
-                  m!.toggleRecord();
-                }
-              : null,
+    Widget button(bool recording) => GestureDetector(
+          onLongPressStart: m == null || state == null ? null : (d) => showRecordOptions(context, state!, m, d.globalPosition),
+          onSecondaryTapUp: m == null || state == null ? null : (d) => showRecordOptions(context, state!, m, d.globalPosition),
+          child: IconButton(
+            key: const ValueKey('transport-record'),
+            tooltip: recording
+                ? 'Stop recording'
+                : 'Record into the selected track (long-press: metronome, count-in)',
+            iconSize: 19,
+            constraints: constraints,
+            color: Neon.pink,
+            isSelected: recording,
+            selectedIcon: const Icon(Icons.stop_circle),
+            icon: const Icon(Icons.fiber_manual_record),
+            onPressed: m == null
+                ? null
+                : () {
+                    if (Motion.haptics) HapticFeedback.selectionClick();
+                    m.toggleRecord();
+                  },
+          ),
         );
-    if (m == null) return button(false, false);
-    return ListenableBuilder(listenable: m, builder: (context, _) => button(m.recording, m.devices.isNotEmpty));
+    if (m == null) return button(false);
+    return ListenableBuilder(listenable: m, builder: (context, _) => button(m.recording));
   }
 }
 

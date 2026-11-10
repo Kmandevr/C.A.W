@@ -122,6 +122,14 @@ public:
     void notesOff();
     void setMaster(double volume);
     void play(double fromStep = 0);  // fromStep: sixteenth steps into the project loop (out of range starts at 0)
+    // Count-in: clicks [beats] beats at the tempo (previews still play), then plays from [fromStep] on the
+    // sample after the last beat. 0 beats is play().
+    void playCountIn(double fromStep, int beats);
+    // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
+    // safety limiter. Off by default; renders and exports never click.
+    void setMetronome(bool on);
+    // Ends every knob touch now, as a Play does, so the lanes rule again (an automation Touch write released).
+    void releaseTouches();
     void stop();
     void clearOverload();
     Meters meters();
@@ -242,6 +250,17 @@ private:
     int64_t epoch_ = 0; // project loops completed since play
     uint64_t touchEpoch_ = 0;  // the play count of the last Play handled (audio thread); ends touches
     uint32_t touchPlayStamp_ = 0;  // the last knob move's stamp before that Play (audio thread)
+    // Metronome and count-in (audio thread): a click is [clickLeft_] samples of a decaying sine.
+    bool metronome_ = false;
+    int64_t countInLeft_ = 0, countInAt_ = 0, countInBeat_ = 0;  // samples left, samples into it, its beat length
+    double countInFrom_ = 0;
+    uint64_t countInPlayCount_ = 0;
+    uint32_t countInTouchStamp_ = 0;
+    int clickLeft_ = 0, clickLen_ = 0;
+    double clickPhase_ = 0, clickInc_ = 0, clickAmp_ = 0;
+    void startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept;
+    void startClick(bool accent) noexcept;
+    double nextClick() noexcept;  // the click's next sample (0 when none sounds)
     double bpm_ = 120.0;
     int beatsPerBar_ = 4;
     int loopSteps_ = 64;

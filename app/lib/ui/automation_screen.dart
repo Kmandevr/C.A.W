@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../model/app_state.dart';
 import '../model/project.dart';
 import 'theme.dart';
+import 'volume_fader.dart' show VolumeTaper;
 import 'widgets.dart';
 
 class AutomationScreen extends StatelessWidget {
@@ -293,16 +294,19 @@ class _PointEditor extends StatelessWidget {
       semanticFormatterCallback: (value) => 'Step ${value.round()}',
       onChanged: (value) => state.updateAutomationPoint(layer, lane, index, value, point.value),
     );
+    // Volume points are gains to +12 dB on the faders' taper (VolumeTaper), shown in dB.
     final valueSlider = Slider(
-      value: point.value.clamp(volume ? 0.0 : -1.0, 1.0).toDouble(),
+      value: volume ? VolumeTaper.position(point.value) : point.value.clamp(-1.0, 1.0).toDouble(),
       min: volume ? 0 : -1,
       max: 1,
       activeColor: color,
       semanticFormatterCallback: (value) => volume
-        ? 'Volume ${(value * 100).round()} percent'
+        ? 'Volume ${VolumeTaper.label(VolumeTaper.gain(value))}'
         : 'Pan ${(value * 100).round()} percent',
-      onChanged: (value) => state.updateAutomationPoint(layer, lane, index, point.step, value),
+      onChanged: (value) =>
+          state.updateAutomationPoint(layer, lane, index, point.step, volume ? VolumeTaper.gain(value) : value),
     );
+    final shown = volume ? VolumeTaper.label(point.value) : point.value.toStringAsFixed(2);
     final removeButton = IconButton(
       tooltip: 'Remove automation point',
       onPressed: () => state.removeAutomationPoint(layer, lane, index),
@@ -314,7 +318,7 @@ class _PointEditor extends StatelessWidget {
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
             Expanded(child: Text('POINT ${index + 1}', style: Neon.code(size: 10, color: color))),
-            Text('Step ${point.step.toStringAsFixed(0)} · ${point.value.toStringAsFixed(2)}',
+            Text('Step ${point.step.toStringAsFixed(0)} · $shown',
               style: Neon.code(size: 10, color: Neon.dim)),
             removeButton,
           ]),
@@ -335,7 +339,7 @@ class _PointEditor extends StatelessWidget {
         SizedBox(width: 38, child: Text(point.step.toStringAsFixed(0), textAlign: TextAlign.end,
           style: Neon.code(size: 10, color: Neon.dim))),
         Expanded(child: valueSlider),
-        SizedBox(width: 42, child: Text(point.value.toStringAsFixed(2), textAlign: TextAlign.end,
+        SizedBox(width: 56, child: Text(shown, textAlign: TextAlign.end,
           style: Neon.code(size: 10, color: color))),
         removeButton,
       ]);
@@ -361,8 +365,7 @@ class _CurveEditorState extends State<_CurveEditor> {
   int? _dragIndex;
 
   Offset _position(AutomationPointDoc point, Size size) {
-    final minimum = widget.volume ? 0.0 : -1.0;
-    final fraction = (point.value - minimum) / (widget.volume ? 1.0 : 2.0);
+    final fraction = widget.volume ? VolumeTaper.position(point.value) : (point.value + 1) / 2;
     return Offset(
       (point.step / widget.maxStep * size.width).clamp(0.0, size.width).toDouble(),
       size.height - (fraction * size.height).clamp(0.0, size.height).toDouble(),
@@ -374,7 +377,7 @@ class _CurveEditorState extends State<_CurveEditor> {
 
   double _valueAt(Offset position, Size size) {
     final fraction = (1 - position.dy / size.height).clamp(0.0, 1.0).toDouble();
-    return widget.volume ? fraction : fraction * 2 - 1;
+    return widget.volume ? VolumeTaper.gain(fraction) : fraction * 2 - 1;
   }
 
   int? _nearestPoint(Offset position, Size size) {
@@ -445,7 +448,8 @@ class _CurvePainter extends CustomPainter {
     final sorted = [...points]..sort((a, b) => a.step.compareTo(b.step));
     Offset map(AutomationPointDoc p) => Offset(
       (p.step / maxStep * size.width).clamp(0.0, size.width).toDouble(),
-      size.height - ((p.value - (volume ? 0 : -1)) / (volume ? 1 : 2) * size.height).clamp(0.0, size.height).toDouble());
+      size.height - ((volume ? VolumeTaper.position(p.value) : (p.value + 1) / 2) * size.height)
+          .clamp(0.0, size.height).toDouble());
     final path = Path()..moveTo(map(sorted.first).dx, map(sorted.first).dy);
     for (final p in sorted.skip(1)) { final at = map(p); path.lineTo(at.dx, at.dy); }
     canvas.drawPath(path, Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 2);

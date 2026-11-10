@@ -2058,3 +2058,84 @@ TEST(previews_follow_the_layer_mix_and_play_on_top_of_playback) {
     CHECK_NEAR(run(e, 4800).back(), 0.5 * 32 / 128.0 * pan, 1e-3);
     CHECK(e.meters().position > 0);
 }
+
+// ---- Metronome, count-in and released touches (the app's recording flow and automation Touch mode) ----
+
+namespace {
+float peakIn(const std::vector<float>& v, size_t from, size_t to) {
+    float m = 0;
+    for (size_t i = from; i < to && i < v.size(); ++i) m = std::max(m, std::fabs(v[i]));
+    return m;
+}
+}  // namespace
+
+TEST(count_in_clicks_each_beat_then_plays_on_the_sample_after_the_last) {
+    // 120 BPM at 48 kHz: a sixteenth is 6000 samples, a beat 24000.
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.playCountIn(0, 4);
+    const auto out = run(e, 4 * 24000 + 4800);
+    for (int beat = 0; beat < 4; ++beat) {
+        const size_t at = static_cast<size_t>(beat) * 24000;
+        CHECK(peakIn(out, at, at + 600) > 0.1f);              // a click on the beat
+        CHECK(peakIn(out, at + 2000, at + 23990) == 0.0f);    // and silence until the next: the song waits
+    }
+    CHECK(peakIn(out, 0, 600) > peakIn(out, 24000, 24600));   // the bar's first beat is accented
+    const double pan = std::cos(kPi / 4.0);
+    CHECK_NEAR(out[4 * 24000 + 2000], 0.25 * pan, 1e-4);      // then the song, from step 0
+    CHECK(e.meters().playing);
+    // A stop during a count-in cancels it.
+    e.stop();
+    run(e, 4800);
+    e.playCountIn(0, 2);
+    run(e, 1000);
+    e.stop();
+    const auto after = run(e, 3 * 24000);
+    CHECK(!e.meters().playing);
+    CHECK(peakIn(after, 0, after.size()) == 0.0f);
+}
+
+TEST(metronome_clicks_on_every_beat_while_playing_and_not_when_off) {
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0"}});
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProject(p);
+    e.play();
+    CHECK(peakIn(run(e, 2 * 24000), 0, 2 * 24000) == 0.0f);  // off by default
+    e.stop();
+    run(e, 4800);
+    e.setMetronome(true);
+    e.play();
+    const auto out = run(e, 2 * 24000 + 1200);
+    CHECK(peakIn(out, 0, 600) > 0.1f);
+    CHECK(peakIn(out, 24000, 24600) > 0.1f);
+    CHECK(peakIn(out, 4000, 23990) == 0.0f);
+}
+
+TEST(released_touches_let_the_lanes_rule_again_while_playing) {
+    Engine e(8000);
+    e.setMasterBypass(true);
+    CHECK(e.setProject(touchProject()).find("\"ok\":true") != std::string::npos);
+    e.play();
+    const double lane = run(e, 512).back();
+    CHECK(lane > 0.05);
+    e.setParam("tone", "g", 0.8);  // a touch overrides the lane
+    CHECK_NEAR(run(e, 512).back() / lane, 3.0, 1e-4);
+    e.releaseTouches();            // let go: the lane again, without a restart
+    CHECK_NEAR(run(e, 512).back() / lane, 1.0, 1e-4);
+    CHECK(e.meters().playing);
+}
+
+TEST(track_volume_lanes_reach_plus_12_db_as_the_faders) {
+    const std::string json = R"({"caw_project":1,"bpm":120,"loop_bars":1,"master":1,
+      "modules":[{"id":"tone","source":"---\nmode: float\n---\n0.1"}],
+      "layers":[{"id":"track","chain":["tone"],"volume":1,"automation":[
+        {"target":"volume","points":[{"step":0,"value":3.0},{"step":16,"value":9.0}]}]}]})";
+    ProjectSpec parsed;
+    std::string error;
+    CHECK(parseProject(json, parsed, error));
+    CHECK_NEAR(parsed.layers[0].automation[0].points[0].value, 3.0, 1e-9);
+    CHECK_NEAR(parsed.layers[0].automation[0].points[1].value, kMaxMixGain, 1e-9);  // held at +12 dB
+}

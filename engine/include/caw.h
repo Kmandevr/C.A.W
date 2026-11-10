@@ -26,8 +26,10 @@ extern "C" {
    5 (2026-11-10): caw_engine_layer_meter_stereo (each side's peak per track); track and master volume up to
    +12 dB. CawLayerMeter is unchanged.
    6 (2026-11-10): caw_engine_component_display (live display data a component publishes for its UI: spectra,
-   gain reduction, levels; #173). Nothing else changes. */
-#define CAW_API_VERSION 6
+   gain reduction, levels; #173). Nothing else changes.
+   7 (2026-11-10): caw_engine_play_count_in, caw_engine_set_metronome (a built-in click) and
+   caw_engine_release_touches; track volume lanes up to +12 dB, as the faders. */
+#define CAW_API_VERSION 7
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -180,6 +182,16 @@ CAW_API void caw_engine_play(CawEngine* e);
    on the same beat even if the tempo changed meanwhile; outside the loop (or not finite) it starts at 0. It fades in
    over 10 ms. Notes that began before it are not heard, and a module's trig fires at its next pass, not here. */
 CAW_API void caw_engine_play_at(CawEngine* e, double step);
+/* Clicks `beats` (0..64) beats at the tempo, accented on each bar, then plays from `step` as caw_engine_play_at does,
+   on the sample after the last beat; previews play during it. While playing, or with 0 beats, it is play_at. A stop
+   during the count-in cancels it. */
+CAW_API void caw_engine_play_count_in(CawEngine* e, double step, int32_t beats);
+/* The metronome (on != 0): a short click on every beat while playing, accented on the bar, mixed before the safety
+   limiter. Off by default; offline renders never click. */
+CAW_API void caw_engine_set_metronome(CawEngine* e, int32_t on);
+/* Ends every knob touch (a parameter set while playing overrides its lane until the next play), so the lanes rule
+   again at once: the host's automation Touch mode calls it when a written control is let go. */
+CAW_API void caw_engine_release_touches(CawEngine* e);
 CAW_API void caw_engine_stop(CawEngine* e);
 CAW_API void caw_engine_clear_overload(CawEngine* e);
 CAW_API void caw_engine_meters(CawEngine* e, CawMeters* out);

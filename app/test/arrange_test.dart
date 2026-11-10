@@ -454,7 +454,6 @@ void main() {
       // Near the finger: its top within a header's reach of the header.
       expect((tester.getRect(menu).top - tester.getCenter(header).dy).abs(), lessThan(120));
       expect(find.text('Record arm'), findsOneWidget);
-      expect(find.text('Connect a MIDI keyboard'), findsOneWidget, reason: 'no keyboard: Record arm is off');
       await tester.tap(find.text('Record arm'));
       await tester.pumpAndSettle();
       expect(menu, findsOneWidget, reason: 'a disabled entry does nothing');

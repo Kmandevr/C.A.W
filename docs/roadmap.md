@@ -196,7 +196,7 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 | 5.2 | Note/CC routing, controller learn and editable mappings | Planned | both | 5.1, F6 | Not built |
 | 5.3 | MIDI clock in/out and sync | Planned | engine | 5.1 | Not built |
 | 5.4 | Control surfaces with assignable controls and feedback | Planned | both | 5.2 | Not built |
-| 5.5 | On-screen performance keys, metronome and count-in | Planned | app | — | Not built |
+| 5.5 | On-screen performance keys, metronome and count-in | Built | both | — | Slide-up keys and 4×4 pads, the engine's click and a count-in ([app](app.md), Frame: Record; 2026-11-10) |
 | 5.6 | Audio output settings: output device choice, buffer size/latency mode, and project render rate (48 kHz default, 44.1/96 selectable) with resampling to the device | Partial | both | F8 | Exports already render at 44.1 or 48 kHz; no output device choice, 96 kHz project rate, device resampling or latency setting in the app |
 
 **Exit gate:** supported hardware connects reliably, events reach the intended tracks/voices, reconnect is safe, output settings take effect without glitches, and timing is verified on real devices.
@@ -207,7 +207,7 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 |---|---|---|---|---|---|
 | 6.1 | Song markers, named sections and navigation | Planned | app | — | Not built |
 | 6.2 | Tempo maps and time-signature changes | Planned | both | F4 | One tempo and meter per project today |
-| 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist; clip automation does not |
+| 6.3 | Clip-following automation and complete parameter/modulation automation | Partial | both | F6 | Track and project automation lanes exist, drawn by hand or written from the controls (Automate: Touch, Latch, Write, Read); clip automation does not |
 | 6.4 | Consolidate/bounce and render selected tracks, folders and groups | Planned | both | 0.3 | Not built |
 | 6.5 | Batch export, persistent/recoverable export queue, delivery presets | Partial | both | 0.3 | Export profiles, history and a bounded in-memory queue exist; the queue isn't persistent and there's no batch delivery |
 | 6.6 | MIDI and audio quantize/alignment across the arrangement | Planned | both | 1.4, 3.2 | Not built |
@@ -221,12 +221,12 @@ Recording is part of the product direction and the last stage before Release 1. 
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 7.1 | MIDI recording from devices and on-screen controls | Partial | both | 5.1, 5.5 | With a USB MIDI keyboard connected (Android), Record writes a take as a new pattern clip ([app](app.md)); no on-screen keys, metronome, count-in, loop takes or record modes |
+| 7.1 | MIDI recording from devices and on-screen controls | Partial | both | 5.1, 5.5 | Record writes a take from a USB MIDI keyboard (Android) or the on-screen keys and pads, with loop passes as takes and a Keep take? toast ([app](app.md)); no record modes (overdub, replace) |
 | 7.2 | Audio input selection, channel configuration and input monitoring | Planned | both | 5.6 | No audio input path exists |
 | 7.3 | Multitrack audio recording to arrangement tracks | Planned | both | 3.2, 7.2 | Not built |
 | 7.4 | Input latency measurement and compensation | Planned | engine | 7.2 | Not built |
 | 7.5 | Punch in/out and loop recording; take lanes and comping | Planned | both | 7.3 | Not built |
-| 7.6 | Count-in, metronome options and monitoring controls | Planned | app | 5.5 | Not built |
+| 7.6 | Count-in, metronome options and monitoring controls | Partial | app | 5.5 | Metronome off, while recording or always, and a 0–2 bar count-in on Record's long-press; no click sound choice or monitoring controls |
 | 7.7 | Recording recovery after interruption, device loss or low storage | Planned | both | 1.7, 7.3 | Not built |
 
 **Exit gate:** recording is reliable on supported hardware, timing/latency behavior is measured, files recover safely after interruption, and the audio callback remains bounded.
