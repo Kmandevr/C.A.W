@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'model/app_state.dart';
+import 'model/live_midi.dart';
 import 'model/problem_log.dart';
 import 'model/settings.dart';
+import 'platform/midi_input.dart';
 import 'ui/glass.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
@@ -27,6 +29,8 @@ Future<void> main() async {
   });
   final settings = await Settings.open();
   final state = AppState(settings: settings);
+  // One MIDI listener for the app's life, above the shell (which a theme change rebuilds).
+  LiveMidi.current = LiveMidi(state, platformMidiInput());
   runApp(CawApp(state: state));
   state.init();
 }

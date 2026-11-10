@@ -109,8 +109,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
       if (!layer.isFolder) ...[
         const MenuAction('fx', 'Effects', Icons.graphic_eq),
         // MIDI keyboards record into a track (lib/model/live_midi.dart); audio recording needs the engine's input.
-        MenuAction('arm', midi?.armedLayerId == layer.id ? 'Stop recording' : 'Record arm', Icons.fiber_manual_record,
-            enabled: midi != null && (midi.devices.isNotEmpty || midi.armedLayerId == layer.id),
+        // While any track records, this stops that take (one take at a time).
+        MenuAction('arm', midi?.recording ?? false ? 'Stop recording' : 'Record arm', Icons.fiber_manual_record,
+            enabled: midi != null && (midi.devices.isNotEmpty || midi.recording),
             checked: midi?.armedLayerId == layer.id,
             hint: midi == null || midi.devices.isEmpty ? 'Connect a MIDI keyboard' : null),
         MenuAction('input', 'Input · ${midi == null || midi.devices.isEmpty ? 'none' : midi.devices.join(', ')}', Icons.input,

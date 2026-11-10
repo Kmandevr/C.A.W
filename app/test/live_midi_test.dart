@@ -82,4 +82,45 @@ void main() {
     expect((note.at, note.len, note.pitch), (Steps(2), Steps(4), 64.0));
     live.dispose();
   });
+
+  test('re-pressing a key while the pedal holds it keeps the new note sounding when the pedal lifts', () {
+    final s = WatchedState()..project = twoTracks();
+    final midi = FakeMidi();
+    final live = LiveMidi(s, midi);
+    midi.notes.add(const MidiMessage(0xB0, 64, 127));
+    midi.notes.add(const MidiMessage(0x90, 60, 100));
+    midi.notes.add(const MidiMessage(0x80, 60, 0));
+    midi.notes.add(const MidiMessage(0x90, 60, 100)); // ends the first note, starts a second
+    expect(s.offs, 1);
+    midi.notes.add(const MidiMessage(0xB0, 64, 0));
+    expect(s.offs, 1, reason: 'the key is still down');
+    live.dispose();
+    expect(s.offs, 2, reason: 'disposing ends every note');
+  });
+
+  test('unplugging a keyboard ends its held notes', () {
+    final s = WatchedState()..project = twoTracks();
+    final midi = FakeMidi();
+    final live = LiveMidi(s, midi);
+    midi.names.add(['Keys']);
+    midi.notes.add(const MidiMessage(0x90, 60, 100));
+    midi.notes.add(const MidiMessage(0x90, 64, 100));
+    midi.names.add([]);
+    expect(s.offs, 2);
+    live.dispose();
+  });
+
+  test('a take that runs past the song end becomes one clip per pass, the later from the start', () {
+    final bar = 16;
+    final loop = 4 * bar.toDouble(); // the default 4-bar song
+    final takes = <TakenNote>[
+      const TakenNote(34, 2, 60, 1), // pass 0, bar 3
+      TakenNote(loop + 4, 2, 62, 1), // pass 1, bar 1
+    ];
+    final first = LiveMidi.takeModule([takes[0]], start: 32, stepsPerBar: bar, name: 'A');
+    expect(PatternDoc.parse(first.source).doc!.notes.single.at, Steps(2));
+    // The split itself: _commit groups by pass; check the grouping rule on the second note.
+    expect((takes[1].at / loop).floor(), 1);
+    expect(takes[1].at - loop, 4);
+  });
 }

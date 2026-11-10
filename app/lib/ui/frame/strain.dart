@@ -1,5 +1,7 @@
 // Lightens the glass while the audio is under strain: recent overruns, or the device hot or saving power (owner,
 // 2026-11-09). It sets Glass.strained and redraws the app when that changes, and clears it once things calm down.
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 import '../../engine/execution.dart';
@@ -30,11 +32,16 @@ class _GlassStrainWatcherState extends State<GlassStrainWatcher> {
   DateTime? _lastOverrun;
   DateTime _lastCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
+  // The meters stop ticking when the app is idle, so the strain is also checked every few seconds: the blur comes
+  // back after a calm spell, and heat or battery saver are noticed while stopped.
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
     _overruns = widget.state.meters.overloaded;
     widget.state.tick.addListener(_check);
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) => _check());
   }
 
   @override
@@ -48,6 +55,7 @@ class _GlassStrainWatcherState extends State<GlassStrainWatcher> {
 
   @override
   void dispose() {
+    _timer?.cancel();
     widget.state.tick.removeListener(_check);
     super.dispose();
   }

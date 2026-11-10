@@ -6,6 +6,7 @@ import 'dart:io';
 import '../engine/component_info.dart';
 import '../ui/frame/sections.dart';
 import 'app_state.dart';
+import 'arrange_fx.dart';
 import 'cpp_component.dart';
 import 'project.dart';
 
@@ -422,7 +423,9 @@ extension FilesCatalog on AppState {
           name: name,
           componentId: shape.componentId,
           files: {
-            for (final e in src.files.entries) e.key: old.isEmpty ? e.value : e.value.replaceAll(old, shape.componentId),
+            // Only the quoted id (the manifest's and the descriptor's), so a short id can't change other code.
+            for (final e in src.files.entries)
+              e.key: old.isEmpty ? e.value : e.value.replaceAll('"$old"', '"${shape.componentId}"'),
           },
           dependencies: {...src.dependencies},
         );
@@ -472,9 +475,13 @@ extension FilesCatalog on AppState {
           p.cppComponents.remove(a.cpp);
           if (id.isNotEmpty && !p.cppComponents.any((c) => c.componentId == id)) {
             for (final l in p.layers) {
+              final before = List.of(l.components);
               l.components.removeWhere((c) => c.id == id);
+              followComponentLanes(p, l.id, before);
             }
+            final before = List.of(p.masterComponents);
             p.masterComponents.removeWhere((c) => c.id == id);
+            followComponentLanes(p, null, before);
           }
         });
       case FileAssetType.cppFile:

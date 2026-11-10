@@ -21,6 +21,7 @@ class MidiInput(context: Context) : EventChannel.StreamHandler {
     private val main = Handler(Looper.getMainLooper())
     private val devices = mutableMapOf<Int, Pair<MidiDevice, String>>()
     private val ports = mutableMapOf<Int, MutableList<MidiOutputPort>>()
+    private val pending = mutableSetOf<Int>() // opening: a removal or cancel meanwhile closes it on arrival
     private var sink: EventChannel.EventSink? = null
 
     private val callback = object : MidiManager.DeviceCallback() {
@@ -48,10 +49,15 @@ class MidiInput(context: Context) : EventChannel.StreamHandler {
 
     private fun open(info: MidiDeviceInfo) {
         val m = manager ?: return
-        if (info.outputPortCount == 0 || devices.containsKey(info.id)) return
+        if (info.outputPortCount == 0 || devices.containsKey(info.id) || !pending.add(info.id)) return
         val name = info.properties.getString(MidiDeviceInfo.PROPERTY_NAME) ?: "MIDI device"
         m.openDevice(info, { device ->
+            val wanted = pending.remove(info.id) && sink != null
             if (device == null) return@openDevice
+            if (!wanted) {
+                runCatching { device.close() }
+                return@openDevice
+            }
             devices[info.id] = device to name
             val opened = mutableListOf<MidiOutputPort>()
             for (p in info.ports) {
@@ -66,6 +72,7 @@ class MidiInput(context: Context) : EventChannel.StreamHandler {
     }
 
     private fun close(id: Int) {
+        pending.remove(id)
         ports.remove(id)?.forEach { runCatching { it.close() } }
         devices.remove(id)?.first?.let { runCatching { it.close() } }
     }

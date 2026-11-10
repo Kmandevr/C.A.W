@@ -42,6 +42,22 @@ class ComponentCatalog extends ValueNotifier<Map<String, NativeComponentInfo>> {
 
 final _catalogs = Expando<ComponentCatalog>('component catalog');
 
+/// Keeps native-component automation lanes on their effects after the chain of [layerId] (null: the master)
+/// changed from [before] to its current order: a lane follows its effect to the new index, and goes with it when the
+/// effect is removed. Lanes address an effect by index, so every chain edit calls this.
+void followComponentLanes(ProjectDoc p, String? layerId, List<ComponentUseDoc> before) {
+  final after = layerId == null ? p.masterComponents : p.layers.where((l) => l.id == layerId).firstOrNull?.components;
+  p.automation.removeWhere((lane) {
+    if (lane.targetType != 'component' || lane.layerId != layerId) return false;
+    final i = lane.component ?? -1;
+    if (i < 0 || i >= before.length) return true;
+    final now = after == null ? -1 : after.indexWhere((c) => identical(c, before[i]));
+    if (now < 0) return true;
+    lane.component = now;
+    return false;
+  });
+}
+
 extension ArrangeFx on AppState {
   ComponentCatalog get componentCatalog => _catalogs[this] ??= ComponentCatalog(this);
 
@@ -79,20 +95,32 @@ extension ArrangeFx on AppState {
   ComponentUseDoc? addNativeEffect(LayerDoc layer, String componentId, {int? at}) {
     if (layer.isFolder || layer.components.length >= 64 || componentId.isEmpty) return null;
     final use = ComponentUseDoc(componentId);
-    editLayer(layer, (l) => l.components.insert((at ?? l.components.length).clamp(0, l.components.length), use));
+    final before = List.of(layer.components);
+    editProject((p) {
+      layer.components.insert((at ?? layer.components.length).clamp(0, layer.components.length), use);
+      followComponentLanes(p, layer.id, before);
+    });
     return use;
   }
 
   void removeNativeEffect(LayerDoc layer, int index) {
     if (index < 0 || index >= layer.components.length) return;
-    editLayer(layer, (l) => l.components.removeAt(index));
+    final before = List.of(layer.components);
+    editProject((p) {
+      layer.components.removeAt(index);
+      followComponentLanes(p, layer.id, before);
+    });
   }
 
   /// Moves native effect [from] so it ends up at index [to] of the new order.
   void moveNativeEffect(LayerDoc layer, int from, int to) {
     final n = layer.components.length;
     if (from < 0 || from >= n || to < 0 || to >= n || from == to) return;
-    editLayer(layer, (l) => l.components.insert(to, l.components.removeAt(from)));
+    final before = List.of(layer.components);
+    editProject((p) {
+      layer.components.insert(to, layer.components.removeAt(from));
+      followComponentLanes(p, layer.id, before);
+    });
   }
 
   /// Bypasses (or brings back) native effect [index]: live in the engine, and stored in the project.

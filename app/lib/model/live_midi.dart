@@ -17,7 +17,8 @@ class TakenNote {
 }
 
 class LiveMidi extends ChangeNotifier {
-  /// The app's instance (the shell makes it), for screens such as the track menu's Record arm.
+  /// The app's one instance (main.dart makes it, above the shell, so a theme change doesn't drop the keyboard), for
+  /// the transport's Record and the track menu's Record arm.
   static LiveMidi? current;
 
   LiveMidi(this.state, this.input) {
@@ -25,10 +26,17 @@ class LiveMidi extends ChangeNotifier {
     if (i == null) return;
     _subs.add(i.messages.listen(handle));
     _subs.add(i.devices.listen((names) {
+      // A keyboard unplugged with keys down sends no note-offs: end every note.
+      if (names.length < devices.length) _releaseAll();
       devices = names;
       notifyListeners();
     }));
     state.addListener(_onState);
+    state.tick.addListener(_onTick);
+  }
+
+  void _onTick() {
+    if (state.transportOn) _now(); // follow the playhead (and count wraps) between notes
   }
 
   final AppState state;
@@ -42,13 +50,26 @@ class LiveMidi extends ChangeNotifier {
   String? armedLayerId;
   bool get recording => armedLayerId != null;
 
-  /// Notes still held: MIDI note number -> (preview id, start step, velocity).
+  /// Notes still held: MIDI note number -> (preview id, start, velocity); starts are song time unwrapped ([_now]).
   final Map<int, (int, double, double)> _held = {};
   final Set<int> _sustained = {};
   bool _sustain = false;
   final List<TakenNote> taken = [];
   double? _recordFrom;
   double _bend = 0;
+
+  // Song time keeps counting across loop wraps while recording: each wrap adds the song's length.
+  double _wraps = 0, _lastStep = 0, _lastNow = 0;
+
+  /// The playhead now, in steps since the song's start, counting every pass since recording began.
+  double _now() {
+    // Stopped, the playhead is where play would resume, or (after Stop) where it last was.
+    final step = state.transportOn ? state.playheadStep : state.pausedStep;
+    if (step == null) return _lastNow;
+    if (recording && step + 1 < _lastStep) _wraps += state.project.engineLoopSteps;
+    _lastStep = step;
+    return _lastNow = step + _wraps;
+  }
 
   /// The track the keyboard plays: the armed one, else the selected one, else the first track that isn't a folder.
   String? get targetLayerId {
@@ -57,11 +78,11 @@ class LiveMidi extends ChangeNotifier {
     return ok(armedLayerId) ?? ok(state.selectedLayerId) ?? layers.where((l) => !l.isFolder).firstOrNull?.id;
   }
 
-  /// Arms [layerId] and starts recording (and playback, if stopped); a second call stops and keeps the take.
+  /// Arms [layerId] and starts recording (and playback, if stopped); a call while recording stops and keeps the take.
   void toggleRecord([String? layerId]) {
     if (recording) {
-      if (state.transportOn) state.togglePlay();
       _commit();
+      if (state.transportOn) state.togglePlay();
       return;
     }
     final id = layerId ?? targetLayerId;
@@ -69,15 +90,19 @@ class LiveMidi extends ChangeNotifier {
     armedLayerId = id;
     taken.clear();
     if (!state.transportOn) state.togglePlay();
-    _recordFrom = state.playheadStep;
+    _wraps = 0;
+    _lastStep = state.playheadStep;
+    _lastNow = _lastStep;
+    _recordFrom = _lastStep;
     notifyListeners();
   }
 
   void handle(MidiMessage m) {
     final layer = targetLayerId;
     if (layer == null) return;
-    final now = state.playheadStep;
+    final now = _now();
     if (m.isNoteOn) {
+      _sustained.remove(m.data1); // pressed again: it is held by the key now, not the pedal
       _release(m.data1, now); // a repeated key ends its earlier note
       final id = state.nextPreviewId();
       final vel = m.data2 / 127;
@@ -107,28 +132,29 @@ class LiveMidi extends ChangeNotifier {
     final h = _held.remove(note);
     if (h == null) return;
     state.previewOff(h.$1);
-    if (recording && _recordFrom != null) {
-      final loop = state.project.engineLoopSteps.toDouble();
-      // Playback looped back while the key was down: the note runs to the song's end.
-      final len = now >= h.$2 ? now - h.$2 : loop - h.$2;
-      taken.add(TakenNote(h.$2, math.max(0.25, len), note.toDouble(), h.$3));
+    if (recording && _recordFrom != null) taken.add(TakenNote(h.$2, math.max(0.25, now - h.$2), note.toDouble(), h.$3));
+  }
+
+  void _releaseAll() {
+    final now = _lastNow;
+    for (final n in _held.keys.toList()) {
+      _release(n, now);
     }
+    _sustained.clear();
   }
 
   void _onState() {
-    // Stop (or a pause) ends the take.
-    if (recording && !state.transportOn) _commit();
+    if (!state.transportOn && recording) _commit(); // Stop (or a pause) ends the take
   }
 
-  /// Writes the take as a new pattern on the armed track, starting at the bar where recording began.
+  /// Writes the take as new pattern clips on the armed track: one per pass through the song, the first from the bar
+  /// where recording began, later ones from the song's start.
   void _commit() {
     final layerId = armedLayerId;
     final from = _recordFrom;
+    _releaseAll(); // keys still down end where the playhead last was
     armedLayerId = null;
     _recordFrom = null;
-    for (final n in _held.keys.toList()) {
-      _release(n, state.playheadStep);
-    }
     final notes = List.of(taken);
     taken.clear();
     notifyListeners();
@@ -136,10 +162,20 @@ class LiveMidi extends ChangeNotifier {
     final layer = state.project.layers.where((l) => l.id == layerId).firstOrNull;
     if (layer == null) return;
     final bar = state.project.stepsPerBar;
-    final start = (from / bar).floor() * bar;
-    final m = takeModule(notes, start: start, stepsPerBar: bar, name: _takeName());
-    state.editProject((p) => p.modules.add(m));
-    state.addClip(layer, m.id, startSteps: start);
+    final loop = state.project.engineLoopSteps.toDouble();
+    final passes = <int, List<TakenNote>>{};
+    for (final n in notes) {
+      final pass = (n.at / loop).floor();
+      final at = n.at - pass * loop;
+      // A note held past the song's end stops there; the next pass starts fresh.
+      (passes[pass] ??= []).add(TakenNote(at, math.min(n.len, loop - at), n.pitch, n.vel));
+    }
+    for (final pass in passes.keys.toList()..sort()) {
+      final start = pass == 0 ? (from / bar).floor() * bar : 0;
+      final m = takeModule(passes[pass]!, start: start, stepsPerBar: bar, name: _takeName());
+      state.editProject((p) => p.modules.add(m));
+      state.addClip(layer, m.id, startSteps: start);
+    }
   }
 
   String _takeName() {
@@ -172,10 +208,15 @@ class LiveMidi extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (recording) _commit();
+    _releaseAll();
     for (final s in _subs) {
       s.cancel();
     }
-    if (input != null) state.removeListener(_onState);
+    if (input != null) {
+      state.removeListener(_onState);
+      state.tick.removeListener(_onTick);
+    }
     super.dispose();
   }
 }
