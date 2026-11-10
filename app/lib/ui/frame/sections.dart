@@ -111,6 +111,7 @@ enum AssetKind {
   nativeEffect, // a native stereo effect: a built-in (org.caw.*) or a project C++ component, by component id
   cawModule,    // a project .caw module, by module id
   pattern,      // a MIDI pattern source, by module id
+  midiFile,     // an imported MIDI file (its parts are patterns), by MidiFileDoc id
 }
 
 @immutable

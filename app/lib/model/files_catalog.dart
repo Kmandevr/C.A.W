@@ -21,6 +21,7 @@ enum FileAssetType {
   cawGenerator,  // a .caw generator or synth
   cawLibrary,    // a .caw library module
   pattern,       // a .caw pattern (MIDI notes)
+  midiFile,      // an imported MIDI file: its parts are patterns
 }
 
 /// The search filters (icons in the toolbar): an asset passes when its group is on, or when none is on.
@@ -36,6 +37,7 @@ extension FileAssetTypeInfo on FileAssetType {
         FileAssetType.cawGenerator => 'GEN',
         FileAssetType.cawLibrary => 'LIB',
         FileAssetType.pattern => 'MIDI',
+        FileAssetType.midiFile => 'MID',
       };
 
   String get label => switch (this) {
@@ -46,19 +48,20 @@ extension FileAssetTypeInfo on FileAssetType {
         FileAssetType.cawGenerator => '.caw instrument',
         FileAssetType.cawLibrary => '.caw library',
         FileAssetType.pattern => 'Pattern',
+        FileAssetType.midiFile => 'MIDI file',
       };
 
   FileAssetFilter get filter => switch (this) {
         FileAssetType.builtinEffect || FileAssetType.cppComponent || FileAssetType.cawEffect => FileAssetFilter.effects,
         FileAssetType.cawGenerator => FileAssetFilter.instruments,
         FileAssetType.cppFile || FileAssetType.cawLibrary => FileAssetFilter.code,
-        FileAssetType.pattern => FileAssetFilter.patterns,
+        FileAssetType.pattern || FileAssetType.midiFile => FileAssetFilter.patterns,
       };
 }
 
 /// One item in the browser.
 class FileAsset {
-  FileAsset._(this.key, this.name, this.type, {this.module, this.cpp, this.filePath, this.native});
+  FileAsset._(this.key, this.name, this.type, {this.module, this.cpp, this.filePath, this.native, this.midi});
 
   /// Unique within the project; also the favourites key (built-ins are app-wide).
   final String key;
@@ -68,6 +71,7 @@ class FileAsset {
   final CppComponentDoc? cpp;
   final String? filePath;        // for a [FileAssetType.cppFile]
   final NativeComponentInfo? native;
+  final MidiFileDoc? midi;       // for a [FileAssetType.midiFile]
 
   bool get builtin => type == FileAssetType.builtinEffect;
 
@@ -79,12 +83,13 @@ class FileAsset {
         FileAssetType.cppComponent => cpp!.componentId.isEmpty ? null : AssetDrag(AssetKind.nativeEffect, cpp!.componentId, name),
         FileAssetType.cawEffect || FileAssetType.cawGenerator => AssetDrag(AssetKind.cawModule, module!.id, name),
         FileAssetType.pattern => AssetDrag(AssetKind.pattern, module!.id, name),
+        FileAssetType.midiFile => AssetDrag(AssetKind.midiFile, midi!.id, name),
         FileAssetType.cppFile || FileAssetType.cawLibrary => null,
       };
 
   /// The Build tab double-tap opens; null for built-ins (nothing to edit).
   BuildTab? get buildTab => switch (type) {
-        FileAssetType.builtinEffect => null,
+        FileAssetType.builtinEffect || FileAssetType.midiFile => null,
         FileAssetType.cppComponent || FileAssetType.cppFile => BuildTab(BuildTabKind.cpp, cpp!.componentId),
         _ => BuildTab(BuildTabKind.caw, module!.id),
       };
@@ -94,9 +99,10 @@ class FileAsset {
 }
 
 /// What a folder holds. Folders are paths: `fav`, `fx`, `fx/builtin`, `fx/cpp`, `fx/caw`, `code`, `code/cpp`,
-/// `code/cpp/<component entry id>`, `code/caw`, `code/caw/<library folder>`, `audio`, `audio/patterns`, `packs`.
+/// `code/cpp/<component entry id>`, `code/caw`, `code/caw/<library folder>`, `audio`, `audio/patterns`,
+/// `audio/midi`, `packs`.
 enum FilesFolderKind { favourites, effects, builtin, cppEffects, cawEffects, code, cppList, cppComponent, cawModules,
-  libraryFolder, audio, patterns, packs }
+  libraryFolder, audio, patterns, midiFiles, packs }
 
 class FilesFolder {
   const FilesFolder(this.path, this.label, this.kind, [this.children = const []]);
@@ -231,12 +237,17 @@ extension FilesCatalog on AppState {
 
   List<FileAsset> get moduleAssets => [for (final m in project.modules) _moduleAsset(m)]..sort(_byName);
 
+  List<FileAsset> get midiFileAssets => [
+        for (final f in project.midiFiles) FileAsset._('midi:${f.id}', f.name, FileAssetType.midiFile, midi: f),
+      ]..sort(_byName);
+
   /// Every asset once (search looks through these).
   List<FileAsset> get allAssets => [
         ...builtinAssets,
         ...cppAssets,
         for (final c in project.cppComponents) ...cppFileAssets(c),
         ...moduleAssets,
+        ...midiFileAssets,
       ];
 
   FileAsset? assetByKey(String key) => allAssets.where((a) => a.key == key).firstOrNull;
@@ -267,6 +278,7 @@ extension FilesCatalog on AppState {
       ]),
       const FilesFolder('audio', 'Audio & MIDI', FilesFolderKind.audio, [
         FilesFolder('audio/patterns', 'Patterns', FilesFolderKind.patterns),
+        FilesFolder('audio/midi', 'MIDI files', FilesFolderKind.midiFiles),
       ]),
     ];
   }
@@ -305,6 +317,7 @@ extension FilesCatalog on AppState {
           moduleAssets.where((a) => a.module!.folderPath.isEmpty || !project.libraryFolders.contains(a.module!.folderPath)).toList(),
         FilesFolderKind.libraryFolder => moduleAssets.where((a) => a.module!.folderPath == folder.libraryPath).toList(),
         FilesFolderKind.patterns => moduleAssets.where((a) => a.type == FileAssetType.pattern).toList(),
+        FilesFolderKind.midiFiles => midiFileAssets,
         _ => const <FileAsset>[],
       };
 
@@ -334,6 +347,11 @@ extension FilesCatalog on AppState {
         if (l.components.any((c) => c.id == componentId)) out.add(l.name);
       }
       if (project.masterComponents.any((c) => c.id == componentId)) out.add('Master');
+    } else if (a.midi != null) {
+      final parts = a.midi!.parts.toSet();
+      for (final l in project.layers) {
+        if (l.clips.any((c) => parts.contains(c.patternId))) out.add(l.name);
+      }
     } else if (a.module != null) {
       final id = a.module!.id;
       for (final l in project.layers) {
@@ -405,6 +423,8 @@ extension FilesCatalog on AppState {
           final text = c.files.remove(from) ?? '';
           c.files[next] = text;
         });
+      case FileAssetType.midiFile:
+        editProject((_) => a.midi!.name = next);
       default:
         renameModule(a.module!.id, next);
     }
@@ -416,7 +436,7 @@ extension FilesCatalog on AppState {
   /// Copies [a] under a free name; returns the copy's key (null for built-ins).
   String? duplicateAsset(FileAsset a) {
     switch (a.type) {
-      case FileAssetType.builtinEffect:
+      case FileAssetType.builtinEffect || FileAssetType.midiFile:
         return null;
       case FileAssetType.cppComponent:
         final src = a.cpp!;
@@ -497,6 +517,9 @@ extension FilesCatalog on AppState {
         });
       case FileAssetType.cppFile:
         editProject((_) => a.cpp!.files.remove(a.filePath));
+      case FileAssetType.midiFile:
+        // Only the file's entry: its parts stay as patterns (and clips) in the project.
+        editProject((p) => p.midiFiles.removeWhere((f) => f.id == a.midi!.id));
       default:
         deleteModule(a.module!.id);
     }

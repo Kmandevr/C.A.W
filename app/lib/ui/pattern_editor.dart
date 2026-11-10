@@ -1,5 +1,6 @@
 // The pattern editor: a piano roll and a drum grid over the same notes, with an adaptive grid, velocity lane and keys.
 import 'dart:async';
+import 'dart:isolate';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -17,6 +18,8 @@ import '../engine/engine.dart';
 
 import '../model/app_state.dart';
 import '../model/lane_curve.dart';
+import '../model/midi_clips.dart';
+import '../model/midi_file.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
@@ -1676,17 +1679,36 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   void _say(String text) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
 
   /// Replaces the notes with a MIDI file's (one undo step); the file's tempo isn't applied.
+  /// ⋮ Import MIDI file: a .mid through the app's own converter (`lib/model/midi_clips.dart`, on another isolate),
+  /// replacing the notes; a file of several parts comes in as one pattern with all of them.
   Future<void> _importMidi() async {
     try {
-      final f = await FilePicker.pickFile();
+      final f = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: const ['mid', 'midi']);
       if (f == null) return;
-      final text = Engine.patternFromMidi(await f.xFile.readAsBytes());
-      final r = PatternDoc.parse(text);
-      if (!r.ok) throw FormatException(r.error ?? 'unreadable pattern');
-      _apply(r.doc!, select: {});
-      _say('Imported ${r.doc!.notes.length} notes');
+      if (await f.xFile.length() > kMaxMidiFileBytes) throw const MidiFileException('the file is bigger than 16 MB');
+      final bytes = await f.xFile.readAsBytes();
+      final beats = s.project.beatsPerBar;
+      final m = await Isolate.run(() => midiImport(bytes, beatsPerBar: beats));
+      if (m.clips.isEmpty) throw const FormatException('the file has no notes');
+      final current = _doc;
+      if (current == null) return;
+      // The pattern keeps its own name and header; its notes become the file's, every part together, and its
+      // length the longest part's.
+      var doc = current.delete({for (final n in current.notes) n.id});
+      var steps = 1;
+      for (final c in m.clips) {
+        final r = PatternDoc.parse(c.source);
+        if (!r.ok) throw FormatException(r.error ?? 'unreadable pattern');
+        doc = doc.paste(PatternClip(r.doc!.notes, Steps.zero), Steps.zero).doc;
+        steps = math.max(steps, r.doc!.lengthSteps(beats));
+      }
+      doc = doc.setLength(steps: steps);
+      _apply(doc, select: {});
+      _say('Imported ${doc.notes.length} notes');
+    } on FormatException catch (e) {
+      _say('Not imported: ${e.message}');
     } catch (e) {
-      _say(e is FormatException ? 'Not a MIDI file: ${e.message}' : 'Could not import: $e');
+      _say('Could not import: $e');
     }
   }
 
@@ -1696,14 +1718,22 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
     if (d == null) return;
     final name = '${widget.module.name}.${clip ? 'midi2' : 'mid'}';
     try {
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}${Platform.pathSeparator}caw-export-${DateTime.now().microsecondsSinceEpoch}';
-      final err = Engine.exportPattern(d.serialize(), path,
-          bpm: s.project.bpm.toDouble(), beatsPerBar: s.project.beatsPerBar, clip: clip);
-      if (err != null) throw Exception(err);
-      final file = File(path);
-      final saved = await FilePicker.saveFile(fileName: name, bytes: await file.readAsBytes(), mimeType: 'audio/midi');
-      await file.delete();
+      final Uint8List bytes;
+      if (clip) {
+        // MIDI 2.0 clips still come from the engine's converter.
+        final dir = await getTemporaryDirectory();
+        final path = '${dir.path}${Platform.pathSeparator}caw-export-${DateTime.now().microsecondsSinceEpoch}';
+        final err = Engine.exportPattern(d.serialize(), path,
+            bpm: s.project.bpm.toDouble(), beatsPerBar: s.project.beatsPerBar, clip: true);
+        if (err != null) throw Exception(err);
+        final file = File(path);
+        bytes = await file.readAsBytes();
+        await file.delete();
+      } else {
+        // A Standard MIDI File from the app's own converter, as a clip's export makes (MPE when notes are bent).
+        bytes = patternToMidi(d, bpm: s.project.bpm.toDouble(), beatsPerBar: s.project.beatsPerBar, name: widget.module.name);
+      }
+      final saved = await FilePicker.saveFile(fileName: name, bytes: bytes, mimeType: 'audio/midi');
       _say(saved == null ? 'Not exported (picker closed).' : 'Exported $name');
     } catch (e) {
       _say('Could not export: $e');

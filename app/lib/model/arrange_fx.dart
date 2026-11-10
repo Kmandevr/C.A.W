@@ -5,6 +5,7 @@ import '../engine/component_info.dart';
 import '../engine/engine.dart';
 import '../ui/frame/sections.dart';
 import 'app_state.dart';
+import 'midi_clips.dart';
 import 'cpp_component.dart';
 import 'native_trust.dart';
 import 'project.dart';
@@ -236,6 +237,10 @@ extension ArrangeFx on AppState {
         return addCawEffect(layer, asset.id);
       case AssetKind.pattern:
         return _dropPattern(layer, asset.id, atStep);
+      case AssetKind.midiFile:
+        final f = project.midiFiles.where((f) => f.id == asset.id).firstOrNull;
+        final snap = arrangementSnapSteps;
+        return f != null && placeMidiFile(this, f, layer, atStep: atStep == null ? null : (atStep / snap).floor() * snap);
     }
   }
 

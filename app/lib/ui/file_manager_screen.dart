@@ -298,6 +298,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       FilesFolderKind.builtin => 'Built-in effects appear once the engine is running.',
       FilesFolderKind.cppEffects || FilesFolderKind.cppList => 'No C++ effects yet. Hold this folder or tap + for a new one.',
       FilesFolderKind.patterns => 'No patterns yet. Tap + for a new one.',
+      FilesFolderKind.midiFiles => 'Imported MIDI files show here (⋯ › Import MIDI file as clips); drag one onto a track.',
       _ => 'This folder is empty.',
     };
   }
