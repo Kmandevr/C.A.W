@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
 import '../../model/files_catalog.dart';
-import '../devices/kit/preset_actions.dart' show exportPreset;
+import '../../model/user_presets.dart';
+import '../devices/kit/preset_actions.dart' show exportPreset, importPreset;
 import '../frame/sections.dart';
 import '../theme.dart';
 import 'asset_views.dart';
@@ -236,6 +237,8 @@ class FilesActions {
         const MenuEntry('import', Icons.file_open_outlined, 'Import .caw module here'),
         const MenuEntry('folder', Icons.create_new_folder_outlined, 'New folder'),
       ],
+      if (f.kind == FilesFolderKind.presets)
+        const MenuEntry('import-preset', Icons.file_open_outlined, 'Import preset file…'),
       if (f.kind == FilesFolderKind.libraryFolder) ...[
         const MenuEntry('rename', Icons.drive_file_rename_outline, 'Rename folder'),
         const MenuEntry('delete', Icons.delete_outline, 'Delete folder', danger: true, dividerBefore: true),
@@ -253,6 +256,8 @@ class FilesActions {
         newCawModule(cawKind!, folderPath: libraryParent);
       case 'import':
         await importCawModule(context, state, libraryParent);
+      case 'import-preset':
+        await importPreset(context, state.userPresets);
       case 'folder':
         await newLibraryFolder(libraryParent);
       case 'rename':

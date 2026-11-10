@@ -62,42 +62,60 @@ typedef PresetName = ({String name, String category});
 /// Asks for a preset's name (starting at [initial]) and an optional tag; [tags] are offered as chips. Null when
 /// cancelled.
 Future<PresetName?> askPresetName(BuildContext context, {required String title, required String initial,
-    String category = '', List<String> tags = const []}) {
-  final name = TextEditingController(text: initial)..selection = TextSelection(baseOffset: 0, extentOffset: initial.length);
-  final tag = TextEditingController(text: category);
-  return showDialog<PresetName>(context: context, builder: (context) {
-    void done() {
-      final n = UserPreset.cleanName(name.text, PresetLimits.name);
-      if (n.isEmpty) return;
-      Navigator.pop(context, (name: n, category: UserPreset.cleanName(tag.text, PresetLimits.category)));
-    }
-    return AlertDialog(
-      key: const ValueKey('preset-save-dialog'),
-      title: Text(title),
-      content: StatefulBuilder(builder: (context, setState) => Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(key: const ValueKey('preset-save-name'), controller: name, autofocus: true,
-          maxLength: PresetLimits.name, decoration: const InputDecoration(labelText: 'Name'),
-          onSubmitted: (_) => done()),
-        TextField(key: const ValueKey('preset-save-tag'), controller: tag, maxLength: PresetLimits.category,
-          decoration: const InputDecoration(labelText: 'Tag (optional)', hintText: 'Bass, Pad, Drums…'),
-          onChanged: (_) => setState(() {}),
-          onSubmitted: (_) => done()),
-        if (tags.isNotEmpty) Align(alignment: Alignment.centerLeft, child: Wrap(spacing: 6, children: [
-          for (final t in tags.take(8)) ActionChip(
-            label: Text(t, style: const TextStyle(fontSize: 11)),
-            visualDensity: VisualDensity.compact,
-            onPressed: () => setState(() => tag.text = t)),
-        ])),
-      ])),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(key: const ValueKey('preset-save-ok'), onPressed: done, child: const Text('Save')),
-      ],
-    );
-  }).whenComplete(() {
+    String category = '', List<String> tags = const []}) => showDialog<PresetName>(
+      context: context,
+      builder: (context) => _PresetNameDialog(title: title, initial: initial, category: category, tags: tags));
+
+class _PresetNameDialog extends StatefulWidget {
+  const _PresetNameDialog({required this.title, required this.initial, required this.category, required this.tags});
+  final String title, initial, category;
+  final List<String> tags;
+
+  @override
+  State<_PresetNameDialog> createState() => _PresetNameDialogState();
+}
+
+class _PresetNameDialogState extends State<_PresetNameDialog> {
+  late final name = TextEditingController(text: widget.initial)
+    ..selection = TextSelection(baseOffset: 0, extentOffset: widget.initial.length);
+  late final tag = TextEditingController(text: widget.category);
+
+  @override
+  void dispose() {
     name.dispose();
     tag.dispose();
-  });
+    super.dispose();
+  }
+
+  void _done() {
+    final n = UserPreset.cleanName(name.text, PresetLimits.name);
+    if (n.isEmpty) return;
+    Navigator.pop(context, (name: n, category: UserPreset.cleanName(tag.text, PresetLimits.category)));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        key: const ValueKey('preset-save-dialog'),
+        title: Text(widget.title),
+        content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(key: const ValueKey('preset-save-name'), controller: name, autofocus: true,
+            maxLength: PresetLimits.name, decoration: const InputDecoration(labelText: 'Name'),
+            onSubmitted: (_) => _done()),
+          TextField(key: const ValueKey('preset-save-tag'), controller: tag, maxLength: PresetLimits.category,
+            decoration: const InputDecoration(labelText: 'Tag (optional)', hintText: 'Bass, Pad, Drums…'),
+            onSubmitted: (_) => _done()),
+          if (widget.tags.isNotEmpty) Align(alignment: Alignment.centerLeft, child: Wrap(spacing: 6, children: [
+            for (final t in widget.tags.take(8)) ActionChip(
+              label: Text(t, style: const TextStyle(fontSize: 11)),
+              visualDensity: VisualDensity.compact,
+              onPressed: () => setState(() => tag.text = t)),
+          ])),
+        ])),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(key: const ValueKey('preset-save-ok'), onPressed: _done, child: const Text('Save')),
+        ],
+      );
 }
 
 /// Asks before replacing preset [name]; true to go on.

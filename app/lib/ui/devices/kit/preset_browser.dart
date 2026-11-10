@@ -76,26 +76,25 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
             },
             child: Container(
               height: 30,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(15), color: color.withValues(alpha: 0.1),
                 border: Border.all(color: color.withValues(alpha: 0.45))),
+              // While the save icon shows, the chip's own icons give their room to the name.
+              padding: EdgeInsets.symmetric(horizontal: quick ? 8 : 10),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.bookmarks_outlined, size: 14, color: color),
-                const SizedBox(width: 5),
+                if (!quick) ...[Icon(Icons.bookmarks_outlined, size: 14, color: color), const SizedBox(width: 5)],
                 Flexible(child: Text(name, key: const ValueKey('device-preset-name'), maxLines: 1,
                   overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
-                const Icon(Icons.arrow_drop_down, size: 16, color: Neon.dim),
+                if (!quick) const Icon(Icons.arrow_drop_down, size: 16, color: Neon.dim),
               ]),
             ),
           ))),
-          if (quick) Pressable(glow: color, circle: true, child: IconButton(
-            key: const ValueKey('device-preset-quicksave'),
-            tooltip: 'Save over "${DevicePresets.currentUser(t)!.name}"${widget.shortcuts ? ' (Ctrl+S)' : ''}',
-            iconSize: 17,
-            visualDensity: VisualDensity.compact,
-            color: color,
-            onPressed: () => quickSavePreset(context, t),
-            icon: const Icon(Icons.save_outlined))),
+          if (quick) Pressable(glow: color, circle: true, child: Tooltip(
+            message: 'Save over "${DevicePresets.currentUser(t)!.name}"${widget.shortcuts ? ' (Ctrl+S)' : ''}',
+            child: InkResponse(
+              key: const ValueKey('device-preset-quicksave'),
+              radius: 18,
+              onTap: () => quickSavePreset(context, t),
+              child: SizedBox(width: 30, height: 34, child: Icon(Icons.save_outlined, size: 17, color: color))))),
         ])));
     },
   );
@@ -109,8 +108,25 @@ Future<void> showPresetBrowser(BuildContext context, DeviceTarget target, Color 
     isScrollControlled: true,
     backgroundColor: Neon.panel,
     constraints: const BoxConstraints(maxWidth: 560),
-    builder: (context) => PresetBrowser(target: target, color: color),
+    builder: (context) => _SheetToasts(height: 0.7, child: PresetBrowser(target: target, color: color)),
   );
+}
+
+/// Toasts raised inside a sheet show at its bottom, above it (the page's own would be under the sheet).
+class _SheetToasts extends StatelessWidget {
+  const _SheetToasts({required this.height, required this.child});
+
+  /// The sheet's height, as a part of the screen's.
+  final double height;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(height: MediaQuery.sizeOf(context).height * height,
+    child: ScaffoldMessenger(child: Scaffold(
+      backgroundColor: Colors.transparent,
+      resizeToAvoidBottomInset: false,
+      body: child,
+    )));
 }
 
 /// What the browser's chips narrow the list to.
@@ -245,7 +261,7 @@ class _PresetBrowserState extends State<PresetBrowser> {
     }
 
     final empty = shownMine.isEmpty && shownFactory.isEmpty;
-    return SizedBox(height: MediaQuery.sizeOf(context).height * 0.7, child: Column(
+    return SizedBox.expand(child: Column(
       key: const ValueKey('preset-browser'),
       crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 0, 4, 4), child: Row(children: [
@@ -360,10 +376,10 @@ Future<void> showTrackPresets(BuildContext context, AppState state, LayerDoc lay
       isScrollControlled: true,
       backgroundColor: Neon.panel,
       constraints: const BoxConstraints(maxWidth: 560),
-      builder: (context) => ListenableBuilder(listenable: state.userPresets, builder: (context, _) {
+      builder: (context) => _SheetToasts(height: 0.6, child: ListenableBuilder(listenable: state.userPresets, builder: (context, _) {
         final store = state.userPresets;
         final list = store.trackPresets;
-        return SizedBox(height: MediaQuery.sizeOf(context).height * 0.6, child: Column(
+        return SizedBox.expand(child: Column(
           key: const ValueKey('track-presets'),
           crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Padding(padding: const EdgeInsets.fromLTRB(16, 0, 8, 4), child: Row(children: [
@@ -402,7 +418,7 @@ Future<void> showTrackPresets(BuildContext context, AppState state, LayerDoc lay
                   ))),
                 ])),
         ]));
-      }),
+      })),
     );
 
 /// "Flagship · Delay · Reverb": what a track preset holds.
