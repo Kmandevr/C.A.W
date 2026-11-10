@@ -544,8 +544,8 @@ class _TimelineHeader extends StatelessWidget {
             onTap: () => layer.isFolder
                 ? state.editLayer(layer, (l) => l.solo = !l.solo)
                 : state.mixLayer(layer, solo: !layer.solo));
-        final meter = PeakMeter(key: ValueKey('meter-${layer.id}'), state: state, color: color,
-            read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0);
+        final meter = TrackMeter(key: ValueKey('meter-${layer.id}'), state: state, index: index, stereo: layer.isStereo,
+            color: color);
         // FX: drawn at 18 dp, touched over about 36 dp; a dot tells the track has effects.
         final fx = layer.isFolder
             ? Tooltip(message: layer.busEnabled ? 'Folder with a group bus' : 'Folder',

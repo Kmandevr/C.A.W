@@ -339,9 +339,8 @@ class ChannelStrip extends StatelessWidget {
           Expanded(child: Row(children: [
             Expanded(child: _Fader(key: ValueKey('fader-${layer.id}'), value: layer.volume, color: Neon.green,
               label: '${layer.name} level', onChanged: (v) => state.mixLayer(layer, volume: v))),
-            SizedBox(width: 10, child: PeakMeter(key: ValueKey(layer.id), state: state,
-              read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
-              color: Neon.green, vertical: true)),
+            SizedBox(width: 10, child: TrackMeter(key: ValueKey(layer.id), state: state, index: index,
+              stereo: layer.isStereo, color: Neon.green, vertical: true)),
             const SizedBox(width: 4),
           ])),
           PeakReadout(state: state, read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,

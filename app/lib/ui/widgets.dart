@@ -156,6 +156,32 @@ class Bar extends StatelessWidget {
 /// pink for [clipSeconds]. It runs on wall-clock time, so it falls the same at any meter cadence. While sound comes
 /// in, the meter reads (about 30 a second) move it; once they report silence its own ticker finishes the fall at the
 /// same rate and then stops, so it never freezes partway when the engine goes quiet.
+/// A track's meter in the mixer, the arrangement or a track card: one [PeakMeter] for a mono track, and left and
+/// right side by side (upright) or one above the other (lying) for a stereo one ([LayerDoc.isStereo]).
+class TrackMeter extends StatelessWidget {
+  const TrackMeter(
+      {super.key, required this.state, required this.index, required this.stereo, required this.color, this.vertical = false});
+  final AppState state;
+  final int index; // the track's project index, as AppState.layerMeters lists it
+  final bool stereo;
+  final Color color;
+  final bool vertical;
+
+  LayerMeterValue? get _meter => index < state.layerMeters.length ? state.layerMeters[index] : null;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!stereo) return PeakMeter(state: state, color: color, vertical: vertical, read: () => _meter?.peak ?? 0.0);
+    final left = PeakMeter(key: const ValueKey('left'), state: state, color: color, vertical: vertical,
+        read: () => _meter?.peakL ?? 0.0);
+    final right = PeakMeter(key: const ValueKey('right'), state: state, color: color, vertical: vertical,
+        read: () => _meter?.peakR ?? 0.0);
+    return vertical
+        ? Row(children: [Expanded(child: left), const SizedBox(width: 1), Expanded(child: right)])
+        : Column(mainAxisSize: MainAxisSize.min, children: [left, const SizedBox(height: 1), right]);
+  }
+}
+
 class PeakMeter extends StatefulWidget {
   const PeakMeter({super.key, required this.state, required this.read, required this.color, this.vertical = false});
   final AppState state;

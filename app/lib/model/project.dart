@@ -245,6 +245,11 @@ class LayerDoc {
   /// screen: it is saved with the project but never sent to the engine.
   double spaceBelow;
 
+  /// Whether the track's sound can differ between left and right before its pan (a native instrument or effect,
+  /// or a folder's bus summing its tracks): its meters then show each side. A .caw chain is mono (its pan alone
+  /// places it), so one meter tells all there is.
+  bool get isStereo => isFolder || instrument != null || components.isNotEmpty;
+
   /// The .caw modules the engine runs: the generator then the effects; with a native [instrument], only the effects.
   List<String> get chain => instrument != null ? [...effectIds] : [?generatorId, ...effectIds];
 

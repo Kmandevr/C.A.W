@@ -22,8 +22,10 @@ extern "C" {
    4 (2026-11-10): native instruments: a layer's "instrument" entry (same shape as a component entry)
    plays its notes instead of a .caw generator; component index CAW_INSTRUMENT_INDEX addresses it in
    _set_component_param, _bypass and _states; automation lanes "target_type":"instrument". Older
-   fields work as before. */
-#define CAW_API_VERSION 4
+   fields work as before.
+   5 (2026-11-10): caw_engine_layer_meter_stereo (each side's peak per track); track and master volume up to
+   +12 dB. CawLayerMeter is unchanged. */
+#define CAW_API_VERSION 5
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -171,6 +173,10 @@ CAW_API void caw_engine_stop(CawEngine* e);
 CAW_API void caw_engine_clear_overload(CawEngine* e);
 CAW_API void caw_engine_meters(CawEngine* e, CawMeters* out);
 CAW_API int32_t caw_engine_layer_meter(CawEngine* e, int32_t layer_index, CawLayerMeter* out);
+/* The same, with each side's sample peak since the last read in *peak_l and *peak_r (either may be NULL); the
+   meter's peak is the louder of the two. Either call resets both sides. API version 5. */
+CAW_API int32_t caw_engine_layer_meter_stereo(CawEngine* e, int32_t layer_index, CawLayerMeter* out, float* peak_l,
+                                              float* peak_r);
 /* Latest n (<= 1024) output samples of a layer (by project index), the audition (CAW_SCOPE_AUDITION) or the
    master (CAW_SCOPE_MASTER). */
 #define CAW_SCOPE_MASTER (-1)

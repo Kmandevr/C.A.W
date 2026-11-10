@@ -413,10 +413,7 @@ class _TrackCard extends StatelessWidget {
               const SizedBox(height: 6),
               Padding(
                 padding: const EdgeInsets.only(right: 6),
-                child: PeakMeter(
-                    state: state,
-                    read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0,
-                    color: color),
+                child: TrackMeter(state: state, index: index, stereo: layer.isStereo, color: color),
               ),
             ]),
           ),

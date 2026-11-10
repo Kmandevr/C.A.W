@@ -84,6 +84,27 @@ void main() {
     expect(PeakMeter.fraction(PeakMeter.db(2.0)), 1.0);
   });
 
+  testWidgets('a stereo track meters each side; a mono one shows one meter', (tester) async {
+    // Owner, 2026-11-10 (feel pass): stereo track meters, from the engine's caw_engine_layer_meter_stereo.
+    final mono = LayerDoc(id: 'm', name: 'M', color: 0);
+    final stereo = LayerDoc(id: 's', name: 'S', color: 0)..instrument = ComponentUseDoc('org.caw.drum.kick');
+    expect(mono.isStereo, isFalse);
+    expect(stereo.isStereo, isTrue);
+    expect((LayerDoc(id: 'f', name: 'F', color: 0)..isFolder = true).isStereo, isTrue);
+    state.layerMeters = const [LayerMeterValue(peak: 0.5, peakL: 0.5, peakR: 0.125, active: true)];
+    Widget strip(bool isStereo) => MaterialApp(home: Scaffold(body: Center(child: SizedBox(width: 10, height: 120,
+        child: TrackMeter(state: state, index: 0, stereo: isStereo, color: Colors.green, vertical: true)))));
+    await tester.pumpWidget(strip(true));
+    state.tick.value++;
+    await tester.pump();
+    final meters = tester.stateList<PeakMeterState>(find.byType(PeakMeter)).toList();
+    expect(meters, hasLength(2));
+    expect(meters[0].shownDb, closeTo(-6.02, 0.01)); // left
+    expect(meters[1].shownDb, closeTo(-18.06, 0.01)); // right
+    await tester.pumpWidget(strip(false));
+    expect(find.byType(PeakMeter), findsOneWidget);
+  });
+
   testWidgets('peak meters rise at once, fall on wall-clock time, hold the peak and show a clip', (tester) async {
     final wall = PeakMeter.clock, start = tester.binding.clock.now();
     addTearDown(() => PeakMeter.clock = wall);

@@ -88,7 +88,7 @@ struct Engine::Slot {
 
     std::atomic<uint64_t> vol{0}, pan{0};
     std::atomic<bool> mute{false}, solo{false};
-    std::atomic<float> peak{0}, progress{0};
+    std::atomic<float> peakL{0}, peakR{0}, progress{0};  // meters: each side's sample peak since the last read
     std::atomic<bool> overloadFlag{false};
     std::atomic<float> scope[kScopeSize];
     std::atomic<int> scopePos{0};
@@ -2440,7 +2440,9 @@ bool Engine::layerMeter(int index, LayerMeter& out) {
     if (it == layers_.end() || it->second.slot < 0) return true;
     Slot& s = ctlSlot(it->second.slot);
     out.active = true;
-    out.peak = s.peak.exchange(0, std::memory_order_relaxed);
+    out.peakL = s.peakL.exchange(0, std::memory_order_relaxed);
+    out.peakR = s.peakR.exchange(0, std::memory_order_relaxed);
+    out.peak = std::max(out.peakL, out.peakR);
     out.progress = s.progress.load(std::memory_order_relaxed);
     out.overloaded = s.overloadFlag.load(std::memory_order_relaxed);
     return true;
@@ -2601,7 +2603,8 @@ void Engine::applyCommands() noexcept {
                     s.old = nullptr;
                     s.swapLeft = 0;
                     s.seamLeft = 0;
-                    s.peak.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
+                    s.peakL.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
+                    s.peakR.store(0, std::memory_order_relaxed);
                     s.active = true;
                     s.removing = false;
                     s.fresh = true;
@@ -2673,7 +2676,8 @@ void Engine::applyCommands() noexcept {
                 }
                 s.cur = s.old = s.pending = nullptr;
                 s.pattern = nullptr;
-                s.peak.store(0, std::memory_order_relaxed);
+                s.peakL.store(0, std::memory_order_relaxed);
+                s.peakR.store(0, std::memory_order_relaxed);
                 s.active = true;
                 s.removing = false;
                 s.bus = true;
@@ -4234,7 +4238,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             }
         }
     }
-    float peak = 0, sig = 0;
+    float peakL = 0, peakR = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
     const bool volumeAutomated = s.automation && !s.automation->volume.empty();
     const bool panAutomated = s.automation && !s.automation->pan.empty();
@@ -4263,7 +4267,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
                 mid[i] = static_cast<float>(v);
             }
         }
-        peak = std::max(peakAbs(outL, m), peakAbs(outR, m));
+        peakL = peakAbs(outL, m);
+        peakR = peakAbs(outR, m);
         sig = peakAbs(level, m);
         for (int i = 0; i < m;) {
             const int run = std::min(m - i, kScopeSize - sp);
@@ -4295,15 +4300,16 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
         outL[i] = routeSample(vl * gl);
         outR[i] = routeSample(vr * gr);
-        // The meter reads what the track sends on (after volume and pan), the louder channel's sample peak.
-        const float av = std::max(std::fabs(outL[i]), std::fabs(outR[i]));
-        if (av > peak) peak = av;
+        // The meter reads what the track sends on (after volume and pan), each channel's sample peak.
+        peakL = std::max(peakL, std::fabs(outL[i]));
+        peakR = std::max(peakR, std::fabs(outR[i]));
         sig = std::max(sig, static_cast<float>(std::max(std::fabs(vl), std::fabs(vr))));  // before pan: a preview's tail test, like the scope
         s.scope[sp].store(static_cast<float>(v), std::memory_order_relaxed);
         sp = (sp + 1) % kScopeSize;
     }
     s.scopePos.store(sp, std::memory_order_release);
-    storeMax(s.peak, peak);
+    storeMax(s.peakL, peakL);
+    storeMax(s.peakR, peakR);
     if (tail && s.tailFade != 0) {  // a capped tail fading out (or faded: silence until it is ended)
         const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
         for (int i = 0; i < m; ++i) {
@@ -4361,13 +4367,15 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
     }
     if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; routingDirty_ = true; }
     // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
-    float peak = 0;
+    float peakL = 0, peakR = 0;
     for (int j = 0; j < m; ++j) {
         outL[j] = routeSample(s.outL[j]);
         outR[j] = routeSample(s.outR[j]);
-        peak = std::max(peak, std::max(std::fabs(outL[j]), std::fabs(outR[j])));
+        peakL = std::max(peakL, std::fabs(outL[j]));
+        peakR = std::max(peakR, std::fabs(outR[j]));
     }
-    storeMax(s.peak, peak);  // a folder's meter: its mix after volume and pan
+    storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
+    storeMax(s.peakR, peakR);
 }
 
 void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {

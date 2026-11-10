@@ -40,7 +40,8 @@ struct Meters {
 };
 
 struct LayerMeter {
-    float peak = 0, progress = 0;
+    float peak = 0, progress = 0;  // peak: the louder side's
+    float peakL = 0, peakR = 0;
     bool overloaded = false, active = false;
 };
 
