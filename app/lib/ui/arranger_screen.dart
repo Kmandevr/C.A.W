@@ -19,6 +19,7 @@ import 'theme.dart';
 import 'widgets.dart';
 import 'track_cards_screen.dart';
 import 'glass.dart';
+import 'midi_file_actions.dart';
 
 
 double endPosition(AppState state, ProjectDoc project, int loopLength) {
@@ -126,6 +127,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
           MenuAction('inst:${c.id}', 'Instrument · ${c.label}', Icons.piano_outlined,
               checked: layer.instrument?.id == c.id, hint: c.builtin ? 'Built-in C++' : 'Project C++'),
         for (final pattern in patterns) MenuAction('clip:${pattern.id}', 'Add clip · ${pattern.name}', Icons.add_box_outlined),
+        const MenuAction('midi', 'Import MIDI file…', Icons.file_open_outlined),
       ],
       const MenuAction('rename', 'Rename', Icons.edit_outlined),
       MenuAction('color', 'Colour', Icons.palette_outlined),
@@ -148,6 +150,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     if (v.startsWith('gen:')) s.setCawGenerator(layer, v.substring(4));
     if (v.startsWith('inst:')) s.setNativeInstrument(layer, v.substring(5));
     if (v.startsWith('clip:')) s.addClip(layer, v.substring(5));
+    if (v == 'midi') await importMidiFile(context, s, layer: layer);
     if (v == 'rename') await _rename(layer);
     if (v == 'color') s.editLayer(layer, (l) => l.color = (l.color + 1) % LayerDoc.trackColors);
     if (v == 'up' && index > 0) s.moveLayer(index, index - 1);
@@ -195,6 +198,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
         const MenuAction('linked', 'Duplicate linked', Icons.link),
         MenuAction('loop', clip.loop ? 'Disable clip looping' : 'Enable clip looping', Icons.loop, checked: clip.loop),
         if (canSplit) const MenuAction('split', 'Split at time selection', Icons.content_cut),
+        const MenuAction('midi', 'Export as MIDI file', Icons.file_upload_outlined),
         const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
       ]);
     if (v == null || !mounted) return;
@@ -205,6 +209,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     if (v == 'linked') s.duplicateClip(layer, clip, linked: true);
     if (v == 'loop') s.editLayer(layer, (l) => clip.loop = !clip.loop);
     if (v == 'split') s.splitClipAt(layer, clip, splitAt!);
+    if (v == 'midi') await exportClipAsMidi(context, s, clip);
     if (v == 'delete') s.removeClip(layer, clip);
   }
 
