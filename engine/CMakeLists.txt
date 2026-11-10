@@ -213,6 +213,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/quality_test.cpp)  # the quality setting (Eco, Normal, High) and the buffer mode
   target_sources(caw_tests PRIVATE tests/display_test.cpp)  # live display data, engine to UI (#173)
   target_sources(caw_tests PRIVATE tests/effects_test.cpp)  # the built-in effects suite (#173)
+  target_sources(caw_tests PRIVATE tests/routing_test.cpp)  # sends, buses, keys and routing loops (#175)
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})

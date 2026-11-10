@@ -61,6 +61,13 @@ struct Engine::Slot {
     Chain* pending = nullptr;  // new code waiting for the next beat or bar
     ComponentChain* inserts = nullptr;  // native stereo effects after the chain, before volume and pan
     DelayLine* delay = nullptr;         // latency compensation, after volume and pan
+    SendTable* sends = nullptr;         // where the slot's sends and keys go (owned; replaced by SetSends)
+    double routeGain[kMaxRoutes] = {};  // audio thread: each route's gain at the end of the last block
+    bool routeOk[kMaxRoutes] = {};      // updateRouting: the route's destination runs after this slot this chunk
+    bool routesStale = false;           // stopped or silent: the routes' delays hold old audio; clear them
+    // A bus's input from sends this chunk (valid while recvChunk is the chunk being run).
+    float recvL[kBlock] = {}, recvR[kBlock] = {};
+    int64_t recvChunk = -1;
     DelayLine* delayFading = nullptr;   // the delay `delay` replaced, crossfading out (null: no delay)
     int delayFadeLeft = 0;
     bool delayStale = false;            // stopped or silent: the delay holds old audio; clear before it runs
@@ -259,10 +266,31 @@ struct Engine::DelayLine {
     }
 };
 
+// A slot's routes: its sends (into bus inputs) then the sidechain keys it feeds, each with its own latency
+// compensation. Built on the control thread; the audio thread swaps it in (SetSends) and retires the old one.
+struct Engine::SendTable {
+    struct Route {
+        int dest = -1;     // destination slot
+        int key = -1;      // -1: a bus's input; else the component index on dest's inserts it keys
+        double level = 1;
+        bool pre = false, mute = false;
+        DelayLine* delay = nullptr;  // owned; null: none
+    };
+    Route routes[kMaxRoutes];
+    int count = 0;
+    bool keys = false;  // some route keys a component: the slot runs even while muted or soloed out
+    SendTable() = default;
+    SendTable(const SendTable&) = delete;
+    SendTable& operator=(const SendTable&) = delete;
+    ~SendTable() {
+        for (Route& r : routes) delete r.delay;
+    }
+};
+
 static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     // SetOrder: slots in dependency order; SetPattern: for each note of the old pattern, the new note that carries it
     // on, or -1 (matchPatternNotes). Owned; retired by the audio thread.
@@ -274,6 +302,8 @@ struct Engine::Cmd {
     // SetComponentAutomation: for slot's inserts (its instrument when `flag`), or the master's (slot -1)
     ComponentAutomation* componentAutomation = nullptr;
     DelayLine* delay = nullptr;  // SetDelay: the slot's latency compensation (null: none)
+    SendTable* sends = nullptr;  // SetSends: the slot's routes (owned; null: none)
+    bool sendMute = false;       // SetSendLevel: route `order` gets level `master`, pre `flag` and this mute
     int steps = 0, order = 0, parentSlot = -1;
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
@@ -304,6 +334,7 @@ struct Engine::Retired {
     ComponentChain* masterChain = nullptr;  // a component chain (master or a track's inserts) replaced or freed
     ComponentAutomation* componentAutomation = nullptr;  // a component chain's automation table replaced
     DelayLine* delay = nullptr;  // a latency-compensation delay replaced or freed
+    SendTable* sends = nullptr;  // a route table replaced or freed
 };
 
 namespace {
@@ -610,6 +641,7 @@ struct Engine::MixGraph {
     std::vector<uint8_t> deferred;    // [slots + 1]
     std::vector<uint8_t> emitted;     // [slots + 1]
     std::vector<int> slotOrder;       // [slots]
+    std::vector<int> stack;           // [slots + 1] slots ready to be ordered
     std::vector<uint32_t> position;   // [slots + 1]
     std::vector<uint32_t> order;      // [nodeCount()]
     std::vector<GraphConnection> edges;  // [maxEdges()]
@@ -620,7 +652,7 @@ struct Engine::MixGraph {
           target(static_cast<size_t>(slots), 0), routable(static_cast<size_t>(slots), 0),
           modules(static_cast<size_t>(slots), 0), pending(static_cast<size_t>(slots) + 1, 0),
           deferred(static_cast<size_t>(slots) + 1, 0), emitted(static_cast<size_t>(slots) + 1, 0),
-          slotOrder(static_cast<size_t>(slots), 0), position(static_cast<size_t>(slots) + 1, 0),
+          slotOrder(static_cast<size_t>(slots), 0), stack(static_cast<size_t>(slots) + 1, 0), position(static_cast<size_t>(slots) + 1, 0),
           order(static_cast<size_t>(nodeCount()), 0), edges(static_cast<size_t>(maxEdges()), GraphConnection{}) {
         const int kNodes = nodeCount();
         ids.reserve(kNodes);
@@ -664,7 +696,7 @@ struct Engine::MixGraph {
         b += nodes.capacity() * sizeof(std::unique_ptr<ModuleProcessor>);
         b += static_cast<std::size_t>(slots) * (K * sizeof(ModuleNode) + sizeof(TrackNode) + sizeof(BusNode)) + sizeof(MasterNode);
         b += static_cast<std::size_t>(nodeCount()) * (sizeof(GraphNode) + sizeof(ModuleProcessor*));
-        b += (target.capacity() + modules.capacity() + pending.capacity() + slotOrder.capacity()) * sizeof(int);
+        b += (target.capacity() + modules.capacity() + pending.capacity() + slotOrder.capacity() + stack.capacity()) * sizeof(int);
         b += routable.capacity() + deferred.capacity() + emitted.capacity();
         b += (position.capacity() + order.capacity()) * sizeof(uint32_t);
         b += edges.capacity() * sizeof(GraphConnection);
@@ -826,6 +858,7 @@ Engine::~Engine() {
         delete slot->instrumentFading;
         delete slot->delayFading;
         delete slot->delay;
+        delete slot->sends;
         delete slot->pattern;
         delete slot->automation;
     }
@@ -844,6 +877,7 @@ void Engine::drainRetired() {
         delete r.masterChain;
         delete r.componentAutomation;
         delete r.delay;
+        delete r.sends;
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -866,6 +900,7 @@ bool Engine::send(const Cmd& c) {
             delete c.masterChain;
             delete c.componentAutomation;
             delete c.delay;
+            delete c.sends;
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1220,6 +1255,12 @@ std::string Engine::setProjectOffline(const ProjectSpec& p) {
 
 std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     const BuildingQuality building(&quality_);
+    {
+        // Sends to buses only, keys from playing layers, and no loops (parseProject checks it too; this covers
+        // projects built in code).
+        std::string error;
+        if (!validateRouting(p, error)) return "{\"ok\":false,\"error\":\"" + jsonEscape(error) + "\",\"modules\":{}}";
+    }
     // The synths that became Flagship presets (2026-11-10, one synth): an old project's track plays Flagship with
     // the matching preset and its knobs mapped, and its lanes on those knobs move Flagship's.
     if (std::any_of(p.layers.begin(), p.layers.end(), [](const LayerSpec& l) { return isLegacyInstrument(l.instrument.id); })) {
@@ -1270,7 +1311,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         if (!p.masterComponents.empty()) charge(p.masterComponents);
         size_t total = p.masterComponents.size();
         for (const LayerSpec& l : p.layers) {
-            if (!l.folder && !l.components.empty()) {
+            if (!(l.folder && !l.busEnabled) && !l.components.empty()) {  // tracks and bus folders run inserts
                 charge(l.components);
                 total += l.components.size();
             }
@@ -1293,9 +1334,11 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 return "{\"ok\":false,\"error\":\"master: " + jsonEscape(error) + "\",\"modules\":{}}";
         }
         for (const LayerSpec& l : p.layers) {
-            if (l.folder || l.components.empty()) continue;  // folder buses take no inserts yet
+            if ((l.folder && !l.busEnabled) || l.components.empty()) continue;  // organization-only folders run none
             auto it = layers_.find(l.id);
-            if (it != layers_.end() && it->second.inserts && it->second.inserts->sameComponents(l.components, sr_))
+            // A layer that turns from a track into a bus (or back) starts its inserts afresh: its slot drops them.
+            if (it != layers_.end() && it->second.inserts && it->second.bus == l.folder &&
+                it->second.inserts->sameComponents(l.components, sr_))
                 continue;
             auto chain = ComponentChain::build(nativeModules_, l.components, sr_, error);
             if (!chain)
@@ -1797,6 +1840,29 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
 
+    // A soloed layer keeps open every bus it is heard through: its sends' buses and theirs, and the buses above them.
+    {
+        std::map<std::string, Planned*> byId;
+        for (Planned& pl : plan) byId[pl.w.id] = &pl;
+        for (bool changed = true; changed;) {
+            changed = false;
+            for (Planned& pl : plan) {
+                if (!pl.w.solo) continue;
+                auto spec = specByLayer.find(pl.w.id);
+                if (spec == specByLayer.end()) continue;
+                auto open = [&](const std::string& id) {
+                    auto it = byId.find(id);
+                    if (it != byId.end() && !it->second->w.solo) {
+                        it->second->w.solo = true;
+                        changed = true;
+                    }
+                };
+                for (const SendSpec& send : spec->second->sends) open(send.to);
+                open(routeTarget(p, *spec->second));
+            }
+        }
+    }
+
     // Reserve a stable pointer table from the graph-working budget. Individual buffers are
     // allocated only when a project needs them; their addresses never move during Engine life.
     std::vector<size_t> requiredExportsPerSlot(static_cast<size_t>(slotCount), 0);
@@ -1915,14 +1981,8 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             ls.mute = w.mute;
             ls.solo = w.solo;
         }
-        if (w.bus) {
-            ls.inserts = nullptr;  // ConfigureBus retires any the slot had, its instrument and its delay
-            ls.instrument = nullptr;
-            ls.compensation = 0;
-            if (w.components && !w.components->empty())
-                // Keyed "project": the result reports module and project warnings, not layer ids.
-                warnings["project"].push_back("folder '" + w.id + "': folder buses take no native components yet; they are not played");
-        } else {
+        // A layer's native inserts: a new chain (crossfaded in), none, or new values for the one it keeps.
+        auto syncInserts = [&]() {
             const bool wantsInserts = w.components && !w.components->empty();
             auto made = nextInserts.find(w.id);
             if (made != nextInserts.end() || (!wantsInserts && ls.inserts)) {
@@ -1943,6 +2003,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 ls.inserts->setValues(*w.components);
                 updateAutomation(ls.slot, *ls.inserts, w.id, ls.insertsAutomationKey);
             }
+        };
+        if (!w.bus) {
+            syncInserts();
             auto madeInstrument = nextInstruments.find(w.id);
             if ((pl.native && madeInstrument != nextInstruments.end()) || (!pl.native && ls.instrument)) {
                 Cmd instrument;
@@ -1978,7 +2041,13 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 nextLayers[w.id] = ls;
                 continue;
             }
+            if (newBus) {  // the slot dropped what it had as a track (its chain, inserts, instrument and delay)
+                ls.inserts = nullptr;
+                ls.instrument = nullptr;
+                ls.compensation = 0;
+            }
             ls.bus = true;
+            syncInserts();  // after ConfigureBus, so a new bus keeps them
             ls.parentSlot = pl.ls.parentSlot;
             if (ls.automationSig != pl.automationSig) {
                 Cmd automation;
@@ -2115,6 +2184,57 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
     layers_ = std::move(nextLayers);
+
+    // Routes: each layer's sends (in project order, so a send's index stays its index), then the sidechain keys
+    // it feeds. updateCompensation sends them with their delays.
+    for (auto& [id, ls] : layers_) {
+        ls.routes.clear();
+        ls.userSends = 0;
+    }
+    for (const LayerSpec& l : p.layers) {
+        auto it = layers_.find(l.id);
+        if (it == layers_.end() || it->second.slot < 0) continue;
+        LayerState& ls = it->second;
+        for (const SendSpec& send : l.sends) {
+            LayerState::Route r;
+            auto to = layers_.find(send.to);
+            if (to != layers_.end() && to->second.slot >= 0 && to->second.bus) r.dest = to->second.slot;
+            else warnings[l.id].push_back("send to '" + send.to + "': that bus isn't playing, so the send is silent");
+            r.level = send.level;
+            r.pre = send.pre;
+            r.mute = send.mute;
+            ls.routes.push_back(r);
+        }
+        ls.userSends = static_cast<int>(ls.routes.size());
+    }
+    for (const LayerSpec& l : p.layers) {
+        auto it = layers_.find(l.id);
+        if (it == layers_.end() || it->second.slot < 0) continue;
+        for (size_t i = 0; i < l.components.size(); ++i) {
+            const ComponentSpec& c = l.components[i];
+            if (!c.hasKey) continue;
+            if (!it->second.inserts || !it->second.inserts->keyed(i)) {
+                warnings[l.id].push_back("component '" + c.id + "' has no sidechain input, so its key is ignored");
+                continue;
+            }
+            auto from = layers_.find(c.key.layer);
+            if (from == layers_.end() || from->second.slot < 0) {
+                warnings[l.id].push_back("component '" + c.id + "': its key '" + c.key.layer + "' isn't playing");
+                continue;
+            }
+            if (from->second.routes.size() >= static_cast<size_t>(kMaxRoutes)) {
+                warnings[c.key.layer].push_back("keys more than " + std::to_string(kMaxRoutes - kMaxSends) +
+                                                " components; the rest hear no key");
+                continue;
+            }
+            LayerState::Route r;
+            r.dest = it->second.slot;
+            r.key = static_cast<int>(i);
+            r.level = c.key.level;
+            r.pre = c.key.pre;
+            from->second.routes.push_back(r);
+        }
+    }
 
     if (!updateCompensation(warnings)) allOk = false;
 
@@ -2282,46 +2402,166 @@ ComponentChain* Engine::ctlComponentChain(const std::string& layerId, uint32_t& 
 // latency (the master chain delays everything alike, so it needs none). Control thread, under ctl_.
 bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>& warnings) {
     bool ok = true;
-    // Each track is delayed so it lines up with the track whose native effects
-    // add the most latency (the master chain delays everything alike, so it needs none).
-    {
-        int64_t most = 0;
-        // A track's own latency: its instrument's and its inserts'.
-        auto latency = [](const LayerState& ls) -> int64_t {
-            uint64_t frames = 0;
-            if (ls.inserts) frames += ls.inserts->latencyFrames();
-            if (ls.instrument) frames += ls.instrument->latencyFrames();
-            return static_cast<int64_t>(std::min<uint64_t>(frames, 1u << 30));
-        };
-        for (const auto& [id, ls] : layers_)
-            if (ls.slot >= 0 && !ls.bus) most = std::max<int64_t>(most, latency(ls));
-        if (most > kMaxCompensationFrames) {
-            warnings["project"].push_back("native effects add " + std::to_string(most) + " frames of latency; tracks are kept in time only up to " +
-                                          std::to_string(kMaxCompensationFrames));
-            most = kMaxCompensationFrames;
-        }
-        for (auto& [id, ls] : layers_) {
-            if (ls.slot < 0 || ls.bus) continue;
-            const int64_t own = std::min<int64_t>(latency(ls), most);
-            const int64_t want = most - own;
-            if (want == ls.compensation) continue;
+    // Plugin delay compensation over the whole routing: a slot's own latency is its instrument's and inserts';
+    // a bus's input arrives at the latest of what feeds it (children and sends), and every route into a bus
+    // (or the master) is delayed by how much earlier it arrives, so everything that meets is in time. Keys
+    // are not delayed: they arrive as early as they can (a ducker's look-ahead covers a late one).
+    struct Node {
+        LayerState* ls = nullptr;
+        const std::string* id = nullptr;
+        int64_t own = 0, in = 0, raw = 0;
+        int indegree = 0;
+        std::vector<int> out;  // slots it feeds (its bus, its sends' buses)
+    };
+    std::map<int, Node> nodes;
+    for (auto& [id, ls] : layers_) {
+        if (ls.slot < 0) continue;
+        Node& n = nodes[ls.slot];
+        n.ls = &ls;
+        n.id = &id;
+        uint64_t frames = 0;
+        if (ls.inserts) frames += ls.inserts->latencyFrames();
+        if (ls.instrument && !ls.bus) frames += ls.instrument->latencyFrames();
+        n.own = static_cast<int64_t>(std::min<uint64_t>(frames, 1u << 30));
+    }
+    auto busAt = [&](int slot) -> Node* {
+        auto it = nodes.find(slot);
+        return it != nodes.end() && it->second.ls->bus ? &it->second : nullptr;
+    };
+    for (auto& [slot, n] : nodes) {
+        if (Node* parent = busAt(n.ls->parentSlot); parent && n.ls->parentSlot != slot) n.out.push_back(n.ls->parentSlot);
+        for (const LayerState::Route& r : n.ls->routes)
+            if (r.key < 0 && busAt(r.dest) && r.dest != slot) n.out.push_back(r.dest);
+        for (int to : n.out) ++nodes[to].indegree;
+    }
+    // Kahn's order (routing loops are refused before here; any left over go last).
+    std::vector<int> order, ready;
+    for (auto& [slot, n] : nodes)
+        if (n.indegree == 0) ready.push_back(slot);
+    while (!ready.empty()) {
+        const int x = ready.back();
+        ready.pop_back();
+        order.push_back(x);
+        for (int to : nodes[x].out)
+            if (--nodes[to].indegree == 0) ready.push_back(to);
+    }
+    if (order.size() < nodes.size())
+        for (auto& [slot, n] : nodes)
+            if (n.indegree > 0) order.push_back(slot);
+    int64_t masterIn = 0;
+    for (int x : order) {
+        Node& n = nodes[x];
+        n.raw = n.in + n.own;
+        bool toMaster = !busAt(n.ls->parentSlot) || n.ls->parentSlot == x;
+        for (int to : n.out) nodes[to].in = std::max(nodes[to].in, n.raw);
+        if (toMaster) masterIn = std::max(masterIn, n.raw);
+    }
+    bool capped = false;
+    auto delayTo = [&](const Node& from, int64_t arrival) {
+        const int64_t d = arrival - from.raw;
+        if (d > kMaxCompensationFrames) capped = true;
+        return std::clamp<int64_t>(d, 0, kMaxCompensationFrames);
+    };
+    auto makeDelay = [](int64_t frames) -> DelayLine* {
+        if (frames <= 0) return nullptr;
+        auto* d = new DelayLine();
+        d->l.assign(static_cast<size_t>(frames), 0.0f);
+        d->r.assign(static_cast<size_t>(frames), 0.0f);
+        return d;
+    };
+    for (int x : order) {
+        Node& n = nodes[x];
+        LayerState& ls = *n.ls;
+        const Node* parent = busAt(ls.parentSlot);
+        const int64_t want = delayTo(n, parent && ls.parentSlot != x ? parent->in : masterIn);
+        if (want != ls.compensation) {
             Cmd d;
             d.type = Cmd::SetDelay;
             d.slot = ls.slot;
-            if (want > 0) {
-                d.delay = new DelayLine();
-                d.delay->l.assign(static_cast<size_t>(want), 0.0f);
-                d.delay->r.assign(static_cast<size_t>(want), 0.0f);
-            }
+            d.delay = makeDelay(want);
             if (send(d)) {
                 ls.compensation = want;
             } else {
                 ok = false;
-                warnings["project"].push_back("layer '" + id + "': audio command queue rejected its latency compensation");
+                warnings["project"].push_back("layer '" + *n.id + "': audio command queue rejected its latency compensation");
             }
         }
+        // The routes: a new table when a destination or a delay changed, else just the levels that moved.
+        std::vector<int64_t> delays;
+        std::string sig;
+        for (const LayerState::Route& r : ls.routes) {
+            const Node* to = r.key < 0 ? busAt(r.dest) : nullptr;
+            delays.push_back(to ? delayTo(n, to->in) : 0);
+            sig += std::to_string(r.dest) + ":" + std::to_string(r.key) + ":" + std::to_string(delays.back()) + ";";
+        }
+        if (sig != ls.routesSig) {
+            Cmd c;
+            c.type = Cmd::SetSends;
+            c.slot = ls.slot;
+            if (!ls.routes.empty()) {
+                c.sends = new SendTable();
+                for (size_t k = 0; k < ls.routes.size(); ++k) {
+                    const LayerState::Route& r = ls.routes[k];
+                    SendTable::Route& t = c.sends->routes[k];
+                    t.dest = r.dest;
+                    t.key = r.key;
+                    t.level = r.level;
+                    t.pre = r.pre;
+                    t.mute = r.mute;
+                    t.delay = makeDelay(delays[k]);
+                    c.sends->keys = c.sends->keys || (r.key >= 0 && r.dest >= 0);
+                }
+                c.sends->count = static_cast<int>(ls.routes.size());
+            }
+            if (send(c)) {
+                ls.routesSig = sig;
+                ls.routesSent = ls.routes;
+            } else {
+                ok = false;
+                warnings["project"].push_back("layer '" + *n.id + "': audio command queue rejected its sends");
+            }
+            continue;
+        }
+        for (size_t k = 0; k < ls.routes.size() && k < ls.routesSent.size(); ++k) {
+            const LayerState::Route& r = ls.routes[k];
+            LayerState::Route& was = ls.routesSent[k];
+            if (r.level == was.level && r.pre == was.pre && r.mute == was.mute) continue;
+            Cmd c;
+            c.type = Cmd::SetSendLevel;
+            c.slot = ls.slot;
+            c.order = static_cast<int>(k);
+            c.master = r.level;
+            c.flag = r.pre;
+            c.sendMute = r.mute;
+            if (send(c)) was = r;
+        }
     }
+    if (capped)
+        warnings["project"].push_back("native effects add more latency than the " + std::to_string(kMaxCompensationFrames) +
+                                      " frames tracks are kept in time over");
     return ok;
+}
+
+bool Engine::setSend(const std::string& layerId, uint32_t index, double level, bool pre, bool mute) {
+    std::lock_guard<std::mutex> lock(ctl_);
+    auto it = layers_.find(layerId);
+    if (it == layers_.end() || it->second.slot < 0 || index >= static_cast<uint32_t>(it->second.userSends)) return false;
+    LayerState& ls = it->second;
+    LayerState::Route& r = ls.routes[index];
+    r.level = std::isfinite(level) ? std::clamp(level, 0.0, kMaxMixGain) : 0.0;
+    r.pre = pre;
+    r.mute = mute;
+    if (index >= ls.routesSent.size()) return false;
+    Cmd c;
+    c.type = Cmd::SetSendLevel;
+    c.slot = ls.slot;
+    c.order = static_cast<int>(index);
+    c.master = r.level;
+    c.flag = r.pre;
+    c.sendMute = r.mute;
+    if (!send(c)) return false;
+    ls.routesSent[index] = r;
+    return true;
 }
 
 bool Engine::setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value) {
@@ -2771,7 +3011,8 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetMasterChain:
             case Cmd::SetInserts:
             case Cmd::SetInstrument:
-            case Cmd::SetDelay: retirementNeed = 2; break;  // the one still crossfading, and the one replaced  // a chain still crossfading, and the one replaced
+            case Cmd::SetDelay: retirementNeed = 2; break;
+            case Cmd::SetSends: retirementNeed = 1; break;  // the one still crossfading, and the one replaced  // a chain still crossfading, and the one replaced
             case Cmd::SetAutomation:
             case Cmd::SetComponentAutomation:
             case Cmd::SetPattern:
@@ -2846,11 +3087,17 @@ void Engine::applyCommands() noexcept {
             }
             case Cmd::ConfigureBus: {
                 Slot& s = slotAt(c.slot);
+                if (!c.flag && s.bus && s.active && !s.removing) {
+                    // Already this bus: its inserts, delay and routes stay (they have their own commands).
+                    s.parentSlot = c.parentSlot;
+                    s.order = c.order;
+                    break;
+                }
                 retire(s.cur, nullptr, s.pattern);
                 retire(s.old, nullptr);
                 retire(s.pending, nullptr);
                 {
-                    Retired r{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts};  // buses run no inserts yet
+                    Retired r{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.inserts};  // a new bus starts without them
                     r.delay = s.delay;
                     if (r.masterChain || r.delay) retireEntry(r);
                 }
@@ -2992,7 +3239,7 @@ void Engine::applyCommands() noexcept {
                 s.delayFadeLeft = 0;
                 if (r.delay) retireEntry(r);
                 if (c.delay && !s.delayStale) c.delay->takeHistory(s.delay);
-                if ((s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail) && !s.delayStale) {
+                if ((s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail || s.mode == Slot::Mode::Bus) && !s.delayStale) {
                     s.delayFading = s.delay;  // sounding: the timing change crossfades
                     s.delayFadeLeft = std::max(1, static_cast<int>(kSwapSeconds * sr_));
                 } else if (s.delay) {
@@ -3001,6 +3248,34 @@ void Engine::applyCommands() noexcept {
                     retireEntry(old);
                 }
                 s.delay = c.delay;
+                break;
+            }
+            case Cmd::SetSends: {
+                Slot& s = slotAt(c.slot);
+                SendTable* next = c.sends;
+                if (next) {
+                    for (int k = 0; k < next->count; ++k) {
+                        const SendTable::Route& r = next->routes[k];
+                        const SendTable::Route* was = s.sends && k < s.sends->count ? &s.sends->routes[k] : nullptr;
+                        // A route that stays keeps its gain and, unless stale, its delay's recent input.
+                        if (!was || was->dest != r.dest || was->key != r.key) s.routeGain[k] = 0.0;
+                        if (r.delay && was && !s.routesStale) r.delay->takeHistory(was->delay);
+                    }
+                }
+                Retired r;
+                r.sends = s.sends;
+                if (r.sends) retireEntry(r);
+                s.sends = next;
+                break;
+            }
+            case Cmd::SetSendLevel: {
+                Slot& s = slotAt(c.slot);
+                if (s.sends && c.order >= 0 && c.order < s.sends->count) {
+                    SendTable::Route& r = s.sends->routes[c.order];
+                    r.level = c.master;
+                    r.pre = c.flag;
+                    r.mute = c.sendMute;
+                }
                 break;
             }
             case Cmd::SetComponentAutomation: {
@@ -3019,7 +3294,7 @@ void Engine::applyCommands() noexcept {
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
                 s.insertsFading = nullptr;
                 s.insertsFadeLeft = 0;
-                if (s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail) {
+                if (s.mode == Slot::Mode::Play || s.mode == Slot::Mode::Tail || s.mode == Slot::Mode::Bus) {
                     s.insertsFading = s.inserts;  // sounding: crossfades out (null: from the dry signal)
                     s.insertsFadeLeft = std::max(1, static_cast<int>(kSwapSeconds * sr_));
                 } else {
@@ -3453,8 +3728,8 @@ void Engine::updatePreviewing(int frames) noexcept {
         if (s.insertTail && !voices && !silent && !quiet && s.previewTail >= cap && s.tailFade == 0)
             s.tailFade = std::max(1, static_cast<int>(kSwapSeconds * sr_));
         const bool fadingOut = s.insertTail && s.tailFade > 0;
-        const bool live = voices || (!silent && s.cur && (s.cur->voiced || s.cur->native || s.insertTail) && !quiet &&
-                                     s.tailFade >= 0 && (s.previewTail < cap || fadingOut));
+        const bool runs = s.bus ? s.insertTail : s.cur && (s.cur->voiced || s.cur->native || s.insertTail);
+        const bool live = voices || (!silent && runs && !quiet && s.tailFade >= 0 && (s.previewTail < cap || fadingOut));
         if (!live && s.insertTail) {
             s.insertTail = false;
             s.tailFade = 0;
@@ -3504,9 +3779,10 @@ void Engine::endPlayback() noexcept {
     for (int i = 0; i < slotCount_; ++i) {
         Slot& s = slotAt(i);
         s.delayStale = true;  // the next play starts from silence, as an export does, not the song's last frames
+        s.routesStale = true;
         if (s.inserts) {
             s.tailCap = tailCap(*s.inserts);
-            if (s.tailCap > 0 && s.active && !s.bus && !(slotTarget(s) == 0.0 && s.gain == 0.0)) {
+            if (s.tailCap > 0 && s.active && !(slotTarget(s) == 0.0 && s.gain == 0.0)) {  // a bus's reverb rings out too
                 s.insertTail = true;
                 s.tailFade = 0;
                 s.previewing = true;
@@ -4076,6 +4352,7 @@ int Engine::planChunk(int maxFrames) noexcept {
                 s.insertsIdle = true;
                 s.instrumentIdle = s.instrumentIdle || s.instrument || s.instrumentFading;
                 s.delayStale = true;
+                s.routesStale = true;
                 continue;
             }
             s.mode = Slot::Mode::Play;
@@ -4098,12 +4375,16 @@ int Engine::planChunk(int maxFrames) noexcept {
         if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
         if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
         s.target = slotTarget(s);
-        if (s.target == 0.0 && s.gain == 0.0) {
+        // A slot keying a component (a kick keying a ducker) keeps running while muted or soloed out, so its key
+        // still sounds; its own output is silence.
+        const bool keys = s.sends && s.sends->keys && !s.removing && !s.overloaded;
+        if (s.target == 0.0 && s.gain == 0.0 && !keys) {
             // Silent (muted, soloed out or removed, and faded out): nothing runs; swaps and removal finish.
             s.mode = Slot::Mode::Silent;
             s.insertsIdle = true;
             s.instrumentIdle = s.instrumentIdle || s.instrument || s.instrumentFading;
             s.delayStale = true;
+            s.routesStale = true;
             s.contiguous = false;
             if (s.pending && canRetire(1)) { swapIn(s, s.pending); s.pending = nullptr; routingDirty_ = true; }
             if (s.removing && canRetire(6)) {
@@ -4127,10 +4408,12 @@ int Engine::planChunk(int maxFrames) noexcept {
                     // One entry: the slot frees with its inserts and delay.
                     Retired r{s.old, &s, nullptr, nullptr, nullptr, nullptr, s.inserts};
                     r.delay = s.delay;
+                    r.sends = s.sends;
                     retireEntry(r);
                 }
                 s.inserts = nullptr;
                 s.delay = nullptr;
+                s.sends = nullptr;
                 s.cur = s.old = nullptr;
                 s.active = false;
                 s.removing = false;
@@ -4181,14 +4464,14 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     return m;
 }
 
-// Routing as the old two-pass mixer did it, now as graph edges: a routable slot (active, and a bus or
-// a track with a chain) goes to its parent when that parent is an active folder bus, is dropped when
-// its parent is anything else (as the old mixer discarded it), and goes to master at the root. Order
-// is the old pass order (processOrder_, then the remaining slots by index) with each bus held back
-// until its routed children have run, so a track always reaches its bus in the same chunk (issue
-// #76). A track runs as its module nodes (enough for its current chain and the one fading out),
-// chained lane by lane into its track node. Edges into buses follow that order, which is the old
-// accumulation order. Idle slots are left out of the order, so they cost nothing.
+// Routing as graph edges: a routable slot (active, and a bus or a track with a chain) goes to its parent when
+// that parent is an active folder bus, is dropped when its parent is anything else, and goes to master at the
+// root. Sends and sidechain keys add order but no edges (the source adds into its destination's input, runRoutes):
+// a slot runs after every slot that feeds it, whether as a child, a send or a key. The order is the old pass order
+// (processOrder_, then the remaining slots by index) with each slot held back until what feeds it has run, so a
+// track always reaches its bus in the same chunk (issue #76). A track runs as its module nodes (enough for its
+// current chain and the one fading out), chained lane by lane into its track node. Edges into buses follow that
+// order, which is the old accumulation order. Idle slots are left out of the order, so they cost nothing.
 void Engine::updateRouting() noexcept {
     MixGraph& g = *mixGraph_;
     const int master = g.master;
@@ -4219,20 +4502,41 @@ void Engine::updateRouting() noexcept {
         g.modules[i] = modules;
         g.target[i] = to;
     }
+    // A route counts when both ends run: into a bus's input, or a key into a slot with inserts.
+    auto routeDest = [&](const Slot& s, int k) noexcept {
+        const SendTable::Route& r = s.sends->routes[k];
+        if (r.dest < 0 || r.dest >= slotCount_ || r.dest == s.index || !g.routable[r.dest]) return -1;
+        const Slot& d = slotAt(r.dest);
+        if (r.key < 0 ? !d.bus : !d.inserts) return -1;
+        return r.dest;
+    };
     for (int n = 0; n <= slotCount_; ++n) { g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false; }
-    for (int i = 0; i < slotCount_; ++i)
+    for (int i = 0; i < slotCount_; ++i) {
+        if (!g.routable[i]) continue;
         if (g.target[i] >= 0 && g.target[i] != master) ++g.pending[g.target[i]];
+        const Slot& s = slotAt(i);
+        if (s.sends)
+            for (int k = 0; k < s.sends->count; ++k)
+                if (const int d = routeDest(s, k); d >= 0) ++g.pending[d];
+    }
     int count = 0;
-    auto emit = [&](int x) noexcept {
-        while (x >= 0) {
+    auto release = [&](int to, int& top) noexcept {
+        if (to >= 0 && to != master && --g.pending[to] == 0 && g.deferred[to]) {
+            g.deferred[to] = false;
+            g.stack[top++] = to;
+        }
+    };
+    auto emit = [&](int first) noexcept {
+        int top = 0;
+        g.stack[top++] = first;
+        while (top > 0) {
+            const int x = g.stack[--top];
             g.emitted[x] = true;
             g.slotOrder[count++] = x;
-            const int parent = g.target[x];
-            x = -1;
-            if (parent >= 0 && parent != master && --g.pending[parent] == 0 && g.deferred[parent]) {
-                g.deferred[parent] = false;
-                x = parent;
-            }
+            const Slot& s = slotAt(x);
+            if (s.sends)
+                for (int k = s.sends->count - 1; k >= 0; --k) release(routeDest(s, k), top);
+            release(g.target[x], top);  // last pushed, first ordered: the parent bus as before
         }
     };
     auto visit = [&](int x) noexcept {
@@ -4243,12 +4547,20 @@ void Engine::updateRouting() noexcept {
     for (int k = 0; k < processCount_; ++k) visit(processOrder_[k]);
     for (int k = 0; k < slotCount_; ++k) visit(k);
     // A routing cycle is never sent by the control thread; if one appears, keep everything ordered
-    // and drop the edges that would point backwards.
+    // and drop the edges and routes that would point backwards.
     for (int k = 0; k < slotCount_; ++k)
         if (g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.slotOrder[count++] = k; }
     for (int n = 0; n <= slotCount_; ++n) g.position[n] = UINT32_MAX;  // not run this chunk
     for (int k = 0; k < count; ++k) g.position[g.slotOrder[k]] = static_cast<uint32_t>(k);
     g.position[master] = static_cast<uint32_t>(count);
+    for (int i = 0; i < slotCount_; ++i) {
+        Slot& s = slotAt(i);
+        if (!s.sends) continue;
+        for (int k = 0; k < s.sends->count; ++k) {
+            const int d = g.routable[i] ? routeDest(s, k) : -1;
+            s.routeOk[k] = d >= 0 && g.position[i] < g.position[d];
+        }
+    }
     uint32_t nodeCount = 0, edgeCount = 0;
     for (int k = 0; k < count; ++k) {
         const int x = g.slotOrder[k];
@@ -4356,6 +4668,152 @@ void Engine::runDelay(Slot& s, float* outL, float* outR, int m) noexcept {
     }
 }
 
+// A slot's native inserts in place, crossfading from a replaced chain (or the dry signal) over 20 ms.
+void Engine::runInserts(Slot& s, float* L, float* R, int m) noexcept {
+    ComponentChain* const inserts = s.inserts;
+    const bool fading = s.insertsFadeLeft > 0;
+    // A tail frozen while the slot was silent must not play on when it sounds again.
+    if (s.insertsIdle) {
+        if (inserts) inserts->reset();
+        if (s.insertsFading) s.insertsFading->reset();
+        s.insertsIdle = false;
+    }
+    const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_,
+                         chunkId_};
+    const ChainTime* t = &time;
+    if (fading) {
+        std::copy_n(L, m, fadeL_);
+        std::copy_n(R, m, fadeR_);
+        if (s.insertsFading) s.insertsFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
+    }
+    if (inserts) inserts->process(L, R, static_cast<uint32_t>(m), sr_, t);
+    if (fading) {
+        const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+        for (int i = 0; i < m; ++i) {
+            const float w = s.insertsFadeLeft > 0
+                ? static_cast<float>(len - s.insertsFadeLeft + 1) / static_cast<float>(len + 1) : 1.0f;
+            if (s.insertsFadeLeft > 0) --s.insertsFadeLeft;
+            L[i] = fadeL_[i] + (L[i] - fadeL_[i]) * w;
+            R[i] = fadeR_[i] + (R[i] - fadeR_[i]) * w;
+        }
+        if (s.insertsFadeLeft == 0 && s.insertsFading && canRetire(1)) {
+            retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+            s.insertsFading = nullptr;
+        } else if (s.insertsFadeLeft == 0 && s.insertsFading) {
+            s.insertsFadeLeft = 1;  // no room to hand it back yet: hold the new chain at full and try again
+        }
+    }
+}
+
+// Sends and keys (runRoutes): each route's gain ramps across the block to its level (0 while muted, and for a
+// send while the slot is muted or soloed out); a pre route reads the pre tap, a post route the post tap (a key
+// from a silenced slot: the pre tap at the fader's volume and pan, so a muted kick still ducks). Each route's
+// delay keeps it in time where it arrives; the result adds into the destination's input for this chunk.
+void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
+                       bool silenced, double keyPostL, double keyPostR) noexcept {
+    SendTable& t = *s.sends;
+    // The notes the slot plays this chunk, for components keyed by it (the ducker's Notes mode).
+    Event notes[ComponentChain::kMaxKeyEvents];
+    const uint32_t noteCount = t.keys ? keyNotes(s, m, notes, ComponentChain::kMaxKeyEvents) : 0;
+    if (s.routesStale) {
+        for (int k = 0; k < t.count; ++k)
+            if (t.routes[k].delay) t.routes[k].delay->clear();
+        s.routesStale = false;
+    }
+    for (int k = 0; k < t.count; ++k) {
+        SendTable::Route& r = t.routes[k];
+        const bool key = r.key >= 0;
+        const double want = r.mute || (!key && silenced) ? 0.0 : r.level;
+        const double from = s.routeGain[k];
+        if (!s.routeOk[k]) {
+            s.routeGain[k] = 0.0;  // its destination doesn't run: it starts from silence when it does
+            continue;
+        }
+        if (from == 0.0 && want == 0.0 && !r.delay) continue;
+        Slot& d = slotAt(r.dest);
+        auto skip = [&]() { s.routeGain[k] = want; };
+        float* dl = nullptr;
+        float* dr = nullptr;
+        if (key) {
+            ComponentChain::KeyInput* in = d.inserts ? d.inserts->keyInput(static_cast<size_t>(r.key)) : nullptr;
+            if (!in) {
+                skip();
+                continue;
+            }
+            in->begin(chunkId_);
+            dl = in->l;
+            dr = in->r;
+            // Merged by frame with what other sources wrote (each list is in frame order).
+            for (uint32_t k2 = 0; k2 < noteCount && in->count < ComponentChain::kMaxKeyEvents; ++k2) {
+                uint32_t at = in->count++;
+                while (at > 0 && in->events[at - 1].frame > notes[k2].frame) {
+                    in->events[at] = in->events[at - 1];
+                    --at;
+                }
+                in->events[at] = notes[k2];
+            }
+        } else {
+            if (d.recvChunk != chunkId_) {
+                std::fill_n(d.recvL, m, 0.0f);
+                std::fill_n(d.recvR, m, 0.0f);
+                d.recvChunk = chunkId_;
+            }
+            dl = d.recvL;
+            dr = d.recvR;
+        }
+        const bool fromPre = r.pre || (key && silenced);
+        const float* xl = fromPre ? preL : postL;
+        const float* xr = fromPre ? preR : postR;
+        const double gl = key && silenced && !r.pre ? keyPostL : 1.0;
+        const double gr = key && silenced && !r.pre ? keyPostR : 1.0;
+        // A level change glides at a fixed rate per sample (full scale in 5 ms), so it is the same at any block size.
+        const double most = 1.0 / std::max(1.0, kGainSeconds * sr_);
+        double g = from;
+        for (int i = 0; i < m; ++i) {
+            if (g != want) g = want > g ? std::min(want, g + most) : std::max(want, g - most);
+            routeL_[i] = routeSample(static_cast<double>(xl[i]) * g * gl);
+            routeR_[i] = routeSample(static_cast<double>(xr[i]) * g * gr);
+        }
+        s.routeGain[k] = g;
+        if (r.delay) r.delay->run(routeL_, routeR_, m);
+        for (int i = 0; i < m; ++i) {
+            dl[i] = routeSample(static_cast<double>(dl[i]) + routeL_[i]);
+            dr[i] = routeSample(static_cast<double>(dr[i]) + routeR_[i]);
+        }
+    }
+}
+
+// The note-ons a playing slot's pattern starts in this chunk (those that play: chance, ratchets; a slide is legato
+// and starts none), as MIDI 2.0 note-ons at their frames, at most `max`.
+uint32_t Engine::keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept {
+    if (s.mode != Slot::Mode::Play || previewChunk_ || !s.pat) return 0;
+    const Pattern& pat = *s.pat;
+    auto sampleOf = [this](double step) { return static_cast<int64_t>(std::floor(step * stepLen_ + 0.5)); };
+    const PatternEvent* ev = pat.events.data();
+    const size_t ne = pat.events.size();
+    const int64_t n0 = s.n0, end = n0 + m;
+    size_t e = static_cast<size_t>(
+        std::partition_point(ev, ev + ne, [&](const PatternEvent& x) { return sampleOf(x.step) < n0; }) - ev);
+    uint32_t count = 0;
+    for (; e < ne && count < max && sampleOf(ev[e].step) < end; ++e) {
+        const PatternEvent& pe = ev[e];
+        if (!pe.on) continue;
+        const PatternNote& n = pat.notes[pe.note];
+        if (pe.sub == 0 && n.slideFrom >= 0) continue;
+        if (!notePlays(n, pe.note, s.repeat, seed_)) continue;
+        Event& x = out[count++];
+        x = Event{};
+        x.frame = static_cast<uint32_t>(std::max<int64_t>(0, sampleOf(pe.step) - n0));
+        x.kind = EventKind::Note;
+        x.noteId = pe.note + 1;
+        const uint32_t key = static_cast<uint32_t>(std::clamp(std::lround(n.pitch), 0L, 127L));
+        const uint32_t vel = static_cast<uint32_t>(std::clamp(n.vel, 0.0, 1.0) * 65535.0 + 0.5);
+        x.data[0] = 0x40000000u | (0x9u << 20) | (key << 8);  // MIDI 2.0 note on, group 0, channel 0
+        x.data[1] = vel << 16;
+    }
+    return count;
+}
+
 // A playing track's output: the seam and swap crossfades of its lanes, then gain and pan.
 void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* outR, int m) noexcept {
     Slot& s = slotAt(slot);
@@ -4410,46 +4868,15 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     }
     // Native inserts (#17): the mono chain output enters as two equal channels; what the inserts
     // make of it stays stereo through volume and pan (the pan law then works per side, as balance).
-    ComponentChain* const inserts = s.inserts;
-    const bool fading = s.insertsFadeLeft > 0;
-    const bool stereo = inserts || fading || instrumentStereo;  // stereo output, not the mono chain
+    const bool stereo = s.inserts || s.insertsFadeLeft > 0 || instrumentStereo;  // stereo output, not the mono chain
     if (stereo) {
-        // A tail frozen while the track was silent must not play on when it sounds again.
-        if (s.insertsIdle) {
-            if (inserts) inserts->reset();
-            if (s.insertsFading) s.insertsFading->reset();
-            s.insertsIdle = false;
-        }
         if (instrumentStereo) {
             std::copy_n(s.instL, m, insertL_);
             std::copy_n(s.instR, m, insertR_);
         } else {
             for (int i = 0; i < m; ++i) insertL_[i] = insertR_[i] = routeSample(finiteOr0(y[i]));
         }
-        const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), playing_ && !previewChunk_};
-        const ChainTime* t = &time;
-        if (fading) {
-            std::copy_n(insertL_, m, fadeL_);
-            std::copy_n(insertR_, m, fadeR_);
-            if (s.insertsFading) s.insertsFading->process(fadeL_, fadeR_, static_cast<uint32_t>(m), sr_, t);
-        }
-        if (inserts) inserts->process(insertL_, insertR_, static_cast<uint32_t>(m), sr_, t);
-        if (fading) {
-            const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
-            for (int i = 0; i < m; ++i) {
-                const float w = s.insertsFadeLeft > 0
-                    ? static_cast<float>(len - s.insertsFadeLeft + 1) / static_cast<float>(len + 1) : 1.0f;
-                if (s.insertsFadeLeft > 0) --s.insertsFadeLeft;
-                insertL_[i] = fadeL_[i] + (insertL_[i] - fadeL_[i]) * w;
-                insertR_[i] = fadeR_[i] + (insertR_[i] - fadeR_[i]) * w;
-            }
-            if (s.insertsFadeLeft == 0 && s.insertsFading && canRetire(1)) {
-                retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
-                s.insertsFading = nullptr;
-            } else if (s.insertsFadeLeft == 0 && s.insertsFading) {
-                s.insertsFadeLeft = 1;  // no room to hand it back yet: hold the new chain at full and try again
-            }
-        }
+        runInserts(s, insertL_, insertR_, m);
     }
     float peakL = 0, peakR = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
@@ -4532,7 +4959,17 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
             outR[i] *= g;
         }
     }
-    if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time with the most-delayed track
+    if (s.sends && s.sends->count > 0) {
+        const float* preL = insertL_;
+        const float* preR = insertR_;
+        if (!stereo) {
+            for (int i = 0; i < m; ++i) preL_[i] = tail ? 0.0f : routeSample(finiteOr0(y[i]));
+            preL = preR = preL_;
+        }
+        const double vol = bitsToDouble(s.vol.load(std::memory_order_relaxed));
+        runRoutes(s, preL, preR, outL, outR, m, !(target > 0.0), vol * s.gl, vol * s.gr);
+    }
+    if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
     s.previewQuiet = sig > kPreviewQuiet ? 0 : s.previewQuiet + m;
     if (previewChunk_) {
         s.previewN += m;  // the transport isn't moving: its place in the loop stays; the preview's time runs on
@@ -4545,7 +4982,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     s.progress.store(static_cast<float>(static_cast<double>(s.n0 + m) / s.cur->layerLen), std::memory_order_relaxed);
 }
 
-// A folder bus: its children arrive summed in float on the graph's summing input.
+// A folder bus: its children arrive summed in float on the graph's summing input, and sends into it in its own
+// input (runRoutes). Then its inserts, volume and pan, its sends, and its latency compensation.
 void Engine::runBusNode(int slot, const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {
     Slot& s = slotAt(slot);
     if (s.mode != Slot::Mode::Bus) {
@@ -4554,9 +4992,28 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         return;
     }
     const double target = slotTarget(s);
-    for (int j = 0; j < m; ++j) {
-        s.outL[j] = inL[j];
-        s.outR[j] = inR[j];
+    const bool received = s.recvChunk == chunkId_;
+    const bool inserts = s.inserts || s.insertsFadeLeft > 0;
+    if (received || inserts) {
+        for (int j = 0; j < m; ++j) {
+            insertL_[j] = received ? routeSample(static_cast<double>(inL[j]) + s.recvL[j]) : inL[j];
+            insertR_[j] = received ? routeSample(static_cast<double>(inR[j]) + s.recvR[j]) : inR[j];
+        }
+        if (inserts) runInserts(s, insertL_, insertR_, m);
+        for (int j = 0; j < m; ++j) {
+            s.outL[j] = insertL_[j];
+            s.outR[j] = insertR_[j];
+        }
+    } else {
+        for (int j = 0; j < m; ++j) {
+            s.outL[j] = inL[j];
+            s.outR[j] = inR[j];
+        }
+    }
+    const bool routes = s.sends && s.sends->count > 0;
+    if (routes && !received && !inserts) {  // the pre tap, when it isn't in insertL_ already
+        std::copy_n(inL, m, insertL_);
+        std::copy_n(inR, m, insertR_);
     }
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
     const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
@@ -4578,7 +5035,6 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         s.outL[j] *= s.gain * leftPan;
         s.outR[j] *= s.gain * rightPan;
     }
-    if (s.removing && s.gain == 0.0) { s.active = false; s.bus = false; routingDirty_ = true; }
     // Graph edges carry 32-bit float (owner, 2026-11-03), saturating at +/-FLT_MAX (route_math.h).
     float peakL = 0, peakR = 0;
     for (int j = 0; j < m; ++j) {
@@ -4587,8 +5043,48 @@ void Engine::runBusNode(int slot, const float* inL, const float* inR, float* out
         peakL = std::max(peakL, std::fabs(outL[j]));
         peakR = std::max(peakR, std::fabs(outR[j]));
     }
+    if (previewChunk_ && s.tailFade != 0) {  // stopped: a capped tail of its inserts fading out
+        const int len = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+        for (int i = 0; i < m; ++i) {
+            const float g = s.tailFade > 0 ? static_cast<float>(s.tailFade) / static_cast<float>(len) : 0.0f;
+            if (s.tailFade > 0 && --s.tailFade == 0) s.tailFade = -1;
+            outL[i] *= g;
+            outR[i] *= g;
+        }
+    }
     storeMax(s.peakL, peakL);  // a folder's meter: its mix after volume and pan
     storeMax(s.peakR, peakR);
+    s.previewQuiet = std::max(peakL, peakR) > kPreviewQuiet ? 0 : s.previewQuiet + m;
+    if (routes) {
+        const double leftPan = pan > 0.0 ? 1.0 - pan : 1.0, rightPan = pan < 0.0 ? 1.0 + pan : 1.0;
+        const double vol = bitsToDouble(s.vol.load(std::memory_order_relaxed));
+        runRoutes(s, insertL_, insertR_, outL, outR, m, !(target > 0.0), vol * leftPan, vol * rightPan);
+    }
+    if (s.delay || s.delayFadeLeft > 0) runDelay(s, outL, outR, m);  // in time where it meets the others
+    if (s.removing && s.gain == 0.0 && canRetire(3)) {
+        // Faded out: the slot is free again, with its inserts, delay and routes.
+        Retired r{nullptr, &s, nullptr, nullptr, nullptr, nullptr, s.inserts};
+        r.delay = s.delay;
+        r.sends = s.sends;
+        retireEntry(r);
+        retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.insertsFading);
+        if (s.delayFading) {
+            Retired d;
+            d.delay = s.delayFading;
+            retireEntry(d);
+        }
+        s.inserts = s.insertsFading = nullptr;
+        s.insertsFadeLeft = 0;
+        s.delay = s.delayFading = nullptr;
+        s.delayFadeLeft = 0;
+        s.sends = nullptr;
+        s.active = false;
+        s.bus = false;
+        s.removing = false;
+        s.previewing = false;
+        s.insertTail = false;
+        routingDirty_ = true;
+    }
 }
 
 void Engine::runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept {

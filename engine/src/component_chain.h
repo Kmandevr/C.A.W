@@ -31,6 +31,7 @@ struct ChainTime {
     double tempo = 120;     // beats per minute, for the components' transport
     uint32_t beatsPerBar = 4;
     bool playing = true;    // false: stopped (lanes hold; components still learn the tempo)
+    int64_t chunk = -1;     // the Engine's chunk counter: a key written for another chunk is stale (silence)
 };
 
 // Built and configured on the control thread, then handed to the audio thread, which alone calls
@@ -54,6 +55,30 @@ public:
                                                            double sampleRate, std::string& error);
     // Whether a descriptor has an instrument's ports (one event input, one stereo audio output).
     static bool isInstrument(const ModuleDescriptor& d) noexcept;
+    // A keyed effect: a stereo audio input, a second stereo audio input with the id "sidechain" (its key), at
+    // most one event input (the key's notes) and one stereo audio output; the main input is the first audio
+    // input. The host fills its key through keyInput(); with no key it hears silence and no notes.
+    static bool isKeyedEffect(const ModuleDescriptor& d) noexcept;
+    // What sidechain sources wrote into a keyed component this chunk (audio thread): their audio, summed, and
+    // the note-ons of the layers keying it. begin() clears it the first time it is written in a chunk.
+    static constexpr uint32_t kMaxKeyEvents = 64;
+    struct KeyInput {
+        float l[kMaxFrames] = {}, r[kMaxFrames] = {};
+        Event events[kMaxKeyEvents] = {};
+        uint32_t count = 0;
+        int64_t chunk = -1;
+        void begin(int64_t now) noexcept {
+            if (chunk == now) return;
+            for (uint32_t i = 0; i < kMaxFrames; ++i) l[i] = r[i] = 0.0f;
+            count = 0;
+            chunk = now;
+        }
+    };
+    // Component `index`'s key, or null when it has no sidechain input. Audio thread (written by the sources).
+    KeyInput* keyInput(std::size_t index) noexcept {
+        return index < entries_.size() ? entries_[index]->key.get() : nullptr;
+    }
+    bool keyed(std::size_t index) const noexcept { return index < entries_.size() && entries_[index]->key != nullptr; }
     bool instrument() const noexcept { return notes_ != nullptr; }
     // The instrument's notes and this block's events (null for an effect chain). Audio thread.
     NoteEvents* notes() noexcept { return notes_.get(); }
@@ -141,6 +166,8 @@ private:
         // Audio thread: asleep, the component is skipped (its output is silence) until an event or input that
         // is not silent (for an instrument: an event).
         bool asleep = false;
+        std::unique_ptr<KeyInput> key;  // a keyed effect's sidechain (null: not keyed)
+        bool keyEvents = false;         // ... and it takes the key's notes
     };
     ComponentChain() = default;
     int parameterIndex(const Entry& e, const std::string& id) const noexcept;
