@@ -115,7 +115,7 @@ class _PatternFieldsState extends State<PatternFields> {
       ((null, null), 'Auto'),
       for (final b in const [1, 2, 4, 8, 16]) ((null, b), b == 1 ? '1 bar' : '$b bars'),
       if (bars != null && !const [1, 2, 4, 8, 16].contains(bars)) ((null, bars), '$bars bars'),
-      if (steps != null) ((steps, null), steps % spb == 0 ? '${steps ~/ spb} bars ($steps)' : '$steps steps'),
+      if (steps != null) ((steps, null), steps % spb == 0 ? '${steps ~/ spb} bar${steps == spb ? '' : 's'} ($steps)' : '$steps steps'),
     ];
     final current = steps != null ? (steps, null) : (null, bars);
     final dense = const TextStyle(fontSize: 13);

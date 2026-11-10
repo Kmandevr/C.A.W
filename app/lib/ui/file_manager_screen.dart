@@ -222,6 +222,23 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       child: Row(children: [
         if (!wide && !widget.explorer)
           _iconButton(Icons.account_tree_outlined, 'Folders', () => _scaffold.currentState?.openDrawer()),
+        // The explorer has no tree beside it: every folder, indented, from one menu.
+        if (widget.explorer)
+          Builder(builder: (c) => _iconButton(Icons.account_tree_outlined, 'Folders', () async {
+                final all = <(FilesFolder, int)>[];
+                void walk(List<FilesFolder> level, int depth) {
+                  for (final f in level) {
+                    all.add((f, depth));
+                    walk(f.children, depth + 1);
+                  }
+                }
+
+                walk(state.filesTree, 0);
+                final path = await showCompactMenu<String>(context, _centerOf(c), [
+                  for (final (f, depth) in all) MenuEntry(f.path, folderIcon(f.kind), '${'    ' * depth}${f.label}'),
+                ]);
+                if (path != null && mounted) _go(path);
+              })),
         Expanded(child: _breadcrumb(trail, searching)),
         if (wide)
           SizedBox(width: 200, child: _searchField())

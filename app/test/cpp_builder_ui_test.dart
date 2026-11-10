@@ -261,6 +261,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(state.cppWorkbench('cpp1').currentFile, 'caw-component.json');
       expect(find.textContaining('Fuzz · caw-component.json'), findsOneWidget);
+      // Folders jumps anywhere in the tree.
+      await tester.tap(find.byKey(const ValueKey('explorer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Folders'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Patterns').last);
+      await tester.pumpAndSettle();
+      expect(find.text('No patterns yet. Tap + for a new one.'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
     });
