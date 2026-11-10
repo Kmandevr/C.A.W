@@ -252,6 +252,29 @@ void main() {
       expect((t.value('type'), t.value('lfo_shape')), (4, 2));
       await close(tester);
     });
+
+    for (final (id, place) in [('org.caw.phaser', 'center'), ('org.caw.flanger', 'delay')]) {
+      testWidgets('$id: sideways moves the comb, up raises the feedback', (tester) async {
+        final s = await open(tester, id);
+        final t = targetOf(s, id);
+        final before = t.value(place);
+        await tester.dragFrom(tester.getCenter(find.byKey(ValueKey('${id.substring(8)}-hero'))), const Offset(50, -30));
+        await tester.pumpAndSettle();
+        expect(t.value(place), greaterThan(before));
+        expect(t.value('feedback'), greaterThan(0.4));
+        await close(tester);
+      });
+    }
+
+    testWidgets('chorus: the pad sets rate across and depth up', (tester) async {
+      final s = await open(tester, 'org.caw.chorus');
+      final t = targetOf(s, 'org.caw.chorus');
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('xy-rate-depth'))), const Offset(40, -40));
+      await tester.pumpAndSettle();
+      expect(t.value('rate'), greaterThan(0.6));
+      expect(t.value('depth'), greaterThan(0.5));
+      await close(tester);
+    });
   });
 
   test('presets: Init is always first; applying one sets every value, and the label tracks edits', () {

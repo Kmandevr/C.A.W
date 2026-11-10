@@ -12,6 +12,7 @@ import '../kit/device_style.dart';
 import 'dynamics_editors.dart';
 import 'drive_editors.dart';
 import 'effect_page.dart';
+import 'mod_editors.dart';
 import 'filter_editor.dart';
 import 'space_editors.dart';
 import 'eq_editor.dart';
@@ -62,8 +63,9 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.gate': singlePage('gate', 'GATE', Icons.door_sliding_outlined, DeviceFamily.dynamics, () => const GatePage()),
   'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientPage()),
   'org.caw.filter': singlePage('filter', 'FILTER', Icons.filter_alt_outlined, DeviceFamily.filter, () => const FilterPage()),
-  'org.caw.phaser': _levels('phaser', 'PHASER', Icons.waves, Neon.violet),
-  'org.caw.flanger': _levels('flanger', 'FLANGER', Icons.waves, Neon.violet),
+  'org.caw.phaser': singlePage('phaser', 'PHASER', Icons.waves, DeviceFamily.modulation, () => const CombPage(flanger: false)),
+  'org.caw.flanger': singlePage('flanger', 'FLANGER', Icons.waves, DeviceFamily.modulation, () => const CombPage(flanger: true)),
+  'org.caw.chorus': singlePage('chorus', 'CHORUS', Icons.waves, DeviceFamily.modulation, () => const ChorusPage()),
   'org.caw.utility': _levels('utility', 'UTILITY', Icons.tune, Neon.green),
 };
 
