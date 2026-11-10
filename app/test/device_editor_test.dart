@@ -119,10 +119,9 @@ void main() {
     });
 
     wtest('an unknown component gets the fallback knob page', (tester) async {
+      s.setNativeInstrument(s.project.layers.first, null); // the synth's card is long: the effect's comes first now
       await pumpStack(tester);
       expect(DeviceEditors.custom('local.fuzz.cpp1', _unknown), isNull);
-      // The effect's card sits below the instrument's: open it from there.
-      await tester.dragUntilVisible(find.byKey(const ValueKey('fx-open-0')), find.byType(ListView).first, const Offset(0, -300));
       await tester.tap(find.byKey(const ValueKey('fx-open-0')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('device-fallback')), findsOneWidget);
