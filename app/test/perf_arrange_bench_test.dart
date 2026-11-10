@@ -32,7 +32,6 @@ void main() {
         .reduce((a, b) => a.maxScrollExtent >= b.maxScrollExtent ? a : b);
     Future<FrameCount> scroll(Axis axis, double by) async {
       final p = scroller(axis);
-      final from = p.pixels;
       final c = await countFrames(tester, 30, onFrame: (_) async => p.jumpTo(p.pixels + by));
       await tester.pump(const Duration(seconds: 2));
       return c;

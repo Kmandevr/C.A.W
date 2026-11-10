@@ -37,17 +37,24 @@ class ProjectStorage {
   File _file(String id) => File('${_root.path}${Platform.pathSeparator}$id.json');
   File get _settings => File('${_root.path}${Platform.pathSeparator}settings.json');
 
+  /// The saved projects, newest first. Every file is read and decoded for its name, so this runs off the UI isolate:
+  /// at startup it would otherwise cost as much as opening every project (#174).
   Future<List<ProjectSummary>> list() async {
-    final out = <ProjectSummary>[];
-    await for (final f in _root.list()) {
-      if (f is! File || !f.path.endsWith('.json') || f.path == _settings.path) continue;
-      try {
-        final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-        out.add(ProjectSummary(j['id'] as String, (j['name'] as String?) ?? 'Untitled', await f.lastModified()));
-      } catch (_) {
-        // A damaged file is skipped, not fatal.
+    final root = _root.path, settings = _settings.path;
+    final rows = await Isolate.run(() {
+      final out = <(String, String, int)>[];
+      for (final f in Directory(root).listSync()) {
+        if (f is! File || !f.path.endsWith('.json') || f.path == settings) continue;
+        try {
+          final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+          out.add((j['id'] as String, (j['name'] as String?) ?? 'Untitled', f.lastModifiedSync().microsecondsSinceEpoch));
+        } catch (_) {
+          // A damaged file is skipped, not fatal.
+        }
       }
-    }
+      return out;
+    });
+    final out = [for (final (id, name, at) in rows) ProjectSummary(id, name, DateTime.fromMicrosecondsSinceEpoch(at))];
     out.sort((a, b) => b.modified.compareTo(a.modified));
     return out;
   }
@@ -141,7 +148,8 @@ class ProjectStorage {
         '${_restoreDirectory(projectId).path}${Platform.pathSeparator}$restorePointId.json',
       );
       if (!await file.exists()) return null;
-      final decoded = jsonDecode(await file.readAsString());
+      final path = file.path;
+      final decoded = await Isolate.run(() => jsonDecode(File(path).readAsStringSync()));
       if (decoded is! Map<String, dynamic>) return null;
       final project = ProjectDoc.fromJson(decoded);
       return project.id == projectId ? project : null;
