@@ -29,12 +29,12 @@ target_compile_features(caw_sdk INTERFACE cxx_std_20)
 # here for the build tree, and in CAWConfig.cmake for installed consumers.
 target_compile_options(caw_sdk INTERFACE
   "$<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/fp:precise>"
-  "$<$<COMPILE_LANG_AND_ID:CXX,GNU,AppleClang>:-ffp-contract=off;-fno-fast-math>")
+  "$<$<COMPILE_LANG_AND_ID:CXX,GNU,AppleClang>:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:/fp:precise;/clang:-ffp-contract=off>")
   else()
-    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:-ffp-contract=off;-fno-fast-math>")
+    target_compile_options(caw_sdk INTERFACE "$<BUILD_INTERFACE:-ffp-contract=off;-fno-fast-math;-fno-trapping-math>")
   endif()
 endif()
 set_target_properties(caw_sdk PROPERTIES EXPORT_NAME SDK)
@@ -78,6 +78,8 @@ if(CAW_INSTALL_SDK)
 endif()
 
 # Determinism: no fast-math and no fused multiply-add contraction, so every platform rounds alike.
+# -fno-trapping-math changes no result (the engine never reads floating-point exception flags; it is
+# Clang's default): it lets GCC vectorize loops with selects, such as the mixer's saturating sums.
 # MSVC's /fp:precise never contracts; clang-cl's does, so it also gets /clang:-ffp-contract=off.
 if(MSVC)
   set(CAW_FLAGS /W4 /fp:precise /utf-8 /EHsc)
@@ -85,7 +87,7 @@ if(MSVC)
     list(APPEND CAW_FLAGS /clang:-ffp-contract=off)
   endif()
 else()
-  set(CAW_FLAGS -Wall -Wextra -ffp-contract=off -fno-fast-math)
+  set(CAW_FLAGS -Wall -Wextra -ffp-contract=off -fno-fast-math -fno-trapping-math)
 endif()
 # Build speed only (the output is the same): Visual Studio builds compile one file at a time per target
 # unless asked; /MP compiles a target's files in parallel.

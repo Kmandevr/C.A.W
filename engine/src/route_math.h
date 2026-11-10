@@ -1,7 +1,9 @@
 // Float routing arithmetic shared by the mixer and graph summing inputs: saturating, never inf or NaN.
 #pragma once
 
+#include <bit>
 #include <cfloat>
+#include <cstdint>
 
 namespace caw {
 
@@ -23,6 +25,18 @@ inline float routeAdd(float sum, float sample) noexcept {
     s = s < -FLT_MAX ? -FLT_MAX : s;
     s = s > FLT_MAX ? FLT_MAX : s;
     return s;
+}
+
+// The largest |x[i]| of a block with no NaN in it (0 for none). Non-negative floats order as their bits do, so
+// this is an integer max, which vectorizes (a float max reduction does not, for the sign of zero; and SSE2 has a
+// signed 32-bit compare, not an unsigned one).
+inline float peakAbs(const float* x, int n) noexcept {
+    int32_t top = 0;
+    for (int i = 0; i < n; ++i) {
+        const int32_t bits = static_cast<int32_t>(std::bit_cast<uint32_t>(x[i]) & 0x7fffffffu);
+        top = bits > top ? bits : top;
+    }
+    return std::bit_cast<float>(top);
 }
 
 }  // namespace caw

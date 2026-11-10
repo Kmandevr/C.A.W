@@ -4213,15 +4213,15 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         // The usual case: volume settled, no lanes. The same sums as the loop below, without its per-sample
         // branches, and the scope written in at most two runs instead of a wrap test per sample.
         const double gain = s.gain, gl = s.gl, gr = s.gr;
-        float mid[kBlock];
+        float mid[kBlock], level[kBlock];
         if (stereo) {
             for (int i = 0; i < m; ++i) {
                 const double vl = static_cast<double>(insertL_[i]) * gain;
                 const double vr = static_cast<double>(insertR_[i]) * gain;
                 outL[i] = routeSample(vl * gl);
                 outR[i] = routeSample(vr * gr);
-                peak = std::max(peak, std::max(std::fabs(outL[i]), std::fabs(outR[i])));
-                sig = std::max(sig, static_cast<float>(std::max(std::fabs(vl), std::fabs(vr))));
+                const double al = std::fabs(vl), ar = std::fabs(vr);
+                level[i] = static_cast<float>(al < ar ? ar : al);
                 mid[i] = static_cast<float>(0.5 * (vl + vr));
             }
         } else {
@@ -4229,11 +4229,12 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
                 const double v = finiteOr0(y[i]) * gain;
                 outL[i] = routeSample(v * gl);
                 outR[i] = routeSample(v * gr);
-                peak = std::max(peak, std::max(std::fabs(outL[i]), std::fabs(outR[i])));
-                sig = std::max(sig, static_cast<float>(std::fabs(v)));
+                level[i] = static_cast<float>(std::fabs(v));
                 mid[i] = static_cast<float>(v);
             }
         }
+        peak = std::max(peakAbs(outL, m), peakAbs(outR, m));
+        sig = peakAbs(level, m);
         for (int i = 0; i < m;) {
             const int run = std::min(m - i, kScopeSize - sp);
             for (int k = 0; k < run; ++k) s.scope[sp + k].store(mid[i + k], std::memory_order_relaxed);
