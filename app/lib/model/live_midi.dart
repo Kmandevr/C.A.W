@@ -17,6 +17,9 @@ class TakenNote {
 }
 
 class LiveMidi extends ChangeNotifier {
+  /// The app's instance (the shell makes it), for screens such as the track menu's Record arm.
+  static LiveMidi? current;
+
   LiveMidi(this.state, this.input) {
     final i = input;
     if (i == null) return;

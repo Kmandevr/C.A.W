@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../model/app_state.dart';
 import '../model/arrange_fx.dart';
+import '../model/live_midi.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
 import 'arrange/focus_panel.dart';
@@ -103,12 +104,17 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     final hasVolume = layer.automation.any((a) => a.target == 'volume');
     final hasPan = layer.automation.any((a) => a.target == 'pan');
     final canAutomate = !layer.isFolder || layer.busEnabled;
+    final midi = LiveMidi.current;
     final v = await showLongPressMenu<String>(context, at: at, title: layer.name, style: s.settings.longPressMenu, actions: [
       if (!layer.isFolder) ...[
         const MenuAction('fx', 'Effects', Icons.graphic_eq),
-        // [Fact, 2026-11-09] the engine has no MIDI device input or audio recording yet (docs/decisions.md).
-        const MenuAction('arm', 'Record arm', Icons.fiber_manual_record, enabled: false, hint: 'Needs engine recording'),
-        const MenuAction('input', 'Input', Icons.input, enabled: false, hint: 'Needs engine MIDI input'),
+        // MIDI keyboards record into a track (lib/model/live_midi.dart); audio recording needs the engine's input.
+        MenuAction('arm', midi?.armedLayerId == layer.id ? 'Stop recording' : 'Record arm', Icons.fiber_manual_record,
+            enabled: midi != null && (midi.devices.isNotEmpty || midi.armedLayerId == layer.id),
+            checked: midi?.armedLayerId == layer.id,
+            hint: midi == null || midi.devices.isEmpty ? 'Connect a MIDI keyboard' : null),
+        MenuAction('input', 'Input · ${midi == null || midi.devices.isEmpty ? 'none' : midi.devices.join(', ')}', Icons.input,
+            enabled: false, hint: 'MIDI keyboards play the selected track; audio input comes later'),
         for (final g in gens) MenuAction('gen:${g.id}', 'Instrument · ${g.name}', Icons.piano, checked: g.id == layer.generatorId),
         for (final pattern in patterns) MenuAction('clip:${pattern.id}', 'Add clip · ${pattern.name}', Icons.add_box_outlined),
       ],
@@ -129,6 +135,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> {
     ]);
     if (v == null || !mounted) return;
     if (v == 'fx') _openTrack(layer, tab: FocusTab.fx);
+    if (v == 'arm') midi?.toggleRecord(layer.id);
     if (v.startsWith('gen:')) s.editLayer(layer, (l) => l.generatorId = v.substring(4));
     if (v.startsWith('clip:')) s.addClip(layer, v.substring(5));
     if (v == 'rename') await _rename(layer);

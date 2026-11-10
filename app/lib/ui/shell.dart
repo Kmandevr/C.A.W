@@ -100,7 +100,7 @@ class _ShellState extends State<Shell> {
   void initState() {
     super.initState();
     _sections.addListener(_onSection);
-    _midi; // starts listening for MIDI keyboards
+    LiveMidi.current = _midi; // starts listening for MIDI keyboards
     _life = AppLifecycleListener(
       onPause: () {
         _dock.flush();
@@ -121,6 +121,7 @@ class _ShellState extends State<Shell> {
     _dock.dispose();
     _sections.removeListener(_onSection);
     _sections.dispose();
+    if (LiveMidi.current == _midi) LiveMidi.current = null;
     _midi.dispose();
     super.dispose();
   }
