@@ -200,7 +200,7 @@ The owner's measure: the whole First loop (all six tracks, Acid and Pad unmuted)
 - **What the engine work did** (bit-identical: every golden render and the block-size test unchanged):
   - The track node has a fast path for the usual case (volume settled, no lanes), and skips the mono mix a stereo native instrument does not use.
   - The mixer's saturating route maths, the output sanitizer and the meters are written as selects and integer maxima, and the engine and SDK build with `-fno-trapping-math`, so GCC vectorizes them (it changes no result).
-  - Components that have fallen silent sleep (`ModuleProcessor::quiet()`, or an honest declared tail; [SDK](native-module-sdk.md)): the kick, hats, snare, kit and acid stop running between hits. In the First loop they are rarely silent long, so it gives about 6% on Kick and Hats alone; an idle track gains most.
+  - Components that have fallen silent sleep (`ModuleProcessor::quiet()`; [SDK](native-module-sdk.md); a declared tail alone no longer puts one to sleep, since that made the output depend on the buffer size, so effects keep running): the kick, hats, snare, kit and acid stop running between hits. In the First loop they are rarely silent long, so it gives about 6% on Kick and Hats alone; an idle track gains most.
   - Note lists and voice pools walk only the notes and voices in use, so the larger capacities (4,096 notes, 128 voices) cost nothing per block.
 - **Bigger ideas, not built** (each needs the owner or an `architect` review first):
   - Run independent tracks on the worker pool's cores (the S22+ has 8): the callback's load falls, the total CPU does not.

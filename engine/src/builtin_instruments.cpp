@@ -733,7 +733,8 @@ public:
         accentLevel_ = 0.0;
         clock_.restart();
     }
-    bool quiet() const noexcept override { return !amp_.active(); }
+    // Silent, and the filter envelope (which a new note's attack starts from) has run out too.
+    bool quiet() const noexcept override { return !amp_.active() && !fenv_.active(); }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {

@@ -774,6 +774,54 @@ TEST(the_built_in_instruments_render_the_same_at_any_block_size) {
     }
 }
 
+TEST(a_sleeping_component_renders_the_same_at_any_block_size) {
+    // Second audio review, fix 1: a component put to sleep by its declared tail fell asleep on a block boundary
+    // and froze there (a chorus's LFO, the acid synth's filter envelope), so after a pause it woke in another
+    // state for each device buffer size, and playback no longer matched the export. Now only a component that
+    // says it is quiet (and has nothing left running) sleeps. The Engine runs at most 64 frames at a time, so
+    // only a callback size that is not a multiple of 64 moves the chunk boundaries: 37 and 100 do, 512 doesn't.
+    // The basic synth stopped a released voice at the end of a render call, so it too ended on a block-dependent frame.
+    auto render = [](const ProjectSpec& p, int block) {
+        Engine e(48000);
+        std::vector<float> out;
+        if (!ok(e.setProjectOffline(p))) return out;
+        e.play();
+        std::vector<float> l(static_cast<size_t>(block)), r(static_cast<size_t>(block));
+        for (int done = 0; done < 48000 * 4; done += block) {
+            e.process(l.data(), r.data(), block);
+            for (int i = 0; i < block; ++i) out.push_back(l[static_cast<size_t>(i)]), out.push_back(r[static_cast<size_t>(i)]);
+        }
+        out.resize(48000 * 4 * 2);
+        return out;
+    };
+    std::vector<Golden> cases;
+    // A short note, then most of a bar of silence (over 1 s): the chorus's input is silent far past its tail.
+    ProjectSpec chorus = track("org.caw.synth.basic", "0 A3 1 0.8\n", {{"release", 0.02}});
+    chorus.layers[0].components = {effect("org.caw.chorus")};
+    cases.push_back({"basic + chorus", chorus, 0});
+    // The synths that keep running through a gap: a released voice stops on the same frame at any block size.
+    for (const char* id : {"org.caw.synth.basic", "org.caw.synth.morph"})
+        cases.push_back({id, track(id, "0 A3 1 0.8\n6 C4 1/2 0.7\n", {{"release", 0.02}, {"decay", 0.05}}), 0});
+    cases.push_back({"org.caw.bass", track("org.caw.bass", "0 A1 1 0.8\n6 C2 1/2 0.7\n"), 0});
+    // Drums and the acid synth with gaps between hits: each falls quiet and sleeps in the gaps.
+    cases.push_back({"kick", track("org.caw.drum.kick", "0 C2 1 1\n7 C2 1 0.8\n", {{"decay", 0.1}}), 0});
+    cases.push_back({"snare", track("org.caw.drum.snare", "4 D2 1 1\n13 D2 1 0.6\n"), 0});
+    cases.push_back({"hats", track("org.caw.drum.hats", "0 F#2 1 0.9\n6 A#2 1 0.8\n11 F#2 1 0.5\n"), 0});
+    cases.push_back({"kit", track("org.caw.drum.kit", "0 C2 1 1\n5 D#2 1 0.7\n9 A#2 1 0.8\n14 D2 1 1\n"), 0});
+    cases.push_back({"acid", track("org.caw.synth.acid", "0 A1 1/4 1\n5 C2 1/4 0.9\n11 A2 1/4 0.8\n", {{"decay", 1.0}}), 0});
+    for (const Golden& g : cases) {
+        const std::vector<float> a = render(g.project, 64);
+        for (int block : {37, 100, 512}) {
+            const std::vector<float> b = render(g.project, block);
+            size_t differ = 0;
+            for (size_t i = 0; i < a.size() && i < b.size(); ++i) differ += a[i] != b[i];
+            if (a.empty() || a.size() != b.size() || differ != 0)
+                cawtest::fail(__FILE__, __LINE__, std::string(g.name) + ": " + std::to_string(differ) +
+                                                      " samples differ between blocks of 64 and " + std::to_string(block));
+        }
+    }
+}
+
 TEST(a_note_held_at_sustain_zero_settles_instead_of_decaying_into_denormals) {
     // Audio review fix 7: the basic synth's level (and lib::Adsr's, which the bass and Morph synth use) fell
     // toward a sustain of 0 forever, through denormal numbers (slow on many CPUs). It now settles at 0.

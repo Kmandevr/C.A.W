@@ -262,7 +262,7 @@ private:
     uint32_t left_ = 0;
 };
 
-// An effect that passes its input on, with a 128-frame declared tail and no quiet(). Counts its calls.
+// An effect that passes its input on, with a 128-frame declared tail, quiet() when gTailQuiet. Counts its calls.
 constexpr PortDescriptor kTailPorts[] = {stereoInput("in"), stereoOutput("out")};
 ModuleDescriptor tailDescriptor() {
     ModuleDescriptor d;
@@ -275,9 +275,11 @@ ModuleDescriptor tailDescriptor() {
 }
 const ModuleDescriptor kTail = tailDescriptor();
 int gTailCalls = 0;
+bool gTailQuiet = false;
 class Tail final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kTail; }
+    bool quiet() const noexcept override { return gTailQuiet; }
     void process(const StereoProcessBlock& b) noexcept override {
         ++gTailCalls;
         for (uint32_t i = 0; i < b.frames; ++i) {
@@ -317,7 +319,10 @@ TEST(a_quiet_instrument_sleeps_until_its_next_note) {
     CHECK_EQ(l[10], 0.5f);
 }
 
-TEST(an_effect_sleeps_once_its_input_has_been_silent_longer_than_its_tail) {
+TEST(an_effect_sleeps_only_when_it_says_it_is_quiet_not_when_its_tail_has_passed) {
+    // Second audio review, fix 1: the host used to put an effect to sleep once its input had been silent past its
+    // declared tail. It fell asleep on a block boundary with its timed state frozen, so the output depended on
+    // the device's buffer size. A declared tail alone now keeps it running; quiet() still puts it to sleep.
     ModuleRegistry registry;
     CHECK(registry.add(kTail, []() noexcept -> ModuleProcessor* { return new Tail; }));
     std::string error;
@@ -328,23 +333,25 @@ TEST(an_effect_sleeps_once_its_input_has_been_silent_longer_than_its_tail) {
     if (!chain) return;
     float l[64], r[64];
     gTailCalls = 0;
-    for (int k = 0; k < 2; ++k) {  // 128 silent frames: within the tail, still run
+    for (int k = 0; k < 8; ++k) {  // 512 silent frames, four times its tail: still run
         std::fill_n(l, 64, 0.0f);
         std::fill_n(r, 64, 0.0f);
         chain->process(l, r, 64, 48000, nullptr);
     }
-    CHECK_EQ(gTailCalls, 2);
-    for (int k = 0; k < 5; ++k) {  // past the tail, with silence out: run once more, then asleep
+    CHECK_EQ(gTailCalls, 8);
+    gTailQuiet = true;  // now it says it is quiet: run once more (it says so after a block), then asleep
+    for (int k = 0; k < 4; ++k) {
         std::fill_n(l, 64, 0.0f);
         std::fill_n(r, 64, 0.0f);
         chain->process(l, r, 64, 48000, nullptr);
     }
-    CHECK_EQ(gTailCalls, 3);
+    CHECK_EQ(gTailCalls, 9);
     std::fill_n(l, 64, 0.25f);  // input again: it runs
     std::fill_n(r, 64, 0.0f);
     chain->process(l, r, 64, 48000, nullptr);
-    CHECK_EQ(gTailCalls, 4);
+    CHECK_EQ(gTailCalls, 10);
     CHECK_EQ(l[5], 0.25f);
+    gTailQuiet = false;
 }
 
 TEST(pattern_notes_reach_an_instrument_on_their_frames_across_loop_wraps) {
@@ -699,7 +706,9 @@ TEST(the_built_in_synth_matches_its_golden_render) {
     const uint64_t h = renderHash(p, 48000 * 2, &peak);
     CHECK(peak > 0.05f);
     CHECK(peak <= 1.0f);
-    constexpr uint64_t kGolden = 0x128b1949baeaf161ull;  // re-recorded: voice summing order (engine pass) and the ping-pong fix
+    // Re-recorded: voice summing order (engine pass), the ping-pong fix, and a released voice stopping on its own
+    // frame rather than at the end of a render call (second audio review, fix 1: at most 15 frames below -100 dB).
+    constexpr uint64_t kGolden = 0x7602349decd473ebull;
     if (h != kGolden) {
         char buf[96];
         std::snprintf(buf, sizeof buf, "the basic synth renders 0x%016llxull", static_cast<unsigned long long>(h));
