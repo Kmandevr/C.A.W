@@ -766,7 +766,12 @@ uint32_t eventPortFor(const Plugin* s, int32_t portIndex) {
 
 void noteOn(Plugin* s, uint32_t port, uint32_t frame, int32_t clapId, uint32_t channel, uint32_t key, uint16_t velocity) {
     const uint32_t id = clapId >= 0 ? hostNoteId(clapId) : freshNoteId(s);
-    s->eventInPorts[port].noteIds[channel * 128 + key] = id;
+    uint32_t& slot = s->eventInPorts[port].noteIds[channel * 128 + key];
+    // A note already sounding on this channel and key whose id only this slot remembers (a note without a
+    // host id, or any note when this one has none) ends first: no later off could name it.
+    if (slot != 0 && slot != id && (clapId < 0 || (slot & 0x80000000u)))
+        pushEvent(s, port, frame, CAW_EVENT_NOTE, slot, voiceWord(0x8, channel, key, 0), 0);
+    slot = id;
     pushEvent(s, port, frame, CAW_EVENT_NOTE, id, voiceWord(0x9, channel, key, 0), uint32_t(velocity) << 16);
 }
 

@@ -285,6 +285,38 @@ TEST(stop_ends_an_instruments_notes_and_play_starts_it_from_silence) {
     CHECK_NEAR(l, 0.1 * kCentre, 1e-5);  // the note starts again with the loop, nothing left over
 }
 
+TEST(play_after_stop_fades_a_ringing_instrument_out_instead_of_cutting_it) {
+    // Audio review fix 3: Play reset an instrument still ringing out after Stop in one sample (a click).
+    Engine e(48000);
+    e.setMasterBypass(true);
+    // A sine (so a step stands out from the wave's own), and the loop starts silent: only the tail sounds at Play.
+    ProjectSpec p = instrumentTrack("org.caw.synth.morph", "8 C4 4 1\n");
+    p.layers[0].instrument.params = {{"release", 3.0}, {"sustain", 1.0}, {"shape", 0.0}, {"drift", 0.0}, {"unison", 1}, {"attack", 0.01}};
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    std::vector<float> l(64), r(64);
+    for (int i = 0; i < 62400 / 64; ++i) e.process(l.data(), r.data(), 64);  // 1.3 s: into the note (step 8 = 1 s)
+    e.stop();
+    float before = 0;
+    for (int i = 0; i < 4800 / 64; ++i) {  // the stop fade, then the release rings on
+        e.process(l.data(), r.data(), 64);
+        before = 0;
+        for (float v : l) before = std::max(before, std::fabs(v));
+    }
+    CHECK(before > 0.01f);
+    e.play();
+    float jump = 0, last = l[63];
+    for (int i = 0; i < 8; ++i) {
+        e.process(l.data(), r.data(), 64);
+        for (float v : l) {
+            jump = std::max(jump, std::fabs(v - last));
+            last = v;
+        }
+    }
+    CHECK_NEAR(l[63], 0.0, 1e-6);  // then silence: the new pass starts from it, as an export does
+    CHECK(jump < 0.25f * before);    // no step: the tail fades over a few milliseconds
+}
+
 TEST(an_instruments_values_bypass_and_automation_work_as_for_an_effect) {
     Engine e(48000);
     CHECK(loadFixture(e, kRecorder));
@@ -368,6 +400,26 @@ TEST(a_rebuilt_instrument_takes_over_its_held_notes_while_playing) {
         CHECK_EQ(rec[1].noteId, rec[0].noteId);
     }
     std::remove(rebuild.c_str());
+}
+
+TEST(two_instrument_swaps_within_the_crossfade_keep_the_held_notes) {
+    // Audio review fix 1: a second swap while the first still crossfades kept the side heard more (the old
+    // instrument, whose notes had been let go) and took over from it, so every held note stopped.
+    Engine e(48000);
+    CHECK(loadFixture(e, kRecorder));
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(instrumentTrack(kRecorder, "0 C4 16 1\n"))));
+    e.play();
+    float l = 0, r = 0;
+    run(e, 6400, 64);
+    CHECK(ok(e.setProject(instrumentTrack(kSynth, "0 C4 16 1\n"))));
+    run(e, 64, 64);  // 1.3 ms: the first crossfade has barely started
+    CHECK(ok(e.setProject(instrumentTrack(kRecorder, "0 C4 16 1\n"))));
+    run(e, 4096, 64, &l, &r);  // past the second crossfade
+    CHECK_NEAR(l, 0.1 * kCentre, 1e-5);  // the held note sounds on in the recorder again
+    const std::vector<Rec> rec = records(e);
+    CHECK_EQ(rec.size(), 1u);  // a new recorder, which heard the held note start again
+    if (!rec.empty()) CHECK_EQ(rec[0].type, kOn);
 }
 
 TEST(an_instrument_is_followed_by_the_tracks_caw_effects_and_replaces_its_generator) {
