@@ -1,21 +1,17 @@
-// Editors for built-in effects (by id, or found by their parameters): EQ, dynamics, saturation, delay, reverb and the kit,
-// drawn from their parameters with the engine's live display data (spectrum, gain reduction, levels) from DeviceDisplaySource.
+// Which plugin UI each built-in effect opens: by id, or (for a built-in whose id isn't listed) by the shape of its parameters.
 import 'package:flutter/material.dart';
 
 import '../../../engine/component_info.dart';
-import '../../../model/device_display.dart';
-import '../../theme.dart';
-import '../device_controls.dart';
 import '../device_registry.dart';
-import '../device_scope.dart';
 import '../kit/device_style.dart';
-import 'dynamics_editors.dart';
 import 'drive_editors.dart';
+import 'dynamics_editors.dart';
 import 'effect_page.dart';
-import 'mod_editors.dart';
-import 'filter_editor.dart';
-import 'space_editors.dart';
 import 'eq_editor.dart';
+import 'filter_editor.dart';
+import 'mod_editors.dart';
+import 'space_editors.dart';
+import 'utility_editors.dart';
 
 // An EQ band's knobs: `bandN_` or the built-in EQ's `bN_` (org.caw.eq).
 final _band = RegExp(r'^(band|b)(\d+)_(freq|gain|q|type|on|channel)$');
@@ -47,10 +43,7 @@ DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
   return null;
 }
 
-DeviceEditorEntry _levels(String id, String label, IconData icon, Color accent) =>
-    DeviceEditorEntry((_) => [DeviceSection(id, label, icon, (_) => const LevelsEditorPage())], accent: accent);
-
-/// The built-in effects without a shape the matchers know (#173): a live view of their levels and display values.
+/// Every built-in effect's plugin UI, by id.
 final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.eq': singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage()),
   'org.caw.compressor': singlePage('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
@@ -66,101 +59,8 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.phaser': singlePage('phaser', 'PHASER', Icons.waves, DeviceFamily.modulation, () => const CombPage(flanger: false)),
   'org.caw.flanger': singlePage('flanger', 'FLANGER', Icons.waves, DeviceFamily.modulation, () => const CombPage(flanger: true)),
   'org.caw.chorus': singlePage('chorus', 'CHORUS', Icons.waves, DeviceFamily.modulation, () => const ChorusPage()),
-  'org.caw.utility': _levels('utility', 'UTILITY', Icons.tune, Neon.green),
+  'org.caw.utility': singlePage('utility', 'UTILITY', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
+  'org.caw.stereo.width': singlePage('width', 'WIDTH', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
+  'org.caw.stereo.balance': singlePage('balance', 'BALANCE', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
 };
-
-/// Every parameter not in [skip] as knobs and choices: what an effect page shows under its visual.
-class ParamGrid extends StatelessWidget {
-  const ParamGrid({super.key, this.skip = const {}, this.only});
-  final Set<String> skip;
-  final List<String>? only;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = DeviceScope.of(context).target;
-    final params = [
-      for (final p in t.info?.parameters ?? const <ComponentParameterInfo>[])
-        if (!skip.contains(p.id) && (only == null || only!.contains(p.id))) p,
-    ];
-    return Wrap(spacing: 4, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-      for (final p in params)
-        if (p.isChoice)
-          p.choices.length == 2 && p.choices.first == 'Off'
-              ? Row(mainAxisSize: MainAxisSize.min, children: [DevicePower(p.id), Text(p.label, style: const TextStyle(fontSize: 10))])
-              : DeviceChoice(p.id, label: p.label, maxSegments: 4)
-        else
-          DeviceKnob(p.id),
-    ]);
-  }
-}
-
-/// Listens to the device's display frames (none until the engine offers them).
-class _Display extends StatelessWidget {
-  const _Display({required this.builder});
-  final Widget Function(BuildContext context, DeviceDisplayFrame? frame) builder;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = DeviceScope.of(context).target;
-    return ValueListenableBuilder<DeviceDisplayFrame?>(
-      valueListenable: DeviceDisplaySource.current.frames(t),
-      builder: (context, f, _) => builder(context, f));
-  }
-}
-
-Widget _page(List<Widget> children) => ListView(padding: const EdgeInsets.fromLTRB(8, 8, 8, 24), children: children);
-
-/// Input, output and gain reduction meters from the display data, and its other values as numbers.
-class LevelMeters extends StatelessWidget {
-  const LevelMeters({super.key, this.showValues = true});
-  final bool showValues;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = DeviceScope.of(context).accent;
-    return _Display(builder: (context, f) {
-      if (f == null) return const Text('No live data (the track is not playing this device)', style: TextStyle(fontSize: 10));
-      Widget bar(String label, double? db, {bool reduction = false}) {
-        final v = db == null ? 0.0 : (reduction ? (-db / 24) : ((db + 60) / 60)).clamp(0.0, 1.0).toDouble();
-        return Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(children: [
-          SizedBox(width: 34, child: Text(label, style: const TextStyle(fontSize: 10))),
-          Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(2), child: LinearProgressIndicator(
-            value: v, minHeight: 6, color: reduction ? Neon.pink : accent, backgroundColor: accent.withValues(alpha: 0.12)))),
-          SizedBox(width: 52, child: Text(db == null ? '' : '${db.toStringAsFixed(1)} dB', textAlign: TextAlign.right,
-            style: const TextStyle(fontSize: 10))),
-        ]));
-      }
-      final values = showValues ? f.values.entries.where((e) => !e.key.startsWith('curve')).toList() : const [];
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        bar('IN', f.inputDb),
-        bar('OUT', f.outputDb),
-        if (f.gainReductionDb != null) bar('GR', f.gainReductionDb, reduction: true),
-        if (values.isNotEmpty)
-          Padding(padding: const EdgeInsets.only(top: 4), child: Wrap(spacing: 10, runSpacing: 2, children: [
-            for (final e in values) Text('${e.key.replaceAll('_', ' ')} ${e.value.toStringAsFixed(e.value.abs() >= 100 ? 0 : 2)}',
-              style: const TextStyle(fontSize: 10)),
-          ])),
-      ]);
-    });
-  }
-}
-
-/// A device shown by its live levels and values, and its knobs (gate, transient shaper, filter, phaser, flanger,
-/// utility).
-class LevelsEditorPage extends StatelessWidget {
-  const LevelsEditorPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    return _page([
-      DeviceCard(title: 'LIVE', color: scope.accent, child: const LevelMeters()),
-      const ParamGrid(),
-    ]);
-  }
-}
-
-
-
-
 

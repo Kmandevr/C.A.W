@@ -275,6 +275,44 @@ void main() {
       expect(t.value('depth'), greaterThan(0.5));
       await close(tester);
     });
+
+    testWidgets('utility: sideways pans, up widens, a pinch widens; the switches flip', (tester) async {
+      final s = await open(tester, 'org.caw.utility');
+      final t = targetOf(s, 'org.caw.utility');
+      final hero = tester.getCenter(find.byKey(const ValueKey('stereo-hero')));
+      await tester.dragFrom(hero, const Offset(40, -30));
+      await tester.pumpAndSettle();
+      expect(t.value('pan'), greaterThan(0.1));
+      expect(t.value('width'), greaterThan(1));
+      final w0 = t.value('width');
+      final a = await tester.startGesture(hero - const Offset(20, 0));
+      final b = await tester.startGesture(hero + const Offset(20, 0));
+      await tester.pump();
+      await a.moveBy(const Offset(-20, 0));
+      await b.moveBy(const Offset(20, 0));
+      await tester.pump();
+      await a.up();
+      await b.up();
+      await tester.pumpAndSettle();
+      expect(t.value('width'), greaterThan(w0));
+      await tester.tap(find.byKey(const ValueKey('toggle-invert_l')));
+      await tester.pumpAndSettle();
+      expect(t.value('invert_l'), 1);
+      await close(tester);
+    });
+
+    testWidgets('width and balance: the same field on their one knob', (tester) async {
+      var s = await open(tester, 'org.caw.stereo.width');
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('stereo-hero'))), const Offset(0, 40));
+      await tester.pumpAndSettle();
+      expect(targetOf(s, 'org.caw.stereo.width').value('width'), lessThan(1));
+      await close(tester);
+      s = await open(tester, 'org.caw.stereo.balance');
+      await tester.dragFrom(tester.getCenter(find.byKey(const ValueKey('stereo-hero'))), const Offset(-50, 0));
+      await tester.pumpAndSettle();
+      expect(targetOf(s, 'org.caw.stereo.balance').value('pan'), lessThan(-0.1));
+      await close(tester);
+    });
   });
 
   test('presets: Init is always first; applying one sets every value, and the label tracks edits', () {
