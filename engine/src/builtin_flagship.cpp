@@ -610,6 +610,7 @@ struct VoiceFilter {
         on = enabled;
         if (fresh) type = -1;  // a new note starts every filter from rest
         if (!on) return;
+        cutoffSet = cutoff, resonanceSet = resonance;
         if (t != type) {  // a new type starts from rest
             for (int c = 0; c < 2; ++c) {
                 ladder[c].clear();
@@ -669,6 +670,18 @@ struct VoiceFilter {
             for (uint32_t i = 0; i < n; ++i) L[i] = dry[i] + (L[i] - dry[i]) * mix;
     }
     bool monoUsed = false;  // the left side ran alone: the right's state is behind
+    double cutoffSet = -1.0, resonanceSet = -1.0;  // what configure() was last given
+
+    // An SVF without drive is linear: voices whose filters are set alike can share one (see FlagshipInstrument).
+    bool linear() const noexcept { return on && type >= kSvfLp && type <= kSvfNotch && !drive; }
+    bool sameAs(const VoiceFilter& f) const noexcept {
+        return on == f.on && type == f.type && drive == f.drive && mix == f.mix && cutoffSet == f.cutoffSet &&
+               resonanceSet == f.resonanceSet;
+    }
+    void clear() noexcept {
+        for (int c = 0; c < 2; ++c) ladder[c].clear(), svf[c].clear(), formant[c].clear();
+        monoUsed = false;
+    }
 
     void process(float* L, float* R, uint32_t n) noexcept {
         if (!on) return;
@@ -732,6 +745,7 @@ struct Voice {
     bool mono = false;  // the mono or legato voice: its pitch follows `glide` at each control
     double configuredPitch = -1.0;  // the pitch its oscillators and filters were last worked out for
     double moving[kSlots] = {};     // the values the slots moved, as its sections were last worked out
+    bool shared = false;            // its level goes into the instrument's shared filter 1 (see renderVoice)
     lib::Glide glide;   // in semitones, stepped once per control period
 };
 
@@ -802,6 +816,10 @@ public:
     void reset() noexcept override {
         voices_.clear();
         held_.clear();
+        shared_.clear();
+        sharedQuiet_ = true;
+        sharedRan_ = false;
+        sharedPeak_ = 0.0f;
         knobsChanged_ = true;
         for (lib::Lfo& l : lfo_) {
             l = lib::Lfo{};
@@ -1107,6 +1125,7 @@ private:
 
     // Once per control period: the knobs, the matrix, every sounding voice's settings and the effects.
     void control(const ProcessBlock& b, uint32_t at) noexcept {
+        restShared();
         for (uint32_t r = 0; r < rampCount_; ++r) base_[ramp_[r]] = b.parameters[ramp_[r]].samples[at];
         tempo_ = transport_ && transport_->tempo > 0.0 ? transport_->tempo : 120.0;
         // What a voice must work out again this control: everything when a knob, the tempo or the quality moved;
@@ -1120,7 +1139,10 @@ private:
 
         // The matrix: the slots that move something, and the parameters they move (each once, in slot order).
         // It is read from the knobs alone, so it stands while none moved.
-        if (knobsChanged_) buildMatrix();
+        if (knobsChanged_) {
+            buildMatrix();
+            configureShared();
+        }
 
         // The free LFOs run once for the instrument, on their knobs' own values; synced to a playing song,
         // they follow its position.
@@ -1179,11 +1201,27 @@ private:
             const double window = fx ? 0.1 * sr_ + (delayOn_ ? delayTime1_ : 0.0) : 0.0;
             if (static_cast<double>(quietRun_) >= window) {
                 clearEffects();
+                shared_.clear();
+                sharedQuiet_ = true;
+                sharedRan_ = false;
+                sharedPeak_ = 0.0f;
                 idle_ = true;
             }
         } else {
             quietRun_ = 0;
         }
+    }
+
+    // The shared filter 1 from the knobs (unmodulated): used when it is linear, filter 2 is off and nothing
+    // follows the pitch (a voice compares its own settings with it each period).
+    void configureShared() noexcept {
+        const auto K = [&](uint32_t f, uint32_t p) noexcept { return base_[fltParam(f, p)]; };
+        const bool on = K(0, kFltOn) >= 0.5;
+        shared_.configure(on, clampi(K(0, kFltType), 0, kFilterTypeCount - 1), K(0, kFltCutoff),
+                          clampd(K(0, kFltResonance), 0.0, 1.0), K(0, kFltDrive), K(0, kFltMorph), K(0, kFltMix), sr_, false);
+        // Poly only: mono and legato play one voice (nothing to share), and keep their level after the filter.
+        sharedOn_ = on && shared_.linear() && K(0, kFltKeytrack) == 0.0 && K(1, kFltOn) < 0.5 &&
+                    clampi(base_[kVoiceMode], 0, 2) == kPoly;
     }
 
     void buildMatrix() noexcept {
@@ -1220,6 +1258,7 @@ private:
         v.random.setSeed(v.seed ^ 0xA511E9B3U);
         v.random.retrigger();
         if (!v.fresh) return;
+        v.shared = true;  // until its filter 1 is set unlike the shared one (then its own, to the note's end)
         for (uint32_t o = 0; o < kOscs; ++o) {
             const double start = base_[oscParam(o, kOscPhase)], randomness = base_[oscParam(o, kOscPhaseRand)];
             for (int c = 0; c < kMaxCopies; ++c) {
@@ -1576,6 +1615,28 @@ private:
                 default: addOscillator(o, f1L, f1R, n, first); break;
             }
         }
+        // Filter 1 linear and set like every other voice's (no slot moves it for this voice, no key tracking):
+        // the voice's level goes on before the filter and the instrument's one shared filter runs for all of them,
+        // as the Morph synth did (2026-11-10 second performance pass; linear and time-invariant, so the sum is
+        // the same filter on each voice, but for the level's place: perceptually the same). Once a voice's filter
+        // is set apart it keeps its own to the note's end: its own filter starts from rest while the shared one
+        // rings out what it had, which by linearity sums to the same signal.
+        if (v.shared) {
+            v.shared = !second && !bypass && sharedOn_ && v.filter[0].sameAs(shared_);
+            if (v.shared) {
+                float amp[kControlFrames];
+                const double step = (v.gain1 - v.gain0) / kControlFrames;
+                for (uint32_t i = 0; i < n; ++i)
+                    amp[i] = static_cast<float>(v.env[0].next() * (v.gain0 + step * static_cast<double>(first + i)));
+                for (uint32_t i = 0; i < n; ++i) {
+                    sharedL_[i] += f1L[i] * amp[i];
+                    sharedR_[i] += f1R[i] * amp[i];
+                }
+                sharedUsed_ = true;
+                if (!v.env[0].active()) v.active = false;
+                return;
+            }
+        }
         // A centred voice through filter 1 alone (the bass, the acid line, Basic): one side filtered, both sides
         // the same bits as before at half the filter's cost (2026-11-10 performance pass).
         if (!second && !bypass && v.filter[0].monoCapable()) {
@@ -1633,7 +1694,10 @@ private:
         }
         const uint32_t first = sinceControl_;
         float L[kControlFrames] = {}, R[kControlFrames] = {};
+        zero(sharedL_), zero(sharedR_);
+        sharedUsed_ = false;
         voices_.forEachActive([&](Voice& v) noexcept { renderVoice(v, L, R, n, first); });
+        runShared(L, R, n);
         const double volumeStep = (volume1_ - volume0_) / kControlFrames;
         const double delayStep = (delayTime1_ - delayTime0_) / kControlFrames;
         float peak = periodPeak_;
@@ -1673,6 +1737,34 @@ private:
             peak = std::max(peak, std::max(std::fabs(ol), std::fabs(orr)));
         }
         periodPeak_ = peak;
+    }
+
+    // The shared filter 1 over the levelled sum of the voices that share it, added to the voices' output. With no
+    // voice in it and its output below -140 dB it is cleared and rests until a voice uses it again.
+    void runShared(float* L, float* R, uint32_t n) noexcept {
+        if (!sharedUsed_ && sharedQuiet_) return;
+        sharedQuiet_ = false;
+        sharedRan_ = sharedRan_ || sharedUsed_;
+        shared_.svf[0].flushDenormals();  // a voice held at level 0 feeds it silence
+        shared_.svf[1].flushDenormals();
+        shared_.process(sharedL_, sharedR_, n);
+        float peak = sharedPeak_;
+        for (uint32_t i = 0; i < n; ++i) {
+            L[i] += sharedL_[i];
+            R[i] += sharedR_[i];
+            peak = std::max(peak, std::max(std::fabs(sharedL_[i]), std::fabs(sharedR_[i])));
+        }
+        sharedPeak_ = peak;
+    }
+    // At each control (the same grid at any block size): a shared filter that no voice fed over the last period
+    // and that stayed below -140 dB is cleared and rests.
+    void restShared() noexcept {
+        if (!sharedQuiet_ && !sharedRan_ && sharedPeak_ < 1e-7f) {
+            shared_.clear();
+            sharedQuiet_ = true;
+        }
+        sharedRan_ = false;
+        sharedPeak_ = 0.0f;
     }
 
     // finiteOr0 as a select (x - x is 0 exactly when x is finite), which vectorizes.
@@ -1749,6 +1841,11 @@ private:
     lib::PingPongDelay delay_;
     double delayTime0_ = 0.0, delayTime1_ = 0.0, delayFeedback_ = 0.35, delayMix_ = 0.25;
     lib::Reverb reverb_;
+    VoiceFilter shared_;        // filter 1 for the voices whose filter 1 is set alike (renderVoice)
+    bool sharedOn_ = false;     // filter 1 (unmodulated) is linear, alone and without key tracking
+    bool sharedUsed_ = false, sharedQuiet_ = true, sharedRan_ = false;  // fed this piece; resting; fed this period
+    float sharedPeak_ = 0.0f;  // its loudest output this period
+    float sharedL_[kControlFrames] = {}, sharedR_[kControlFrames] = {};
     static constexpr uint32_t kFxEq = 1, kFxChorus = 2, kFxDelay = 4, kFxReverb = 8;
     uint32_t fxDirty_ = kFxEq | kFxChorus | kFxDelay | kFxReverb;  // the effects that were on since their last clear
 };

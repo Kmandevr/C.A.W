@@ -87,6 +87,12 @@ public:
     double highpass(double x) noexcept { return process(x).high; }
     double bandpass(double x) noexcept { return process(x).band; }
     void clear() noexcept { ic1_ = ic2_ = 0.0; }
+    // A silent input decays the state into subnormal numbers (slow on many CPUs): a caller whose input may be
+    // silent flushes it with this once per block.
+    void flushDenormals() noexcept {
+        if (ic1_ < 1e-20 && ic1_ > -1e-20) ic1_ = 0.0;
+        if (ic2_ < 1e-20 && ic2_ > -1e-20) ic2_ = 0.0;
+    }
     // Takes another filter's coefficients (no tan): the second side of a stereo pair set like the first.
     void setLike(const Svf& other) noexcept {
         a1_ = other.a1_, a2_ = other.a2_, a3_ = other.a3_, k_ = other.k_;

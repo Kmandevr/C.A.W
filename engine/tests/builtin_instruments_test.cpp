@@ -648,7 +648,10 @@ std::vector<Golden> goldens() {
     // Morph synth: a chord with a quarter tone, drifting, wide.
     g.push_back({"morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
                                 {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
-                 0x5a0015830a00f7feull});
+                 // Re-recorded (2026-11-10 second performance pass): poly voices whose filter 1 is set alike share
+                 // one filter, the level before it, as the Morph synth did (levels within 0.001 dB, bands 60 dB
+                 // down within 0.3 dB: the_built_in_sounds_are_perceptually_what_they_were).
+                 0xd7de2f225b042be1ull});
     // Flagship: its default patch (a warm, wide saw stack of seven, a ladder, env 2 on the cutoff) on a
     // chord, a line over it and a bent note. Re-recorded (2026-11-10 performance pass): the unwarped oscillator
     // reads its table with a 32-bit fixed-point phase (finer than the float one; perceptually the same).
@@ -859,6 +862,28 @@ TEST(a_sleeping_component_renders_the_same_at_any_block_size) {
                                                       " samples differ between blocks of 64 and " + std::to_string(block));
         }
     }
+}
+
+TEST(a_voice_leaving_the_shared_filter_does_not_click) {
+    // Poly voices whose filter 1 is set alike share one filter (2026-11-10 second performance pass). A voice whose
+    // filter is moved apart mid-note (a timbre of almost nothing here, so the sound should not change) takes its
+    // own filter from rest while the shared one rings out what it had: by linearity the same signal, but for the
+    // level's place before or after the filter.
+    Engine e(48000);
+    const auto values = asFlagship("org.caw.synth.morph", {});
+    std::vector<Event> chord = {notes::noteOn(0, 1, 57, 0.8), notes::noteOn(0, 2, 60, 0.8), notes::noteOn(0, 3, 64, 0.8)};
+    std::vector<Event> moved = chord;
+    moved.push_back(notes::noteTimbre(24000, 2, 60, 1e-9));
+    std::unique_ptr<ModuleProcessor> a = make(e, "org.caw.synth.morph"), b = make(e, "org.caw.synth.morph");
+    if (!a || !b) return;
+    const std::vector<float> plain = play(*a, chord, 48000, values), split = play(*b, moved, 48000, values);
+    float peak = 0, diff = 0;
+    for (size_t i = 0; i < plain.size(); ++i) {
+        peak = std::max(peak, std::fabs(plain[i]));
+        diff = std::max(diff, std::fabs(plain[i] - split[i]));
+    }
+    CHECK(peak > 0.01f);
+    CHECK(diff < peak * 1e-3f);  // below -60 dB of the peak
 }
 
 TEST(a_note_held_at_sustain_zero_settles_instead_of_decaying_into_denormals) {
