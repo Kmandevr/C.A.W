@@ -2,7 +2,7 @@
 title: Synth
 summary: Implemented synth patch compiler, supported patch features, app behavior and verified gaps.
 covers: [engine/src/synth.cpp, engine/tests/synth_test.cpp, app/lib/ui/builder_screen.dart, app/lib/ui/modulation_panel.dart]
-updated: 2026-11-02
+updated: 2026-11-10
 ---
 
 # Synth
@@ -13,7 +13,7 @@ This note describes the synth functionality that exists in the repository. It is
 
 **[Fact, checked 2026-11-01]** The engine accepts modules with header kind: synth. The patch compiler translates the patch into ordinary generator code plus effect modules, which use the existing voice, pattern, hot-swap, export and deterministic-render paths. The Init synth template is included, and engine tests cover parsing, validation and generated output.
 
-A synth patch is a code-editable module. In the current app, it is handled through the normal Builder workflow (the Code panel; in a narrow panel its controls and code scroll as one list under a one-row track card, and its sheets open as glass sheets while Glass is on): generated parameters appear in the Controls panel and the patch source remains editable in the code editor, which shows the restored code after a project undo or redo. There is no separate Vital/Serum-style synth screen or dedicated on-screen keyboard in the current UI.
+A synth patch is a code-editable module. In the current app, it is handled through the normal Builder workflow (the Code panel; in a narrow panel its controls and code scroll as one list, under a one-row track card outside Build, and its sheets open as glass sheets while Glass is on): generated parameters appear in the Controls panel and the patch source remains editable in the code editor, which shows the restored code after a project undo or redo. There is no separate Vital/Serum-style synth screen or dedicated on-screen keyboard in the current UI.
 
 ## Supported patch features
 

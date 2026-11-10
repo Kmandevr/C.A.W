@@ -27,7 +27,7 @@ updated: 2026-11-10
 
 ## 2026-11-10: Owner feedback on the open beta (look and feel)
 
-**Owner, after trying the APK:** most things feel okay for now. Changes asked for (not built yet):
+**Owner, after trying the APK:** most things feel okay for now. Changes asked for (not built unless marked):
 - **Meters** work about the way REAPER's do, and fall faster than today's 24 dB/s while staying smooth. [Fact, 2026-11-10] REAPER sets meter decay in dB/s as a preference; its factory default is not confirmed here, so the app gets a decay setting with a faster default.
 - **Look:** the whole app a little darker, with less green in the background.
 - **Arrange:** track headers can be resized (drag their edge).
@@ -35,10 +35,10 @@ updated: 2026-11-10
 - **Phone landscape** feels bad and everything is too big (owner screenshot: the status row and the toolbar take a third of the height, the rail's icons and labels are large, the FX panel's knob labels are cut off). Make landscape compact: one combined top row, smaller icons, a narrow rail without labels, more height for the tracks.
 - **Bars hide on scroll:** scrolling down tucks the top bars (status row, toolbar) away so the main content gets the screen; scrolling up brings them back, snapping fully shown or fully hidden.
 - **Zoom** in Arrange and the piano roll: pinch with two fingers, on-screen buttons or a slider, time and height zoom separately, and Ctrl + scroll on desktop.
-- **Build feels like VS Code:** an explorer sidebar (the Files browser; a drawer on the phone) replaces the row of module chips, the code editor gets the rest of the space (remove what isn't needed), one slim top bar with open-file tabs and Build.
-- **New files:** only broad templates (pattern, instrument, effect, plus plain formats such as JSON or text), hidden behind a "+ New" dropdown.
-- **Pattern files:** the header block (`---`, `caw: 1`, kind, name, summary, length) is hidden from the text and edited as small fields above the notes.
-- **The Library reference** is liked but out of date: it should cover the C++ SDK and Library.
+- **Build feels like VS Code** (built, #169): an explorer (the Files browser; a drawer on the phone, a resizable sidebar when wide) replaces the row of module chips, one slim row of open tabs with Build, and the code gets the rest of the space (the status line, bottom bar and the .caw Builder's track mix are gone from Build).
+- **New files** (built, #169): + New offers Pattern, Instrument, Effect and Text file (owner: "JSON only where a project actually uses it": the component manifest is the one JSON file, so there is no JSON template; a text file of any name goes into the open C++ component). [Assumption] Text files belong to a C++ component because a project has no other place for loose files yet.
+- **Pattern files** (built, #169): the header block is hidden from the text; name and length are fields beside the kind badge. [Assumption] `summary` and other header keys stay in the file unedited (no field yet), to keep the row small.
+- **The Library reference** (built, #169) keeps the function Library's look and covers the C++ SDK (with instruments), `caw::lib`, the built-in components and C.A.W's text formats.
 - A good sample pack comes later; the owner's focus now is how things feel and work.
 
 ## 2026-11-10: Native libraries in the APK are compressed

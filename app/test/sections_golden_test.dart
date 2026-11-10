@@ -1,4 +1,5 @@
-// Goldens of the three sections at phone size: Build with a C++ effect open, Files, and Arrange's focus view on the
+// Goldens of the three sections at phone size: Build with a C++ effect open (and its explorer, a pattern's fields
+// and the desktop sidebar), Files, and Arrange's focus view on the
 // FX tab with a built-in effect (they need CAW_LIB).
 import 'dart:io';
 
@@ -43,6 +44,34 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await expectLater(goldenScreen, matchesGoldenFile('goldens/section_build_phone.png'));
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets("Build's explorer drawer and a pattern's fields, at phone size", (tester) async {
+    final s = await startState(tester);
+    final doc = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
+    s.project.cppComponents.add(doc);
+    await pumpGolden(tester, Shell(state: s), goldenSizes['phone']!);
+    sections(tester).openBuild(BuildTab(BuildTabKind.cpp, doc.componentId));
+    sections(tester).openBuild(BuildTab(BuildTabKind.caw, s.project.modules.firstWhere((m) => s.isPattern(m.id)).id));
+    await tester.pumpAndSettle();
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/section_build_pattern_phone.png'));
+    await tester.tap(find.byKey(const ValueKey('explorer')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/section_build_explorer_phone.png'));
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('Build with the explorer sidebar, at desktop size', (tester) async {
+    final s = await startState(tester);
+    final doc = CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz');
+    s.project.cppComponents.add(doc);
+    await pumpGolden(tester, Shell(state: s), goldenSizes['desktop']!);
+    sections(tester).openBuild(BuildTab(BuildTabKind.cpp, doc.componentId));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await expectLater(goldenScreen, matchesGoldenFile('goldens/section_build_desktop.png'));
     s.dispose();
   }, skip: skip);
 

@@ -241,6 +241,19 @@ class CppWorkbench extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Adds a new file (plain text, a header, JSON...) to the component and opens it; false for an unsafe path or
+  /// one that exists. It is saved with the rest after a pause.
+  bool addFile(String path, [String text = '']) {
+    if (!CppComponentDoc.isSafeRelativePath(path) || texts.containsKey(path)) return false;
+    texts[path] = text;
+    currentFile = path;
+    _dirty = true;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(saveDelay, () => unawaited(save()));
+    notifyListeners();
+    return true;
+  }
+
   /// The editor's text of [path] changed: autosave and a check follow after a pause.
   void edit(String path, String text) {
     if (texts[path] == text) return;

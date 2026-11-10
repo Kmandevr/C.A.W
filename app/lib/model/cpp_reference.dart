@@ -1,8 +1,9 @@
-// The C.A.W SDK and caw::lib names the C++ Builder knows offline: the Ref sheet, snippets and instant completion.
+// The C.A.W SDK and caw::lib names the C++ Builder knows offline: the Library sheet, snippets and instant completion.
 
-/// One SDK name. [name] is what completion matches (the last part of [qualified]); [insert] is what Ref inserts.
+/// One SDK name. [name] is what completion matches (the last part of [qualified]); [insert] is what Insert types.
 class CppRefEntry {
-  const CppRefEntry(this.qualified, this.detail, this.doc, {this.insertText, this.member = false, this.group = 'SDK'});
+  const CppRefEntry(this.qualified, this.detail, this.doc,
+      {this.insertText, this.member = false, this.group = 'SDK', this.example = ''});
 
   final String qualified;
   final String detail; // a type, a signature or a range, shown dim
@@ -11,13 +12,15 @@ class CppRefEntry {
   /// A field or method reached with `.` (completion offers it after a dot).
   final bool member;
   final String group;
+  /// A few lines showing it in use (the Library's Insert example); empty for none.
+  final String example;
 
   String get name => qualified.split('::').last;
   String get insert => insertText ?? (member ? name : qualified);
 }
 
-/// Hand-kept from `engine/include/caw/` (module.hpp, component.hpp, library/*.hpp); a test checks every name is
-/// still declared there.
+/// Hand-kept from `engine/include/caw/` (module.hpp, component.hpp, instrument.hpp, detmath.hpp, library/*.hpp); a
+/// test checks every name is still declared there. The groups are the Library's headings, in this order.
 const cppReference = <CppRefEntry>[
   // Describing an effect.
   CppRefEntry('caw::ModuleDescriptor', 'struct', 'What the effect is: id, ports, parameters, name, role, latency, tail.',
@@ -98,24 +101,275 @@ const cppReference = <CppRefEntry>[
   CppRefEntry('caw::detPow', 'double (double x, double y)', 'x^y, the same on every device.', insertText: 'caw::detPow()', group: 'Maths'),
   CppRefEntry('caw::finiteOr0', 'double (double d)', 'NaN and infinity become 0.', insertText: 'caw::finiteOr0()', group: 'Maths'),
   CppRefEntry('caw::kPi', 'constexpr double', 'Pi.', group: 'Maths'),
-  // The Library.
-  CppRefEntry('caw::lib::PingPongDelay', 'class', 'Stereo ping-pong delay: prepare(sr, maxSeconds), process(...).', group: 'Library'),
-  CppRefEntry('caw::lib::Chorus', 'class', 'Stereo chorus: prepare(sr), process(rate, depth, mix, l, r).', group: 'Library'),
+  // Instruments (instrument.hpp).
+  CppRefEntry('caw::InstrumentProcessor', 'class', 'Derive an instrument from it: one note input, stereo out. Override onNote() and render(); '
+      'the base splits each block at its notes, so a note starts on its exact frame.',
+      group: 'Instrument', example: """class Synth final : public caw::InstrumentProcessor {
+protected:
+    void onNote(const caw::NoteMessage& m) noexcept override { /* start or stop a voice */ }
+    void render(float* l, float* r, uint32_t frames, uint32_t offset, const caw::ProcessBlock& b) noexcept override {}
+};"""),
+  CppRefEntry('caw::InstrumentProcessor::onNote', 'void (const NoteMessage&) noexcept', 'A note on, off, pitch, pressure or timbre change, on the frame render() continues from.',
+      member: true, group: 'Instrument'),
+  CppRefEntry('caw::InstrumentProcessor::render', 'void (float* l, float* r, uint32_t frames, uint32_t offset, const ProcessBlock&) noexcept',
+      'Write frames samples to l and r; they start at frame offset of the block.', member: true, group: 'Instrument'),
+  CppRefEntry('caw::InstrumentProcessor::onEvent', 'void (const Event&) noexcept', 'Any other event (a controller); ignored unless overridden.',
+      member: true, group: 'Instrument'),
+  CppRefEntry('caw::ModuleRole::Instrument', 'ModuleRole', 'Plays the track\'s notes.', group: 'Instrument'),
+  CppRefEntry('caw::NoteMessage', 'struct', 'A decoded note event: type, frame, noteId, key, velocity, pitch, value.', group: 'Instrument'),
+  CppRefEntry('caw::NoteMessage::type', 'NoteMessageType', 'On, Off, Pitch, Pressure, Timbre or Other.', member: true, group: 'Instrument'),
+  CppRefEntry('caw::NoteMessage::noteId', 'uint32_t', "The host's id for the note; an off names the same id as its on.", member: true,
+      group: 'Instrument'),
+  CppRefEntry('caw::NoteMessage::pitch', 'double', 'MIDI note number with fraction (60.5: a quarter tone above middle C).', member: true,
+      group: 'Instrument'),
+  CppRefEntry('caw::NoteMessage::velocity', 'double', 'On, Off: 0..1.', member: true, group: 'Instrument'),
+  CppRefEntry('caw::NoteMessage::value', 'double', 'Pressure, Timbre: 0..1.', member: true, group: 'Instrument'),
+  CppRefEntry('caw::NoteMessage::key', 'uint8_t', 'The nearest semitone, 0..127.', member: true, group: 'Instrument'),
+  CppRefEntry('caw::NoteMessageType::On', 'NoteMessageType', 'A note starts.', group: 'Instrument'),
+  CppRefEntry('caw::NoteMessageType::Off', 'NoteMessageType', 'A note is released.', group: 'Instrument'),
+  CppRefEntry('caw::NoteMessageType::Pitch', 'NoteMessageType', "The note's pitch now (glide, bend, vibrato).", group: 'Instrument'),
+  CppRefEntry('caw::NoteMessageType::Pressure', 'NoteMessageType', "The note's pressure now.", group: 'Instrument'),
+  CppRefEntry('caw::NoteMessageType::Timbre', 'NoteMessageType', "The note's timbre now.", group: 'Instrument'),
+  CppRefEntry('caw::VoicePool', 'template <class Voice, uint32_t N>', 'N voices assigned by note id: a free one, else the oldest released, '
+      'else the oldest held. Voice needs bool active, bool held, uint32_t noteId, uint64_t age.',
+      insertText: 'caw::VoicePool<Voice, 8> voices_;', group: 'Instrument', example: """if (m.type == caw::NoteMessageType::On) {
+    Voice& v = voices_.start(m.noteId);
+} else if (Voice* v = voices_.find(m.noteId)) {
+    if (m.type == caw::NoteMessageType::Off) v->held = false;
+}"""),
+  CppRefEntry('caw::VoicePool::start', 'Voice& (uint32_t noteId) noexcept', 'A voice for a new note (steals one when all are busy).', member: true,
+      group: 'Instrument'),
+  CppRefEntry('caw::VoicePool::find', 'Voice* (uint32_t noteId) noexcept', 'The voice playing that note, or null.', member: true, group: 'Instrument'),
+  CppRefEntry('caw::VoicePool::clear', 'void () noexcept', 'Silences every voice.', member: true, group: 'Instrument'),
+  CppRefEntry('caw::readNote', 'bool (const Event&, NoteMessage& out) noexcept', 'Decodes a note event (onNote gets them decoded already).',
+      insertText: 'caw::readNote(event, message)', group: 'Instrument'),
+  CppRefEntry('caw::parameterAt', 'double (const ProcessBlock&, uint32_t index, uint32_t frame, double fallback) noexcept',
+      'A knob at one frame of the block (per frame while it ramps).', insertText: 'caw::parameterAt(b, 0, offset + i, 0.5)', group: 'Instrument'),
+  // Oscillators (library/oscillator.hpp, wavetable.hpp).
+  CppRefEntry('caw::lib::noteHz', 'double (double pitch)', 'A MIDI note number with fraction to Hz (69 = A4 = 440 Hz).',
+      insertText: 'caw::lib::noteHz(m.pitch)', group: 'Oscillators'),
+  CppRefEntry('caw::lib::wrap01', 'double (double phase)', 'The phase wrapped into 0..1.', insertText: 'caw::lib::wrap01(phase + dt)',
+      group: 'Oscillators'),
+  CppRefEntry('caw::lib::sineWave', 'double (double t)', 'Sine at phase t (0..1), rising from 0.', insertText: 'caw::lib::sineWave(phase)',
+      group: 'Oscillators'),
+  CppRefEntry('caw::lib::triangleWave', 'double (double t)', 'Triangle at phase t, rising from 0.', insertText: 'caw::lib::triangleWave(phase)',
+      group: 'Oscillators'),
+  CppRefEntry('caw::lib::sawWave', 'double (double t, double dt)', 'Band-limited saw (PolyBLEP); dt is cycles per sample (hz / rate).',
+      insertText: 'caw::lib::sawWave(phase, dt)', group: 'Oscillators', example: """const double dt = caw::lib::noteHz(pitch) / rate;
+const double y = caw::lib::sawWave(phase, dt);
+phase = caw::lib::wrap01(phase + dt);"""),
+  CppRefEntry('caw::lib::squareWave', 'double (double t, double dt)', 'Band-limited square.', insertText: 'caw::lib::squareWave(phase, dt)',
+      group: 'Oscillators'),
+  CppRefEntry('caw::lib::pulseWave', 'double (double t, double dt, double width = 0.5)', 'Band-limited pulse, +1 for the first width of the cycle.',
+      insertText: 'caw::lib::pulseWave(phase, dt, 0.25)', group: 'Oscillators'),
+  CppRefEntry('caw::lib::morphWave', 'double (double t, double dt, double shape)', 'Crossfades sine (0), triangle, saw and square (1).',
+      insertText: 'caw::lib::morphWave(phase, dt, 0.5)', group: 'Oscillators'),
+  CppRefEntry('caw::lib::polyBlep', 'double (double t, double dt)', 'The residual that smooths a step at phase 0 over one sample.',
+      insertText: 'caw::lib::polyBlep(t, dt)', group: 'Oscillators'),
+  CppRefEntry('caw::lib::Noise', 'class (uint32_t seed = 1)', 'White noise -1..1; the same seed gives the same sequence on every device.',
+      insertText: 'caw::lib::Noise noise_{1};', group: 'Oscillators'),
+  CppRefEntry('caw::lib::Noise::next', 'double () noexcept', 'The next sample.', member: true, group: 'Oscillators'),
+  CppRefEntry('caw::lib::Wavetable', 'class', 'Band-limited, mipmapped frames you fill (harmonics or a function); morph across them. '
+      'prepare() allocates and the builders are slow: call them off the audio thread.', group: 'Oscillators',
+      example: """caw::lib::Wavetable table_;
+table_.prepare(2);  // in activate()
+table_.setFrameFunction(0, [](double p) { return 2 * p - 1; });"""),
+  CppRefEntry('caw::lib::Wavetable::prepare', 'void (int maxFrames, int frameSize = 2048)', 'Allocates room for the frames.', member: true,
+      group: 'Oscillators'),
+  CppRefEntry('caw::lib::Wavetable::setFrameHarmonics', 'bool (int frame, const double* amplitudes, int count, const double* phases = nullptr)',
+      'Builds a frame from harmonic amplitudes.', member: true, group: 'Oscillators'),
+  CppRefEntry('caw::lib::Wavetable::setFrameFunction', 'bool (int frame, Fn fn)', 'Builds a frame from one cycle of fn(phase).', member: true,
+      group: 'Oscillators'),
+  CppRefEntry('caw::lib::WavetableOscillator', 'class', 'Plays a Wavetable without aliasing: setTable, setFrequency, setPosition, next().',
+      insertText: 'caw::lib::WavetableOscillator osc_;', group: 'Oscillators'),
+  CppRefEntry('caw::lib::WavetableOscillator::setFrequency', 'void (double hz, double sampleRate) noexcept', 'Picks the mip level for the note.',
+      member: true, group: 'Oscillators'),
+  CppRefEntry('caw::lib::WavetableOscillator::setPosition', 'void (double position) noexcept', 'Morph position 0..1 across the frames.',
+      member: true, group: 'Oscillators'),
+  CppRefEntry('caw::lib::sawHarmonics', 'void (double* out, int count)', 'Harmonic amplitudes of a saw, for setFrameHarmonics.',
+      insertText: 'caw::lib::sawHarmonics(amps, 64)', group: 'Oscillators'),
+  // Filters (library/filter.hpp).
+  CppRefEntry('caw::lib::Svf', 'class', 'State-variable filter, 12 dB/octave: low, band, high and notch at once.',
+      insertText: 'caw::lib::Svf filter_;', group: 'Filters', example: """filter_.set(cutoff, caw::lib::resonanceQ(0.5), rate);  // every 16 frames is plenty
+const double y = filter_.lowpass(x);"""),
+  CppRefEntry('caw::lib::Svf::set', 'void (double cutoff, double q, double sampleRate) noexcept', 'Costs a tan: call it when the cutoff or q changes.',
+      member: true, group: 'Filters'),
+  CppRefEntry('caw::lib::Svf::lowpass', 'double (double x) noexcept', 'One sample through, low-pass.', member: true, group: 'Filters'),
+  CppRefEntry('caw::lib::Svf::highpass', 'double (double x) noexcept', 'One sample through, high-pass.', member: true, group: 'Filters'),
+  CppRefEntry('caw::lib::Svf::bandpass', 'double (double x) noexcept', 'One sample through, band-pass.', member: true, group: 'Filters'),
+  CppRefEntry('caw::lib::Ladder', 'class', '4-pole (24 dB/octave) ladder low-pass with a soft-clipped input: the acid squelch. resonance 0..1.',
+      insertText: 'caw::lib::Ladder ladder_;', group: 'Filters', example: """ladder_.set(cutoff, 0.7, rate);
+const double y = ladder_.process(x);"""),
+  CppRefEntry('caw::lib::OnePole', 'class', 'One-pole low-pass (6 dB/octave); high() is the input minus it.', insertText: 'caw::lib::OnePole tone_;',
+      group: 'Filters'),
+  CppRefEntry('caw::lib::resonanceQ', 'double (double resonance)', 'Resonance 0..1 to a filter Q (0: 0.707, 1: about 20).',
+      insertText: 'caw::lib::resonanceQ(0.5)', group: 'Filters'),
+  CppRefEntry('caw::lib::shiftCutoff', 'double (double cutoff, double octaves, double sampleRate)', 'A cutoff moved by octaves, kept in range.',
+      insertText: 'caw::lib::shiftCutoff(cutoff, env * 4.0, rate)', group: 'Filters'),
+  // Envelopes (library/envelope.hpp).
+  CppRefEntry('caw::lib::Adsr', 'class', 'ADSR: gateOn() attacks from where it is, gateOff() releases; times in seconds.',
+      insertText: 'caw::lib::Adsr env_;', group: 'Envelopes', example: """env_.set(0.005, 0.3, 0.7, 0.25, rate);  // attack, decay, sustain, release
+env_.gateOn();  // on the note on; gateOff() on its off
+const double y = osc * env_.next();"""),
+  CppRefEntry('caw::lib::Adsr::gateOn', 'void () noexcept', 'Starts the attack.', member: true, group: 'Envelopes'),
+  CppRefEntry('caw::lib::Adsr::gateOff', 'void () noexcept', 'Starts the release.', member: true, group: 'Envelopes'),
+  CppRefEntry('caw::lib::Adsr::active', 'bool () const noexcept', 'False once the release has finished (free the voice).', member: true,
+      group: 'Envelopes'),
+  CppRefEntry('caw::lib::AdEnvelope', 'class', 'Attack-decay: trigger() then it falls 60 dB in decay seconds. Drums and plucks.',
+      insertText: 'caw::lib::AdEnvelope env_;', group: 'Envelopes'),
+  CppRefEntry('caw::lib::AdEnvelope::trigger', 'void () noexcept', 'Starts it (from its current level: no click).', member: true, group: 'Envelopes'),
+  CppRefEntry('caw::lib::Glide', 'class', 'Portamento: glideTo(target, seconds, rate), next() each sample.', insertText: 'caw::lib::Glide glide_;',
+      group: 'Envelopes'),
+  CppRefEntry('caw::lib::Glide::glideTo', 'void (double target, double seconds, double sampleRate) noexcept', 'About 99 % of the way in seconds.',
+      member: true, group: 'Envelopes'),
+  CppRefEntry('caw::lib::decayCoefficient', 'double (double seconds, double sampleRate)', 'Per-sample factor that falls 60 dB in seconds.',
+      insertText: 'caw::lib::decayCoefficient(0.5, rate)', group: 'Envelopes'),
+  // Modulation (library/lfo.hpp, smoothing.hpp).
+  CppRefEntry('caw::lib::Lfo', 'class', 'LFO: seven shapes, Hz or tempo-synced, -1..1 or 0..1. block(frames) once per block is the cheap way.',
+      insertText: 'caw::lib::Lfo lfo_;', group: 'Modulation', example: """lfo_.prepare(rate);
+lfo_.setShape(caw::lib::LfoShape::Triangle);
+lfo_.setRateBeats(1.0, tempo);  // one cycle per beat
+const double m = lfo_.block(static_cast<int>(frames));"""),
+  CppRefEntry('caw::lib::Lfo::setRateHz', 'void (double hz) noexcept', 'Free-running rate.', member: true, group: 'Modulation'),
+  CppRefEntry('caw::lib::Lfo::setRateBeats', 'void (double beats, double tempoBpm) noexcept', 'One cycle every beats beats.', member: true,
+      group: 'Modulation'),
+  CppRefEntry('caw::lib::Lfo::syncToBeat', 'void (double beatPosition, double beats) noexcept', 'Locks the phase to the song position.',
+      member: true, group: 'Modulation'),
+  CppRefEntry('caw::lib::Lfo::block', 'double (int frames) noexcept', 'The value at the block start, then frames forward.', member: true,
+      group: 'Modulation'),
+  CppRefEntry('caw::lib::LfoShape', 'enum class', 'Sine, Triangle, SawUp, SawDown, Square, SampleHold, SmoothRandom.',
+      insertText: 'caw::lib::LfoShape::Sine', group: 'Modulation'),
+  CppRefEntry('caw::lib::OnePoleSmoother', 'class', 'Smooths a knob (no zipper noise): setTime once, setTarget any time, next() each sample.',
+      insertText: 'caw::lib::OnePoleSmoother gain_;', group: 'Modulation', example: """gain_.setTime(0.01, rate);  // in activate()
+gain_.setTarget(b.parameters[0].value);  // per block
+const double g = gain_.next();  // per sample"""),
+  CppRefEntry('caw::lib::OnePoleSmoother::setTarget', 'void (double target) noexcept', 'Where it glides to (free).', member: true,
+      group: 'Modulation'),
+  CppRefEntry('caw::lib::LinearSmoother', 'class', 'A straight ramp that reaches the target in exactly the set time (gains, crossfades).',
+      insertText: 'caw::lib::LinearSmoother mix_;', group: 'Modulation'),
+  // Drums (library/drums.hpp).
+  CppRefEntry('caw::lib::KickVoice', 'class', 'Kick: set(KickSettings, rate), trigger(velocity), next(), choke().',
+      insertText: 'caw::lib::KickVoice kick_;', group: 'Drums', example: """caw::lib::KickSettings k;
+k.tune = 48.0;
+k.decay = 0.35;
+kick_.set(k, rate);
+kick_.trigger(m.velocity);  // on a note on
+const double y = kick_.next();"""),
+  CppRefEntry('caw::lib::KickSettings', 'struct', 'tune (Hz), punch, decay (s), click, tone, drive.', group: 'Drums'),
+  CppRefEntry('caw::lib::SnareVoice', 'class', 'Snare: a two-mode body and high-passed noise (SnareSettings: tune, body, snappy, tone, mix).',
+      insertText: 'caw::lib::SnareVoice snare_;', group: 'Drums'),
+  CppRefEntry('caw::lib::ClapVoice', 'class', 'Clap: three noise bursts and a tail (ClapSettings: tone, decay).', insertText: 'caw::lib::ClapVoice clap_;',
+      group: 'Drums'),
+  CppRefEntry('caw::lib::HatVoice', 'class', 'Hi-hat: six square waves and noise (HatSettings: tone, decay, metal). Short decays sound closed.',
+      insertText: 'caw::lib::HatVoice hat_;', group: 'Drums'),
+  CppRefEntry('caw::lib::KickVoice::trigger', 'void (double velocity) noexcept', 'A hit, velocity 0..1.', member: true, group: 'Drums'),
+  CppRefEntry('caw::lib::KickVoice::choke', 'void () noexcept', 'Fades it out over 5 ms.', member: true, group: 'Drums'),
+  // Effects (library/delay.hpp, reverb.hpp, distortion.hpp, stereo.hpp).
+  CppRefEntry('caw::lib::PingPongDelay', 'class', 'Stereo ping-pong delay: prepare(sr, maxSeconds), process(...).', group: 'Effects',
+      insertText: 'caw::lib::PingPongDelay delay_;', example: """delay_.prepare(rate, 2.0);  // in activate()
+delay_.process(caw::lib::noteSeconds(tempo, 0.25), 0.4, 0.5, 0.3, l, r);"""),
+  CppRefEntry('caw::lib::Chorus', 'class', 'Stereo chorus: prepare(sr), process(rate, depth, mix, l, r).', insertText: 'caw::lib::Chorus chorus_;',
+      group: 'Effects'),
+  CppRefEntry('caw::lib::Reverb', 'class', 'Stereo reverb (an 8-line feedback delay network). prepare() allocates; set(ReverbSettings), process(l, r).',
+      insertText: 'caw::lib::Reverb reverb_;', group: 'Effects', example: """reverb_.prepare(rate, static_cast<int>(maxFrames));  // in activate()
+caw::lib::ReverbSettings s;
+s.decay = 2.5;
+s.mix = 0.3;
+reverb_.set(s);
+reverb_.process(left, right, static_cast<int>(frames));"""),
+  CppRefEntry('caw::lib::ReverbSettings', 'struct', 'size, decay (s), damping, preDelay (s), width, mix.', group: 'Effects'),
   CppRefEntry('caw::lib::noteSeconds', 'double (double tempo, double wholeNotes)', 'A note length in seconds (0.25: a quarter).',
-      insertText: 'caw::lib::noteSeconds(tempo, 0.25)', group: 'Library'),
+      insertText: 'caw::lib::noteSeconds(tempo, 0.25)', group: 'Effects'),
   CppRefEntry('caw::lib::drive', 'double (double x, double amount)', 'Warm tanh saturation, level-matched (1..10).',
-      insertText: 'caw::lib::drive(x, 2.0)', group: 'Library'),
+      insertText: 'caw::lib::drive(x, 2.0)', group: 'Effects'),
   CppRefEntry('caw::lib::hardClip', 'double (double x, double amount)', 'Hard clip after gain.', insertText: 'caw::lib::hardClip(x, 2.0)',
-      group: 'Library'),
-  CppRefEntry('caw::lib::fold', 'double (double x, double drive)', 'Wavefolder (1..12).', insertText: 'caw::lib::fold(x, 2.0)', group: 'Library'),
+      group: 'Effects'),
+  CppRefEntry('caw::lib::fold', 'double (double x, double drive)', 'Wavefolder (1..12).', insertText: 'caw::lib::fold(x, 2.0)', group: 'Effects'),
   CppRefEntry('caw::lib::crush', 'double (double x, double bits)', 'Bit crusher (1..24 bits).', insertText: 'caw::lib::crush(x, 8.0)',
-      group: 'Library'),
+      group: 'Effects'),
   CppRefEntry('caw::lib::constantPowerPan', 'PanGains (double pan)', 'Pan -1..1: left/right gains, -3 dB centre.',
-      insertText: 'caw::lib::constantPowerPan(0.0)', group: 'Library'),
+      insertText: 'caw::lib::constantPowerPan(0.0)', group: 'Effects'),
   CppRefEntry('caw::lib::balanceGains', 'PanGains (double pan)', 'Stereo balance gains.', insertText: 'caw::lib::balanceGains(0.0)',
-      group: 'Library'),
+      group: 'Effects'),
   CppRefEntry('caw::lib::applyWidth', 'void (double width, double& l, double& r)', 'Mid/side width: 0 mono, 1 as is, 2 wide.',
-      insertText: 'caw::lib::applyWidth(1.0, l, r)', group: 'Library'),
+      insertText: 'caw::lib::applyWidth(1.0, l, r)', group: 'Effects'),
+];
+
+/// A component that ships in every engine (org.caw.*): put on a track from Files or "+ effect"; its id names it in
+/// code and project files. Hand-kept from `engine/src/builtin_components.cpp` and `builtin_instruments.cpp` (a test
+/// checks the ids and knobs are still there).
+class CppBuiltin {
+  const CppBuiltin(this.id, this.name, this.instrument, this.doc, this.knobs);
+  final String id, name, doc;
+  final bool instrument;
+  final List<String> knobs; // parameter ids, in order
+}
+
+const cppBuiltins = <CppBuiltin>[
+  CppBuiltin('org.caw.synth.basic', 'Basic synth', true, 'Two oscillators, a resonant low-pass and an ADSR; 16 voices.',
+      ['wave1', 'wave2', 'detune', 'mix', 'cutoff', 'resonance', 'env', 'attack', 'decay', 'sustain', 'release', 'volume']),
+  CppBuiltin('org.caw.synth.morph', 'Morph synth', true, 'A sine-to-square morph with unison, drift, a low-pass and an ADSR.',
+      ['shape', 'drift', 'unison', 'detune', 'spread', 'cutoff', 'resonance', 'attack', 'decay', 'sustain', 'release', 'volume']),
+  CppBuiltin('org.caw.synth.acid', 'Acid synth', true, 'One saw or square voice into a 4-pole ladder; accents and slides.',
+      ['wave', 'cutoff', 'resonance', 'env', 'decay', 'accent', 'slide', 'drive', 'volume']),
+  CppBuiltin('org.caw.bass', 'Bass', true, 'A saw or square with a sub an octave below, a low-pass and glide.',
+      ['wave', 'sub', 'cutoff', 'resonance', 'env', 'decay', 'sustain', 'glide', 'legato', 'drive', 'volume']),
+  CppBuiltin('org.caw.drum.kit', 'Drum kit', true, 'Kick, snare, clap and hi-hats on General MIDI keys (C2 kick, D2 snare, F#2 hat).',
+      ['kick_tune', 'kick_decay', 'kick_punch', 'snare_tune', 'snare_snappy', 'clap_decay', 'hat_closed', 'hat_open', 'hat_tone', 'kick',
+       'snare', 'clap', 'hats', 'volume']),
+  CppBuiltin('org.caw.drum.kick', 'Kick', true, 'Every note plays the kick; velocity sets the level.',
+      ['tune', 'punch', 'decay', 'click', 'tone', 'drive', 'volume']),
+  CppBuiltin('org.caw.drum.snare', 'Snare', true, 'A two-mode body and noise.', ['tune', 'body', 'snappy', 'tone', 'mix', 'volume']),
+  CppBuiltin('org.caw.drum.hats', 'Hi-hats', true, 'Closed on every key but A#2 (open), unless mode says otherwise.',
+      ['mode', 'closed', 'open', 'tone', 'metal', 'volume']),
+  CppBuiltin('org.caw.distortion', 'Distortion', false, 'Four shapes, a dry/wet mix and an output level.',
+      ['shape', 'drive', 'bits', 'mix', 'output']),
+  CppBuiltin('org.caw.delay.pingpong', 'Ping-pong delay', false, 'A stereo delay that bounces between the sides.',
+      ['time', 'feedback', 'cross', 'mix']),
+  CppBuiltin('org.caw.chorus', 'Chorus', false, 'A stereo chorus.', ['rate', 'depth', 'mix']),
+  CppBuiltin('org.caw.stereo.width', 'Width', false, 'Mid/side width: 0 mono, 1 as is, 2 wide.', ['width']),
+  CppBuiltin('org.caw.stereo.balance', 'Balance', false, 'Stereo balance.', ['pan']),
+];
+
+/// One of C.A.W's own text formats, for the Library's last groups.
+class TextFormatRef {
+  const TextFormatRef(this.title, this.detail, this.doc, this.example, {this.fields = const []});
+  final String title, detail, doc, example;
+  final List<(String, String)> fields; // a key or column, and what it means
+}
+
+const textFormats = <TextFormatRef>[
+  TextFormatRef('Pattern', 'notes as text',
+      "A clip's notes, one line each. Name and length are fields above the notes; the text holds only the note lines.",
+      '// at  note(s)   len  vel  extras\n'
+      '0      A1        2    1\n'
+      '3      A1        1    0.8  slide\n'
+      '13/3   E2        1    0.6  prob 0.5\n'
+      '4.5    C3,E3,G3  1/2  0.9  ratchet 2',
+      fields: [
+        ('at', 'start in 16ths; decimals or fractions (13/3 lands on a triplet)'),
+        ('note(s)', 'names (A1, F#3) or MIDI numbers, fractions for microtones; commas make a chord'),
+        ('len', 'length in 16ths'),
+        ('vel', 'velocity 0..1 (default 1)'),
+        ('prob P', 'plays with chance P, the same on every loop and in exports'),
+        ('ratchet N', 'N equal repeats (2..8)'),
+        ('slide', 'the next note starting where this one ends glides from it'),
+        ('bend, vib, press, timbre', 'per-note expression curves (the piano roll writes them)'),
+        ('// text', 'a comment'),
+      ]),
+  TextFormatRef('caw-component.json', 'JSON', "A C++ component's manifest: its id, name and the sources to compile.",
+      '{\n'
+      '  "format": "caw.component",\n'
+      '  "version": 1,\n'
+      '  "component": {"id": "local.my-delay.cpp1", "name": "My delay"},\n'
+      '  "sources": ["src/effect.cpp"]\n'
+      '}',
+      fields: [
+        ('component.id', 'stable reverse-DNS id; tracks and saved projects name the component by it'),
+        ('sources', 'project-relative .cpp files to compile'),
+        ('includeDirectories', 'optional: project-relative folders for #include'),
+        ('compileDefinitions', 'optional: NAME or NAME=value'),
+      ]),
 ];
 
 /// C++ keywords and common standard-library names for the instant completion list.
