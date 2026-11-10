@@ -76,6 +76,21 @@ jobs:
       - name: Test component contract
         if: ${{ !matrix.android }}
         run: ctest --test-dir "$RUNNER_TEMP/caw-component-build" --build-config Release --output-on-failure
+      - name: Build and test the example instrument for desktop
+        if: ${{ !matrix.android }}
+        run: |
+          node scripts/caw-component-build.js \
+            --project examples/cpp/poly-synth --sdk "$RUNNER_TEMP/caw-sdk" \
+            --build "$RUNNER_TEMP/caw-instrument-build" --config Release
+          ctest --test-dir "$RUNNER_TEMP/caw-instrument-build" --build-config Release --output-on-failure
+      - name: Build the example instrument for Android ARM64
+        if: matrix.android
+        run: |
+          node scripts/caw-component-build.js \
+            --project examples/cpp/poly-synth --sdk "$RUNNER_TEMP/caw-sdk" \
+            --build "$RUNNER_TEMP/caw-instrument-build" --config Release \
+            --toolchain "$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            --android-abi arm64-v8a --android-platform android-24
       - name: Upload Android component artifact
         if: matrix.android
         uses: actions/upload-artifact@v7

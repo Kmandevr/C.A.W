@@ -43,8 +43,8 @@ struct AutomationPointSpec { double step = 0, value = 0; };
 struct AutomationLaneSpec { std::string target; std::vector<AutomationPointSpec> points; };
 
 struct ProjectAutomationLaneSpec {
-    std::string targetType;  // param, global or component
-    std::string moduleId;    // param: the module; component: the layer (empty for the master chain)
+    std::string targetType;  // param, global, component or instrument
+    std::string moduleId;    // param: the module; component: the layer (empty for the master chain); instrument: the layer
     int component = -1;      // component: its index in that chain
     std::string target;      // parameter/global name
     std::vector<AutomationPointSpec> points;
@@ -60,6 +60,10 @@ struct LayerSpec {
     bool folder = false, busEnabled = true;
     std::vector<AutomationLaneSpec> automation;
     std::vector<ComponentSpec> components;  // native stereo effects after the chain, before volume and pan
+    // A native instrument (one event input, one stereo output) that plays the layer's notes instead of
+    // a .caw generator; the chain's .caw effects, then `components`, follow it.
+    bool hasInstrument = false;
+    ComponentSpec instrument;
     double volume = 0.8, pan = 0.0;
     bool mute = false, solo = false;
 };

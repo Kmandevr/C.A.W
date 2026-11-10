@@ -131,6 +131,13 @@ class NativeComponentInfo {
 
   String get label => name.isEmpty ? id : name;
 
+  /// An instrument plays a track's notes: one event input and one stereo audio output, no audio input (the engine
+  /// checks the same shape; docs/native-module-sdk.md).
+  bool get isInstrument =>
+      ports.length == 2 &&
+      ports.any((p) => p.type == 'event' && p.input) &&
+      ports.any((p) => p.isAudio && !p.input && p.channels == 2);
+
   factory NativeComponentInfo.fromJson(Map<String, dynamic> j) => NativeComponentInfo(
         id: j['id'] as String? ?? '',
         name: j['name'] as String? ?? '',

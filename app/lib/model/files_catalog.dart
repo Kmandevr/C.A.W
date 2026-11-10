@@ -370,10 +370,13 @@ extension FilesCatalog on AppState {
     return '$base $n';
   }
 
-  /// Adds a blank pass-through C++ effect to the project (the user's own code: trusted on this device).
-  CppComponentDoc addBlankCppEffect({String base = 'New effect'}) {
+  /// Adds a blank pass-through C++ effect to the project, or with [instrument] a blank instrument (the user's own
+  /// code: trusted on this device).
+  CppComponentDoc addBlankCppEffect({String base = 'New effect', bool instrument = false}) {
     final name = _freeName(base, project.cppComponents.map((c) => c.name));
-    final doc = CppComponentDoc.blankEffect(id: newId('cpp'), name: name);
+    final doc = instrument
+        ? CppComponentDoc.blankInstrument(id: newId('cpp'), name: name)
+        : CppComponentDoc.blankEffect(id: newId('cpp'), name: name);
     editProject((p) => p.cppComponents.add(doc));
     _markAuthored(doc);
     return doc;

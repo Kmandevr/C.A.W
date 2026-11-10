@@ -360,7 +360,7 @@ class AppState extends ChangeNotifier {
   /// The layer a pattern's note previews play on: the selected layer if it plays [patternId], else the first that
   /// does; null when no layer plays it.
   String? previewLayerFor(String patternId) {
-    bool plays(LayerDoc l) => l.generatorId != null && (l.patternId == patternId || l.clips.any((c) => c.patternId == patternId));
+    bool plays(LayerDoc l) => (l.generatorId != null || l.instrument != null) && (l.patternId == patternId || l.clips.any((c) => c.patternId == patternId));
     final selected = project.layers.where((l) => l.id == selectedLayerId && plays(l)).firstOrNull;
     return (selected ?? project.layers.where(plays).firstOrNull)?.id;
   }
@@ -429,7 +429,10 @@ class AppState extends ChangeNotifier {
         // The engine's built-ins (org.caw.*) are always loaded, so they play beside the project's loaded ones.
         playableComponents: nativeComponents == null ? null : {
           ...nativeComponents!.loaded,
-          for (final c in [...project.masterComponents, for (final l in project.layers) ...l.components])
+          for (final c in [
+            ...project.masterComponents,
+            for (final l in project.layers) ...[...l.components, ?l.instrument],
+          ])
             if (c.id.startsWith('org.caw.')) c.id,
         });
     try {

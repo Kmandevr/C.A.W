@@ -204,6 +204,7 @@ class LayerDoc {
     List<ClipDoc>? clips,
     List<AutomationLaneDoc>? automation,
     List<ComponentUseDoc>? components,
+    this.instrument,
     this.parentId,
     this.isFolder = false,
     this.busEnabled = true,
@@ -229,6 +230,10 @@ class LayerDoc {
   List<ClipDoc> clips;
   List<AutomationLaneDoc> automation;
   List<ComponentUseDoc> components; // native C++ effects after the chain, before volume and pan
+
+  /// A native C++ instrument (a built-in or one of the project's) playing the track's notes instead of a .caw
+  /// generator: the two are exclusive, so setting one clears the other ([setInstrument], [generatorId]).
+  ComponentUseDoc? instrument;
   String? parentId;
   bool isFolder, busEnabled, collapsed;
 
@@ -236,7 +241,19 @@ class LayerDoc {
   /// screen: it is saved with the project but never sent to the engine.
   double spaceBelow;
 
-  List<String> get chain => [?generatorId, ...effectIds];
+  /// The .caw modules the engine runs: the generator then the effects; with a native [instrument], only the effects.
+  List<String> get chain => instrument != null ? [...effectIds] : [?generatorId, ...effectIds];
+
+  /// Makes [componentId] the track's instrument (null: none), replacing any .caw generator. The same id keeps its
+  /// values; another one starts from its defaults.
+  void setInstrument(String? componentId) {
+    if (componentId == null) {
+      instrument = null;
+      return;
+    }
+    if (instrument?.id != componentId) instrument = ComponentUseDoc(componentId);
+    generatorId = null;
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -253,6 +270,7 @@ class LayerDoc {
         'clips': [for (final c in clips) c.toJson()],
         'automation': [for (final a in automation) a.toJson()],
         if (components.isNotEmpty) 'components': [for (final c in components) c.toJson()],
+        if (instrument != null) 'instrument': instrument!.toJson(),
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
         if (spaceBelow > 0) 'space_below': spaceBelow,
       };
@@ -272,6 +290,7 @@ class LayerDoc {
         clips: ((j['clips'] as List?) ?? const []).map((c) => ClipDoc.fromJson(c as Map<String, dynamic>)).toList(),
         automation: ((j['automation'] as List?) ?? const []).map((a) => AutomationLaneDoc.fromJson(a as Map<String, dynamic>)).toList(),
         components: ComponentUseDoc.listFromJson(j['components']),
+        instrument: j['folder'] == true ? null : ComponentUseDoc.fromJson(j['instrument']),
         parentId: j['parent'] as String?, isFolder: j['folder'] == true,
         busEnabled: j['bus'] != false, collapsed: j['collapsed'] == true,
         spaceBelow: switch (j['space_below']) {
@@ -370,22 +389,26 @@ class ProjectDoc {
         lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
   }
 
+  /// The component index the engine gives a layer's native instrument (CAW_INSTRUMENT_INDEX in caw.h).
+  static const instrumentIndex = 0xFFFFFFFF;
+
   /// Stores what [states] reports (Engine.componentStates, per layer id; null for the master) into the
   /// component entries, so the saved project carries each effect's state. Entries it doesn't name keep theirs.
   void storeComponentStates(Map<int, ({String state, int version})> Function(String? layerId) states) {
-    void store(List<ComponentUseDoc> chain, String? layerId) {
-      if (chain.isEmpty) return;
+    void store(List<ComponentUseDoc> chain, String? layerId, [ComponentUseDoc? instrument]) {
+      if (chain.isEmpty && instrument == null) return;
       states(layerId).forEach((index, s) {
-        if (index < 0 || index >= chain.length) return;
+        final use = index == instrumentIndex ? instrument : (index >= 0 && index < chain.length ? chain[index] : null);
+        if (use == null) return;
         // An empty state is no state: the component keeps nothing beyond its parameters.
-        chain[index].state = s.state.isEmpty ? null : s.state;
-        chain[index].stateVersion = s.version;
+        use.state = s.state.isEmpty ? null : s.state;
+        use.stateVersion = s.version;
       });
     }
 
     store(masterComponents, null);
     for (final l in layers) {
-      if (!l.isFolder) store(l.components, l.id);
+      if (!l.isFolder) store(l.components, l.id, l.instrument);
     }
   }
 
@@ -438,9 +461,13 @@ class ProjectDoc {
     }
     List<ComponentUseDoc> chainOf(String? layerId) =>
         layerId == null ? masterComponents : layers.where((l) => l.id == layerId).firstOrNull?.components ?? const [];
+    bool instrumentPlays(LayerDoc l) =>
+        !l.isFolder && l.instrument != null && (playableComponents == null || playableComponents.contains(l.instrument!.id));
     final engineAutomation = [
       for (final lane in automation)
-        if (lane.targetType != 'component')
+        if (lane.targetType == 'instrument') ...[
+          if (layers.where((l) => l.id == lane.layerId).firstOrNull case final LayerDoc l when instrumentPlays(l)) lane.toJson(),
+        ] else if (lane.targetType != 'component')
           lane.toJson()
         else if (playableIndex(chainOf(lane.layerId), lane.component ?? -1) case final int index)
           lane.toJson()..['component'] = index,
@@ -470,6 +497,8 @@ class ProjectDoc {
               'name': l.name,
               'chain': l.chain,
               if (playable(l.components).isNotEmpty && !l.isFolder) 'components': [for (final c in playable(l.components)) c.toJson()],
+              // A C++ instrument not loaded yet (awaiting trust, building) is left out: the track is silent until it is.
+              if (instrumentPlays(l)) 'instrument': l.instrument!.toJson(),
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
               'automation': [for (final a in l.automation) a.toJson()],
               if (l.clips.isEmpty && l.patternId != null) 'pattern': l.patternId,

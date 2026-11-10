@@ -35,6 +35,8 @@ void copyError(const std::string& msg, char* out, int32_t len) {
 
 extern "C" {
 
+static_assert(CAW_INSTRUMENT_INDEX == caw::Engine::kInstrumentIndex, "the C API and the Engine name the instrument alike");
+
 int32_t caw_api_version(void) { return CAW_API_VERSION; }
 
 void caw_free(char* s) { std::free(s); }

@@ -100,16 +100,20 @@ extension CppBuilderState on AppState {
     }
   }
 
-  /// A new effect from the blank pass-through template, added to the project; it is the user's own code.
-  CppComponentDoc newCppEffect({String? name}) {
-    var n = name ?? 'My effect';
+  /// A new effect from the blank pass-through template (or, with [instrument], a new instrument from the blank
+  /// polyphonic sine), added to the project; it is the user's own code.
+  CppComponentDoc newCppEffect({String? name, bool instrument = false}) {
+    final base = instrument ? 'My instrument' : 'My effect';
+    var n = name ?? base;
     if (name == null) {
       var k = 1;
       while (project.cppComponents.any((c) => c.name == n)) {
-        n = 'My effect ${++k}';
+        n = '$base ${++k}';
       }
     }
-    final doc = CppComponentDoc.blankEffect(id: newId('cpp'), name: n);
+    final doc = instrument
+        ? CppComponentDoc.blankInstrument(id: newId('cpp'), name: n)
+        : CppComponentDoc.blankEffect(id: newId('cpp'), name: n);
     editProject((p) => p.cppComponents.add(doc));
     cppWorkbench(doc.id).own = true;
     final trust = nativeComponents?.trust;

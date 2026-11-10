@@ -221,3 +221,58 @@ TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_chang
     }
     CHECK_EQ(operations, 0u);
 }
+
+TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
+    // The built-in synth plays a pattern (loop wraps, a slide, a ratchet, chords) through a .caw effect and a
+    // native delay; mid-way it is swapped for another instrument (its held notes move over), previews play and
+    // it is stopped: the audio thread must not allocate or free through any of it.
+    ProjectSpec p;
+    p.bpm = 160;
+    p.loopBars = 1;
+    p.modules.push_back({"pat", "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C3 4 1\n0 G3 4 1\n4 D3 2 1 slide\n"
+                                "6 F3 2 1\n8 A3 4 1 ratchet 4\n12 C4 4 1\n", {}});
+    p.modules.push_back({"fold", templateSource("fold.caw"), {}});
+    LayerSpec l = layer("s", {"fold"});
+    l.pattern = "pat";
+    l.hasInstrument = true;
+    l.instrument.id = "org.caw.synth.basic";
+    l.components = {{"org.caw.delay.pingpong", {}}};
+    p.layers = {l, layer("t", {})};
+    p.layers[1].pattern = "pat";
+    p.layers[1].hasInstrument = true;
+    p.layers[1].instrument.id = "org.caw.synth.basic";
+    Engine e(48000);
+    const char* path = caw::test::nativeComponentPath();
+    const bool recorder = path && e.loadNativeComponent(path, "org.caw.tests.native-loader.recorder", NativeModuleTrust::Trusted).success;
+    CHECK(recorder);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l2(192), r2(192);
+    for (int k = 0; k < 250; ++k) e.process(l2.data(), r2.data(), 192);  // warm up
+    if (recorder) p.layers[1].instrument.id = "org.caw.tests.native-loader.recorder";
+    p.layers[0].instrument.params = {{"cutoff", 800}};
+    e.setProject(p);
+    e.noteOn("s", 1, 64, 1);
+    e.setComponentParam("s", Engine::kInstrumentIndex, "resonance", 0.8);
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 500; ++k) {
+            e.process(l2.data(), r2.data(), 192);
+            for (float v : l2) peak = v > peak ? v : peak;
+        }
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+    e.noteOff(1);
+    e.stop();
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 250; ++k) e.process(l2.data(), r2.data(), 192);  // the stop, the release tails
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK_EQ(e.routingRejections(), 0u);
+}
