@@ -6,6 +6,16 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Frame and feel, as built (choices to confirm)
+
+**Built** from the evening round's frame decisions ([app](app.md), Frame; Motion and feel). **Choices made on the owner's behalf, to confirm:**
+- **The bars' grip** sits at the top centre of the section, over the toolbar's top edge; a pull of 28 dp (half of 56) hides or shows, a flick counts, and a tap on the hidden tab shows them. In landscape only Arrange has one (its toolbar is the only bar). The hidden state stays across sections.
+- **Haptic mapping:** a step is `PRIMITIVE_TICK`, a tap a softer `PRIMITIVE_CLICK`, a grab a click, a drop `PRIMITIVE_LOW_TICK`, a threshold a tick then a click, an error two clicks. Strength 50% plays the base scales (0.45–0.8); 0% halves them, 100% is 1.5 times. Ticks are limited to one per 35 ms and skip 35 ms after a tap.
+- **Press feedback** is a dip to 92% and a glow; Reduced motion keeps only the glow.
+- **The side panel** is resizable only on a phone in landscape (desktop keeps 34%), between 30% and 80%, snapping at ½ and ⅔; the panel moves on release, with a ghost while dragging, instead of resizing live.
+- **Layout › Auto** uses the desktop frame at a shortest side of 600 dp or 900 × 480 dp (before: 900 dp wide alone, which a phone with a small display size could reach in landscape). Desktop on a small window starts with all panels as tabs of one group.
+- **Floating windows** no longer blur what is under them.
+
 ## 2026-11-10: Owner feedback, evening round (owner)
 
 **Decision (owner), after trying the latest APK (#174):**
