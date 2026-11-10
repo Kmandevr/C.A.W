@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import 'motion.dart';
 import 'theme.dart';
 import 'glass.dart';
 
@@ -105,16 +106,19 @@ class _ScopePainter extends CustomPainter {
 /// A horizontal bar for a 0..1 value, drawn in neon. With glass on: a faint fill and a solid outline, for the
 /// track and the value alike, a little taller so the outline reads.
 class Bar extends StatelessWidget {
-  const Bar({super.key, required this.value, required this.color, this.height = 4});
+  const Bar({super.key, required this.value, required this.color, this.height = 4, this.glassMinHeight = 7});
   final double value;
   final Color color;
   final double height;
+
+  /// The glass look draws the bar at least this tall (a stereo meter's two bars are thinner).
+  final double glassMinHeight;
 
   @override
   Widget build(BuildContext context) => Glass.active ? _glass() : _plain();
 
   Widget _glass() {
-    final h = height < 7 ? 7.0 : height;
+    final h = height < glassMinHeight ? glassMinHeight : height;
     final r = BorderRadius.circular(h);
     return LayoutBuilder(
       builder: (context, c) => Container(
@@ -151,13 +155,9 @@ class Bar extends StatelessWidget {
       );
 }
 
-/// A peak meter for one layer, folder or the master, on a dB scale: the bar rises at once to each sample peak and
-/// falls at [fallDbPerSecond]; a thin line holds the highest peak for [holdSeconds]; at [clipDb] or over it turns
-/// pink for [clipSeconds]. It runs on wall-clock time, so it falls the same at any meter cadence. While sound comes
-/// in, the meter reads (about 30 a second) move it; once they report silence its own ticker finishes the fall at the
-/// same rate and then stops, so it never freezes partway when the engine goes quiet.
-/// A track's meter in the mixer, the arrangement or a track card: one [PeakMeter] for a mono track, and left and
-/// right side by side (upright) or one above the other (lying) for a stereo one ([LayerDoc.isStereo]).
+/// A track's meter in the mixer, the arrangement or a track card: a stereo [PeakMeter] (left and right, from
+/// `caw_engine_layer_meter_stereo`) for a stereo track ([LayerDoc.isStereo]: a native instrument or effect, or a
+/// folder), and one bar for a mono .caw track, whose two sides differ only by its pan.
 class TrackMeter extends StatelessWidget {
   const TrackMeter(
       {super.key, required this.state, required this.index, required this.stereo, required this.color, this.vertical = false});
@@ -170,22 +170,28 @@ class TrackMeter extends StatelessWidget {
   LayerMeterValue? get _meter => index < state.layerMeters.length ? state.layerMeters[index] : null;
 
   @override
-  Widget build(BuildContext context) {
-    if (!stereo) return PeakMeter(state: state, color: color, vertical: vertical, read: () => _meter?.peak ?? 0.0);
-    final left = PeakMeter(key: const ValueKey('left'), state: state, color: color, vertical: vertical,
-        read: () => _meter?.peakL ?? 0.0);
-    final right = PeakMeter(key: const ValueKey('right'), state: state, color: color, vertical: vertical,
-        read: () => _meter?.peakR ?? 0.0);
-    return vertical
-        ? Row(children: [Expanded(child: left), const SizedBox(width: 1), Expanded(child: right)])
-        : Column(mainAxisSize: MainAxisSize.min, children: [left, const SizedBox(height: 1), right]);
-  }
+  Widget build(BuildContext context) => stereo
+      ? PeakMeter(state: state, color: color, vertical: vertical,
+          read: () => _meter?.peakL ?? 0.0, readRight: () => _meter?.peakR ?? 0.0)
+      : PeakMeter(state: state, color: color, vertical: vertical, read: () => _meter?.peak ?? 0.0);
 }
 
+/// A peak meter for one layer, folder or the master, on a dB scale, REAPER-like: the bar rises at once to each
+/// sample peak and falls at [fallDbPerSecond] (the Meter fall setting); a thin line holds the highest peak for
+/// [holdSeconds]; at [clipDb] or over it turns pink for [clipSeconds]. With [readRight] it is a stereo meter: two
+/// bars, left above right (side by side when [vertical]). It runs on wall-clock time, so it falls the same at any
+/// meter cadence. While sound comes in, the meter reads (about 30 a second) move it; once they report silence its own
+/// ticker finishes the fall at the same rate and then stops, so it never freezes partway when the engine goes quiet.
 class PeakMeter extends StatefulWidget {
-  const PeakMeter({super.key, required this.state, required this.read, required this.color, this.vertical = false});
+  const PeakMeter({super.key, required this.state, required this.read, required this.color, this.vertical = false,
+      this.readRight});
   final AppState state;
+
+  /// The peak since the last read (the left channel of a stereo meter).
   final double Function() read;
+
+  /// The right channel's peak: given, the meter shows two bars.
+  final double Function()? readRight;
   final Color color;
 
   /// Upright, filling from the bottom (a mixer strip's meter), instead of a bar filling from the left.
@@ -193,7 +199,9 @@ class PeakMeter extends StatefulWidget {
 
   /// The meter's range: [floorDb] (empty) to 0 dBFS (full).
   static const floorDb = -60.0;
-  static const fallDbPerSecond = 24.0;
+
+  /// Set from Settings (`meter_fall`); 48 dB/s by default.
+  static double fallDbPerSecond = 48.0;
 
   static final _wall = Stopwatch()..start();
 
@@ -218,19 +226,52 @@ class PeakMeter extends StatefulWidget {
   State<PeakMeter> createState() => PeakMeterState();
 }
 
+/// One channel's bar, held peak and clip light.
+class _MeterChannel {
+  double shownDb = PeakMeter.floorDb, holdDb = PeakMeter.floorDb;
+  double holdLeft = 0, clipLeft = 0; // seconds
+
+  bool get empty => shownDb <= PeakMeter.floorDb && holdDb <= PeakMeter.floorDb && clipLeft <= 0;
+  bool get clipped => clipLeft > 0;
+
+  void take(double peak) {
+    final d = PeakMeter.db(peak);
+    if (d > shownDb) shownDb = d;
+    if (d >= holdDb && d > PeakMeter.floorDb) {
+      holdDb = d;
+      holdLeft = PeakMeter.holdSeconds;
+    }
+    if (d >= PeakMeter.clipDb) clipLeft = PeakMeter.clipSeconds;
+  }
+
+  void fall(double dt) {
+    final rate = PeakMeter.fallDbPerSecond;
+    shownDb = math.max(PeakMeter.floorDb, shownDb - rate * dt);
+    // The peak line holds, then falls like the bar for whatever part of this frame came after its hold.
+    final held = math.min(holdLeft, dt);
+    holdLeft = math.max(0, holdLeft - dt);
+    holdDb = math.max(shownDb, holdDb - rate * (dt - math.max(0, held)));
+    if (clipLeft > 0) clipLeft -= dt;
+  }
+}
+
 class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixin {
   late final Ticker _ticker = createTicker(_frame);
   Duration _last = Duration.zero, _built = Duration.zero;
   Duration _lastRead = Duration.zero;
-  double _shownDb = PeakMeter.floorDb, _holdDb = PeakMeter.floorDb;
-  double _holdLeft = 0, _clipLeft = 0; // seconds
+  final _left = _MeterChannel(), _right = _MeterChannel();
 
-  /// The level the bar shows now, in dB (for tests).
-  double get shownDb => _shownDb;
+  bool get _stereo => widget.readRight != null;
+
+  /// The level the bar shows now, in dB (the left bar of a stereo meter; for tests).
+  double get shownDb => _left.shownDb;
 
   /// The held peak line, in dB.
-  double get holdDb => _holdDb;
-  bool get clipped => _clipLeft > 0;
+  double get holdDb => _left.holdDb;
+  bool get clipped => _left.clipped || (_stereo && _right.clipped);
+
+  /// The right bar's level, in dB (a stereo meter; for tests).
+  double get shownRightDb => _right.shownDb;
 
   @override
   void initState() {
@@ -254,7 +295,7 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
     super.dispose();
   }
 
-  bool get _empty => _shownDb <= PeakMeter.floorDb && _holdDb <= PeakMeter.floorDb && _clipLeft <= 0;
+  bool get _empty => _left.empty && (!_stereo || _right.empty);
 
   // A meter read: the peak since the last one. The time since the previous read moves the fall first.
   void _read() {
@@ -262,15 +303,11 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
     if (!_ticker.isActive) _fall((now - _lastRead).inMicroseconds / 1e6);
     _lastRead = now;
     final peak = widget.read();
-    final d = PeakMeter.db(peak);
-    if (d > _shownDb) _shownDb = d;
-    if (d >= _holdDb && d > PeakMeter.floorDb) {
-      _holdDb = d;
-      _holdLeft = PeakMeter.holdSeconds;
-    }
-    if (d >= PeakMeter.clipDb) _clipLeft = PeakMeter.clipSeconds;
+    _left.take(peak);
+    final right = widget.readRight?.call() ?? 0.0;
+    if (_stereo) _right.take(right);
     // Sound coming in: the reads drive the meter. Silence: the ticker finishes the fall (the reads may stop soon).
-    if (peak > 0) {
+    if (peak > 0 || right > 0) {
       _ticker.stop();
     } else if (!_empty && !_ticker.isActive) {
       _last = _built = Duration.zero;
@@ -296,42 +333,39 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
 
   void _fall(double dt) {
     if (dt <= 0) return;
-    _shownDb = math.max(PeakMeter.floorDb, _shownDb - PeakMeter.fallDbPerSecond * dt);
-    // The peak line holds, then falls like the bar for whatever part of this frame came after its hold.
-    final held = math.min(_holdLeft, dt);
-    _holdLeft = math.max(0, _holdLeft - dt);
-    _holdDb = math.max(_shownDb, _holdDb - PeakMeter.fallDbPerSecond * (dt - math.max(0, held)));
-    if (_clipLeft > 0) _clipLeft -= dt;
+    _left.fall(dt);
+    if (_stereo) _right.fall(dt);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final color = clipped ? Neon.pink : widget.color;
-    final hold = PeakMeter.fraction(_holdDb);
-    if (widget.vertical) {
-      return RepaintBoundary(child: Container(
-        decoration: BoxDecoration(
-          color: Neon.line.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(3),
-          border: Border.all(color: Neon.line, width: 0.8),
-        ),
-        child: LayoutBuilder(builder: (context, c) {
-          final h = c.maxHeight.isFinite ? c.maxHeight : 0.0;
-          return Stack(children: [
-            Positioned(left: 0, right: 0, bottom: 0, height: h * PeakMeter.fraction(_shownDb),
-              child: Container(color: color.withValues(alpha: 0.6))),
-            if (hold > 0)
-              Positioned(left: 0, right: 0, height: 1.5,
-                bottom: (h * hold - 1.5).clamp(0.0, math.max(0.0, h - 1.5)),
-                child: IgnorePointer(child: Container(color: color))),
-          ]);
-        }),
-      ));
-    }
-    // Its own layer: a meter moving doesn't repaint the panel around it.
-    return RepaintBoundary(child: LayoutBuilder(
+  Widget _upright(_MeterChannel ch) {
+    final color = ch.clipped ? Neon.pink : widget.color;
+    final hold = PeakMeter.fraction(ch.holdDb);
+    return Container(
+      decoration: BoxDecoration(
+        color: Neon.line.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: Neon.line, width: 0.8),
+      ),
+      child: LayoutBuilder(builder: (context, c) {
+        final h = c.maxHeight.isFinite ? c.maxHeight : 0.0;
+        return Stack(children: [
+          Positioned(left: 0, right: 0, bottom: 0, height: h * PeakMeter.fraction(ch.shownDb),
+            child: Container(color: color.withValues(alpha: 0.6))),
+          if (hold > 0)
+            Positioned(left: 0, right: 0, height: 1.5,
+              bottom: (h * hold - 1.5).clamp(0.0, math.max(0.0, h - 1.5)),
+              child: IgnorePointer(child: Container(color: color))),
+        ]);
+      }),
+    );
+  }
+
+  Widget _sideways(_MeterChannel ch, {double height = 4}) {
+    final color = ch.clipped ? Neon.pink : widget.color;
+    final hold = PeakMeter.fraction(ch.holdDb);
+    return LayoutBuilder(
       builder: (context, c) => Stack(alignment: Alignment.centerLeft, children: [
-        Bar(value: PeakMeter.fraction(_shownDb), color: color),
+        Bar(value: PeakMeter.fraction(ch.shownDb), color: color, height: height, glassMinHeight: _stereo ? 5 : 7),
         if (hold > 0 && c.maxWidth.isFinite)
           Positioned(
             left: (c.maxWidth * hold - 1.5).clamp(0.0, math.max(0.0, c.maxWidth - 1.5)),
@@ -340,7 +374,23 @@ class PeakMeterState extends State<PeakMeter> with SingleTickerProviderStateMixi
             child: IgnorePointer(child: Container(width: 1.5, color: color)),
           ),
       ]),
-    ));
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Its own layer: a meter moving doesn't repaint the panel around it.
+    if (widget.vertical) {
+      return RepaintBoundary(child: _stereo
+          ? Row(children: [Expanded(child: _upright(_left)), const SizedBox(width: 2), Expanded(child: _upright(_right))])
+          : _upright(_left));
+    }
+    if (!_stereo) return RepaintBoundary(child: _sideways(_left));
+    return RepaintBoundary(child: Column(mainAxisSize: MainAxisSize.min, children: [
+      _sideways(_left, height: 5),
+      const SizedBox(height: 1),
+      _sideways(_right, height: 5),
+    ]));
   }
 }
 
@@ -571,4 +621,22 @@ class BarsField extends StatelessWidget {
         tooltip: 'One bar more', visualDensity: VisualDensity.compact),
     ]);
   }
+}
+
+/// A double-tap on [child] (a slider, usually) sets it back to its default (owner, 2026-11-10: every slider and knob
+/// resets on a double-tap). A drag still belongs to the slider; a single tap waits the double-tap time first.
+class ResetOnDoubleTap extends StatelessWidget {
+  const ResetOnDoubleTap({super.key, required this.onReset, required this.child});
+  final VoidCallback? onReset;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => onReset == null
+      ? child
+      : GestureDetector(
+          onDoubleTap: () {
+            Motion.tick();
+            onReset!();
+          },
+          child: child);
 }

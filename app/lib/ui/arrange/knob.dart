@@ -1,4 +1,5 @@
-// A compact rotary knob for effect cards: drag up or down to turn, double-tap for the default, a tick at the centre.
+// A compact rotary knob for effect cards: drag up or down to turn, double-tap for the default, a tick at the centre;
+// exponential parameters turn on a log taper.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,37 @@ import 'package:flutter/services.dart';
 
 import '../motion.dart';
 import '../theme.dart';
+
+/// Where a value sits along a control's travel (0..1) and back. Linear by default; an exponential parameter
+/// (`curve: exponential` in a component's descriptor: times, frequencies, rates) moves little at the start of the
+/// travel and a lot at the end (owner, 2026-11-10): a log scale when the range is above zero, otherwise a curve
+/// that spans three decades from the minimum.
+class Taper {
+  const Taper(this.min, this.max, {this.exponential = false});
+  final double min, max;
+  final bool exponential;
+
+  static const _decades = 1000.0;
+
+  bool get _log => min > 0 && max > min;
+
+  double position(double value) {
+    final range = max - min;
+    if (range <= 0) return 0;
+    final v = value.clamp(min, max).toDouble();
+    if (!exponential) return (v - min) / range;
+    if (_log) return math.log(v / min) / math.log(max / min);
+    return math.log(1 + (v - min) / range * (_decades - 1)) / math.log(_decades);
+  }
+
+  double value(double position) {
+    final t = position.clamp(0.0, 1.0).toDouble();
+    final range = max - min;
+    if (!exponential || range <= 0) return min + t * range;
+    if (_log) return (min * math.pow(max / min, t)).clamp(min, max).toDouble();
+    return (min + (math.pow(_decades, t) - 1) / (_decades - 1) * range).clamp(min, max).toDouble();
+  }
+}
 
 class Knob extends StatefulWidget {
   const Knob({
@@ -22,7 +54,11 @@ class Knob extends StatefulWidget {
     this.onChangeEnd,
     this.enabled = true,
     this.size = 34,
+    this.exponential = false,
   });
+
+  /// Turn on an exponential taper ([Taper]): the parameter descriptor's `curve: exponential`.
+  final bool exponential;
 
   final double value, min, max, step;
   final double? defaultValue;
@@ -42,6 +78,10 @@ class Knob extends StatefulWidget {
 
 class _KnobState extends State<Knob> {
   double? _dragValue;
+  // The travel position during a drag, so slow drags still move along a curved or stepped taper.
+  double? _dragPos;
+
+  Taper get _taper => Taper(widget.min, widget.max, exponential: widget.exponential);
 
   double get _centre => (widget.min + widget.max) / 2;
 
@@ -77,8 +117,7 @@ class _KnobState extends State<Knob> {
 
   @override
   Widget build(BuildContext context) {
-    final range = widget.max - widget.min;
-    final norm = range <= 0 ? 0.0 : ((widget.value - widget.min) / range).clamp(0.0, 1.0).toDouble();
+    final norm = _taper.position(widget.value);
     final text = _describe(widget.value);
     final color = widget.enabled ? widget.color : Neon.dim;
     return Semantics(
@@ -94,19 +133,17 @@ class _KnobState extends State<Knob> {
         waitDuration: const Duration(milliseconds: 600),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onVerticalDragStart: widget.enabled ? (_) => _dragValue = widget.value : null,
+          onVerticalDragStart: widget.enabled ? (_) { _dragValue = widget.value; _dragPos = _taper.position(widget.value); } : null,
           onVerticalDragUpdate: widget.enabled
               ? (d) {
                   // 200 px of travel covers the range; hold Shift on a desktop for fine moves.
                   final fine = HardwareKeyboard.instance.isShiftPressed ? 0.2 : 1.0;
-                  final raw = (_dragValue ?? widget.value) - d.delta.dy / 200 * range * fine;
-                  final before = _dragValue ?? widget.value;
-                  _set(raw);
-                  // Keep sub-step travel so slow drags still move a stepped knob.
-                  if (widget.step > 0 && _dragValue == before) _dragValue = raw.clamp(widget.min, widget.max).toDouble();
+                  final pos = ((_dragPos ?? _taper.position(widget.value)) - d.delta.dy / 200 * fine).clamp(0.0, 1.0).toDouble();
+                  _dragPos = pos;
+                  _set(_taper.value(pos));
                 }
               : null,
-          onVerticalDragEnd: widget.enabled ? (_) { _dragValue = null; widget.onChangeEnd?.call(); } : null,
+          onVerticalDragEnd: widget.enabled ? (_) { _dragValue = null; _dragPos = null; widget.onChangeEnd?.call(); } : null,
           onDoubleTap: widget.enabled && widget.defaultValue != null
               ? () { _set(widget.defaultValue!); _dragValue = null; widget.onChangeEnd?.call(); }
               : null,

@@ -74,7 +74,7 @@ The app has three sections, Build, Files and Arrange; the Mixer, Automation, Exp
 
 **Phone (portrait):** a slim status row (project, tempo, CPU, More) on top; the section; then the transport in thumb reach (undo, redo, position, stop, play, record; drag sideways to scrub) and the section bar. Both hide while the keyboard is open, and a downward swipe on the section bar brings the status row within reach.
 
-**Phone (landscape):** a slim rail on the left, the section, the transport at the bottom.
+**Phone (landscape):** compact (owner, 2026-11-10): a narrow icon rail on the left (with the project and More), the section, the transport at the bottom with the tempo and CPU; edge to edge under the camera cutout, controls kept clear of it. In both orientations the top bars tuck away while the content scrolls down ([app](app.md), Frame).
 
 **Desktop, tablets:** the rail, the transport bar and docking panels, which can also float in windows. Files is a Unity-style tree, grid and inspector here; on a phone the tree is a drawer.
 
@@ -90,7 +90,7 @@ The same meaning everywhere, so nothing has to be learned twice:
 | Long-press | Right-click | Options menu, or pick up to drag |
 | Drag | Drag | Move a note or card, or change a value |
 | A second finger resting during a drag | Shift | Free the drag from the grid (piano roll) |
-| Double-tap | Double-click | Reset a value to its default; open an item |
+| Double-tap | Double-click | Reset a value to its default (every knob and slider with a meaningful default: a component's knob to its descriptor's default, a track's volume to 0 dB, pan to centre, zoom to its default; `ResetOnDoubleTap`); open an item |
 | Two-finger pinch / pan | Wheel, Ctrl+wheel | Zoom and scroll a grid or roll |
 | Swipe up on the sheet | — | Show more of the inspector |
 

@@ -192,6 +192,22 @@ class ComponentUseDoc {
 /// holds gains to the same range.
 const double kMaxMixGain = 3.9810717055349722;
 
+/// An imported MIDI file: its name and the pattern modules its parts became, in the file's order.
+class MidiFileDoc {
+  MidiFileDoc({required this.id, required this.name, required this.parts});
+  final String id;
+  String name;
+  final List<String> parts;
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'parts': parts};
+
+  static MidiFileDoc? fromJson(Map<String, dynamic> j) {
+    final id = j['id'], name = j['name'], parts = j['parts'];
+    if (id is! String || name is! String || parts is! List) return null;
+    return MidiFileDoc(id: id, name: _boundedProjectText(name, 128), parts: parts.whereType<String>().take(256).toList());
+  }
+}
+
 class LayerDoc {
   LayerDoc({
     required this.id,
@@ -214,6 +230,7 @@ class LayerDoc {
     this.busEnabled = true,
     this.collapsed = false,
     this.spaceBelow = 0,
+    this.ownColor = false,
   }) : effectIds = effectIds ?? [], clips = clips ?? [], automation = automation ?? [], components = components ?? [];
 
   /// The tallest visual spacer under a track, in logical pixels.
@@ -225,6 +242,9 @@ class LayerDoc {
   final String id;
   String name;
   int color;
+
+  /// The user chose [color] for this track; without it a track in a folder takes a shade of the folder's colour.
+  bool ownColor;
   String? generatorId;
   List<String> effectIds;
   String? patternId; // a pattern module whose notes play the generator; it sets the layer's length
@@ -282,6 +302,7 @@ class LayerDoc {
         if (instrument != null) 'instrument': instrument!.toJson(),
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
         if (spaceBelow > 0) 'space_below': spaceBelow,
+        if (ownColor) 'own_color': true,
       };
 
   static LayerDoc fromJson(Map<String, dynamic> j) => LayerDoc(
@@ -306,6 +327,7 @@ class LayerDoc {
           final num v when v.isFinite => v.toDouble().clamp(0.0, maxSpaceBelow),
           _ => 0,
         },
+        ownColor: j['own_color'] == true,
       );
 }
 
@@ -334,7 +356,9 @@ class ProjectDoc {
     Map<String, String>? savedLibrarySearches,
     List<CppComponentDoc>? cppComponents,
     List<ComponentUseDoc>? masterComponents,
-  })  : globals = globals ?? {},
+    List<MidiFileDoc>? midiFiles,
+  })  : midiFiles = midiFiles ?? [],
+        globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
         automation = automation ?? [],
@@ -383,6 +407,10 @@ class ProjectDoc {
   Map<String, String> savedLibrarySearches;
   List<CppComponentDoc> cppComponents;
   List<ComponentUseDoc> masterComponents; // native stereo master effects; this is not a trust grant
+
+  /// The MIDI files imported into the project, listed in Files (Audio & MIDI): each names the pattern modules its
+  /// parts became, so it can be dragged onto a track again. The notes live in those patterns only.
+  List<MidiFileDoc> midiFiles;
 
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
@@ -550,6 +578,7 @@ class ProjectDoc {
         'saved_library_searches': savedLibrarySearches,
         'cpp_components': [for (final component in cppComponents) component.toJson()],
         'master_components': [for (final c in masterComponents) c.toJson()],
+        if (midiFiles.isNotEmpty) 'midi_files': [for (final f in midiFiles) f.toJson()],
       };
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
@@ -576,6 +605,10 @@ class ProjectDoc {
       cppComponents: ((j['cpp_components'] as List?) ?? const [])
           .map((component) => CppComponentDoc.fromJson(component as Map<String, dynamic>)).toList(),
       masterComponents: ComponentUseDoc.listFromJson(j['master_components']),
+      midiFiles: [
+        for (final raw in ((j['midi_files'] as List?) ?? const []).take(512))
+          if (raw is Map<String, dynamic>) ?MidiFileDoc.fromJson(raw),
+      ],
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.

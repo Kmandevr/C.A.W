@@ -1313,6 +1313,7 @@ class AppState extends ChangeNotifier {
       color: project.layers.length % LayerDoc.trackColors,
       generatorId: gen?.id,
       lengthSteps: project.stepsPerBar,
+      volume: 1, // 0 dB (owner, 2026-11-10)
     ));
     _changed();
   }

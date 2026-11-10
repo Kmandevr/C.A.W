@@ -24,6 +24,7 @@ class AssetInspector extends StatelessWidget {
         FileAssetType.builtinEffect => 'Built-in · ${asset.native!.id}',
         FileAssetType.cppComponent => 'C++ components · ${asset.cpp!.componentId}',
         FileAssetType.cppFile => 'C++ components / ${asset.cpp!.name}',
+        FileAssetType.midiFile => 'MIDI files · ${asset.midi!.parts.length} part${asset.midi!.parts.length == 1 ? '' : 's'}',
         _ => asset.module!.folderPath.isEmpty ? '.caw modules' : '.caw modules / ${asset.module!.folderPath}',
       };
 

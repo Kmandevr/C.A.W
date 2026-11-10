@@ -15,7 +15,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 ### Pattern editor and piano roll
 
-- **[Implemented]** Pattern files, piano-roll editor, draw/select/erase tools, adaptive grid, snapping/free timing (with a second-finger bypass), note stretching from either end, triplets, keyboard navigation, note preview, velocity lane, and per-note velocity, chance, ratchet and slide editing.
+- **[Implemented]** Pattern files, piano-roll editor, draw/select/erase tools, adaptive grid, snapping/free timing (with a second-finger bypass), note stretching from either end (per-note expression points keep their grid positions), triplets, keyboard navigation, note preview, velocity lane, and per-note velocity, chance, ratchet and slide editing.
 - **[Implemented]** Patterns hold any number of notes and curve points in the app as in the engine (F7.1, 2026-11-04).
 - **[Implemented]** Opening straight into the last project; New, New from template and Open are in the project menu.
 - **[Implemented]** Pause and resume (Space) on the same beat, and Stop (Shift+Space) back to the start (2026-11-05, `caw_engine_play_at`).
@@ -36,7 +36,7 @@ This note records the current implementation gaps in C.A.W.'s music-production w
 
 ### Mixer and signal flow
 
-- **[Implemented]** Track volume/pan/mute/solo, generator/effect chains, nested folder buses, folder routing and group volume/pan, master output level (track and master gain up to +12 dB since 2026-11-10), and peak meters for the master (stereo), each track and each folder, on a dB scale. Routing between tracks, buses and master carries 32-bit float since 2026-11-03 (Foundation F4.2).
+- **[Implemented]** Track volume/pan/mute/solo, generator/effect chains, nested folder buses, folder routing and group volume/pan, master output level, and peak meters for the master (stereo), each track and each folder, on a dB scale; volume faders in dB on a REAPER-like taper up to +12 dB (track and master gain up to +12 dB since 2026-11-10), stereo meters on stereo tracks. Routing between tracks, buses and master carries 32-bit float since 2026-11-03 (Foundation F4.2).
 - **[Partial]** Exported module signals and sidechain concepts exist in the engine/module system, but full user-facing routing and modulation connections are not integrated as a general mixer workflow.
 - **[Incomplete]** Sends, arbitrary buses, parallel routing/effects, master effect chain and full plugin/global parameter automation.
 

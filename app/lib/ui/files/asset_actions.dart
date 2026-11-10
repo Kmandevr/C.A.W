@@ -146,7 +146,7 @@ class FilesActions {
       if (a.previewable) MenuEntry('preview', isPreviewing(a) ? Icons.stop : Icons.play_arrow, isPreviewing(a) ? 'Stop preview' : 'Preview'),
       MenuEntry('fav', fav ? Icons.star_rounded : Icons.star_outline_rounded, fav ? 'Remove from Favourites' : 'Add to Favourites'),
       if (!a.builtin) const MenuEntry('rename', Icons.drive_file_rename_outline, 'Rename'),
-      if (!a.builtin) const MenuEntry('duplicate', Icons.copy, 'Duplicate'),
+      if (!a.builtin && a.midi == null) const MenuEntry('duplicate', Icons.copy, 'Duplicate'),
       if (a.module != null) const MenuEntry('tags', Icons.sell_outlined, 'Edit tags'),
       if (a.module != null) const MenuEntry('export', Icons.file_upload_outlined, 'Export .caw'),
       if (!a.builtin) const MenuEntry('delete', Icons.delete_outline, 'Delete', danger: true, dividerBefore: true),

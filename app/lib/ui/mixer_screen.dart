@@ -9,6 +9,8 @@ import '../model/arrange_fx.dart';
 import '../model/project.dart';
 import 'param_control.dart';
 import 'theme.dart';
+import 'volume_fader.dart';
+import 'arrange/track_color.dart';
 import 'widgets.dart';
 
 /// Below this the strips keep their height and the panel scrolls up and down instead.
@@ -145,11 +147,6 @@ class _MixerScreenState extends State<MixerScreen> {
   });
 }
 
-/// "72%" to 0.72; null when it isn't a number.
-double? _parseLevel(String text) {
-  final v = double.tryParse(text.replaceAll('%', '').trim());
-  return v == null || !v.isFinite ? null : (v / 100).clamp(0.0, 1.0).toDouble();
-}
 
 /// "C" or "0" is centre, "30L" or "-30" is 30% left, "30R" or "30" is 30% right; null when it isn't a pan.
 double? _parsePan(String text) {
@@ -161,7 +158,10 @@ double? _parsePan(String text) {
   return ((left ? -v.abs() : right ? v.abs() : v) / 100).clamp(-1.0, 1.0).toDouble();
 }
 
-String _levelText(double v) => '${(v * 100).round()}%';
+String _levelText(double v) => VolumeTaper.label(v);
+
+/// The level as typed: dB without the unit ("-6.0", "-inf").
+String _levelInitial(double v) => VolumeTaper.label(v).replaceAll(' dB', '');
 String _panText(double v) => v.abs() < .01 ? 'C' : '${(v.abs() * 100).round()}${v < 0 ? 'L' : 'R'}';
 
 /// A value under a control: tap it to type a new one.
@@ -178,20 +178,19 @@ class _TypedValue extends StatelessWidget {
   ));
 }
 
-/// An upright fader: drag up and down.
+/// An upright REAPER-like fader in dB ([VolumeFader]): drag up and down, Shift or a resting second finger for fine
+/// moves, double-tap for 0 dB.
 class _Fader extends StatelessWidget {
-  const _Fader({super.key, required this.value, required this.color, required this.label, required this.onChanged});
-  final double value;
+  const _Fader({super.key, required this.value, required this.color, required this.label, required this.onChanged,
+      this.defaultGain = 1});
+  final double value, defaultGain;
   final Color color;
   final String label;
   final ValueChanged<double> onChanged;
 
   @override
-  Widget build(BuildContext context) => RotatedBox(quarterTurns: 3, child: Slider(
-    value: value.clamp(0.0, 1.0).toDouble(), min: 0, max: 1, activeColor: color,
-    semanticFormatterCallback: (v) => '$label ${(v * 100).round()}%',
-    onChanged: onChanged,
-  ));
+  Widget build(BuildContext context) =>
+      VolumeFader(value: value, color: color, label: label, onChanged: onChanged, defaultGain: defaultGain);
 }
 
 class _MasterStrip extends StatelessWidget {
@@ -211,10 +210,9 @@ class _MasterStrip extends StatelessWidget {
             style: TextStyle(color: Neon.pink, fontWeight: FontWeight.w800, fontSize: 12)))),
           Expanded(child: Row(children: [
             Expanded(child: _Fader(key: const ValueKey('fader-master'), value: s.project.master, color: Neon.pink,
-              label: 'Master level', onChanged: s.setMaster)),
-            SizedBox(width: 10, child: PeakMeter(state: s, read: () => s.meters.peakL, color: Neon.blue, vertical: true)),
-            const SizedBox(width: 3),
-            SizedBox(width: 10, child: PeakMeter(state: s, read: () => s.meters.peakR, color: Neon.green, vertical: true)),
+              label: 'Master level', onChanged: s.setMaster, defaultGain: 0.7)),
+            SizedBox(width: 22, child: PeakMeter(key: const ValueKey('master-meter'), state: s, read: () => s.meters.peakL,
+              readRight: () => s.meters.peakR, color: Neon.blue, vertical: true)),
             const SizedBox(width: 4),
           ])),
           PeakReadout(key: const ValueKey('master-peak-l'), state: s, read: () => s.meters.peakL,
@@ -223,8 +221,8 @@ class _MasterStrip extends StatelessWidget {
             style: Neon.code(size: 10, color: Neon.green)),
           _TypedValue(key: const ValueKey('level-master'), text: _levelText(s.project.master),
             tooltip: 'Type master level', color: Neon.pink,
-            onTap: () => typeValue(context, title: 'Master level (%)', initial: '${(s.project.master * 100).round()}',
-              parse: _parseLevel, apply: s.setMaster)),
+            onTap: () => typeValue(context, title: 'Master level (dB, or -inf)', initial: _levelInitial(s.project.master),
+              parse: VolumeTaper.parse, apply: s.setMaster)),
         ]),
       ),
     ));
@@ -277,7 +275,7 @@ class ChannelStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final folders = state.project.layers.where((item) => item.isFolder && item.id != layer.id).toList();
     final routeId = folders.any((folder) => folder.id == layer.parentId) ? layer.parentId : null;
-    final tint = Neon.layer(layer.color);
+    final tint = trackColor(state, layer);
     return SizedBox(width: _stripWidth, child: NeonPanel(
       color: state.selectedLayerId == layer.id ? Neon.blue : tint,
       padding: const EdgeInsets.fromLTRB(5, 6, 5, 6),
@@ -326,13 +324,13 @@ class ChannelStrip extends StatelessWidget {
               ],
               onChanged: (id) { state.moveLayerIntoFolder(layer, id); },
             ))),
-          SizedBox(height: 40, child: Slider(
+          SizedBox(height: 40, child: ResetOnDoubleTap(onReset: () => state.mixLayer(layer, pan: 0), child: Slider(
             key: ValueKey('pan-${layer.id}'),
             value: layer.pan.clamp(-1.0, 1.0).toDouble(), min: -1, max: 1, activeColor: Neon.blue,
             semanticFormatterCallback: (v) => v.abs() < .01 ? '${layer.name} pan centre'
               : '${layer.name} pan ${(v.abs() * 100).round()}% ${v < 0 ? 'left' : 'right'}',
             onChanged: (v) => state.mixLayer(layer, pan: v),
-          )),
+          ))),
           _TypedValue(key: ValueKey('pan-value-${layer.id}'), text: _panText(layer.pan), tooltip: 'Type ${layer.name} pan',
             color: Neon.blue, onTap: () => typeValue(context, title: 'Pan (C, 30L, 30R or -30)',
               initial: _panText(layer.pan), parse: _parsePan, apply: (v) => state.mixLayer(layer, pan: v))),
@@ -346,8 +344,8 @@ class ChannelStrip extends StatelessWidget {
           PeakReadout(state: state, read: () => index < state.layerMeters.length ? state.layerMeters[index].peak : 0.0,
             style: Neon.code(size: 10, color: Neon.dim)),
           _TypedValue(key: ValueKey('level-${layer.id}'), text: _levelText(layer.volume), tooltip: 'Type ${layer.name} level',
-            color: Neon.green, onTap: () => typeValue(context, title: 'Level (%)',
-              initial: '${(layer.volume * 100).round()}', parse: _parseLevel,
+            color: Neon.green, onTap: () => typeValue(context, title: 'Level (dB, or -inf)',
+              initial: _levelInitial(layer.volume), parse: VolumeTaper.parse,
               apply: (v) => state.mixLayer(layer, volume: v))),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             ToggleChip(label: 'M', size: 40, tooltip: layer.mute ? 'Unmute ${layer.name}' : 'Mute ${layer.name}', on: layer.mute, color: Neon.yellow,

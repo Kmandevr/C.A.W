@@ -5,10 +5,13 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/arrange_fx.dart';
+import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/midi_clips.dart';
 import 'package:caw/model/midi_file.dart';
 import 'package:caw/model/pattern_doc.dart';
 import 'package:caw/model/project.dart';
+import 'package:caw/ui/frame/sections.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 List<int> u16(int v) => [v >> 8 & 0xFF, v & 0xFF];
@@ -326,6 +329,34 @@ void main() {
       final back = readMidiFile(clipToMidi(s.project, keys.clips.last)!);
       expect(back.firstBpm, closeTo(140, 0.01));
       expect([for (final n in back.tracks.last.notes) (n.key, n.on, n.off)], [(60, 0, 960)]);
+    });
+
+    test('an imported file is listed in Files and dropped again onto a track: one clip per part', () {
+      final s = AppState()..project = project();
+      placeMidiImport(s, midiImport(twoTracks(500000), beatsPerBar: 4, name: 'Song'));
+      expect(s.project.midiFiles.single.name, 'Song');
+      expect(s.project.midiFiles.single.parts.length, 2);
+      final saved = ProjectDoc.fromJson(s.project.toJson());
+      expect(saved.midiFiles.single.parts, s.project.midiFiles.single.parts);
+      final folder = s.folderAt('audio/midi')!;
+      final asset = s.folderAssets(folder).single;
+      expect(asset.type, FileAssetType.midiFile);
+      expect(asset.drag!.kind, AssetKind.midiFile);
+      // Dropped on Keys at bar 2: the first part there, the second on a new track right under it, same step.
+      final keys = s.project.layers.first;
+      final tracks = s.project.layers.length;
+      s.arrangementSnapSteps = 4;
+      expect(s.dropAsset(keys, asset.drag!, atStep: 17), isTrue);
+      expect(keys.clips.single.startSteps, 16, reason: 'on the snap grid');
+      expect(s.project.layers.length, tracks + 1);
+      final under = s.project.layers[1];
+      expect(under.clips.single.startSteps, 16);
+      expect(under.clips.single.patternId, s.project.midiFiles.single.parts[1]);
+      expect(s.usesOf(asset), containsAll(['Keys', under.name]));
+      // Deleting the file's entry keeps its patterns and clips.
+      s.deleteAsset(asset);
+      expect(s.project.midiFiles, isEmpty);
+      expect(under.clips, hasLength(1));
     });
   });
 }

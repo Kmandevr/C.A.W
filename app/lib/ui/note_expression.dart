@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../model/pattern_doc.dart';
 import 'theme.dart';
+import 'widgets.dart';
 
 /// Shapes to stamp on a note (the owner asked for presets besides drawing and the vibrato knob).
 final List<(String, NoteExpression Function(NoteExpression))> expressionPresets = [
@@ -40,10 +41,13 @@ class ExpressionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = expr;
-    Widget slider(String label, double v, double min, double max, String Function(double) show, NoteExpression Function(double) set) =>
+    // Double-tap: the value a note has without vibrato (none, 5 Hz, no fade-in).
+    Widget slider(String label, double v, double min, double max, String Function(double) show, NoteExpression Function(double) set,
+            double reset) =>
         Row(children: [
           SizedBox(width: 92, child: Text('$label ${show(v)}', style: Neon.code(size: 12))),
-          Expanded(child: Slider(value: v.clamp(min, max), min: min, max: max, onChanged: (x) => onChanged(set(x)))),
+          Expanded(child: ResetOnDoubleTap(onReset: () => onChanged(set(reset)),
+            child: Slider(value: v.clamp(min, max), min: min, max: max, onChanged: (x) => onChanged(set(x))))),
         ]);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 8),
@@ -56,9 +60,9 @@ class ExpressionPanel extends StatelessWidget {
           style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
           points: e.bend, min: -12, max: 12, zero: 0, snap: 1, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(bend: p))),
-      slider('Vibrato', e.vibDepth, 0, 2, (v) => v.toStringAsFixed(2), (v) => e.copyWith(vibDepth: v)),
-      slider('Rate', e.vibRate, 0.5, 12, (v) => '${v.toStringAsFixed(1)} Hz', (v) => e.copyWith(vibRate: v)),
-      slider('Fade-in', e.vibFade, 0, 1, (v) => '${(v * 100).round()}%', (v) => e.copyWith(vibFade: v)),
+      slider('Vibrato', e.vibDepth, 0, 2, (v) => v.toStringAsFixed(2), (v) => e.copyWith(vibDepth: v), 0),
+      slider('Rate', e.vibRate, 0.5, 12, (v) => '${v.toStringAsFixed(1)} Hz', (v) => e.copyWith(vibRate: v), const NoteExpression().vibRate),
+      slider('Fade-in', e.vibFade, 0, 1, (v) => '${(v * 100).round()}%', (v) => e.copyWith(vibFade: v), 0),
       Text('Volume over the note', style: TextStyle(color: Neon.dim, fontSize: 12)),
       NoteCurveEditor(
           points: e.press, min: 0, max: 1, zero: 1, snap: valueSnap, timeSnap: timeSnap, color: color, onChanged: (p) => onChanged(e.copyWith(press: p))),
