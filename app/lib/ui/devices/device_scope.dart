@@ -38,9 +38,9 @@ class DeviceScope extends InheritedWidget {
   }
 
   @override
-  bool updateShouldNotify(DeviceScope old) =>
-      old.target.layerId != target.layerId || old.target.slot != target.slot || old.matrix != matrix || old.accent != accent ||
-      old.secondary != secondary;
+  // The editor rebuilds the scope only when the device changed (a value, undo, the catalog), and every control
+  // reads its values through it, so each rebuild reaches them (an effect has no mod matrix whose new object would).
+  bool updateShouldNotify(DeviceScope old) => true;
 }
 
 /// A source's colour: envelopes green, LFOs blue, random violet, the note's own sources yellow.
