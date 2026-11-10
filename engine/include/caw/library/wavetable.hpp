@@ -136,6 +136,13 @@ public:
         const float f = static_cast<float>(x - i);
         return t[i] + (t[i + 1] - t[i]) * f;
     }
+    // The samples of frame `frame`, mip level `level`: levelSize(level) + 1 floats (the last repeats the first,
+    // so reading sample i and i + 1 for any i below levelSize needs no wrap). For a renderer that reads many
+    // copies at once (a unison stack) without read()'s per-sample offset sums. Null if out of range.
+    const float* levelData(int frame, int level) const noexcept {
+        if (data_.empty() || frame < 0 || frame >= maxFrames_ || level < 0 || level >= levels_) return nullptr;
+        return &data_[frameStride_ * static_cast<size_t>(frame) + levelOffset_[level]];
+    }
     // Morph: `position` 0..1 across frameCount() frames, linearly between the two nearest.
     double readMorph(double position, int level, double phase) const noexcept {
         if (level < 0 || data_.empty()) return 0.0;

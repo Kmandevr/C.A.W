@@ -1,5 +1,6 @@
 // Built-in C++ instruments (#157): drums, a kit, a bass, an acid synth and a morph synth, on the Library's kernels.
 #include "builtin_instruments.h"
+#include "builtin_flagship.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1068,6 +1069,7 @@ void registerBuiltinInstruments(ModuleRegistry& registry) {
     registry.add(kBass, &make<BassInstrument>);
     registry.add(kAcid, &make<AcidInstrument>);
     registry.add(kMorph, &make<MorphInstrument>);
+    registerFlagshipSynth(registry);  // the flagship synth (builtin_flagship.cpp)
 }
 
 }  // namespace caw

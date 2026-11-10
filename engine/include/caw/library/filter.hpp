@@ -1,4 +1,4 @@
-// C.A.W. Library: filters (state-variable, one-pole, a 4-pole ladder), header-only and allocation-free.
+// C.A.W. Library: filters (state-variable, one-pole, a 4-pole ladder and its multimode form), header-only and allocation-free.
 #pragma once
 
 #include <cmath>
@@ -127,6 +127,63 @@ private:
         }
         return u;
     }
+    double s_[4] = {0, 0, 0, 0};
+    double G_ = 0.5, k_ = 0;
+    double cutoff_ = -1, resonance_ = -1, rate_ = -1;  // what set() last worked out
+};
+
+// The ladder with low-, high- and band-pass outputs, by mixing its four stages' outputs ("pole mixing", the
+// classic way a multimode ladder is built): with u the input to the first stage and y1..y4 each stage's output,
+// low = y4 (24 dB/octave), high = u - 4 y1 + 6 y2 - 4 y3 + y4 (24 dB/octave: four one-pole high-passes, since
+// each stage is u times a one-pole low-pass H and this is u (1 - H)^4), band = 4 (y2 - 2 y3 + y4) (u H^2
+// (1 - H)^2: 12 dB/octave each side, unity near the cutoff). The resonance feeds back from y4 in every mode,
+// so it peaks at the cutoff whichever output is taken. Same cost as Ladder::processFast plus a few adds.
+enum class LadderMode : int { LowPass, HighPass, BandPass };
+class MultiLadder {
+public:
+    void set(double cutoff, double resonance, double sampleRate) noexcept {
+        if (cutoff == cutoff_ && resonance == resonance_ && sampleRate == rate_) return;  // unchanged: no tan
+        cutoff_ = cutoff;
+        resonance_ = resonance;
+        rate_ = sampleRate;
+        double fc = finiteOr0(cutoff);
+        const double top = 0.45 * sampleRate;
+        fc = fc < 10.0 ? 10.0 : (fc > top ? top : fc);
+        const double g = detTan(kPi * fc / sampleRate);
+        G_ = g / (1.0 + g);
+        const double r = finiteOr0(resonance) < 0.0 ? 0.0 : (resonance > 1.0 ? 1.0 : finiteOr0(resonance));
+        k_ = 3.95 * r;
+    }
+    template <LadderMode Mode>
+    double process(double input) noexcept {
+        const double x = finiteOr0(input);
+        const double b = 1.0 - G_;
+        const double G2 = G_ * G_, G3 = G2 * G_, G4 = G3 * G_;
+        const double S = b * (G3 * s_[0] + G2 * s_[1] + G_ * s_[2] + s_[3]);
+        const double u = fastTanh((x * (1.0 + 0.5 * k_) - k_ * S) / (1.0 + k_ * G4));
+        double y[4];
+        double in = u;
+        for (int i = 0; i < 4; ++i) {
+            const double v = (in - s_[i]) * G_;
+            y[i] = v + s_[i];
+            s_[i] = y[i] + v;
+            if (s_[i] < 1e-20 && s_[i] > -1e-20) s_[i] = 0.0;  // a silent tail never runs in subnormals
+            in = y[i];
+        }
+        if constexpr (Mode == LadderMode::LowPass) return y[3];
+        else if constexpr (Mode == LadderMode::HighPass) return u - 4.0 * y[0] + 6.0 * y[1] - 4.0 * y[2] + y[3];
+        else return 4.0 * (y[1] - 2.0 * y[2] + y[3]);
+    }
+    double process(double input, LadderMode mode) noexcept {
+        switch (mode) {
+            case LadderMode::HighPass: return process<LadderMode::HighPass>(input);
+            case LadderMode::BandPass: return process<LadderMode::BandPass>(input);
+            default: return process<LadderMode::LowPass>(input);
+        }
+    }
+    void clear() noexcept { s_[0] = s_[1] = s_[2] = s_[3] = 0.0; }
+
+private:
     double s_[4] = {0, 0, 0, 0};
     double G_ = 0.5, k_ = 0;
     double cutoff_ = -1, resonance_ = -1, rate_ = -1;  // what set() last worked out
