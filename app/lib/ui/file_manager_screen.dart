@@ -9,6 +9,7 @@ import 'files/asset_views.dart';
 import 'files/files_tree.dart';
 import 'files/library_manager.dart';
 import 'glass.dart';
+import 'midi_file_actions.dart';
 import 'theme.dart';
 import 'tokens.dart';
 
@@ -164,6 +165,7 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       MenuEntry('export', Icons.file_upload_outlined, 'Export .cawproj'),
       MenuEntry('import', Icons.file_open_outlined, 'Import project'),
       MenuEntry('module', Icons.note_add_outlined, 'Import .caw module'),
+      MenuEntry('midi', Icons.piano, 'Import MIDI file as clips'),
       MenuEntry('restore', Icons.bookmark_add_outlined, 'Create restore point', dividerBefore: true),
       MenuEntry('history', Icons.history, 'Version history'),
       MenuEntry('library', Icons.folder_copy_outlined, 'Project library (folders, tags)', dividerBefore: true),
@@ -177,6 +179,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
         if (mounted) setState(() => _selected = null);
       case 'module':
         await importCawModule(context, state, folder.libraryPath);
+      case 'midi':
+        await importMidiFile(context, state);
       case 'restore':
         await createProjectRestorePoint(context, state);
       case 'history':
