@@ -471,6 +471,7 @@ struct OscVoice {
     int count = 0;  // copies in the stack
     int warpMode = kWarpNone;
     float w1 = 0.0f, w2 = 0.0f, w3 = 0.0f, mix = 0.0f;  // the warp's constants; the morph between frames a and b
+    int f0 = -1, f1 = -1;                              // the frames a and b read
     double phase[kMaxCopies] = {};
     double dt[kMaxCopies] = {};  // cycles per sample; 0 for a copy above Nyquist (silent)
     const float* a[kMaxCopies] = {};
@@ -733,6 +734,7 @@ struct Voice {
     double gain0 = 0.0, gain1 = 0.0;  // the level ramps from gain0 to gain1 over the control period
     bool mono = false;  // the mono or legato voice: its pitch follows `glide` at each control
     double configuredPitch = -1.0;  // the pitch its oscillators and filters were last worked out for
+    double moving[kSlots] = {};     // the values the slots moved, as its sections were last worked out
     lib::Glide glide;   // in semitones, stepped once per control period
 };
 
@@ -1242,13 +1244,34 @@ private:
     static constexpr uint32_t kMovedRouting = 1u << 5, kMovedEnvs = 1u << 6, kMovedLfos = 1u << 7, kMovedGlobal = 1u << 8;
 
     void configureVoice(Voice& v, const double* offsets) noexcept {
-        const auto P = [&](uint32_t k) noexcept { return value(k, offsets); };
-        // Only what changed: every section at a note's start or after a knob moved, else those a slot moves and
-        // those that follow the pitch (it glides, bends).
+        // The values the slots move, once each (an exp for each one away from its knob).
+        double moving[kSlots];
+        for (uint32_t t = 0; t < targetCount_; ++t)
+            moving[t] = offsets[t] != 0.0 ? modulated(targetParam_[t], static_cast<int>(t), offsets) : base_[targetParam_[t]];
+        const auto P = [&](uint32_t k) noexcept {
+            const int t = targetOf_[k];
+            return t ? moving[t - 1] : base_[k];
+        };
+        // Only what changed: every section at a note's start or after a knob moved; else the sections where a value
+        // a slot moves is not what it was at the last control (a slot whose source rests changes nothing), and what
+        // follows the pitch (it glides, bends). An oscillator whose frame alone moved (an LFO sweeping the table)
+        // only re-reads its frames (2026-11-10 second performance pass).
         const bool all = v.starting || knobsChanged_;
         const bool pitch = v.pitch != v.configuredPitch;
         v.configuredPitch = v.pitch;
-        const auto moved = [&](uint32_t bits) noexcept { return all || (moved_ & bits) != 0; };
+        uint32_t changed = 0, frameOnly = 0;
+        if (!all) {
+            uint32_t frame = 0, other = 0;
+            for (uint32_t t = 0; t < targetCount_; ++t) {
+                if (moving[t] == v.moving[t]) continue;
+                const uint32_t k = targetParam_[t], section = sectionOf(k);
+                changed |= section;
+                (k < kFltBase && k % kOscCount == kOscFrame ? frame : other) |= section;
+            }
+            frameOnly = pitch ? 0u : frame & ~other;
+        }
+        std::copy(moving, moving + targetCount_, v.moving);
+        const auto moved = [&](uint32_t bits) noexcept { return all || (changed & bits) != 0; };
         // Only what a slot listens to runs (env 1 always: it is the level).
         for (uint32_t e = 0; e < kEnvs && moved(kMovedEnvs); ++e)
             if (e == 0 || uses(kSrcEnv1 + e))
@@ -1265,11 +1288,14 @@ private:
             v.random.setShape(P(kRndMode) >= 0.5 ? lib::LfoShape::SmoothRandom : lib::LfoShape::SampleHold);
             v.random.setRateHz(P(kRndRate));
         }
-        for (uint32_t o = 0; o < kOscs; ++o)
-            if (pitch || moved(1u << o)) configureOscillator(v, o, P);
+        for (uint32_t o = 0; o < kOscs; ++o) {
+            if (frameOnly & (1u << o)) moveFrame(v.osc[o], P(oscParam(o, kOscFrame)));
+            else if (pitch || moved(1u << o)) configureOscillator(v, o, P);
+        }
         if (moved(kMovedRouting)) v.parallel = P(kFltRouting) >= 0.5;
         for (uint32_t f = 0; f < kFilters; ++f) {
-            if (!pitch && !moved(1u << (3 + f))) continue;
+            // The pitch moves a filter only through its key tracking.
+            if (!moved(1u << (3 + f)) && !(pitch && P(fltParam(f, kFltKeytrack)) != 0.0)) continue;
             if (P(fltParam(f, kFltOn)) < 0.5) {
                 v.filter[f].configure(false, 0, 0, 0, 1, 0, 1, sr_, v.starting && v.fresh);
                 continue;
@@ -1281,6 +1307,24 @@ private:
                                   P(fltParam(f, kFltMorph)), P(fltParam(f, kFltMix)), sr_, v.starting && v.fresh);
         }
         v.fresh = false;
+    }
+
+    // Only the frame position moved: the copies keep their steps, mip levels and gains, and read the new pair of
+    // frames (the same frames and morph as configureOscillator works out).
+    void moveFrame(OscVoice& o, double frame) noexcept {
+        if (!o.on || o.key.table < 0) return;
+        const double position = clampd(frame, 0.0, 1.0);
+        if (position == o.key.position) return;
+        o.key.position = position;
+        const lib::Wavetable& table = tables_->table[o.key.table];
+        const double at = position * (table.frameCount() - 1);
+        const int f0 = static_cast<int>(at), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
+        o.mix = static_cast<float>(at - f0);
+        if (f0 == o.f0 && f1 == o.f1) return;
+        for (int c = 0; c < o.count; ++c)
+            if (o.a[c]) o.a[c] = table.levelData(f0, o.level[c]), o.b[c] = table.levelData(f1, o.level[c]);
+        o.f0 = f0;
+        o.f1 = f1;
     }
 
     template <class Get>
@@ -1319,6 +1363,8 @@ private:
         const double position = key.position * (table.frameCount() - 1);
         const int f0 = static_cast<int>(position), f1 = f0 + 1 < table.frameCount() ? f0 + 1 : f0;
         o.mix = static_cast<float>(position - f0);
+        o.f0 = f0;
+        o.f1 = f1;
         {
             // Only the frame position moved (an LFO sweeping the table): the copies keep their steps, mip levels
             // and gains, and just read the new pair of frames.
