@@ -11,7 +11,8 @@ import '../theme.dart';
 /// Hands the device editor's state to its controls.
 class DeviceScope extends InheritedWidget {
   const DeviceScope({super.key, required this.target, required this.matrix, required this.dragging,
-    required this.accent, required this.focusSource, this.openSource, required super.child});
+    required this.accent, Color? secondary, required this.focusSource, this.openSource, required super.child})
+      : secondary = secondary ?? accent;
 
   final DeviceTarget target;
 
@@ -21,8 +22,8 @@ class DeviceScope extends InheritedWidget {
   /// The mod source being dragged onto a knob (every knob it can reach lights up), or null.
   final ValueNotifier<ModSource?> dragging;
 
-  /// The device's colour.
-  final Color accent;
+  /// The device's colour, and its family's second colour (the right channel, the output, a gradient's end).
+  final Color accent, secondary;
 
   /// The source the MOD page shows (a tapped chip picks it).
   final ValueNotifier<ModSource> focusSource;
@@ -38,7 +39,8 @@ class DeviceScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(DeviceScope old) =>
-      old.target.layerId != target.layerId || old.target.slot != target.slot || old.matrix != matrix || old.accent != accent;
+      old.target.layerId != target.layerId || old.target.slot != target.slot || old.matrix != matrix || old.accent != accent ||
+      old.secondary != secondary;
 }
 
 /// A source's colour: envelopes green, LFOs blue, random violet, the note's own sources yellow.
@@ -84,7 +86,7 @@ String formatParamValue(ComponentParameterInfo? p, double v, {bool pan = false})
 /// A short knob label: the descriptor's name without its section ("Osc 1 detune" → "detune"), capitalised.
 String shortParamLabel(ComponentParameterInfo? p, String fallback) {
   final name = p?.label ?? fallback;
-  final m = RegExp(r'^(Osc|Filter|Env|LFO|Mod) \d+ ').firstMatch(name);
+  final m = RegExp(r'^(Osc|Filter|Env|LFO|Mod|Band) \d+ ').firstMatch(name);
   final s = m == null ? name : name.substring(m.end);
   return s.isEmpty ? name : s[0].toUpperCase() + s.substring(1);
 }

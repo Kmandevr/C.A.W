@@ -10,7 +10,10 @@ import '../../theme.dart';
 import '../device_controls.dart';
 import '../device_registry.dart';
 import '../device_scope.dart';
+import '../kit/device_style.dart';
 import '../visuals/fx_visuals.dart';
+import 'effect_page.dart';
+import 'eq_editor.dart';
 
 // An EQ band's knobs: `bandN_` or the built-in EQ's `bN_` (org.caw.eq).
 final _band = RegExp(r'^(band|b)(\d+)_(freq|gain|q|type|on|channel)$');
@@ -25,8 +28,7 @@ DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
   if (_byId[info.id] case final e?) return e;
   if (info.parameters.any((p) => _band.hasMatch(p.id)) &&
       ((_has(info, 'band1_freq') && _has(info, 'band1_gain')) || (_has(info, 'b1_freq') && _has(info, 'b1_gain')))) {
-    return DeviceEditorEntry((_) => [DeviceSection('eq', 'EQ', Icons.graphic_eq, (_) => const EqEditorPage())],
-        accent: Neon.yellow);
+    return singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage());
   }
   if (_has(info, 'threshold') && _has(info, 'ratio')) {
     return DeviceEditorEntry((_) => [DeviceSection('comp', 'COMP', Icons.compress, (_) => const CompressorEditorPage())],
@@ -52,6 +54,7 @@ DeviceEditorEntry _levels(String id, String label, IconData icon, Color accent) 
 
 /// The built-in effects without a shape the matchers know (#173): a live view of their levels and display values.
 final Map<String, DeviceEditorEntry> _byId = {
+  'org.caw.eq': singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage()),
   'org.caw.limiter': DeviceEditorEntry((_) => [DeviceSection('limit', 'LIMIT', Icons.vertical_align_top, (_) => const LimiterEditorPage())],
       accent: Neon.yellow),
   'org.caw.gate': _levels('gate', 'GATE', Icons.door_sliding_outlined, Neon.yellow),
@@ -168,58 +171,6 @@ class LimiterEditorPage extends StatelessWidget {
         gainReductionDb: f?.gainReductionDb, inputDb: f?.inputDb))),
       DeviceCard(title: 'LIVE', color: scope.accent, child: const LevelMeters(showValues: false)),
       const ParamGrid(),
-    ]);
-  }
-}
-
-/// An EQ: one curve with a node per `bandN_`, its type read from `bandN_type`'s choice label (shelf, cut, peak).
-class EqEditorPage extends StatelessWidget {
-  const EqEditorPage({super.key});
-
-  static EqKind kindOf(String label) {
-    final l = label.toLowerCase();
-    if (l.contains('low') && l.contains('shelf')) return EqKind.lowShelf;
-    if (l.contains('high') && l.contains('shelf')) return EqKind.highShelf;
-    if (l.contains('low cut') || l.contains('high pass') || l.contains('highpass') || l == 'hp') return EqKind.lowCut;
-    if (l.contains('high cut') || l.contains('low pass') || l.contains('lowpass') || l == 'lp') return EqKind.highCut;
-    return EqKind.peak;
-  }
-
-  static EqKind _kind(ComponentParameterInfo? p, double v) =>
-      p != null && p.isChoice ? kindOf(formatParamValue(p, v)) : EqKind.peak;
-
-  @override
-  Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    var prefix = 'band';
-    final numbers = <int>{
-      for (final p in t.info?.parameters ?? const <ComponentParameterInfo>[])
-        if (_band.firstMatch(p.id) case final m?) int.parse(m.group(2)!),
-    }.toList()
-      ..sort();
-    if (t.param('band1_freq') == null && t.param('b1_freq') != null) prefix = 'b';
-    String? id(int n, String k) => t.param('$prefix${n}_$k') == null ? null : '$prefix${n}_$k';
-    final bands = [
-      for (final n in numbers)
-        EqBand(
-          kind: _kind(t.param('$prefix${n}_type'), t.value('$prefix${n}_type')),
-          freqParam: id(n, 'freq'),
-          gainParam: id(n, 'gain'),
-          qParam: id(n, 'q'),
-          onParam: id(n, 'on'),
-          label: '$n'),
-    ];
-    final range = t.param('${prefix}1_gain')?.max ?? 18;
-    return _page([
-      DeviceCard(title: 'BANDS', color: scope.accent, child: _Display(builder: (context, f) => EqCurve(
-        bands: bands, height: 160, rangeDb: range, spectrum: f?.spectrum))),
-      DeviceCard(title: 'LIVE', color: scope.accent, child: const LevelMeters(showValues: false)),
-      for (final n in numbers)
-        DeviceCard(title: 'BAND $n', color: scope.accent, child: ParamGrid(only: [
-          for (final k in ['on', 'type', 'freq', 'gain', 'q', 'channel']) '$prefix${n}_$k',
-        ])),
-      ParamGrid(skip: {for (final p in t.info?.parameters ?? const <ComponentParameterInfo>[]) if (_band.hasMatch(p.id)) p.id}),
     ]);
   }
 }

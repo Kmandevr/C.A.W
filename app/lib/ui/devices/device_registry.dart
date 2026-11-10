@@ -7,6 +7,7 @@ import '../../model/device_target.dart';
 import 'effects/effect_editors.dart';
 import 'flagship/flagship_editor.dart';
 import 'generic_device_page.dart';
+import 'kit/device_style.dart';
 
 /// One tab of a device editor.
 class DeviceSection {
@@ -16,11 +17,13 @@ class DeviceSection {
   final WidgetBuilder builder;
 }
 
-/// A custom editor: its tabs, and its colour (null: the track's).
+/// A custom editor: its tabs, its family (its colours and badge) and an accent that overrides the family's (both
+/// null: the track's colour).
 class DeviceEditorEntry {
-  const DeviceEditorEntry(this.sections, {this.accent});
+  const DeviceEditorEntry(this.sections, {this.accent, this.family});
   final List<DeviceSection> Function(DeviceTarget target) sections;
   final Color? accent;
+  final DeviceFamily? family;
 }
 
 class DeviceEditors {

@@ -2,7 +2,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../engine/component_info.dart';
 import '../../model/mod_matrix.dart';
@@ -11,9 +10,14 @@ import '../motion.dart';
 import '../theme.dart';
 import '../widgets.dart' show ResetOnDoubleTap;
 import 'device_scope.dart';
+import 'kit/feel.dart';
 
-/// A rotary knob for parameter [paramId]: drag up or down (200 px covers the travel; Shift for fine), double-tap
-/// for the default, on the descriptor's taper. With a mod matrix it takes a dropped source (a new route) and shows
+/// [p]'s knob travel (its descriptor's curve).
+Taper taperOf(ComponentParameterInfo p) => Taper(p.min, p.max, exponential: p.exponential);
+
+/// A rotary knob for parameter [paramId]: drag up or down (200 px covers the travel; a second finger or Shift for
+/// fine), double-tap for the default, long-press to type a value, on the descriptor's taper. While it is dragged a
+/// bubble above it shows the value, so the finger doesn't hide it. With a mod matrix it takes a dropped source (a new route) and shows
 /// each route's span as a coloured ring outside the knob; a drag that starts on the ring sets that route's amount.
 class DeviceKnob extends StatefulWidget {
   const DeviceKnob(this.paramId, {super.key, this.label, this.size = 40, this.color, this.valueText});
@@ -32,6 +36,8 @@ class _DeviceKnobState extends State<DeviceKnob> {
   int? _ringSlot; // the route a ring drag sets
   double _ringAmount = 0;
   int? _lastSlot; // the route dropped or dragged last: the one a ring drag picks
+
+  final _bubble = OverlayPortalController();
 
   double get _box => widget.size + 14;
 
@@ -56,10 +62,12 @@ class _DeviceKnobState extends State<DeviceKnob> {
       t.setLive(p.id, v);
       final now = t.value(p.id);
       final c = (p.min + p.max) / 2;
-      if (before != now && before != c && (now == c || (before - c) * (now - c) < 0)) Motion.tick();
+      if (before != now && before != c && (now == c || (before - c) * (now - c) < 0)) DeviceFeel.detent();
     }
 
     void start(Offset local) {
+      DeviceFeel.grab();
+      _bubble.show();
       final centre = Offset(math.max(52, _box + 2) / 2, _box / 2);
       final r = widget.size / 2;
       if (routes.isNotEmpty && (local - centre).distance > r * 0.8) {
@@ -73,7 +81,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
     }
 
     void update(double dy) {
-      final fine = HardwareKeyboard.instance.isShiftPressed ? 0.2 : 1.0;
+      final fine = DeviceFingers.fine;
       if (_ringSlot != null) {
         _ringAmount = (_ringAmount - dy / 200 * fine).clamp(-1.0, 1.0);
         matrix!.setAmountLive(_ringSlot!, _ringAmount);
@@ -87,6 +95,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
     void end() {
       _pos = null;
       _ringSlot = null;
+      _bubble.hide();
       t.commit();
     }
 
@@ -105,11 +114,15 @@ class _DeviceKnobState extends State<DeviceKnob> {
           onReset: () => t.set(p.id, p.defaultValue),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            onLongPress: p.isChoice ? null : () => _typeValue(context, p, value),
             onVerticalDragStart: (d) => start(d.localPosition),
             onVerticalDragUpdate: (d) => update(d.delta.dy),
             onVerticalDragEnd: (_) => end(),
             onVerticalDragCancel: end,
-            child: SizedBox(
+            child: OverlayPortal(
+              controller: _bubble,
+              overlayChildBuilder: (_) => _ValueBubble(anchor: context, text: text, color: color),
+              child: SizedBox(
               width: math.max(52, _box + 2),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 SizedBox(width: _box, height: _box, child: CustomPaint(
@@ -126,7 +139,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
                 Text(text, maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: Neon.code(size: 9, color: color).copyWith(height: 1.2)),
               ]),
-            ),
+            )),
           ),
         ),
       ),
@@ -151,6 +164,52 @@ class _DeviceKnobState extends State<DeviceKnob> {
           builder: (context, dragging, _) => knob(dragging != null || hovering.isNotEmpty),
         ),
     ));
+  }
+
+  Future<void> _typeValue(BuildContext context, ComponentParameterInfo p, double value) async {
+    final t = DeviceScope.of(context).target;
+    DeviceFeel.tap();
+    final field = TextEditingController(text: value.toStringAsFixed(p.max - p.min > 20 ? 1 : 3));
+    final typed = await showDialog<double>(context: context, builder: (c) => AlertDialog(
+      title: Text(p.label, style: const TextStyle(fontSize: 14)),
+      content: TextField(
+        key: const ValueKey('dknob-type'),
+        controller: field,
+        autofocus: true,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+        decoration: InputDecoration(suffixText: p.unit, helperText: '${p.min} .. ${p.max}'),
+        onSubmitted: (s) => Navigator.of(c).pop(double.tryParse(s.trim())),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(c).pop(), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.of(c).pop(double.tryParse(field.text.trim())), child: const Text('Set')),
+      ],
+    ));
+    field.dispose();
+    if (typed != null) t.set(p.id, typed);
+  }
+}
+
+/// The value above a knob while it is dragged.
+class _ValueBubble extends StatelessWidget {
+  const _ValueBubble({required this.anchor, required this.text, required this.color});
+  final BuildContext anchor;
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final box = anchor.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return const SizedBox.shrink();
+    final at = box.localToGlobal(Offset(box.size.width / 2, 0));
+    return Positioned(left: at.dx - 50, top: math.max(0, at.dy - 34), width: 100, child: IgnorePointer(child: Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: Neon.panelHi, borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color), boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 10)]),
+        child: Text(text, style: Neon.code(size: 12, color: Neon.text).copyWith(height: 1.1, fontWeight: FontWeight.w700)),
+      ),
+    )));
   }
 }
 
@@ -187,7 +246,19 @@ class _DeviceKnobPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawArc(rect, _start, _sweep, false, stroke..color = Neon.line);
     final from = bipolar ? 0.5 : 0.0;
-    canvas.drawArc(rect, _start + _sweep * math.min(from, pos), _sweep * (pos - from).abs(), false, stroke..color = color);
+    final a0 = _start + _sweep * math.min(from, pos), sweep = _sweep * (pos - from).abs();
+    if (sweep > 0.001) {
+      canvas.drawArc(rect, a0, sweep, false, Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 7
+        ..strokeCap = StrokeCap.round
+        ..color = color.withValues(alpha: 0.18));
+    }
+    canvas.drawArc(rect, a0, sweep, false, stroke
+      ..shader = SweepGradient(startAngle: 0, endAngle: math.pi * 2, transform: GradientRotation(_start),
+          colors: [Color.lerp(color, Colors.white, 0.0)!.withValues(alpha: 0.65), color, Color.lerp(color, Colors.white, 0.35)!],
+          stops: const [0, 0.5, 0.75]).createShader(rect));
+    stroke.shader = null;
     for (var i = 0; i < rings.length && i < 3; i++) {
       final ((lo, hi), rc) = rings[i];
       final rr = Rect.fromCircle(center: c, radius: r + 4 + i * 3.0);
