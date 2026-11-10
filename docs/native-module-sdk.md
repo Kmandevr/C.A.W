@@ -102,7 +102,7 @@ caw test-component ./build/my-echo.so --id local.my-echo --trust trusted --sweep
 caw test-component ./build/my-echo-v2.so --id local.my-echo --trust trusted --compare ./build/my-echo.so --signal pink
 ```
 
-A library is in-process code, so it loads only with an explicit `--trust trusted`, as in the app. Hosts call `caw_component_test(request_json)` with the same request. What it catches:
+A library is in-process code, so it loads only with an explicit `--trust trusted`, as in the app. Hosts call `caw_component_test(request_json, trust_level, output_dir, input_dir)` with the same request: the host gives the trust and the folders, never the request. What it catches:
 - **Wrong declarations:** the measured latency against `latencyFrames` (an impulse, sweep or noise shows it), and the measured tail (until -90 dB) against `tailFrames`. A mismatch is a warning: the host compensates and rings out by what you declare.
 - **Bad samples:** NaN, Inf and denormals in the raw output, clipping above 0 dBFS, and blocks where `process` returned false.
 - **Sound:** peak, RMS, DC, crest factor and gain per channel; THD and THD+N for a sine; impulse-response length; frequency response from an impulse, sweep or noise; a spectrum; stereo correlation and width.

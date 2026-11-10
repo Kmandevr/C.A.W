@@ -433,11 +433,25 @@ TEST(component_test_wav_round_trip_and_c_api) {
     CHECK(!mismatch.boolean("ok", true));
     std::filesystem::remove_all(dir);
 
-    char* result = caw_component_test("{\"component\":\"org.caw.stereo.balance\",\"cpu\":false}");
+    char* result = caw_component_test("{\"component\":\"org.caw.stereo.balance\",\"cpu\":false}", CAW_NATIVE_TRUST_BLOCKED,
+                                      nullptr, nullptr);
     CHECK(result != nullptr);
     CHECK(std::string(result).find("\"ok\":true") != std::string::npos);
     caw_free(result);
-    result = caw_component_test(nullptr);
+    // Through the C API the host gives the trust and the folders: a request can't choose them.
+    result = caw_component_test("{\"component\":{\"id\":\"x\",\"library\":\"/tmp/x.so\",\"trust\":\"trusted\"}}",
+                                CAW_NATIVE_TRUST_BLOCKED, nullptr, nullptr);
+    CHECK(std::string(result).find("may not choose a trust") != std::string::npos);
+    caw_free(result);
+    result = caw_component_test("{\"component\":\"org.caw.stereo.balance\",\"write_wav\":\"../evil.wav\"}",
+                                CAW_NATIVE_TRUST_BLOCKED, "/tmp", nullptr);
+    CHECK(std::string(result).find("plain file name") != std::string::npos);
+    caw_free(result);
+    result = caw_component_test("{\"component\":\"org.caw.stereo.balance\",\"write_wav\":\"out.wav\"}",
+                                CAW_NATIVE_TRUST_BLOCKED, nullptr, nullptr);
+    CHECK(std::string(result).find("plain file name") != std::string::npos);
+    caw_free(result);
+    result = caw_component_test(nullptr, CAW_NATIVE_TRUST_BLOCKED, nullptr, nullptr);
     CHECK(std::string(result).find("\"ok\":false") != std::string::npos);
     caw_free(result);
 }

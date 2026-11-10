@@ -333,9 +333,16 @@ const char* caw_template_source(int32_t i) {
     return i >= 0 && i < caw::kTemplateCount ? caw::kTemplateSources[i] : nullptr;
 }
 
-char* caw_component_test(const char* request_json) try {
+char* caw_component_test(const char* request_json, int32_t trust_level, const char* output_dir,
+                         const char* input_dir) try {
     if (!request_json) return dup("{\"ok\":false,\"error\":\"missing request\"}");
-    return dup(caw::componentTestJson(request_json));
+    caw::ComponentTestHost host;
+    host.trust = trust_level == CAW_NATIVE_TRUST_TRUSTED    ? caw::NativeModuleTrust::Trusted
+                 : trust_level == CAW_NATIVE_TRUST_ISOLATED ? caw::NativeModuleTrust::Isolated
+                                                             : caw::NativeModuleTrust::Blocked;
+    host.outputDir = output_dir ? output_dir : "";
+    host.inputDir = input_dir ? input_dir : "";
+    return dup(caw::componentTestJson(request_json, host));
 } catch (...) {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
 }

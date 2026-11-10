@@ -242,11 +242,14 @@ CAW_API void caw_worker_pool_wait_idle(CawWorkerPool* pool);
 /* Component testing suite (#163): renders one C++ effect offline (never on the audio thread, no
    device) with a test signal and returns its measurements as JSON. The request is JSON, e.g.
    {"component":{"id":"org.caw.distortion","params":{"drive":8}},"signal":{"type":"sine","frequency":1000}};
-   a built library needs "library" and an explicit "trust" ("trusted", "isolated" or "blocked").
+   a built library needs "library"; its trust is [trust_level] (CAW_NATIVE_TRUST_*: the user's own choice for that
+   library), and a request naming a "trust" is refused. "write_wav"/"write_input_wav" are plain file names written
+   inside [output_dir] (NULL: no files) and a WAV test signal's "path" a plain name inside [input_dir] (NULL: none).
    Keys of the request and the result: docs/engine.md, "Component testing". The result always has
    "ok" and "error". Blocks the caller for the render; call it from a worker, never the UI or audio
    thread. Free the result with caw_free. */
-CAW_API char* caw_component_test(const char* request_json);
+CAW_API char* caw_component_test(const char* request_json, int32_t trust_level, const char* output_dir,
+                                 const char* input_dir);
 
 #ifdef __cplusplus
 }

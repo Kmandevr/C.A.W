@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -217,6 +218,13 @@ uint32_t le(const uint8_t* p, int n) {
 
 bool readWav(const std::string& path, std::vector<float>& left, std::vector<float>& right, int& rate,
              std::string& error) {
+    // A regular file, read up to what the longest allowed test signal needs (120 s, 192 kHz, 32-bit stereo).
+    constexpr std::uintmax_t kMaxWavBytes = 200u * 1024u * 1024u;
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || std::filesystem::file_size(path, ec) > kMaxWavBytes || ec) {
+        error = "'" + path + "' is not a readable WAV file of at most 200 MB";
+        return false;
+    }
     std::ifstream f(path, std::ios::binary);
     if (!f) {
         error = "can't read the WAV file '" + path + "'";
@@ -1099,6 +1107,55 @@ std::string runComponentTest(const ComponentTestRequest& request) try {
     return o.s;
 } catch (const std::bad_alloc&) {
     return failure("out of memory: the test is too long for this device");
+} catch (...) {
+    return failure("the component test failed");
+}
+
+namespace {
+
+// [name] as a plain file name inside [dir] (no separators, no "..", not hidden), or empty.
+std::string inside(const std::string& dir, const std::string& name) {
+    if (dir.empty() || name.empty() || name == "." || name == ".." || name[0] == '.' ||
+        name.find_first_of("/\\:") != std::string::npos)
+        return {};
+    return dir + "/" + name;
+}
+
+bool hostPath(std::string& path, const std::string& dir, const char* key, std::string& error) {
+    if (path.empty()) return true;
+    const std::string p = inside(dir, path);
+    if (p.empty()) {
+        error = std::string("'") + key + "' must be a plain file name inside the host's folder";
+        return false;
+    }
+    path = p;
+    return true;
+}
+
+bool hostComponent(TestComponent& c, const ComponentTestHost& host, std::string& error) {
+    if (c.trustSet) {
+        error = "the request may not choose a trust level; the host gives it";
+        return false;
+    }
+    if (!c.library.empty()) {
+        c.trust = host.trust;
+        c.trustSet = true;
+    }
+    return true;
+}
+
+}  // namespace
+
+std::string componentTestJson(std::string_view requestJson, const ComponentTestHost& host) try {
+    ComponentTestRequest req;
+    std::string error;
+    if (!parseComponentTestRequest(requestJson, req, error)) return failure(error);
+    if (!hostComponent(req.component, host, error) || !hostComponent(req.compare, host, error) ||
+        !hostPath(req.writeWav, host.outputDir, "write_wav", error) ||
+        !hostPath(req.writeInputWav, host.outputDir, "write_input_wav", error) ||
+        !hostPath(req.signal.path, host.inputDir, "signal.path", error))
+        return failure(error);
+    return runComponentTest(req);
 } catch (...) {
     return failure("the component test failed");
 }

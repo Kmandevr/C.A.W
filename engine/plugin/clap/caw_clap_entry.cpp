@@ -584,7 +584,7 @@ bool stateLoad(const clap_plugin_t* p, const clap_istream_t* stream) {
         uint8_t buffer[4096];
         for (;;) {
             const int64_t n = stream->read(stream, buffer, sizeof(buffer));
-            if (n < 0) return false;
+            if (n < 0 || n > static_cast<int64_t>(sizeof(buffer))) return false;  // a host over-reporting its read
             if (n == 0) break;
             b.insert(b.end(), buffer, buffer + n);
             if (b.size() > kMaxStateBlob) return false;
@@ -600,6 +600,7 @@ bool stateLoad(const clap_plugin_t* p, const clap_istream_t* stream) {
             const std::string id = r.str();
             const double v = r.f64();
             if (!r.ok) return false;
+            if (!std::isfinite(v)) continue;  // a damaged value keeps the default
             for (uint32_t k = 0; k < s->paramCount; ++k)
                 if (id == s->params[k].info->id) values[k] = v;  // unknown ids (older versions) are ignored
         }

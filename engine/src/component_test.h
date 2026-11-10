@@ -93,4 +93,14 @@ bool prepareRegistry(ModuleRegistry& registry, const TestComponent& component, s
 std::string runComponentTest(const ComponentTestRequest& request);
 std::string componentTestJson(std::string_view requestJson);
 
+// How a host (the C API) runs a request it may have been handed by untrusted data: the trust for a component
+// library comes from the host (the user's own choice), never from the request, which may not name one; files are
+// written only as plain names inside [outputDir] (empty: no files at all); a test WAV is read only from inside
+// [inputDir] (empty: none).
+struct ComponentTestHost {
+    NativeModuleTrust trust = NativeModuleTrust::Blocked;
+    std::string outputDir, inputDir;
+};
+std::string componentTestJson(std::string_view requestJson, const ComponentTestHost& host);
+
 }  // namespace caw
