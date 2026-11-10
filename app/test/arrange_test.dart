@@ -32,6 +32,7 @@ ProjectDoc _project() => ProjectDoc(id: 'p', name: 'Arrange test', layers: [
     ]);
 
 void main() {
+  _steppedKnobs();
   late AppState s;
   late SectionController sections;
   late List<String> haptics;
@@ -532,6 +533,70 @@ void main() {
     s.setNativeParamLive(layer, 0, 'width', 1.5);
     expect(s.engine!.setComponentParam(layer.id, 0, 'width', 1.5), isTrue);
     expect(layer.components.single.params['width'], 1.5);
+    await tester.pump(const Duration(seconds: 1));
+  }, skip: Platform.environment['CAW_LIB']?.isNotEmpty != true);
+}
+
+void _steppedKnobs() {
+  // Owner (2026-11-10): "the unison knob, I have to touch it any time I want it to move one notch". One slow drag
+  // must move a stepped knob through as many steps as its travel covers, for every stepped built-in knob.
+  testWidgets('with the engine: one slow drag moves a stepped knob through several steps (needs CAW_LIB)',
+      (tester) async {
+    final s = AppState(settings: Settings());
+    addTearDown(s.dispose);
+    s.engine = Engine.create();
+    s.templates = Engine.templates();
+    s.project = s.starterProject();
+    await tester.runAsync(() async {
+      s.componentCatalog.refreshIfStale();
+      for (var i = 0; i < 250 && s.componentInfo('org.caw.synth.morph') == null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+    final layer = s.project.layers.firstWhere((l) => !l.isFolder);
+    s.setNativeInstrument(layer, 'org.caw.synth.morph');
+    // Every built-in effect with a stepped knob goes on the track too.
+    final stepped = [
+      for (final c in s.componentCatalog.value.values)
+        if (c.builtin && !c.isInstrument && c.parameters.any((p) => p.step > 0 && !p.isChoice)) c,
+    ];
+    for (final c in stepped) {
+      s.addNativeEffect(layer, c.id);
+    }
+    tester.view.physicalSize = const Size(600, 6000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+        body: ListenableBuilder(listenable: s, builder: (_, _) => FxStack(state: s, layer: layer)))));
+    await tester.pump();
+    final knobs = <(String, ComponentParameterInfo)>[
+      for (final c in [s.componentInfo('org.caw.synth.morph')!, ...stepped])
+        for (final p in c.parameters)
+          if (p.step > 0 && !p.isChoice && (p.max - p.min) / p.step >= 4) (c.id, p),
+    ];
+    expect(knobs.map((k) => k.$2.id), contains('unison'));
+    double valueOf(String id, String param) => (id == 'org.caw.synth.morph'
+        ? layer.instrument!.params[param]
+        : layer.components.firstWhere((c) => c.id == id).params[param]) ?? double.nan;
+    for (final (id, p) in knobs) {
+      final knob = find.byKey(ValueKey('knob-$id-${p.id}'));
+      await tester.ensureVisible(knob);
+      await tester.pumpAndSettle();
+      // Set to the minimum first (double-tap goes to the default, so drag far down).
+      await tester.drag(knob, const Offset(0, 400));
+      await tester.pumpAndSettle();
+      expect(valueOf(id, p.id), p.min, reason: '$id ${p.id} at the bottom');
+      // Then one slow drag up, a pixel at a time, over 60% of the travel (200 px covers it all).
+      final g = await tester.startGesture(tester.getCenter(knob));
+      for (var i = 0; i < 140; i++) {
+        await g.moveBy(const Offset(0, -1));
+        await tester.pump();
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+      final steps = (valueOf(id, p.id) - p.min) / p.step;
+      expect(steps, greaterThanOrEqualTo(2), reason: '$id ${p.id} moved $steps steps in one slow drag');
+    }
     await tester.pump(const Duration(seconds: 1));
   }, skip: Platform.environment['CAW_LIB']?.isNotEmpty != true);
 }
