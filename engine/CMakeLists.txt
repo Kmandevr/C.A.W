@@ -196,7 +196,9 @@ set_target_properties(caw_engine PROPERTIES OUTPUT_NAME caw CXX_VISIBILITY_PRESE
 
 if(CAW_TOOLS)
   add_executable(caw_cli cli/main.cpp platform/audio_none.cpp)
-  set_target_properties(caw_cli PROPERTIES OUTPUT_NAME caw)
+  # The CLI and the engine DLL are both named caw; on Windows the CLI exports the C API too, so its import library
+  # (caw.lib/caw.exp) would collide with the DLL's in a parallel build. Give the CLI's import library its own name.
+  set_target_properties(caw_cli PROPERTIES OUTPUT_NAME caw ARCHIVE_OUTPUT_NAME caw_cli)
   target_compile_options(caw_cli PRIVATE ${CAW_FLAGS})
 target_include_directories(caw_cli PRIVATE src)
   target_link_libraries(caw_cli PRIVATE caw_core)
