@@ -10,6 +10,7 @@ import '../actions/actions.dart';
 import '../model/cpp_workbench.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
+import '../platform/system_bars.dart';
 import 'arranger_screen.dart';
 import 'exporter_screen.dart';
 import 'mixer_screen.dart';
@@ -199,9 +200,13 @@ class _ShellState extends State<Shell> {
               child: GlassStrainWatcher(
                 state: s,
                 child: Scaffold(
-                  body: SafeArea(
-                    child: LayoutBuilder(builder: (context, box) {
-                      _dock.form = formFactorFor(box.biggest);
+                  // Phones draw edge to edge (owner, 2026-11-10): the bars' backgrounds reach under the system bars
+                  // and the camera cutout, and each part pads its controls clear of them. Desktop keeps a safe area.
+                  body: Builder(builder: (context) {
+                    final pad = MediaQuery.paddingOf(context);
+                    return LayoutBuilder(builder: (context, box) {
+                      _dock.form = formFactorFor(pad.deflateSize(box.biggest));
+                      SystemBars.apply(fullScreen: _dock.form == FormFactor.phoneLandscape);
                       if (!_homeShown) {
                         _homeShown = true;
                         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -217,12 +222,12 @@ class _ShellState extends State<Shell> {
                               : _areaOf(panelOfSection(_sections.current)),
                           onView: (i) => _reveal(context, _viewPanels[i]),
                           child: _dock.form == FormFactor.desktop
-                              ? _desktop(context, screens)
-                              : _phone(context, screens, landscape: _dock.form == FormFactor.phoneLandscape),
+                              ? SafeArea(child: _desktop(context, screens))
+                              : _phone(context, screens, pad, landscape: _dock.form == FormFactor.phoneLandscape),
                         ),
                       );
-                    }),
-                  ),
+                    });
+                  }),
                 ),
               ),
             ),
@@ -290,45 +295,119 @@ class _ShellState extends State<Shell> {
       ]);
 
   /// Phones: one section at a time. Portrait has the status row on top and the transport and section bar at the
-  /// bottom (both hide while the keyboard is open); landscape has the rail on the left.
-  Widget _phone(BuildContext context, Map<String, Widget> screens, {required bool landscape}) {
+  /// bottom (both hide while the keyboard is open); landscape has a narrow rail on the left with the project and More,
+  /// the tempo and CPU in the transport, and no status row, so the tracks get the height (owner, 2026-11-10). The
+  /// top bars tuck away while the content scrolls down and come back when it scrolls up.
+  Widget _phone(BuildContext context, Map<String, Widget> screens, EdgeInsets pad, {required bool landscape}) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final status = _StatusRow(state: s, onTools: () => _showTools(context));
-    final body = Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: (_) {
-        if (_reach) setState(() => _reach = false);
-      },
-      child: IndexedStack(
-        index: sectionOrder.indexOf(_sections.current),
-        children: [
-          for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
-        ],
+    // The content is padded clear of the edges here, so the screens inside see no padding of their own.
+    final body = MediaQuery.removePadding(
+      context: context,
+      removeLeft: true,
+      removeTop: true,
+      removeRight: true,
+      removeBottom: true,
+      child: NotificationListener<ScrollUpdateNotification>(
+        onNotification: _onScroll,
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (_) {
+            if (_reach) setState(() => _reach = false);
+          },
+          child: SectionSwitcher(
+            index: sectionOrder.indexOf(_sections.current),
+            children: [
+              for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
+            ],
+          ),
+        ),
       ),
     );
     if (landscape) {
-      return Row(children: [
-        SectionRail(current: _sections.current, onSelect: _sections.show),
-        Expanded(
-          child: Column(children: [
-            status,
-            ?_banner(),
-            Expanded(child: body),
-            if (!keyboard) BottomTransport(state: s, midi: LiveMidi.current, compact: true),
-          ]),
+      final small = IconButton.styleFrom(iconSize: 18, visualDensity: VisualDensity.compact,
+          minimumSize: const Size(34, 34), padding: const EdgeInsets.all(6));
+      return Theme(
+        // Compact landscape: smaller icons and denser controls everywhere in it.
+        data: Theme.of(context).copyWith(
+          visualDensity: VisualDensity.compact,
+          iconButtonTheme: IconButtonThemeData(style: small),
         ),
-      ]);
+        child: Row(children: [
+          SectionRail(
+            compact: true,
+            inset: EdgeInsets.only(left: pad.left, top: pad.top, bottom: pad.bottom),
+            current: _sections.current,
+            onSelect: _sections.show,
+            top: Tooltip(
+              message: '${s.project.name}: project menu',
+              child: InkWell(
+                key: const ValueKey('project-menu'),
+                onTap: () => showProjectMenu(context, s),
+                child: const SizedBox(height: 40, child: Center(child: CrowLogo(size: 22))),
+              ),
+            ),
+            bottom: IconButton(
+              key: const ValueKey('more-tools'),
+              tooltip: 'More: mixer, automation, export…',
+              color: Neon.dim,
+              icon: const Icon(Icons.more_vert),
+              onPressed: () => _showTools(context),
+            ),
+          ),
+          Expanded(
+            child: Column(children: [
+              SizedBox(height: pad.top),
+              ?_banner(),
+              Expanded(child: Padding(padding: EdgeInsets.only(right: pad.right), child: body)),
+              if (!keyboard)
+                BottomTransport(
+                  state: s,
+                  midi: LiveMidi.current,
+                  compact: true,
+                  inset: EdgeInsets.only(right: pad.right, bottom: pad.bottom),
+                  extras: [
+                    _BpmButton(state: s),
+                    const SizedBox(width: 8),
+                    _CpuReadout(state: s),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+            ]),
+          ),
+        ]),
+      );
     }
+    final status = _StatusRow(state: s, onTools: () => _showTools(context));
+    final bar = Glass.active ? Neon.panel.withValues(alpha: 0.6) : Neon.panel;
     return Column(children: [
-      if (!_reach) status,
+      // The system status bar's strip keeps the bar colour; the status row tucks away under it.
+      if (pad.top > 0) Container(height: pad.top, color: bar),
+      if (!_reach)
+        ValueListenableBuilder<bool>(
+          valueListenable: _sections.barsShown,
+          builder: (context, shown, child) => TuckAway(shown: shown || keyboard, child: child!),
+          child: status,
+        ),
       ?_banner(),
-      Expanded(child: body),
+      Expanded(child: Padding(padding: EdgeInsets.only(left: pad.left, right: pad.right), child: body)),
       if (_reach) status,
       if (!keyboard) ...[
-        BottomTransport(state: s, midi: LiveMidi.current),
-        SectionBar(sections: _sections, onReach: () => setState(() => _reach = true)),
+        BottomTransport(state: s, midi: LiveMidi.current, inset: EdgeInsets.only(left: pad.left, right: pad.right)),
+        SectionBar(sections: _sections, bottomInset: pad.bottom, onReach: () => setState(() => _reach = true)),
       ],
     ]);
+  }
+
+  /// Scrolling down by hand tucks the top bars away; scrolling up, or reaching the top, brings them back.
+  bool _onScroll(ScrollUpdateNotification n) {
+    if (n.metrics.axis != Axis.vertical || n.dragDetails == null) return false;
+    final d = n.scrollDelta ?? 0;
+    if (n.metrics.pixels <= n.metrics.minScrollExtent || d < -6) {
+      _sections.barsShown.value = true;
+    } else if (d > 6 && n.metrics.pixels > n.metrics.minScrollExtent + 24) {
+      _sections.barsShown.value = false;
+    }
+    return false;
   }
 
   /// The phone's other workspaces (the mixer, automation, export, the engine lab, the .caw plugin builder).
@@ -390,13 +469,7 @@ class _StatusRow extends StatelessWidget {
         ),
         _BpmButton(state: state),
         const SizedBox(width: 8),
-        ValueListenableBuilder<int>(
-          valueListenable: state.tick,
-          builder: (context, _, _) {
-            final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-            return Text('CPU $cpu%', style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim));
-          },
-        ),
+        _CpuReadout(state: state),
         IconButton(
           key: const ValueKey('more-tools'),
           tooltip: 'More: mixer, automation, export…',
@@ -409,6 +482,21 @@ class _StatusRow extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// The engine's CPU load, in percent; pink over 85%.
+class _CpuReadout extends StatelessWidget {
+  const _CpuReadout({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+        valueListenable: state.tick,
+        builder: (context, _, _) {
+          final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
+          return Text('CPU $cpu%', style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim));
+        },
+      );
 }
 
 /// The layout menu: the presets, and every panel (tap to show it).

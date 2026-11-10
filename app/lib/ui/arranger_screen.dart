@@ -18,6 +18,7 @@ import 'motion.dart';
 import 'param_control.dart';
 import 'theme.dart';
 import 'arrange/track_color.dart';
+import 'frame/frame_widgets.dart';
 import 'widgets.dart';
 import 'track_cards_screen.dart';
 import 'glass.dart';
@@ -420,10 +421,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       },
       child: Column(children: [
         if (s.meters.overloaded > 0) _OverloadBanner(state: s),
-        _toolbar(context, focused),
-        AnimatedSize(duration: Motion.move(Motion.standard, Motion.of(context)), curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
-          child: zoomBar ? _zoomBar() : const SizedBox(width: double.infinity)),
+        // The toolbar tucks away with the status row while the tracks scroll down (owner, 2026-11-10).
+        _tucked(Column(mainAxisSize: MainAxisSize.min, children: [
+          _toolbar(context, focused),
+          AnimatedSize(duration: Motion.move(Motion.standard, Motion.of(context)), curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: zoomBar ? _zoomBar() : const SizedBox(width: double.infinity)),
+        ])),
         if (settings) _settingsPanel(),
         Expanded(child: body),
         if (mixer) _ArrangementMixer(state: s),
@@ -508,6 +512,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         ]);
       }),
     );
+  }
+
+  Widget _tucked(Widget bar) {
+    final shown = _sections?.barsShown;
+    if (shown == null) return bar;
+    return ValueListenableBuilder<bool>(valueListenable: shown,
+      builder: (context, v, child) => TuckAway(shown: v || settings, child: child!), child: bar);
   }
 
   /// Time and height zoom: − and + glide a step, the sliders follow the finger (time on a log scale).

@@ -28,11 +28,33 @@ BoxDecoration _barDecoration({required bool top}) {
   );
 }
 
+/// A bar that tucks away upwards when [shown] turns false and slides back down when it turns true (a short slide;
+/// at once when motion is reduced or off).
+class TuckAway extends StatelessWidget {
+  const TuckAway({super.key, required this.shown, required this.child});
+  final bool shown;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+        child: AnimatedAlign(
+          duration: Motion.move(Motion.standard, Motion.of(context)),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.bottomCenter,
+          heightFactor: shown ? 1 : 0,
+          child: child,
+        ),
+      );
+}
+
 /// The phone's bottom bar: Build, Files, Arrange. A downward drag on it brings the top row within reach.
 class SectionBar extends StatelessWidget {
-  const SectionBar({super.key, required this.sections, this.onReach});
+  const SectionBar({super.key, required this.sections, this.onReach, this.bottomInset = 0});
   final SectionController sections;
   final VoidCallback? onReach;
+
+  /// The system navigation bar's height: the bar's background reaches under it, its buttons stay above it.
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -41,7 +63,8 @@ class SectionBar extends StatelessWidget {
           if ((d.primaryVelocity ?? 0) > 200) onReach?.call();
         },
         child: Container(
-          height: 48,
+          height: 48 + bottomInset,
+          padding: EdgeInsets.only(bottom: bottomInset),
           decoration: _barDecoration(top: true),
           child: Row(children: [
             for (final s in sectionOrder)
@@ -52,16 +75,16 @@ class SectionBar extends StatelessWidget {
 }
 
 class _SectionButton extends StatelessWidget {
-  const _SectionButton({required this.section, required this.selected, required this.onTap});
+  const _SectionButton({required this.section, required this.selected, required this.onTap, this.label = true});
   final Section section;
-  final bool selected;
+  final bool selected, label;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final (icon, name) = sectionLook(section);
     final color = selected ? Neon.green : Neon.dim;
-    return Semantics(
+    final button = Semantics(
       button: true,
       selected: selected,
       label: name,
@@ -80,26 +103,39 @@ class _SectionButton extends StatelessWidget {
               color: selected ? Neon.green.withValues(alpha: 0.16) : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, size: 19, color: color),
+            child: Icon(icon, size: label ? 19 : 18, color: color),
           ),
-          const SizedBox(height: 1),
-          Text(name, style: TextStyle(fontSize: 10, color: color, fontWeight: selected ? FontWeight.w700 : null)),
+          if (label) ...[
+            const SizedBox(height: 1),
+            Text(name, style: TextStyle(fontSize: 10, color: color, fontWeight: selected ? FontWeight.w700 : null)),
+          ],
         ]),
       ),
     );
+    // Without its label the name shows on hold (or hover).
+    return label ? button : Tooltip(message: name, child: button);
   }
 }
 
 /// The slim rail on the left in landscape, on tablets and on desktop.
 class SectionRail extends StatelessWidget {
-  const SectionRail({super.key, required this.current, required this.onSelect, this.top, this.bottom});
+  const SectionRail({super.key, required this.current, required this.onSelect, this.top, this.bottom,
+      this.compact = false, this.inset = EdgeInsets.zero});
   final Section? current;
   final ValueChanged<Section> onSelect;
   final Widget? top, bottom;
 
+  /// Phone landscape (owner, 2026-11-10): a narrow rail of icons without labels (names on hold).
+  final bool compact;
+
+  /// The screen's edge insets on the rail's side (a camera cutout, the system bars): the rail's background reaches
+  /// under them, its buttons stay clear.
+  final EdgeInsets inset;
+
   @override
   Widget build(BuildContext context) => Container(
-        width: 56,
+        width: (compact ? 44 : 56) + inset.left,
+        padding: EdgeInsets.only(left: inset.left, top: inset.top, bottom: inset.bottom),
         decoration: BoxDecoration(
           color: Glass.active ? Neon.panel.withValues(alpha: 0.6) : Neon.panel,
           border: Border(right: BorderSide(color: Glass.active ? Colors.white.withValues(alpha: 0.08) : Neon.line)),
@@ -108,7 +144,8 @@ class SectionRail extends StatelessWidget {
           ?top,
           const SizedBox(height: 4),
           for (final s in sectionOrder)
-            SizedBox(height: 56, child: _SectionButton(section: s, selected: current == s, onTap: () => onSelect(s))),
+            SizedBox(height: compact ? 44 : 56,
+              child: _SectionButton(section: s, selected: current == s, onTap: () => onSelect(s), label: !compact)),
           const Spacer(),
           ?bottom,
         ]),
@@ -117,9 +154,16 @@ class SectionRail extends StatelessWidget {
 
 /// Play, stop, record and undo within thumb reach. A sideways drag on it scrubs the playhead (one bar per 48 px).
 class BottomTransport extends StatefulWidget {
-  const BottomTransport({super.key, required this.state, this.midi, this.compact = false});
+  const BottomTransport({super.key, required this.state, this.midi, this.compact = false, this.extras = const [],
+      this.inset = EdgeInsets.zero});
   final AppState state;
   final bool compact;
+
+  /// More readouts after the position (phone landscape: the tempo and CPU, which have no status row there).
+  final List<Widget> extras;
+
+  /// The screen's edge insets under and beside the bar: its background reaches under them, its buttons stay clear.
+  final EdgeInsets inset;
 
   /// The MIDI keyboard input; Record is on while a keyboard is connected or a take is running.
   final LiveMidi? midi;
@@ -174,8 +218,8 @@ class _BottomTransportState extends State<BottomTransport> {
       onHorizontalDragUpdate: _update,
       onHorizontalDragEnd: _end,
       child: Container(
-        height: widget.compact ? 44 : 50,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+        height: (widget.compact ? 40 : 50) + widget.inset.bottom,
+        padding: EdgeInsets.fromLTRB(6 + widget.inset.left, 0, 6 + widget.inset.right, widget.inset.bottom),
         decoration: _barDecoration(top: true),
         child: Row(children: [
           IconButton(
@@ -207,6 +251,7 @@ class _BottomTransportState extends State<BottomTransport> {
                     ),
             ),
           ),
+          ...widget.extras,
           IconButton(
             key: const ValueKey('transport-stop'),
             tooltip: 'Stop, back to the start (Shift+Space)',
@@ -288,5 +333,48 @@ class RecordButton extends StatelessWidget {
         );
     if (m == null) return button(false, false);
     return ListenableBuilder(listenable: m, builder: (context, _) => button(m.recording, m.devices.isNotEmpty));
+  }
+}
+
+/// The sections, one in front (an [IndexedStack], so each keeps its state). Switching shows the new one with a short
+/// fade and a slight rise (owner, 2026-11-10: a transition when switching sections, snappy); a fade only when motion
+/// is reduced, and nothing when it is off.
+class SectionSwitcher extends StatefulWidget {
+  const SectionSwitcher({super.key, required this.index, required this.children});
+  final int index;
+  final List<Widget> children;
+
+  @override
+  State<SectionSwitcher> createState() => _SectionSwitcherState();
+}
+
+class _SectionSwitcherState extends State<SectionSwitcher> with SingleTickerProviderStateMixin {
+  late final AnimationController _in = AnimationController(vsync: this, duration: Motion.standard, value: 1);
+  late final Animation<double> _curve = CurvedAnimation(parent: _in, curve: Curves.easeOutCubic);
+  late final Animation<Offset> _rise = Tween(begin: const Offset(0, 0.015), end: Offset.zero).animate(_curve);
+
+  @override
+  void didUpdateWidget(SectionSwitcher old) {
+    super.didUpdateWidget(old);
+    if (old.index == widget.index) return;
+    final level = Motion.of(context);
+    if (level == MotionLevel.off) {
+      _in.value = 1;
+    } else {
+      _in.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _in.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final stack = IndexedStack(index: widget.index, children: widget.children);
+    final fade = FadeTransition(opacity: _curve, child: stack);
+    return Motion.of(context) == MotionLevel.full ? SlideTransition(position: _rise, child: fade) : fade;
   }
 }

@@ -74,7 +74,7 @@ The app has three sections, Build, Files and Arrange; the Mixer, Automation, Exp
 
 **Phone (portrait):** a slim status row (project, tempo, CPU, More) on top; the section; then the transport in thumb reach (undo, redo, position, stop, play, record; drag sideways to scrub) and the section bar. Both hide while the keyboard is open, and a downward swipe on the section bar brings the status row within reach.
 
-**Phone (landscape):** a slim rail on the left, the section, the transport at the bottom.
+**Phone (landscape):** compact (owner, 2026-11-10): a narrow icon rail on the left (with the project and More), the section, the transport at the bottom with the tempo and CPU; edge to edge under the camera cutout, controls kept clear of it. In both orientations the top bars tuck away while the content scrolls down ([app](app.md), Frame).
 
 **Desktop, tablets:** the rail, the transport bar and docking panels, which can also float in windows. Files is a Unity-style tree, grid and inspector here; on a phone the tree is a drawer.
 

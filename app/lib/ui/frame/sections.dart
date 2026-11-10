@@ -35,10 +35,21 @@ class SectionController extends ChangeNotifier {
   String? _focusedLayer;
   String? get focusedLayer => _focusedLayer;
 
+  /// The top bars (the status row, a section's toolbar): scrolling down tucks them away, scrolling up brings them
+  /// back (owner, 2026-11-10). A section change shows them again.
+  final ValueNotifier<bool> barsShown = ValueNotifier(true);
+
   void show(Section s) {
+    barsShown.value = true;
     if (_current == s) return;
     _current = s;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    barsShown.dispose();
+    super.dispose();
   }
 
   /// Opens [tab] in Build (adding it when new) and brings Build to the front.
