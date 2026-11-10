@@ -290,8 +290,10 @@ class _ClipTab extends StatelessWidget {
     if (clip == null || module == null) {
       final patterns = state.project.modules.where((m) => state.isPattern(m.id)).toList();
       return ListView(padding: const EdgeInsets.all(12), children: [
-        Text(clip == null ? 'No clip on this track yet: start a new pattern, or add one the project has.' : 'This clip\'s pattern is missing.',
+        Text(clip == null ? 'No clip on this track yet.' : 'This clip\'s pattern is missing.',
           style: const TextStyle(color: Neon.dim)),
+        if (clip == null)
+          const Text('Start a new pattern, or add one the project has.', style: TextStyle(color: Neon.dim, fontSize: 12)),
         const SizedBox(height: 8),
         ListTile(key: const ValueKey('clip-new-pattern'), dense: true,
           leading: const Icon(Icons.queue_music, size: 18, color: Neon.yellow), title: const Text('New pattern on this track'),

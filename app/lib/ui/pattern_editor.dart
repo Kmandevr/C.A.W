@@ -2330,9 +2330,14 @@ class _Toolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // The tools scroll; zoom, full screen and ⋯ (generators, lanes, MIDI import) stay pinned at the end so they are
-    // never hidden past the edge on a phone, and a fade says there are more tools to scroll to.
-    return SizedBox(
+    // The tools scroll with a fade where there are more; ⋯ (generators, lanes, MIDI import) stays pinned at the end so
+    // it is never hidden past the edge, and on a phone the buttons are a little narrower so the snap fits too.
+    return LayoutBuilder(builder: (context, box) {
+      final narrow = box.maxWidth < 480;
+      return IconButtonTheme(
+        data: IconButtonThemeData(style: IconButton.styleFrom(minimumSize: Size(narrow ? 40 : 48, 48),
+            padding: EdgeInsets.zero, tapTargetSize: MaterialTapTargetSize.shrinkWrap)),
+        child: SizedBox(
       height: 48,
       child: Row(children: [
         Expanded(child: ScrollFade(child: SingleChildScrollView(key: const ValueKey('roll-toolbar'), scrollDirection: Axis.horizontal,
@@ -2353,7 +2358,6 @@ class _Toolbar extends StatelessWidget {
             style: TextButton.styleFrom(minimumSize: const Size(0, 48)),
           ),
         ],
-        ])))),
         IconButton(
           key: const ValueKey('roll-zoom'),
           tooltip: 'Zoom (or pinch; Ctrl + wheel)',
@@ -2365,6 +2369,7 @@ class _Toolbar extends StatelessWidget {
           onPressed: onFullScreen,
           icon: Icon(fullScreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Neon.dim),
         ),
+        ])))),
         PopupMenuButton<String>(
           tooltip: 'More',
           icon: const Icon(Icons.more_vert, color: Neon.dim),
@@ -2395,7 +2400,8 @@ class _Toolbar extends StatelessWidget {
           ],
         ),
       ]),
-    );
+    ));
+    });
   }
 }
 

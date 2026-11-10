@@ -176,7 +176,7 @@ void main() {
   });
 
   group('Piano roll', () {
-    testWidgets('on a phone zoom, full screen and More stay on screen, and the tools fade where they scroll', (tester) async {
+    testWidgets('on a phone More stays pinned on screen with the tools and snap, and the tools fade where they scroll', (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -185,11 +185,9 @@ void main() {
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: PatternEditor(state: s, module: m))));
       await tester.pump();
       await tester.pump();
-      for (final tip in ['More', 'Full screen']) {
-        final r = tester.getRect(find.byTooltip(tip));
-        expect(r.right, lessThanOrEqualTo(390), reason: tip);
-      }
-      expect(find.byKey(const ValueKey('roll-zoom')).hitTestable(), findsOneWidget);
+      expect(tester.getRect(find.byTooltip('More')).right, lessThanOrEqualTo(390));
+      // The snap (1/16 and its ▾) still fits beside the six tools.
+      expect(tester.getRect(find.text('1/16')).right, lessThan(390 - 40));
       expect(find.byKey(const ValueKey('scroll-fade-right')), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 2));
