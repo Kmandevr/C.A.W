@@ -396,7 +396,8 @@ TEST(sample_pack_refuses_what_it_should) {
     const Json flat = run("{\"instrument\":\"org.caw.synth.basic\"," + out +
                           ",\"name\":\"../../escape\",\"name_pattern\":\"../{name}/{note}\",\"hold_seconds\":0.05}");
     CHECK(flat.boolean("ok", false));
-    for (const auto& e : fs::directory_iterator(dir)) CHECK(e.path().parent_path() == fs::canonical(dir));
+    // Compared resolved: Windows can spell one folder two ways (a short 8.3 name and the long one).
+    for (const auto& e : fs::directory_iterator(dir)) CHECK(fs::canonical(e.path()).parent_path() == fs::canonical(dir));
     CHECK(!fs::exists(dir.parent_path() / "escape.json"));
     const fs::path victim = freshDir("victim") / "target.wav";
     { std::ofstream(victim) << "keep"; }
