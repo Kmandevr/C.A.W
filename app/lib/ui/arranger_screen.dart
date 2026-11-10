@@ -824,9 +824,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
                 CheckedPopupMenuItem(value: 'g:$px', checked: gap == px, child: Text(px == 0 ? name : '$name · ${px.round()} px')),
             ],
           ),
-          DropdownButton<int>(value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
+          Tooltip(message: 'Grid: clips snap to this', child: DropdownButton<int>(key: const ValueKey('arrange-snap'),
+            value: s.arrangementSnapSteps, underline: const SizedBox.shrink(),
             items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
-            onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); }),
+            onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); })),
           if (narrow)
             IconButton(onPressed: p.layers.length >= 64 ? null : s.addFolder,
               icon: const Icon(Icons.create_new_folder_outlined), color: Neon.green, tooltip: 'Add folder')
@@ -842,11 +843,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             icon: const Icon(Icons.view_agenda_outlined), tooltip: 'Track cards'),
         ];
         if (narrow) {
-          return SingleChildScrollView(
+          // The row scrolls; a fade at an edge says there is more past it (Mixer, Settings, Track cards).
+          return ScrollFade(child: SingleChildScrollView(
             key: const ValueKey('arrange-toolbar'),
             scrollDirection: Axis.horizontal,
             child: Row(children: controls),
-          );
+          ));
         }
         // Wide: the clip bar sits in the toolbar while clips are selected (owner, 2026-11-10: docs/reaper-flow.md).
         return Row(children: [
@@ -1065,7 +1067,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   Widget _arrangement(BuildContext context, _TrackCallbacks callbacks) {
     final s = widget.state;
     final tracks = s.project.layers.isEmpty
-        ? const Center(child: Text('Add a track, choose a generator, then add a MIDI clip.'))
+        ? _EmptyArrangement(onAdd: () { Haptics.tap(); s.addLayer(); }, onBrowse: () => setState(() => _browser = true))
         : _timeline(context, s.visibleLayers, callbacks);
     if (!mixerCard) return tracks;
     return LayoutBuilder(builder: (context, box) => Stack(children: [
@@ -2111,6 +2113,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           IconButton.outlined(
+              tooltip: 'Slower: 1 BPM',
               onPressed: () => s.editProject((p) => p.bpm = (p.bpm - 1).clamp(20, 400).roundToDouble()),
               icon: const Icon(Icons.remove)),
           Expanded(
@@ -2120,6 +2123,7 @@ class _ProjectSettingsState extends State<_ProjectSettings> {
             ]),
           ),
           IconButton.outlined(
+              tooltip: 'Faster: 1 BPM',
               onPressed: () => s.editProject((p) => p.bpm = (p.bpm + 1).clamp(20, 400).roundToDouble()),
               icon: const Icon(Icons.add)),
           const SizedBox(width: 8),
@@ -2210,3 +2214,83 @@ class _Labeled extends StatelessWidget {
       ]);
 }
 
+/// No tracks yet: what to do first, with the button to do it.
+class _EmptyArrangement extends StatelessWidget {
+  const _EmptyArrangement({required this.onAdd, required this.onBrowse});
+  final VoidCallback onAdd, onBrowse;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.queue_music, size: 40, color: Neon.green.withValues(alpha: 0.7)),
+            const SizedBox(height: 10),
+            const Text('No tracks yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            const Text('Add a track, give it an instrument, then draw a pattern clip on it.',
+                textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Neon.dim)),
+            const SizedBox(height: 14),
+            Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
+              FilledButton.icon(key: const ValueKey('empty-add-track'), onPressed: onAdd,
+                  icon: const Icon(Icons.add, size: 18), label: const Text('Add a track')),
+              OutlinedButton.icon(onPressed: onBrowse,
+                  icon: const Icon(Icons.folder_open, size: 18), label: const Text('Drag one in from Files')),
+            ]),
+          ]),
+        ),
+      );
+}
+
+/// A horizontal scroller with soft fades at the edges that have more past them, so hidden buttons are findable.
+class ScrollFade extends StatefulWidget {
+  const ScrollFade({super.key, required this.child});
+  final SingleChildScrollView child;
+
+  @override
+  State<ScrollFade> createState() => _ScrollFadeState();
+}
+
+class _ScrollFadeState extends State<ScrollFade> {
+  bool _left = false, _right = false;
+
+  bool _onMetrics(ScrollMetrics m) {
+    final l = m.pixels > m.minScrollExtent + 1, r = m.pixels < m.maxScrollExtent - 1;
+    if (l != _left || r != _right) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() { _left = l; _right = r; });
+      });
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget fade(bool left) => Positioned(
+          top: 0, bottom: 0, left: left ? 0 : null, right: left ? null : 0, width: 28,
+          child: IgnorePointer(child: DecoratedBox(
+            key: ValueKey(left ? 'scroll-fade-left' : 'scroll-fade-right'),
+            decoration: BoxDecoration(gradient: LinearGradient(
+              begin: left ? Alignment.centerRight : Alignment.centerLeft,
+              end: left ? Alignment.centerLeft : Alignment.centerRight,
+              colors: [Neon.bg.withValues(alpha: 0), Neon.bg.withValues(alpha: 0.85)],
+            )),
+            child: Align(
+              alignment: left ? Alignment.centerLeft : Alignment.centerRight,
+              child: Icon(left ? Icons.chevron_left : Icons.chevron_right, size: 14, color: Neon.dim),
+            ),
+          )),
+        );
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (n) => _onMetrics(n.metrics),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (n) => _onMetrics(n.metrics),
+        child: Stack(children: [
+          widget.child,
+          if (_left) fade(true),
+          if (_right) fade(false),
+        ]),
+      ),
+    );
+  }
+}
