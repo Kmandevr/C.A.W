@@ -165,6 +165,13 @@ TEST(analysis_spectrum_reads_a_sine_at_its_level) {
     // Between bins it reads low by the window's scalloping, at most 1.42 dB.
     const double off = loudest(sine(8192, 1000, 48000, 0.5), hz);
     CHECK(off <= -6.0206 + 1e-6 && off > -6.0206 - 1.43);
+    // Shorter than the FFT (zero-padded): the window spans the signal, so the level still reads right (it read
+    // 1.4 to 6 dB low while the window spanned the padded size).
+    for (std::size_t n : {std::size_t(6000), std::size_t(4096), std::size_t(2000)}) {
+        const double at = loudest(sine(n, 171 * 48000.0 / 8192, 48000, 0.5), hz);
+        CHECK(at > -6.0206 - 1.43 && at < -6.0206 + 0.05);
+    }
+    CHECK_NEAR(loudest(sine(4096, 86 * 48000.0 / 8192, 48000, 0.5), hz), -6.0206, 0.05);  // on a bin of the 4096 frames
     const auto x = sine(8192, 1000, 48000, 0.5);
     const auto flat = analysis::frequencyResponse(x.data(), x.data(), x.size(), 48000, 6);
     CHECK(!flat.empty());

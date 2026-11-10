@@ -68,6 +68,11 @@ struct Engine::Slot {
     int instrumentFadeLeft = 0;
     bool instrumentIdle = false;  // the instrument stopped running (Silent): reset before it runs again
     float instL[kBlock] = {}, instR[kBlock] = {};  // this chunk's instrument output (module node 0)
+    // Play while the instrument still rang out (after Stop): its next few milliseconds, rendered before it was
+    // reset and faded to silence, mixed in from the next chunk so the reset doesn't click.
+    static constexpr int kPlayTailMax = 512;
+    float playTailL[kPlayTailMax] = {}, playTailR[kPlayTailMax] = {};
+    int playTailLen = 0, playTailAt = 0;
     bool insertTail = false;   // stopped: the inserts ring out on silence (Mode::Tail) until quiet
     int tailFade = 0;          // > 0: a tail at its cap, still audible, fading out (frames left); -1: faded
     int64_t tailCap = 0;       // ... or for at most this many samples
@@ -296,6 +301,8 @@ namespace {
 constexpr double kSwapSeconds = 0.02;
 constexpr double kSeamSeconds = 0.003;
 constexpr double kStopSeconds = 0.01;
+constexpr double kPlayTailSeconds = 0.005;   // Play after Stop: a ringing instrument fades out over this
+constexpr double kPlayTailQuietSeconds = 0.1;  // ... if its track sounded within the last 0.1 s
 constexpr double kPreviewGlideSeconds = 0.005;  // a held preview glides to a new pitch this fast (a bend being drawn)
 constexpr float kPreviewQuiet = 1e-4f;          // -80 dB: a preview's effect tail below this has died away
 constexpr double kPreviewQuietSeconds = 0.25;   // ... once it has stayed below it this long
@@ -1226,7 +1233,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             }
             if (!l.folder && l.hasInstrument) {
                 charge({l.instrument});
-                masterChainBytes += sizeof(NoteEvents);  // its note list and held notes
+                masterChainBytes += sizeof(NoteEvents) + NoteEvents::kBytes;  // its note list and held notes
                 ++total;
             }
         }
@@ -2821,14 +2828,16 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetInstrument: {
                 Slot& s = slotAt(c.slot);
                 const int fadeLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
+                ComponentChain* next = c.masterChain;
+                // Held notes move to the new instrument (a rebuild or a new choice keeps a note sounding);
+                // the old one lets them go and rings out as it crossfades. They are taken over from the
+                // instrument that holds them, the current one, even when a swap still crossfading keeps the
+                // one it replaced (whose notes were let go) as the side heard more.
+                if (s.instrument && next && !s.instrumentIdle) next->notes()->takeOver(*s.instrument->notes());
                 if (s.instrumentFadeLeft * 2 > fadeLen) std::swap(s.instrument, s.instrumentFading);
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, s.instrumentFading);
                 s.instrumentFading = nullptr;
                 s.instrumentFadeLeft = 0;
-                ComponentChain* next = c.masterChain;
-                // Held notes move to the new instrument (a rebuild or a new choice keeps a note sounding);
-                // the old one lets them go and rings out as it crossfades.
-                if (s.instrument && next && !s.instrumentIdle) next->notes()->takeOver(*s.instrument->notes());
                 if (s.mode == Slot::Mode::Play && s.instrument && !s.instrumentIdle) {
                     s.instrument->notes()->releaseAll(0, false);
                     s.instrumentFading = s.instrument;
@@ -2876,11 +2885,15 @@ void Engine::applyCommands() noexcept {
                     s.swapLeft = 0;
                     s.seamLeft = 0;
                     if (s.cur) restartChain(*s.cur);  // a held preview plays on into playback
+                    s.playTailLen = s.playTailAt = 0;
                     if (s.instrument) {
                         // Pattern notes end; without a held preview the instrument starts from silence, as an export does.
                         NoteEvents& notes = *s.instrument->notes();
                         notes.releaseAll(0, true);
                         if (!notes.holdsPreview()) {
+                            // Still sounding (a release after Stop): its next 5 ms fade out over the new pass's start.
+                            if (!s.instrumentIdle && s.active && s.previewQuiet < static_cast<int64_t>(kPlayTailQuietSeconds * sr_))
+                                playTail(s);
                             s.instrument->reset();
                             notes.forget(false);
                             notes.clearEvents();
@@ -3194,6 +3207,7 @@ void Engine::previewCommand(const Cmd& c) noexcept {
             held->glideLeft = std::max(1, static_cast<int>(std::floor(kPreviewGlideSeconds * sr_ + 0.5)));
             held->glideStep = (held->target - held->pitch) / held->glideLeft;
             held->motionFrom = 0;
+            held->motionWait = 0;
             return;
         }
         if (c.previewOp == 2) {
@@ -3418,8 +3432,11 @@ bool Engine::playsNotes(const Slot& s) noexcept { return s.cur && (s.cur->voiced
 void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     const int64_t n0 = s.n0, end = n0 + m;
     for (NoteEvents::Held& h : notes.held())
-        if (h.active && h.source == NoteEvents::Source::Orphan && h.offAt < end)
-            notes.off(static_cast<uint32_t>(std::max<int64_t>(0, h.offAt - n0)), h);
+        if (h.active && h.source == NoteEvents::Source::Orphan && h.offAt < end) {
+            const uint32_t frame = static_cast<uint32_t>(std::max<int64_t>(0, h.offAt - n0));
+            noteMotion(notes, h, static_cast<int>(frame));
+            notes.off(frame, h);
+        }
     const Pattern* pat = s.pat;
     if (!pat) return;
     auto sampleOf = [this](double step) { return static_cast<int64_t>(std::floor(step * stepLen_ + 0.5)); };
@@ -3433,19 +3450,24 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
         h.exLen = std::max(1.0, n.len / std::max(1, n.ratchet) * stepLen_);
         h.since = 0;
         h.motionFrom = frame;
+        h.motionWait = 0;
     };
     for (; e < ne && sampleOf(ev[e].step) < end; ++e) {
         const PatternEvent& pe = ev[e];
         const PatternNote& n = pat->notes[pe.note];
         const uint32_t frame = static_cast<uint32_t>(std::max<int64_t>(0, sampleOf(pe.step) - n0));
         if (!pe.on) {
-            if (NoteEvents::Held* h = notes.findPattern(pe.note, pe.sub)) notes.off(frame, *h);
+            if (NoteEvents::Held* h = notes.findPattern(pe.note, pe.sub)) {
+                noteMotion(notes, *h, static_cast<int>(frame));
+                notes.off(frame, *h);
+            }
             continue;
         }
         if (!notePlays(n, pe.note, s.repeat, seed_)) continue;
         if (pe.sub == 0 && n.slideFrom >= 0) {
             const PatternNote& from = pat->notes[static_cast<size_t>(n.slideFrom)];
             if (NoteEvents::Held* h = notes.findPattern(static_cast<uint32_t>(n.slideFrom), static_cast<uint16_t>(from.ratchet - 1))) {
+                noteMotion(notes, *h, static_cast<int>(frame));  // its glide and expression up to the slide
                 h->note = pe.note;
                 h->sub = 0;
                 h->pitch = h->sentPitch;  // from the pitch being heard, bend included
@@ -3462,33 +3484,61 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
 }
 
 // Glides and expression as per-note pitch, pressure and timbre events, worked out every kExpressionStep frames (as a
-// .caw voice works out its curves), sent only when a value changes.
+// .caw voice works out its curves), sent only when a value changes. The grid runs on from the note's start (or its
+// slide) across blocks, and a note that ends or slides mid-block first gets its points up to there, so the events
+// land on the same frames, with the same values, at any block size.
+void Engine::noteMotion(NoteEvents& notes, NoteEvents::Held& h, int end) noexcept {
+    if (h.glideLeft <= 0 && !h.ex) {
+        h.motionFrom = static_cast<uint32_t>(end);
+        h.motionWait = 0;
+        return;
+    }
+    int f = static_cast<int>(h.motionFrom) + h.motionWait;
+    for (; f < end; f += kExpressionStep) {
+        double bend = 0, press = 1, timbre = 0;
+        if (h.ex) expressionAt(*h.ex, static_cast<double>(h.since), h.exLen, sr_, bend, press, timbre);
+        const uint32_t frame = static_cast<uint32_t>(f);
+        notes.pitch(frame, h, h.pitch + bend);
+        if (h.ex) {
+            if (!h.ex->press.points.empty()) notes.pressure(frame, h, std::clamp(press, 0.0, 1.0));
+            if (!h.ex->timbre.points.empty()) notes.timbre(frame, h, std::clamp(timbre, 0.0, 1.0));
+        }
+        if (h.glideLeft > 0) {
+            const int k = std::min(kExpressionStep, h.glideLeft);
+            h.glideLeft -= k;
+            h.pitch = h.glideLeft == 0 ? h.target : h.pitch + h.glideStep * k;
+        }
+        h.since += kExpressionStep;
+    }
+    h.motionWait = f - end;  // the next point, that many frames on
+    h.motionFrom = static_cast<uint32_t>(end);
+}
+
 void Engine::instrumentMotion(NoteEvents& notes, int m) noexcept {
     for (NoteEvents::Held& h : notes.held()) {
         if (!h.active) continue;
-        if (h.glideLeft <= 0 && !h.ex) {
-            h.motionFrom = 0;
-            continue;
-        }
-        for (int f = static_cast<int>(h.motionFrom); f < m; f += kExpressionStep) {
-            const int step = std::min(kExpressionStep, m - f);
-            double bend = 0, press = 1, timbre = 0;
-            if (h.ex) expressionAt(*h.ex, static_cast<double>(h.since), h.exLen, sr_, bend, press, timbre);
-            const uint32_t frame = static_cast<uint32_t>(f);
-            notes.pitch(frame, h, h.pitch + bend);
-            if (h.ex) {
-                if (!h.ex->press.points.empty()) notes.pressure(frame, h, std::clamp(press, 0.0, 1.0));
-                if (!h.ex->timbre.points.empty()) notes.timbre(frame, h, std::clamp(timbre, 0.0, 1.0));
-            }
-            if (h.glideLeft > 0) {
-                const int k = std::min(step, h.glideLeft);
-                h.glideLeft -= k;
-                h.pitch = h.glideLeft == 0 ? h.target : h.pitch + h.glideStep * k;
-            }
-            h.since += step;
-        }
-        h.motionFrom = 0;
+        noteMotion(notes, h, m);
+        h.motionFrom = 0;  // the next block starts at its frame 0
     }
+}
+
+// Renders the instrument's next few milliseconds (its notes already let go) into the slot's play tail, faded
+// to silence, before Play resets it; runInstrument mixes the tail into the first chunks of the new pass.
+void Engine::playTail(Slot& s) noexcept {
+    const int len = std::min(Slot::kPlayTailMax, std::max(1, static_cast<int>(kPlayTailSeconds * sr_ + 0.5)));
+    const ChainTime time{g_, stepLen_, touchEpoch_, bpm_, static_cast<uint32_t>(beatsPerBar_), false};
+    for (int done = 0; done < len;) {
+        const int n = std::min(kBlock, len - done);
+        s.instrument->process(s.playTailL + done, s.playTailR + done, static_cast<uint32_t>(n), sr_, &time);
+        done += n;
+    }
+    for (int i = 0; i < len; ++i) {
+        const float w = static_cast<float>(len - i) / static_cast<float>(len + 1);
+        s.playTailL[i] *= w;
+        s.playTailR[i] *= w;
+    }
+    s.playTailLen = len;
+    s.playTailAt = 0;
 }
 
 void Engine::runInstrument(Slot& s, int m) noexcept {
@@ -3511,6 +3561,10 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
     } else {
         std::fill_n(s.instL, m, 0.0f);
         std::fill_n(s.instR, m, 0.0f);
+    }
+    for (int i = 0; i < m && s.playTailAt < s.playTailLen; ++i, ++s.playTailAt) {
+        s.instL[i] += s.playTailL[s.playTailAt];
+        s.instR[i] += s.playTailR[s.playTailAt];
     }
     if (s.instrumentFadeLeft <= 0) return;
     // A replaced instrument (a rebuild, another choice) rings out under the new one for 20 ms.
@@ -4073,7 +4127,8 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     }
     const bool tail = s.mode == Slot::Mode::Tail;  // stopped: silence into the inserts, which ring out
     const double target = s.target;
-    const double gainCoef = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));
+    if (!(trackGainCoef_ >= 0.0)) trackGainCoef_ = 1.0 - detExp(-1.0 / (kGainSeconds * sr_));  // once per Engine
+    const double gainCoef = trackGainCoef_;
     const int seamLen = std::max(1, static_cast<int>(kSeamSeconds * sr_));
     const int swapLen = std::max(1, static_cast<int>(kSwapSeconds * sr_));
     const double pan = bitsToDouble(s.pan.load(std::memory_order_relaxed));
@@ -4083,24 +4138,30 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         s.gl = g.left;
         s.gr = g.right;
     }
+    // A native instrument with no .caw effects after it stays stereo into the inserts; the mono chain output
+    // (y) is then not used, so it is not worked out.
+    const bool instrumentStereo = !tail && s.cur->native && s.cur->main.empty() && !(s.fade && !s.old->main.empty());
     double* y = tmp_;
-    for (int i = 0; i < m; ++i) y[i] = tail ? 0.0 : static_cast<double>(in[0][i]);
+    if (!instrumentStereo)
+        for (int i = 0; i < m; ++i) y[i] = tail ? 0.0 : static_cast<double>(in[0][i]);
     if (s.seam && !tail) {
         const int sl = std::min(m, s.seamLeft);
-        for (int i = 0; i < sl; ++i) {
-            const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
-            y[i] = static_cast<double>(in[1][i]) * (1.0 - w) + y[i] * w;
-        }
+        if (!instrumentStereo)
+            for (int i = 0; i < sl; ++i) {
+                const double w = static_cast<double>(seamLen - s.seamLeft + i + 1) / (seamLen + 1);
+                y[i] = static_cast<double>(in[1][i]) * (1.0 - w) + y[i] * w;
+            }
         s.shadowN += sl;
         s.seamLeft -= sl;
     }
     if (s.fade && !tail) {
         const int sl = std::min(m, s.swapLeft);
-        for (int i = 0; i < m; ++i) {
-            double w = 1.0;
-            if (i < sl) w = static_cast<double>(swapLen - s.swapLeft + i + 1) / (swapLen + 1);
-            y[i] = static_cast<double>(in[2][i]) * (1.0 - w) + y[i] * w;
-        }
+        if (!instrumentStereo)
+            for (int i = 0; i < m; ++i) {
+                double w = 1.0;
+                if (i < sl) w = static_cast<double>(swapLen - s.swapLeft + i + 1) / (swapLen + 1);
+                y[i] = static_cast<double>(in[2][i]) * (1.0 - w) + y[i] * w;
+            }
         s.swapLeft -= sl;
     }
     if (s.old && s.swapLeft <= 0 && canRetire(1)) {
@@ -4112,8 +4173,6 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     // make of it stays stereo through volume and pan (the pan law then works per side, as balance).
     ComponentChain* const inserts = s.inserts;
     const bool fading = s.insertsFadeLeft > 0;
-    // A native instrument with no .caw effects after it stays stereo into the inserts.
-    const bool instrumentStereo = !tail && s.cur->native && s.cur->main.empty() && !(s.fade && !s.old->main.empty());
     const bool stereo = inserts || fading || instrumentStereo;  // stereo output, not the mono chain
     if (stereo) {
         // A tail frozen while the track was silent must not play on when it sounds again.
@@ -4155,9 +4214,44 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     }
     float peak = 0, sig = 0;
     int sp = s.scopePos.load(std::memory_order_relaxed);
+    const bool volumeAutomated = s.automation && !s.automation->volume.empty();
+    const bool panAutomated = s.automation && !s.automation->pan.empty();
+    const double settled = target > 0.0 ? target : 0.0;
+    if (!volumeAutomated && !panAutomated && s.gain == settled) {
+        // The usual case: volume settled, no lanes. The same sums as the loop below, without its per-sample
+        // branches, and the scope written in at most two runs instead of a wrap test per sample.
+        const double gain = s.gain, gl = s.gl, gr = s.gr;
+        float mid[kBlock], level[kBlock];
+        if (stereo) {
+            for (int i = 0; i < m; ++i) {
+                const double vl = static_cast<double>(insertL_[i]) * gain;
+                const double vr = static_cast<double>(insertR_[i]) * gain;
+                outL[i] = routeSample(vl * gl);
+                outR[i] = routeSample(vr * gr);
+                const double al = std::fabs(vl), ar = std::fabs(vr);
+                level[i] = static_cast<float>(al < ar ? ar : al);
+                mid[i] = static_cast<float>(0.5 * (vl + vr));
+            }
+        } else {
+            for (int i = 0; i < m; ++i) {
+                const double v = finiteOr0(y[i]) * gain;
+                outL[i] = routeSample(v * gl);
+                outR[i] = routeSample(v * gr);
+                level[i] = static_cast<float>(std::fabs(v));
+                mid[i] = static_cast<float>(v);
+            }
+        }
+        peak = std::max(peakAbs(outL, m), peakAbs(outR, m));
+        sig = peakAbs(level, m);
+        for (int i = 0; i < m;) {
+            const int run = std::min(m - i, kScopeSize - sp);
+            for (int k = 0; k < run; ++k) s.scope[sp + k].store(mid[i + k], std::memory_order_relaxed);
+            i += run;
+            sp = (sp + run) % kScopeSize;
+        }
+    } else  // volume moving or automated: per sample
     for (int i = 0; i < m; ++i) {
-        const double step = static_cast<double>(g_ + i) / stepLen_;
-        const bool volumeAutomated = s.automation && !s.automation->volume.empty();
+        const double step = volumeAutomated || panAutomated ? static_cast<double>(g_ + i) / stepLen_ : 0.0;
         const double desired = target > 0.0
             ? (volumeAutomated ? automationValue(s.automation->volume, step, target) : target) : 0.0;
         if (volumeAutomated) {
@@ -4171,7 +4265,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
         const double vr = stereo ? static_cast<double>(insertR_[i]) * s.gain : vl;
         const double v = stereo ? 0.5 * (vl + vr) : vl;  // the scope and tail test read the mid
         double gl = s.gl, gr = s.gr;
-        if (s.automation && !s.automation->pan.empty()) {
+        if (panAutomated) {
             const double automatedPan = automationValue(s.automation->pan, step, pan);
             const lib::PanGains g = lib::constantPowerPan(automatedPan);
             gl = g.left; gr = g.right;

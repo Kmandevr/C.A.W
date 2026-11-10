@@ -620,6 +620,35 @@ TEST(clap_notes_and_midi_reach_an_instrument_as_caw_events) {
     CHECK_EQ(moreOut.list.size(), 4u);
 }
 
+TEST(clap_a_repeated_note_without_host_ids_ends_the_one_before) {
+    // Audio review fix 2: with note id -1, a second Note On on the same channel and key took the slot of the
+    // first, whose id then never got an off (a stuck note). It now ends first.
+    constexpr uint32_t kFrames = 128;
+    ClapLibrary lib(CAW_CLAP_FIXTURE);
+    Plug p(lib, kSynth);
+    CHECK(p.plugin && p.activate(kFrames));
+    if (!p.active) return;
+    InEvents events;
+    events.note(0, CLAP_EVENT_NOTE_ON, -1, 0, 60, 1.0);
+    events.note(10, CLAP_EVENT_NOTE_ON, -1, 0, 60, 0.5);
+    events.midi(20, 0x90, 64, 127);
+    events.midi(30, 0x90, 64, 127);
+    events.note(64, CLAP_EVENT_NOTE_OFF, -1, 0, 60, 0.0);
+    events.midi(70, 0x80, 64, 0);
+    Stereo out(kFrames);
+    OutEvents outEvents;
+    CHECK_EQ(run(p, nullptr, out, kFrames, events, outEvents), CLAP_PROCESS_CONTINUE);
+    CHECK_NEAR(out.l[15], 0.05, 1e-6);  // only the second note on key 60 sounds
+    CHECK_EQ(out.l[100], 0.0f);         // and every note has ended
+    int ons = 0, offs = 0;
+    for (const auto& e : outEvents.list) {
+        ons += e.header.type == CLAP_EVENT_NOTE_ON;
+        offs += e.header.type == CLAP_EVENT_NOTE_OFF;
+    }
+    CHECK_EQ(ons, 4);
+    CHECK_EQ(offs, 4);
+}
+
 TEST(clap_transport_reaches_the_component_while_playing) {
     ClapLibrary lib(CAW_CLAP_FIXTURE);
     Plug p(lib, kTransport);

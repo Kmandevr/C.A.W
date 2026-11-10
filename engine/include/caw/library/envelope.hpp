@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstdint>
 
 #include "../detmath.hpp"
 
@@ -22,6 +23,10 @@ inline double attackStep(double seconds, double sampleRate) noexcept {
 class AdEnvelope {
 public:
     void set(double attack, double decay, double sampleRate) noexcept {
+        if (attack == attack_ && decay == decay_ && sampleRate == rate_) return;  // unchanged: no exp
+        attack_ = attack;
+        decay_ = decay;
+        rate_ = sampleRate;
         inc_ = attackStep(attack, sampleRate);
         coef_ = decayCoefficient(decay, sampleRate);
     }
@@ -51,6 +56,7 @@ public:
 
 private:
     double level_ = 0, inc_ = 2, coef_ = 0;
+    double attack_ = -1, decay_ = -1, rate_ = -1;  // what set() last worked out
     int stage_ = 0;  // 0 idle, 1 attack, 2 decay
 };
 
@@ -60,6 +66,13 @@ private:
 class Adsr {
 public:
     void set(double attack, double decay, double sustain, double release, double sampleRate) noexcept {
+        if (attack == attack_ && decay == decay_ && sustain == sustainIn_ && release == release_ && sampleRate == rate_)
+            return;  // unchanged: no exp
+        attack_ = attack;
+        decay_ = decay;
+        sustainIn_ = sustain;
+        release_ = release;
+        rate_ = sampleRate;
         inc_ = attackStep(attack, sampleRate);
         decayCoef_ = decayCoefficient(decay, sampleRate);
         releaseCoef_ = decayCoefficient(release, sampleRate);
@@ -79,7 +92,12 @@ public:
                     stage_ = 2;
                 }
                 break;
-            case 2: level_ = sustain_ + (level_ - sustain_) * decayCoef_; break;
+            case 2:
+                level_ = sustain_ + (level_ - sustain_) * decayCoef_;
+                // Within 1e-9 of the sustain level it is there: a held note at sustain 0 doesn't decay into
+                // denormal numbers (slow on many CPUs).
+                if (level_ - sustain_ < 1e-9 && sustain_ - level_ < 1e-9) level_ = sustain_;
+                break;
             case 3:
                 level_ *= releaseCoef_;
                 if (level_ < 1e-6) {
@@ -88,6 +106,39 @@ public:
                 }
                 break;
             default: break;
+        }
+        return level_;
+    }
+    // Moves the envelope on n samples at once and returns the level it ends at: what n next() calls give,
+    // within rounding, for a few multiplies (for a renderer that steps the level linearly over a short
+    // block, as the Morph synth does over its 16-frame control period).
+    double skip(uint32_t n) noexcept {
+        while (n > 0 && stage_ != 0) {
+            switch (stage_) {
+                case 1: {
+                    const double steps = inc_ > 0.0 ? (1.0 - level_) / inc_ : 0.0;  // to reach 1
+                    if (static_cast<double>(n) < steps) {
+                        level_ += static_cast<double>(n) * inc_;
+                        return level_;
+                    }
+                    const uint32_t k = steps <= 1.0 ? 1u : static_cast<uint32_t>(steps) + (steps > static_cast<uint32_t>(steps));
+                    level_ = 1.0;
+                    stage_ = 2;
+                    n = n > k ? n - k : 0;
+                    break;
+                }
+                case 2:
+                    level_ = sustain_ + (level_ - sustain_) * power(decayCoef_, n);
+                    if (level_ - sustain_ < 1e-9 && sustain_ - level_ < 1e-9) level_ = sustain_;
+                    return level_;
+                default:  // release
+                    level_ *= power(releaseCoef_, n);
+                    if (level_ < 1e-6) {
+                        level_ = 0.0;
+                        stage_ = 0;
+                    }
+                    return level_;
+            }
         }
         return level_;
     }
@@ -100,7 +151,14 @@ public:
     }
 
 private:
+    static double power(double c, uint32_t n) noexcept {  // c^n by squaring
+        double r = 1.0;
+        for (; n > 0; n >>= 1, c *= c)
+            if (n & 1) r *= c;
+        return r;
+    }
     double level_ = 0, inc_ = 2, decayCoef_ = 0, releaseCoef_ = 0, sustain_ = 1;
+    double attack_ = -1, decay_ = -1, sustainIn_ = -1, release_ = -1, rate_ = -1;  // what set() last worked out
     int stage_ = 0;  // 0 idle, 1 attack, 2 decay and sustain, 3 release
 };
 

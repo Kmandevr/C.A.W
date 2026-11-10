@@ -10,6 +10,7 @@
 #include "caw/instrument.hpp"
 #include "caw/library/delay.hpp"
 #include "caw/library/distortion.hpp"
+#include "caw/library/fastmath.hpp"
 #include "caw/library/stereo.hpp"
 
 namespace caw {
@@ -26,6 +27,16 @@ ParameterDescriptor parameter(std::string_view id, std::string_view name, double
     p.minimum = lo;
     p.maximum = hi;
     p.smoothingFrames = 480;  // 10 ms at 48 kHz: a knob move doesn't click
+    return p;
+}
+
+// A time, frequency, rate or gain: the knob tapers (each step of its travel multiplies the value), so it turns finely
+// near the bottom of a wide range.
+ParameterDescriptor tapered(std::string_view id, std::string_view name, double def, double lo, double hi,
+                            std::string_view unit = {}) {
+    ParameterDescriptor p = parameter(id, name, def, lo, hi);
+    p.unit = unit;
+    p.curve = ParameterCurve::Exponential;
     return p;
 }
 
@@ -98,7 +109,7 @@ ParameterDescriptor shapeParameter() {
 }
 const ParameterDescriptor kDistortionParams[] = {
     shapeParameter(),
-    parameter("drive", "Drive", 4.0, 1.0, 20.0),
+    tapered("drive", "Drive", 4.0, 1.0, 20.0),
     parameter("bits", "Bits", 8.0, 1.0, 24.0),
     parameter("mix", "Mix", 1.0, 0.0, 1.0),
     parameter("output", "Output", 1.0, 0.0, 2.0),
@@ -116,6 +127,8 @@ double paramAt(const AudioProcessBlock& b, uint32_t k, uint32_t i, double fallba
     return b.parameters[k].samples ? b.parameters[k].samples[i] : b.parameters[k].value;
 }
 
+// The shapes' per-sample maths is the Library's fast kind (fastmath.hpp: the same curves within 1e-9), and
+// what depends only on the knobs is worked out once per value, not per sample.
 class Distortion final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDistortion; }
@@ -126,20 +139,30 @@ public:
             const int shape = static_cast<int>(paramAt(b, 0, i, 0.0));
             const double amount = paramAt(b, 1, i, 4.0), bits = paramAt(b, 2, i, 8.0);
             const double mix = paramAt(b, 3, i, 1.0), out = paramAt(b, 4, i, 1.0);
+            if (shape == 0) saturator_.set(amount);
+            if (shape == 3 && bits != bits_) {
+                bits_ = bits;
+                const double whole = bits < 1.0 ? 1.0 : (bits > 24.0 ? 24.0 : bits);
+                steps_ = detPow(2.0, std::floor(whole) - 1.0);
+            }
             for (uint32_t c = 0; c < 2; ++c) {
                 const double x = b.input.channels[c][i];
                 double y = 0.0;
                 switch (shape) {
                     case 1: y = lib::hardClip(x, amount); break;
-                    case 2: y = lib::fold(x, amount); break;
-                    case 3: y = lib::crush(x, bits); break;
-                    default: y = lib::drive(x, amount); break;
+                    case 2: y = lib::fastSinCycles(finiteOr0(x) * amount * 0.25); break;  // lib::fold
+                    case 3: y = std::floor(finiteOr0(x) * steps_ + 0.5) / steps_; break;  // lib::crush
+                    default: y = saturator_.process(x); break;                             // lib::drive
                 }
                 b.output.channels[c][i] = static_cast<float>((x + (y - x) * mix) * out);
             }
         }
         return true;
     }
+
+private:
+    lib::Saturator saturator_;
+    double bits_ = -1.0, steps_ = 128.0;
 };
 
 // Ping-pong delay: synced to the song's tempo (a note division) or free (milliseconds), with feedback,
@@ -157,7 +180,7 @@ ParameterDescriptor syncParameter() {
 }
 const ParameterDescriptor kDelayParams[] = {
     syncParameter(),
-    parameter("time", "Time (free)", 375.0, 1.0, 4000.0),
+    tapered("time", "Time (free)", 375.0, 1.0, 4000.0, "ms"),
     parameter("feedback", "Feedback", 0.45, 0.0, 0.95),
     parameter("cross", "Ping-pong", 1.0, 0.0, 1.0),
     parameter("mix", "Mix", 0.35, 0.0, 1.0),
@@ -213,7 +236,7 @@ private:
 
 // Stereo chorus: rate, depth and mix; the two sides sweep a quarter cycle apart.
 const ParameterDescriptor kChorusParams[] = {
-    parameter("rate", "Rate", 0.6, 0.05, 5.0),
+    tapered("rate", "Rate", 0.6, 0.05, 5.0, "Hz"),
     parameter("depth", "Depth", 0.5, 0.0, 1.0),
     parameter("mix", "Mix", 0.5, 0.0, 1.0),
 };
@@ -237,13 +260,23 @@ public:
         }
         return true;
     }
-    void reset() noexcept override { chorus_.clear(); }
+    void reset() noexcept override {
+        chorus_.clear();
+        left_ = 0;
+    }
     using ModuleProcessor::process;
+    // The LFO runs at the control rate (lib::Chorus::control every 16 frames, carried across blocks so a
+    // block's size doesn't move it), the sweep gliding in between: perceptually the per-sample sweep.
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
         for (uint32_t i = 0; i < b.frames; ++i) {
+            if (left_ == 0) {
+                chorus_.control(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), kControlFrames);
+                left_ = kControlFrames;
+            }
+            --left_;
             float l = b.input.channels[0][i], r = b.input.channels[1][i];
-            chorus_.process(paramAt(b, 0, i, 0.6), paramAt(b, 1, i, 0.5), paramAt(b, 2, i, 0.5), l, r);
+            chorus_.step(paramAt(b, 2, i, 0.5), l, r);
             b.output.channels[0][i] = l;
             b.output.channels[1][i] = r;
         }
@@ -251,11 +284,13 @@ public:
     }
 
 private:
+    static constexpr uint32_t kControlFrames = 16;
     lib::Chorus chorus_;
+    uint32_t left_ = 0;  // frames until the next control
 };
 
 
-// The basic synth ("org.caw.synth.basic"): 16 voices of two oscillators (saw, square, triangle or sine; the second
+// The basic synth ("org.caw.synth.basic"): 128 voices of two oscillators (saw, square, triangle or sine; the second
 // detuned and mixed in), a resonant low-pass filter that follows the envelope, and an ADSR envelope. Velocity sets
 // the level; a note's pressure scales it and its timbre opens the filter. Deterministic maths (caw/detmath.hpp),
 // so it renders the same bits on every device.
@@ -319,15 +354,19 @@ public:
     const ModuleDescriptor& descriptor() const noexcept override { return kSynth; }
     bool activate(double sampleRate, uint32_t) noexcept override {
         sampleRate_ = sampleRate;
-        voices_.clear();
+        reset();
         return true;
     }
-    void reset() noexcept override { voices_.clear(); }
+    void reset() noexcept override {
+        voices_.clear();
+        controlLeft_ = 0;
+    }
 
 protected:
     void onNote(const NoteMessage& m) noexcept override {
         switch (m.type) {
             case NoteMessageType::On: {
+                controlLeft_ = 0;  // the control grid restarts here
                 Voice& v = voices_.start(m.noteId);
                 v.stage = Stage::Attack;
                 v.velocity = m.velocity;
@@ -359,60 +398,19 @@ protected:
         }
     }
 
+    // The control grid (envelope rates and each voice's steps and filter, every 16 frames) runs on from one
+    // render call to the next and restarts at a note-on, so blocks and event splits don't move it.
     void render(float* left, float* right, uint32_t frames, uint32_t offset, const ProcessBlock& b) noexcept override {
         for (uint32_t i = 0; i < frames; ++i) left[i] = right[i] = 0.0f;
-        const double sr = sampleRate_;
-        for (Voice& v : voices_) {
-            if (!v.active) continue;
-            for (uint32_t i = 0; i < frames; ++i) {
-                const uint32_t at = offset + i;
-                if ((i & 15u) == 0) {  // control rate: envelope rates and the filter every 16 frames
-                    const double detune = parameterAt(b, kDetune, at, 7.0);
-                    v.inc1 = v.freq / sr;
-                    v.inc2 = v.freq * detPow(2.0, detune / 1200.0) / sr;
-                    attackStep_ = 1.0 / std::max(1.0, parameterAt(b, kAttack, at, 0.005) * sr);
-                    decayCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kDecay, at, 0.3) * sr / 5.0));
-                    releaseCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kRelease, at, 0.25) * sr / 5.0));
-                    const double octaves = 5.0 * parameterAt(b, kEnv, at, 0.5) * v.level + 4.0 * v.timbre;
-                    double fc = parameterAt(b, kCutoff, at, 2400.0) * detPow(2.0, octaves);
-                    fc = std::clamp(fc, 20.0, 0.45 * sr);
-                    const double g = detTan(3.14159265358979323846 * fc / sr);
-                    const double k = 2.0 - 1.9 * std::clamp(parameterAt(b, kResonance, at, 0.2), 0.0, 1.0);
-                    v.a1 = 1.0 / (1.0 + g * (g + k));
-                    v.a2 = g * v.a1;
-                    v.a3 = g * v.a2;
-                }
-                const double sustain = parameterAt(b, kSustain, at, 0.7);
-                switch (v.stage) {
-                    case Stage::Attack:
-                        v.level += attackStep_;
-                        if (v.level >= 1.0) { v.level = 1.0; v.stage = Stage::Decay; }
-                        break;
-                    case Stage::Decay: v.level = sustain + (v.level - sustain) * decayCoef_; break;
-                    case Stage::Release: v.level *= releaseCoef_; break;
-                }
-                const double o1 = oscillator(static_cast<int>(parameterAt(b, kWave1, at, 0.0)), v.phase1, v.inc1);
-                const double o2 = oscillator(static_cast<int>(parameterAt(b, kWave2, at, 1.0)), v.phase2, v.inc2);
-                const double mix = parameterAt(b, kMix, at, 0.5);
-                const double x = o1 * (1.0 - 0.5 * mix) + o2 * mix;
-                v.phase1 += v.inc1;
-                v.phase1 -= std::floor(v.phase1);
-                v.phase2 += v.inc2;
-                v.phase2 -= std::floor(v.phase2);
-                // Low-pass state-variable filter (topology-preserving form).
-                const double v3 = x - v.ic2;
-                const double v1 = v.a1 * v.ic1 + v.a2 * v3;
-                const double v2 = v.ic2 + v.a2 * v.ic1 + v.a3 * v3;
-                v.ic1 = 2.0 * v1 - v.ic1;
-                v.ic2 = 2.0 * v2 - v.ic2;
-                const double y = v2 * v.level * v.velocity * v.pressure * parameterAt(b, kVolume, at, 0.5) * 0.3;
-                left[i] += static_cast<float>(y);
-                right[i] += static_cast<float>(y);
+        for (uint32_t start = 0; start < frames;) {
+            if (controlLeft_ == 0) {
+                control(b, offset + start);
+                controlLeft_ = kControlFrames;
             }
-            if (v.stage == Stage::Release && v.level < 1e-5) {
-                v.active = false;
-                v.level = 0.0;
-            }
+            const uint32_t n = std::min(controlLeft_, frames - start);
+            voices_.forEachActive([&](Voice& v) noexcept { renderVoice(v, left, right, start, start + n, offset, b); });
+            start += n;
+            controlLeft_ -= n;
         }
     }
 
@@ -427,6 +425,69 @@ private:
         double freq = 261.6255653005986, inc1 = 0, inc2 = 0, phase1 = 0, phase2 = 0;
         double ic1 = 0, ic2 = 0, a1 = 1, a2 = 0, a3 = 0;
     };
+    void control(const ProcessBlock& b, uint32_t at) noexcept {
+        const double sr = sampleRate_;
+        const double detune = parameterAt(b, kDetune, at, 7.0);
+        const double ratio = detPow(2.0, detune / 1200.0);
+        attackStep_ = 1.0 / std::max(1.0, parameterAt(b, kAttack, at, 0.005) * sr);
+        decayCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kDecay, at, 0.3) * sr / 5.0));
+        releaseCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kRelease, at, 0.25) * sr / 5.0));
+        const double env = parameterAt(b, kEnv, at, 0.5), cutoff = parameterAt(b, kCutoff, at, 2400.0);
+        const double k = 2.0 - 1.9 * std::clamp(parameterAt(b, kResonance, at, 0.2), 0.0, 1.0);
+        voices_.forEachActive([&](Voice& v) noexcept {
+            v.inc1 = v.freq / sr;
+            v.inc2 = v.freq * ratio / sr;
+            const double octaves = 5.0 * env * v.level + 4.0 * v.timbre;
+            double fc = cutoff * detPow(2.0, octaves);
+            fc = std::clamp(fc, 20.0, 0.45 * sr);
+            const double g = detTan(3.14159265358979323846 * fc / sr);
+            v.a1 = 1.0 / (1.0 + g * (g + k));
+            v.a2 = g * v.a1;
+            v.a3 = g * v.a2;
+        });
+    }
+    void renderVoice(Voice& v, float* left, float* right, uint32_t from, uint32_t to, uint32_t offset,
+                     const ProcessBlock& b) noexcept {
+        for (uint32_t i = from; i < to; ++i) {
+            const uint32_t at = offset + i;
+            const double sustain = parameterAt(b, kSustain, at, 0.7);
+            switch (v.stage) {
+                case Stage::Attack:
+                    v.level += attackStep_;
+                    if (v.level >= 1.0) { v.level = 1.0; v.stage = Stage::Decay; }
+                    break;
+                case Stage::Decay:
+                    v.level = sustain + (v.level - sustain) * decayCoef_;
+                    // At the sustain level (within 1e-9) it stays there: a held note at sustain 0 doesn't decay
+                    // into denormal numbers.
+                    if (v.level - sustain < 1e-9 && sustain - v.level < 1e-9) v.level = sustain;
+                    break;
+                case Stage::Release: v.level *= releaseCoef_; break;
+            }
+            const double o1 = oscillator(static_cast<int>(parameterAt(b, kWave1, at, 0.0)), v.phase1, v.inc1);
+            const double o2 = oscillator(static_cast<int>(parameterAt(b, kWave2, at, 1.0)), v.phase2, v.inc2);
+            const double mix = parameterAt(b, kMix, at, 0.5);
+            const double x = o1 * (1.0 - 0.5 * mix) + o2 * mix;
+            v.phase1 += v.inc1;
+            v.phase1 -= std::floor(v.phase1);
+            v.phase2 += v.inc2;
+            v.phase2 -= std::floor(v.phase2);
+            // Low-pass state-variable filter (topology-preserving form).
+            const double v3 = x - v.ic2;
+            const double v1 = v.a1 * v.ic1 + v.a2 * v3;
+            const double v2 = v.ic2 + v.a2 * v.ic1 + v.a3 * v3;
+            v.ic1 = 2.0 * v1 - v.ic1;
+            v.ic2 = 2.0 * v2 - v.ic2;
+            const double y = v2 * v.level * v.velocity * v.pressure * parameterAt(b, kVolume, at, 0.5) * 0.3;
+            left[i] += static_cast<float>(y);
+            right[i] += static_cast<float>(y);
+        }
+        if (v.stage == Stage::Release && v.level < 1e-5) {
+            v.active = false;
+            v.level = 0.0;
+        }
+    }
+    static constexpr uint32_t kControlFrames = 16;
     static void setPitch(Voice& v, double pitch) noexcept { v.freq = 440.0 * detPow(2.0, (pitch - 69.0) / 12.0); }
     // PolyBLEP: the step of a saw or square smoothed over one sample, so high notes alias less.
     static double blep(double t, double dt) noexcept {
@@ -451,9 +512,10 @@ private:
             default: return 2.0 * t - 1.0 - blep(t, dt);
         }
     }
-    VoicePool<Voice, 16> voices_;
+    VoicePool<Voice, 128> voices_;  // plenty: a silent voice costs a check
     double sampleRate_ = 48000.0;
     double attackStep_ = 0, decayCoef_ = 0, releaseCoef_ = 0;
+    uint32_t controlLeft_ = 0;  // frames until the next control
 };
 
 template <class T>

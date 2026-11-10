@@ -7,8 +7,10 @@
 
 #include "caw.h"
 #include "caw/instrument.hpp"
+#include "component_chain.h"
 #include "engine.h"
 #include "json.h"
+#include "module_registry.h"
 #include "native_component_test_path.h"
 #include "note_events.h"
 #include "project.h"
@@ -167,6 +169,184 @@ TEST(a_note_list_is_bounded_and_sorted_and_counts_what_overflows) {
     CHECK(notes->findPreview(1) != nullptr);
 }
 
+TEST(a_full_note_list_still_delivers_every_off) {
+    // Audio review fix 5: a block whose list filled up (with per-note motion) dropped a note-off: a stuck note.
+    // Room for every held note's off is now kept back from note-ons and motion.
+    auto notes = std::make_unique<NoteEvents>();
+    std::vector<NoteEvents::Held*> held;
+    for (int32_t i = 0; i < 8; ++i) held.push_back(&notes->on(0, NoteEvents::Source::Preview, 0, 0, i, 60 + i, 1));
+    for (uint32_t i = 0; i < NoteEvents::kCapacity; ++i) notes->pitch(i % 64, *held[i % 8], 60.0 + 0.001 * i);
+    CHECK(notes->overflow() > 0u);  // motion past the room left was dropped
+    for (NoteEvents::Held* h : held) notes->off(63, *h);
+    CHECK_EQ(notes->count(), NoteEvents::kCapacity);
+    uint32_t offs = 0;
+    for (uint32_t i = 0; i < notes->count(); ++i) {
+        NoteMessage m;
+        offs += readNote(notes->events()[i], m) && m.type == NoteMessageType::Off;
+    }
+    CHECK_EQ(offs, 8u);
+    CHECK(!notes->holdsAny());
+}
+
+TEST(a_note_list_sorts_many_runs_in_frame_order_and_keeps_their_order) {
+    // Audio review fix 6: the insertion sort was O(n^2) with many expressive notes. A natural merge sort keeps
+    // it O(n log runs), stable: here 1,024 runs of motion, each in frame order.
+    auto notes = std::make_unique<NoteEvents>();
+    uint32_t id = 0;
+    for (uint32_t run = 0; run < 1024; ++run)
+        for (uint32_t f = run % 7; f < 64; f += 8) notes->push(notes::notePitch(f, ++id, 60, 60.0 + run));
+    const uint32_t n = notes->count();
+    notes->sort();
+    CHECK_EQ(notes->count(), n);
+    for (uint32_t i = 1; i < n; ++i) {
+        const Event& a = notes->events()[i - 1];
+        const Event& b = notes->events()[i];
+        CHECK(a.frame <= b.frame);
+        if (a.frame == b.frame) CHECK(a.noteId < b.noteId);  // stable: same-frame events keep their order
+    }
+}
+
+TEST(an_instrument_can_hold_thousands_of_notes) {
+    // Owner, 2026-11-10: no practical polyphony cap from the host; a program sets its own.
+    auto notes = std::make_unique<NoteEvents>();
+    for (uint32_t i = 0; i < 4000; ++i) notes->on(0, NoteEvents::Source::Pattern, i, 0, -1, 40 + i % 60, 1);
+    CHECK_EQ(notes->activeCount(), 4000u);
+    CHECK(notes->findPattern(0, 0) != nullptr);  // the first is still held
+    CHECK_EQ(notes->overflow(), 0u);
+    notes->clearEvents();
+    notes->releaseAll(0, false);
+    CHECK_EQ(notes->count(), 4000u);
+    notes->clearEvents();
+    CHECK_EQ(notes->activeCount(), 0u);
+    uint32_t left = 0;
+    for (const NoteEvents::Held& h : notes->held()) left += h.active;  // packed away: nothing left to walk
+    CHECK_EQ(left, 0u);
+    CHECK(notes->held().begin() == notes->held().end());
+}
+
+namespace {
+
+// A note sounds for 100 frames; then the instrument says it is quiet. Counts its render calls.
+constexpr PortDescriptor kSleepyPorts[] = {
+    {"notes", PortType::Event, ChannelLayout::None, true, 0, true, 0.0f},
+    stereoOutput("out"),
+};
+ModuleDescriptor sleepyDescriptor() {
+    ModuleDescriptor d;
+    d.id = "org.caw.tests.sleepy";
+    d.role = ModuleRole::Instrument;
+    d.ports = kSleepyPorts;
+    d.portCount = 2;
+    return d;
+}
+const ModuleDescriptor kSleepy = sleepyDescriptor();
+int gSleepyRenders = 0;
+class Sleepy final : public InstrumentProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kSleepy; }
+    bool quiet() const noexcept override { return left_ == 0; }
+
+protected:
+    void onNote(const NoteMessage& m) noexcept override {
+        if (m.type == NoteMessageType::On) left_ = 100;
+    }
+    void render(float* l, float* r, uint32_t frames, uint32_t, const ProcessBlock&) noexcept override {
+        ++gSleepyRenders;
+        for (uint32_t i = 0; i < frames; ++i) {
+            l[i] = r[i] = left_ > 0 ? 0.5f : 0.0f;
+            if (left_ > 0) --left_;
+        }
+    }
+
+private:
+    uint32_t left_ = 0;
+};
+
+// An effect that passes its input on, with a 128-frame declared tail and no quiet(). Counts its calls.
+constexpr PortDescriptor kTailPorts[] = {stereoInput("in"), stereoOutput("out")};
+ModuleDescriptor tailDescriptor() {
+    ModuleDescriptor d;
+    d.id = "org.caw.tests.tail";
+    d.role = ModuleRole::Effect;
+    d.ports = kTailPorts;
+    d.portCount = 2;
+    d.tailFrames = 128;
+    return d;
+}
+const ModuleDescriptor kTail = tailDescriptor();
+int gTailCalls = 0;
+class Tail final : public ModuleProcessor {
+public:
+    const ModuleDescriptor& descriptor() const noexcept override { return kTail; }
+    void process(const StereoProcessBlock& b) noexcept override {
+        ++gTailCalls;
+        for (uint32_t i = 0; i < b.frames; ++i) {
+            b.outputLeft[i] = b.inputLeft[i];
+            b.outputRight[i] = b.inputRight[i];
+        }
+    }
+};
+
+}  // namespace
+
+TEST(a_quiet_instrument_sleeps_until_its_next_note) {
+    // Owner, 2026-11-10: the host skips what has fallen silent, so a plug-in that says so costs nothing then.
+    ModuleRegistry registry;
+    CHECK(registry.add(kSleepy, []() noexcept -> ModuleProcessor* { return new Sleepy; }));
+    std::string error;
+    ComponentSpec spec;
+    spec.id = kSleepy.id;
+    auto chain = ComponentChain::buildInstrument(registry, spec, 48000, error);
+    CHECK(chain != nullptr);
+    if (!chain) return;
+    float l[64], r[64];
+    gSleepyRenders = 0;
+    chain->notes()->on(0, NoteEvents::Source::Preview, 0, 0, 1, 60, 1);
+    chain->process(l, r, 64, 48000, nullptr);
+    chain->process(l, r, 64, 48000, nullptr);  // frames 64..127: the note ends at 100, then it is quiet
+    const int awake = gSleepyRenders;
+    CHECK(awake > 0);
+    for (int k = 0; k < 10; ++k) chain->process(l, r, 64, 48000, nullptr);
+    CHECK_EQ(gSleepyRenders, awake);  // asleep: not run, and silence out
+    CHECK_EQ(l[0], 0.0f);
+    CHECK_EQ(r[63], 0.0f);
+    chain->notes()->on(10, NoteEvents::Source::Preview, 0, 0, 2, 62, 1);  // an event wakes it, on its frame
+    chain->process(l, r, 64, 48000, nullptr);
+    CHECK(gSleepyRenders > awake);
+    CHECK_EQ(l[9], 0.0f);
+    CHECK_EQ(l[10], 0.5f);
+}
+
+TEST(an_effect_sleeps_once_its_input_has_been_silent_longer_than_its_tail) {
+    ModuleRegistry registry;
+    CHECK(registry.add(kTail, []() noexcept -> ModuleProcessor* { return new Tail; }));
+    std::string error;
+    ComponentSpec spec;
+    spec.id = kTail.id;
+    auto chain = ComponentChain::build(registry, {spec}, 48000, error);
+    CHECK(chain != nullptr);
+    if (!chain) return;
+    float l[64], r[64];
+    gTailCalls = 0;
+    for (int k = 0; k < 2; ++k) {  // 128 silent frames: within the tail, still run
+        std::fill_n(l, 64, 0.0f);
+        std::fill_n(r, 64, 0.0f);
+        chain->process(l, r, 64, 48000, nullptr);
+    }
+    CHECK_EQ(gTailCalls, 2);
+    for (int k = 0; k < 5; ++k) {  // past the tail, with silence out: run once more, then asleep
+        std::fill_n(l, 64, 0.0f);
+        std::fill_n(r, 64, 0.0f);
+        chain->process(l, r, 64, 48000, nullptr);
+    }
+    CHECK_EQ(gTailCalls, 3);
+    std::fill_n(l, 64, 0.25f);  // input again: it runs
+    std::fill_n(r, 64, 0.0f);
+    chain->process(l, r, 64, 48000, nullptr);
+    CHECK_EQ(gTailCalls, 4);
+    CHECK_EQ(l[5], 0.25f);
+}
+
 TEST(pattern_notes_reach_an_instrument_on_their_frames_across_loop_wraps) {
     Engine e(48000);
     CHECK(loadFixture(e, kRecorder));
@@ -285,6 +465,38 @@ TEST(stop_ends_an_instruments_notes_and_play_starts_it_from_silence) {
     CHECK_NEAR(l, 0.1 * kCentre, 1e-5);  // the note starts again with the loop, nothing left over
 }
 
+TEST(play_after_stop_fades_a_ringing_instrument_out_instead_of_cutting_it) {
+    // Audio review fix 3: Play reset an instrument still ringing out after Stop in one sample (a click).
+    Engine e(48000);
+    e.setMasterBypass(true);
+    // A sine (so a step stands out from the wave's own), and the loop starts silent: only the tail sounds at Play.
+    ProjectSpec p = instrumentTrack("org.caw.synth.morph", "8 C4 4 1\n");
+    p.layers[0].instrument.params = {{"release", 3.0}, {"sustain", 1.0}, {"shape", 0.0}, {"drift", 0.0}, {"unison", 1}, {"attack", 0.01}};
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    std::vector<float> l(64), r(64);
+    for (int i = 0; i < 62400 / 64; ++i) e.process(l.data(), r.data(), 64);  // 1.3 s: into the note (step 8 = 1 s)
+    e.stop();
+    float before = 0;
+    for (int i = 0; i < 4800 / 64; ++i) {  // the stop fade, then the release rings on
+        e.process(l.data(), r.data(), 64);
+        before = 0;
+        for (float v : l) before = std::max(before, std::fabs(v));
+    }
+    CHECK(before > 0.01f);
+    e.play();
+    float jump = 0, last = l[63];
+    for (int i = 0; i < 8; ++i) {
+        e.process(l.data(), r.data(), 64);
+        for (float v : l) {
+            jump = std::max(jump, std::fabs(v - last));
+            last = v;
+        }
+    }
+    CHECK_NEAR(l[63], 0.0, 1e-6);  // then silence: the new pass starts from it, as an export does
+    CHECK(jump < 0.25f * before);    // no step: the tail fades over a few milliseconds
+}
+
 TEST(an_instruments_values_bypass_and_automation_work_as_for_an_effect) {
     Engine e(48000);
     CHECK(loadFixture(e, kRecorder));
@@ -368,6 +580,26 @@ TEST(a_rebuilt_instrument_takes_over_its_held_notes_while_playing) {
         CHECK_EQ(rec[1].noteId, rec[0].noteId);
     }
     std::remove(rebuild.c_str());
+}
+
+TEST(two_instrument_swaps_within_the_crossfade_keep_the_held_notes) {
+    // Audio review fix 1: a second swap while the first still crossfades kept the side heard more (the old
+    // instrument, whose notes had been let go) and took over from it, so every held note stopped.
+    Engine e(48000);
+    CHECK(loadFixture(e, kRecorder));
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(instrumentTrack(kRecorder, "0 C4 16 1\n"))));
+    e.play();
+    float l = 0, r = 0;
+    run(e, 6400, 64);
+    CHECK(ok(e.setProject(instrumentTrack(kSynth, "0 C4 16 1\n"))));
+    run(e, 64, 64);  // 1.3 ms: the first crossfade has barely started
+    CHECK(ok(e.setProject(instrumentTrack(kRecorder, "0 C4 16 1\n"))));
+    run(e, 4096, 64, &l, &r);  // past the second crossfade
+    CHECK_NEAR(l, 0.1 * kCentre, 1e-5);  // the held note sounds on in the recorder again
+    const std::vector<Rec> rec = records(e);
+    CHECK_EQ(rec.size(), 1u);  // a new recorder, which heard the held note start again
+    if (!rec.empty()) CHECK_EQ(rec[0].type, kOn);
 }
 
 TEST(an_instrument_is_followed_by_the_tracks_caw_effects_and_replaces_its_generator) {
@@ -467,7 +699,7 @@ TEST(the_built_in_synth_matches_its_golden_render) {
     const uint64_t h = renderHash(p, 48000 * 2, &peak);
     CHECK(peak > 0.05f);
     CHECK(peak <= 1.0f);
-    constexpr uint64_t kGolden = 0xa9a3782cd29156deull;  // re-recorded: the ping-pong delay now bounces a centred sound
+    constexpr uint64_t kGolden = 0x128b1949baeaf161ull;  // re-recorded: voice summing order (engine pass) and the ping-pong fix
     if (h != kGolden) {
         char buf[96];
         std::snprintf(buf, sizeof buf, "the basic synth renders 0x%016llxull", static_cast<unsigned long long>(h));

@@ -233,7 +233,22 @@ int32_t loadState(void* p, const uint8_t* source, uint32_t size, uint32_t versio
     }
 }
 
-inline const void* noExtension(void*, const char*) noexcept { return nullptr; }
+template <class Type>
+int32_t quiet(void* p) noexcept {
+    try {
+        return instance<Type>(p)->processor.quiet() ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+// The extensions every exported component offers: CAW_EXTENSION_QUIET (from ModuleProcessor::quiet()).
+template <class Type>
+const void* extension(void*, const char* id) noexcept {
+    static const CawQuietExtension kQuiet{sizeof(CawQuietExtension), &quiet<Type>};
+    if (id && std::string_view(id) == CAW_EXTENSION_QUIET) return &kQuiet;
+    return nullptr;
+}
 
 template <class Type>
 bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
@@ -318,7 +333,7 @@ bool exportComponent(const ModuleDescriptor& d, Exported& exported) noexcept {
         t.process = &process<Type>;
         t.save_state = &saveState<Type>;
         t.load_state = &loadState<Type>;
-        t.get_extension = &noExtension;
+        t.get_extension = &extension<Type>;
         return true;
     } catch (...) {
         return false;

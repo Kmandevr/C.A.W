@@ -117,6 +117,10 @@ inline double detExp(double x) {
     p = p * r + 0.5;
     p = p * r + 1.0;
     p = p * r + 1.0;
+    // p * 2^k, with 2^k built from its bits while it is a normal number: the same correctly rounded product
+    // ldexp gives (a power-of-two scale), without the library call.
+    if (k >= -1022.0 && k <= 1023.0)
+        return p * std::bit_cast<double>(static_cast<uint64_t>(static_cast<int64_t>(k) + 1023) << 52);
     return std::ldexp(p, static_cast<int>(k));
 }
 
