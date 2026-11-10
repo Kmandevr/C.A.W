@@ -257,6 +257,48 @@ TEST(publishing_and_reading_display_data_never_allocates) {
     CHECK_EQ(got, 400);
 }
 
+TEST(the_built_in_effects_suite_never_allocates_on_the_audio_thread) {
+    // #173: every effect of the suite on a track (and the limiter on the master), at busy settings, with knob moves,
+    // display reads, a stop and a restart: no allocation or free on the audio thread.
+    const char* ids[] = {"org.caw.eq",       "org.caw.compressor", "org.caw.reverb.pro", "org.caw.delay.pro",
+                         "org.caw.saturator", "org.caw.gate",      "org.caw.transient",  "org.caw.filter",
+                         "org.caw.phaser",    "org.caw.flanger",   "org.caw.utility"};
+    ProjectSpec p;
+    p.bpm = 128;
+    p.loopBars = 1;
+    p.modules.push_back({"bass", templateSource("bass.caw"), {}});
+    p.layers = {layer("b", {"bass"})};
+    for (const char* id : ids) p.layers[0].components.push_back({id, {}});
+    p.layers[0].components[0].params = {{"b4_gain", 6}, {"b1_on", 1}, {"b1_type", 5}};
+    p.layers[0].components[3].params = {{"mode", 1}, {"freeze", 0}};
+    p.masterComponents = {{"org.caw.limiter", {{"gain", 6}}}};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 100; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    float shown[1024];
+    for (int round = 0; round < 6; ++round) {
+        e.setComponentParam("b", 0, "b4_freq", 300 + 400 * round);
+        e.setComponentParam("b", 0, "b2_type", round);
+        e.setComponentParam("b", 2, "freeze", round % 2);
+        e.setComponentParam("b", 3, "sync", round);
+        e.setComponentParam("b", 4, "mode", round % 6);
+        e.setComponentParam("b", 7, "type", round);
+        if (round == 4) e.stop();
+        if (round == 5) e.play();
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 60; ++k) {
+            e.process(l.data(), r.data(), 192);
+            for (uint32_t i = 0; i < 11; ++i) e.componentDisplay("b", i, shown, 1024);
+            e.componentDisplay("", 0, shown, 1024);
+        }
+        operations += scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+}
+
 TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
     // The built-in synth plays a pattern (loop wraps, a slide, a ratchet, chords) through a .caw effect and a
     // native delay; mid-way it is swapped for another instrument (its held notes move over), previews play and

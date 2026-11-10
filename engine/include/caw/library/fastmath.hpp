@@ -39,6 +39,45 @@ inline double fastExp(double x) noexcept {
     return p * std::bit_cast<double>(static_cast<uint64_t>(static_cast<int64_t>(k) + 1023) << 52);
 }
 
+// ln(x) within 1e-15 (relative to 1, for x near 1, absolute elsewhere); -746 (below ln of the smallest double) for
+// x <= 0 or NaN, ln(DBL_MAX) for +inf. Basic operations only: the exponent from the bits, the mantissa folded into
+// [sqrt(1/2), sqrt(2)), then ln(m) = 2 atanh(s), s = (m - 1) / (m + 1), as its odd series (|s| <= 0.172).
+inline double fastLog(double x) noexcept {
+    if (!(x > 0.0)) return -746.0;
+    if (x > 1.7976931348623157e308) return 709.782712893384;
+    uint64_t bits = std::bit_cast<uint64_t>(x);
+    int64_t e = static_cast<int64_t>((bits >> 52) & 0x7ff);
+    if (e == 0) {  // subnormal: scale into the normal range first
+        bits = std::bit_cast<uint64_t>(x * 18014398509481984.0);  // 2^54
+        e = static_cast<int64_t>((bits >> 52) & 0x7ff) - 54;
+    }
+    double m = std::bit_cast<double>((bits & 0x000fffffffffffffULL) | 0x3ff0000000000000ULL);  // 1 .. 2
+    e -= 1023;
+    if (m > 1.4142135623730951) {
+        m *= 0.5;
+        ++e;
+    }
+    const double s = (m - 1.0) / (m + 1.0), s2 = s * s;
+    double p = 1.0 / 17.0;
+    p = p * s2 + 1.0 / 15.0;
+    p = p * s2 + 1.0 / 13.0;
+    p = p * s2 + 1.0 / 11.0;
+    p = p * s2 + 1.0 / 9.0;
+    p = p * s2 + 1.0 / 7.0;
+    p = p * s2 + 1.0 / 5.0;
+    p = p * s2 + 1.0 / 3.0;
+    const double k = static_cast<double>(e);
+    return k * 6.93147180369123816490e-01 + (2.0 * s + 2.0 * s * s2 * p) + k * 1.90821492927058770002e-10;
+}
+
+// Decibels to a gain and back (20 log10), on fastExp and fastLog. A gain of 0 (or less, or NaN) is `floorDb`.
+inline double dbToGain(double db) noexcept { return fastExp(finiteOr0(db) * 0.11512925464970229); }  // ln(10) / 20
+inline double gainToDb(double gain, double floorDb = -120.0) noexcept {
+    if (!(gain > 0.0)) return floorDb;
+    const double db = fastLog(gain) * 8.6858896380650366;  // 20 / ln(10)
+    return db < floorDb ? floorDb : db;
+}
+
 // tanh(x) within 1e-9; NaN gives 0.
 inline double fastTanh(double x) noexcept {
     if (!(x == x)) return 0.0;

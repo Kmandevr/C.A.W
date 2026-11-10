@@ -50,7 +50,9 @@ public:
     // copied; 0 before the first publish, or in the (practically never seen) case that the writer kept
     // overwriting the slot during every try.
     uint32_t read(float* out, uint32_t max) const noexcept {
-        if (!out || max == 0 || published_.load(std::memory_order_acquire) == 0) return 0;
+        if (!out || max == 0) return 0;
+        reads_.fetch_add(1u, std::memory_order_relaxed);
+        if (published_.load(std::memory_order_acquire) == 0) return 0;
         for (int attempt = 0; attempt < 4; ++attempt) {
             const Slot& s = slots_[latest_.load(std::memory_order_acquire) & 1u];
             const uint32_t v = s.version.load(std::memory_order_acquire);
@@ -63,6 +65,20 @@ public:
             if (s.version.load(std::memory_order_relaxed) == v) return n;
         }
         return 0;
+    }
+
+    // Audio thread, once per publish: whether a UI has read in the last `publishes` publishes (about half a second
+    // at 60 a second), so expensive display work (a spectrum's FFT) can be skipped while nobody looks. The first
+    // read after a pause turns it back on for the next publish.
+    bool watched(uint32_t publishes = 30) noexcept {
+        const uint32_t r = reads_.load(std::memory_order_relaxed);
+        if (r != seenReads_) {
+            seenReads_ = r;
+            unread_ = 0;
+        } else if (unread_ < publishes) {
+            ++unread_;
+        }
+        return unread_ < publishes;
     }
 
     // How many blocks have been published (a UI can skip a repaint when it hasn't moved).
@@ -83,6 +99,8 @@ private:
     Slot slots_[2];
     std::atomic<uint32_t> latest_{0};
     std::atomic<uint32_t> published_{0};
+    mutable std::atomic<uint32_t> reads_{0};  // bumped by every read: the writer's sign that a UI is looking
+    uint32_t seenReads_ = 0, unread_ = 1u << 30;  // writer only; nobody has looked yet
 };
 
 // When to publish: about `hz` times a second, counted in frames, so a processor publishes from its block loop
