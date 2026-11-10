@@ -327,9 +327,9 @@ std::string describePattern(const Pattern& p) {
     return o;
 }
 
-std::vector<int32_t> matchPatternNotes(const Pattern& from, const Pattern& to) {
+std::vector<int> matchPatternNotes(const Pattern& from, const Pattern& to) {
     const size_t nf = from.notes.size(), nt = to.notes.size();
-    std::vector<int32_t> map(nf, -1);
+    std::vector<int> map(nf, -1);
     std::vector<char> taken(nt, 0);
     auto same = [](const PatternNote& a, const PatternNote& b) {
         return a.at == b.at && a.len == b.len && a.pitch == b.pitch && a.ratchet == b.ratchet;
@@ -341,7 +341,7 @@ std::vector<int32_t> matchPatternNotes(const Pattern& from, const Pattern& to) {
             [](const PatternNote& n, double at) { return n.at < at; }) - to.notes.begin());
         for (; j < nt && to.notes[j].at == a.at; ++j)
             if (!taken[j] && same(a, to.notes[j])) {
-                map[i] = static_cast<int32_t>(j);
+                map[i] = static_cast<int>(j);
                 taken[j] = 1;
                 break;
             }
@@ -376,7 +376,7 @@ std::vector<int32_t> matchPatternNotes(const Pattern& from, const Pattern& to) {
     });
     for (const Pair& p : pairs)
         if (map[p.i] < 0 && !taken[p.j]) {
-            map[p.i] = static_cast<int32_t>(p.j);
+            map[p.i] = static_cast<int>(p.j);
             taken[p.j] = 1;
         }
     return map;

@@ -335,3 +335,38 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
     }
     CHECK_EQ(operations, 0u);
 }
+
+TEST(a_pattern_edit_while_notes_sound_never_allocates_on_the_audio_thread) {
+    // #170: held notes carried across a pattern edit (a native instrument's and a .caw voice's) take their new
+    // note's curve on the audio thread: the match is worked out on the control thread, the curve copy fits.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"bass", templateSource("bass.caw"), {}});
+    auto pattern = [](int k) {
+        return "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C3 16 1  bend 0:0 " + std::to_string(0.3 + 0.05 * k) +
+               ":" + std::to_string(k - 6) + " 1:12\n" + (k % 2 ? "0 E3 16 1\n" : "") + "4 G3 8 1  bend 0:0 1:-3\n";
+    };
+    p.modules.push_back({"pat", pattern(0), {}});
+    LayerSpec inst = layer("i", {});
+    inst.pattern = "pat";
+    inst.hasInstrument = true;
+    inst.instrument.id = "org.caw.synth.morph";
+    LayerSpec voices = layer("v", {"bass"});
+    voices.pattern = "pat";
+    p.layers = {inst, voices};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 50; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    for (int k = 1; k < 12; ++k) {
+        p.modules[1].source = pattern(k);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        cawtest::AllocationScope scope;
+        for (int b = 0; b < 20; ++b) e.process(l.data(), r.data(), 192);
+        operations += scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+}

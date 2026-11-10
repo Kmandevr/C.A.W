@@ -385,7 +385,7 @@ TEST(pattern_notes_are_matched_across_an_edit) {
     CHECK(a && b);
     if (!a || !b) return;
     // b sorted by start: C4 (0), G4 (1), E4 (2)
-    std::vector<int32_t> m = matchPatternNotes(*a, *b);
+    std::vector<int> m = matchPatternNotes(*a, *b);
     CHECK_EQ(m.size(), size_t{3});
     CHECK(m.size() == 3 && m[0] == 0 && m[1] == 2 && m[2] == 1);
     // A note moved, stretched or transposed while overlapping its old place is the same note; a deleted one has none.

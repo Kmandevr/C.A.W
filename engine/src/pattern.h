@@ -86,7 +86,7 @@ std::string describePattern(const Pattern& p);
 // among the rest, a changed note takes the edited note that overlaps it in time, nearest in pitch, then in start,
 // then in length (a move, stretch or transpose while it still overlaps its old place). Each note of `to` carries
 // on at most one. Past 2^24 pairs of changed notes the second pass is skipped (their sounding notes end).
-std::vector<int32_t> matchPatternNotes(const Pattern& from, const Pattern& to);
+std::vector<int> matchPatternNotes(const Pattern& from, const Pattern& to);
 
 // Whether a note plays on a given repeat of its layer, from its probability and the seed. Same answer every time.
 bool notePlays(const PatternNote& n, uint32_t index, int64_t repeat, uint32_t seed);
