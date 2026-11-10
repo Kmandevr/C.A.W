@@ -2,6 +2,7 @@
 #include "engine.h"
 
 #include "builtin_presets.h"
+#include "quality.h"
 #include "builtin_components.h"
 #include "graph.h"
 #include "route_math.h"
@@ -1135,6 +1136,7 @@ ModuleLoadResult Engine::reloadNativeComponent(
     if (!result.success) return result;
     std::vector<Rebuilt> rebuilt;
     std::string error;
+    const BuildingQuality building(&quality_);
     auto rebuild = [&](ComponentChain* old, int slot, LayerState* layer, const std::string& layerId) {
         if (!old || !old->uses(expectedId)) return true;
         const std::vector<ComponentSpec> specs = old->currentSpecs();
@@ -1204,6 +1206,10 @@ std::unique_ptr<ModuleProcessor> Engine::createNativeComponent(const std::string
     return nativeModules_.create(id);
 }
 
+void Engine::setQuality(int quality) noexcept {
+    quality_.store(quality < kQualityEco ? kQualityEco : (quality > kQualityHigh ? kQualityHigh : quality), std::memory_order_relaxed);
+}
+
 std::string Engine::setProject(const ProjectSpec& p) {
     return setProjectImpl(p, false);
 }
@@ -1213,6 +1219,7 @@ std::string Engine::setProjectOffline(const ProjectSpec& p) {
 }
 
 std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
+    const BuildingQuality building(&quality_);
     // The synths that became Flagship presets (2026-11-10, one synth): an old project's track plays Flagship with
     // the matching preset and its knobs mapped, and its lanes on those knobs move Flagship's.
     if (std::any_of(p.layers.begin(), p.layers.end(), [](const LayerSpec& l) { return isLegacyInstrument(l.instrument.id); })) {

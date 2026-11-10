@@ -396,3 +396,9 @@ extern "C" char* caw_migrate_instrument(const char* entry_json) try {
 } catch (...) {
     return dup(std::string("{\"ok\":false,\"error\":\"") + kOutOfMemory + "\"}");
 }
+
+extern "C" void caw_engine_set_quality(CawEngine* e, int32_t quality) {
+    if (e && e->engine) e->engine->setQuality(quality);
+}
+
+extern "C" int32_t caw_engine_quality(CawEngine* e) { return e && e->engine ? e->engine->quality() : CAW_QUALITY_NORMAL; }

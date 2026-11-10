@@ -128,6 +128,9 @@ public:
     // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
     // safety limiter. Off by default; renders and exports never click.
     void setMetronome(bool on);
+    // Sound quality (caw.h CAW_QUALITY_*): the built-ins read it while they play (quality.h). Normal by default.
+    void setQuality(int quality) noexcept;
+    int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
     // Ends every knob touch now, as a Play does, so the lanes rule again (an automation Touch write released).
     void releaseTouches();
     void stop();
@@ -150,6 +153,8 @@ public:
     struct Chain;
 
 private:
+    // First, so it outlives every component chain (built-ins keep a pointer to it).
+    std::atomic<int> quality_{1};
     struct Slot;
     struct Cmd;
     struct Retired;

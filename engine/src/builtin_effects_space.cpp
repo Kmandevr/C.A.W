@@ -110,6 +110,7 @@ protected:
         s.modulation = param(kMod, at);
         s.modRate = param(kModRate, at);
         s.freeze = on(kFreeze, at);
+        reverb_.setLight(quality() == kQualityEco);
         if (s.size != settings_.size || s.decay != settings_.decay || s.preDelay != settings_.preDelay ||
             s.damping != settings_.damping || s.width != settings_.width || s.modulation != settings_.modulation ||
             s.modRate != settings_.modRate || s.freeze != settings_.freeze || !set_) {

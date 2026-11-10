@@ -1,5 +1,6 @@
 // The flagship synth (#171): three wavetable oscillators with unison, two filters, a mod matrix and an effects rack.
 #include "builtin_flagship.h"
+#include "quality.h"
 
 #include <algorithm>
 #include <bit>
@@ -52,6 +53,7 @@ constexpr uint32_t kOscs = 3, kFilters = 2, kEnvs = 3, kLfos = 3, kSlots = 16;
 constexpr int kTableCount = 5;
 constexpr int kFrameSize = 1024;  // 512 harmonics: a full spectrum down to about 30 Hz at 48 kHz
 constexpr int kMaxCopies = lib::kMaxUnisonVoices;
+constexpr int kEcoCopies = 4;  // the unison cap at Eco quality
 constexpr double kLn2 = 0.69314718055994530942;
 
 // ---------- Parameters ----------
@@ -686,6 +688,7 @@ public:
     bool activate(double sampleRate, uint32_t maxBlock) noexcept override {
         try {
             sr_ = sampleRate > 0.0 && std::isfinite(sampleRate) ? sampleRate : 48000.0;
+            quality_ = buildingQuality();
             tables_ = &tables();
             for (auto& pair : combs_)
                 for (lib::CombFilter& c : pair) c.prepare(sr_, 20.0);
@@ -1152,7 +1155,9 @@ private:
         key.amount = clampd(at(kOscWarpAmount), 0.0, 1.0);
         key.warp = key.amount > 0.0 ? clampi(at(kOscWarp), 0, 4) : kWarpNone;
         lib::UnisonSettings& u = key.unison;
-        u.voices = clampi(at(kOscUnison), 1, kMaxCopies);
+        // Eco quality caps each oscillator at 4 copies (the outermost and the centre kept: the stack is laid out
+        // again for 4, so its detune and spread stay as wide).
+        u.voices = clampi(at(kOscUnison), 1, qualityNow(quality_) == kQualityEco ? kEcoCopies : kMaxCopies);
         u.detune = clampd(at(kOscDetune), 0.0, 100.0) / 100.0;
         u.power = at(kOscPower);
         u.spread = at(kOscSpread);
@@ -1274,6 +1279,7 @@ private:
             delayMix_ = clampd(g(kDelayMix), 0.0, 1.0);
         }
         if (reverb) {
+            reverb_.setLight(qualityNow(quality_) == kQualityEco);
             lib::ReverbSettings s;
             s.size = g(kReverbSize);
             s.decay = g(kReverbDecay);
@@ -1413,6 +1419,7 @@ private:
     HeldNotes held_;  // mono and legato
     lib::CombFilter combs_[kVoices][kFilters * 2];
     const Tables* tables_ = nullptr;
+    const std::atomic<int>* quality_ = nullptr;  // the building Engine's (quality.h)
     Clock clock_;
     const Transport* transport_ = nullptr;
     const ProcessBlock* block_ = nullptr;  // the block being processed (beginBlock), for knobs at a note's frame

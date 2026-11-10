@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "caw/display.hpp"
+#include "quality.h"
 #include "caw/library/fastmath.hpp"
 #include "module_registry.h"
 
@@ -158,12 +159,16 @@ protected:
         return true;
     }
     double rate() const noexcept { return rate_; }
+    // The Engine's quality now (quality.h): Eco, Normal or High.
+    int quality() const noexcept { return qualityNow(quality_); }
     // Peaks since the last publish, in dB (floored at -120).
     float inPeakDb() const noexcept { return static_cast<float>(lib::gainToDb(inPeak_)); }
     float outPeakDb() const noexcept { return static_cast<float>(lib::gainToDb(outPeak_)); }
 
 private:
     const AudioProcessBlock* block_ = nullptr;
+    const std::atomic<int>* quality_ = nullptr;  // the building Engine's (activate)
+    bool skipPublish_ = false;                   // Eco publishes every other display tick (30 a second)
     double rate_ = 48000.0, tempo_ = 120.0;
     uint32_t left_ = 0;         // frames until the next control
     uint64_t silent_ = 0;       // frames of silence in and out so far
