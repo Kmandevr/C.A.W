@@ -34,7 +34,6 @@ REAPER's behaviour is taken from its user guide ([UI design](ui.md#reaper-refere
 - **Copies have their own notes** (REAPER's plain Ctrl-drag doesn't pool MIDI); a linked copy stays in the clip menu.
 - **Phone gestures where REAPER uses a mouse:** a track header is dragged after a long press (a long press released without moving opens the menu); a double-tap in empty lane space draws a one-bar clip in place of Ctrl+drag.
 - **Not done:** REAPER's S to split (S is C.A.W.'s next-track key; the clip menu and toolbar split), Alt-drag stretch of a clip edge (Alt-drag shifts the source offset), and dragging several selected clips together.
-- **Whole workflow (owner, later the same day):** "look at the flow of REAPER and match that as well", and "the goal is to make it really easy to use". REAPER's flow is the model where it is simple and direct. Where REAPER is powerful but fiddly, the easy path comes first, with REAPER's depth behind it. The gap analysis is in `docs/reaper-flow.md`.
 
 ## 2026-11-10: A flagship synth that can do everything (owner)
 
