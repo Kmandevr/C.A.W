@@ -1,7 +1,7 @@
 ---
 title: C.A.W. roadmap
 summary: Permanent product roadmap: verified current state, ordered implementation stages, future production capabilities, performance gates and explicit scope boundaries.
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # C.A.W. roadmap
@@ -57,6 +57,13 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | AI/video | No in-app AI; video sync is not planned | AI remains excluded; video sync remains off-roadmap |
 
 ## Roadmap sequence
+
+**Current order (owner, 2026-11-10):** work goes issue by issue, bottom up (engine first, then the app), one area of the code per branch; UI work only where it is simple. C++ replaces the .caw language first ([decisions](decisions.md)), then the owner's three new roles ([vision](vision.md)):
+1. #156 C++ instruments, then #157 C++ built-in instruments and a starter project (with #122, the useful .caw built-ins ported to the Library), #17 and #127 (independent instances, per-note and per-channel processing for instruments).
+2. #158 note clips as standard MIDI with a text form; #161 C++ modulators and routing anything anywhere (with #32).
+3. #160 remove the .caw language, then #159 `.caw` project files.
+4. #163 testing suite, #164 sample-pack maker, #162 plug-in builder (CLAP first).
+5. Then the stages below, in order, skipping what the .caw removal makes obsolete.
 
 The stages are ordered by dependency and product value: first the **C++ creation-platform foundation**, then the existing **Engine graph/N-channel Foundation**, then the **unified authoring interfaces**, then Stages 0–7 and **Release 1**. Stages 8–10 ship as updates after Release 1. Work may be split into smaller issues and pull requests, but keep the stage dependencies and exit gates. The owner can reprioritize explicitly.
 
