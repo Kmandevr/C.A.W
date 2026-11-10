@@ -34,8 +34,9 @@ ParameterDescriptor parameter(std::string_view id, std::string_view name, double
     p.smoothingFrames = 480;  // 10 ms at 48 kHz: a knob move doesn't click
     return p;
 }
+// A time, frequency or gain: the knob tapers, so it turns finely near the bottom of a wide range.
 ParameterDescriptor exponential(std::string_view id, std::string_view name, double def, double lo, double hi,
-                                std::string_view unit) {
+                                std::string_view unit = {}) {
     ParameterDescriptor p = parameter(id, name, def, lo, hi, unit);
     p.curve = ParameterCurve::Exponential;
     return p;
@@ -169,7 +170,7 @@ const ParameterDescriptor kKickParams[] = {
     seconds("decay", "Decay", 0.35, 0.05, 4.0),
     parameter("click", "Click", 0.3, 0.0, 1.0),
     parameter("tone", "Tone", 0.6, 0.0, 1.0),
-    parameter("drive", "Drive", 1.5, 1.0, 10.0),
+    exponential("drive", "Drive", 1.5, 1.0, 10.0),
     parameter("volume", "Volume", 0.8, 0.0, 1.0),
 };
 const ModuleDescriptor kKick = instrument("org.caw.drum.kick", "Kick", kKickParams, 768000);  // a 4 s decay at 192 kHz
@@ -598,7 +599,7 @@ const ParameterDescriptor kBassParams[] = {
     parameter("sustain", "Sustain", 0.6, 0.0, 1.0),
     seconds("glide", "Glide", 0.04, 0.001, 1.0),
     choice("legato", "Legato", 1.0, kOffOn, 2),
-    parameter("drive", "Drive", 1.2, 1.0, 10.0),
+    exponential("drive", "Drive", 1.2, 1.0, 10.0),
     parameter("volume", "Volume", 0.6, 0.0, 1.0),
 };
 enum BassParam : uint32_t {
@@ -705,7 +706,7 @@ const ParameterDescriptor kAcidParams[] = {
     seconds("decay", "Decay", 0.3, 0.05, 2.0),
     parameter("accent", "Accent", 0.5, 0.0, 1.0),
     seconds("slide", "Slide", 0.06, 0.005, 0.5),
-    parameter("drive", "Drive", 2.0, 1.0, 10.0),
+    exponential("drive", "Drive", 2.0, 1.0, 10.0),
     parameter("volume", "Volume", 0.6, 0.0, 1.0),
 };
 enum AcidParam : uint32_t { kAcidWave, kAcidCutoff, kAcidResonance, kAcidEnv, kAcidDecay, kAcidAccent, kAcidSlide, kAcidDrive, kAcidVolume };

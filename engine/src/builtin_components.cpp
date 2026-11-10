@@ -30,6 +30,16 @@ ParameterDescriptor parameter(std::string_view id, std::string_view name, double
     return p;
 }
 
+// A time, frequency, rate or gain: the knob tapers (each step of its travel multiplies the value), so it turns finely
+// near the bottom of a wide range.
+ParameterDescriptor tapered(std::string_view id, std::string_view name, double def, double lo, double hi,
+                            std::string_view unit = {}) {
+    ParameterDescriptor p = parameter(id, name, def, lo, hi);
+    p.unit = unit;
+    p.curve = ParameterCurve::Exponential;
+    return p;
+}
+
 ModuleDescriptor descriptor(std::string_view id, std::string_view name, const ParameterDescriptor* params) {
     ModuleDescriptor d;
     d.id = id;
@@ -99,7 +109,7 @@ ParameterDescriptor shapeParameter() {
 }
 const ParameterDescriptor kDistortionParams[] = {
     shapeParameter(),
-    parameter("drive", "Drive", 4.0, 1.0, 20.0),
+    tapered("drive", "Drive", 4.0, 1.0, 20.0),
     parameter("bits", "Bits", 8.0, 1.0, 24.0),
     parameter("mix", "Mix", 1.0, 0.0, 1.0),
     parameter("output", "Output", 1.0, 0.0, 2.0),
@@ -170,7 +180,7 @@ ParameterDescriptor syncParameter() {
 }
 const ParameterDescriptor kDelayParams[] = {
     syncParameter(),
-    parameter("time", "Time (free)", 375.0, 1.0, 4000.0),
+    tapered("time", "Time (free)", 375.0, 1.0, 4000.0, "ms"),
     parameter("feedback", "Feedback", 0.45, 0.0, 0.95),
     parameter("cross", "Ping-pong", 1.0, 0.0, 1.0),
     parameter("mix", "Mix", 0.35, 0.0, 1.0),
@@ -226,7 +236,7 @@ private:
 
 // Stereo chorus: rate, depth and mix; the two sides sweep a quarter cycle apart.
 const ParameterDescriptor kChorusParams[] = {
-    parameter("rate", "Rate", 0.6, 0.05, 5.0),
+    tapered("rate", "Rate", 0.6, 0.05, 5.0, "Hz"),
     parameter("depth", "Depth", 0.5, 0.0, 1.0),
     parameter("mix", "Mix", 0.5, 0.0, 1.0),
 };
