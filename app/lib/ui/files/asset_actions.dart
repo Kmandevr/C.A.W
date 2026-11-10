@@ -173,9 +173,10 @@ class FilesActions {
     }
   }
 
-  /// "New C++ effect": the blank pass-through template, added to the project and opened in Build.
-  void newCppEffect() {
-    final doc = state.addBlankCppEffect();
+  /// "New C++ effect" (the blank pass-through template) or, with [instrument], "New C++ instrument" (a polyphonic
+  /// sine played by the track's notes), added to the project and opened in Build.
+  void newCppEffect({bool instrument = false}) {
+    final doc = instrument ? state.addBlankCppEffect(base: 'New instrument', instrument: true) : state.addBlankCppEffect();
     onSelect('cpp:${doc.id}');
     final sections = SectionController.maybeOf(context);
     if (sections != null) {
@@ -220,6 +221,7 @@ class FilesActions {
     final libraryParent = f.kind == FilesFolderKind.libraryFolder ? f.libraryPath : '';
     final entries = <MenuEntry<String>>[
       if (f.offersNewCpp) const MenuEntry('cpp', Icons.memory, 'New C++ effect'),
+      if (f.offersNewCpp) const MenuEntry('cpp-instrument', Icons.piano_outlined, 'New C++ instrument'),
       if (cawKind != null)
         MenuEntry('caw', Icons.note_add_outlined, switch (cawKind) {
           'effect' => 'New .caw effect',
@@ -241,6 +243,8 @@ class FilesActions {
     switch (action) {
       case 'cpp':
         newCppEffect();
+      case 'cpp-instrument':
+        newCppEffect(instrument: true);
       case 'caw':
         newCawModule(cawKind!, folderPath: libraryParent);
       case 'import':

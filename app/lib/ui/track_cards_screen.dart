@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import '../model/arrange_fx.dart';
 import '../model/pattern_doc.dart';
 import '../model/project.dart';
 import 'builder_screen.dart' show kindColor, kindIcon;
@@ -760,7 +761,7 @@ class _TrackSheet extends StatelessWidget {
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (final m in sounds)
             _choice(m.name, kindIcon('generator'), Neon.green, m.id == layer.generatorId,
-                () => s.editLayer(layer, (l) => l.generatorId = m.id)),
+                () => s.setCawGenerator(layer, m.id)),
         ]),
       if (sound != null && soundParams.isNotEmpty)
         Padding(

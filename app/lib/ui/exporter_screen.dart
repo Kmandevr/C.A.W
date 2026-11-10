@@ -541,7 +541,7 @@ class _ExporterScreenState extends State<ExporterScreen> {
   @override
   Widget build(BuildContext context) {
     final p = s.project;
-    final layers = p.layers.where((l) => l.generatorId != null).toList();
+    final layers = p.layers.where((l) => l.generatorId != null || l.instrument != null).toList();
     if (_layerId == null || !layers.any((l) => l.id == _layerId)) _layerId = layers.firstOrNull?.id;
     final modules = p.modules.where((m) => (s.info[m.id]?.ok ?? false) && !s.isLibrary(m.id)).toList();
     final patterns = p.modules.where((m) => s.isPattern(m.id)).toList();

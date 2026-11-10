@@ -145,6 +145,38 @@ void main() {
     await dir.delete(recursive: true);
   }, skip: skip);
 
+  test('a C++ instrument plays a track\'s notes, takes knob moves live and exports', () async {
+    final e = Engine.create();
+    final list = await e.nativeComponents();
+    final synth = list.firstWhere((c) => c.id == 'org.caw.synth.basic');
+    expect(synth.builtin, isTrue);
+    expect(synth.role, 'instrument');
+    expect(synth.isInstrument, isTrue);
+    expect(list.where((c) => c.id == 'org.caw.chorus').single.isInstrument, isFalse);
+    final p = ProjectDoc(id: 'p', name: 'T', modules: [
+      ModuleDoc(id: 'n', name: 'Line', source: '---\nkind: pattern\nname: Line\nlength: 16\n---\n0 C3 4 1\n4 G3 4 0.8\n'),
+    ], layers: [
+      LayerDoc(id: 'l', name: 'Synth', color: 0, patternId: 'n')..setInstrument('org.caw.synth.basic'),
+    ]);
+    p.layers.single.instrument!.params['cutoff'] = 900;
+    final result = await e.setProject(p.toEngineJson(playableComponents: {'org.caw.synth.basic'}));
+    expect(result['n']!.ok, isTrue);
+    expect(e.setComponentParam('l', ProjectDoc.instrumentIndex, 'cutoff', 1500), isTrue);
+    expect(e.setComponentParam('l', 0, 'cutoff', 1500), isFalse, reason: 'index 0 names the inserts, which are empty');
+    expect(e.setComponentBypass('l', ProjectDoc.instrumentIndex, false), isTrue);
+    expect(e.componentStates('l').keys, contains(ProjectDoc.instrumentIndex));
+    e.dispose();
+    final dir = await Directory.systemTemp.createTemp('caw');
+    final out = '${dir.path}/synth.wav';
+    final job = RenderJob.start(RenderRequest(projectJson: p.toEngineJson(), kind: ExportKind.loop, outPath: out));
+    expect(await job.result, isNull);
+    final bytes = await File(out).readAsBytes();
+    expect(bytes.length, greaterThan(100000));
+    // Not silent: some 32-bit or 16-bit sample past the header is non-zero.
+    expect(bytes.skip(1000).any((b) => b != 0), isTrue);
+    await dir.delete(recursive: true);
+  }, skip: skip);
+
   test('the function library and library modules come through the C API', () {
     final lib = Library.builtIn;
     final adsr = lib.find('env.adsr')!;

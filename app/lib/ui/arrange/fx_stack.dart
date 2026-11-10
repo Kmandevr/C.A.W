@@ -44,7 +44,7 @@ class FxStack extends StatefulWidget {
 class _FxStackState extends State<FxStack> {
   bool _routing = false;
 
-  /// The selected card: ('caw' | 'native', index).
+  /// The selected card: ('caw' | 'native' | 'instrument', index).
   (String, int)? _selected;
 
   AppState get s => widget.state;
@@ -99,6 +99,13 @@ class _FxStackState extends State<FxStack> {
   Widget _stack(BuildContext context) {
     final glow = Neon.layer(layer.color);
     return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 24), children: [
+      if (layer.instrument != null) ...[
+        const _GroupLabel('INSTRUMENT · C++', null, note: 'Plays the track\'s notes'),
+        _NativeEffectCard(key: ValueKey('fx-instrument-${layer.instrument!.id}'), state: s, layer: layer, index: -1,
+          instrument: true, selected: _selected == ('instrument', 0), glow: glow,
+          onSelect: () => setState(() => _selected = ('instrument', 0))),
+        const SizedBox(height: 6),
+      ],
       _GroupLabel('CODE EFFECTS · .caw', layer.effectIds.isEmpty ? 'None' : null),
       if (layer.effectIds.isNotEmpty)
         ReorderableListView(
@@ -196,8 +203,12 @@ class _FxCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(2, 2, 4, 6),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               SizedBox(height: 36, child: Row(children: [
-                ReorderableDragStartListener(index: index, child: const Tooltip(message: 'Drag to reorder',
-                  child: SizedBox(width: 36, height: 36, child: Icon(Icons.drag_indicator, size: 18, color: Neon.dim)))),
+                // A negative index: a card outside the reorderable lists (the track's instrument).
+                if (index < 0)
+                  const SizedBox(width: 36, height: 36, child: Icon(Icons.piano, size: 18, color: Neon.dim))
+                else
+                  ReorderableDragStartListener(index: index, child: const Tooltip(message: 'Drag to reorder',
+                    child: SizedBox(width: 36, height: 36, child: Icon(Icons.drag_indicator, size: 18, color: Neon.dim)))),
                 Container(width: 4, height: 18, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
                 const SizedBox(width: 8),
                 Expanded(child: InkWell(
@@ -291,19 +302,27 @@ class _CawEffectCard extends StatelessWidget {
   }
 }
 
+/// A native component's card: one of the track's C++ effects, or (with [instrument]) its C++ instrument.
 class _NativeEffectCard extends StatelessWidget {
   const _NativeEffectCard({super.key, required this.state, required this.layer, required this.index,
-    required this.selected, required this.glow, required this.onSelect});
+    required this.selected, required this.glow, required this.onSelect, this.instrument = false});
   final AppState state;
   final LayerDoc layer;
   final int index;
   final bool selected;
   final Color glow;
   final VoidCallback onSelect;
+  final bool instrument;
+
+  ComponentUseDoc get _use => instrument ? layer.instrument! : layer.components[index];
+  void _bypass(bool on) => instrument ? state.setInstrumentBypass(layer, on) : state.setNativeBypass(layer, index, on);
+  void _param(String id, double v) =>
+      instrument ? state.setInstrumentParamLive(layer, id, v) : state.setNativeParamLive(layer, index, id, v);
+  void _remove() => instrument ? state.setNativeInstrument(layer, null) : state.removeNativeEffect(layer, index);
 
   @override
   Widget build(BuildContext context) {
-    final use = layer.components[index];
+    final use = _use;
     final info = state.componentInfo(use.id);
     final cpp = state.cppComponentFor(use.id);
     final builtin = isBuiltinComponent(use.id) || (info?.builtin ?? false);
@@ -317,28 +336,28 @@ class _NativeEffectCard extends StatelessWidget {
         style: state.settings.longPressMenu, actions: [
           MenuAction('bypass', use.bypass ? 'Turn on' : 'Bypass', Icons.power_settings_new, checked: use.bypass),
           if (cpp != null) const MenuAction('open', 'Open code', Icons.code),
-          if (index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
-          if (index < layer.components.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
+          if (!instrument && index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
+          if (!instrument && index < layer.components.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
           if (info != null && info.parameters.isNotEmpty) const MenuAction('reset', 'Reset knobs', Icons.restart_alt),
           const MenuAction('remove', 'Remove', Icons.delete_outline, danger: true),
         ]);
-      if (v == 'bypass') state.setNativeBypass(layer, index, !use.bypass);
+      if (v == 'bypass') _bypass(!use.bypass);
       if (v == 'open' && context.mounted) open();
       if (v == 'up') state.moveNativeEffect(layer, index, index - 1);
       if (v == 'down') state.moveNativeEffect(layer, index, index + 1);
       if (v == 'reset' && info != null) {
         for (final p in info.parameters) {
-          state.setNativeParamLive(layer, index, p.id, p.defaultValue);
+          _param(p.id, p.defaultValue);
         }
         state.commitNativeParams(layer);
       }
-      if (v == 'remove') state.removeNativeEffect(layer, index);
+      if (v == 'remove') _remove();
     }
     final failed = status == NativeEffectState.buildFailed || status == NativeEffectState.loadFailed;
     return _FxCard(
       index: index,
       title: name,
-      titleKey: ValueKey('fx-native-title-$index'),
+      titleKey: ValueKey(instrument ? 'fx-instrument-title' : 'fx-native-title-$index'),
       subtitle: builtin ? 'Built-in' : (cpp != null ? 'Project C++ · tap to open' : use.id),
       color: failed ? Neon.pink : (builtin ? Neon.blue : Neon.green),
       glow: glow,
@@ -350,10 +369,11 @@ class _NativeEffectCard extends StatelessWidget {
       actions: [
         if (failed) const Tooltip(message: 'Build failed', child: Padding(padding: EdgeInsets.symmetric(horizontal: 6),
           child: Icon(Icons.error, size: 16, color: Neon.pink))),
-        _iconAction(key: ValueKey('fx-bypass-$index'), tooltip: use.bypass ? 'Turn on $name' : 'Bypass $name',
+        _iconAction(key: ValueKey(instrument ? 'fx-instrument-bypass' : 'fx-bypass-$index'),
+          tooltip: use.bypass ? 'Turn on $name' : 'Bypass $name',
           icon: Icons.power_settings_new, color: use.bypass ? Neon.dim : Neon.green,
-          onPressed: () => state.setNativeBypass(layer, index, !use.bypass)),
-        _iconAction(tooltip: 'Remove $name', icon: Icons.close, onPressed: () => state.removeNativeEffect(layer, index)),
+          onPressed: () => _bypass(!use.bypass)),
+        _iconAction(tooltip: 'Remove $name', icon: Icons.close, onPressed: _remove),
       ],
       body: _body(context, status, use, info, cpp, open),
     );
@@ -400,14 +420,14 @@ class _NativeEffectCard extends StatelessWidget {
             for (final p in info.parameters)
               if (p.isChoice)
                 _ChoiceParam(label: p.label, value: use.params[p.id] ?? p.defaultValue, choices: p.choices, min: p.min,
-                  onChanged: (v) { state.setNativeParamLive(layer, index, p.id, v); state.commitNativeParams(layer); })
+                  onChanged: (v) { _param(p.id, v); state.commitNativeParams(layer); })
               else
                 Knob(key: ValueKey('knob-${use.id}-${p.id}'), value: use.params[p.id] ?? p.defaultValue,
                   min: p.min, max: p.max, step: p.step, defaultValue: p.defaultValue, label: p.label,
                   enabled: !use.bypass,
                   color: isBuiltinComponent(use.id) ? Neon.blue : Neon.green,
                   valueText: (v) => '${v.toStringAsFixed(p.max - p.min > 20 ? 0 : 2)}${p.unit.isEmpty ? '' : ' ${p.unit}'}',
-                  onChanged: (v) => state.setNativeParamLive(layer, index, p.id, v),
+                  onChanged: (v) => _param(p.id, v),
                   onChangeEnd: () => state.commitNativeParams(layer)),
           ]),
         );
@@ -464,7 +484,12 @@ class _RoutingView extends StatelessWidget {
     final p = state.project;
     final out = p.layers.where((f) => f.id == layer.parentId && f.isFolder && f.busEnabled).firstOrNull;
     final nodes = <(String, String, Color, bool)>[
-      (p.module(layer.generatorId)?.name ?? 'No instrument', 'Instrument', Neon.green, false),
+      if (layer.instrument case final inst?)
+        (state.componentInfo(inst.id)?.label ?? state.cppComponentFor(inst.id)?.name ?? _builtinName(inst.id),
+          inst.bypass ? 'Bypassed' : (state.componentPlayable(inst.id) ? 'C++ instrument' : 'Not loaded'),
+          isBuiltinComponent(inst.id) ? Neon.blue : Neon.green, inst.bypass || !state.componentPlayable(inst.id))
+      else
+        (p.module(layer.generatorId)?.name ?? 'No instrument', 'Instrument', Neon.green, false),
       for (final id in layer.effectIds) (p.module(id)?.name ?? 'Missing', '.caw', Neon.violet, false),
       for (final c in layer.components)
         (state.componentInfo(c.id)?.label ?? state.cppComponentFor(c.id)?.name ?? _builtinName(c.id),
