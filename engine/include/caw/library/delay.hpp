@@ -10,7 +10,7 @@
 namespace caw::lib {
 
 // A stereo ping-pong delay: each channel's echo can feed the other (cross 0: two plain echoes, 1: full
-// ping-pong). prepare() allocates (call it off the audio thread); process() never does.
+// ping-pong, where the input enters on the left (summed) and the echoes alternate sides, even for a centred sound). prepare() allocates (call it off the audio thread); process() never does.
 class PingPongDelay {
 public:
     // Room for delays up to maxSeconds at sampleRate.
@@ -41,8 +41,13 @@ public:
         const double dl = left_[i0] + (left_[i1] - left_[i0]) * frac;
         const double dr = right_[i0] + (right_[i1] - right_[i0]) * frac;
         const double inL = finiteOr0(l), inR = finiteOr0(r);
-        left_[pos_] = store(inL + fb * ((1.0 - x) * dl + x * dr));
-        right_[pos_] = store(inR + fb * ((1.0 - x) * dr + x * dl));
+        // Feeding: with cross 0 each side echoes its own input. Toward full ping-pong the right input moves over to
+        // the left (summed, like a ping-pong delay's mono input) and the loop carries it across, so even a centred
+        // sound bounces left, right, left. Feeding each side its own input would keep a centred sound centred.
+        const double feedL = inL + x * inR;
+        const double feedR = (1.0 - x) * inR;
+        left_[pos_] = store(feedL + fb * ((1.0 - x) * dl + x * dr));
+        right_[pos_] = store(feedR + fb * ((1.0 - x) * dr + x * dl));
         pos_ = pos_ + 1 == n ? 0 : pos_ + 1;
         l = static_cast<float>(inL + (dl - inL) * mix);
         r = static_cast<float>(inR + (dr - inR) * mix);
