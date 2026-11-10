@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import '../model/project.dart';
 import '../platform/save_copy.dart';
 import '../model/settings.dart';
 import 'theme.dart';
@@ -83,7 +84,10 @@ class _ExporterScreenState extends State<ExporterScreen> {
     final bpm = p.bpm.toStringAsFixed(p.bpm == p.bpm.roundToDouble() ? 0 : 1);
     switch (_kind) {
       case ExportKind.loop:
-        return '${base}_${bpm}bpm_${p.engineLoopSteps ~/ p.stepsPerBar}bars.wav';
+        // With the loop range on, the export is that range (the engine's loop export bounds).
+        final steps = p.loopsRange ? p.loopEndSteps - p.loopStartSteps : p.engineLoopSteps;
+        final bars = steps % p.stepsPerBar == 0 ? '${steps ~/ p.stepsPerBar}bars' : '${steps}steps';
+        return '${base}_${bpm}bpm_$bars.wav';
       case ExportKind.free:
         return '${base}_${bpm}bpm_${_seconds.toStringAsFixed(0)}s.wav';
       case ExportKind.oneShot:
@@ -799,9 +803,17 @@ class _ExporterScreenState extends State<ExporterScreen> {
     ]);
   }
 
+  /// A song position as bar.beat (1-based), the ruler's numbering.
+  static String _barBeat(ProjectDoc p, int steps) => '${steps ~/ p.stepsPerBar + 1}.${steps % p.stepsPerBar ~/ 4 + 1}';
+
   String _describe() {
     final p = s.project;
     switch (_kind) {
+      case ExportKind.loop when p.loopsRange:
+        final seconds = (p.loopEndSteps - p.loopStartSteps) * 15.0 / p.bpm;
+        return 'The loop range drawn on the ruler, from bar ${_barBeat(p, p.loopStartSteps)} to '
+            '${_barBeat(p, p.loopEndSteps)} (${seconds.toStringAsFixed(3)} s), as it sounds when it repeats. '
+            'Turn the loop range off in Arrange to export the whole song.';
       case ExportKind.loop:
         return 'The whole mix, exactly ${p.engineLoopSteps ~/ p.stepsPerBar} bars at ${p.bpm.toStringAsFixed(1)} BPM '
             '(${p.songSeconds.toStringAsFixed(3)} s), with loop points. Drops onto Reaper\'s grid.';

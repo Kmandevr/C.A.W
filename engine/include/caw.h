@@ -25,9 +25,11 @@ extern "C" {
    fields work as before.
    5 (2026-11-10): caw_engine_layer_meter_stereo (each side's peak per track); track and master volume up to
    +12 dB. CawLayerMeter is unchanged.
-   6 (2026-11-10): caw_engine_play_count_in, caw_engine_set_metronome (a built-in click) and
+   6 (2026-11-10): caw_engine_component_display (live display data a component publishes for its UI: spectra,
+   gain reduction, levels; #173). Nothing else changes.
+   7 (2026-11-10): caw_engine_play_count_in, caw_engine_set_metronome (a built-in click) and
    caw_engine_release_touches; track volume lanes up to +12 dB, as the faders. */
-#define CAW_API_VERSION 6
+#define CAW_API_VERSION 7
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -146,6 +148,15 @@ CAW_API int32_t caw_engine_set_component_param(CawEngine* e, const char* layer_i
 /* Bypasses (bypass != 0) or brings back component `index` of the chain, crossfaded over 5 ms; a
    bypassed component is not run. 1 on success, 0 if there is no such component. */
 CAW_API int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_id, uint32_t index, int32_t bypass);
+/* Live display data (API version 6, #173): copies the latest block of floats component `index` published for
+   its UI (addressed as in caw_engine_set_component_param: NULL or empty layer_id is the master chain,
+   CAW_INSTRUMENT_INDEX the layer's instrument) into out, at most max floats. Returns the count copied; 0 when
+   the component publishes nothing (yet) or the engine is busy with a project update (call again next frame);
+   -1 when there is no such component. Never blocks and never allocates; call it from the UI thread as often as
+   the screen refreshes (components publish about 60 times a second). Each component's float layout is in
+   docs/engine.md ("Display data"). */
+CAW_API int32_t caw_engine_component_display(CawEngine* e, const char* layer_id, uint32_t index, float* out,
+                                             int32_t max);
 /* Each component's state as it saves it now, as JSON (free with caw_free):
    {"ok":true,"components":[{"index","ok","version","state" (base64)}]} (the layer's instrument has
    index CAW_INSTRUMENT_INDEX). Store "state" and

@@ -157,7 +157,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
 - The Arranger's 30 Hz playhead uses a dedicated overlay painter driven by the engine meter tick. It does not rebuild the clip grid, headers or track layout for every playhead update.
 - Engine Lab reads a fixed 512-sample window from the existing master scope only on meter ticks; its Hann window, FFT scratch buffers and 128-bin spectrum buffer are retained between ticks. A 512-point radix-2 FFT is performed at the existing 30 Hz meter cadence; the UI does not allocate new sample buffers each frame.
 - Mixer meters and Builder controls listen to the existing state notifiers rather than introducing a second audio-state polling loop.
-- Peak meters (`PeakMeter` in `app/lib/ui/widgets.dart`) read on a dB scale from -60 to 0 dBFS: they rise at once to each sample peak and fall on wall-clock time at the **Meter fall** setting (Settings → Look: 24, 48, 72 or 96 dB a second; 48 by default, `meter_fall`; owner, 2026-11-10: faster than the old 24, REAPER-like), with a peak line held 1.5 s and pink for 3 s at 0 dBFS or over. Given a right channel, a meter is stereo: two thin bars (side by side when upright); the master meters are stereo, a track's or folder's is one bar because the engine reports one peak per track (`caw_layer_meter`). Each meter runs its own ticker only while it shows something, so it falls the same at any refresh rate or meter cadence, and doesn't freeze when the engine goes quiet. The engine's meters are sample peaks of what each track or folder sends on (after volume and pan, the louder channel) and of the master output. The hold and fall are presentation-only.
+- Peak meters (`PeakMeter` in `app/lib/ui/widgets.dart`) read on a dB scale from -60 to 0 dBFS: they rise at once to each sample peak and fall on wall-clock time at the **Meter fall** setting (Settings → Look: Slow 48, Medium 96, Fast 144 or Very fast 192 dB a second; Medium by default, `meter_fall`; owner, 2026-11-10: faster than the old 24, REAPER-like, and the earlier "Very fast" 96 is the right medium), with a peak line held 1.5 s and pink for 3 s at 0 dBFS or over. Given a right channel, a meter is stereo: two thin bars (side by side when upright); the master meters are stereo, a track's or folder's is one bar because the engine reports one peak per track (`caw_layer_meter`). Each meter runs its own ticker only while it shows something, so it falls the same at any refresh rate or meter cadence, and doesn't freeze when the engine goes quiet. The engine's meters are sample peaks of what each track or folder sends on (after volume and pan, the louder channel) and of the master output. The hold and fall are presentation-only.
 - These are architectural reductions in unnecessary rebuild/allocation work; no frame-time, CPU or battery benchmark has yet been captured on physical hardware.
 
 ## UI performance profiles (Task 1)
@@ -229,6 +229,33 @@ The flagship (#171, [engine](engine.md)) is built for the phone budget: everythi
 - So 8 voices of the default patch take about 2 % of one server core, a 16-copy voice about 0.3 %. The Morph synth's busy pattern (seven copies, a shared filter) costs 59 M instructions a second of audio, the flagship's default 158 M (callgrind, the instrument alone); a voice of seven copies without a filter about the same as Morph's.
 - [Assumption] On the owner's Galaxy S22+ these scale like the instruction counts (not measured on the phone).
 - The ladder is a long chain of dependent operations per sample; running a voice's two sides in one loop let the CPU overlap them (1.7× faster), and voices could be interleaved the same way next. The reverb (the Library's, unchanged) is why the flagship's starts off.
+
+## Effects suite (2026-11-10)
+
+`caw_bench SECONDS 300` times each built-in effect (#173, [engine](engine.md)) alone on a busy stereo signal that never falls silent (so nothing sleeps), in the engine's 64-frame chain blocks, best of 3 runs. Microseconds of CPU per second of stereo audio (10,000 = 1 % of one core); 3 s runs on a shared x86-64 server (Intel Xeon 2.3 GHz, GCC 13 `-O3`), so ±30 % noise between runs (the existing chorus read 489 and 735 in two runs).
+
+| Effect | Cost |
+| --- | --- |
+| EQ, default (bands at 0 dB are skipped) | 780–840 |
+| EQ, 8 bands with gain, two 48 dB cuts | 8,000–9,200 |
+| Compressor, default (peak, linked) | 2,300–3,100 |
+| Compressor, RMS, unlinked, sidechain high-pass | 3,500–4,600 |
+| Limiter, true peak / sample peak | 2,800–3,000 / 1,600–2,300 |
+| Reverb, default (modulated) / no modulation | 6,700–8,300 / 5,450–5,600 |
+| Delay, default / ping-pong with ducking | 3,700–4,500 / 4,900–6,300 |
+| Saturator, default (tape, 2×) / no oversampling | 6,100–8,600 / 2,200–3,700 |
+| Gate | 1,800 |
+| Transient shaper | 2,200–2,400 |
+| Filter, 24 dB SVF / ladder with LFO and envelope | 1,200–2,300 / 1,900–3,100 |
+| Phaser, 6 / 12 stages | 2,100–2,700 / 3,300–4,400 |
+| Flanger | 1,400–2,100 |
+| Utility (bass mono, DC block, width) | 870–1,400 |
+| For scale: the chorus, the ping-pong delay | 490–735, 1,270–1,490 |
+
+- So a full mastering chain (EQ, compressor, saturator, limiter) costs about 2 % of one server core; [Assumption] the phone scales like these numbers (not measured on a device).
+- The EQ's display spectrum (one 2048-point FFT per publish, about 60 a second) runs only while a UI reads (`DisplayBuffer::watched`), so it costs nothing in an export or with the editor closed.
+- Found while timing: the gate cost 18,000 because its dB envelope settled on a steady target through subnormal numbers; the followers now land on a steady target (1,800).
+- Next, if it matters: the EQ runs its bands sample by sample with a branch per band; a block loop per band (or stereo pairs interleaved, as the flagship's ladder) would cut the many-band case.
 
 ## Remaining bottlenecks and next steps
 

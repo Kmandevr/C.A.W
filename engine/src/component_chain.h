@@ -82,6 +82,9 @@ public:
     // rebuilt component can take over where this one is.
     std::vector<ComponentSpec> currentSpecs() const;
     bool uses(const std::string& id) const noexcept;
+    // Any thread but the audio thread, while the chain plays: component `index`'s latest display block
+    // (ModuleProcessor::readDisplay), at most `max` floats; -1 for an index the chain does not have.
+    int32_t readDisplay(std::size_t index, float* out, uint32_t max) const noexcept;
     // Control thread: the automation table for `lanes` (component lanes of this chain's `layer`;
     // empty for the master). Null when no lane targets the chain.
     // An instrument takes the lanes with target type "instrument" instead.

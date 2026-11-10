@@ -52,8 +52,8 @@ class ModuleDoc {
 }
 
 class ClipDoc {
-  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0, this.loop = true, this.linked = false,
-      List<String>? takes})
+  ClipDoc({required this.id, required this.patternId, this.startSteps = 0, this.lengthSteps = 64, this.sourceOffsetSteps = 0,
+    this.loop = true, this.linked = false, this.name, this.color, this.mute = false, this.lock = false, List<String>? takes})
       : takes = takes ?? [];
   final String id;
   String patternId;
@@ -67,9 +67,25 @@ class ClipDoc {
   bool loop;
   bool linked;
 
+  /// The clip's own name (its Properties); null shows its pattern's name.
+  String? name;
+
+  /// The clip's own colour, a track-colour index; null takes its track's colour.
+  int? color;
+
+  /// A muted clip stays on the timeline but isn't sent to the engine (REAPER's item mute, UG 7.8).
+  bool mute;
+
+  /// A locked clip can't be moved, trimmed, split, glued or deleted until it is unlocked (REAPER's item lock).
+  bool lock;
+
   Map<String, dynamic> toJson() => {
         'id': id, 'pattern': patternId, 'start_steps': startSteps,
         'length_steps': lengthSteps, 'source_offset_steps': sourceOffsetSteps, 'loop': loop, 'linked': linked,
+        if (name != null) 'name': name,
+        if (color != null) 'color': color,
+        if (mute) 'mute': true,
+        if (lock) 'lock': true,
         if (takes.isNotEmpty) 'takes': takes,
       };
 
@@ -81,6 +97,10 @@ class ClipDoc {
         sourceOffsetSteps: (j['source_offset_steps'] as num?)?.toInt() ?? 0,
         loop: j['loop'] != false,
         linked: j['linked'] == true,
+        name: switch (_boundedProjectText(j['name'], 128)) { '' => null, final n => n },
+        color: switch (j['color']) { final int c when c >= 0 && c < LayerDoc.trackColors => c, _ => null },
+        mute: j['mute'] == true,
+        lock: j['lock'] == true,
         takes: [for (final t in (j['takes'] as List?) ?? const []) if (t is String) t].take(64).toList(),
       );
 }
@@ -201,6 +221,46 @@ class ComponentUseDoc {
   static List<ComponentUseDoc> listFromJson(Object? raw) => [
         for (final entry in ((raw as List?) ?? const []).take(64)) ?ComponentUseDoc.fromJson(entry),
       ];
+}
+
+/// A marker (a named, coloured point in the song) or, with [endSteps], a region (a named span: a verse, a chorus).
+/// Stored in the project and shown on the ruler; the engine never sees them.
+class MarkerDoc {
+  MarkerDoc({required this.id, required this.name, required this.startSteps, this.endSteps, this.color = 0});
+  final String id;
+  String name;
+  int startSteps;
+
+  /// Where a region ends (after [startSteps]); null for a marker.
+  int? endSteps;
+
+  /// A track-colour index.
+  int color;
+
+  bool get isRegion => endSteps != null;
+
+  Map<String, dynamic> toJson() => {
+        'id': id, 'name': name, 'start_steps': startSteps,
+        if (endSteps != null) 'end_steps': endSteps,
+        'color': color,
+      };
+
+  /// Null for an entry without an id or a start.
+  static MarkerDoc? fromJson(Object? raw, int maxSteps) {
+    if (raw is! Map) return null;
+    final id = _boundedProjectText(raw['id'], 64);
+    final start = raw['start_steps'];
+    if (id.isEmpty || start is! num || !start.isFinite) return null;
+    final at = start.toInt().clamp(0, maxSteps - 1).toInt();
+    final end = raw['end_steps'];
+    return MarkerDoc(
+      id: id,
+      name: _boundedProjectText(raw['name'], 64),
+      startSteps: at,
+      endSteps: end is num && end.isFinite && end.toInt() > at ? end.toInt().clamp(at + 1, maxSteps).toInt() : null,
+      color: switch (raw['color']) { final int c when c >= 0 && c < LayerDoc.trackColors => c, _ => 0 },
+    );
+  }
 }
 
 /// The most a track or the master gains: +12 dB, 10^(12/20) (owner, 2026-11-10: faders like REAPER's). The engine
@@ -372,7 +432,12 @@ class ProjectDoc {
     List<CppComponentDoc>? cppComponents,
     List<ComponentUseDoc>? masterComponents,
     List<MidiFileDoc>? midiFiles,
+    this.loopRange = false,
+    this.loopStartSteps = 0,
+    this.loopEndSteps = 0,
+    List<MarkerDoc>? markers,
   })  : midiFiles = midiFiles ?? [],
+        markers = markers ?? [],
         globals = globals ?? {},
         modules = modules ?? [],
         layers = layers ?? [],
@@ -427,15 +492,30 @@ class ProjectDoc {
   /// parts became, so it can be dragged onto a track again. The notes live in those patterns only.
   List<MidiFileDoc> midiFiles;
 
+  /// The loop range (REAPER's loop points, drawn on the ruler): while [loopRange] is on and it has a length,
+  /// playback loops from [loopEndSteps] back to [loopStartSteps]; off, the whole song loops, as it always did.
+  bool loopRange;
+  int loopStartSteps, loopEndSteps;
+
+  /// The range has a length (it was drawn), whether or not it is on.
+  bool get hasLoopRange => loopEndSteps > loopStartSteps;
+
+  /// Playback loops over the range now.
+  bool get loopsRange => loopRange && hasLoopRange;
+
+  /// Markers and regions on the ruler, in no particular order.
+  List<MarkerDoc> markers;
+
   int get stepsPerBar => beatsPerBar * 4;
   int get loopSteps => loopBars * stepsPerBar;
   /// A song position is the engine's 32-bit step count, so a song holds whole bars up to 2^31 - 1 steps (F7.2).
   int get maxLoopBars => 2147483647 ~/ max(4, stepsPerBar);
   int get maxArrangementSteps => maxLoopBars * max(4, stepsPerBar);
 
-  /// Where the song ends: the loop, the last clip end or the last project automation point.
+  /// Where the song ends: the loop, the last clip end, the last project automation point, or the loop range's end
+  /// while it is on (the engine reaches it too).
   int get arrangementEndSteps {
-    final clipsEnd = layers.fold<int>(loopSteps, (end, layer) =>
+    final clipsEnd = layers.fold<int>(loopsRange ? max(loopSteps, loopEndSteps) : loopSteps, (end, layer) =>
         layer.clips.fold<int>(end, (value, clip) => max(value, clip.startSteps + clip.lengthSteps)));
     return automation.fold<int>(clipsEnd, (end, lane) =>
         lane.points.fold<int>(end, (value, point) => max(value, point.step.ceil())));
@@ -500,7 +580,7 @@ class ProjectDoc {
   /// The engine's project JSON (docs/engine.md, "Project file"). Modules get the code last run, not unrun edits.
   String toEngineJson(
       {List<String>? audition, String? auditionPattern, bool auditionOnly = false, int voices = 8, String swap = 'now',
-      Set<String>? playableComponents, Set<String> suspendLanes = const {}}) {
+      Set<String>? playableComponents, Map<String, String>? sourceOverrides, Set<String> suspendLanes = const {}}) {
     final engineLoopBars = engineLoopSteps ~/ stepsPerBar;
     // Native components the engine hasn't loaded (awaiting trust, blocked, failed to build) are left out, so the
     // rest of the song still plays; their automation lanes go with them and the others are renumbered.
@@ -532,6 +612,7 @@ class ProjectDoc {
         'bpm': bpm,
         'beats_per_bar': beatsPerBar,
         'loop_bars': engineLoopBars,
+        if (loopsRange) ...{'loop_range': true, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
         'seed': seed,
         'master': master,
         'seam_crossfade': seamCrossfade,
@@ -541,7 +622,8 @@ class ProjectDoc {
         'globals': globals,
         'automation': engineAutomation,
         'modules': [
-          for (final m in modules) {'id': m.id, 'name': m.name, 'source': m.runSource, 'params': m.params},
+          for (final m in modules)
+            {'id': m.id, 'name': m.name, 'source': sourceOverrides?[m.id] ?? m.runSource, 'params': m.params},
         ],
         'master_components': [for (final c in playable(masterComponents)) c.toJson()],
         'layers': [
@@ -564,6 +646,7 @@ class ProjectDoc {
                   'id': clip.id, 'pattern': clip.patternId, 'start_steps': clip.startSteps,
                   'length_steps': clip.lengthSteps, 'source_offset_steps': clip.sourceOffsetSteps,
                   'loop': clip.loop,
+                  if (clip.mute) 'mute': true,
                 },
               ],
               'length_steps': l.clips.isNotEmpty ? 0 : l.lengthSteps,
@@ -599,6 +682,8 @@ class ProjectDoc {
         'cpp_components': [for (final component in cppComponents) component.toJson()],
         'master_components': [for (final c in masterComponents) c.toJson()],
         if (midiFiles.isNotEmpty) 'midi_files': [for (final f in midiFiles) f.toJson()],
+        if (hasLoopRange) ...{'loop_range': loopRange, 'loop_start_steps': loopStartSteps, 'loop_end_steps': loopEndSteps},
+        if (markers.isNotEmpty) 'markers': [for (final m in markers) m.toJson()],
       };
 
   static ProjectDoc fromJson(Map<String, dynamic> j) {
@@ -629,6 +714,9 @@ class ProjectDoc {
         for (final raw in ((j['midi_files'] as List?) ?? const []).take(512))
           if (raw is Map<String, dynamic>) ?MidiFileDoc.fromJson(raw),
       ],
+      loopRange: j['loop_range'] == true,
+      loopStartSteps: (j['loop_start_steps'] as num?)?.toInt() ?? 0,
+      loopEndSteps: (j['loop_end_steps'] as num?)?.toInt() ?? 0,
       layers: ((j['layers'] as List?) ?? const []).map((raw) {
         final layer = LayerDoc.fromJson(raw as Map<String, dynamic>);
         // Clips are authoritative once present; the old single-pattern pointer is only a migration source.
@@ -690,6 +778,12 @@ class ProjectDoc {
     }
     // Keep persisted positions inside what the engine's 32-bit step count can hold; nothing valid moves.
     project.loopBars = project.loopBars.clamp(1, project.maxLoopBars).toInt();
+    project.loopStartSteps = project.loopStartSteps.clamp(0, project.maxArrangementSteps - 1).toInt();
+    project.loopEndSteps = project.loopEndSteps.clamp(0, project.maxArrangementSteps).toInt();
+    if (!project.hasLoopRange) project.loopRange = false;
+    project.markers = [
+      for (final raw in ((j['markers'] as List?) ?? const []).take(1024)) ?MarkerDoc.fromJson(raw, project.maxArrangementSteps),
+    ];
     for (final layer in project.layers) {
       for (final clip in layer.clips) {
         clip.startSteps = clip.startSteps.clamp(0, project.maxArrangementSteps - 1).toInt();

@@ -429,11 +429,9 @@ class AppState extends ChangeNotifier {
     return (chain: [?gen, m.id], pattern: layer?.clips.firstOrNull?.patternId ?? layer?.patternId);
   }
 
-  Future<void> _syncNow() async {
-    final e = engine;
-    if (e == null) return;
+  String _engineJson({Map<String, String>? sourceOverrides}) {
     final pv = previewOnly ? preview : null;
-    final json = project.toEngineJson(
+    return project.toEngineJson(
         audition: pv?.chain,
         auditionPattern: pv?.pattern,
         auditionOnly: previewOnly,
@@ -448,7 +446,15 @@ class AppState extends ChangeNotifier {
             for (final l in project.layers) ...[...l.components, ?l.instrument],
           ])
             if (c.id.startsWith('org.caw.')) c.id,
-        });
+        },
+        sourceOverrides: sourceOverrides);
+  }
+
+  Future<void> _syncNow() async {
+    final e = engine;
+    if (e == null) return;
+    _livePending = null; // the project as it is now supersedes a drag step not yet sent
+    final json = _engineJson();
     try {
       info = await e.setProject(json);
       engineError = null;
@@ -467,6 +473,44 @@ class AppState extends ChangeNotifier {
 
   /// Sends the project to the engine soon, with no edit (the automation writer after [suspendedLanes] changes).
   void resyncEngine() => _sync();
+
+  ({String id, String? text})? _livePending;
+  bool _liveBusy = false;
+
+  /// A pattern edit still under the finger, heard while the song plays (#170): the project goes to the engine with
+  /// [text] as pattern [moduleId]'s source, so a sounding note follows the drag. Nothing else changes: no save, no
+  /// undo step, and no listener is notified (the piano roll keeps its drag in an overlay). The roll throttles calls
+  /// to about 30 a second; one sent while another is still being built waits, and only the newest is sent.
+  /// [text] null (a drag cancelled) sends the project as it is again.
+  Future<void> livePattern(String moduleId, String? text) async {
+    if (engine == null) return;
+    _livePending = (id: moduleId, text: text);
+    if (!_liveBusy) await _liveSend();
+  }
+
+  Future<void> _liveSend() async {
+    _liveBusy = true;
+    try {
+      for (var next = _livePending; next != null; next = _livePending) {
+        _livePending = null;
+        final e = engine;
+        if (e == null || _disposed) break;
+        final text = next.text;
+        if (text == null) {
+          _syncTimer?.cancel();
+          await _syncNow();
+          continue;
+        }
+        try {
+          await e.setProject(_engineJson(sourceOverrides: {next.id: text}));
+        } catch (_) {
+          // A live step that fails (the engine busy or gone) is dropped: the edit is sent in full on release.
+        }
+      }
+    } finally {
+      _liveBusy = false;
+    }
+  }
 
   /// Sends the project to the engine soon (edits in quick succession are sent once).
   void _sync() {
@@ -502,6 +546,16 @@ class AppState extends ChangeNotifier {
       history.settle(_snapshot());
       if ((history.canUndo, history.canRedo) != was) notifyListeners();
     });
+  }
+
+  /// Closes the burst of edits now, so a discrete action (split, glue, a clip's properties) is one undo step of its
+  /// own and the next edit starts another.
+  void endUndoStep() {
+    if (!(_historyTimer?.isActive ?? false)) return;
+    _historyTimer!.cancel();
+    final was = (history.canUndo, history.canRedo);
+    history.settle(_snapshot());
+    if ((history.canUndo, history.canRedo) != was) notifyListeners();
   }
 
   bool get canUndo => history.canUndo;
@@ -1322,20 +1376,6 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void splitClipAt(LayerDoc layer, ClipDoc clip, int atStep) {
-    final offset = atStep - clip.startSteps;
-    if (offset <= 0 || offset >= clip.lengthSteps) return;
-    final right = ClipDoc(id: newId('c'), patternId: clip.patternId,
-      startSteps: atStep, lengthSteps: clip.lengthSteps - offset,
-      sourceOffsetSteps: clip.sourceOffsetSteps + offset, loop: clip.loop, linked: true);
-    editLayer(layer, (l) {
-      clip.lengthSteps = offset;
-      l.clips.add(right);
-    });
-    selectClip(layer, right);
-  }
-
-
   /// Adds a track using [soundId], the first available sound, or no sound when [empty] is true.
   void addLayer({String? soundId, bool empty = false}) {
     final gen = empty ? null : project.module(soundId) ?? project.modules.where((m) => isGenerator(m.id)).firstOrNull;
@@ -1464,6 +1504,9 @@ class AppState extends ChangeNotifier {
     selectedClipIds.add(clip.id);
     notifyListeners();
   }
+
+  /// Tells the screens that [selectedClipIds] changed (Arrange's marquee, split and glue set it directly).
+  void clipSelectionChanged() => notifyListeners();
 
   void selectClip(LayerDoc layer, ClipDoc clip, {bool additive = false}) {
     if (!additive) selectedClipIds.clear();

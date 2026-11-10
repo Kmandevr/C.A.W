@@ -222,6 +222,83 @@ TEST(engine_process_never_allocates_with_native_inserts_and_live_parameter_chang
     CHECK_EQ(operations, 0u);
 }
 
+TEST(publishing_and_reading_display_data_never_allocates) {
+    // #173: the fixture's gain component publishes display data every block; reading it through the Engine (as
+    // the UI does) and publishing it on the audio thread must neither allocate nor free.
+    const char* path = caw::test::nativeComponentPath();
+    CHECK(path != nullptr);
+    if (!path) return;
+    Engine e(48000);
+    const char* gain = "org.caw.tests.native-loader.gain";
+    CHECK(e.loadNativeComponent(path, gain, NativeModuleTrust::Trusted).success);
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"bass", templateSource("bass.caw"), {}});
+    p.layers = {layer("b", {"bass"})};
+    p.layers[0].components = {{gain, {}}};
+    p.masterComponents = {{gain, {}}};
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 20; ++k) e.process(l.data(), r.data(), 192);
+    float out[16];
+    int32_t got = 0;
+    std::size_t operations = 0;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 100; ++k) {
+            e.process(l.data(), r.data(), 192);
+            got += e.componentDisplay("b", 0, out, 16) + e.componentDisplay("", 0, out, 16);
+        }
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK_EQ(got, 400);
+}
+
+TEST(the_built_in_effects_suite_never_allocates_on_the_audio_thread) {
+    // #173: every effect of the suite on a track (and the limiter on the master), at busy settings, with knob moves,
+    // display reads, a stop and a restart: no allocation or free on the audio thread.
+    const char* ids[] = {"org.caw.eq",       "org.caw.compressor", "org.caw.reverb.pro", "org.caw.delay.pro",
+                         "org.caw.saturator", "org.caw.gate",      "org.caw.transient",  "org.caw.filter",
+                         "org.caw.phaser",    "org.caw.flanger",   "org.caw.utility"};
+    ProjectSpec p;
+    p.bpm = 128;
+    p.loopBars = 1;
+    p.modules.push_back({"bass", templateSource("bass.caw"), {}});
+    p.layers = {layer("b", {"bass"})};
+    for (const char* id : ids) p.layers[0].components.push_back({id, {}});
+    p.layers[0].components[0].params = {{"b4_gain", 6}, {"b1_on", 1}, {"b1_type", 5}};
+    p.layers[0].components[3].params = {{"mode", 1}, {"freeze", 0}};
+    p.masterComponents = {{"org.caw.limiter", {{"gain", 6}}}};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 100; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    float shown[1024];
+    for (int round = 0; round < 6; ++round) {
+        e.setComponentParam("b", 0, "b4_freq", 300 + 400 * round);
+        e.setComponentParam("b", 0, "b2_type", round);
+        e.setComponentParam("b", 2, "freeze", round % 2);
+        e.setComponentParam("b", 3, "sync", round);
+        e.setComponentParam("b", 4, "mode", round % 6);
+        e.setComponentParam("b", 7, "type", round);
+        if (round == 4) e.stop();
+        if (round == 5) e.play();
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 60; ++k) {
+            e.process(l.data(), r.data(), 192);
+            for (uint32_t i = 0; i < 11; ++i) e.componentDisplay("b", i, shown, 1024);
+            e.componentDisplay("", 0, shown, 1024);
+        }
+        operations += scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+}
+
 TEST(a_native_instrument_never_allocates_on_the_audio_thread) {
     // The built-in synth plays a pattern (loop wraps, a slide, a ratchet, chords) through a .caw effect and a
     // native delay; mid-way it is swapped for another instrument (its held notes move over), previews play and
@@ -332,6 +409,41 @@ TEST(the_built_in_instruments_never_allocate_on_the_audio_thread) {
         cawtest::AllocationScope scope;
         for (int k = 0; k < 250; ++k) e.process(l.data(), r.data(), 192);  // the stop, the release tails
         operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+}
+
+TEST(a_pattern_edit_while_notes_sound_never_allocates_on_the_audio_thread) {
+    // #170: held notes carried across a pattern edit (a native instrument's and a .caw voice's) take their new
+    // note's curve on the audio thread: the match is worked out on the control thread, the curve copy fits.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"bass", templateSource("bass.caw"), {}});
+    auto pattern = [](int k) {
+        return "---\nkind: pattern\nname: P\nlength: 16\n---\n0 C3 16 1  bend 0:0 " + std::to_string(0.3 + 0.05 * k) +
+               ":" + std::to_string(k - 6) + " 1:12\n" + (k % 2 ? "0 E3 16 1\n" : "") + "4 G3 8 1  bend 0:0 1:-3\n";
+    };
+    p.modules.push_back({"pat", pattern(0), {}});
+    LayerSpec inst = layer("i", {});
+    inst.pattern = "pat";
+    inst.hasInstrument = true;
+    inst.instrument.id = "org.caw.synth.morph";
+    LayerSpec voices = layer("v", {"bass"});
+    voices.pattern = "pat";
+    p.layers = {inst, voices};
+    Engine e(48000);
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 50; ++k) e.process(l.data(), r.data(), 192);
+    std::size_t operations = 0;
+    for (int k = 1; k < 12; ++k) {
+        p.modules[1].source = pattern(k);
+        CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+        cawtest::AllocationScope scope;
+        for (int b = 0; b < 20; ++b) e.process(l.data(), r.data(), 192);
+        operations += scope.count();
     }
     CHECK_EQ(operations, 0u);
 }

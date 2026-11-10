@@ -255,6 +255,20 @@ typedef struct CawQuietExtension {
     int32_t (*quiet)(void* instance);
 } CawQuietExtension;
 
+/* Extension CAW_EXTENSION_DISPLAY (CawComponentV3.get_extension, asked once per instance after create): live
+ * display data for the component's UI (#173), such as a spectrum, gain reduction or levels. read() copies the
+ * latest block of floats the component published into destination (at most capacity floats) and returns how
+ * many it copied, 0 when it has none. The host calls it from a thread that is not the audio thread, at any time
+ * between create and destroy, while process may run on the audio thread: it must never block, lock or allocate
+ * (the C++ SDK's caw::DisplayBuffer, caw/display.hpp, is a double-buffered seqlock that does this). max_floats is
+ * the most read ever returns. The layout of the floats is the component's own. */
+#define CAW_EXTENSION_DISPLAY "caw.display.v1"
+typedef struct CawDisplayExtension {
+    uint32_t struct_size;
+    uint32_t max_floats;
+    uint32_t (*read)(void* instance, float* destination, uint32_t capacity);
+} CawDisplayExtension;
+
 /* The one symbol a component library exports. A library may hold several components (a bundle):
    index 0, 1, ... returns each, and NULL past the last. Hosts stop at the first NULL. */
 typedef const CawComponentV3* (*CawGetComponentV3Fn)(uint32_t index);

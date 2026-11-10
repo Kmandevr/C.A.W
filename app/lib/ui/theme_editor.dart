@@ -143,9 +143,9 @@ class SettingsPage extends StatelessWidget {
                 items: [
                   for (final v in Settings.meterFalls)
                     DropdownMenuItem(value: v, child: Text(switch (v) {
-                      24.0 => 'Slow',
-                      48.0 => 'Medium',
-                      72.0 => 'Fast',
+                      48.0 => 'Slow',
+                      96.0 => 'Medium',
+                      144.0 => 'Fast',
                       _ => 'Very fast',
                     })),
                 ],

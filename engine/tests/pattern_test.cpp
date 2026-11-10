@@ -319,9 +319,9 @@ TEST(packed_patterns_stay_cheap_and_late_notes_warn) {
     CHECK(has(res, "1 note starts after the pattern's length and never plays"));
 }
 
-TEST(a_pattern_edit_lets_sounding_notes_finish) {
-    // An 8-step note is shortened to 2 steps while it plays: it still ends where it was going to (step 8), and the
-    // next pass plays the short version.
+TEST(a_pattern_edit_lets_a_sounding_note_follow_it) {
+    // An 8-step note is shortened to 2 steps while it plays (owner, 2026-11-10, #170: a sounding note follows the
+    // edit): it ends where the edited note ends (step 2), and the next pass plays the short version.
     ProjectSpec p = voicedProject("gate", "---\nkind: pattern\nlength: 16\n---\n0 C4 8\n");
     Engine e(48000);
     e.setMasterBypass(true);
@@ -332,11 +332,76 @@ TEST(a_pattern_edit_lets_sounding_notes_finish) {
     e.setProject(p);
     std::vector<double> y = run(e, 120000);
     const size_t at = 6016;  // samples already played
-    CHECK(y[30000 - at] > 0.5);
-    CHECK(y[47990 - at] > 0.5);
-    CHECK_NEAR(y[48100 - at], 0.0, 1e-9);
+    CHECK(y[11990 - at] > 0.5);
+    CHECK_NEAR(y[12100 - at], 0.0, 1e-9);
+    CHECK_NEAR(y[47990 - at], 0.0, 1e-9);
     CHECK(y[96000 + 100 - at] > 0.5);
     CHECK_NEAR(y[96000 + 13000 - at], 0.0, 1e-9);
+}
+
+TEST(a_pattern_edit_rebinds_a_sounding_voices_bend_and_ends_a_deleted_note) {
+    // Owner (2026-11-10, #170): a bent note being edited while the song plays follows its new curve from the
+    // playhead, gliding there over a few ms, without a new trig; a note the edit deletes ends.
+    const std::string gen = "trig + gate * note / 100";
+    const std::string before = "0 C4 16 1  bend 0:0 1:24\n";
+    const size_t at = 6016;
+    {
+        ProjectSpec p = voicedProject(gen, before);
+        Engine e(48000);
+        e.setMasterBypass(true);
+        e.setProject(p);
+        e.play();
+        std::vector<double> a = run(e, static_cast<int64_t>(at));
+        p.modules[1].source = kHead + "0 C4 16 1  bend 0:0 1:-24\n";
+        e.setProject(p);
+        std::vector<double> b = run(e, 30000);
+        int trigs = 0;
+        for (double v : a) trigs += v > 0.9;
+        for (double v : b) trigs += v > 0.9;
+        CHECK_EQ(trigs, 1);
+        CHECK_NEAR(a[at - 1] * 100, 60.0 + 24.0 * (at - 1) / 96000.0, 0.01);
+        for (size_t i = 1; i < 480; ++i) CHECK(std::fabs(b[i] - b[i - 1]) * 100 < 0.1);  // a glide, no jump
+        for (size_t i = 480; i < b.size(); i += 101) CHECK_NEAR(b[i] * 100, 60.0 - 24.0 * (at + i) / 96000.0, 0.01);
+    }
+    {
+        ProjectSpec p = voicedProject(gen, before);
+        Engine e(48000);
+        e.setMasterBypass(true);
+        e.setProject(p);
+        e.play();
+        run(e, static_cast<int64_t>(at));
+        p.modules[1].source = kHead + "8 E4 2 1\n";
+        e.setProject(p);
+        std::vector<double> b = run(e, 6000);
+        CHECK_NEAR(b[10], 0.0, 1e-9);
+    }
+}
+
+TEST(pattern_notes_are_matched_across_an_edit) {
+    auto pat = [](const std::string& body) { return parsePattern(kHead + body).pattern; };
+    // Unchanged notes keep their partner even when another note's move reorders them; a curve edit is the same note.
+    auto a = pat("0 C4 4\n2 E4 4  bend 0:0 1:2\n3 G4 2\n");
+    auto b = pat("0 C4 4\n2 E4 4  bend 0:0 1:-5\n1 G4 3\n");
+    CHECK(a && b);
+    if (!a || !b) return;
+    // b sorted by start: C4 (0), G4 (1), E4 (2)
+    std::vector<int> m = matchPatternNotes(*a, *b);
+    CHECK_EQ(m.size(), size_t{3});
+    CHECK(m.size() == 3 && m[0] == 0 && m[1] == 2 && m[2] == 1);
+    // A note moved, stretched or transposed while overlapping its old place is the same note; a deleted one has none.
+    auto c = pat("0 C4 4\n2 E4 4\n6 G4 2\n");
+    auto d = pat("0 C4 4\n3 F4 6\n");
+    CHECK(c && d);
+    if (!c || !d) return;
+    m = matchPatternNotes(*c, *d);
+    CHECK(m.size() == 3 && m[0] == 0 && m[1] == 1 && m[2] == -1);
+    // Two notes at one pitch: each keeps the one nearest its old start.
+    auto e = pat("0 C4 4\n2 C4 4\n");
+    auto f = pat("1/2 C4 4\n5/2 C4 4\n");
+    CHECK(e && f);
+    if (!e || !f) return;
+    m = matchPatternNotes(*e, *f);
+    CHECK(m.size() == 2 && m[0] == 0 && m[1] == 1);
 }
 
 TEST(editing_a_synth_does_not_restart_its_held_notes) {

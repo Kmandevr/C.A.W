@@ -22,8 +22,11 @@ class RecordedTake {
 
 /// One captured note, in sixteenth steps of the song.
 class TakenNote {
-  const TakenNote(this.at, this.len, this.pitch, this.vel);
+  const TakenNote(this.at, this.len, this.pitch, this.vel, [this.pass = 0]);
   final double at, len, pitch, vel;
+
+  /// The loop pass it began in (0: the first); [at] counts every pass before it.
+  final int pass;
 }
 
 class LiveMidi extends ChangeNotifier {
@@ -110,15 +113,25 @@ class LiveMidi extends ChangeNotifier {
   bool get recording => armedLayerId != null;
 
   /// Notes still held: MIDI note number -> (preview id, start, velocity); starts are song time unwrapped ([_now]).
-  final Map<int, (int, double, double)> _held = {};
+  final Map<int, (int, double, double, int)> _held = {};
   final Set<int> _sustained = {};
   bool _sustain = false;
   final List<TakenNote> taken = [];
   double? _recordFrom;
   double _bend = 0;
 
-  // Song time keeps counting across loop wraps while recording: each wrap adds the song's length.
+  // Song time keeps counting across loop wraps while recording: each wrap adds the loop's length (the loop range's
+  // when one is on, else the song's).
   double _wraps = 0, _lastStep = 0, _lastNow = 0;
+  int _pass = 0;
+
+  /// Where playback loops: the loop range when it is on, else the whole song.
+  (double, double) get loopSpan {
+    final p = state.project;
+    return p.loopsRange
+        ? (p.loopStartSteps.toDouble(), p.loopEndSteps.toDouble())
+        : (0.0, p.engineLoopSteps.toDouble());
+  }
 
   /// The playhead now, in steps since the song's start, counting every pass since recording began.
   double _now() {
@@ -129,7 +142,11 @@ class LiveMidi extends ChangeNotifier {
     }
     final step = state.transportOn ? state.playheadStep : state.pausedStep;
     if (step == null) return _lastNow;
-    if (recording && step + 1 < _lastStep) _wraps += state.project.engineLoopSteps;
+    if (recording && step + 1 < _lastStep) {
+      final (from, to) = loopSpan;
+      _wraps += to - from;
+      _pass++;
+    }
     _lastStep = step;
     return _lastNow = step + _wraps;
   }
@@ -165,6 +182,7 @@ class LiveMidi extends ChangeNotifier {
           : null;
     }
     _wraps = 0;
+    _pass = 0;
     _lastStep = from;
     _lastNow = from;
     _recordFrom = from;
@@ -195,7 +213,7 @@ class LiveMidi extends ChangeNotifier {
       final id = state.nextPreviewId();
       final vel = m.data2 / 127;
       state.previewOn(layer, id, m.data1 + _bend * 2, vel);
-      _held[m.data1] = (id, now, vel);
+      _held[m.data1] = (id, now, vel, _pass);
     } else if (m.isNoteOff) {
       if (_sustain) {
         _sustained.add(m.data1);
@@ -220,7 +238,7 @@ class LiveMidi extends ChangeNotifier {
     final h = _held.remove(note);
     if (h == null) return;
     state.previewOff(h.$1);
-    if (recording && _recordFrom != null) taken.add(TakenNote(h.$2, math.max(0.25, now - h.$2), note.toDouble(), h.$3));
+    if (recording && _recordFrom != null) taken.add(TakenNote(h.$2, math.max(0.25, now - h.$2), note.toDouble(), h.$3, h.$4));
   }
 
   void _releaseAll() {
@@ -236,8 +254,8 @@ class LiveMidi extends ChangeNotifier {
     _applyMetronome();
   }
 
-  /// Writes the take as new pattern clips on the armed track: one per pass through the song, the first from the bar
-  /// where recording began, later ones from the song's start.
+  /// Writes the recording on the armed track: one pass is one clip from the bar where recording began; a loop
+  /// recording is one clip whose takes are the passes.
   void _commit() {
     final layerId = armedLayerId;
     final from = _recordFrom;
@@ -253,16 +271,17 @@ class LiveMidi extends ChangeNotifier {
     final layer = state.project.layers.where((l) => l.id == layerId).firstOrNull;
     if (layer == null) return;
     final bar = state.project.stepsPerBar;
-    final loop = state.project.engineLoopSteps.toDouble();
+    final (loopFrom, loopTo) = loopSpan;
+    final loop = loopTo - loopFrom;
     final passes = <int, List<TakenNote>>{};
     for (final n in notes) {
-      final pass = (n.at / loop).floor();
-      final at = n.at - pass * loop;
-      // A note held past the song's end stops there; the next pass starts fresh.
-      (passes[pass] ??= []).add(TakenNote(at, math.min(n.len, loop - at), n.pitch, n.vel));
+      final at = n.at - n.pass * loop;
+      // A note held past the loop's end stops there; the next pass starts fresh.
+      (passes[n.pass] ??= []).add(TakenNote(at, math.max(0.125, math.min(n.len, loopTo - at)), n.pitch, n.vel));
     }
     final order = passes.keys.toList()..sort();
-    final firstStart = order.first == 0 ? (from / bar).floor() * bar : 0;
+    int floorBar(double v) => (v / bar).floor() * bar;
+    final firstStart = order.first == 0 ? floorBar(from) : floorBar(loopFrom);
     if (order.length == 1) {
       final m = takeModule(passes[order.first]!, start: firstStart, stepsPerBar: bar, name: _takeName());
       state.editProject((p) => p.modules.add(m));
@@ -271,10 +290,10 @@ class LiveMidi extends ChangeNotifier {
       lastTake.value = RecordedTake(layer.id, [?clip?.id], [m.id]);
       return;
     }
-    // Loop recording: every pass is a take of one clip over the span they share; the newest plays (REAPER's
-    // default), and the clip's Takes picker switches.
-    final start = order.any((p) => p > 0) ? 0 : firstStart;
-    final end = notes.isEmpty ? start + bar : passes.values.expand((n) => n).map((n) => n.at + n.len).fold<double>(0, math.max);
+    // Loop recording (the loop range, or the whole song): every pass is a take of one clip over the span they
+    // share; the newest plays (REAPER's default), and the clip's Takes picker switches.
+    final start = math.min(firstStart, floorBar(loopFrom));
+    final end = passes.values.expand((n) => n).map((n) => n.at + n.len).fold<double>(loopTo, math.max);
     final bars = math.max(1, ((end - start) / bar).ceil());
     final modules = [
       for (final pass in order) takeModule(passes[pass]!, start: start, stepsPerBar: bar, name: _takeName(order.indexOf(pass)), bars: bars),

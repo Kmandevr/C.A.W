@@ -185,13 +185,16 @@ class AutomationWriter extends ChangeNotifier {
     final at = _now;
     if (mode == AutomationMode.write && !_writeStarted && state.meters.playing) _startWrite(at);
     if (at + 1 < _lastStep && _segments.isNotEmpty) {
-      // The song looped: what was written reaches the end, and writing goes on from the start.
-      final end = state.project.engineLoopSteps.toDouble();
+      // The song (or its loop range) looped: what was written reaches the loop's end, and writing goes on from its start.
+      final p = state.project;
+      final (start, end) = p.loopsRange
+          ? (p.loopStartSteps.toDouble(), p.loopEndSteps.toDouble())
+          : (0.0, p.engineLoopSteps.toDouble());
       for (final seg in _segments.values.toList()) {
         _add(seg, end, seg.value);
         _commit(seg, returns: true);
         final next = _Segment(seg.target, seg.value, hadLane: true, original: seg.original)..held = seg.held;
-        _add(next, 0, seg.value);
+        _add(next, start, seg.value);
         _segments[seg.target.key] = next;
       }
     }

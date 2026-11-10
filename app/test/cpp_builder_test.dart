@@ -155,7 +155,9 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
   });
 
   test('every built-in in the Library is registered in the engine with those knobs', () {
-    final src = ['../engine/src/builtin_components.cpp', '../engine/src/builtin_instruments.cpp', '../engine/src/builtin_flagship.cpp']
+    // Every engine/src/builtin_*.cpp: the components, instruments, flagship and effects suite.
+    final src = (Directory('../engine/src').listSync().whereType<File>().map((f) => f.path)
+            .where((p) => RegExp(r'builtin_[a-z_]+\.cpp$').hasMatch(p)).toList()..sort())
         .map((p) => File(p).readAsStringSync())
         .join('\n');
     for (final b in cppBuiltins) {

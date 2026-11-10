@@ -195,8 +195,8 @@ class Settings extends ChangeNotifier {
   static const minTrackHeight = 40.0, maxTrackHeight = 160.0;
 
   /// How fast peak meters fall, in dB per second (owner, 2026-11-10: faster than the old 24, still smooth).
-  double meterFall = 48;
-  static const meterFalls = [24.0, 48.0, 72.0, 96.0];
+  double meterFall = 96;
+  static const meterFalls = [48.0, 96.0, 144.0, 192.0];
 
   /// Long-press menus on tracks, clips and effects: a list by default, a ring as a choice.
   LongPressMenuStyle longPressMenu = LongPressMenuStyle.list;

@@ -108,6 +108,10 @@ public:
     // id: the master's; its instrument has index kInstrumentIndex), as each component's save_state writes it now; store it in the project so a
     // reload or an export starts from it. {"ok":false,...} if the layer has no chain.
     std::string componentStatesJson(const std::string& layerId);
+    // Live display data (#173): the latest block a playing component published (ModuleProcessor::readDisplay),
+    // at most `max` floats into out; the count, 0 when it has none (or the control thread is busy: it never
+    // waits), -1 when there is no such component. Any thread but the audio thread.
+    int32_t componentDisplay(const std::string& layerId, uint32_t index, float* out, uint32_t max);
     void setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo);
     // Note previews (#103): a held note on a layer's instrument, heard through its effects and mix, while playing or
     // stopped. [id] is the caller's handle: a second noteOn with it ends the first. Only layers that play notes
@@ -201,8 +205,15 @@ private:
     void endPlayback() noexcept;
     static void restartChain(Chain& c) noexcept;
     void takeExpression(struct Voice& v, const Pattern& pat, const PatternNote& n) noexcept;
+    bool noteSpan(const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept;
+    void rebindVoice(struct Voice& v, const Pattern* pat, int64_t n0) noexcept;
+    void rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept;
     int64_t loopStart(const Slot& s, int64_t k) const noexcept;
     void updateTiming() noexcept;
+    // Where playback from g_ goes back: the loop range's end while it is on and ahead, else the song end.
+    int64_t wrapAt() const noexcept;
+    // The position after a chunk that ends at [next]: back to the loop range's start (or 0) at the wrap.
+    int64_t after(int64_t next) const noexcept;
     void pickOverloadVictim() noexcept;
 
     const double sr_;
@@ -253,6 +264,9 @@ private:
     double bpm_ = 120.0;
     int beatsPerBar_ = 4;
     int loopSteps_ = 64;
+    bool loopRange_ = false;               // the project's loop range is on
+    int loopFromSteps_ = 0, loopToSteps_ = 0;
+    int64_t loopFrom_ = 0, loopTo_ = 0;    // the loop range in samples (updateTiming)
     uint32_t seed_ = 0;
     double master_ = 0.7;
     double masterTarget_ = 0.7, masterStep_ = 0.0;

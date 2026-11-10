@@ -160,6 +160,13 @@ int32_t caw_engine_set_component_bypass(CawEngine* e, const char* layer_id, uint
     return 0;
 }
 
+int32_t caw_engine_component_display(CawEngine* e, const char* layer_id, uint32_t index, float* out, int32_t max) try {
+    if (!e || !e->engine || !out || max <= 0) return e && e->engine ? 0 : -1;
+    return e->engine->componentDisplay(layer_id ? layer_id : "", index, out, static_cast<uint32_t>(max));
+} catch (...) {
+    return 0;
+}
+
 char* caw_engine_component_states(CawEngine* e, const char* layer_id) try {
     if (!e || !e->engine) return nullptr;
     return dup(e->engine->componentStatesJson(layer_id ? layer_id : ""));

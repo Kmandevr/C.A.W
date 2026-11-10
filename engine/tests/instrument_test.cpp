@@ -418,7 +418,7 @@ TEST(a_looping_clip_plays_its_notes_on_every_repeat) {
 TEST(a_note_played_again_while_held_gets_its_motion_up_to_its_end_at_any_block_size) {
     // Second audio review, fix 5: NoteEvents::on() ends a pattern note still held without the pitch points due
     // before its end, so its last pitch could depend on where the block split fell. The Engine now ends it first
-    // with its motion, as an off, an orphan and a slide do. Today a pattern's restart ends its notes before
+    // with its motion, as an off and a slide do. Today a pattern's restart ends its notes before
     // they start again (here a bent note longer than its 3-step pattern, restarting mid-chunk), so this checks
     // that the motion up to a note's end and its new start land on the same frames at any block size.
     auto recordAt = [](int block) {
@@ -814,7 +814,7 @@ TEST(c_api_plays_and_addresses_a_layers_instrument) {
     CawEngine* engine = caw_engine_create(48000);
     CHECK(engine != nullptr);
     if (!engine) return;
-    CHECK_EQ(caw_api_version(), 6);  // 6: count-in, metronome, released touches (5 stereo meters, 4 instruments)
+    CHECK_EQ(caw_api_version(), 7);  // 7: count-in, metronome, released touches (6 component display, 5 stereo meters)
     char* result = caw_engine_set_project(engine,
         R"({"caw_project":1,"bpm":120,"modules":[{"id":"p","source":"---\nkind: pattern\nname: P\nlength: 16\n---\n0 C4 4 1\n"}],
             "layers":[{"id":"t","pattern":"p","instrument":{"id":"org.caw.synth.basic","params":{"cutoff":900}}}]})");
@@ -868,4 +868,132 @@ TEST(a_clips_note_keeps_its_bend_when_the_clips_are_laid_out) {
         if (r.type == kPitch) lowest = std::min(lowest, static_cast<double>(r.pitch));
     // The recorder keeps its first 256 events (about 4,000 frames of pitch steps): the bend has begun.
     CHECK(lowest < 59.0);
+}
+
+// Owner (2026-11-10, #170): editing the piano roll while the song plays froze a sounding bent note ("the note bend
+// kind of wigs out or pauses where it's at"). A pattern edit made every held note an orphan without its curve, so
+// its pitch stopped where it was until the old pattern's end. A note still in the new pattern now keeps sounding
+// (no new on, no off) and follows its new curve from the playhead, gliding there over a few ms; a note the edit
+// deletes, or moves off the playhead, ends with a release.
+namespace {
+
+// Plays `before` on the recorder for `at` frames, swaps in `after` through setProject, and plays `total` frames in
+// all. Returns the held-note count (left) and the pitch heard (right) per frame, and the recorded events.
+struct EditTrace {
+    std::vector<double> held, pitch;
+    std::vector<Rec> rec;
+};
+EditTrace playEdit(const std::string& before, const std::string& after, int at, int total, int block = 64) {
+    EditTrace t;
+    Engine e(48000);
+    if (!loadFixture(e, kRecorder)) return t;
+    e.setMasterBypass(true);
+    if (!ok(e.setProject(instrumentTrack(kRecorder, before)))) return t;
+    e.play();
+    std::vector<float> l(static_cast<size_t>(block)), r(static_cast<size_t>(block));
+    for (int done = 0; done < total;) {
+        if (done == at && !ok(e.setProject(instrumentTrack(kRecorder, after)))) return t;
+        const int n = std::min({block, total - done, done < at ? at - done : block});
+        e.process(l.data(), r.data(), n);
+        for (int i = 0; i < n; ++i) {
+            t.held.push_back(l[static_cast<size_t>(i)] / (0.1 * kCentre));
+            t.pitch.push_back(r[static_cast<size_t>(i)] / kCentre * 128.0);
+        }
+        done += n;
+    }
+    t.rec = records(e);
+    return t;
+}
+
+uint32_t countOf(const std::vector<Rec>& rec, uint32_t type) {
+    uint32_t n = 0;
+    for (const Rec& r : rec) n += r.type == type;
+    return n;
+}
+
+}  // namespace
+
+TEST(a_pattern_edit_rebinds_a_sounding_bent_note_to_its_new_curve) {
+    // A long note bending up 24 semitones over the bar; 2,000 frames in, its curve point is dragged down to -24.
+    const std::string before = "0 C4 16 1  bend 0:0 1:24\n", after = "0 C4 16 1  bend 0:0 1:-24\n";
+    const int at = 2000, glide = 480;  // the glide is a few ms (5 ms here, 240 frames): 480 is safely past it
+    for (int block : {64, 37}) {
+        const EditTrace t = playEdit(before, after, at, 3800, block);  // few enough events for the recorder's log
+        CHECK_EQ(t.pitch.size(), size_t{3800});
+        if (t.pitch.size() != 3800u) continue;
+        CHECK_EQ(countOf(t.rec, kOn), 1u);   // no retrigger
+        CHECK_EQ(countOf(t.rec, kOff), 0u);  // and no off
+        for (size_t f = 0; f < t.held.size(); f += 50) CHECK_NEAR(t.held[f], 1.0, 1e-4);
+        CHECK_NEAR(t.pitch[at - 1], 60.0 + 24.0 * (at - 1) / 96000.0, 0.02);
+        // It glides, never jumps: no step between frames larger than a grid point's share of the glide.
+        for (int f = at; f < at + glide; ++f) CHECK(std::fabs(t.pitch[f] - t.pitch[f - 1]) < 0.1);
+        // Then it follows the new curve, still moving.
+        for (int f = at + glide; f < 3800; f += 100) CHECK_NEAR(t.pitch[f], 60.0 - 24.0 * f / 96000.0, 0.02);
+        CHECK(t.pitch[3799] < t.pitch[at + glide] - 0.3);
+    }
+}
+
+TEST(a_pattern_edit_that_moves_or_stretches_a_sounding_note_keeps_it_sounding) {
+    // The note moves a little later, a whole tone up and gets shorter (12 steps), still covering the playhead.
+    const std::string before = "0 C4 16 1  bend 0:0 1:24\n", after = "1/16 D4 12 1  bend 0:0 1:-24\n";
+    const int at = 2000, glide = 480, start = 375, len = 72000;
+    const EditTrace t = playEdit(before, after, at, 80000);
+    CHECK_EQ(t.pitch.size(), size_t{80000});
+    if (t.pitch.size() != 80000u) return;
+    CHECK_EQ(countOf(t.rec, kOn), 1u);
+    for (int f = at; f < at + glide; ++f) CHECK(std::fabs(t.pitch[f] - t.pitch[f - 1]) < 0.1);
+    for (int f = at + glide; f < start + len - 100; f += 997)
+        CHECK_NEAR(t.pitch[f], 62.0 - 24.0 * (f - start) / len, 0.02);
+    // It ends where the edited note ends, not where the old one did.
+    CHECK_NEAR(t.held[start + len - 10], 1.0, 1e-4);
+    CHECK_NEAR(t.held[start + len + 10], 0.0, 1e-4);
+}
+
+TEST(a_pattern_edit_ends_a_sounding_note_it_deletes_or_moves_off_the_playhead) {
+    const std::string before = "0 C4 16 1  bend 0:0 1:24\n";
+    const int at = 2000;
+    {  // deleted (another note is left in the pattern)
+        const EditTrace t = playEdit(before, "8 E4 2 1\n", at, 3000);
+        CHECK_EQ(t.held.size(), size_t{3000});
+        if (t.held.size() != 3000u) return;
+        CHECK_NEAR(t.held[at - 1], 1.0, 1e-4);
+        CHECK_NEAR(t.held[at + 1], 0.0, 1e-4);
+        CHECK_EQ(countOf(t.rec, kOff), 1u);
+        CHECK(!t.rec.empty() && t.rec.back().type == kOff && t.rec.back().frame == static_cast<uint64_t>(at));
+    }
+    {  // moved later, off the playhead: it ends now and plays again from its new start
+        const EditTrace t = playEdit(before, "8 C4 4 1  bend 0:0 1:24\n", at, 49000);
+        CHECK_EQ(t.held.size(), size_t{49000});
+        if (t.held.size() != 49000u) return;
+        CHECK_NEAR(t.held[at + 1], 0.0, 1e-4);
+        CHECK_NEAR(t.held[47990], 0.0, 1e-4);
+        CHECK_NEAR(t.held[48010], 1.0, 1e-4);
+        CHECK_NEAR(t.pitch[48010], 60.0, 0.02);
+    }
+}
+
+TEST(a_pattern_edit_keeps_a_builtin_synths_bent_note_sounding_and_releases_a_deleted_one) {
+    for (const char* inst : {"org.caw.synth.morph", "org.caw.synth.flagship"}) {
+        auto energy = [&](const std::string& after) {
+            Engine e(48000);
+            e.setMasterBypass(true);
+            std::vector<double> win(4, 0.0);  // before the edit, just after it, and two later windows
+            if (!ok(e.setProject(instrumentTrack(inst, "0 C3 16 1  bend 0:0 1:12\n")))) return win;
+            e.play();
+            std::vector<float> l(64), r(64);
+            for (int done = 0; done < 48000; done += 64) {
+                if (done == 24000 && !ok(e.setProject(instrumentTrack(inst, after)))) return win;
+                e.process(l.data(), r.data(), 64);
+                const int w = done < 19200 ? -1 : done < 24000 ? 0 : done < 24000 + 1920 ? 1 : done < 38400 ? -1 : done < 43200 ? 2 : 3;
+                if (w >= 0)
+                    for (float x : l) win[static_cast<size_t>(w)] += static_cast<double>(x) * x;
+            }
+            return win;
+        };
+        const std::vector<double> kept = energy("0 C3 16 1  bend 0:0 1:-12\n"), gone = energy("12 C3 1 1\n");
+        CHECK(kept[0] > 0.0);
+        CHECK(kept[2] > kept[0] * 0.25);  // still sounding long after the edit, at the same strength
+        CHECK(gone[1] > 0.0);             // the deleted note releases (its tail), not cut to silence at once
+        CHECK(gone[2] < kept[2] * 0.01);  // and then it is gone
+    }
 }

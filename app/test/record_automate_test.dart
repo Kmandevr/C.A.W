@@ -408,6 +408,38 @@ void main() {
     });
   });
 
+  test('loop recording into a loop range: each pass is a take over the range', () {
+    final s = playState();
+    final live = LiveMidi(s, null);
+    addTearDown(live.dispose);
+    s.project
+      ..loopRange = true
+      ..loopStartSteps = 16
+      ..loopEndSteps = 48;
+    s.pausedStep = 20;
+    s.at = 20;
+    live.toggleRecord('L1');
+    void note(double from, double to, int pitch) {
+      s.pausedStep = from;
+      live.keyDown(pitch, 1);
+      s.pausedStep = to;
+      live.keyUp(pitch);
+    }
+
+    note(22, 24, 60); // pass 1
+    s.pausedStep = 46;
+    live.keyUp(0);
+    note(18, 20, 62); // pass 2: back at the range's start
+    live.toggleRecord();
+    final clip = s.project.layers.first.clips.single;
+    expect(clip.takes.length, 2);
+    expect((clip.startSteps, clip.lengthSteps), (16, 32), reason: 'the range, bars 2 and 3');
+    final first = PatternDoc.parse(s.project.module(clip.takes.first)!.source).doc!.notes.single;
+    final second = PatternDoc.parse(s.project.module(clip.takes.last)!.source).doc!.notes.single;
+    expect((first.at, first.pitch), (Steps(6), 60.0));
+    expect((second.at, second.pitch), (Steps(2), 62.0));
+  });
+
   group('with the engine', () {
     final lib = Platform.environment['CAW_LIB'];
     final skip = lib == null || lib.isEmpty;

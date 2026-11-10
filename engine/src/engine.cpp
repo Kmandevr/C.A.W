@@ -7,6 +7,7 @@
 #include "hardware.h"
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <array>
 #include <chrono>
@@ -136,7 +137,7 @@ struct Voice {
     int glideLeft = 0;
     double vel = 1, tacc = 0, phase = 0;
     double lastY = 0;     // last output sample, so a voice cut short can be smoothed over
-    int64_t offAt = -1;   // a note from an edited pattern: the sample (in the layer pass) where it ends
+    bool rebind = false;  // its pattern was edited: it moves onto its note in the new one (`note`) next run
     // The note's own bend, pressure, timbre and vibrato, copied at note start (no allocation on the audio thread).
     bool expressive = false;
     NoteExpression ex;
@@ -151,7 +152,8 @@ struct Voice {
 
 constexpr int kExpressionStep = 16;  // 1/3 ms at 48 kHz: smooth for bends and vibrato up to 30 Hz, 16x cheaper
 
-constexpr uint32_t kOrphanNote = 0xFFFFFFFFu;  // a held note whose pattern was edited: ends at offAt
+// A held note carried across a pattern edit glides from the pitch heard to its new curve over this long.
+constexpr double kRebindGlideSeconds = 0.005;
 constexpr uint32_t kPreviewNote = 0xFFFFFFFEu;  // a note preview: no pattern event matches it, only its own off
 
 // One layer's modules: the main instances plus shadow copies that play the loop's tail across a seam. A layer
@@ -259,7 +261,9 @@ static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "comp
 struct Engine::Cmd {
     enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
-    std::vector<int>* orderList = nullptr;  // SetOrder: slots in dependency order (owned; retired by the audio thread)
+    // SetOrder: slots in dependency order; SetPattern: for each note of the old pattern, the new note that carries it
+    // on, or -1 (matchPatternNotes). Owned; retired by the audio thread.
+    std::vector<int>* orderList = nullptr;
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
     int slot = 0;
     Chain* chain = nullptr;
@@ -271,6 +275,8 @@ struct Engine::Cmd {
     AutomationData* automation = nullptr;
     double bpm = 120, master = 0.7;
     int beatsPerBar = 4, loopSteps = 64, keyRoot = 9, keyScale = 1;
+    int loopFromSteps = 0, loopToSteps = 0;  // Transport: the loop range, when loopRange
+    bool loopRange = false;
     uint32_t seed = 0;
     bool seamXf = true, flag = false;
     int swapMode = 0;
@@ -337,6 +343,7 @@ double arrangementBytes(const std::vector<ClipSpec>& clips,
     const std::map<std::string, std::shared_ptr<const Pattern>>& sources, int beatsPerBar) {
     double total = 0;
     for (const ClipSpec& clip : clips) {
+        if (clip.mute) continue;
         const auto found = sources.find(clip.pattern);
         if (found == sources.end() || !found->second || found->second->notes.empty()) continue;
         const Pattern& src = *found->second;
@@ -359,6 +366,7 @@ std::shared_ptr<const Pattern> compileArrangement(
     out->name = "Arrangement";
     out->lengthSteps = projectLengthSteps;
     for (const ClipSpec& clip : clips) {
+        if (clip.mute) continue;  // a muted clip plays nothing; the layer still follows the arrangement
         const auto found = sources.find(clip.pattern);
         if (found == sources.end() || !found->second) continue;
         const Pattern& src = *found->second;
@@ -1304,6 +1312,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     t.bpm = p.bpm;
     t.beatsPerBar = p.beatsPerBar;
     t.loopSteps = p.loopSteps();
+    t.loopRange = p.loopRange && p.loopEndSteps > p.loopStartSteps && p.loopEndSteps <= p.loopSteps();
+    t.loopFromSteps = p.loopStartSteps;
+    t.loopToSteps = p.loopEndSteps;
     t.seed = p.seed;
     t.master = p.master;
     t.seamXf = p.seamCrossfade;
@@ -1539,7 +1550,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             for (const ClipSpec& clip : w.clips) {
                 pl.arrangementSig += clip.id + "|" + clip.pattern + "|" + std::to_string(clip.startSteps) + "|" +
                     std::to_string(clip.lengthSteps) + "|" + std::to_string(clip.sourceOffsetSteps) + "|" +
-                    (clip.loop ? "1" : "0") + "|";
+                    (clip.loop ? "1" : "0") + (clip.mute ? "m" : "") + "|";
                 auto source = modules_.find(clip.pattern);
                 if (source != modules_.end()) pl.arrangementSig += source->second.source;
                 pl.arrangementSig += "\x1e";
@@ -1595,6 +1606,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 pl.expressionCapacity = std::max(pl.expressionCapacity, expression.press.points.size());
                 pl.expressionCapacity = std::max(pl.expressionCapacity, expression.timbre.points.size());
             }
+            // Room to spare (a power of two, at least 16 points), so adding a curve point while the song plays
+            // seldom rebuilds the chain, and a held voice can take its note's edited curve without allocating.
+            pl.expressionCapacity = std::bit_ceil(std::max<size_t>(16, pl.expressionCapacity));
         }
         // The project-state share comes from the Engine's measured/fallback resource budget.
         const bool stateSizeOverflow = layerStateDoubles > std::numeric_limits<uint64_t>::max() / sizeof(double);
@@ -2038,6 +2052,10 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             cmd.type = Cmd::SetPattern;
             cmd.slot = ls.slot;
             cmd.pattern = pl.pattern ? new std::shared_ptr<const Pattern>(pl.pattern) : nullptr;
+            // Which new note carries on each old one, so held notes follow the edit (worked out here, off the
+            // audio thread; send() frees it if the queue rejects the command).
+            if (pl.pattern && ls.pattern)
+                cmd.orderList = new std::vector<int>(matchPatternNotes(*ls.pattern, *pl.pattern));
             if (!send(cmd)) {
                 allOk = false;
                 warnings[w.id].push_back("audio command queue rejected pattern update");
@@ -2308,6 +2326,16 @@ std::string Engine::componentStatesJson(const std::string& layerId) {
     if (instrument)
         for (const ComponentChain::SavedState& state : instrument->saveStates()) add(state, kInstrumentIndex);
     return j + "]}";
+}
+
+int32_t Engine::componentDisplay(const std::string& layerId, uint32_t index, float* out, uint32_t max) {
+    // Never waits: a UI polls this every frame, and a project update can hold ctl_ for a while (it then shows
+    // its last picture). The chains themselves are read without locks (DisplayBuffer).
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);
+    if (!lock.owns_lock()) return 0;
+    ComponentChain* chain = ctlComponentChain(layerId, index);
+    if (!chain) return -1;
+    return chain->readDisplay(index, out, max);
 }
 
 void Engine::setLayerMix(const std::string& layerId, double volume, double pan, bool mute, bool solo) {
@@ -2604,6 +2632,14 @@ void Engine::updateTiming() noexcept {
     stepLen_ = 60.0 * sr_ / (bpm_ * 4.0);
     loopLen_ = static_cast<int64_t>(std::floor(loopSteps_ * stepLen_ + 0.5));
     if (loopLen_ < 1) loopLen_ = 1;
+    loopFrom_ = loopRange_ ? std::clamp<int64_t>(static_cast<int64_t>(std::floor(loopFromSteps_ * stepLen_ + 0.5)), 0, loopLen_ - 1) : 0;
+    loopTo_ = loopRange_ ? std::clamp<int64_t>(static_cast<int64_t>(std::floor(loopToSteps_ * stepLen_ + 0.5)), loopFrom_ + 1, loopLen_) : loopLen_;
+}
+
+int64_t Engine::wrapAt() const noexcept { return loopRange_ && g_ < loopTo_ ? loopTo_ : loopLen_; }
+
+int64_t Engine::after(int64_t next) const noexcept {
+    return next >= wrapAt() ? (loopRange_ ? loopFrom_ : 0) : next;
 }
 
 bool Engine::canRetire(size_t count) const noexcept {
@@ -2819,41 +2855,41 @@ void Engine::applyCommands() noexcept {
             }
             case Cmd::SetPattern: {
                 Slot& s = slotAt(c.slot);
-                // A sounding note finishes as the old pattern had it; the edit is heard from its next start.
-                if (s.cur && s.cur->voiced) {
-                    const Pattern* old = s.pattern ? s.pattern->get() : nullptr;
+                // A sounding note that the edit kept (matchPatternNotes) moves onto its new note on the slot's next
+                // run, which knows the playhead: it sounds on and follows the new curve. One the edit deleted ends.
+                const std::vector<int>* map = c.orderList;
+                auto carried = [map](uint32_t note) {
+                    return map && note < map->size() ? (*map)[note] : -1;
+                };
+                if (s.cur && s.cur->voiced)
                     for (Voice& v : s.cur->voices) {
-                        if (!v.active || !v.gate || v.note == kOrphanNote || v.preview >= 0) continue;
-                        if (!old || v.note >= old->notes.size()) {
+                        if (!v.active || !v.gate || v.preview >= 0) continue;
+                        const int to = carried(v.note);
+                        if (to < 0) {
                             v.gate = false;
                             v.rel = v.quiet = 0;
+                            v.rebind = false;
                             continue;
                         }
-                        const PatternNote& n = old->notes[v.note];
-                        const double end = n.at + n.len / n.ratchet * (v.sub + 1);
-                        v.offAt = static_cast<int64_t>(std::floor(end * stepLen_ + 0.5));
-                        v.note = kOrphanNote;
+                        v.note = static_cast<uint32_t>(to);
+                        v.rebind = true;
                     }
-                }
                 if (s.instrument) {
                     // The same for a native instrument's notes; none keeps pointing into the old pattern.
                     NoteEvents& notes = *s.instrument->notes();
-                    const Pattern* old = s.pattern ? s.pattern->get() : nullptr;
                     for (NoteEvents::Held& h : notes.held()) {
-                        if (!h.active) continue;
+                        if (!h.active || h.source != NoteEvents::Source::Pattern) continue;
                         h.ex = nullptr;
-                        if (h.source != NoteEvents::Source::Pattern) continue;
-                        if (!old || h.note >= old->notes.size()) {
+                        const int to = carried(h.note);
+                        if (to < 0) {
                             notes.off(0, h);
                             continue;
                         }
-                        const PatternNote& n = old->notes[h.note];
-                        const double end = n.at + n.len / n.ratchet * (h.sub + 1);
-                        h.offAt = static_cast<int64_t>(std::floor(end * stepLen_ + 0.5));
-                        h.source = NoteEvents::Source::Orphan;
+                        h.note = static_cast<uint32_t>(to);
+                        h.rebind = true;
                     }
                 }
-                retire(nullptr, nullptr, s.pattern);
+                retire(nullptr, nullptr, s.pattern, nullptr, c.orderList);
                 s.pattern = c.pattern;
                 break;
             }
@@ -2875,6 +2911,9 @@ void Engine::applyCommands() noexcept {
                 bpm_ = c.bpm;
                 beatsPerBar_ = c.beatsPerBar;
                 loopSteps_ = c.loopSteps;
+                loopRange_ = c.loopRange;
+                loopFromSteps_ = c.loopFromSteps;
+                loopToSteps_ = c.loopToSteps;
                 seed_ = c.seed;
                 master_ = masterTarget_ = c.master;
                 masterStep_ = 0.0;
@@ -3339,7 +3378,7 @@ void Engine::previewCommand(const Cmd& c) noexcept {
     v.freq = mtof(c.pitch);
     v.vel = c.vel;
     v.tacc = v.phase = 0;
-    v.offAt = -1;
+    v.rebind = false;
     v.expressive = false;
     v.exLeft = 0;
     v.bend = v.timbre = 0;
@@ -3511,26 +3550,97 @@ void Engine::noteEvent(Chain& c, const Pattern& pat, const PatternEvent& e, int6
     v.freq = mtof(n.pitch);
     v.vel = n.vel;
     v.tacc = v.phase = 0;
-    v.offAt = -1;
+    v.rebind = false;
     takeExpression(v, pat, n);
 }
 
 bool Engine::playsNotes(const Slot& s) noexcept { return s.cur && (s.cur->voiced || s.cur->native); }
 
+// Where sub-note `sub` of pattern note `n` sounds, in samples of the layer pass; false when it has no such repeat.
+bool Engine::noteSpan(const PatternNote& n, uint32_t sub, int64_t& start, int64_t& stop) const noexcept {
+    const int ratchet = std::max(1, n.ratchet);
+    if (sub >= static_cast<uint32_t>(ratchet)) return false;
+    const double part = n.len / ratchet;
+    start = static_cast<int64_t>(std::floor((n.at + part * sub) * stepLen_ + 0.5));
+    stop = static_cast<int64_t>(std::floor((n.at + part * (sub + 1)) * stepLen_ + 0.5));
+    return true;
+}
+
+// A held .caw voice carried across a pattern edit, at the start of its next run (n0): if its new note still covers
+// the playhead it sounds on (no new trig) and takes that note's curve from here, gliding from the pitch heard to
+// where the new curve is over kRebindGlideSeconds; otherwise it is released.
+void Engine::rebindVoice(Voice& v, const Pattern* pat, int64_t n0) noexcept {
+    v.rebind = false;
+    int64_t start = 0, stop = 0;
+    const PatternNote* n = pat && v.note < pat->notes.size() ? &pat->notes[v.note] : nullptr;
+    const bool expressive = n && n->extra >= 0 && static_cast<size_t>(n->extra) < pat->expressions.size();
+    const NoteExpression* x = expressive ? &pat->expressions[static_cast<size_t>(n->extra)] : nullptr;
+    // The curve is copied into the voice's own storage, set aside for the layer's longest curve: one that doesn't
+    // fit (never expected: the chain is rebuilt with room first) ends the note rather than allocate here.
+    const bool fits = !x || (x->bend.points.size() <= v.ex.bend.points.capacity() &&
+                             x->press.points.size() <= v.ex.press.points.capacity() &&
+                             x->timbre.points.size() <= v.ex.timbre.points.capacity());
+    if (!n || !fits || !noteSpan(*n, v.sub, start, stop) || n0 < start || n0 >= stop) {
+        v.gate = false;
+        v.rel = v.quiet = 0;
+        return;
+    }
+    const double heard = v.pitch + (v.expressive ? v.bend : 0.0);
+    v.expressive = expressive;
+    if (x) v.ex = *x;
+    v.exLen = std::max(1.0, n->len / std::max(1, n->ratchet) * stepLen_);
+    v.exStart = v.since - (n0 - start);
+    v.bend = 0;
+    v.press = 1;
+    v.timbre = 0;
+    if (x) expressionAt(v.ex, static_cast<double>(n0 - start), v.exLen, sr_, v.bend, v.press, v.timbre);
+    v.exLeft = 0;  // the next sample works out its control point from these values, so nothing jumps
+    v.vel = n->vel;
+    v.pitch = heard - v.bend;
+    v.freq = mtof(v.pitch);
+    v.target = n->pitch;
+    v.glideLeft = std::max(1, static_cast<int>(std::floor(kRebindGlideSeconds * sr_ + 0.5)));
+    v.glideStep = (v.target - v.pitch) / v.glideLeft;
+}
+
+// The same for a native instrument's held note, at the start of its next chunk (n0): its motion carries on from the
+// next control point of its grid (the grid's phase is kept), now on the new note's curve, gliding there.
+void Engine::rebindNote(NoteEvents& notes, NoteEvents::Held& h, const Pattern* pat, int64_t n0) noexcept {
+    h.rebind = false;
+    int64_t start = 0, stop = 0;
+    const PatternNote* n = pat && h.note < pat->notes.size() ? &pat->notes[h.note] : nullptr;
+    if (!n || !noteSpan(*n, h.sub, start, stop) || n0 < start || n0 >= stop) {
+        notes.off(0, h);
+        return;
+    }
+    const bool expressive = n->extra >= 0 && static_cast<size_t>(n->extra) < pat->expressions.size();
+    h.ex = expressive ? &pat->expressions[static_cast<size_t>(n->extra)] : nullptr;
+    h.exLen = std::max(1.0, n->len / std::max(1, n->ratchet) * stepLen_);
+    h.since = n0 + static_cast<int64_t>(h.motionFrom) + h.motionWait - start;  // at its next control point
+    double bend = 0, press = 1, timbre = 0;
+    if (h.ex) expressionAt(*h.ex, static_cast<double>(h.since), h.exLen, sr_, bend, press, timbre);
+    // A curve the new note doesn't have goes back to its resting value.
+    if (!h.ex || h.ex->press.points.empty()) notes.pressure(0, h, 1.0);
+    if (!h.ex || h.ex->timbre.points.empty()) notes.timbre(0, h, 0.0);
+    h.vel = n->vel;
+    h.pitch = h.sentPitch - bend;
+    h.target = n->pitch;
+    // Whole control steps, so the glide ends on a grid point.
+    const int steps = std::max(1, static_cast<int>(std::floor(kRebindGlideSeconds * sr_ / kExpressionStep + 0.5)));
+    h.glideLeft = steps * kExpressionStep;
+    h.glideStep = (h.target - h.pitch) / h.glideLeft;
+}
+
 // The pattern's notes in this chunk as a native instrument's events, on their exact frames, with the same rules a
 // .caw voice pool follows: chance per repeat, ratchets, slides (the held note glides on, no new attack), the note's
-// expression, and notes left over from an edited pattern ending where the old pattern ended them.
+// expression, and held notes carried across a pattern edit following their new note.
 void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
     const int64_t n0 = s.n0, end = n0 + m;
-    for (NoteEvents::Held& h : notes.held())
-        if (h.active && h.source == NoteEvents::Source::Orphan && h.offAt < end) {
-            const uint32_t frame = static_cast<uint32_t>(std::max<int64_t>(0, h.offAt - n0));
-            noteMotion(notes, h, static_cast<int>(frame));
-            notes.off(frame, h);
-        }
     const Pattern* pat = s.pat;
-    if (!pat) return;
     auto sampleOf = [this](double step) { return static_cast<int64_t>(std::floor(step * stepLen_ + 0.5)); };
+    for (NoteEvents::Held& h : notes.held())
+        if (h.active && h.rebind) rebindNote(notes, h, pat, n0);
+    if (!pat) return;
     const PatternEvent* ev = pat->events.data();
     const size_t ne = pat->events.size();
     size_t e = static_cast<size_t>(
@@ -3569,7 +3679,7 @@ void Engine::instrumentNotes(Slot& s, NoteEvents& notes, int m) noexcept {
                 continue;
             }
         }
-        // The same note still held ends first, with its motion up to here, as an off, an orphan and a slide do
+        // The same note still held ends first, with its motion up to here, as an off and a slide do
         // (on() would end it too, but without the motion, so its last pitch would depend on the block split).
         if (NoteEvents::Held* same = notes.findPattern(pe.note, pe.sub)) {
             noteMotion(notes, *same, static_cast<int>(frame));
@@ -3705,6 +3815,8 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
     const size_t ne = pat ? pat->events.size() : 0;
     size_t e = static_cast<size_t>(
         std::partition_point(ev, ev + ne, [&](const PatternEvent& x) { return sampleOf(x.step) < n0; }) - ev);
+    for (int vi = 0; vi < c.voiceCount; ++vi)
+        if (c.voices[vi].active && c.voices[vi].rebind) rebindVoice(c.voices[vi], pat, n0);
     const Program& prog = c.voices[0].inst->program();
     const bool byteMode = prog.mode == OutputMode::Byte;
     const double tPerHz = prog.rate / sr_ / kC4;  // byte mode: t runs at the formula rate when the note is C4
@@ -3723,22 +3835,10 @@ void Engine::runVoices(Chain& c, const Pattern* pat, int64_t repeat, int64_t n0,
     int splits = 0;
     while (pos < end) {
         while (e < ne && sampleOf(ev[e].step) <= pos) noteEvent(c, *pat, ev[e++], repeat);
-        // Notes held over from before a pattern edit end where the old pattern ended them.
-        int64_t orphanNext = end;
-        for (Voice& v : c.voices) {
-            if (!v.active || !v.gate || v.offAt < 0) continue;
-            if (v.offAt <= pos) {
-                v.gate = false;
-                v.rel = v.quiet = 0;
-                v.offAt = -1;
-            } else {
-                orphanNext = std::min(orphanNext, v.offAt);
-            }
-        }
         // A pattern packed with notes can't split a block into slivers: past kMaxSplits they start together.
         if (++splits >= kMaxSplits)
             while (e < ne && sampleOf(ev[e].step) < end) noteEvent(c, *pat, ev[e++], repeat);
-        const int64_t next = std::min(orphanNext, e < ne ? std::min(end, sampleOf(ev[e].step)) : end);
+        const int64_t next = e < ne ? std::min(end, sampleOf(ev[e].step)) : end;
         const int n = static_cast<int>(next - pos), o = static_cast<int>(pos - n0);
         int newest = -1;
         for (int v = 0; v < c.voiceCount; ++v)
@@ -4406,7 +4506,7 @@ void Engine::runTrackNode(int slot, const float* const* in, float* outL, float* 
     }
     s.lastN = s.n0 + m - 1;
     const int64_t next = g_ + m;
-    s.expectG = next >= loopLen_ ? 0 : next;
+    s.expectG = after(next);
     s.contiguous = true;
     s.progress.store(static_cast<float>(static_cast<double>(s.n0 + m) / s.cur->layerLen), std::memory_order_relaxed);
 }
@@ -4658,15 +4758,17 @@ void Engine::process(float* left, float* right, int frames) noexcept {
             i += m;
             continue;
         }
-        const int maxM = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, loopLen_ - g_}));
+        // The song loops at its end, or at the loop range's end while that is on (and before it).
+        const int64_t wrap = wrapAt();
+        const int maxM = static_cast<int>(std::min<int64_t>({static_cast<int64_t>(frames - i), kBlock, wrap - g_}));
         const int m = processChunk(left + i, right + i, maxM);
         if (stopEnded_) {
             stopEnded_ = false;
             endPlayback();
         }
         g_ += m;
-        if (g_ >= loopLen_) {
-            g_ = 0;
+        if (g_ >= wrap) {
+            g_ = loopRange_ ? loopFrom_ : 0;
             ++epoch_;
         }
         i += m;

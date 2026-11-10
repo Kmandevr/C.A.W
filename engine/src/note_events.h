@@ -28,7 +28,7 @@ public:
     static constexpr uint32_t kMaxHeld = 1024;   // notes held at once; a new one past it ends the oldest
     static_assert(kCapacity >= 3 * kMaxHeld, "room for every held note's off, and as many ons again, in one block");
 
-    enum class Source : uint8_t { Pattern, Orphan, Preview };
+    enum class Source : uint8_t { Pattern, Preview };
     struct Held {
         bool active = false;
         Source source = Source::Pattern;
@@ -39,7 +39,7 @@ public:
         uint8_t key = 60;      // the key its on was sent with (its off and per-note messages use it)
         uint64_t order = 0;    // note-on order
         double vel = 1;
-        int64_t offAt = -1;    // Orphan: the sample in the layer pass where it ends
+        bool rebind = false;   // Pattern: its pattern was edited; `note` is its note in the new one (Engine::rebindNote)
         // Pitch motion, sent at control rate by the Engine: a glide (a slide, a preview's new pitch)
         // and the note's expression (bend and vibrato, pressure, timbre).
         double pitch = 60;     // the pitch without expression
@@ -120,7 +120,7 @@ public:
             if (h.active && h.source == Source::Preview && h.preview == preview) return &h;
         return nullptr;
     }
-    // Ends the pattern's notes (and orphans) at `frame`; previews too unless keepPreviews.
+    // Ends the pattern's notes at `frame`; previews too unless keepPreviews.
     void releaseAll(uint32_t frame, bool keepPreviews) noexcept {
         for (Held& h : held())
             if (h.active && !(keepPreviews && h.source == Source::Preview)) off(frame, h);

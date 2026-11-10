@@ -193,6 +193,9 @@ void main() {
     final layer = s.project.layers.first;
     final before = layer.components.length;
     final item = find.descendant(of: find.byKey(const ValueKey('arrange-browser')), matching: find.text('Distortion'));
+    // The built-in list is long (the effects suite, #173): scroll to it.
+    await tester.scrollUntilVisible(item, 60,
+        scrollable: find.descendant(of: find.byKey(const ValueKey('arrange-browser')), matching: find.byType(Scrollable)).last);
     expect(item, findsOneWidget);
     final lane = tester.getCenter(find.byKey(ValueKey('track-header-${layer.id}'))) + const Offset(180, 0);
     await tester.ensureVisible(item);

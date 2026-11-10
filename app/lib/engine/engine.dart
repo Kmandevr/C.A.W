@@ -301,6 +301,9 @@ class Engine {
   final Pointer<CawLayerMeterStruct> _layer = calloc<CawLayerMeterStruct>();
   final Pointer<Float> _layerSides = calloc<Float>(2);
   final Pointer<Float> _scope = calloc<Float>(1024);
+  final Pointer<Float> _display = calloc<Float>(maxDisplayFloats);
+  Pointer<Utf8>? _displayLayer;
+  String? _displayLayerId;
   bool _audioOn = false;
   bool _disposed = false;
   int _pendingNativeOps = 0;
@@ -471,6 +474,30 @@ class Engine {
     };
   }
 
+  /// The most floats a component's display block holds (kMaxDisplayFloats in engine/include/caw/display.hpp).
+  static const int maxDisplayFloats = 1024;
+
+  /// Live display data (#173): the latest floats component [index] of a layer's chain published for its UI
+  /// (null [layerId]: the master chain; [index] CAW_INSTRUMENT_INDEX, 0xFFFFFFFF: the layer's instrument), copied
+  /// into [out] (at most its length). Returns the count; 0 when it has none yet or the engine is busy with a
+  /// project update (keep the last picture), -1 when there is no such component. Cheap and never blocks: call
+  /// it once per frame. The float layout of each built-in is in docs/engine.md ("Display data").
+  int componentDisplay(String? layerId, int index, Float32List out) {
+    if (_nativeDestroyed) return -1;
+    final id = layerId ?? '';
+    if (_displayLayerId != id) {  // the layer id stays in native memory while the same device polls
+      final old = _displayLayer;
+      if (old != null) calloc.free(old);
+      _displayLayer = id.toNativeUtf8();
+      _displayLayerId = id;
+    }
+    final max = out.length < maxDisplayFloats ? out.length : maxDisplayFloats;
+    if (max == 0) return 0;
+    final n = _b.componentDisplay(_handle, _displayLayer!, index, _display, max);
+    if (n > 0) out.setRange(0, n, _display.asTypedList(n));
+    return n;
+  }
+
   void setGlobal(String name, double value) {
     final n = name.toNativeUtf8();
     _b.setGlobal(_handle, n, value);
@@ -598,6 +625,9 @@ class Engine {
     calloc.free(_layer);
     calloc.free(_layerSides);
     calloc.free(_scope);
+    calloc.free(_display);
+    final displayLayer = _displayLayer;
+    if (displayLayer != null) calloc.free(displayLayer);
   }
 
   static List<Template> templates() {
