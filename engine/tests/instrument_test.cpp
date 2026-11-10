@@ -167,6 +167,61 @@ TEST(a_note_list_is_bounded_and_sorted_and_counts_what_overflows) {
     CHECK(notes->findPreview(1) != nullptr);
 }
 
+TEST(a_full_note_list_still_delivers_every_off) {
+    // Audio review fix 5: a block whose list filled up (with per-note motion) dropped a note-off: a stuck note.
+    // Room for every held note's off is now kept back from note-ons and motion.
+    auto notes = std::make_unique<NoteEvents>();
+    std::vector<NoteEvents::Held*> held;
+    for (int32_t i = 0; i < 8; ++i) held.push_back(&notes->on(0, NoteEvents::Source::Preview, 0, 0, i, 60 + i, 1));
+    for (uint32_t i = 0; i < NoteEvents::kCapacity; ++i) notes->pitch(i % 64, *held[i % 8], 60.0 + 0.001 * i);
+    CHECK(notes->overflow() > 0u);  // motion past the room left was dropped
+    for (NoteEvents::Held* h : held) notes->off(63, *h);
+    CHECK_EQ(notes->count(), NoteEvents::kCapacity);
+    uint32_t offs = 0;
+    for (uint32_t i = 0; i < notes->count(); ++i) {
+        NoteMessage m;
+        offs += readNote(notes->events()[i], m) && m.type == NoteMessageType::Off;
+    }
+    CHECK_EQ(offs, 8u);
+    CHECK(!notes->holdsAny());
+}
+
+TEST(a_note_list_sorts_many_runs_in_frame_order_and_keeps_their_order) {
+    // Audio review fix 6: the insertion sort was O(n^2) with many expressive notes. A natural merge sort keeps
+    // it O(n log runs), stable: here 1,024 runs of motion, each in frame order.
+    auto notes = std::make_unique<NoteEvents>();
+    uint32_t id = 0;
+    for (uint32_t run = 0; run < 1024; ++run)
+        for (uint32_t f = run % 7; f < 64; f += 8) notes->push(notes::notePitch(f, ++id, 60, 60.0 + run));
+    const uint32_t n = notes->count();
+    notes->sort();
+    CHECK_EQ(notes->count(), n);
+    for (uint32_t i = 1; i < n; ++i) {
+        const Event& a = notes->events()[i - 1];
+        const Event& b = notes->events()[i];
+        CHECK(a.frame <= b.frame);
+        if (a.frame == b.frame) CHECK(a.noteId < b.noteId);  // stable: same-frame events keep their order
+    }
+}
+
+TEST(an_instrument_can_hold_thousands_of_notes) {
+    // Owner, 2026-11-10: no practical polyphony cap from the host; a program sets its own.
+    auto notes = std::make_unique<NoteEvents>();
+    for (uint32_t i = 0; i < 4000; ++i) notes->on(0, NoteEvents::Source::Pattern, i, 0, -1, 40 + i % 60, 1);
+    CHECK_EQ(notes->activeCount(), 4000u);
+    CHECK(notes->findPattern(0, 0) != nullptr);  // the first is still held
+    CHECK_EQ(notes->overflow(), 0u);
+    notes->clearEvents();
+    notes->releaseAll(0, false);
+    CHECK_EQ(notes->count(), 4000u);
+    notes->clearEvents();
+    CHECK_EQ(notes->activeCount(), 0u);
+    uint32_t left = 0;
+    for (const NoteEvents::Held& h : notes->held()) left += h.active;  // packed away: nothing left to walk
+    CHECK_EQ(left, 0u);
+    CHECK(notes->held().begin() == notes->held().end());
+}
+
 TEST(pattern_notes_reach_an_instrument_on_their_frames_across_loop_wraps) {
     Engine e(48000);
     CHECK(loadFixture(e, kRecorder));
@@ -519,7 +574,7 @@ TEST(the_built_in_synth_matches_its_golden_render) {
     const uint64_t h = renderHash(p, 48000 * 2, &peak);
     CHECK(peak > 0.05f);
     CHECK(peak <= 1.0f);
-    constexpr uint64_t kGolden = 0x3acbcf05300aedbbull;
+    constexpr uint64_t kGolden = 0xcddb8aca5e5c26bfull;
     if (h != kGolden) {
         char buf[96];
         std::snprintf(buf, sizeof buf, "the basic synth renders 0x%016llxull", static_cast<unsigned long long>(h));

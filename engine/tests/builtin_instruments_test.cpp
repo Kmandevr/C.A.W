@@ -626,7 +626,7 @@ std::vector<Golden> goldens() {
     // Morph synth: a chord with a quarter tone, drifting, wide.
     g.push_back({"morph", track("org.caw.synth.morph", "0 A3 8 0.8\n0 C4 8 0.8\n0 E4 8 0.8\n8 F3 6 0.7\n8 60.5 6 0.7\n8 C4 6 0.7\n",
                                 {{"attack", 0.05}, {"release", 0.3}, {"shape", 0.6}, {"drift", 0.4}}),
-                 0x6633d948d078431bull});
+                 0xcd3342395d322d32ull});
     return g;
 }
 

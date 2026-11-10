@@ -280,7 +280,7 @@ private:
 };
 
 
-// The basic synth ("org.caw.synth.basic"): 16 voices of two oscillators (saw, square, triangle or sine; the second
+// The basic synth ("org.caw.synth.basic"): 128 voices of two oscillators (saw, square, triangle or sine; the second
 // detuned and mixed in), a resonant low-pass filter that follows the envelope, and an ADSR envelope. Velocity sets
 // the level; a note's pressure scales it and its timbre opens the filter. Deterministic maths (caw/detmath.hpp),
 // so it renders the same bits on every device.
@@ -398,8 +398,7 @@ protected:
                 controlLeft_ = kControlFrames;
             }
             const uint32_t n = std::min(controlLeft_, frames - start);
-            for (Voice& v : voices_)
-                if (v.active) renderVoice(v, left, right, start, start + n, offset, b);
+            voices_.forEachActive([&](Voice& v) noexcept { renderVoice(v, left, right, start, start + n, offset, b); });
             start += n;
             controlLeft_ -= n;
         }
@@ -425,8 +424,7 @@ private:
         releaseCoef_ = detExp(-1.0 / std::max(1.0, parameterAt(b, kRelease, at, 0.25) * sr / 5.0));
         const double env = parameterAt(b, kEnv, at, 0.5), cutoff = parameterAt(b, kCutoff, at, 2400.0);
         const double k = 2.0 - 1.9 * std::clamp(parameterAt(b, kResonance, at, 0.2), 0.0, 1.0);
-        for (Voice& v : voices_) {
-            if (!v.active) continue;
+        voices_.forEachActive([&](Voice& v) noexcept {
             v.inc1 = v.freq / sr;
             v.inc2 = v.freq * ratio / sr;
             const double octaves = 5.0 * env * v.level + 4.0 * v.timbre;
@@ -436,7 +434,7 @@ private:
             v.a1 = 1.0 / (1.0 + g * (g + k));
             v.a2 = g * v.a1;
             v.a3 = g * v.a2;
-        }
+        });
     }
     void renderVoice(Voice& v, float* left, float* right, uint32_t from, uint32_t to, uint32_t offset,
                      const ProcessBlock& b) noexcept {
@@ -504,7 +502,7 @@ private:
             default: return 2.0 * t - 1.0 - blep(t, dt);
         }
     }
-    VoicePool<Voice, 16> voices_;
+    VoicePool<Voice, 128> voices_;  // plenty: a silent voice costs a check
     double sampleRate_ = 48000.0;
     double attackStep_ = 0, decayCoef_ = 0, releaseCoef_ = 0;
     uint32_t controlLeft_ = 0;  // frames until the next control

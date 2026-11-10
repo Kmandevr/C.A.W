@@ -793,6 +793,7 @@ private:
 // ---------- Morph synth ----------
 
 constexpr uint32_t kMaxUnison = 16;
+constexpr uint32_t kMorphVoices = 128;  // voices: plenty (a silent one costs a check); the oldest is stolen past them
 const ParameterDescriptor kMorphParams[] = {
     parameter("shape", "Shape", 0.45, 0.0, 1.0),
     parameter("drift", "Drift", 0.25, 0.0, 1.0),
@@ -813,7 +814,7 @@ enum MorphParam : uint32_t {
 };
 const ModuleDescriptor kMorph = instrument("org.caw.synth.morph", "Morph synth", kMorphParams, 1920000);  // 10 s at 192 kHz
 
-// 8 voices, each a stack of up to 16 detuned copies (unison, spread across the stereo field) of one
+// 128 voices, each a stack of up to 16 detuned copies (unison, spread across the stereo field) of one
 // waveform that morphs from sine through triangle and saw to square (`shape`; the .caw wavetable pad's
 // table.basic). `drift` sweeps the shape with a slow sine over 16 beats. A resonant low-pass per side (a
 // note's timbre opens it), an ADSR envelope; velocity and pressure set the level.
@@ -931,11 +932,10 @@ private:
         if (sinceControl_ == 0) return;
         const double n = static_cast<double>(sinceControl_);
         lfo_ = lib::wrap01(lfo_ + n * tempo_ / (60.0 * 16.0 * sr_));
-        for (Voice& v : voices_) {
-            if (!v.active) continue;
+        voices_.forEachActive([&](Voice& v) noexcept {
             for (uint32_t u = 0; u < unison_; ++u)
                 if (v.dt[u] > 0.0 && v.dt[u] < 0.5) v.phase[u] = lib::wrap01(v.phase[u] + n * v.dt[u]);
-        }
+        });
         // A period of the shared pair below -140 dB clears it (its ringing would decay into denormal numbers,
         // with or without a voice held at level 0), and without voices it rests until one uses it again.
         sharedQuiet_ = !sharedUsed_ && sharedPeak_ < 1e-7f;
@@ -963,8 +963,7 @@ private:
         const double fc = lib::shiftCutoff(cutoff, 0.0, sr_);
         sharedL_.set(fc, q, sr_);
         sharedR_.set(fc, q, sr_);
-        for (Voice& v : voices_) {
-            if (!v.active) continue;
+        voices_.forEachActive([&](Voice& v) noexcept {
             v.amp.set(attack, decay, sustain, release, sr_);
             if (v.timbre != 0.0) {
                 const double own = lib::shiftCutoff(cutoff, 4.0 * v.timbre, sr_);
@@ -974,7 +973,7 @@ private:
             const double perSample = v.freq / sr_;
             for (uint32_t u = 0; u < unison_; ++u) v.dt[u] = std::min(0.45, perSample * ratio_[u]);
             v.level = (0.5 + 0.5 * v.velocity) * v.pressure * volume;
-        }
+        });
     }
 
     // One control period (frames <= kControlFrames).
@@ -982,8 +981,7 @@ private:
         float sharedL[kControlFrames] = {}, sharedR[kControlFrames] = {};
         bool shared = false;
         for (uint32_t i = 0; i < frames; ++i) left[i] = right[i] = 0.0f;
-        for (Voice& v : voices_) {
-            if (!v.active) continue;
+        voices_.forEachActive([&](Voice& v) noexcept {
             float sumL[kControlFrames] = {}, sumR[kControlFrames] = {};
             lib::addMorphStackAt(sumL, sumR, frames, sinceControl_, v.phase, v.dt, unison_, shape_, gainL_, gainR_);
             if (v.timbre == 0.0) {
@@ -1001,7 +999,7 @@ private:
                 }
             }
             if (!v.amp.active()) v.active = false;
-        }
+        });
         // The shared pair rings on after its last voice until a period of it is quiet, then rests (no
         // denormal decay) until a voice uses it again.
         sharedUsed_ = sharedUsed_ || shared;
@@ -1033,7 +1031,7 @@ private:
             gainR_[u] = static_cast<float>(g.right * 1.41421356237309505);
         }
     }
-    VoicePool<Voice, 8> voices_;
+    VoicePool<Voice, kMorphVoices> voices_;
     lib::Svf sharedL_, sharedR_;  // the filter pair of the voices without timbre
     bool sharedQuiet_ = true, sharedUsed_ = false;  // resting; used in this control period
     float sharedPeak_ = 0.0f;                        // its loudest output in this control period

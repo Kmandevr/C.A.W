@@ -220,17 +220,26 @@ protected:
 // Fixed voices assigned by note id: a free voice, else the oldest released, else the oldest held
 // (stolen). Voice needs the members `bool active`, `bool held`, `uint32_t noteId` and `uint64_t age`;
 // start() sets them, the instrument clears `held` on its off and `active` when the voice is silent.
+//
+// N is the instrument's own polyphony: the host sets no limit of its own (owner, 2026-11-10), so a pool of
+// hundreds of voices is fine. forEachActive() and find() walk only the voices sounding (start() lists a
+// voice; one found silent is dropped from the list), so a large N costs memory, not time.
 template <class Voice, uint32_t N>
 class VoicePool {
 public:
     static_assert(N > 0, "a pool needs at least one voice");
+    static_assert(N <= 65535, "a pool holds up to 65535 voices");
     Voice& start(uint32_t noteId) noexcept {
         Voice* pick = nullptr;
-        for (Voice& v : voices_)
-            if (!v.active) { pick = &v; break; }
-        for (int pass = 0; pass < 2 && !pick; ++pass)
-            for (Voice& v : voices_)
-                if ((pass == 1 || !v.held) && (!pick || v.age < pick->age)) pick = &v;
+        prune();
+        if (live_ < N) {  // a free voice: one not sounding (the list holds every voice that is)
+            pick = &voices_[free()];
+        } else {
+            for (int pass = 0; pass < 2 && !pick; ++pass)
+                for (Voice& v : voices_)
+                    if ((pass == 1 || !v.held) && (!pick || v.age < pick->age)) pick = &v;
+        }
+        if (!pick->active) list_[live_++] = static_cast<uint16_t>(pick - voices_);
         pick->active = true;
         pick->held = true;
         pick->noteId = noteId;
@@ -239,18 +248,52 @@ public:
     }
     // The voice playing note `noteId` (held or releasing), or null.
     Voice* find(uint32_t noteId) noexcept {
-        for (Voice& v : voices_)
-            if (v.active && v.noteId == noteId) return &v;
+        prune();
+        for (uint32_t i = 0; i < live_; ++i) {
+            Voice& v = voices_[list_[i]];
+            if (v.noteId == noteId) return &v;
+        }
         return nullptr;
+    }
+    // f(voice) for each sounding voice, in the order they started; f may clear `active` (the voice is
+    // then dropped from the list).
+    template <class F>
+    void forEachActive(F&& f) noexcept {
+        uint32_t keep = 0;
+        for (uint32_t i = 0; i < live_; ++i) {
+            Voice& v = voices_[list_[i]];
+            if (v.active) f(v);
+            if (v.active) list_[keep++] = list_[i];
+        }
+        live_ = keep;
+    }
+    uint32_t activeCount() noexcept {
+        prune();
+        return live_;
     }
     Voice* begin() noexcept { return voices_; }
     Voice* end() noexcept { return voices_ + N; }
     void clear() noexcept {
         for (Voice& v : voices_) v = Voice{};
+        live_ = 0;
     }
 
 private:
+    void prune() noexcept {
+        uint32_t keep = 0;
+        for (uint32_t i = 0; i < live_; ++i)
+            if (voices_[list_[i]].active) list_[keep++] = list_[i];
+        live_ = keep;
+    }
+    // A voice not sounding, the first by index (with the list pruned, live_ < N means one exists).
+    uint32_t free() noexcept {
+        for (uint32_t i = 0; i < N; ++i)
+            if (!voices_[i].active) return i;
+        return 0;
+    }
     Voice voices_[N]{};
+    uint16_t list_[N]{};  // the sounding voices (and some found silent since), in the order they started
+    uint32_t live_ = 0;
     uint64_t clock_ = 0;
 };
 
