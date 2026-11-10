@@ -6,6 +6,10 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: Installables move to GitHub Releases once the current work is done (owner)
+
+**Decision (owner):** once the current roadmap work is done, builds are published as GitHub Releases (a tagged version with the APK and the Windows build attached) instead of being picked up from Actions artifacts. [Proposal, not built] Until then, installables stay Actions artifacts. A release needs a stable signing key (the repository's Android signing secrets) so each APK installs over the last; the version comes from `app/pubspec.yaml` (`app/lib/version.dart` matches it).
+
 ## 2026-11-10: Sound need only be perceptually the same (owner)
 
 **Decision (owner):** "so long as someone can't perceive the difference it's fine." Where making output bit-identical (every device, playback against export) is expensive, a cheaper way that sounds effectively the same is acceptable. Golden renders still pin the sound so changes are deliberate; they check bit-exactness where it is cheap (offline renders of the same build), and a comparison within an inaudible tolerance where exactness would cost real-time performance (for example live playback against export with different block sizes).
