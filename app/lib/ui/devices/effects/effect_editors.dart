@@ -14,6 +14,7 @@ import '../kit/device_style.dart';
 import '../visuals/fx_visuals.dart';
 import 'dynamics_editors.dart';
 import 'effect_page.dart';
+import 'space_editors.dart';
 import 'eq_editor.dart';
 
 // An EQ band's knobs: `bandN_` or the built-in EQ's `bN_` (org.caw.eq).
@@ -35,12 +36,10 @@ DeviceEditorEntry? effectEditorFor(NativeComponentInfo info) {
     return singlePage('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage());
   }
   if (_has(info, 'feedback') && (_has(info, 'time') || _has(info, 'sync'))) {
-    return DeviceEditorEntry((_) => [DeviceSection('delay', 'DELAY', Icons.blur_linear, (_) => const DelayEditorPage())],
-        accent: Neon.green);
+    return singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage());
   }
   if (_has(info, 'decay') && _has(info, 'size')) {
-    return DeviceEditorEntry((_) => [DeviceSection('reverb', 'REVERB', Icons.blur_on, (_) => const ReverbEditorPage())],
-        accent: Neon.violet);
+    return singlePage('reverb', 'REVERB', Icons.blur_on, DeviceFamily.space, () => const ReverbPage());
   }
   if (_has(info, 'drive') && (_has(info, 'type') || _has(info, 'shape') || _has(info, 'mode'))) {
     return DeviceEditorEntry((_) => [DeviceSection('sat', 'DRIVE', Icons.whatshot_outlined, (_) => const SaturationEditorPage())],
@@ -56,6 +55,9 @@ DeviceEditorEntry _levels(String id, String label, IconData icon, Color accent) 
 final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.eq': singlePage('eq', 'EQ', Icons.graphic_eq, DeviceFamily.eq, () => const EqEditorPage()),
   'org.caw.compressor': singlePage('comp', 'COMP', Icons.compress, DeviceFamily.dynamics, () => const CompressorPage()),
+  'org.caw.reverb.pro': singlePage('reverb', 'REVERB', Icons.blur_on, DeviceFamily.space, () => const ReverbPage()),
+  'org.caw.delay.pro': singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage()),
+  'org.caw.delay.pingpong': singlePage('delay', 'DELAY', Icons.blur_linear, DeviceFamily.space, () => const DelayPage()),
   'org.caw.limiter': singlePage('limit', 'LIMIT', Icons.vertical_align_top, DeviceFamily.dynamics, () => const LimiterPage()),
   'org.caw.gate': singlePage('gate', 'GATE', Icons.door_sliding_outlined, DeviceFamily.dynamics, () => const GatePage()),
   'org.caw.transient': singlePage('transient', 'SHAPE', Icons.show_chart, DeviceFamily.dynamics, () => const TransientPage()),
@@ -158,53 +160,7 @@ class LevelsEditorPage extends StatelessWidget {
 
 
 
-/// A delay: its echoes from `time` (s or ms) or `sync`, `feedback` and `mix`.
-class DelayEditorPage extends StatelessWidget {
-  const DelayEditorPage({super.key});
 
-  static const _syncWholes = {'1/32': 1 / 32, '1/16': 1 / 16, '1/8': 1 / 8, '1/8 dotted': 3 / 16, '1/4': 1 / 4,
-    '1/4 dotted': 3 / 8, '1/2': 1 / 2, '1 bar': 1.0, '2 bars': 2.0,
-    // org.caw.delay.pro's triplets (T, x 2/3) and dotted (D, x 1.5)
-    '1/16 T': 1 / 24, '1/16 D': 3 / 32, '1/8 T': 1 / 12, '1/8 D': 3 / 16, '1/4 T': 1 / 6, '1/4 D': 3 / 8, '1/2 T': 1 / 3,
-    '1/2 D': 3 / 4};
-
-  @override
-  Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    final time = t.param('time');
-    var seconds = time == null ? 0.3 : t.value('time') / (time.unit == 'ms' ? 1000 : 1);
-    if (t.param('sync') case final p? when p.isChoice) {
-      final wholes = _syncWholes[formatParamValue(p, t.value(p.id))];
-      if (wholes != null) seconds = wholes * 4 * 60 / t.state.project.bpm;
-    }
-    return _page([
-      DeviceCard(title: 'ECHOES', color: scope.accent, child: _Display(builder: (context, f) => DelayEchoes(
-        seconds: f?.values['time_l_s'] ?? seconds, feedback: t.value('feedback'),
-        mix: t.param('mix') == null ? 0.5 : t.value('mix'), color: scope.accent, height: 90))),
-      DeviceCard(title: 'LIVE', color: scope.accent, child: const LevelMeters()),
-      const ParamGrid(),
-    ]);
-  }
-}
-
-/// A reverb: its tail from `decay`, `size`, `damping` and `mix`.
-class ReverbEditorPage extends StatelessWidget {
-  const ReverbEditorPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final scope = DeviceScope.of(context);
-    final t = scope.target;
-    return _page([
-      DeviceCard(title: 'TAIL', color: scope.accent, child: ReverbTail(decaySeconds: t.value('decay'),
-        size: t.value('size'), damping: t.param('damping') == null ? 0.4 : t.value('damping'),
-        mix: t.param('mix') == null ? 0.3 : t.value('mix'), color: scope.accent, height: 90)),
-      DeviceCard(title: 'LIVE', color: scope.accent, child: const LevelMeters()),
-      const ParamGrid(),
-    ]);
-  }
-}
 
 /// A saturation: its transfer curve from `type`/`shape` (Drive, Hard clip, Fold, Crush), `drive` and `mix`.
 class SaturationEditorPage extends StatelessWidget {

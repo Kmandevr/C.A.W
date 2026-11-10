@@ -36,6 +36,7 @@ void main() {
 
   AppState state(String id) {
     final s = stateWith(id);
+    Motion.setting = MotionLevel.off; // the app state applies its settings' motion; visuals stand still for goldens
     states.add(s);
     return s;
   }
@@ -181,6 +182,34 @@ void main() {
       await tester.pumpAndSettle();
       expect(t.value('attack'), greaterThan(0.1));
       expect(t.value('sustain'), lessThan(-0.1));
+      await close(tester);
+    });
+
+    testWidgets('reverb: sideways sets the decay, up the size', (tester) async {
+      final s = await open(tester, 'org.caw.reverb.pro');
+      final t = targetOf(s, 'org.caw.reverb.pro');
+      final hero = tester.getRect(find.byKey(const ValueKey('reverb-hero')));
+      await tester.dragFrom(hero.center, const Offset(60, -30));
+      await tester.pumpAndSettle();
+      expect(t.value('decay'), greaterThan(2.6));
+      expect(t.value('size'), greaterThan(0.6));
+      await close(tester);
+    });
+
+    testWidgets('delay: the first echo drags through the sync divisions and sets the feedback; modes are tiles', (tester) async {
+      final s = await open(tester, 'org.caw.delay.pro');
+      final t = targetOf(s, 'org.caw.delay.pro');
+      final hero = tester.getRect(find.byKey(const ValueKey('delay-hero')));
+      // 1/8 D (0.375 s) of a 2.06 s view: the first left echo.
+      final x = hero.left + 14 + (hero.width - 22) * 0.375 / (0.375 * 5.5);
+      final y = hero.top + hero.height * 0.48 - hero.height * 0.3 * (0.35 + 0.65 * 0.3);
+      await tester.dragFrom(Offset(x, y), const Offset(70, -20));
+      await tester.pumpAndSettle();
+      expect(t.value('sync'), greaterThan(7), reason: 'a longer division');
+      expect(t.value('feedback'), greaterThan(0.4));
+      await tester.tap(find.byKey(const ValueKey('mode-mode-1')));
+      await tester.pumpAndSettle();
+      expect(t.value('mode'), 1);
       await close(tester);
     });
   });
