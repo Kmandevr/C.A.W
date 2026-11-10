@@ -108,7 +108,12 @@ public:
         saved_ = -1;
         if (lseek(file_, 0, SEEK_SET) == 0) {
             char buffer[4096];
-            for (ssize_t n; (n = read(file_, buffer, sizeof buffer)) > 0;) text.append(buffer, static_cast<size_t>(n));
+            // Capped, so a reply always fits Android's Binder transaction (about 1 MB, sent as UTF-16).
+            constexpr size_t kMaxCapture = 256 * 1024;
+            for (ssize_t n; text.size() < kMaxCapture && (n = read(file_, buffer, sizeof buffer)) > 0;) {
+                text.append(buffer, static_cast<size_t>(n));
+            }
+            if (text.size() > kMaxCapture) text.resize(kMaxCapture);
         }
         close(file_);
         file_ = -1;

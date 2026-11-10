@@ -1,5 +1,6 @@
 // One open C++ effect in the Builder: its files, autosave, the live check, completion, Build, versions and tests.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -89,7 +90,15 @@ extension CppBuilderState on AppState {
   /// The open session of a component (by entry id), kept while the app runs so each file's undo survives tab
   /// switches.
   CppWorkbench cppWorkbench(String entryId) =>
-      (_workbenches[this] ??= {}).putIfAbsent(entryId, () => CppWorkbench(this, entryId));
+      // Per project too: a duplicated or imported project keeps entry ids, and its code is its own.
+      (_workbenches[this] ??= {}).putIfAbsent('${project.id}/$entryId', () => CppWorkbench(this, entryId));
+
+  /// Saves every open session's code now (the app going to the background, or quitting).
+  Future<void> saveCppWorkbenches() async {
+    for (final w in (_workbenches[this] ?? const <String, CppWorkbench>{}).values) {
+      await w.save();
+    }
+  }
 
   /// A new effect from the blank pass-through template, added to the project; it is the user's own code.
   CppComponentDoc newCppEffect({String? name}) {
@@ -160,6 +169,15 @@ class CppWorkbench extends ChangeNotifier {
   int _editGeneration = 0;
   bool _dirty = false;
   late ProjectDoc _project;
+  int _workspaces = 0;
+
+  Future<void> _removeWorkspace(String path) async {
+    try {
+      await Directory(path).delete(recursive: true);
+    } on FileSystemException {
+      // Left for the next run's clean-up.
+    }
+  }
   bool _disposed = false;
 
   CppComponentDoc? get component => state.project.cppComponents.where((c) => c.id == entryId).firstOrNull;
@@ -187,7 +205,10 @@ class CppWorkbench extends ChangeNotifier {
   void _onState() {
     if (_disposed) return;
     if (!identical(state.project, _project)) {
+      final same = state.project.id == _project.id;
       _project = state.project;
+      // Another project opened: this session belongs to the old one and leaves the new one alone.
+      if (!same) return;
       final c = component;
       if (c == null) return;
       // A project undo or redo replaced the project: the editor's code stays (it has its own undo).
@@ -225,6 +246,7 @@ class CppWorkbench extends ChangeNotifier {
   /// Writes the editor's code into the project component and saves the project (no project undo step).
   Future<void> save() async {
     _saveTimer?.cancel();
+    if (state.project.id != _project.id) return; // another project is open now
     final c = component;
     if (c == null || !_dirty) return;
     _dirty = false;
@@ -240,9 +262,11 @@ class CppWorkbench extends ChangeNotifier {
   }
 
   // The check workspace: this component's current code, written fresh for each check or completion.
-  Future<String> _writeWorkspace() async {
+  // Each request gets its own folder (removed after it), so a check and a completion never rewrite each other's
+  // files while the compiler reads them.
+  Future<String> _writeWorkspace(String kind) async {
     final root = await state.cppServices.workDirectory();
-    final dir = Directory('${root.path}/check/${entryId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_')}');
+    final dir = Directory('${root.path}/check/${entryId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_')}-$kind-${++_workspaces}');
     if (await dir.exists()) await dir.delete(recursive: true);
     for (final e in texts.entries) {
       if (!CppComponentDoc.isSafeRelativePath(e.key)) continue;
@@ -286,9 +310,14 @@ class CppWorkbench extends ChangeNotifier {
     notifyListeners();
     try {
       final toolchain = await compiler.toolchainDirectory();
-      final dir = await _writeWorkspace();
-      final result = await _run(
-          compiler, CppSourceBuilder.checkArguments(toolchain: toolchain, sourceDirectory: dir, manifest: manifest), 'check');
+      final dir = await _writeWorkspace('check');
+      final ({int code, String output})? result;
+      try {
+        result = await _run(compiler, CppSourceBuilder.checkArguments(toolchain: toolchain, sourceDirectory: dir, manifest: manifest),
+            '$entryId/check');
+      } finally {
+        unawaited(_removeWorkspace(dir));
+      }
       if (result == null || _disposed) return; // a newer check replaced it
       if (generation != _editGeneration) return; // typing went on: the next check has the right positions
       final found = parseClangDiagnostics(result.output, sourceDirectory: dir);
@@ -316,14 +345,23 @@ class CppWorkbench extends ChangeNotifier {
     if (compiler == null || manifest == null || !manifest.sources.contains(path)) return const [];
     try {
       final toolchain = await compiler.toolchainDirectory();
-      final dir = await _writeWorkspace();
-      final result = await _run(
-          compiler,
-          CppSourceBuilder.completionArguments(
-              toolchain: toolchain, sourceDirectory: dir, manifest: manifest, source: path, line: line + 1,
-              // Clang completes the word starting at the column: point it at the word's start.
-              column: column - prefix.length + 1),
-          'complete');
+      // Clang completes the word starting at the column, counted in UTF-8 bytes from 1: the word's start.
+      final lines = (texts[path] ?? '').split('\n');
+      final lineText = line < lines.length ? lines[line] : '';
+      final start = (column - prefix.length).clamp(0, lineText.length);
+      final byteColumn = utf8.encode(lineText.substring(0, start)).length + 1;
+      final dir = await _writeWorkspace('complete');
+      final ({int code, String output})? result;
+      try {
+        result = await _run(
+            compiler,
+            CppSourceBuilder.completionArguments(
+                toolchain: toolchain, sourceDirectory: dir, manifest: manifest, source: path, line: line + 1,
+                column: byteColumn),
+            '$entryId/complete');
+      } finally {
+        unawaited(_removeWorkspace(dir));
+      }
       if (result == null) return const [];
       return parseClangCompletions(result.output, prefix: prefix);
     } on StateError {
@@ -543,6 +581,7 @@ class CppWorkbench extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_dirty) unawaited(save());
     _disposed = true;
     _saveTimer?.cancel();
     _checkTimer?.cancel();

@@ -189,7 +189,8 @@ class _TestStripState extends State<TestStrip> {
   int _use = 0;
   bool _playing = false;
   bool _bypassed = false;
-  CppEffectUse? _soloed;
+  bool _wasPlaying = false;
+  CppEffectUse? _soloed, _bypassedUse;
 
   CppWorkbench get w => widget.workbench;
 
@@ -207,17 +208,19 @@ class _TestStripState extends State<TestStrip> {
       engine.setLayerMix(layer.id, layer.volume, layer.pan, layer.mute, true);
       _soloed = u;
     }
+    _wasPlaying = s.transportOn;
     if (!s.transportOn) s.togglePlay();
     setState(() => _playing = true);
   }
 
   void _stop({bool rebuild = true}) {
     final s = w.state;
-    if (_playing) s.stopPlayback();
-    final u = _soloed;
-    final layer = u?.layer;
+    // Playback that was going before Test goes on; Test's own playback stops.
+    if (_playing && !_wasPlaying) s.stopPlayback();
+    final layer = _soloed?.layer;
     if (layer != null) s.engine?.setLayerMix(layer.id, layer.volume, layer.pan, layer.mute, layer.solo);
-    if (_bypassed && u != null) _setBypass(u, false);
+    final bypassed = _bypassedUse;
+    if (_bypassed && bypassed != null) _setBypass(bypassed, false);
     _soloed = null;
     _playing = false;
     if (rebuild && mounted) setState(() {});
@@ -227,6 +230,7 @@ class _TestStripState extends State<TestStrip> {
     final index = w.engineIndex(u);
     if (index != null) w.state.engine?.setComponentBypass(u.layer?.id, index, on || u.use.bypass);
     _bypassed = on;
+    _bypassedUse = on ? u : null;
   }
 
   @override

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:caw/model/app_state.dart';
+import 'package:caw/model/project.dart';
 import 'package:caw/model/cpp_completion.dart';
 import 'package:caw/model/cpp_component.dart';
 import 'package:caw/model/cpp_diagnostics.dart';
@@ -294,8 +295,10 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
     tearDown(() => dir.deleteSync(recursive: true));
 
     test('runs once about a second after typing stops (more typing cancels it) and marks the errors', () async {
+      String? compiled;
       final compiler = FakeCompiler('/tc', reply: (args) {
         final source = args.last; // <workspace>/src/effect.cpp
+        compiled = File(source).readAsStringSync(); // the workspace is removed once the check is done
         return (code: 1, output: "$source:3:5:{3:5-3:9}: error: unknown type name 'flot'\n");
       });
       final state = AppState(settings: Settings());
@@ -313,7 +316,7 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
       expect(compiler.calls.single, containsAll(['-fsyntax-only', '/tc/bin/clang++']));
       expect(compiler.calls.single, isNot(contains('-o')));
       // The check compiled the editor's code, written to the app-private workspace.
-      expect(File(compiler.calls.single.last).readAsStringSync(), '// typing 3');
+      expect(compiled, '// typing 3');
       expect(w.diagnostics.single, const CppDiagnostic(
           file: 'src/effect.cpp', line: 3, column: 5, endLine: 3, endColumn: 9, startColumn: 5, severity: CppSeverity.error,
           message: "unknown type name 'flot'"));
@@ -322,6 +325,44 @@ COMPLETION: process : [#bool#]process(<#const AudioProcessBlock &block#>)
       expect(state.project.cppComponents.single.files['src/effect.cpp'], '// typing 3');
       expect(state.canUndo, isFalse);
       w.dispose();
+    });
+
+    test('completion points Clang at the word start in UTF-8 bytes, past non-ASCII text', () async {
+      final compiler = FakeCompiler('/tc');
+      final state = AppState(settings: Settings());
+      state.project.cppComponents.add(CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz'));
+      state.cppServices = CppBuilderServices(compiler: compiler, workDirectory: () async => dir);
+      final w = CppWorkbench(state, 'cpp1');
+      w.edit('src/effect.cpp', 'x = 1; // 20°C µs\nfoo.ba');
+      await w.clangCompletions('src/effect.cpp', 1, 6, prefix: 'ba');
+      expect(compiler.calls.single.join(' '), contains('src/effect.cpp:2:5'));
+      w.edit('src/effect.cpp', '// °µ\nx.ab');
+      compiler.calls.clear();
+      await w.clangCompletions('src/effect.cpp', 0, 5, prefix: '');
+      // "// °µ" is 5 UTF-16 units but 7 bytes: the column is byte 8.
+      expect(compiler.calls.single.join(' '), contains('src/effect.cpp:1:8'));
+      w.dispose();
+    });
+
+    test('a session belongs to its project: another project with the same entry id keeps its own code', () async {
+      final state = AppState(settings: Settings());
+      final a = state.project;
+      a.cppComponents.add(CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz'));
+      state.cppServices = CppBuilderServices(compiler: null, workDirectory: () async => dir);
+      final wa = state.cppWorkbench('cpp1');
+      wa.edit('src/effect.cpp', '// project A');
+      await wa.save();
+      final b = ProjectDoc(id: 'other', name: 'B')..cppComponents.add(CppComponentDoc.blankEffect(id: 'cpp1', name: 'Fuzz'));
+      state.project = b;
+      state.notifyListeners();
+      expect(b.cppComponents.single.files['src/effect.cpp'], isNot('// project A'));
+      final wb = state.cppWorkbench('cpp1');
+      expect(identical(wa, wb), isFalse);
+      wb.edit('src/effect.cpp', '// project B');
+      await wb.save();
+      expect(a.cppComponents.single.files['src/effect.cpp'], '// project A');
+      wa.dispose();
+      wb.dispose();
     });
 
     test('without the in-app compiler the check only says so', () async {

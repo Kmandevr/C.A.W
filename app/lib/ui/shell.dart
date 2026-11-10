@@ -1,11 +1,13 @@
 // App shell: the frame (Build, Files, Arrange; bottom transport on phones, a rail and docking panels when wide) and
 // the project menu.
+import 'dart:async';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
+import '../model/cpp_workbench.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
 import 'arranger_screen.dart';
@@ -101,11 +103,14 @@ class _ShellState extends State<Shell> {
     _life = AppLifecycleListener(
       onPause: () {
         _dock.flush();
+        // Code typed in Build is saved before Android may stop the app in the background.
+        unawaited(s.saveCppWorkbenches());
         s.lifecycle(foreground: false);
       },
       onResume: () => s.lifecycle(foreground: true),
       onExitRequested: () async {
         await _dock.flush();
+        await s.saveCppWorkbenches();
         await s.flush();
         return AppExitResponse.exit;
       },

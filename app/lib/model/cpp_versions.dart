@@ -2,6 +2,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'cpp_component.dart';
+
 class CppVersion {
   const CppVersion({required this.number, required this.time, required this.files});
 
@@ -22,7 +24,8 @@ class CppVersion {
     if (number is! int || time == null || files is! Map) return null;
     return CppVersion(number: number, time: time, files: {
       for (final e in files.entries)
-        if (e.key is String && e.value is String) e.key as String: e.value as String,
+        if (e.key is String && e.value is String && CppComponentDoc.isSafeRelativePath(e.key as String))
+          e.key as String: e.value as String,
     });
   }
 }
