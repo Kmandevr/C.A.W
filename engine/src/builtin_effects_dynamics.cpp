@@ -117,6 +117,7 @@ protected:
                 if (useHpf_) sc[c] = hpf_[c].highpass(sc[c]);
                 if (rms_) {
                     ms_[c] = sc[c] * sc[c] + (ms_[c] - sc[c] * sc[c]) * rmsCoef_;
+                    if (ms_[c] < 1e-30) ms_[c] = 0.0;
                     level[c] = std::sqrt(ms_[c] < 0.0 ? 0.0 : ms_[c]);
                 } else {
                     level[c] = sc[c] < 0.0 ? -sc[c] : sc[c];
@@ -131,6 +132,7 @@ protected:
                 const double target = lib::compressorGainDb(lib::gainToDb(lv, -200.0), threshold_, ratio_, knee_);
                 const double coef = target < env_[c] ? attack_ : release_;
                 env_[c] = target + (env_[c] - target) * coef;
+                if (env_[c] - target < 1e-9 && target - env_[c] < 1e-9) env_[c] = target;  // settled: no subnormal creep
                 if (env_[c] > -1e-9) env_[c] = 0.0;  // back to no reduction: no subnormal creep
                 gain[c] = lib::dbToGain(env_[c] + makeupDb_);
             }
@@ -138,7 +140,9 @@ protected:
             const double gr = std::min(env_[0], env_[1]);
             grMax_ = std::min(grMax_, gr);
             grNow_ = gr;
-            sustained_ = (gr < -1.0 ? 1.0 : 0.0) + (sustained_ - (gr < -1.0 ? 1.0 : 0.0)) * sustainCoef_;
+            const double held = gr < -1.0 ? 1.0 : 0.0;
+            sustained_ = held + (sustained_ - held) * sustainCoef_;
+            if (sustained_ - held < 1e-12 && held - sustained_ < 1e-12) sustained_ = held;
             if (listen_) {
                 outL[i] = static_cast<float>(sc[0]);
                 outR[i] = static_cast<float>(sc[1]);
@@ -265,6 +269,7 @@ protected:
             const double need = peak > ceiling_ ? ceiling_ / peak : 1.0;
             const double m = min_.push(need, window_);
             held_ = m < held_ ? m : m + (held_ - m) * release_;
+            if (held_ - m < 1e-12) held_ = m;  // recovered: no subnormal creep
             // The moving average over `window_` frames.
             sum_ += held_ - box_[(boxPos_ - window_) & boxMask];
             box_[boxPos_] = held_;
@@ -379,6 +384,7 @@ protected:
             if (target > env_) env_ = target + (env_ - target) * attack_;  // opening
             else if (holdLeft_ > 0) --holdLeft_;                          // held open a while
             else env_ = target + (env_ - target) * release_;              // closing
+            if (env_ - target < 1e-9 && target - env_ < 1e-9) env_ = target;  // settled: no subnormal creep
             const double g = lib::dbToGain(env_);
             grMax_ = std::min(grMax_, env_);
             outL[i] = static_cast<float>(inL[i] * g);

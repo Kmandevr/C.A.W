@@ -163,6 +163,7 @@ protected:
                 }
             }
             out_ += (outTarget_ - out_) * outCoef_;
+            if (out_ - outTarget_ < 1e-12 && outTarget_ - out_ < 1e-12) out_ = outTarget_;
             l *= out_;
             r *= out_;
             outL[i] = static_cast<float>(l);

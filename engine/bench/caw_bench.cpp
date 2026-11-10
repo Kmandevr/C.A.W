@@ -238,6 +238,91 @@ double heldNotes(const std::vector<std::pair<std::string, double>>& values, int 
     return best;  // microseconds of CPU per second of audio
 }
 
+// The effects suite's cost (`caw_bench SECONDS 300`): each effect alone on a busy stereo signal (noise bursts
+// and tones, never silent, so nothing sleeps) in the engine's 64-frame chain blocks, at its defaults and with its
+// heavier options, the best of 3 runs; microseconds of CPU per second of audio (10000 = 1% of a core).
+double effectCost(const char* id, const std::vector<std::pair<std::string, double>>& values, double seconds) {
+    Engine e(kRate);
+    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(id);
+    if (!p || !p->activate(kRate, 64)) return 0.0;
+    const ModuleDescriptor& d = p->descriptor();
+    std::vector<ParameterValue> params(d.parameterCount);
+    for (uint32_t k = 0; k < d.parameterCount; ++k) {
+        params[k].value = d.parameters[k].defaultValue;
+        for (const auto& [name, v] : values)
+            if (d.parameters[k].id == name) params[k].value = v;
+    }
+    const int frames = kRate;  // a second of input, looped
+    std::vector<float> inL(frames), inR(frames), outL(64), outR(64);
+    uint32_t seed = 1;
+    for (int i = 0; i < frames; ++i) {
+        seed = seed * 1664525u + 1013904223u;
+        const double noise = (static_cast<double>(seed >> 8) / 8388608.0 - 1.0) * (0.05 + 0.3 * ((i / 6000) % 2));
+        inL[i] = static_cast<float>(noise + 0.3 * std::sin(2 * 3.14159265358979 * 220 * i / kRate));
+        inR[i] = static_cast<float>(0.8 * noise + 0.3 * std::sin(2 * 3.14159265358979 * 330 * i / kRate));
+    }
+    double best = 1e30;
+    for (int run = 0; run < 3; ++run) {
+        p->reset();
+        const int blocks = static_cast<int>(seconds * kRate / 64);
+        const auto t0 = Clock::now();
+        for (int b = 0; b < blocks; ++b) {
+            const int at = (b * 64) % (frames - 64);
+            const float* in[2] = {inL.data() + at, inR.data() + at};
+            float* out[2] = {outL.data(), outR.data()};
+            AudioProcessBlock block;
+            block.input = {in, 2, 64};
+            block.output = {out, 2, 64};
+            block.frames = 64;
+            block.sampleRate = kRate;
+            block.parameters = params.data();
+            block.parameterCount = d.parameterCount;
+            p->process(block);
+        }
+        best = std::min(best, std::chrono::duration<double, std::micro>(Clock::now() - t0).count() / seconds);
+    }
+    return best;
+}
+
+void effectsCost(double seconds) {
+    using Values = std::vector<std::pair<std::string, double>>;
+    struct Case {
+        const char* name;
+        const char* id;
+        Values values;
+    };
+    const Case cases[] = {
+        {"eq (default: 6 bands at 0 dB)", "org.caw.eq", {}},
+        {"eq, 8 bands with gain, 2 cuts at 48 dB", "org.caw.eq",
+         {{"b1_on", 1}, {"b1_type", 5}, {"b8_on", 1}, {"b8_type", 8}, {"b2_gain", 3}, {"b3_gain", -3}, {"b4_gain", 4},
+          {"b5_gain", 2}, {"b6_gain", -2}, {"b7_gain", 3}}},
+        {"compressor (default: peak, linked)", "org.caw.compressor", {}},
+        {"compressor, RMS, unlinked, sidechain HPF", "org.caw.compressor", {{"detect", 1}, {"link", 0}, {"sc_hpf", 120}}},
+        {"limiter (default: true peak)", "org.caw.limiter", {{"gain", 12}}},
+        {"limiter, sample peak", "org.caw.limiter", {{"gain", 12}, {"true_peak", 0}}},
+        {"reverb (default: modulated)", "org.caw.reverb.pro", {}},
+        {"reverb, no modulation", "org.caw.reverb.pro", {{"mod", 0}}},
+        {"reverb, ducking", "org.caw.reverb.pro", {{"duck", 0.5}}},
+        {"delay (default)", "org.caw.delay.pro", {}},
+        {"delay, ping-pong, ducking", "org.caw.delay.pro", {{"mode", 1}, {"duck", 0.5}}},
+        {"saturator (default: tape, 2x)", "org.caw.saturator", {}},
+        {"saturator, tape, no oversampling", "org.caw.saturator", {{"oversample", 0}}},
+        {"saturator, tube, 2x, tone", "org.caw.saturator", {{"mode", 1}, {"tone", 0.5}}},
+        {"gate", "org.caw.gate", {}},
+        {"transient shaper", "org.caw.transient", {{"attack", 0.5}, {"sustain", 0.3}}},
+        {"filter (default: 24 dB SVF)", "org.caw.filter", {}},
+        {"filter, ladder, LFO, envelope", "org.caw.filter", {{"type", 6}, {"lfo_amount", 0.5}, {"env_amount", 0.3}}},
+        {"phaser (default: 6 stages)", "org.caw.phaser", {}},
+        {"phaser, 12 stages", "org.caw.phaser", {{"stages", 5}}},
+        {"flanger", "org.caw.flanger", {}},
+        {"utility, bass mono, DC block", "org.caw.utility", {{"bass_mono", 1}, {"dc_block", 1}, {"width", 1.3}}},
+        {"chorus (existing, for scale)", "org.caw.chorus", {}},
+        {"ping-pong delay (existing)", "org.caw.delay.pingpong", {}},
+    };
+    std::printf("effects: microseconds of CPU per second of stereo audio, 64-frame blocks (10000 = 1%% of a core)\n");
+    for (const Case& c : cases) std::printf("  %-44s %8.0f\n", c.name, effectCost(c.id, c.values, seconds));
+}
+
 void flagshipVoiceCost(double seconds) {
     using Values = std::vector<std::pair<std::string, double>>;
     const Values dry = {{"flt1_on", 0}, {"fx_reverb_on", 0}, {"env1_sustain", 1}, {"mod1_src", 0}};
@@ -424,7 +509,8 @@ int main(int argc, char** argv) {
     const double secs = argc > 1 ? std::atof(argv[1]) : 10.0;
     // `caw_bench SECONDS N` plays only playback scenario N (1-6), for exact instruction counts under callgrind;
     // N = 100 plays First loop (the app's starter project on the built-in instruments) and each built-in alone
-    // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices.
+    // (`caw_bench SECONDS 100 K`: only the K-th of those, from 0); N = 200 times the flagship synth's voices; N = 300
+    // times each built-in effect.
     const int only = argc > 2 ? std::atoi(argv[2]) : 0;
     std::printf("callback %d frames at %d Hz (budget %.0f us); %.0f s per scenario\n", kCallback, kRate,
                 1e6 * kCallback / kRate, secs);
@@ -443,6 +529,10 @@ int main(int argc, char** argv) {
                                {"64 layers", manyLayers(64)},
                                {"pattern layers (acid + chords)", patterns()},
                                {"starter + delay + reverb each", effects()}};
+    if (only == 300) {  // `caw_bench SECONDS 300`: each built-in effect's cost
+        effectsCost(secs);
+        return 0;
+    }
     if (only == 200) {  // `caw_bench SECONDS 200`: the flagship synth's cost per voice and per unison copy
         flagshipVoiceCost(secs);
         return 0;

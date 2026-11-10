@@ -287,6 +287,7 @@ protected:
             double read[2];
             for (int c = 0; c < 2; ++c) {
                 seconds_[c] = seconds_[c] < 0.0 ? target_[c] : seconds_[c] + (target_[c] - seconds_[c]) * glide_;
+                if (seconds_[c] - target_[c] < 1e-12 && target_[c] - seconds_[c] < 1e-12) seconds_[c] = target_[c];
                 const double back = std::max(2.0, seconds_[c] * sr + mod_[c].next());  // the newest tap stays written
                 read[c] = hermite(line_[c].data(), back);
             }

@@ -59,8 +59,11 @@ public:
     }
     double process(double x) noexcept {
         const double c = x > y_ ? attack_ : release_;
-        y_ = x + (y_ - x) * c;
-        if (y_ < 1e-30) y_ = 0.0;  // no subnormal tail
+        const double d = (y_ - x) * c;
+        // Within 1e-12 of a steady input it lands on it: the distance would otherwise shrink through subnormal
+        // numbers (slow on many CPUs).
+        y_ = d < 1e-12 && d > -1e-12 ? x : x + d;
+        if (y_ < 1e-30) y_ = 0.0;
         return y_;
     }
     double value() const noexcept { return y_; }
