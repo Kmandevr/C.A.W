@@ -1,6 +1,7 @@
 // Saves projects as JSON files in app-private storage and remembers which one was open last.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -58,17 +59,20 @@ class ProjectStorage {
     final f = _file(id);
     if (!await f.exists()) return null;
     try {
-      return ProjectDoc.fromJson(jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+      // Reading and decoding a big project runs off the UI isolate; the decoded map comes back without a copy.
+      final path = f.path;
+      return ProjectDoc.fromJson(await Isolate.run(() => jsonDecode(File(path).readAsStringSync())) as Map<String, dynamic>);
     } catch (_) {
       return null;
     }
   }
 
-  /// Writes through a temporary file so a crash mid-save never leaves a half-written project.
-  Future<void> save(ProjectDoc p) async {
+  /// Writes through a temporary file so a crash mid-save never leaves a half-written project. [json] is [p]'s
+  /// `jsonEncode(p.toJson())` when the caller already has it (the app shares it with its undo snapshot).
+  Future<void> save(ProjectDoc p, {String? json}) async {
     final f = _file(p.id);
     final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(const JsonEncoder.withIndent(' ').convert(p.toJson()), flush: true);
+    await tmp.writeAsString(json ?? jsonEncode(p.toJson()), flush: true);
     await tmp.rename(f.path);
   }
 

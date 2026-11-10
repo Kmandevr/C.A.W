@@ -58,7 +58,7 @@ class AppState extends ChangeNotifier {
 
   // Lightweight/Minimal change the engine's voice budget; UI meter cadence stays fixed.
   void _settingsChanged() {
-    _engineDocChanged(); // the swap timing and the voice budget are in the engine JSON
+    _docChanged(); // the swap timing and the voice budget are in the engine JSON
     final nextMode = settings.performanceMode;
     final nextDensity = settings.density;
     final nextLook = settings.lookRevision;
@@ -164,14 +164,14 @@ class AppState extends ChangeNotifier {
 
   /// Aggregate value tick retained for diagnostics and external listeners. Workspaces use the scoped ticks below
   /// so parameter, track and master drags don't rebuild unrelated controls.
-  late final ValueNotifier<int> values = ValueNotifier(0)..addListener(_engineDocChanged);
-  late final ValueNotifier<int> masterValueTick = ValueNotifier(0)..addListener(_engineDocChanged);
+  late final ValueNotifier<int> values = ValueNotifier(0)..addListener(_docChanged);
+  late final ValueNotifier<int> masterValueTick = ValueNotifier(0)..addListener(_docChanged);
   final Map<String, ValueNotifier<int>> _moduleValueTicks = {};
   final Map<String, ValueNotifier<int>> _layerValueTicks = {};
   ValueNotifier<int> moduleValueTick(String id) =>
-      _moduleValueTicks.putIfAbsent(id, () => ValueNotifier(0)..addListener(_engineDocChanged));
+      _moduleValueTicks.putIfAbsent(id, () => ValueNotifier(0)..addListener(_docChanged));
   ValueNotifier<int> layerValueTick(String id) =>
-      _layerValueTicks.putIfAbsent(id, () => ValueNotifier(0)..addListener(_engineDocChanged));
+      _layerValueTicks.putIfAbsent(id, () => ValueNotifier(0)..addListener(_docChanged));
   EngineMeters meters = const EngineMeters();
 
   /// Set when an overload switched light mode on, so the app can say so once.
@@ -457,7 +457,7 @@ class AppState extends ChangeNotifier {
     final e = engine;
     if (e == null) return;
     _livePending = null; // the project as it is now supersedes a drag step not yet sent
-    _engineDocGen++;
+    _docGen++;
     final json = _engineJson();
     try {
       info = await e.setProject(json);
@@ -494,22 +494,22 @@ class AppState extends ChangeNotifier {
 
   // A live drag step's engine JSON is the project's with one module source changed: the rest is built once, around
   // a marker, and each step only splices the new text in (#174). Any edit, value move or sync drops it.
-  int _engineDocGen = 0;
+  int _docGen = 0;
   ({int gen, ProjectDoc project, String id, String head, String tail})? _liveTemplate;
   static const _liveMarker = '\u0001caw-live-source\u0001';
 
-  void _engineDocChanged() => _engineDocGen++;
+  void _docChanged() => _docGen++;
 
   /// The engine JSON of a live drag step: the project with [text] as module [moduleId]'s source.
   @visibleForTesting
   String liveEngineJson(String moduleId, String text) {
     var t = _liveTemplate;
-    if (t == null || t.gen != _engineDocGen || !identical(t.project, project) || t.id != moduleId) {
+    if (t == null || t.gen != _docGen || !identical(t.project, project) || t.id != moduleId) {
       final json = _engineJson(sourceOverrides: {moduleId: _liveMarker});
       final marker = jsonEncode(_liveMarker);
       final at = json.indexOf(marker);
       if (at < 0 || json.indexOf(marker, at + 1) >= 0) return _engineJson(sourceOverrides: {moduleId: text});
-      t = _liveTemplate = (gen: _engineDocGen, project: project, id: moduleId, head: json.substring(0, at),
+      t = _liveTemplate = (gen: _docGen, project: project, id: moduleId, head: json.substring(0, at),
           tail: json.substring(at + marker.length));
     }
     return '${t.head}${jsonEncode(text)}${t.tail}';
@@ -541,13 +541,13 @@ class AppState extends ChangeNotifier {
 
   /// Sends the project to the engine soon (edits in quick succession are sent once).
   void _sync() {
-    _engineDocGen++;
+    _docGen++;
     _syncTimer?.cancel();
     _syncTimer = Timer(const Duration(milliseconds: 40), _syncNow);
   }
 
   void _save() {
-    _engineDocGen++;
+    _docGen++;
     _recordHistory();
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 500), flush);
@@ -560,7 +560,17 @@ class AppState extends ChangeNotifier {
   Timer? _historyTimer;
   bool _restoring = false;
 
-  String _snapshot() => jsonEncode(project.toJson());
+  // The project's JSON as last encoded: autosave writes it and the undo step that settles 100 ms later reuses it,
+  // so a burst of edits encodes the project once, not twice (#174). Any edit or value move ([_docGen]) drops it.
+  ({int gen, ProjectDoc project, String text})? _encoded;
+
+  String _snapshot({bool reuse = false}) {
+    final c = _encoded;
+    if (reuse && c != null && c.gen == _docGen && identical(c.project, project)) return c.text;
+    final text = jsonEncode(project.toJson());
+    _encoded = (gen: _docGen, project: project, text: text);
+    return text;
+  }
 
   void _recordHistory() {
     if (starting || _restoring) return;
@@ -572,7 +582,7 @@ class AppState extends ChangeNotifier {
     if (_historyHeld) return; // a take of automation writing: it settles when the take ends
     _historyTimer = Timer(const Duration(milliseconds: 600), () {
       final was = (history.canUndo, history.canRedo);
-      history.settle(_snapshot());
+      history.settle(_snapshot(reuse: true));
       if ((history.canUndo, history.canRedo) != was) notifyListeners();
     });
   }
@@ -645,8 +655,12 @@ class AppState extends ChangeNotifier {
     if (starting) return; // the placeholder before the first project opens is never saved
     // Native effects' running state (save_state) goes into the project, so a reload or an export starts from it.
     final e = engine;
-    if (e != null) project.storeComponentStates(e.componentStates);
-    await _storage?.save(project);
+    if (e != null) {
+      project.storeComponentStates(e.componentStates);
+      _docGen++;
+    }
+    final storage = _storage;
+    if (storage != null) await storage.save(project, json: _snapshot());
   }
 
   Future<bool> createRestorePoint() async {
