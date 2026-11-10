@@ -1169,15 +1169,18 @@ class _TimelineHeader extends StatelessWidget {
         final fx = layer.isFolder
             ? Tooltip(message: layer.busEnabled ? 'Folder with a group bus' : 'Folder',
                 child: SizedBox(width: 26, height: 26, child: Icon(Icons.account_tree_outlined, size: 15, color: color)))
-            : Tooltip(message: 'Effects', child: InkResponse(
+            : Tooltip(message: fxCount > 0 ? 'Effects ($fxCount)' : 'Effects', child: InkResponse(
                 key: ValueKey('fx-button-${layer.id}'),
                 radius: 20,
-                onTap: onFx,
-                child: SizedBox(width: 30, height: 26, child: Stack(alignment: Alignment.center, children: [
+                onTap: () {
+                  Haptics.tap();
+                  onFx();
+                },
+                child: Pressable(glow: color, child: SizedBox(width: 30, height: 26, child: Stack(alignment: Alignment.center, children: [
                   Icon(Icons.graphic_eq, size: 18, color: fxCount > 0 ? color : Neon.dim),
                   if (fxCount > 0) Positioned(right: 3, top: 2, child: Container(width: 5, height: 5,
                     decoration: BoxDecoration(color: color, shape: BoxShape.circle))),
-                ]))));
+                ])))));
         // The envelope button (REAPER's, UG 18.16): opens the track's automation lanes under it; lit while open,
         // a dot while they are closed but there are some.
         final laneCount = canHaveLanes(layer) ? arrangeLanes(state, layer).length : 0;

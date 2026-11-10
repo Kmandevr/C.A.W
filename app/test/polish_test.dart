@@ -8,12 +8,20 @@ import 'package:caw/model/settings.dart';
 import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/automation_screen.dart';
 import 'package:caw/ui/exporter_screen.dart';
+import 'package:caw/platform/haptics_device.dart';
 import 'package:caw/ui/frame/sections.dart';
+import 'package:caw/ui/haptics.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'golden_util.dart';
+
+class _Recorder implements HapticsDevice {
+  final played = <HapticKind>[];
+  @override
+  void play(HapticKind kind, double scale) => played.add(kind);
+}
 
 void main() {
   late AppState s;
@@ -54,6 +62,25 @@ void main() {
       await settle(tester);
       expect(s.project.layers, hasLength(1));
       expect(find.text('No tracks yet'), findsNothing);
+    });
+
+    testWidgets('mute, solo and the FX button are felt when tapped', (tester) async {
+      final rec = _Recorder();
+      Haptics.device = rec;
+      Haptics.reset();
+      addTearDown(() {
+        Haptics.device = const FlutterHaptics();
+        Haptics.reset();
+      });
+      await pumpArranger(tester, const Size(390, 844));
+      await tester.tap(find.byTooltip('Mute').first);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(rec.played, contains(HapticKind.tap));
+      expect(s.project.layers.first.mute, isTrue);
+      rec.played.clear();
+      await tester.tap(find.byKey(const ValueKey('fx-button-a')));
+      await settle(tester);
+      expect(rec.played, contains(HapticKind.tap));
     });
 
     testWidgets("on a phone the toolbar's fade shows there is more past its edge, and goes at the end", (tester) async {

@@ -11,6 +11,7 @@ import '../model/app_state.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'glass.dart';
+import 'haptics.dart';
 
 class NeonPanel extends StatelessWidget {
   const NeonPanel({super.key, required this.child, this.color, this.padding = const EdgeInsets.all(12)});
@@ -497,7 +498,10 @@ class ToggleChip extends StatelessWidget {
         message: tooltip ?? label,
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
-          onTap: onTap,
+          onTap: () {
+            Haptics.tap(); // M and S are felt, as every other press
+            onTap();
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             width: size,
