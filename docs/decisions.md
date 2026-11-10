@@ -19,6 +19,12 @@ updated: 2026-11-10
 - **A ducking plug-in** that works well ("there's literally no free one… that works well").
 - **The Builder** is clearer about being for writing code, and easier to navigate.
 - **Every screen** gets a polish pass for missing pieces, missing feedback and hard-to-use spots: super user friendly, and it looks cool.
+- **Clarified (owner):**
+  - The device that is confusing is the synth (the Flagship editor), not the EQ.
+  - Saved presets live in a global library on the device and can be exported as files.
+  - The public beta ships as a GitHub pre-release tagged `v1.0.0-beta.1` (APK and Windows zip).
+  - The .caw language is removed before the beta (#160), and project files use the .caw extension (#159).
+  - After this round the roadmap continues without the owner, who is asked only where a call is genuinely theirs.
 
 ## 2026-11-10: Release APK splits its Dart debug info out; no obfuscation (app performance pass)
 
@@ -42,6 +48,7 @@ updated: 2026-11-10
 - **Old projects migrate in the engine** (one mapping, in C++): a project or sample-pack request naming a retired synth plays Flagship with its preset and its knobs mapped; lanes move to the Flagship knob in the same units and are dropped otherwise (choice made for the owner: the retired synths existed for a day, and a lane on, say, the bass's `env` has no single Flagship knob). The app asks the engine for the same migration (`caw_migrate_instrument`) when it opens a project, so its knobs show Flagship's values. The retired synths' code is deleted; their sound survives as measured references (`kRetiredSynthReferences`) the presets are compared with.
 - **How close:** the mono and two-oscillator presets (Mono bass, Acid 303, Basic) are perceptually the same by the owner's bar (level within 0.5 dB, every band within 1 dB). Morph pad's unison starts each copy at a random phase, which neither synth repeats, so a 2 s render differs from the old one about as much as two old renders with another phase seed do: within 1.2 dB, bands within 2 dB RMS. A bright square through 16 kHz lacks the old polyBLEP square's aliases (up to 9 dB less between the harmonics). Numbers: [performance](performance.md#one-synth-2026-11-10).
 - **Quality** (owner-approved): Eco, Normal (default), High, in Settings › Engine: Eco caps unison at 4 copies, turns the saturator's oversampling off, thins the reverbs and halves the effects' display updates; High oversamples the saturator 4x. **The audio buffer** (owner-approved): Auto (default: a 1024-frame buffer while not recording, the smallest while recording), Low latency, Battery. Choices made for the owner, to confirm: the Eco cap of 4 copies, the 1024-frame size, and that Auto keeps AAudio's low-latency path and Battery leaves it.
+- **Second performance pass (choices made for the owner, under "perceptually the same"):** Flagship's poly voices whose filter 1 is set alike share one filter with their level before it (the Morph synth's way), and its oscillator phases move on in fixed point; both change bits inaudibly (every measured band within 0.01 dB), so the affected goldens were re-recorded. The First loop now costs what it did with the retired synths ([performance](performance.md#one-synth-2026-11-10)).
 - **Not built, with reasons** ([performance](performance.md#one-synth-2026-11-10)): tracks on several cores (a wake-up and barrier per 64-frame chunk cost about what a track's chunk does; it waits for a phone measurement), an Android performance-hint session (binder calls from the audio thread), flush-to-zero (the owner's decision is open).
 
 ## 2026-11-10: Owner feedback, evening round (owner)

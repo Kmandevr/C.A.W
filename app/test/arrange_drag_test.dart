@@ -330,6 +330,8 @@ void main() {
             } else {
               expect(made.effectIds, [kind.id]);
             }
+          case AssetKind.devicePreset || AssetKind.trackPreset:
+            fail('presets are tested in user_presets_test.dart');
         }
       });
     }

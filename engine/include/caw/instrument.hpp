@@ -243,7 +243,9 @@ public:
                 for (Voice& v : voices_)
                     if ((pass == 1 || !v.held) && (!pick || v.age < pick->age)) pick = &v;
         }
-        if (!pick->active) list_[live_++] = static_cast<uint16_t>(pick - voices_);
+        const uint32_t index = static_cast<uint32_t>(pick - voices_);
+        if (index >= touched_) touched_ = index + 1;
+        if (!pick->active) list_[live_++] = static_cast<uint16_t>(index);
         pick->active = true;
         pick->held = true;
         pick->noteId = noteId;
@@ -277,9 +279,12 @@ public:
     }
     Voice* begin() noexcept { return voices_; }
     Voice* end() noexcept { return voices_ + N; }
+    // Only the voices started since the last clear are not as new (a free voice is the first by index, so they
+    // are the first touched_): a Play doesn't rewrite the whole pool.
     void clear() noexcept {
-        for (Voice& v : voices_) v = Voice{};
+        for (uint32_t i = 0; i < touched_; ++i) voices_[i] = Voice{};
         live_ = 0;
+        touched_ = 0;
     }
 
 private:
@@ -298,6 +303,7 @@ private:
     Voice voices_[N]{};
     uint16_t list_[N]{};  // the sounding voices (and some found silent since), in the order they started
     uint32_t live_ = 0;
+    uint32_t touched_ = N;  // voices_[touched_..N) are as new (Voice{}); unknown at first
     uint64_t clock_ = 0;
 };
 

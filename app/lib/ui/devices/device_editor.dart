@@ -17,9 +17,12 @@ import 'device_registry.dart';
 import 'device_scope.dart';
 import 'kit/device_style.dart';
 import 'kit/feel.dart';
+import 'kit/preset_browser.dart';
 import 'kit/presets.dart';
 import 'visuals/mod_routing.dart';
 import 'visuals/mod_sheet.dart';
+
+export 'kit/preset_browser.dart' show DevicePresetChip, showPresetBrowser;
 
 /// True when [size] gets the floating window instead of the full-screen page.
 bool deviceEditorWindowed(Size size) => size.width >= 720 && size.height >= 520;
@@ -215,7 +218,7 @@ class _DeviceEditorState extends State<DeviceEditor> {
               style: TextStyle(fontSize: 9, color: color)),
           ])),
         if (bypass) ...[
-          DevicePresetChip(target: t, color: color),
+          DevicePresetChip(target: t, color: color, shortcuts: true),
           const SizedBox(width: 4),
           _ABSwitch(target: t, color: color),
           IconButton(
@@ -250,41 +253,6 @@ class _DeviceEditorState extends State<DeviceEditor> {
   }
 }
 
-/// The header's preset button: the current preset's name; a tap opens the browser.
-class DevicePresetChip extends StatelessWidget {
-  const DevicePresetChip({super.key, required this.target, required this.color, this.maxWidth = 150, this.chipKey});
-  final DeviceTarget target;
-  final Color color;
-  final double maxWidth;
-  final Key? chipKey;
-
-  @override
-  Widget build(BuildContext context) {
-    final name = DevicePresets.label(target);
-    return Flexible(child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: InkWell(
-      key: chipKey ?? const ValueKey('device-presets'),
-      borderRadius: BorderRadius.circular(15),
-      onTap: () {
-        DeviceFeel.tap();
-        showPresetBrowser(context, target, color);
-      },
-      child: Container(
-        height: 30,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(15), color: color.withValues(alpha: 0.1),
-          border: Border.all(color: color.withValues(alpha: 0.45))),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.bookmarks_outlined, size: 14, color: color),
-          const SizedBox(width: 5),
-          Flexible(child: Text(name, key: const ValueKey('device-preset-name'), maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
-          const Icon(Icons.arrow_drop_down, size: 16, color: Neon.dim),
-        ]),
-      ),
-    )));
-  }
-}
-
 /// The A/B compare switch.
 class _ABSwitch extends StatelessWidget {
   const _ABSwitch({required this.target, required this.color});
@@ -315,73 +283,6 @@ class _ABSwitch extends StatelessWidget {
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Neon.line)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [side('A', false), side('B', true)]),
     ));
-  }
-}
-
-/// The preset browser: categories as chips, presets as a list; a tap loads one (one undo step).
-Future<void> showPresetBrowser(BuildContext context, DeviceTarget target, Color color) {
-  return showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    backgroundColor: Neon.panel,
-    constraints: const BoxConstraints(maxWidth: 560),
-    builder: (context) => _PresetBrowser(target: target, color: color),
-  );
-}
-
-class _PresetBrowser extends StatefulWidget {
-  const _PresetBrowser({required this.target, required this.color});
-  final DeviceTarget target;
-  final Color color;
-
-  @override
-  State<_PresetBrowser> createState() => _PresetBrowserState();
-}
-
-class _PresetBrowserState extends State<_PresetBrowser> {
-  String? _category;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = widget.target;
-    final all = DevicePresets.of(t);
-    final cats = <String>{for (final p in all) if (p.category.isNotEmpty) p.category}.toList();
-    final shown = [for (final p in all) if (_category == null || p.category == _category) p];
-    final current = DevicePresets.label(t);
-    final colors = spectrumColors();
-    return SizedBox(height: MediaQuery.sizeOf(context).height * 0.6, child: Column(
-      key: const ValueKey('preset-browser'),
-      crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text('${t.label} presets',
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800))),
-      if (cats.length > 1) SizedBox(height: 40, child: ListView(scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-          for (final c in [null, ...cats]) Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(
-            label: Text(c ?? 'All', style: const TextStyle(fontSize: 11)),
-            selected: _category == c,
-            selectedColor: widget.color.withValues(alpha: 0.25),
-            onSelected: (_) => setState(() => _category = c))),
-        ])),
-      Expanded(child: ListView(padding: const EdgeInsets.only(bottom: 16), children: [
-        for (final p in shown)
-          ListTile(
-            key: ValueKey('preset-${p.name}'),
-            dense: true,
-            leading: Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle,
-              color: colors[(cats.indexOf(p.category) + 1) % colors.length])),
-            title: Text(p.name, style: TextStyle(fontSize: 13,
-              fontWeight: current.startsWith(p.name) ? FontWeight.w800 : FontWeight.w500)),
-            subtitle: p.category.isEmpty ? null : Text(p.category, style: const TextStyle(fontSize: 10, color: Neon.dim)),
-            trailing: current == p.name ? Icon(Icons.check, size: 18, color: widget.color) : null,
-            onTap: () {
-              DeviceFeel.tap();
-              DevicePresets.apply(t, p);
-              Navigator.of(context).maybePop();
-            },
-          ),
-      ])),
-    ]));
   }
 }
 
