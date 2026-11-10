@@ -15,6 +15,7 @@ import '../model/project.dart';
 import '../model/settings.dart';
 import 'arrange/arrange_drag.dart';
 import 'arrange/clip_bar.dart';
+import 'arrange/clip_preview.dart';
 import 'arrange/ruler.dart';
 import 'arrange/focus_panel.dart';
 import 'arrange/fx_stack.dart';
@@ -1406,6 +1407,7 @@ class _TimelineLaneState extends State<_TimelineLane> {
         Positioned(left: clip.startSteps * stepW, top: _clipInset(trackHeight),
           width: math.max(12.0, clip.lengthSteps * stepW), height: trackHeight - 2 * _clipInset(trackHeight),
           child: _TimelineClip(state: state, layer: layer, clip: clip, stepW: stepW, drag: widget.drag,
+            height: trackHeight - 2 * _clipInset(trackHeight),
             color: clip.color == null ? color : Neon.layer(clip.color!),
             selected: widget.selectedIds.contains(clip.id), callbacks: widget.callbacks)),
       if (_drawing case (final from, final to))
@@ -1569,11 +1571,12 @@ class _MarqueePainter extends CustomPainter {
 
 class _TimelineClip extends StatefulWidget {
   const _TimelineClip({required this.state, required this.layer, required this.clip,
-    required this.stepW, required this.color, required this.selected, required this.callbacks, this.drag});
+    required this.stepW, required this.color, required this.selected, required this.callbacks, this.drag,
+    this.height = 60});
   final AppState state;
   final LayerDoc layer;
   final ClipDoc clip;
-  final double stepW;
+  final double stepW, height;
   final Color color;
   final bool selected;
   final _TrackCallbacks callbacks;
@@ -1797,6 +1800,9 @@ class _TimelineClipState extends State<_TimelineClip> {
       length = end - start;
     }
     final name = _name;
+    // The notes sit under the name when the clip is tall enough for both, else they fill it.
+    final preview = MidiClipPreview.of(widget.state.project, c, stepW: widget.stepW,
+      top: widget.height >= 34 ? 15 : 1, color: Color.lerp(widget.color, Colors.white, 0.45)!.withValues(alpha: 0.9));
     // On the pinned track the clip itself slides in time; elsewhere its ghost shows where it goes and it stays dim.
     final shown = dragging && !sourceDragging && _drag == null ? (_moveTarget() - c.startSteps) * widget.stepW : 0.0;
     final ghosted = dragging && !sourceDragging && _drag != null && !_copy;
@@ -1862,12 +1868,15 @@ class _TimelineClipState extends State<_TimelineClip> {
                 child: Row(children: [
                   if (c.lock) Icon(Icons.lock, key: ValueKey('clip-locked-${c.id}'), size: 9, color: widget.color),
                   if (c.mute) Icon(Icons.volume_off, key: ValueKey('clip-muted-${c.id}'), size: 9, color: widget.color),
-                  Flexible(child: Text(c.loop ? 'MIDI · LOOP' : 'MIDI', maxLines: 1, overflow: TextOverflow.clip,
-                    style: TextStyle(color: widget.color.withValues(alpha: .8), fontSize: 8))),
+                  if (preview == null) Flexible(child: Text(c.loop ? 'MIDI · LOOP' : 'MIDI', maxLines: 1,
+                    overflow: TextOverflow.clip, style: TextStyle(color: widget.color.withValues(alpha: .8), fontSize: 8))),
                 ]))),
             ]),
           ),
         )))),
+        // The clip's notes as a mini piano roll (REAPER), from a cached picture of its pattern; under the edges.
+        if (preview != null) Positioned.fill(child: IgnorePointer(child: RepaintBoundary(
+          child: CustomPaint(key: ValueKey('clip-preview-${c.id}'), painter: ClipPreviewPainter(preview))))),
         // Both edges trim (REAPER: drag an item's edge): the left one moves the start and keeps the notes in time.
         _edge(left: true),
         _edge(left: false),
