@@ -1,10 +1,16 @@
 // The focus view's panel for one track (owner, 2026-11-09): tabs FX, Mixer, Clip and Automation, under or beside the tracks.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../model/app_state.dart';
 import '../../model/project.dart';
+import '../../model/settings.dart';
 import '../automation_screen.dart';
+import '../feedback.dart';
+import '../frame/frame_widgets.dart' show SlideIn;
 import '../glass.dart';
+import '../haptics.dart';
 import '../mixer_screen.dart';
 import '../pattern_editor.dart';
 import '../theme.dart';
@@ -226,4 +232,121 @@ class _ClipTab extends StatelessWidget {
       Expanded(child: PatternEditor(key: ValueKey('clip-${module.id}'), state: state, module: module)),
     ]);
   }
+}
+
+/// Landscape and desktop: the tracks with the focus panel on the right. On a phone in landscape the panel takes
+/// [Settings.focusPanelShare] of the width (two thirds by default, owner 2026-11-10) and its left edge drags: the
+/// edge grows when grabbed, a ghost shows where the panel will land with its share, it snaps to a half and two thirds
+/// with a tick, and the share is saved on release (double-tap: back to two thirds). Desktop keeps 34% (320 to 480 dp).
+class FocusSidePane extends StatefulWidget {
+  const FocusSidePane({super.key, required this.settings, required this.tracks, required this.panel, this.desktop = false});
+  final Settings settings;
+  final Widget tracks, panel;
+  final bool desktop;
+
+  /// The shares a drag snaps to, and how close (as a share) counts as on one.
+  static const snaps = [0.5, 2 / 3];
+  static const snapReach = 0.025;
+
+  /// The narrowest the tracks get beside the panel, in logical pixels.
+  static const minTracks = 120.0;
+
+  @override
+  State<FocusSidePane> createState() => _FocusSidePaneState();
+}
+
+class _FocusSidePaneState extends State<FocusSidePane> {
+  double? _from, _ghost; // the share at the drag's start, and where it would land now
+  double? _snap;
+
+  Settings get settings => widget.settings;
+
+  double _snapped(double share) {
+    for (final s in FocusSidePane.snaps) {
+      if ((share - s).abs() <= FocusSidePane.snapReach) return s;
+    }
+    return share;
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
+        final total = box.maxWidth;
+        final maxShare = ((total - FocusSidePane.minTracks) / total).clamp(0.0, Settings.maxFocusPanelShare);
+        double widthOf(double share) => (total * share.clamp(Settings.minFocusPanelShare, maxShare)).toDouble();
+        final w = widget.desktop
+            ? math.min((total * 0.34).clamp(320.0, 480.0).toDouble(), total - FocusSidePane.minTracks)
+            : widthOf(settings.focusPanelShare);
+        final pane = SizedBox(
+          width: w,
+          child: SlideIn(from: const Offset(0.12, 0), child: Padding(
+            padding: EdgeInsets.fromLTRB(widget.desktop ? 4 : 0, 0, 4, 4), child: widget.panel)),
+        );
+        if (widget.desktop) {
+          return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [Expanded(child: widget.tracks), pane]);
+        }
+        final ghost = _ghost;
+        final edge = DragEdge(
+          key: const ValueKey('focus-panel-edge'),
+          axis: Axis.horizontal,
+          label: 'Resize the panel',
+          thickness: 14,
+          hot: _snap != null,
+          onStart: () => setState(() {
+            _from = settings.focusPanelShare;
+            _ghost = _from;
+          }),
+          onDrag: (moved) {
+            final from = _from;
+            if (from == null) return;
+            final raw = (from - moved / total).clamp(Settings.minFocusPanelShare, maxShare).toDouble();
+            final at = _snapped(raw);
+            final snap = at == raw ? null : at;
+            if (snap != null && snap != _snap) Haptics.tick();
+            setState(() {
+              _ghost = at;
+              _snap = snap;
+            });
+          },
+          onEnd: () {
+            final at = _ghost;
+            setState(() => _from = _ghost = _snap = null);
+            if (at != null && at != settings.focusPanelShare) settings.update((s) => s.focusPanelShare = at);
+          },
+          onReset: () {
+            Haptics.tick();
+            settings.update((s) => s.focusPanelShare = Settings.defaultFocusPanelShare);
+          },
+        );
+        return Stack(children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Expanded(child: widget.tracks),
+            edge,
+            pane,
+          ]),
+          // Where the panel will land: a ghost of its edge and area, with its share, until the drag ends.
+          if (ghost != null)
+            Positioned(
+              key: const ValueKey('focus-panel-ghost'),
+              top: 0,
+              bottom: 4,
+              right: 4,
+              width: widthOf(ghost),
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Neon.blue.withValues(alpha: 0.08),
+                    border: Border(left: BorderSide(color: (_snap != null ? Neon.green : Neon.blue).withValues(alpha: 0.9), width: 2)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  alignment: Alignment.topCenter,
+                  padding: const EdgeInsets.only(top: 48),
+                  child: Text(
+                    _snap == 2 / 3 ? '⅔' : _snap == 0.5 ? '½' : '${(ghost * 100).round()}%',
+                    style: Neon.code(size: 13, color: _snap != null ? Neon.green : Neon.blue),
+                  ),
+                ),
+              ),
+            ),
+        ]);
+      });
 }

@@ -9,11 +9,14 @@ import 'package:caw/model/arrange_fx.dart';
 import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/settings.dart';
 import 'package:caw/ui/dock/dock_controller.dart';
+import 'package:caw/ui/dock/dock_view.dart';
 import 'package:caw/ui/dock/layout.dart';
 import 'package:caw/ui/frame/frame_widgets.dart';
 import 'package:caw/ui/frame/sections.dart';
+import 'package:caw/ui/haptics.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/shell.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -112,6 +115,12 @@ void main() {
       expect(formFactorFor(const Size(844, 330)), FormFactor.phoneLandscape);
       expect(formFactorFor(const Size(1280, 800)), FormFactor.desktop);
       expect(formFactorFor(const Size(800, 1280)), FormFactor.desktop, reason: 'a tablet in portrait');
+      expect(formFactorFor(const Size(915, 412)), FormFactor.phoneLandscape, reason: 'a wide phone stays a phone');
+      expect(formFactorFor(const Size(1000, 620)), FormFactor.desktop, reason: 'a DeX or freeform window');
+      expect(formFactorFor(const Size(390, 780), mode: LayoutMode.desktop), FormFactor.desktop);
+      expect(formFactorFor(const Size(844, 330), mode: LayoutMode.desktop), FormFactor.desktop);
+      expect(formFactorFor(const Size(1280, 800), mode: LayoutMode.phone), FormFactor.phoneLandscape);
+      expect(formFactorFor(const Size(800, 1280), mode: LayoutMode.phone), FormFactor.phonePortrait);
     });
   });
 
@@ -216,11 +225,18 @@ void main() {
     s.dispose();
   }, skip: skip);
 
-  testWidgets('scrolling the tracks down tucks the top bars away, scrolling up brings them back', (tester) async {
+  testWidgets('scrolling never hides the top bars; a deliberate pull on the grip does, and the tab brings them back',
+      (tester) async {
     final s = await startState(tester);
     for (var i = 0; i < 12; i++) {
       s.addLayer();
     }
+    final felt = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'HapticFeedback.vibrate') felt.add(call.arguments as String);
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
     tester.view.padding = const FakeViewPadding(top: 30, bottom: 20);
     await pumpGolden(tester, Shell(state: s), const Size(390, 844));
     final status = find.byKey(const ValueKey('project-menu'));
@@ -230,11 +246,53 @@ void main() {
     final tracks = find.byKey(ValueKey('track-header-${s.project.layers[3].id}'));
     await tester.drag(tracks, const Offset(0, -200));
     await tester.pumpAndSettle();
+    expect(tester.getTopLeft(status).dy, greaterThanOrEqualTo(30), reason: 'a scroll leaves the status row');
+    expect(tester.getTopLeft(toolbar).dy, top0, reason: 'and the toolbar');
+
+    // A short pull follows the finger, shows the hint, and springs back on release.
+    final grip = find.byKey(const ValueKey('bars-handle'));
+    expect(grip, findsOneWidget);
+    Haptics.reset();
+    final g = await tester.startGesture(tester.getCenter(grip));
+    await g.moveBy(const Offset(0, -12));
+    await g.moveBy(const Offset(0, -10));
+    await tester.pump();
+    expect(tester.getTopLeft(toolbar).dy, lessThan(top0), reason: 'the bars follow the finger');
+    expect(find.text('Pull up to hide the bars'), findsOneWidget);
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(toolbar).dy, top0, reason: 'short of the threshold it snaps back');
+
+    // Past the threshold: a tick, the hint changes, and letting go hides the bars.
+    Haptics.reset();
+    felt.clear();
+    final g2 = await tester.startGesture(tester.getCenter(grip));
+    await g2.moveBy(const Offset(0, -20));
+    await g2.moveBy(const Offset(0, -20));
+    await tester.pump();
+    expect(find.text('Let go to hide'), findsOneWidget);
+    expect(felt, containsAll(['HapticFeedbackType.lightImpact']), reason: 'a grab and a threshold tick');
+    await g2.up();
+    await tester.pumpAndSettle();
     expect(tester.getRect(status).bottom, lessThanOrEqualTo(31), reason: 'the status row tucked away');
     expect(tester.getTopLeft(toolbar).dy, lessThan(top0));
+    expect(find.byKey(const ValueKey('bars-tab')), findsOneWidget, reason: 'a slim tab stays to bring them back');
+
+    // Scrolling still changes nothing; the tab, tapped, brings the bars back.
     await tester.drag(tracks, const Offset(0, 120));
     await tester.pumpAndSettle();
+    expect(tester.getRect(status).bottom, lessThanOrEqualTo(31));
+    await tester.tap(find.byKey(const ValueKey('bars-handle')));
+    await tester.pumpAndSettle();
     expect(tester.getTopLeft(status).dy, greaterThanOrEqualTo(30));
+    expect(tester.getTopLeft(toolbar).dy, top0);
+
+    // And a pull down on the tab does too.
+    await tester.drag(find.byKey(const ValueKey('bars-handle')), const Offset(0, -60));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(status).bottom, lessThanOrEqualTo(31));
+    await tester.drag(find.byKey(const ValueKey('bars-handle')), const Offset(0, 60));
+    await tester.pumpAndSettle();
     expect(tester.getTopLeft(toolbar).dy, top0);
     s.dispose();
   }, skip: skip);
@@ -318,6 +376,67 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
     expect(find.text('Tap tempo'), findsNothing);
+    s.dispose();
+  }, skip: skip);
+
+  testWidgets('Settings › Layout switches the frame while running; desktop on a phone takes a mouse and keys',
+      (tester) async {
+    final s = await startState(tester);
+    s.history.reset(jsonEncode(s.project.toJson()));
+    await pumpGolden(tester, Shell(state: s), goldenSizes['phone']!);
+    expect(find.byType(SectionBar), findsOneWidget, reason: 'Auto on a phone: the phone frame');
+    expect(find.byType(DockView), findsNothing);
+
+    s.settings.layoutMode = LayoutMode.desktop;
+    s.settings.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.byType(DockView), findsOneWidget, reason: 'Desktop: docking panels on the phone');
+    expect(find.byType(SectionBar), findsNothing);
+    expect(find.byType(SectionRail), findsOneWidget);
+    expect(find.byKey(const ValueKey('arrange-toolbar')), findsOneWidget, reason: 'Arrange stays in front');
+    expect(tester.takeException(), isNull, reason: 'the transport bar fits a phone width');
+
+    // A mouse: hovering shows a tooltip, a right-click opens a track's menu.
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byTooltip('Play (Space)')));
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('Play (Space)'), findsOneWidget);
+    await mouse.moveTo(Offset.zero);
+    await tester.pumpAndSettle();
+    final header = find.byKey(ValueKey('track-header-${s.project.layers.first.id}'));
+    await tester.tapAt(tester.getCenter(header), buttons: kSecondaryButton, kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle();
+    expect(find.text('Rename'), findsOneWidget, reason: "a right-click opens the track's menu");
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Rename'), findsNothing);
+
+    // Keys: Ctrl+Z undoes.
+    final bpm = s.project.bpm;
+    s.editProject((p) => p.bpm = bpm + 10);
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(s.project.bpm, bpm);
+
+    // Back to the phone frame while running, on the same section; landscape too.
+    s.settings.layoutMode = LayoutMode.phone;
+    s.settings.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.byType(SectionBar), findsOneWidget);
+    expect(find.byKey(const ValueKey('arrange-toolbar')), findsOneWidget);
+    tester.view.physicalSize = goldenSizes['landscape']!;
+    s.settings.layoutMode = LayoutMode.desktop;
+    s.settings.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.byType(DockView), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    s.settings.layoutMode = LayoutMode.auto;
+    await tester.pump(const Duration(seconds: 1));
     s.dispose();
   }, skip: skip);
 

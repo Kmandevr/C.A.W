@@ -35,12 +35,15 @@ class SectionController extends ChangeNotifier {
   String? _focusedLayer;
   String? get focusedLayer => _focusedLayer;
 
-  /// The top bars (the status row, a section's toolbar): scrolling down tucks them away, scrolling up brings them
-  /// back (owner, 2026-11-10). A section change shows them again.
+  /// The top bars (the status row, Arrange's toolbar). They hide only on a deliberate pull of their handle
+  /// (owner, 2026-11-10: "Hide only on a deliberate pull"); scrolling never hides them.
   final ValueNotifier<bool> barsShown = ValueNotifier(true);
 
+  /// While the handle is pulled: how far the bars are toward hidden, from 0 (shown) to 1 (hidden), so they follow the
+  /// finger; null otherwise.
+  final ValueNotifier<double?> barsPull = ValueNotifier(null);
+
   void show(Section s) {
-    barsShown.value = true;
     if (_current == s) return;
     _current = s;
     notifyListeners();
@@ -49,6 +52,7 @@ class SectionController extends ChangeNotifier {
   @override
   void dispose() {
     barsShown.dispose();
+    barsPull.dispose();
     super.dispose();
   }
 

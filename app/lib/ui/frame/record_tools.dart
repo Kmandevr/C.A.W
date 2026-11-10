@@ -8,7 +8,8 @@ import '../../model/live_midi.dart';
 import '../../model/project.dart';
 import '../../model/settings.dart';
 import '../arrange/long_press_menu.dart';
-import '../motion.dart';
+import '../feedback.dart';
+import '../haptics.dart';
 import '../theme.dart';
 
 const _modeNames = {
@@ -61,7 +62,7 @@ class AutomateButton extends StatelessWidget {
                 key: const ValueKey('transport-automate'),
                 behavior: HitTestBehavior.opaque,
                 onTap: () {
-                  Motion.tick();
+                  Haptics.tap();
                   writer.setArmed(!armed);
                 },
                 onLongPressStart: (d) => _menu(context, d.globalPosition),
@@ -70,7 +71,7 @@ class AutomateButton extends StatelessWidget {
                   width: size,
                   height: size,
                   child: Center(
-                    child: AnimatedContainer(
+                    child: Pressable(glow: Neon.pink, radius: 6, child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       width: 30,
                       height: 24,
@@ -85,7 +86,7 @@ class AutomateButton extends StatelessWidget {
                         if (armed)
                           Text(letter, style: Neon.code(size: 9, color: hot ? Neon.bg : color).copyWith(fontWeight: FontWeight.w800)),
                       ]),
-                    ),
+                    )),
                   ),
                 ),
               ),
@@ -104,7 +105,7 @@ class KeysButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: midi,
-        builder: (context, _) => IconButton(
+        builder: (context, _) => Pressable(glow: Neon.blue, child: IconButton(
           key: const ValueKey('transport-keys'),
           tooltip: midi.keysOpen ? 'Hide the keys' : 'Keys and pads: play the selected track',
           iconSize: 19,
@@ -113,10 +114,10 @@ class KeysButton extends StatelessWidget {
           isSelected: midi.keysOpen,
           icon: const Icon(Icons.piano),
           onPressed: () {
-            Motion.tick();
+            Haptics.tap();
             midi.keysOpen = !midi.keysOpen;
           },
-        ),
+        )),
       );
 }
 

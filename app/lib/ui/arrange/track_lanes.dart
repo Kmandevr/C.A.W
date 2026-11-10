@@ -9,6 +9,8 @@ import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/automation_writer.dart';
 import '../../model/project.dart';
+import '../feedback.dart';
+import '../haptics.dart';
 import '../theme.dart';
 import '../volume_fader.dart' show VolumeTaper;
 
@@ -176,11 +178,11 @@ class TrackLaneHeaders extends StatelessWidget {
             Expanded(child: Text(lane.name, maxLines: 2, overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: lane.color))),
             // 32 px wide, a whole row high: a finger's target in a compact row.
-            SizedBox(width: 32, height: kLaneRowHeight, child: IconButton(
+            SizedBox(width: 32, height: kLaneRowHeight, child: Pressable(child: IconButton(
               key: ValueKey('lane-remove-${lane.key}'),
               padding: EdgeInsets.zero, tooltip: 'Remove lane', iconSize: 15,
               icon: const Icon(Icons.close, color: Neon.dim),
-              onPressed: lane.delete)),
+              onPressed: lane.delete))),
           ])),
       SizedBox(height: kLaneAddRowHeight, child: Padding(padding: EdgeInsets.only(left: 6 + indent),
         child: Align(alignment: Alignment.centerLeft, child: PopupMenuButton<String>(
@@ -254,6 +256,7 @@ class _LaneRowState extends State<LaneRow> {
     final p = lane.points[index];
     _grab = Offset(_x(p.step), _y(p.value));
     lane.state.beginAutomationGesture();
+    Haptics.grab();
   }
 
   void _pointMove(int index, DragUpdateDetails d) {
@@ -271,7 +274,10 @@ class _LaneRowState extends State<LaneRow> {
     }
   }
 
-  void _end() => lane.state.endAutomationGesture();
+  void _end() {
+    lane.state.endAutomationGesture();
+    Haptics.drop();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -309,7 +315,10 @@ class _LaneRowState extends State<LaneRow> {
             width: 24, height: 24,
             child: GestureDetector(key: ValueKey('lane-segment-${lane.key}-$i'), behavior: HitTestBehavior.opaque,
               dragStartBehavior: DragStartBehavior.down,
-              onVerticalDragStart: (_) => lane.state.beginAutomationGesture(),
+              onVerticalDragStart: (_) {
+                lane.state.beginAutomationGesture();
+                Haptics.grab();
+              },
               onVerticalDragUpdate: (d) => _segmentMove(i, d),
               onVerticalDragEnd: (_) => _end(),
               onVerticalDragCancel: _end,

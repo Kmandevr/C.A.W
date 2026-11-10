@@ -52,7 +52,10 @@ class _FloatingWindowState extends State<FloatingWindow> {
       height: _r.height * a.height,
       child: Listener(
         onPointerDown: (_) => widget.onRaise(),
+        // No blur: a floating window stays over live, repainting panels (the playhead, meters), where a backdrop
+        // blur would run again on every frame; it keeps the glass look with a denser tint.
         child: GlassOverlay(
+          blur: false,
           radius: Radii.m,
           padding: EdgeInsets.zero,
           child: Column(children: [

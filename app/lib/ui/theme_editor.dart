@@ -9,6 +9,7 @@ import '../engine/execution.dart';
 import '../model/problem_log.dart';
 import '../model/settings.dart';
 import '../version.dart';
+import 'haptics.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -54,6 +55,22 @@ class SettingsPage extends StatelessWidget {
               selected: {settings.density},
               onSelectionChanged: (v) => settings.update((s) => s.density = v.first),
             ),
+            ListTile(
+              leading: Icon(Icons.desktop_windows, color: Neon.green),
+              title: const Text('Layout'),
+              subtitle: Text(switch (settings.layoutMode) {
+                LayoutMode.auto => 'Auto: the desktop layout on a big window (DeX, an external display, a tablet)',
+                LayoutMode.phone => 'Phone: always the phone layout',
+                LayoutMode.desktop => 'Desktop: the rail, docking panels and floating windows, even on a phone',
+              }, style: TextStyle(color: Neon.dim)),
+            ),
+            SegmentedButton<LayoutMode>(
+              key: const ValueKey('settings-layout-mode'),
+              showSelectedIcon: false,
+              segments: [for (final m in LayoutMode.values) ButtonSegment(value: m, label: Text(m.label))],
+              selected: {settings.layoutMode},
+              onSelectionChanged: (v) => settings.update((s) => s.layoutMode = v.first),
+            ),
             const Heading('Motion and feel'),
             ListTile(
               leading: Icon(Icons.animation, color: Neon.violet),
@@ -75,12 +92,33 @@ class SettingsPage extends StatelessWidget {
               onSelectionChanged: (v) => settings.update((s) => s.motion = v.first),
             ),
             SwitchListTile(
+              key: const ValueKey('settings-haptics'),
               contentPadding: EdgeInsets.zero,
               secondary: Icon(Icons.vibration, color: Neon.blue),
-              title: const Text('Haptic ticks'),
-              subtitle: const Text('A light tick when something snaps or a note is placed (Android)'),
+              title: const Text('Haptics'),
+              subtitle: const Text('A light touch on presses, steps, snaps, grabs and drops'),
               value: settings.haptics,
               onChanged: (v) => settings.update((s) => s.haptics = v),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.vibration, color: Neon.dim),
+              title: Text('Haptic strength: ${(settings.hapticStrength * 100).round()}%'),
+              subtitle: ResetOnDoubleTap(
+                onReset: () => settings.update((s) => s.hapticStrength = Settings().hapticStrength),
+                child: Slider(
+                  key: const ValueKey('settings-haptic-strength'),
+                  value: settings.hapticStrength,
+                  divisions: 10,
+                  onChanged: settings.haptics ? (v) => settings.adjust((s) => s.hapticStrength = v) : null,
+                  // A tick at the new strength, so it can be felt.
+                  onChangeEnd: (_) {
+                    settings.save();
+                    Haptics.reset();
+                    Haptics.tap();
+                  },
+                ),
+              ),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,

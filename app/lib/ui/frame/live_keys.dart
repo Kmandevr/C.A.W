@@ -7,7 +7,7 @@ import '../../model/app_state.dart';
 import '../../model/live_midi.dart';
 import '../../model/project.dart';
 import '../arrange/track_color.dart';
-import '../motion.dart';
+import '../haptics.dart';
 import '../theme.dart';
 import 'frame_widgets.dart' show SlideIn;
 
@@ -106,7 +106,7 @@ class _LiveKeysPanelState extends State<LiveKeysPanel> {
           key: key,
           borderRadius: BorderRadius.circular(8),
           onTap: () {
-            Motion.tick();
+            Haptics.tap();
             tap();
           },
           child: Container(

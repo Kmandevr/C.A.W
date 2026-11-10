@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../model/app_state.dart';
 import '../model/files_catalog.dart';
+import 'frame/frame_widgets.dart' show AwakeListenableBuilder;
 import 'files/asset_actions.dart';
 import 'files/asset_inspector.dart';
 import 'files/asset_views.dart';
@@ -367,7 +368,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
+  // Asleep while Files is behind another section (frame_widgets.dart).
+  Widget build(BuildContext context) => AwakeListenableBuilder(
         listenable: state,
         builder: (context, _) => LayoutBuilder(builder: (context, c) {
           // A small docked panel in a landscape window still uses the drawer: the tree needs room beside the grid.

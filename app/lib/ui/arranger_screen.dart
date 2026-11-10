@@ -22,6 +22,8 @@ import 'arrange/fx_stack.dart';
 import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
 import 'frame/sections.dart';
+import 'feedback.dart' show GrabFeedback, GripMark, Pressable;
+import 'haptics.dart';
 import 'motion.dart';
 import 'param_control.dart';
 import 'theme.dart';
@@ -678,16 +680,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       });
     } else if (focused != null) {
       // Landscape and desktop: a right side panel; the tracks keep their full height.
-      body = LayoutBuilder(builder: (context, box) {
-        final w = layout == FocusLayout.side && MediaQuery.sizeOf(context).width >= 900
-            ? (box.maxWidth * 0.34).clamp(320.0, 480.0).toDouble()
-            : box.maxWidth * 0.4;
-        return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Expanded(child: _arrangement(context, callbacks)),
-          SizedBox(width: math.min(w, box.maxWidth - 120), child: SlideIn(from: const Offset(0.12, 0), child: Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4), child: panel(false)))),
-        ]);
-      });
+      // Its size is FocusSidePane's (focus_panel.dart): resizable on a phone, two thirds by default.
+      body = FocusSidePane(settings: s.settings, desktop: MediaQuery.sizeOf(context).width >= 900,
+        tracks: _arrangement(context, callbacks), panel: panel(false));
     } else {
       body = _arrangement(context, callbacks);
     }
@@ -1023,7 +1018,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             if (drag != null) SizedBox(width: width,
               child: NewTrackZone(key: drag.newTrackLane, state: s, drag: drag, height: zoneH, stepW: stepW)),
           ])),
-          Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<int>(
+          // A live island (widgets.dart): the line moves about 30 times a second while playing, and without it the
+          // timeline around it would lay out and repaint with it.
+          Positioned.fill(child: IgnorePointer(child: LiveIsland(child: ValueListenableBuilder<int>(
             valueListenable: s.tick,
             builder: (context, _, _) {
               // Stopped, a dimmer line shows where play starts and Split cuts (REAPER's edit cursor).
@@ -1031,7 +1028,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
               return CustomPaint(painter: _PlayheadPainter(stepW,
                 playing ? endPosition(s, p, s.meters.loopLength) : s.playheadStep, stopped: !playing));
             },
-          ))),
+          )))),
           if (!pinned) Positioned.fill(child: IgnorePointer(child: ValueListenableBuilder<Rect?>(
             valueListenable: _marquee,
             builder: (context, box, _) {
@@ -1165,13 +1162,16 @@ class _TimelineHeader extends StatelessWidget {
         Widget? lanesButton(double w, double h) => !canHaveLanes(layer) || onTrackDrag == null ? null : Tooltip(
           message: layer.showLanes ? 'Hide automation lanes' : 'Show automation lanes',
           child: InkResponse(key: ValueKey('lanes-button-${layer.id}'), radius: 18,
-            onTap: () => state.setLanesShown(layer, !layer.showLanes),
-            child: SizedBox(width: w, height: h, child: Stack(alignment: Alignment.center, children: [
+            onTap: () {
+              Haptics.tap();
+              state.setLanesShown(layer, !layer.showLanes);
+            },
+            child: Pressable(glow: Neon.blue, child: SizedBox(width: w, height: h, child: Stack(alignment: Alignment.center, children: [
               Icon(layer.showLanes ? Icons.keyboard_arrow_down : Icons.show_chart, size: math.min(17, h),
                 color: layer.showLanes ? Neon.blue : laneCount > 0 ? color : Neon.dim),
               if (!layer.showLanes && laneCount > 0) Positioned(right: 2, top: 2, child: Container(width: 5, height: 5,
                 decoration: const BoxDecoration(color: Neon.blue, shape: BoxShape.circle))),
-            ]))));
+            ])))));
         final top = SizedBox(height: thin ? 24 : 28, child: Row(children: [
           if (layer.isFolder)
             IconButton(padding: EdgeInsets.zero, constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
@@ -1310,22 +1310,21 @@ class _ResizeGrip extends StatefulWidget {
   State<_ResizeGrip> createState() => _ResizeGripState();
 }
 
-class _ResizeGripState extends State<_ResizeGrip> {
-  bool _active = false;
-
+class _ResizeGripState extends State<_ResizeGrip> with GrabFeedback {
   @override
   Widget build(BuildContext context) {
     final sideways = widget.axis == Axis.horizontal;
-    final line = Container(
-      width: sideways ? 2 : 22, height: sideways ? 22 : 2,
-      decoration: BoxDecoration(color: (_active ? Neon.blue : Neon.dim).withValues(alpha: _active ? 0.9 : 0.35),
-        borderRadius: BorderRadius.circular(1)));
-    void start() => setState(() => _active = true);
+    // The shared grip (feedback.dart): it grows and lights when grabbed, with a haptic grab and drop.
+    final line = GripMark(axis: widget.axis, grabbed: grabbed, hovered: hovered, length: 22,
+      restColor: Neon.dim.withValues(alpha: 0.35), restThickness: 2);
+    void start() => grab();
     void update(double d) => widget.onDrag(d);
-    void end() { setState(() => _active = false); widget.onEnd(); }
+    void end() { release(); widget.onEnd(); }
     return Semantics(label: widget.label, child: Tooltip(message: widget.label, waitDuration: const Duration(milliseconds: 600),
       child: MouseRegion(
         cursor: sideways ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
+        onEnter: (_) => hover(true),
+        onExit: (_) => hover(false),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           // The edge follows the finger from where it went down, slop included.

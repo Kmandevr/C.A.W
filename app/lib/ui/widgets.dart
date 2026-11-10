@@ -169,11 +169,31 @@ class TrackMeter extends StatelessWidget {
 
   LayerMeterValue? get _meter => index < state.layerMeters.length ? state.layerMeters[index] : null;
 
+  /// A sideways meter's height: two 5 dp bars and a gap, or one bar (drawn at least 7 dp tall with glass).
+  double get _sidewaysHeight => stereo ? 11 : Glass.active ? 7 : 4;
+
   @override
-  Widget build(BuildContext context) => stereo
-      ? PeakMeter(state: state, color: color, vertical: vertical,
-          read: () => _meter?.peakL ?? 0.0, readRight: () => _meter?.peakR ?? 0.0)
-      : PeakMeter(state: state, color: color, vertical: vertical, read: () => _meter?.peak ?? 0.0);
+  Widget build(BuildContext context) {
+    final meter = stereo
+        ? PeakMeter(state: state, color: color, vertical: vertical,
+            read: () => _meter?.peakL ?? 0.0, readRight: () => _meter?.peakR ?? 0.0)
+        : PeakMeter(state: state, color: color, vertical: vertical, read: () => _meter?.peak ?? 0.0);
+    // Sideways (a track header) it is a live island of a fixed size, so its 30 reads a second don't lay out and
+    // repaint the list of tracks around it.
+    return vertical ? meter : SizedBox(width: double.infinity, height: _sidewaysHeight, child: LiveIsland(child: meter));
+  }
+}
+
+/// Something that changes about 30 times a second (a meter, the playhead, a readout), kept to itself: it rebuilds,
+/// lays out and repaints alone. Give it a fixed size (tight constraints), which makes it a layout boundary; its own
+/// LayoutBuilder is the build scope its updates run in, so they don't make a LayoutBuilder higher up lay out the
+/// screen again (each LayoutBuilder is a build scope: a rebuild under it lays it out anew).
+class LiveIsland extends StatelessWidget {
+  const LiveIsland({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(child: LayoutBuilder(builder: (_, _) => child));
 }
 
 /// A peak meter for one layer, folder or the master, on a dB scale, REAPER-like: the bar rises at once to each

@@ -2,22 +2,25 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import '../../motion.dart';
+import '../../haptics.dart';
 
 /// What a haptic is for.
 enum DeviceFeelKind { grab, detent, tap, release }
 
-/// The single place device controls ask for haptics. The default is the app's light tick ([Motion.tick], which honours
-/// the haptics setting) on a grab, a detent and a tap, and nothing on release; the frame's shared haptics helper can
-/// replace [hook] to use the phone's finer primitives and its strength setting.
+/// The single place device controls ask for haptics. The default plays the app's semantic haptics ([Haptics]: the
+/// phone's fine primitives, the on/off and Strength settings, the rate limit): a grab, a detent's tick, a tap, and a
+/// drop on release.
 class DeviceFeel {
   DeviceFeel._();
 
   static void Function(DeviceFeelKind kind) hook = _default;
 
-  static void _default(DeviceFeelKind kind) {
-    if (kind != DeviceFeelKind.release) Motion.tick();
-  }
+  static void _default(DeviceFeelKind kind) => switch (kind) {
+        DeviceFeelKind.grab => Haptics.grab(),
+        DeviceFeelKind.detent => Haptics.tick(),
+        DeviceFeelKind.tap => Haptics.tap(),
+        DeviceFeelKind.release => Haptics.drop(),
+      };
 
   static void grab() => hook(DeviceFeelKind.grab);
   static void detent() => hook(DeviceFeelKind.detent);

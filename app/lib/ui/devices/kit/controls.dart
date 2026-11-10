@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../engine/component_info.dart';
+import '../../feedback.dart';
 import '../../motion.dart';
 import '../../theme.dart';
 import '../device_controls.dart';
@@ -48,7 +49,8 @@ class ModeTiles extends StatelessWidget {
               DeviceFeel.tap();
               t.set(p.id, p.min + k);
             },
-            child: AnimatedContainer(
+            // The frame's press feedback (feedback.dart): a dip and a glow while held.
+            child: Pressable(glow: c, child: AnimatedContainer(
               duration: Motion.fade(Motion.small, Motion.of(context)),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(10),
@@ -62,7 +64,7 @@ class ModeTiles extends StatelessWidget {
                   maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9.5, letterSpacing: 0.3,
                     fontWeight: FontWeight.w800, color: k == sel ? Neon.text : Neon.dim))),
               ]),
-            ),
+            )),
           ),
         ))),
     ]));
@@ -124,7 +126,7 @@ class DeviceToggle extends StatelessWidget {
           DeviceFeel.tap();
           t.set(p.id, on ? p.min : p.max);
         },
-        child: AnimatedContainer(
+        child: Pressable(glow: c, radius: 18, child: AnimatedContainer(
           duration: Motion.fade(Motion.small, Motion.of(context)),
           height: 36,
           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -139,7 +141,7 @@ class DeviceToggle extends StatelessWidget {
             Text((label ?? p.label).toUpperCase(), style: TextStyle(fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.w800,
               color: on ? Neon.text : Neon.dim)),
           ]),
-        ),
+        )),
       ),
     );
   }

@@ -11,6 +11,7 @@ import '../model/cpp_workbench.dart';
 import '../model/automation_writer.dart';
 import '../model/live_midi.dart';
 import '../model/app_state.dart';
+import '../model/settings.dart';
 import '../platform/system_bars.dart';
 import 'arranger_screen.dart';
 import 'exporter_screen.dart';
@@ -28,7 +29,10 @@ import 'key_router.dart';
 import 'theme.dart';
 import 'theme_editor.dart';
 import 'widgets.dart';
+import 'feedback.dart';
 import 'glass.dart';
+import 'haptics.dart';
+import 'frame/bars_handle.dart';
 import 'frame/frame_widgets.dart';
 import 'frame/live_keys.dart';
 import 'frame/record_tools.dart';
@@ -55,13 +59,16 @@ Area _areaOf(String panel) => switch (panel) {
       _ => Area.global,
     };
 
-/// The screen shape that keeps its own layout, from the shell's size. Tablets (shortest side 600 dp or more) get the
-/// desktop layout with touch (owner, 2026-11-09).
-FormFactor formFactorFor(Size size) => size.width >= 900 || size.shortestSide >= 600
-    ? FormFactor.desktop
-    : size.width > size.height
-        ? FormFactor.phoneLandscape
-        : FormFactor.phonePortrait;
+/// The screen shape that keeps its own layout, from the shell's size in logical pixels (the window's pixels over its
+/// density, so a DeX window, an external display or a freeform window counts by its real room, not by the device).
+/// [LayoutMode.auto]: the desktop frame when the window is big enough (a shortest side of 600 dp, as a tablet, owner
+/// 2026-11-09; or 900 dp wide and 480 dp tall, so a phone in landscape stays a phone). [LayoutMode.desktop] forces
+/// it and [LayoutMode.phone] never uses it (owner, 2026-11-10).
+FormFactor formFactorFor(Size size, {LayoutMode mode = LayoutMode.auto}) {
+  final big = size.shortestSide >= 600 || (size.width >= 900 && size.height >= 480);
+  if (mode == LayoutMode.desktop || (mode == LayoutMode.auto && big)) return FormFactor.desktop;
+  return size.width > size.height ? FormFactor.phoneLandscape : FormFactor.phonePortrait;
+}
 
 /// The section a docked panel belongs to (the rail highlights it), or null for the others.
 Section? sectionOfPanel(String panel) => switch (panel) {
@@ -100,9 +107,17 @@ class _ShellState extends State<Shell> {
 
   AppState get s => widget.state;
 
+  // Settings › Layout, followed while running.
+  late LayoutMode _layoutMode = s.settings.layoutMode;
+
+  void _onSettings() {
+    if (s.settings.layoutMode != _layoutMode && mounted) setState(() => _layoutMode = s.settings.layoutMode);
+  }
+
   @override
   void initState() {
     super.initState();
+    s.settings.addListener(_onSettings);
     _sections.addListener(_onSection);
     _life = AppLifecycleListener(
       onPause: () {
@@ -123,6 +138,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    s.settings.removeListener(_onSettings);
     _life.dispose();
     _dock.dispose();
     _sections.removeListener(_onSection);
@@ -136,6 +152,26 @@ class _ShellState extends State<Shell> {
     if (now == _lastSection) return;
     _lastSection = now;
     if (_dock.form == FormFactor.desktop) _dock.reveal(panelOfSection(now));
+  }
+
+  /// A change of frame while running (Settings › Layout, a rotation, a window or display change): the section in
+  /// front stays in front. Desktop shows its docked panel; a phone shows the section of the panel last used.
+  void _switchForm(FormFactor form) {
+    final was = _dock.form;
+    _dock.form = form;
+    if (!_homeShown) return;
+    // After this frame: both notify listeners that are being built now.
+    if (form == FormFactor.desktop) {
+      final section = _sections.current;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _dock.form == FormFactor.desktop) _dock.reveal(panelOfSection(section));
+      });
+    } else if (was == FormFactor.desktop) {
+      final section = sectionOfPanel(_dock.keyPanel);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && section != null && _dock.form != FormFactor.desktop) _sections.show(section);
+      });
+    }
   }
 
   /// Opens the selected .caw module in Build (the older screens' "open in Builder").
@@ -208,7 +244,10 @@ class _ShellState extends State<Shell> {
                   body: Builder(builder: (context) {
                     final pad = MediaQuery.paddingOf(context);
                     return LayoutBuilder(builder: (context, box) {
-                      _dock.form = formFactorFor(pad.deflateSize(box.biggest));
+                      final room = pad.deflateSize(box.biggest);
+                      final form = formFactorFor(room, mode: _layoutMode);
+                      _dock.narrow = formFactorFor(room) != FormFactor.desktop;
+                      if (form != _dock.form) _switchForm(form);
                       SystemBars.apply(fullScreen: _dock.form == FormFactor.phoneLandscape);
                       if (!_homeShown) {
                         _homeShown = true;
@@ -238,6 +277,11 @@ class _ShellState extends State<Shell> {
         },
       );
 
+  /// What the transport shows from the app state: it rebuilds only when one of these changes (frame_widgets.dart,
+  /// Selected), not on every app-state change.
+  Object _transportLook() => (s.transportOn, s.canUndo, s.canRedo, s.pausedStep, s.project, s.project.bpm,
+      s.project.name, LiveMidi.current, AutomationWriter.current);
+
   Widget? _banner() => s.engineError != null || s.audioError != null || s.openError != null
       ? Container(
           width: double.infinity,
@@ -249,16 +293,19 @@ class _ShellState extends State<Shell> {
 
   /// Desktop and tablets: the rail, the transport bar and the docking panels.
   Widget _desktop(BuildContext context, Map<String, Widget> screens) => Row(children: [
-        SectionRail(
-          current: sectionOfPanel(_dock.keyPanel),
-          onSelect: (section) {
-            _sections.show(section);
-            _dock.reveal(panelOfSection(section));
-          },
+        Selected(
+          select: () => sectionOfPanel(_dock.keyPanel),
+          builder: (_) => SectionRail(
+            current: sectionOfPanel(_dock.keyPanel),
+            onSelect: (section) {
+              _sections.show(section);
+              _dock.reveal(panelOfSection(section));
+            },
+          ),
         ),
         Expanded(
           child: Column(children: [
-            _TransportBar(state: s, dock: _dock),
+            Selected(select: _transportLook, builder: (_) => _TransportBar(state: s, dock: _dock)),
             ?_banner(),
             Expanded(
               child: LayoutBuilder(
@@ -302,32 +349,36 @@ class _ShellState extends State<Shell> {
   /// Phones: one section at a time. Portrait has the status row on top and the transport and section bar at the
   /// bottom (both hide while the keyboard is open); landscape has a narrow rail on the left with the project and More,
   /// the tempo and CPU in the transport, and no status row, so the tracks get the height (owner, 2026-11-10). The
-  /// top bars tuck away while the content scrolls down and come back when it scrolls up.
+  /// top bars hide when their grip is pulled up and come back when it is pulled down (or its tab tapped).
   Widget _phone(BuildContext context, Map<String, Widget> screens, EdgeInsets pad, {required bool landscape}) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     // The content is padded clear of the edges here, so the screens inside see no padding of their own.
-    final body = MediaQuery.removePadding(
+    final content = MediaQuery.removePadding(
       context: context,
       removeLeft: true,
       removeTop: true,
       removeRight: true,
       removeBottom: true,
-      child: NotificationListener<ScrollUpdateNotification>(
-        onNotification: _onScroll,
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (_) {
-            if (_reach) setState(() => _reach = false);
-          },
-          child: SectionSwitcher(
-            index: sectionOrder.indexOf(_sections.current),
-            children: [
-              for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
-            ],
-          ),
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) {
+          if (_reach) setState(() => _reach = false);
+        },
+        child: SectionSwitcher(
+          index: sectionOrder.indexOf(_sections.current),
+          children: [
+            for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
+          ],
         ),
       ),
     );
+    // The top bars hide only on a deliberate pull of this grip (owner, 2026-11-10); in landscape only Arrange has a
+    // bar to hide (its toolbar). It hides while the keyboard is open, which keeps the bars shown.
+    final grip = !keyboard && !_reach && (!landscape || _sections.current == Section.arrange);
+    final body = !grip ? content : Stack(children: [
+      Positioned.fill(child: content),
+      Positioned(top: 0, left: 0, right: 0, child: Center(child: BarsHandle(sections: _sections))),
+    ]);
     if (landscape) {
       final small = IconButton.styleFrom(iconSize: 18, visualDensity: VisualDensity.compact,
           minimumSize: const Size(34, 34), padding: const EdgeInsets.all(6));
@@ -335,10 +386,10 @@ class _ShellState extends State<Shell> {
         // Compact landscape: smaller icons and denser controls everywhere in it.
         data: Theme.of(context).copyWith(
           visualDensity: VisualDensity.compact,
-          iconButtonTheme: IconButtonThemeData(style: small),
+          iconButtonTheme: IconButtonThemeData(style: small.merge(Theme.of(context).iconButtonTheme.style)),
         ),
         child: Row(children: [
-          SectionRail(
+          Selected(select: () => (_sections.current, pad, s.project.name), builder: (_) => SectionRail(
             compact: true,
             inset: EdgeInsets.only(left: pad.left, top: pad.top, bottom: pad.bottom),
             current: _sections.current,
@@ -348,24 +399,24 @@ class _ShellState extends State<Shell> {
               child: InkWell(
                 key: const ValueKey('project-menu'),
                 onTap: () => showProjectMenu(context, s),
-                child: const SizedBox(height: 40, child: Center(child: CrowLogo(size: 22))),
+                child: const Pressable(child: SizedBox(height: 40, child: Center(child: CrowLogo(size: 22)))),
               ),
             ),
-            bottom: IconButton(
+            bottom: Pressable(child: IconButton(
               key: const ValueKey('more-tools'),
               tooltip: 'More: mixer, automation, export…',
               color: Neon.dim,
               icon: const Icon(Icons.more_vert),
               onPressed: () => _showTools(context),
-            ),
-          ),
+            )),
+          )),
           Expanded(
             child: Column(children: [
               SizedBox(height: pad.top),
               ?_banner(),
               Expanded(child: Padding(padding: EdgeInsets.only(right: pad.right), child: body)),
               if (!keyboard)
-                BottomTransport(
+                Selected(select: () => (_transportLook(), pad), builder: (_) => BottomTransport(
                   state: s,
                   midi: LiveMidi.current,
                   compact: true,
@@ -376,13 +427,14 @@ class _ShellState extends State<Shell> {
                     _CpuReadout(state: s),
                     const SizedBox(width: 8),
                   ],
-                ),
+                )),
             ]),
           ),
         ]),
       );
     }
-    final status = _StatusRow(state: s, onTools: () => _showTools(context));
+    final status = Selected(select: () => (s.project, s.project.name, s.project.bpm),
+        builder: (_) => _StatusRow(state: s, onTools: () => _showTools(context)));
     final bar = Glass.active ? Neon.panel.withValues(alpha: 0.6) : Neon.panel;
     return Column(children: [
       // The system status bar's strip keeps the bar colour; the status row tucks away under it.
@@ -397,22 +449,12 @@ class _ShellState extends State<Shell> {
       Expanded(child: Padding(padding: EdgeInsets.only(left: pad.left, right: pad.right), child: body)),
       if (_reach) status,
       if (!keyboard) ...[
-        BottomTransport(state: s, midi: LiveMidi.current, inset: EdgeInsets.only(left: pad.left, right: pad.right)),
-        SectionBar(sections: _sections, bottomInset: pad.bottom, onReach: () => setState(() => _reach = true)),
+        Selected(select: () => (_transportLook(), pad), builder: (_) =>
+            BottomTransport(state: s, midi: LiveMidi.current, inset: EdgeInsets.only(left: pad.left, right: pad.right))),
+        Selected(select: () => (_sections.current, pad.bottom), builder: (_) =>
+            SectionBar(sections: _sections, bottomInset: pad.bottom, onReach: () => setState(() => _reach = true))),
       ],
     ]);
-  }
-
-  /// Scrolling down by hand tucks the top bars away; scrolling up, or reaching the top, brings them back.
-  bool _onScroll(ScrollUpdateNotification n) {
-    if (n.metrics.axis != Axis.vertical || n.dragDetails == null) return false;
-    final d = n.scrollDelta ?? 0;
-    if (n.metrics.pixels <= n.metrics.minScrollExtent || d < -6) {
-      _sections.barsShown.value = true;
-    } else if (d > 6 && n.metrics.pixels > n.metrics.minScrollExtent + 24) {
-      _sections.barsShown.value = false;
-    }
-    return false;
   }
 
   /// The phone's other workspaces (the mixer, automation, export, the engine lab, the .caw plugin builder).
@@ -495,12 +537,24 @@ class _CpuReadout extends StatelessWidget {
   final AppState state;
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<int>(
-        valueListenable: state.tick,
-        builder: (context, _, _) {
-          final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-          return Text('CPU $cpu%', style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim));
-        },
+  Widget build(BuildContext context) => SizedBox(
+        // A live island (widgets.dart) of a fixed size: read about 30 times a second while playing, it rebuilds, lays
+        // out and repaints alone, not the bar around it.
+        width: 58,
+        height: 16,
+        child: LiveIsland(
+          child: ValueListenableBuilder<int>(
+            valueListenable: state.tick,
+            builder: (context, _, _) {
+              final cpu = (state.meters.cpu * 100).clamp(0, 999).toStringAsFixed(0);
+              return Align(
+                alignment: Alignment.centerRight,
+                child: Text('CPU $cpu%', maxLines: 1, softWrap: false,
+                    style: Neon.code(size: 11, color: state.meters.cpu > 0.85 ? Neon.pink : Neon.dim)),
+              );
+            },
+          ),
+        ),
       );
 }
 
@@ -578,99 +632,117 @@ class _TransportBar extends StatelessWidget {
               border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
             )
           : const BoxDecoration(color: Neon.panel, border: Border(bottom: BorderSide(color: Neon.line))),
-      child: Row(children: [
-        const CrowLogo(size: 30),
-        const SizedBox(width: 8),
-        Expanded(
-          child: InkWell(
-            onTap: () => showProjectMenu(context, state),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              const Text('C.A.W', style: TextStyle(fontSize: 11, letterSpacing: 2, color: Neon.dim, fontWeight: FontWeight.w800)),
-              Row(children: [
-                Flexible(
-                  child: Text(p.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      // Desktop on a phone (Settings › Layout) can make the bar narrow: the project name then keeps a modest width and
+      // the readouts and buttons scroll sideways instead of overflowing.
+      child: LayoutBuilder(builder: (context, box) {
+        final narrow = box.maxWidth < 720;
+        Widget name(Widget c) =>
+            narrow ? ConstrainedBox(constraints: const BoxConstraints(maxWidth: 120), child: c) : Expanded(child: c);
+        final tail = <Widget>[
+          Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+            _BpmButton(state: state),
+            // The position and CPU change about 30 times a second while playing: a live island (widgets.dart).
+            SizedBox(width: 170, height: 15, child: LiveIsland(child: ValueListenableBuilder<int>(
+              valueListenable: state.tick,
+              builder: (context, _, _) {
+                final m = state.meters;
+                final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
+                // Paused, it shows where play will resume.
+                return Align(alignment: Alignment.centerRight, child: Text(maxLines: 1, softWrap: false, m.playing
+                    ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
+                    : state.pausedStep != null
+                        ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
+                          ' · CPU $cpu%'
+                    : 'CPU $cpu%',
+                    style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)));
+              },
+            ))),
+          ]),
+          // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
+          Pressable(child: IconButton(
+            key: const ValueKey('transport-undo'),
+            tooltip: 'Undo (Ctrl+Z)',
+            color: Neon.text,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.undo),
+            onPressed: state.canUndo ? state.undo : null,
+          )),
+          Pressable(child: IconButton(
+            key: const ValueKey('transport-redo'),
+            tooltip: 'Redo (Ctrl+Shift+Z)',
+            color: Neon.text,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.redo),
+            onPressed: state.canRedo ? state.redo : null,
+          )),
+          Pressable(child: IconButton(
+            tooltip: 'Layout and panels',
+            color: Neon.dim,
+            icon: const Icon(Icons.dashboard_customize),
+            onPressed: () => showLayoutMenu(context, dock),
+          )),
+          if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
+          if (LiveMidi.current case final m?) KeysButton(midi: m),
+          // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
+          if (playing || state.pausedStep != null) Pressable(child: IconButton(
+            key: const ValueKey('transport-stop'),
+            tooltip: 'Stop, back to the start (Shift+Space)',
+            color: Neon.green,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+            icon: const Icon(Icons.stop),
+            onPressed: state.stopPlayback,
+          )),
+          Tooltip(
+            message: playing ? 'Pause (Space)' : state.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(28),
+              onTap: () {
+                Haptics.tap();
+                state.togglePlay();
+              },
+              child: Pressable(circle: true, child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: playing ? Neon.green : Colors.transparent,
+                  border: Border.all(color: Neon.green, width: 2),
+                  boxShadow: Neon.glow(Neon.green, strength: playing ? 0.8 : 0.3),
                 ),
-                const Icon(Icons.arrow_drop_down, color: Neon.dim),
-              ]),
-            ]),
-          ),
-        ),
-        ValueListenableBuilder<int>(
-          valueListenable: state.tick,
-          builder: (context, _, _) {
-            final m = state.meters;
-            final cpu = (m.cpu * 100).clamp(0, 999).toStringAsFixed(0);
-            return Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-              _BpmButton(state: state),
-              // Paused, it shows where play will resume.
-              Text(m.playing
-                  ? '${transportPosition(m.position, m.loopLength, p.engineLoopSteps, p.stepsPerBar)} · CPU $cpu%'
-                  : state.pausedStep != null
-                      ? '${transportPosition(state.pausedStep!, p.engineLoopSteps, p.engineLoopSteps, p.stepsPerBar)} paused'
-                        ' · CPU $cpu%'
-                  : 'CPU $cpu%',
-                  style: Neon.code(size: 11, color: m.cpu > 0.85 ? Neon.pink : Neon.dim)),
-            ]);
-          },
-        ),
-        // Undo and redo of project edits (Ctrl+Z, Ctrl+Shift+Z); an editor with its own history keeps its keys.
-        IconButton(
-          key: const ValueKey('transport-undo'),
-          tooltip: 'Undo (Ctrl+Z)',
-          color: Neon.text,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.undo),
-          onPressed: state.canUndo ? state.undo : null,
-        ),
-        IconButton(
-          key: const ValueKey('transport-redo'),
-          tooltip: 'Redo (Ctrl+Shift+Z)',
-          color: Neon.text,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.redo),
-          onPressed: state.canRedo ? state.redo : null,
-        ),
-        IconButton(
-          tooltip: 'Layout and panels',
-          color: Neon.dim,
-          icon: const Icon(Icons.dashboard_customize),
-          onPressed: () => showLayoutMenu(context, dock),
-        ),
-        if (AutomationWriter.current case final w?) AutomateButton(writer: w, state: state, size: 40),
-        if (LiveMidi.current case final m?) KeysButton(midi: m),
-        // Only while there is somewhere to stop from, so a phone's transport keeps room for the project name.
-        if (playing || state.pausedStep != null) IconButton(
-          key: const ValueKey('transport-stop'),
-          tooltip: 'Stop, back to the start (Shift+Space)',
-          color: Neon.green,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
-          icon: const Icon(Icons.stop),
-          onPressed: state.stopPlayback,
-        ),
-        Tooltip(
-          message: playing ? 'Pause (Space)' : state.pausedStep != null ? 'Resume (Space)' : 'Play (Space)',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(28),
-            onTap: state.togglePlay,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: playing ? Neon.green : Colors.transparent,
-                border: Border.all(color: Neon.green, width: 2),
-                boxShadow: Neon.glow(Neon.green, strength: playing ? 0.8 : 0.3),
-              ),
-              child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
+                child: Icon(playing ? Icons.pause : Icons.play_arrow, color: playing ? Neon.bg : Neon.green, size: 30),
+              )),
             ),
           ),
-        ),
-        RecordButton(midi: LiveMidi.current, state: state),
-      ]),
+          RecordButton(midi: LiveMidi.current, state: state),
+        ];
+        return Row(children: [
+          const CrowLogo(size: 30),
+          const SizedBox(width: 8),
+          name(
+            InkWell(
+              onTap: () => showProjectMenu(context, state),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                const Text('C.A.W', style: TextStyle(fontSize: 11, letterSpacing: 2, color: Neon.dim, fontWeight: FontWeight.w800)),
+                Row(children: [
+                  Flexible(
+                    child: Text(p.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  ),
+                  const Icon(Icons.arrow_drop_down, color: Neon.dim),
+                ]),
+              ]),
+            ),
+          ),
+          if (narrow)
+            Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, reverse: true,
+                child: Row(mainAxisSize: MainAxisSize.min, children: tail)))
+          else
+            ...tail,
+        ]);
+      }),
     );
   }
 }

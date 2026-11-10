@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
+import 'haptics.dart';
 import 'motion.dart';
 import 'theme.dart';
 import 'tokens.dart';
@@ -94,15 +95,20 @@ class GlassPanel extends StatelessWidget {
 /// behind it under a see-through tint, or with blur off a denser tint, a top highlight and a bright edge. With
 /// glass off: the solid raised panel colour.
 class GlassOverlay extends StatelessWidget {
-  const GlassOverlay({super.key, required this.child, this.radius = Radii.l, this.padding = EdgeInsets.zero});
+  const GlassOverlay({super.key, required this.child, this.blur = true, this.radius = Radii.l, this.padding = EdgeInsets.zero});
 
   final Widget child;
   final double radius;
   final EdgeInsetsGeometry padding;
 
+  /// False for a surface that stays up over live content (a floating window): the glass look without the backdrop
+  /// blur, which would be recomputed on every frame something under it repaints.
+  final bool blur;
+
   @override
   Widget build(BuildContext context) {
     final r = BorderRadius.circular(radius);
+    final blurred = blur && Glass.blur;
     if (!Glass.active) {
       return DecoratedBox(
         decoration: BoxDecoration(
@@ -117,7 +123,7 @@ class GlassOverlay extends StatelessWidget {
       );
     }
     final body = DecoratedBox(
-      decoration: Glass.blur
+      decoration: blurred
           ? BoxDecoration(
               borderRadius: r,
               color: Neon.panelHi.withValues(alpha: 0.55),
@@ -128,7 +134,7 @@ class GlassOverlay extends StatelessWidget {
     );
     return ClipRRect(
       borderRadius: r,
-      child: Glass.blur
+      child: blurred
           ? BackdropFilter(filter: ui.ImageFilter.blur(sigmaX: Glass.blurSigma, sigmaY: Glass.blurSigma), child: body)
           : body,
     );
@@ -213,6 +219,7 @@ Future<T?> showGlassSheet<T>({
   BoxConstraints? constraints,
 }) {
   final glass = Glass.active;
+  Haptics.tap(); // a sheet opening is felt too
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,
