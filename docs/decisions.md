@@ -6,6 +6,14 @@ updated: 2026-11-10
 
 # Decisions
 
+## 2026-11-10: A complete built-in suite with visual device UIs (owner)
+
+**Decision (owner):** the effects get the flagship synth's treatment, "everything you would need to make something, already built in" (#173).
+- **Engine, in this order:** a parametric EQ, a compressor with sidechain, a master limiter, full reverb and delay, multi-mode saturation, then the rest of a stock kit.
+- **Look:** every device's UI is "completely visual, fun to use and easy to use". Today's knob pages are "strictly a fallback if there's no UI built in".
+- **Where it opens:** on the phone a device opens as a full-screen editor with tabs for its sections.
+- **The flagship synth** gets its visual UI in the same work, mod matrix included.
+
 ## 2026-11-10: The arranger works like REAPER's (owner)
 
 **Decision (owner):** "I would like the arranger to work like REAPER… Look at how REAPER does it and we're going to copy them" (#172). It covers:
