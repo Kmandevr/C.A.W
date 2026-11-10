@@ -31,23 +31,34 @@ BoxDecoration _barDecoration({required bool top}) {
   );
 }
 
-/// A bar that tucks away upwards when [shown] turns false and slides back down when it turns true (a short slide;
-/// at once when motion is reduced or off).
+/// A top bar that tucks away upwards when [shown] turns false and slides back down when it turns true (a short
+/// slide; at once when motion is reduced or off). While the bars' handle is pulled it follows the finger, fading as it
+/// goes ([SectionController.barsPull]).
 class TuckAway extends StatelessWidget {
   const TuckAway({super.key, required this.shown, required this.child});
   final bool shown;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => ClipRect(
+  Widget build(BuildContext context) {
+    final pull = SectionController.maybeOf(context)?.barsPull;
+    Widget at(double? p) {
+      final hidden = p ?? (shown ? 0.0 : 1.0);
+      return ClipRect(
         child: AnimatedAlign(
-          duration: Motion.move(Motion.standard, Motion.of(context)),
+          duration: p != null ? Duration.zero : Motion.move(Motion.standard, Motion.of(context)),
           curve: Curves.easeOutCubic,
           alignment: Alignment.bottomCenter,
-          heightFactor: shown ? 1 : 0,
-          child: child,
+          heightFactor: 1 - hidden,
+          child: Opacity(opacity: (1 - 0.7 * hidden).clamp(0.0, 1.0), child: child),
         ),
       );
+    }
+
+    // A bar held open (the keyboard is up, a setting is showing) doesn't follow a pull.
+    if (pull == null || shown && !(SectionController.maybeOf(context)?.barsShown.value ?? true)) return at(null);
+    return ValueListenableBuilder<double?>(valueListenable: pull, builder: (context, p, _) => at(p));
+  }
 }
 
 /// The phone's bottom bar: Build, Files, Arrange. A downward drag on it brings the top row within reach.

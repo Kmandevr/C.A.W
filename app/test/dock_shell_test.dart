@@ -12,6 +12,7 @@ import 'package:caw/ui/dock/dock_controller.dart';
 import 'package:caw/ui/dock/layout.dart';
 import 'package:caw/ui/frame/frame_widgets.dart';
 import 'package:caw/ui/frame/sections.dart';
+import 'package:caw/ui/haptics.dart';
 import 'package:caw/ui/mixer_screen.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/material.dart';
@@ -216,11 +217,18 @@ void main() {
     s.dispose();
   }, skip: skip);
 
-  testWidgets('scrolling the tracks down tucks the top bars away, scrolling up brings them back', (tester) async {
+  testWidgets('scrolling never hides the top bars; a deliberate pull on the grip does, and the tab brings them back',
+      (tester) async {
     final s = await startState(tester);
     for (var i = 0; i < 12; i++) {
       s.addLayer();
     }
+    final felt = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'HapticFeedback.vibrate') felt.add(call.arguments as String);
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
     tester.view.padding = const FakeViewPadding(top: 30, bottom: 20);
     await pumpGolden(tester, Shell(state: s), const Size(390, 844));
     final status = find.byKey(const ValueKey('project-menu'));
@@ -230,11 +238,53 @@ void main() {
     final tracks = find.byKey(ValueKey('track-header-${s.project.layers[3].id}'));
     await tester.drag(tracks, const Offset(0, -200));
     await tester.pumpAndSettle();
+    expect(tester.getTopLeft(status).dy, greaterThanOrEqualTo(30), reason: 'a scroll leaves the status row');
+    expect(tester.getTopLeft(toolbar).dy, top0, reason: 'and the toolbar');
+
+    // A short pull follows the finger, shows the hint, and springs back on release.
+    final grip = find.byKey(const ValueKey('bars-handle'));
+    expect(grip, findsOneWidget);
+    Haptics.reset();
+    final g = await tester.startGesture(tester.getCenter(grip));
+    await g.moveBy(const Offset(0, -12));
+    await g.moveBy(const Offset(0, -10));
+    await tester.pump();
+    expect(tester.getTopLeft(toolbar).dy, lessThan(top0), reason: 'the bars follow the finger');
+    expect(find.text('Pull up to hide the bars'), findsOneWidget);
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(toolbar).dy, top0, reason: 'short of the threshold it snaps back');
+
+    // Past the threshold: a tick, the hint changes, and letting go hides the bars.
+    Haptics.reset();
+    felt.clear();
+    final g2 = await tester.startGesture(tester.getCenter(grip));
+    await g2.moveBy(const Offset(0, -20));
+    await g2.moveBy(const Offset(0, -20));
+    await tester.pump();
+    expect(find.text('Let go to hide'), findsOneWidget);
+    expect(felt, containsAll(['HapticFeedbackType.lightImpact']), reason: 'a grab and a threshold tick');
+    await g2.up();
+    await tester.pumpAndSettle();
     expect(tester.getRect(status).bottom, lessThanOrEqualTo(31), reason: 'the status row tucked away');
     expect(tester.getTopLeft(toolbar).dy, lessThan(top0));
+    expect(find.byKey(const ValueKey('bars-tab')), findsOneWidget, reason: 'a slim tab stays to bring them back');
+
+    // Scrolling still changes nothing; the tab, tapped, brings the bars back.
     await tester.drag(tracks, const Offset(0, 120));
     await tester.pumpAndSettle();
+    expect(tester.getRect(status).bottom, lessThanOrEqualTo(31));
+    await tester.tap(find.byKey(const ValueKey('bars-handle')));
+    await tester.pumpAndSettle();
     expect(tester.getTopLeft(status).dy, greaterThanOrEqualTo(30));
+    expect(tester.getTopLeft(toolbar).dy, top0);
+
+    // And a pull down on the tab does too.
+    await tester.drag(find.byKey(const ValueKey('bars-handle')), const Offset(0, -60));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(status).bottom, lessThanOrEqualTo(31));
+    await tester.drag(find.byKey(const ValueKey('bars-handle')), const Offset(0, 60));
+    await tester.pumpAndSettle();
     expect(tester.getTopLeft(toolbar).dy, top0);
     s.dispose();
   }, skip: skip);

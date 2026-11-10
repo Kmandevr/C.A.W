@@ -29,6 +29,7 @@ import 'theme.dart';
 import 'theme_editor.dart';
 import 'widgets.dart';
 import 'glass.dart';
+import 'frame/bars_handle.dart';
 import 'frame/frame_widgets.dart';
 import 'frame/live_keys.dart';
 import 'frame/record_tools.dart';
@@ -302,32 +303,36 @@ class _ShellState extends State<Shell> {
   /// Phones: one section at a time. Portrait has the status row on top and the transport and section bar at the
   /// bottom (both hide while the keyboard is open); landscape has a narrow rail on the left with the project and More,
   /// the tempo and CPU in the transport, and no status row, so the tracks get the height (owner, 2026-11-10). The
-  /// top bars tuck away while the content scrolls down and come back when it scrolls up.
+  /// top bars hide when their grip is pulled up and come back when it is pulled down (or its tab tapped).
   Widget _phone(BuildContext context, Map<String, Widget> screens, EdgeInsets pad, {required bool landscape}) {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     // The content is padded clear of the edges here, so the screens inside see no padding of their own.
-    final body = MediaQuery.removePadding(
+    final content = MediaQuery.removePadding(
       context: context,
       removeLeft: true,
       removeTop: true,
       removeRight: true,
       removeBottom: true,
-      child: NotificationListener<ScrollUpdateNotification>(
-        onNotification: _onScroll,
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (_) {
-            if (_reach) setState(() => _reach = false);
-          },
-          child: SectionSwitcher(
-            index: sectionOrder.indexOf(_sections.current),
-            children: [
-              for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
-            ],
-          ),
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) {
+          if (_reach) setState(() => _reach = false);
+        },
+        child: SectionSwitcher(
+          index: sectionOrder.indexOf(_sections.current),
+          children: [
+            for (final section in sectionOrder) screens[panelOfSection(section)] ?? const SizedBox.shrink(),
+          ],
         ),
       ),
     );
+    // The top bars hide only on a deliberate pull of this grip (owner, 2026-11-10); in landscape only Arrange has a
+    // bar to hide (its toolbar). It hides while the keyboard is open, which keeps the bars shown.
+    final grip = !keyboard && !_reach && (!landscape || _sections.current == Section.arrange);
+    final body = !grip ? content : Stack(children: [
+      Positioned.fill(child: content),
+      Positioned(top: 0, left: 0, right: 0, child: Center(child: BarsHandle(sections: _sections))),
+    ]);
     if (landscape) {
       final small = IconButton.styleFrom(iconSize: 18, visualDensity: VisualDensity.compact,
           minimumSize: const Size(34, 34), padding: const EdgeInsets.all(6));
@@ -401,18 +406,6 @@ class _ShellState extends State<Shell> {
         SectionBar(sections: _sections, bottomInset: pad.bottom, onReach: () => setState(() => _reach = true)),
       ],
     ]);
-  }
-
-  /// Scrolling down by hand tucks the top bars away; scrolling up, or reaching the top, brings them back.
-  bool _onScroll(ScrollUpdateNotification n) {
-    if (n.metrics.axis != Axis.vertical || n.dragDetails == null) return false;
-    final d = n.scrollDelta ?? 0;
-    if (n.metrics.pixels <= n.metrics.minScrollExtent || d < -6) {
-      _sections.barsShown.value = true;
-    } else if (d > 6 && n.metrics.pixels > n.metrics.minScrollExtent + 24) {
-      _sections.barsShown.value = false;
-    }
-    return false;
   }
 
   /// The phone's other workspaces (the mixer, automation, export, the engine lab, the .caw plugin builder).
