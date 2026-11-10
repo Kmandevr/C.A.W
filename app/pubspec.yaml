@@ -63,10 +63,9 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # The licence of the bundled font, shown in the app's licence page, and the crow logo.
+  # The licence of the bundled font, shown in the app's licence page.
   assets:
     - assets/fonts/OFL.txt
-    - assets/logo/caw_mark.png
 
   # JetBrains Mono 2.304 (SIL Open Font License 1.1, see assets/fonts/OFL.txt): the code and number font.
   fonts:

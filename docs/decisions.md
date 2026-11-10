@@ -6,10 +6,6 @@ updated: 2026-11-10
 
 # Decisions
 
-## 2026-11-10: The logo is the kernel crow (owner)
-
-**Decision (owner):** the placeholder outline crow is replaced. The owner wanted it abstract, "like a kernel", glitchy and fun, coloured like a real crow and in the app's colours. From four rounds of drafts they leaned to "J with a bit of I": a tilted hexagon chip in black glass with an iridescent feather sheen (cyan, purple, green), a sharp beak with a neon-pink edge, a glowing cyan eye and data pins trailing behind, on a frosted graphite tile. It is the in-app mark and the Android and Windows launcher icon (`docs/app.md`). The owner can still swap the variant.
-
 ## 2026-11-10: The engine carries inefficient plug-ins; efficient ones are easy to write (owner)
 
 **Decision (owner):** "we have to build around people who aren't going to make very efficient plugins. We should also make it very easy to make them efficient as well." The performance goal for a whole project on the owner's phone (Galaxy S22+, 25–30% CPU on 2026-11-10) is 15–20%, reached by engine and host work with the existing instruments unchanged; the built-in instruments are optimized later and separately. The SDK and the testing suite should make the efficient path the easy one (for example block-based helpers, letting the host skip silent voices, and showing each component's CPU cost). [Proposal] Which helpers to build is not decided yet.

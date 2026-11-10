@@ -780,13 +780,52 @@ Future<void> showProjectMenu(BuildContext context, AppState s) async {
   );
 }
 
-/// The crow mark: the kernel crow (black glass with a feather sheen, a neon beak edge and a cyan eye).
-/// Its source drawing is `assets/logo/caw_mark.svg`; the launcher icons are rendered from `caw_icon.svg`.
+/// The crow mark, drawn in neon so it needs no image asset.
 class CrowLogo extends StatelessWidget {
   const CrowLogo({super.key, this.size = 32});
   final double size;
 
   @override
-  Widget build(BuildContext context) => Image.asset('assets/logo/caw_mark.png',
-      width: size, height: size, filterQuality: FilterQuality.medium, semanticLabel: 'C.A.W.');
+  Widget build(BuildContext context) => SizedBox(width: size, height: size, child: CustomPaint(painter: _CrowPainter()));
+}
+
+class _CrowPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final body = Path()
+      ..moveTo(0.12 * w, 0.62 * h) // tail
+      ..lineTo(0.34 * w, 0.52 * h)
+      ..quadraticBezierTo(0.40 * w, 0.30 * h, 0.62 * w, 0.28 * h) // back to head
+      ..quadraticBezierTo(0.70 * w, 0.20 * h, 0.78 * w, 0.26 * h) // crown
+      ..lineTo(0.96 * w, 0.32 * h) // beak tip
+      ..lineTo(0.78 * w, 0.37 * h)
+      ..quadraticBezierTo(0.74 * w, 0.62 * h, 0.50 * w, 0.68 * h) // breast
+      ..lineTo(0.30 * w, 0.66 * h)
+      ..close();
+    final legs = Path()
+      ..moveTo(0.48 * w, 0.68 * h)
+      ..lineTo(0.46 * w, 0.86 * h)
+      ..moveTo(0.56 * w, 0.66 * h)
+      ..lineTo(0.58 * w, 0.86 * h);
+    final glow = Paint()
+      ..color = Neon.green.withValues(alpha: 0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.09
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, w * 0.06);
+    final line = Paint()
+      ..color = Neon.green
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.05
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(body, glow);
+    canvas.drawPath(body, Paint()..color = Neon.bg);
+    canvas.drawPath(body, line);
+    canvas.drawPath(legs, line);
+    canvas.drawCircle(Offset(0.72 * w, 0.29 * h), w * 0.035, Paint()..color = Neon.pink);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
