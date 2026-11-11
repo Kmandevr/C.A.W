@@ -108,7 +108,7 @@ TEST(worker_api_project_jobs_keep_engine_alive_until_completion) {
         caw_worker_pool_destroy(pool);
         return;
     }
-    const char* project = R"CAW({"caw_project":1,"name":"worker test","bpm":120,"beats_per_bar":4,"loop_bars":1,"modules":[{"id":"tone","name":"Tone","source":"---\nmode: float\n---\n0.2"}],"layers":[{"id":"track","name":"Tone","chain":["tone"],"length_steps":16}]})CAW";
+    const char* project = R"CAW({"caw_project":1,"name":"worker test","bpm":120,"beats_per_bar":4,"loop_bars":1,"modules":[{"id":"pat","name":"Pattern","source":"---\nkind: pattern\n---\n0 C4 4 1\n"}],"layers":[{"id":"track","name":"Tone","pattern":"pat","instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.2}}}]})CAW";
     CawJob* job = caw_worker_pool_submit_project(pool, engine, project, CAW_JOB_FOREGROUND);
     CHECK(job != nullptr);
     // Destroy waits for the retained project job instead of invalidating its engine pointer.
@@ -138,7 +138,7 @@ TEST(worker_api_cancels_offline_render_and_keeps_released_handles_safe) {
     CawExecutionPlan plan{};
     CHECK_EQ(caw_worker_pool_apply(pool, &request, &plan), 0);
 
-    const char* project = R"CAW({"caw_project":1,"name":"cancel test","bpm":120,"beats_per_bar":4,"loop_bars":1,"modules":[{"id":"tone","name":"Tone","source":"---\nmode: float\n---\nsin(220)"}],"layers":[{"id":"track","name":"Tone","chain":["tone"],"length_steps":16}]})CAW";
+    const char* project = R"CAW({"caw_project":1,"name":"cancel test","bpm":120,"beats_per_bar":4,"loop_bars":1,"layers":[{"id":"track","name":"Tone","instrument":{"id":"org.caw.test.osc","params":{"freq":220}}}]})CAW";
     CawRenderOptions options{};
     options.kind = CAW_EXPORT_FREE;
     options.sample_rate = 48000;

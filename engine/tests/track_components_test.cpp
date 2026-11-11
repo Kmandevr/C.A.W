@@ -15,6 +15,7 @@
 #include "native_component_test_path.h"
 #include "project.h"
 #include "test.h"
+#include "test_signal.h"
 
 using namespace caw;
 
@@ -26,19 +27,15 @@ const double kCentre = std::cos(3.14159265358979323846 / 4.0);  // the pan law a
 
 bool ok(const std::string& result) { return result.find("\"ok\":true") != std::string::npos; }
 
-// One track playing a constant 0.5 through `components`, volume 1, centred, master bypassed.
+// One track playing a constant 0.5 through `components`, volume 1, centred, master bypassed: the test signal holds
+// a note through the loop, so a Stop ends it.
 ProjectSpec constantTrack(std::vector<ComponentSpec> components) {
     ProjectSpec p;
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"dc", "---\nmode: float\n---\n0.5", {}});
-    LayerSpec l;
-    l.id = "t";
-    l.name = "t";
-    l.chain = {"dc"};
-    l.volume = 1.0;
-    l.components = std::move(components);
+    p.modules.push_back({"hold", "---\nkind: pattern\nlength: 16\n---\n0 C4 16 1\n", {}});
+    LayerSpec l = cawtest::testSignalNotesLayer("t", cawtest::Shape::Dc, "hold", {{"level", 0.5}}, std::move(components));
     p.layers.push_back(l);
     return p;
 }
@@ -63,7 +60,7 @@ TEST(project_json_reads_track_and_master_components_with_parameters) {
     std::string error;
     CHECK(parseProject(R"({"caw_project":1,
         "master_components":["org.a",{"id":"org.b","params":{"mix":0.25}}],
-        "layers":[{"id":"t","chain":["x"],"components":[{"id":"org.c","params":{"left":2,"right":0.5}}]}]})",
+        "layers":[{"id":"t","components":[{"id":"org.c","params":{"left":2,"right":0.5}}]}]})",
                        p, error));
     CHECK_EQ(p.masterComponents.size(), 2u);
     CHECK_EQ(p.masterComponents[0].id, std::string("org.a"));
@@ -240,8 +237,8 @@ TEST(c_api_sets_a_component_parameter) {
     char* loaded = caw_engine_load_component(engine, path, kGain, CAW_NATIVE_TRUST_TRUSTED);
     caw_free(loaded);
     char* result = caw_engine_set_project(engine,
-        R"({"caw_project":1,"bpm":120,"modules":[{"id":"dc","source":"---\nmode: float\n---\n0.5"}],
-            "layers":[{"id":"t","chain":["dc"],"components":[{"id":"org.caw.tests.native-loader.gain","params":{"left":2}}]}]})");
+        R"({"caw_project":1,"bpm":120,
+            "layers":[{"id":"t","instrument":{"id":"org.caw.test.osc","params":{"shape":4,"level":0.5}},"components":[{"id":"org.caw.tests.native-loader.gain","params":{"left":2}}]}]})");
     CHECK(result && std::string(result).find("\"ok\":true") != std::string::npos);
     caw_free(result);
     CHECK_EQ(caw_engine_set_component_param(engine, "t", 0, "right", 0.5), 1);
@@ -289,7 +286,7 @@ TEST(component_state_is_saved_and_restored_through_the_project) {
     CHECK(e.componentStatesJson("missing").find("\"ok\":false") != std::string::npos);
     // A fresh Engine (an export, a reload) restores what was saved: 10 blocks, as 8 little-endian bytes.
     ProjectSpec restored = p;
-    std::string json = R"({"caw_project":1,"layers":[{"id":"t","chain":["dc"],"components":[)"
+    std::string json = R"({"caw_project":1,"layers":[{"id":"t","components":[)"
                        R"({"id":"org.caw.tests.native-loader.gain","state":"CgAAAAAAAAA=","state_version":7}]}]})";
     ProjectSpec parsed;
     std::string error;
@@ -496,7 +493,16 @@ TEST(a_tail_still_sounding_at_its_cap_fades_out_instead_of_stopping_dead) {
     Engine e(48000);
     CHECK(loadFixture(e, kDrone));
     e.setMasterBypass(true);
-    CHECK(ok(e.setProject(constantTrack({{kDrone, {}}}))));
+    // The drone (a 0.1 s tail it never ends) on a bus with nothing in it: after the stop its inserts ring on alone.
+    // (A track's inserts no longer ring on alone: a track's instrument runs on after a Stop, so the whole track does.)
+    ProjectSpec p = constantTrack({});
+    LayerSpec bus;
+    bus.id = bus.name = "fx";
+    bus.folder = true;
+    bus.busEnabled = true;
+    bus.components = {{kDrone, {}}};
+    p.layers = {bus};
+    CHECK(ok(e.setProject(p)));
     e.play();
     float l = 0, r = 0;
     runLast(e, 4096, l, r);

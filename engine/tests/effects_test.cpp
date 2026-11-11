@@ -27,6 +27,7 @@ static constexpr double kTestPi = 3.14159265358979323846;
 #include "engine.h"
 #include "project.h"
 #include "test.h"
+#include "test_signal.h"
 
 using namespace caw;
 
@@ -858,12 +859,7 @@ TEST(an_eq_on_a_track_publishes_through_the_c_api) {
     p.bpm = 120;
     p.loopBars = 1;
     p.master = 1.0;
-    p.modules.push_back({"tone", "---\nmode: float\n---\nsine(440) * 0.5", {}});
-    LayerSpec l;
-    l.id = "t";
-    l.name = "t";
-    l.chain = {"tone"};
-    l.volume = 1.0;
+    LayerSpec l = cawtest::testSignalLayer("t", cawtest::Shape::Sine, {{"freq", 440}, {"level", 0.5}});
     l.components = {{"org.caw.eq", {{"b4_gain", 6}}}, {"org.caw.compressor", {}}};
     p.layers.push_back(l);
     p.masterComponents = {{"org.caw.limiter", {}}};
