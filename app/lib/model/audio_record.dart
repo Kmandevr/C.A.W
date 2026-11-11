@@ -94,6 +94,7 @@ class AudioRecorder extends ChangeNotifier {
         prefs = prefs ?? AudioInputPrefs(state.settings.dir == null
             ? null : File('${state.settings.dir!.path}${Platform.pathSeparator}audio-input.json')) {
     state.tick.addListener(_poll);
+    state.latency.addListener(_applyLatency);
   }
 
   static AudioRecorder? current;
@@ -122,6 +123,7 @@ class AudioRecorder extends ChangeNotifier {
   Future<void> load() async {
     await prefs.load();
     if (prefs.latencyOverride >= 0) io.setInputLatency(prefs.latencyOverride);
+    _applyLatency();
   }
 
   // ---------- the input ----------
@@ -138,6 +140,8 @@ class AudioRecorder extends ChangeNotifier {
     final r = await io.configureInput(enabled: true, deviceId: prefs.deviceId, deviceName: prefs.deviceName,
         channels: prefs.channels);
     if (prefs.latencyOverride >= 0) io.setInputLatency(prefs.latencyOverride);
+    _compensated = -1; // a reopened input: the round trip is worked out again
+    unawaited(state.latency.refresh().then((_) => _applyLatency()));
     inputOpen = r != 1;
     final status = io.inputStatus();
     if (status.isNotEmpty && status['running'] == false && state.engine?.audioOn == true) {
@@ -363,13 +367,51 @@ class AudioRecorder extends ChangeNotifier {
 
   // ---------- latency ----------
 
-  LatencyInfo get latency => io.inputLatency();
+  /// The round trip takes are placed by. "compensated": the output's latency (Bluetooth included, Settings › Audio ›
+  /// Latency) plus the input's, sent because it says more than the engine's own estimate.
+  LatencyInfo get latency {
+    final l = io.inputLatency();
+    if (_compensated < 0 || prefs.latencyOverride >= 0) return l;
+    return LatencyInfo(frames: l.frames, ms: l.ms, source: 'compensated', override: -1, measured: l.measured,
+        device: l.device);
+  }
+
+  int _compensated = -1;
+
+  /// Sends the round trip recordings are placed by: a typed one stands; a ping made through the output in use
+  /// stands (it heard the whole trip); else the output latency plus the input latency (Settings › Audio › Latency),
+  /// when that is more than the engine's estimate of its buffers (a Bluetooth output or microphone).
+  void _applyLatency() {
+    if (prefs.latencyOverride >= 0) return;
+    final comp = state.latency;
+    final l = io.inputLatency();
+    final measured = l.measured >= 0;
+    final pinged = measured && comp.pingOutputKey == comp.routeInfo.output.key;
+    final frames = comp.framesOf(comp.roundTripMs, state.engine?.sampleRate ?? 48000);
+    final own = l.device;
+    final use = comp.enabled && !pinged && (measured || frames > own);
+    if (!use) {
+      if (_compensated >= 0) {
+        _compensated = -1;
+        io.setInputLatency(-1);
+        notifyListeners();
+      }
+      return;
+    }
+    final f = math.max(frames, 0);
+    if (f == _compensated) return;
+    _compensated = f;
+    io.setInputLatency(f);
+    notifyListeners();
+  }
 
   /// A typed latency in milliseconds (null: back to the ping's, else the device's).
   void setLatencyMs(double? ms) {
     final rate = state.engine?.sampleRate ?? 48000;
     prefs.latencyOverride = ms == null ? -1 : (ms * rate / 1000).round().clamp(0, rate * 2);
     io.setInputLatency(prefs.latencyOverride);
+    _compensated = -1;
+    _applyLatency();
     unawaited(prefs.save());
     notifyListeners();
   }
@@ -382,7 +424,12 @@ class AudioRecorder extends ChangeNotifier {
       await Future<void>.delayed(poll);
       final r = io.pingResult();
       if (r.done) {
-        // A good ping becomes the latency in use unless one is typed in.
+        // A good ping becomes the latency in use unless one is typed in; what the output's latency does not explain
+        // of it is the input's (Settings › Audio › Latency).
+        if (r.ok) {
+          state.latency.splitPing(r.ms);
+          _applyLatency();
+        }
         notifyListeners();
         return r;
       }
@@ -393,6 +440,7 @@ class AudioRecorder extends ChangeNotifier {
   @override
   void dispose() {
     state.tick.removeListener(_poll);
+    state.latency.removeListener(_applyLatency);
     message.dispose();
     lastRecording.dispose();
     levels.dispose();

@@ -8,7 +8,9 @@ import 'package:flutter/foundation.dart';
 
 import '../engine/engine.dart';
 import '../engine/execution.dart';
+import '../platform/audio_route.dart';
 import '../platform/resource_signals.dart';
+import 'latency_comp.dart';
 import 'poller.dart';
 import 'native_components.dart';
 import 'project.dart';
@@ -53,7 +55,16 @@ class _AutomationSnapshot {
 }
 
 class AppState extends ChangeNotifier {
-  AppState({Settings? settings}) : settings = settings ?? Settings() {
+  AppState({Settings? settings, AudioRoute? audioRoute, int Function()? clockUs})
+      : settings = settings ?? Settings(),
+        _clockUs = clockUs ?? _monotonicUs {
+    latency = LatencyComp(
+        store: LatencyStore(this.settings.dir == null
+            ? null : File('${this.settings.dir!.path}${Platform.pathSeparator}latency.json')),
+        route: audioRoute ?? platformAudioRoute())
+      ..outputName = (() => engine?.audioStatus().device ?? '')
+      ..inputName = (() => (engine?.audioStatusJson()['input'] as Map?)?['device'] as String? ?? '')
+      ..addListener(_latencyChanged);
     _light = this.settings.lightMode;
     _performanceMode = this.settings.performanceMode;
     _density = this.settings.density;
@@ -87,6 +98,100 @@ class AppState extends ChangeNotifier {
 
   /// App-wide settings (theme, density, live coding).
   final Settings settings;
+
+  // ---------- latency compensation (owner, 2026-11-11; latency_comp.dart) ----------
+
+  static final Stopwatch _clock = Stopwatch()..start();
+  static int _monotonicUs() => _clock.elapsedMicroseconds;
+  final int Function() _clockUs;
+
+  /// The app's clock in microseconds (monotonic; tests pass their own).
+  int get nowUs => _clockUs();
+
+  /// The output and input latency in force: the platform's figure plus each device's offset (Settings › Audio ›
+  /// Latency).
+  late final LatencyComp latency;
+
+  /// The last few seconds of meter reads, each at the time it was read, so meters show what is heard.
+  final MeterTimeline meterTimeline = MeterTimeline();
+  int _latencyReadUs = -1 << 62;
+  int _playStartUs = 0;
+  double _playStartStep = 0;
+
+  void _latencyChanged() {
+    tick.value++;
+    notifyListeners();
+  }
+
+  /// How long after rendering a sample is heard, in microseconds (0 with compensation off).
+  int get outputLatencyUs => (latency.outputMs * 1000).round();
+
+  /// The meter read being heard now: the one taken an output latency ago (the newest with compensation off or
+  /// nothing older kept). Peaks, playing and position all come from it.
+  MeterReading get audibleReading =>
+      meterAt(nowUs - outputLatencyUs) ?? MeterReading(nowUs, const EngineMeters(), const []);
+
+  /// The meter read taken at or before [us] on [nowUs]'s clock; while compensation holds the first reads back,
+  /// a silent one (nothing of them is heard yet). Null only when nothing was read at all.
+  MeterReading? meterAt(int us) {
+    final newest = meterTimeline.newest;
+    if (newest == null) return null;
+    if (us >= newest.us) return newest;
+    return meterTimeline.at(us) ??
+        MeterReading(us, EngineMeters(playing: false, loopLength: newest.meters.loopLength), const []);
+  }
+
+  /// The master meters as heard ([meters] is what was just rendered): what peak meters should read.
+  EngineMeters get audibleMeters {
+    final r = audibleReading.meters;
+    final m = meters;
+    // The transport's state and overloads are now's; the levels are the heard ones.
+    return EngineMeters(cpu: m.cpu, peakL: r.peakL, peakR: r.peakR, playing: m.playing, overloaded: m.overloaded,
+        position: r.position, loopLength: m.loopLength);
+  }
+
+  /// Each track's meter as heard ([layerMeters] is what was just rendered).
+  List<LayerMeterValue> get audibleLayerMeters {
+    if (outputLatencyUs <= 0) return layerMeters;
+    final heard = audibleReading.layers;
+    return [for (var i = 0; i < layerMeters.length; i++) i < heard.length ? heard[i] : const LayerMeterValue()];
+  }
+
+  /// The output latency in sixteenth steps at the project's tempo.
+  double get outputLatencySteps => latency.outputMs / 1000 * project.bpm / 15;
+
+  /// Where the engine renders now, in sixteenth steps (playing; [playheadStep] is where the ear is).
+  double get renderStep {
+    final m = meters;
+    if (m.playing && m.loopLength > 0) return m.position * project.engineLoopSteps / m.loopLength;
+    return pausedStep ?? 0;
+  }
+
+  /// [step] rendered now, moved back to where the ear is: an output latency earlier, wrapped back over the loop
+  /// (the loop range when on, else the song) and held at where play began until the first sound is heard.
+  double heardStep(double step, {int? atUs}) {
+    final lat = outputLatencySteps;
+    if (lat <= 0) return step;
+    if ((atUs ?? nowUs) - _playStartUs < outputLatencyUs) return _playStartStep;
+    final p = project;
+    final (from, to) = p.loopsRange
+        ? (p.loopStartSteps.toDouble(), p.loopEndSteps.toDouble())
+        : (0.0, p.engineLoopSteps.toDouble());
+    var s = step - lat;
+    final span = to - from;
+    if (span > 0) {
+      while (s < from && step >= from) {
+        s += span;
+      }
+    }
+    return s < 0 ? 0 : s;
+  }
+
+  void _markPlayStart(double step) {
+    _playStartUs = nowUs;
+    _playStartStep = step;
+    meterTimeline.clear();
+  }
 
   SoundQuality? _quality;
   String? _fallbackNote;  // the audioError a fallback set, cleared when the choice opens again
@@ -287,6 +392,7 @@ class AppState extends ChangeNotifier {
   AudioStatus? get audioStatus => engine?.audioStatus();
 
   Future<void> init() async {
+    await latency.load();
     _resourcePressureSubscription = ResourceSignals.changes.listen(
       (pressure) => EngineExecutionPolicy.updateRuntimeSignals(pressure: pressure),
       onError: (Object _) => EngineExecutionPolicy.updateRuntimeSignals(pressure: EnginePressure.unknown),
@@ -361,6 +467,8 @@ class AppState extends ChangeNotifier {
     _resourcePressureSubscription = null;
     if (pressureSubscription != null) unawaited(pressureSubscription.cancel());
     _poller.dispose();
+    latency.removeListener(_latencyChanged);
+    latency.dispose();
     _liveTimer?.cancel();
     _saveTimer?.cancel();
     _syncTimer?.cancel();
@@ -384,6 +492,13 @@ class AppState extends ChangeNotifier {
       EngineExecutionPolicy.updateRuntimeSignals(audioActive: meters.playing);
     }
     layerMeters = [for (var i = 0; i < project.layers.length; i++) e.layerMeter(i)];
+    final now = nowUs;
+    meterTimeline.push(MeterReading(now, meters, layerMeters));
+    if (e.audioOn && now - _latencyReadUs > 3000000) {
+      // The platform's figure and the route, now and then (a Bluetooth link can settle after it opens).
+      _latencyReadUs = now;
+      unawaited(latency.refresh());
+    }
     tick.value++;
     if (meters.overloaded > before.overloaded && settings.lightAuto && !settings.lightMode) {
       // The device can't keep up: Lightweight turns on by itself once (the user can choose another profile).
@@ -394,8 +509,14 @@ class AppState extends ChangeNotifier {
       });
     }
     if (before.playing != meters.playing || before.overloaded != meters.overloaded) notifyListeners();
-    return meters.playing || meters.peakL > 0 || meters.peakR > 0 || layerMeters.any((m) => m.peak > 0);
+    // Held back by the output latency, the meters keep moving until what was rendered last has been heard.
+    final heardYet = outputLatencyUs <= 0 || now - _lastLoudUs > outputLatencyUs;
+    final loud = meters.playing || meters.peakL > 0 || meters.peakR > 0 || layerMeters.any((m) => m.peak > 0);
+    if (loud) _lastLoudUs = now;
+    return loud || !heardYet;
   }
+
+  int _lastLoudUs = 0;
 
   // ---------- starter content ----------
 
@@ -525,7 +646,9 @@ class AppState extends ChangeNotifier {
     final m = meters;
     if (e == null || timeNs <= 0 || m.loopLength <= 0) return null;
     final pos = e.positionAt(timeNs);
-    return pos < 0 ? null : pos * project.engineLoopSteps / m.loopLength;
+    // What was heard then: the render position less the output latency (a take lands where it was played against
+    // what you heard).
+    return pos < 0 ? null : heardStep(pos * project.engineLoopSteps / m.loopLength);
   }
 
   void previewOff(int id) {
@@ -875,7 +998,8 @@ class AppState extends ChangeNotifier {
     if (_transportOn) {
       // Read now: the stop's short fade still moves the transport on.
       final m = e.meters();
-      pausedStep = m.loopLength > 0 ? m.position * project.engineLoopSteps / m.loopLength : null;
+      // Paused where the ear is, so play resumes on what was last heard.
+      pausedStep = m.loopLength > 0 ? heardStep(m.position * project.engineLoopSteps / m.loopLength) : null;
       e.stop();
       _transportOn = false;
     } else {
@@ -883,6 +1007,7 @@ class AppState extends ChangeNotifier {
         if (_openAudio(e) != null) return notifyListeners(); // no sound card: the pause stays where it was
       }
       final from = pausedStep;
+      _markPlayStart(from ?? 0);
       if (countInBeats > 0) {
         e.playCountIn(from ?? 0, countInBeats);
       } else {
@@ -915,6 +1040,7 @@ class AppState extends ChangeNotifier {
     final e = engine;
     final at = step.clamp(0.0, math.max(0, project.engineLoopSteps - 1).toDouble()).toDouble();
     if (_transportOn && e != null) {
+      _markPlayStart(at);
       e.playAt(at);
       meters = e.meters();
       _poller.wake();
@@ -924,10 +1050,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Where the playhead is now, in sixteenth steps (paused: where play resumes; stopped: 0).
+  /// Where the playhead is now, in sixteenth steps (paused: where play resumes; stopped: 0): what is heard, an output
+  /// latency behind [renderStep] while compensation is on, so the playhead, follow and note highlights line up with
+  /// the sound.
   double get playheadStep {
     final m = meters;
-    if (m.playing && m.loopLength > 0) return m.position * project.engineLoopSteps / m.loopLength;
+    if (m.playing && m.loopLength > 0) return heardStep(m.position * project.engineLoopSteps / m.loopLength);
     return pausedStep ?? 0;
   }
 
@@ -956,6 +1084,9 @@ class AppState extends ChangeNotifier {
   String? _openAudio(Engine e) {
     final error = e.startAudio();
     if (error != null) return audioError = error;
+    latency.readDevice = e.audioLatency;
+    _latencyReadUs = nowUs;
+    unawaited(latency.refresh());
     final st = e.audioStatus();
     if (st.fallback) {
       final name = settings.audioDevice;
