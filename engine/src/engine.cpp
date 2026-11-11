@@ -599,6 +599,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     for (int i = 0; i < kScopeSize; ++i) masterScope_[i].store(0);
     midiPending_.reset(new PendingMidi[Midi2InputQueue::kCapacity]);
     loudness_->prepare(sampleRate);
+    loudness_->sleepWhenUnread(true);  // it measures while something reads it (meters.h)
     audioIn_ = std::make_unique<LiveAudio>(sampleRate);
     masterCorrelation_.prepare(sampleRate);
     registerBuiltinComponents(nativeModules_);  // the Library's stereo tools, ready in every chain
@@ -3964,6 +3965,14 @@ void Engine::runRoutes(Slot& s, const float* preL, const float* preR, const floa
         // A level change glides at a fixed rate per sample (full scale in 5 ms), so it is the same at any block size.
         const double most = 1.0 / std::max(1.0, kGainSeconds * sr_);
         double g = from;
+        if (g == want && r.tapPre == r.pre && !(key && !r.tapPre)) {
+            // Settled (the usual case): the loop below with nothing gliding, switching or faded, which vectorizes
+            // (x g times 1.0 is x g: the same bits).
+            for (int i = 0; i < m; ++i) {
+                routeL_[i] = routeSample(static_cast<double>(xl[i]) * g);
+                routeR_[i] = routeSample(static_cast<double>(xr[i]) * g);
+            }
+        } else
         for (int i = 0; i < m; ++i) {
             const double aim = r.tapPre == r.pre ? want : 0.0;  // changing tap: through silence
             if (g != aim) g = aim > g ? std::min(aim, g + most) : std::max(aim, g - most);

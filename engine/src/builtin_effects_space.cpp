@@ -127,11 +127,13 @@ protected:
         mix_.set(std::clamp(param(kMix, at), 0.0, 1.0), kControlFrames);
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
+        float wetL[kControlFrames], wetR[kControlFrames];
+        std::copy_n(inL, n, wetL);
+        std::copy_n(inR, n, wetR);
+        reverb_.process(wetL, wetR, static_cast<int>(n));  // the block form: the same bits as frame by frame
         for (uint32_t i = 0; i < n; ++i) {
             const double xl = inL[i], xr = inR[i];
-            float wl = inL[i], wr = inR[i];
-            reverb_.process(wl, wr);
-            double l = wl, r = wr;
+            double l = wetL[i], r = wetR[i];
             if (useLow_) l = low_[0].highpass(l), r = low_[1].highpass(r);
             if (useHigh_) l = high_[0].lowpass(l), r = high_[1].lowpass(r);
             const double g = duck_.gain(xl, xr);
@@ -345,7 +347,7 @@ private:
     // `back` samples before the write position (at least 2), by 4-point Hermite interpolation.
     double hermite(const float* line, double back) const noexcept {
         const size_t mask = size_ - 1;
-        const size_t whole = static_cast<size_t>(back);
+        const size_t whole = static_cast<size_t>(static_cast<int64_t>(back));  // back >= 2: the same value, a cheaper cast
         const double t = back - static_cast<double>(whole);
         // Samples at whole - 1, whole, whole + 1, whole + 2 frames back (newest first).
         const double ym1 = line[(pos_ - whole + 1) & mask], y0 = line[(pos_ - whole) & mask];

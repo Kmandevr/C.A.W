@@ -59,7 +59,7 @@ const ModuleDescriptor& satDescriptor() {
 
 // The curves, each with slope 1 at 0 (so the drive alone sets how hard it is pushed; the rectifier's slope is
 // +-1 and the bit shaper's 1 on average). `steps`: the bit shaper's levels per unit.
-inline double curve(int mode, double x, double steps = 128.0) noexcept {
+[[gnu::always_inline]] inline double curve(int mode, double x, double steps = 128.0) noexcept {
     switch (mode) {
         case kTube:  // asymmetric: the positive side a tanh, the negative an exponential that flattens at -2/3 (even harmonics)
             return x >= 0.0 ? lib::fastTanh(x) : (lib::fastExp(1.5 * x) - 1.0) * (1.0 / 1.5);
@@ -185,15 +185,36 @@ protected:
         }
     }
     void run(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept override {
+        // A run with no mode or oversampling change under way keeps one mode throughout: the loop is made for it
+        // (the curve inlined, no switch per sample); the arithmetic is the same either way.
+        if (switching_ || fade_ < 1.0) return runWith<-1>(inL, inR, outL, outR, n);
+        switch (mode_) {
+            case kTube: return runWith<kTube>(inL, inR, outL, outR, n);
+            case kSoft: return runWith<kSoft>(inL, inR, outL, outR, n);
+            case kHard: return runWith<kHard>(inL, inR, outL, outR, n);
+            case kFold: return runWith<kFold>(inL, inR, outL, outR, n);
+            case kCrush: return runWith<kCrush>(inL, inR, outL, outR, n);
+            case kFuzz: return runWith<kFuzz>(inL, inR, outL, outR, n);
+            case kRectify: return runWith<kRectify>(inL, inR, outL, outR, n);
+            case kTriFold: return runWith<kTriFold>(inL, inR, outL, outR, n);
+            case kBitShape: return runWith<kBitShape>(inL, inR, outL, outR, n);
+            case kFat: return runWith<kFat>(inL, inR, outL, outR, n);
+            default: return runWith<kTape>(inL, inR, outL, outR, n);
+        }
+    }
+    // M: the mode for the whole run, or -1: mode_ as it is at each sample (a change under way).
+    template <int M>
+    void runWith(const float* inL, const float* inR, float* outL, float* outR, uint32_t n) noexcept {
         for (uint32_t i = 0; i < n; ++i) {
             const double drive = drive_.next(), bias0 = bias_.next(), out = out_.next(), mix0 = mix_.next();
-            if (switching_ || fade_ < 1.0) stepSwitch();
+            if (M < 0 && (switching_ || fade_ < 1.0)) stepSwitch();
+            const int mode = M < 0 ? mode_ : M;
             const double mix = fade_ < 1.0 ? mix0 * fade_ : mix0;
             const double sp = spreadOn_ ? spread_.next() : 0.0;
             const double steps = steps_;
             const double x[2] = {inL[i], inR[i]};
             double y[2];
-            if (mode_ == kCrush) {
+            if (mode == kCrush) {
                 crushPhase_ += crushStep_;
                 const bool take = crushPhase_ >= 1.0;
                 if (take) crushPhase_ -= std::floor(crushPhase_);
@@ -207,27 +228,34 @@ protected:
             } else {
                 for (int c = 0; c < 2; ++c) {
                     const double bias = spreadOn_ ? bias0 + (c == 0 ? sp : -sp) : bias0;
-                    const double offset = curve(mode_, bias, steps);
+                    // The curve's value at the bias, worked out again only when the bias (or the mode) moved.
+                    if (bias != offsetBias_[c] || mode != offsetMode_[c] || steps != offsetSteps_[c]) {
+                        offsetBias_[c] = bias;
+                        offsetMode_[c] = mode;
+                        offsetSteps_[c] = steps;
+                        offset_[c] = curve(mode, bias, steps);
+                    }
+                    const double offset = offset_[c];
                     const double v = x[c] * drive + bias;
                     if (factor_ == 4) {
                         double up[2], a[2], b[2];
                         os_[c].up(v, up);
                         os4_[c].up(up[0], a);
                         os4_[c].up(up[1], b);
-                        for (double& u : a) u = curve(mode_, u, steps) - offset;
-                        for (double& u : b) u = curve(mode_, u, steps) - offset;
+                        for (double& u : a) u = curve(mode, u, steps) - offset;
+                        for (double& u : b) u = curve(mode, u, steps) - offset;
                         const double down[2] = {os4_[c].down(a), os4_[c].down(b)};
                         y[c] = os_[c].down(down);
                     } else if (oversample_) {
                         double up[2];
                         os_[c].up(v, up);
-                        up[0] = curve(mode_, up[0], steps) - offset;
-                        up[1] = curve(mode_, up[1], steps) - offset;
+                        up[0] = curve(mode, up[0], steps) - offset;
+                        up[1] = curve(mode, up[1], steps) - offset;
                         y[c] = os_[c].down(up);
                     } else {
-                        y[c] = curve(mode_, v, steps) - offset;
+                        y[c] = curve(mode, v, steps) - offset;
                     }
-                    if (mode_ == kTape) y[c] = tape_[c].low(y[c]);  // tape's gentle top-end loss
+                    if (mode == kTape) y[c] = tape_[c].low(y[c]);  // tape's gentle top-end loss
                 }
             }
             double v[2];
@@ -287,6 +315,8 @@ private:
     int factor_ = 2;
     double driveDb_ = 6, biasValue_ = 0, toneValue_ = 0, autoDb_ = 0, steps_ = 128, crushStep_ = 0.25;
     double crushPhase_ = 1.0, held_[2] = {};
+    double offset_[2] = {}, offsetBias_[2] = {}, offsetSteps_[2] = {};  // curve(offsetMode_, offsetBias_, ...) per side
+    int offsetMode_[2] = {-1, -1};
 };
 
 ModuleProcessor* makeSaturator() noexcept { return new (std::nothrow) Saturator(); }

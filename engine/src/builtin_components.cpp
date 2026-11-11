@@ -73,6 +73,8 @@ bool stereo(const AudioProcessBlock& b) noexcept { return b.input.channelCount =
 class Balance final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kBalance; }
+    // No state: silence in gives silence out, so the host may skip it while its input is silent.
+    bool quiet() const noexcept override { return true; }
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
@@ -88,6 +90,8 @@ public:
 class Width final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kWidth; }
+    // No state: silence in gives silence out, so the host may skip it while its input is silent.
+    bool quiet() const noexcept override { return true; }
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;
@@ -145,6 +149,8 @@ bool steadyKnobs(const AudioProcessBlock& b, uint32_t count) noexcept {
 class Distortion final : public ModuleProcessor {
 public:
     const ModuleDescriptor& descriptor() const noexcept override { return kDistortion; }
+    // No state: silence in gives silence out, so the host may skip it while its input is silent.
+    bool quiet() const noexcept override { return true; }
     using ModuleProcessor::process;
     bool process(const AudioProcessBlock& b) noexcept override {
         if (!stereo(b)) return false;

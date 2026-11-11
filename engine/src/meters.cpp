@@ -48,6 +48,7 @@ void storeMax(std::atomic<float>& a, float v) noexcept {
 
 void CorrelationMeter::prepare(double sampleRate) noexcept {
     perFrame_ = -1.0 / (kCorrelationSeconds * (sampleRate > 0 ? sampleRate : 48000.0));
+    keepFrames_ = -1;  // a new rate: the decay again
     clear();
 }
 
@@ -66,7 +67,8 @@ void CorrelationMeter::process(const float* left, const float* right, int frames
         lr += l * r;
     }
     // One decay a block (block-sized steps of the window: a meter's reading, not audio).
-    const double keep = std::exp(perFrame_ * frames);
+    if (frames != keepFrames_) keepFrames_ = frames, keep_ = std::exp(perFrame_ * frames);  // the usual 64: once
+    const double keep = keep_;
     ll_ = finite(ll_ * keep + ll);
     rr_ = finite(rr_ * keep + rr);
     lr_ = finite(lr_ * keep + lr);
@@ -152,12 +154,28 @@ void LoudnessMeter::clearAudioState() noexcept {
 double LoudnessMeter::truePeak(int side, double x) noexcept {
     double* h = tpHistory_[side];
     h[tpPos_] = x;
-    double peak = 0.0;
-    const int step = 4 / oversample_;  // 4x: every phase; 2x: phases 0 and 2; 1x: the sample itself
+    h[tpPos_ + 12] = x;
     if (oversample_ == 1) return x < 0 ? -x : x;
+    const double* w = h + tpPos_ + 12;  // w[-k]: the sample k back
+    if (oversample_ == 4) {
+        // The four phases side by side (each phase's sum in its own order, k = 0..11, as below), so they vectorize.
+        double y[4] = {0.0, 0.0, 0.0, 0.0};
+        for (int k = 0; k < 12; ++k) {
+            const double v = w[-k];
+            for (int p = 0; p < 4; ++p) y[p] += kTruePeakTaps[p][k] * v;
+        }
+        double peak = 0.0;
+        for (int p = 0; p < 4; ++p) {
+            const double a = y[p] < 0 ? -y[p] : y[p];
+            peak = a > peak ? a : peak;
+        }
+        return peak;
+    }
+    double peak = 0.0;
+    const int step = 4 / oversample_;  // 2x: phases 0 and 2
     for (int p = 0; p < 4; p += step) {
         double y = 0.0;
-        for (int k = 0; k < 12; ++k) y += kTruePeakTaps[p][k] * h[(tpPos_ - k + 12) % 12];
+        for (int k = 0; k < 12; ++k) y += kTruePeakTaps[p][k] * w[-k];
         y = y < 0 ? -y : y;
         peak = y > peak ? y : peak;
     }
@@ -202,6 +220,20 @@ void LoudnessMeter::endSubBlock() noexcept {
 }
 
 void LoudnessMeter::process(const float* left, const float* right, int frames) noexcept {
+    if (sleepWhenUnread_) {
+        const uint32_t reads = reads_.load(std::memory_order_relaxed);
+        if (reads != readsSeen_) {
+            readsSeen_ = reads;
+            unreadFrames_ = 0;
+            if (asleep_) {  // read again after a pause: measure from here, as after a reset
+                asleep_ = false;
+                requestReset();
+            }
+        } else if (!asleep_ && (unreadFrames_ += frames) > kUnreadSeconds * sampleRate_) {
+            asleep_ = true;
+        }
+        if (asleep_) return;
+    }
     const uint32_t asked = resetAsked_.load(std::memory_order_relaxed);
     if (asked != resetSeen_) {  // a reset: once per request, 8,000 stores
         resetSeen_ = asked;
@@ -242,6 +274,7 @@ void LoudnessMeter::process(const float* left, const float* right, int frames) n
 }
 
 LoudnessMeter::Reading LoudnessMeter::read() noexcept {
+    reads_.fetch_add(1, std::memory_order_relaxed);
     Reading r;
     r.momentary = momentary_.load(std::memory_order_relaxed);
     r.shortTerm = shortTerm_.load(std::memory_order_relaxed);
