@@ -179,6 +179,8 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
         for (const auto& [name, value] : spec.params) {
             const int k = chain->parameterIndex(*e, name);
             if (k < 0 && spec.lenient) continue;  // a rebuild dropped the parameter
+            // A rack's value for a child its slot no longer holds (`s2.cutoff` after s2 changed): left over, ignored.
+            if (k < 0 && !e->structure.empty() && name.find('.') != std::string::npos) continue;
             if (k < 0) {
                 error = "native component " + quoted(spec.id) + " has no parameter " + quoted(name);
                 return nullptr;

@@ -11,6 +11,7 @@ import 'effect_page.dart';
 import 'eq_editor.dart';
 import 'filter_editor.dart';
 import 'mod_editors.dart';
+import 'racks/rack_editors.dart';  // fx-racks
 import 'space_editors.dart';
 import 'utility_editors.dart';
 
@@ -64,5 +65,8 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.utility': singlePage('utility', 'UTILITY', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.width': singlePage('width', 'WIDTH', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.balance': singlePage('balance', 'BALANCE', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
+  // fx-racks begin
+  ...rackEditors,
+  // fx-racks end
 };
 

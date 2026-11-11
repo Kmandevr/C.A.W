@@ -92,6 +92,8 @@ TEST(rack_child_hashes_are_24_bit_never_zero_and_unique_among_the_built_ins) {
     CHECK_EQ(rackChildHash("org.caw.filter"), rackChildHash("org.caw.filter"));
     // Pinned: the app's Dart (app/lib/model/racks.dart) computes the same numbers.
     CHECK_EQ(rackChildHash(""), (2166136261u >> 24) ^ (2166136261u & 0xFFFFFFu));
+    CHECK_EQ(rackChildHash("org.caw.filter"), 3477098u);
+    CHECK_EQ(rackChildHash("org.caw.utility"), 4302427u);
     std::vector<uint32_t> seen;
     for (const ModuleDescriptor* d : registry().builtinComponents()) {
         const uint32_t h = rackChildHash(d->id);
@@ -130,6 +132,9 @@ TEST(racks_refuse_racks_and_unknown_effects_inside) {
     CHECK(why.find("nest") != std::string::npos);
     CHECK(!chainOf(spec("org.caw.rack.fx", {{"s1_fx", 12345}}), &why));
     CHECK(!chainOf(spec("org.caw.rack.multiband", {{"b1s1_fx", hashOf("org.caw.synth.flagship")}}), &why));
+    // A value left over from a child the slot no longer holds is ignored; an unknown own parameter is not.
+    CHECK(chainOf(spec("org.caw.rack.fx", {{"s1_fx", hashOf("org.caw.eq")}, {"s1.cutoff", 500}})) != nullptr);
+    CHECK(!chainOf(spec("org.caw.rack.fx", {{"nothing", 1}}), &why));
     ComponentSpec lenient = spec("org.caw.rack.fx", {{"s1_fx", 12345}});
     lenient.lenient = true;
     CHECK(chainOf(lenient) != nullptr);

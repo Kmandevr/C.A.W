@@ -99,12 +99,12 @@ class ModSourceChip extends StatelessWidget {
 
 /// A row of source chips, scrolling sideways, under the editor's tabs on every page (and inline in the FX tab).
 class ModSourceStrip extends StatelessWidget {
-  const ModSourceStrip({super.key, this.selected, this.onSelect, this.sources = stripSources});
+  const ModSourceStrip({super.key, this.selected, this.onSelect, this.sources});
   final ModSource? selected;
   final ValueChanged<ModSource>? onSelect;
 
-  /// The chips, in order (a rack offers its own: [ModMatrix.sources]).
-  final List<ModSource> sources;
+  /// The chips, in order; null: the device's own sources ([ModMatrix.sources]: the flagship's are [stripSources]).
+  final List<ModSource>? sources;
 
   @override
   Widget build(BuildContext context) {
@@ -117,7 +117,7 @@ class ModSourceStrip extends StatelessWidget {
       children: [
         const Center(child: Padding(padding: EdgeInsets.only(right: 6), child: Text('MOD', style: TextStyle(
           fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim)))),
-        for (final s in sources)
+        for (final s in sources ?? scope.matrix?.sources ?? stripSources)
           Padding(padding: const EdgeInsets.only(right: 6), child: ModSourceChip(s,
             selected: s == selected,
             count: routes.where((r) => r.source == s).length,

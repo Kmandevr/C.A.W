@@ -30,7 +30,7 @@ bool hasInlineDevice(DeviceTarget target) {
 /// compact). It has its own repaint boundary, and its motion and live display run only while it is on screen.
 class DeviceInline extends StatefulWidget {
   const DeviceInline({super.key, required this.target, this.leading, this.actions = const [], this.onTitle,
-    this.titleKey, this.onMenu, this.selected = false, this.glow, this.onSelect});
+    this.titleKey, this.onMenu, this.selected = false, this.glow, this.onSelect, this.matrix, this.nested = false});
   final DeviceTarget target;
   final Widget? leading;
   final List<Widget> actions;
@@ -44,6 +44,13 @@ class DeviceInline extends StatefulWidget {
   final bool selected;
   final Color? glow;
   final VoidCallback? onSelect;
+
+  /// The mod matrix its knobs show (null: the device's own). A rack's child (fx-racks) takes the rack's, by prefix.
+  final ModMatrix? matrix;
+
+  /// Inside another device (a rack's chain): it shares that device's drag, assign mode and selected route, and has
+  /// no sidechain bar of its own.
+  final bool nested;
 
   @override
   State<DeviceInline> createState() => _DeviceInlineState();
@@ -81,18 +88,19 @@ class _DeviceInlineState extends State<DeviceInline> {
     final style = entry.family == null ? null : deviceStyle(entry.family!);
     final color = entry.accent ?? style?.primary ?? trackColor(s, layer);
     final second = style?.secondary ?? color;
-    final matrix = ModMatrix(t);
+    final matrix = widget.matrix ?? ModMatrix(t);
     final glow = widget.glow ?? color;
-    final key = t.isInstrument ? 'instrument' : '${t.slot}';
+    final key = t.isInstrument ? 'instrument' : (t.displayChild > 0 ? '${t.slot}-${t.displayChild}' : '${t.slot}');
+    final parent = widget.nested ? DeviceScope.maybeOf(context) : null;
     return OnScreenGate(child: RepaintBoundary(child: DeviceScope(
       target: t,
       matrix: matrix.slotCount > 0 ? matrix : null,
-      dragging: _dragging,
+      dragging: parent?.dragging ?? _dragging,
       accent: color,
       secondary: second,
-      focusSource: _focus,
-      assigning: matrix.slotCount > 0 ? _assigning : null,
-      selectedSlot: _selected,
+      focusSource: parent?.focusSource ?? _focus,
+      assigning: matrix.slotCount > 0 ? (parent?.assigning ?? _assigning) : null,
+      selectedSlot: parent?.selectedSlot ?? _selected,
       inline: true,
       child: Builder(builder: (context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
@@ -114,7 +122,7 @@ class _DeviceInlineState extends State<DeviceInline> {
                 Container(height: 2, decoration: BoxDecoration(gradient: LinearGradient(colors: [
                   color.withValues(alpha: 0.0), color.withValues(alpha: 0.8), second.withValues(alpha: 0.8),
                   second.withValues(alpha: 0.0)]))),
-                SidechainBar(target: t, color: color),
+                if (!widget.nested) SidechainBar(target: t, color: color),
                 AnimatedOpacity(
                   duration: Motion.fade(Motion.small, Motion.of(context)),
                   opacity: t.bypass ? 0.55 : 1,
