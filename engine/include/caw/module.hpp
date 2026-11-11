@@ -162,8 +162,9 @@ struct ModuleDescriptor {
     uint32_t capabilities = 0;          // kCapability* bits
     CpuClass cpuClass = CpuClass::Unspecified;
 };
-// Audio ports with an explicit layout. Stereo is the ordinary default for audio in and out;
-// a layout change between connected ports is never implicit (the graph refuses a mismatch).
+// Audio ports with an explicit layout. Stereo is the ordinary default for audio in and out. Between connected
+// ports the graph widens only mono into stereo (duplicated); any other layout change is refused, so stereo
+// into mono goes through an explicit downmix (org.caw.downmix).
 constexpr PortDescriptor audioPort(std::string_view id, bool input, ChannelLayout layout = ChannelLayout::Stereo,
                                    uint32_t discreteChannels = 0) noexcept {
     PortDescriptor port;

@@ -1,7 +1,7 @@
 ---
 title: Architecture
 summary: Technical architecture, verified engine/app boundaries and clearly labelled future design proposals.
-updated: 2026-11-10
+updated: 2026-11-11
 covers: [app/pubspec.yaml, engine/CMakeLists.txt]
 ---
 
@@ -240,6 +240,45 @@ The GitHub library-sync/source-picker workflow described in earlier proposals is
 The earlier proposal to keep readable .caw source authoritative and add visual controls around that language is superseded by the owner's 2026-11-05 C++ decision. The target is ordinary C++, a comprehensive C.A.W. Library/SDK, and one shared component model across the code editor, visual composition and generated/custom performance UI. Components are authored once and reused through the native runtime, component browser, mixer and later CLAP/VST3/standalone adapters.
 
 See [C++ creation platform](cpp-creation-platform.md) for the full component descriptor, typed port and parameter contracts, library categories, editor and visual-scripting requirements, generated/custom UI, MIDI/event model, real-time safety, trust boundaries, versioning, migration and verification gates.
+
+## Per-note processing (#127) and descriptor domains (#120)
+
+The owner put per-note effects in the beta ([decisions](decisions.md), 2026-11-11, "The beta's scope"). Steps 1–3 below are built (branch `note-fx`, 2026-11-11); step 4 onwards is **[Proposal]**. Engine details: [engine](engine.md#descriptor-domains-and-the-voice-bus-120-127).
+
+### Domains and capabilities (#120) [Fact]
+
+- `ModuleDescriptor` and `CawComponentDescriptor` end with `domains` (Whole 1, PerChannel 2, PerVoice 4, PerNote 8), `capabilities` (NotesIn, MidiIn, EventsOut, SampleAssets, NeedsTransport, ExportClap) and `cpuClass` (unspecified, light, medium, heavy: a hint, not a measurement). They are appended under the v3 growth rules as **revision 3.1** (`CAW_COMPONENT_ABI_REVISION 1`); the v3 entry symbol stays. A descriptor whose `struct_size` stops at `custom_ui_id` (`CAW_COMPONENT_DESCRIPTOR_SIZE_3_0`) reads as whole-only, no capabilities, unspecified cost; a C descriptor's `domains` 0 also reads as whole.
+- Validation: `InvalidDomains` (an unknown bit, or Whole missing: every component runs whole), `DomainPortMismatch` (PerChannel needs one mono audio input and one mono output; PerNote and PerVoice need the effect shape, one stereo input and one stereo output, or the instrument shape, no audio input, one stereo output and an event input), `InvalidCapabilities` (an unknown bit, NotesIn or MidiIn without an event input, EventsOut without an event output, an unknown cost class). `moduleDescriptorsMatch` compares all three.
+- It is called "domain", not "scope": `CAW_SCOPE_*` is already the oscilloscope in `caw.h`.
+- Built-ins: stereo effects declare Whole|PerNote; keyed effects (sidechain), the racks and the limiter stay whole-only. For an instrument, PerNote means it exposes a voice bus (the Flagship, the drums, the test signal). The C++ SDK default is whole-only, so a third-party component runs per note only when its author says it can.
+
+### Layout rules [Fact]
+
+- A mono output feeding a stereo input is duplicated (L = R = the mono signal, unity, no pan law), in plain, summing and routed graph connections.
+- Stereo into mono is refused (`ChannelLayoutMismatch`); it needs the explicit downmix `org.caw.downmix` (Average (L+R)/2, Left, Right). `org.caw.utility`'s Mono mode is stereo in and out, so it cannot feed a mono port. The downmix is internal (not listed) while track chains take stereo only.
+- A mono-in, mono-out effect that declares PerChannel runs as dual mono, one instance per channel, through `ModuleRegistry::createDualMono`. Every other mismatch stays `ChannelLayoutMismatch`.
+
+### The voice bus [Fact]
+
+- `ProcessBlock::voices` and `CawProcessBlock.voices` (3.1) carry a `CawVoiceBus {struct_size, lane_count, lane_stride, lanes, host_data, run(host_data, offset, frames)}` of `CawVoiceLane {struct_size, note_id, flags, channel_count, channels[2]}`. Flags: the host sets ASSIGNED; the instrument sets WRITTEN and ENDED.
+- The host fills lanes with the note ids it has slots for. For each stretch it renders, the instrument clears the assigned lanes' stretch, renders a matching voice into its lane instead of its mix, calls `run()` (the host processes the lanes in place), then adds every lane into its mix **before** its own shared stage. So the Flagship's effects and volume still come after per-note FX, and without a bus (`voices` null) the sound is bit-identical. Every frame of a block goes through exactly one `run()`, in order, also while no voice sounds (a lane's FX tail keeps the instrument awake).
+- A voice with no lane goes to the mix. ENDED: no voice plays the lane's note at the block's end (it finished, was stolen or never started); a steal in `VoicePool` raises it at once. Mono and legato lanes follow the note the voice plays now. PerVoice is treated as PerNote. Expression is not copied into the lane: the host already has it in its events.
+- `caw::VoiceLanes` (`caw/instrument.hpp`) is the instrument's side: `bind`, `laneFor`, `begin`, `runAndSum`, `end`, `endBlock`. The Flagship renders lanes within each control period (16 frames, so `run()` is called that often); the drums give each hit its lane, summed back into the output that hit plays to (its room send stays dry); the test signal gives each note its lane.
+
+### The per-note FX host (NoteFxHost) [Proposal: step 4]
+
+- Built on the control thread from the layer's per-note specs: B slot `ComponentChain`s plus one overflow chain, all allocated at prepare.
+- Slot choice (deterministic): the lowest free slot; else the oldest slot whose note has ended (10 ms tail fade); else the oldest released note (its remaining audio crossfades into overflow over 10 ms); else the new note goes to overflow. Held notes are never stolen.
+- Overflow runs the same chain over the sum of unassigned voices, without per-note expression, so the sound stays processed.
+- Tails: after ENDED a slot runs on silence until `quiet()` or `tailFrames` (capped at 2 s), then frees. Latency is the same for every slot and is reported as for inserts.
+- Expression: each slot's optional event input gets only its note's events (note on, per-note pitch 7.25, poly pressure, CC74 timbre), as the existing `Event` type.
+- #161: global sources (LFOs, macros) are evaluated once per block, per-note sources (pitch, velocity, pressure, timbre, gate/age) per slot; each slot has its own `ParameterValue` array (shared base and automation plus link offsets). Knob moves fan out to every slot; the display reads the newest note's slot.
+- Sum: slots in index order, then overflow, from +0.0f, inside `run()`.
+- Project JSON per layer: `"noteComponents"` (a list of component entries, always before the inserts) and `"noteVoices"` (1–16, default 8); automation and #161 link targets gain the kind `"noteComponent"`.
+- C API (next free number when it lands): `caw_engine_note_fx_stats(e, layer, CawNoteFxStats*)`, size-tagged: budget, active slots, overflowed notes. Per-note FX on an instrument without a voice bus fails the project with a clear error.
+- CPU: about B × the chain's per-instance cost. The only measured figure is an empty FX rack at about 26 M instructions/s on desktop; phone figures are **[Assumption]** until measured on the S22+. Live cap: Eco min(B, 4), Normal B (default 8), High min(B, 16); slots are allocated for the High cap and a quality change applies at the next project update. Over budget, notes go to overflow; nothing changes automatically on CPU overload; export uses the same rules. Memory is the limit with large effects (16 × reverb.pro).
+- UI concept (the owner gives the look before any UI work): a "Per note" section above "Track" in the track's FX stack with a voice-budget chip and active-voice dots; "Run per note" in each card's menu (greyed out with a reason when it can't); note sources in the mod matrix for per-note cards. The choices to confirm are in [decisions](decisions.md).
+- Later steps: per-note sources in `modulation_links.*` after #161 (step 5), the C API and app bridge (6), the app UI (7), docs and roadmap 2.8/CP.2 (8).
 
 ## Sources
 

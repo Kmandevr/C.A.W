@@ -6,6 +6,19 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Per-note FX steps 1–3 and descriptor domains (#127, #120; choices to confirm)
+
+**Decision (Claude, from the architect's design; [architecture](architecture.md#per-note-processing-127-and-descriptor-domains-120)):**
+- **No v4:** the new descriptor fields and the voice bus are C interface revision 3.1 under the v3 growth rules, so `caw_get_component_v3` and every 3.0 component keep working (they read as whole-only).
+- **Named "domain", not "scope":** `CAW_SCOPE_*` is already the oscilloscope in `caw.h`.
+- **Whole is always set**, and the C++ SDK default is whole-only: a third-party effect runs per note only when its author declares it (a silent opt-in could run unprepared state per note). The built-in stereo effects opt in; keyed effects, the racks and the limiter do not.
+- **Lanes are summed before the instrument's shared stage**, so turning per-note FX on does not change the instrument's own effects and volume, and with no bus the sound is bit-identical. The Flagship calls `run()` once per control period (16 frames); step 4's host must handle such short runs cheaply.
+- **ENDED means no voice plays the note at the block's end**, raised every such block (also for a lane assigned before its note starts), so the host never waits on a note the instrument dropped. Mono and legato lanes follow the note the voice plays now. A drum hit's room send stays dry.
+- **`org.caw.downmix` is new and internal:** `org.caw.utility`'s Mono mode is stereo in and out and cannot feed a mono port; the downmix is unlisted while track chains take stereo only. Dual mono is `ModuleRegistry::createDualMono`, an adapter, not a graph feature.
+- **The listing** adds `domains`, `capabilities` and `cpu_class` (snake_case like its other keys) to `caw_engine_components`; no new function, so the API number stays 17. Step 6's new functions take the next free number (20 at the time of writing: 18 and 19 are claimed by the audio-engine and modulator branches).
+- **Cost classes are judged, not measured** ([Assumption] until the S22+ measurement).
+- **To confirm (owner):** (1) the look: a "Per note" section above "Track" in the FX stack, or a per-card "Run per note" toggle only; (2) over budget, overflow to one shared chain (the default) or steal the oldest note's slot; (3) the default voice budget per phone (8 for now; Eco 4, High 16) after the CPU measurement; (4) the name "domain" in the UI (a menu might say "Runs: whole track / per note").
+
 ## 2026-11-11: MIDI devices (WP-H; choices made for the owner)
 
 - **The engine path:** device MIDI reaches a track's instrument through a new C API (API 15) into `Midi2InputQueue`, placed at the frame it was played from the device's timestamp, one callback late so the spacing is kept (Android's MIDI timestamps are `System.nanoTime`, the engine's `steady_clock` on Android). On-screen keys keep note previews. MIDI 1.0 is converted to MIDI 2.0 at the edge (`midi_device.cpp`, the UMP specification's min-centre-max upscaling written from the published algorithm, [Assumption] not re-read against the PDF).
