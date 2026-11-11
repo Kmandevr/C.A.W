@@ -7,6 +7,8 @@
 #include <string_view>
 #include <vector>
 
+#include "component_samples.h"
+
 #include "dependency.h"
 
 namespace caw {
@@ -39,6 +41,8 @@ struct ComponentSpec {
     std::vector<uint8_t> state;
     bool hasKey = false;  // `key` names its sidechain source (a component with a sidechain input only)
     KeySpec key;
+    // Audio for the component's sample slots (org.caw.drums: one per pad), decoded at build (component_samples.h).
+    std::vector<SampleRefSpec> samples;
 };
 
 struct ClipSpec {

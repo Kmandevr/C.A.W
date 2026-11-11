@@ -26,8 +26,9 @@ using namespace caw;
 
 namespace {
 
-const char* const kInstruments[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit",
-                                    "org.caw.synth.flagship"};
+const char* const kInstruments[] = {"org.caw.drums", "org.caw.synth.flagship"};
+// The old drums (2026-11-11, one drum instrument): a test of one plays org.caw.drums with its migrated values.
+const char* const kOldDrums[] = {"org.caw.drum.kick", "org.caw.drum.snare", "org.caw.drum.hats", "org.caw.drum.kit"};
 // The synths that became Flagship presets (2026-11-10, one synth): a test of one plays Flagship with its preset.
 const char* const kRetired[] = {"org.caw.bass", "org.caw.synth.acid", "org.caw.synth.morph", "org.caw.synth.basic"};
 
@@ -76,7 +77,8 @@ std::vector<float> play(ModuleProcessor& p, const std::vector<Event>& events, ui
     return out;
 }
 
-// A retired synth's knob values as Flagship's (its preset and the knobs mapped), as the engine loads an old project.
+// A retired synth's or old drum's knob values as its successor's (Flagship's preset and knobs mapped, or the drum's
+// values on org.caw.drums), as the engine loads an old project.
 std::vector<std::pair<std::string, double>> asFlagship(const char* id, std::vector<std::pair<std::string, double>> values) {
     std::string to = id;
     migrateLegacyInstrument(to, values);
@@ -84,7 +86,10 @@ std::vector<std::pair<std::string, double>> asFlagship(const char* id, std::vect
 }
 
 std::unique_ptr<ModuleProcessor> make(Engine& e, const char* id) {
-    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(isLegacyInstrument(id) ? "org.caw.synth.flagship" : id);
+    std::string to = id;
+    std::vector<std::pair<std::string, double>> none;
+    migrateLegacyInstrument(to, none);
+    std::unique_ptr<ModuleProcessor> p = e.createNativeComponent(to);
     CHECK(p != nullptr);
     if (p) CHECK(p->activate(48000, 64));
     return p;
@@ -474,8 +479,8 @@ TEST(library_drum_voices_ring_for_their_decay_then_stop_and_a_choke_cuts_them) {
 TEST(the_built_in_instruments_are_listed_with_readable_names) {
     Engine e(48000);
     const std::string list = e.nativeComponentsJson();
-    const char* names[] = {"Kick", "Snare", "Hi-hats", "Drum kit", "Flagship"};
-    for (int i = 0; i < 5; ++i) {
+    const char* names[] = {"Drums", "Flagship"};
+    for (int i = 0; i < 2; ++i) {
         const size_t at = list.find(std::string("\"id\":\"") + kInstruments[i] + "\"");
         CHECK(at != std::string::npos);
         if (at == std::string::npos) continue;
@@ -486,6 +491,7 @@ TEST(the_built_in_instruments_are_listed_with_readable_names) {
     }
     // The retired synths are gone from the list; Flagship lists the presets that replace them.
     for (const char* id : kRetired) CHECK(list.find(std::string("\"id\":\"") + id + "\"") == std::string::npos);
+    for (const char* id : kOldDrums) CHECK(list.find(std::string("\"id\":\"") + id + "\"") == std::string::npos);
     const size_t flagship = list.find("\"presets\":[{\"name\":\"Init\"");
     CHECK(flagship != std::string::npos);
     for (const char* name : {"Morph pad", "Mono bass", "Acid 303", "Basic"})
@@ -496,10 +502,12 @@ TEST(each_built_in_instrument_starts_on_its_frame_and_falls_silent_after_its_not
     Engine e(48000);
     std::vector<const char*> ids(std::begin(kInstruments), std::end(kInstruments));
     ids.insert(ids.end(), std::begin(kRetired), std::end(kRetired));  // Flagship with each preset
+    ids.insert(ids.end(), std::begin(kOldDrums), std::end(kOldDrums));  // Drums with each old drum's values
     for (const char* id : ids) {
         std::unique_ptr<ModuleProcessor> p = make(e, id);
         if (!p) continue;
-        const uint8_t key = std::strcmp(id, "org.caw.drum.kit") == 0 ? 36 : 45;
+        const bool kit = std::strcmp(id, "org.caw.drum.kit") == 0 || std::strcmp(id, "org.caw.drums") == 0;
+        const uint8_t key = kit ? 36 : 45;
         const std::vector<Event> notes = {notes::noteOn(100, 1, key, 1.0), notes::noteOff(12100, 1, key)};
         const std::vector<float> out = play(*p, notes, 48000 * 6, asFlagship(id, {}));
         bool before = true;
@@ -522,39 +530,42 @@ TEST(each_built_in_instrument_starts_on_its_frame_and_falls_silent_after_its_not
     }
 }
 
-TEST(hats_are_closed_or_open_by_note_and_a_closed_hit_chokes_an_open_one) {
+TEST(the_old_hats_migrate_closed_or_open_by_note_and_a_closed_hit_chokes_an_open_one) {
     Engine e(48000);
-    std::unique_ptr<ModuleProcessor> hats = make(e, "org.caw.drum.hats");
+    const char* id = "org.caw.drum.hats";
+    std::unique_ptr<ModuleProcessor> hats = make(e, id);
     if (!hats) return;
-    const std::vector<float> closed = play(*hats, {notes::noteOn(0, 1, 42, 1)}, 24000);
+    const auto values = asFlagship(id, {});
+    const std::vector<float> closed = play(*hats, {notes::noteOn(0, 1, 42, 1)}, 24000, values);
     hats->reset();
-    const std::vector<float> open = play(*hats, {notes::noteOn(0, 1, 46, 1)}, 24000);
+    const std::vector<float> open = play(*hats, {notes::noteOn(0, 1, 46, 1)}, 24000, values);
     CHECK(energy(open, 4800, 9600) > 100.0 * energy(closed, 4800, 9600));  // A#2 rings, F#2 is short
     hats->reset();
-    const std::vector<float> choked = play(*hats, {notes::noteOn(0, 1, 46, 1), notes::noteOn(4800, 2, 42, 0.01)}, 24000);
+    const std::vector<float> choked = play(*hats, {notes::noteOn(0, 1, 46, 1), notes::noteOn(4800, 2, 42, 0.01)}, 24000, values);
     CHECK(energy(choked, 9600, 14400) < 0.01 * energy(open, 9600, 14400));
     hats->reset();
-    const std::vector<float> forced = play(*hats, {notes::noteOn(0, 1, 42, 1)}, 24000, {{"mode", 2}});  // Open
+    const std::vector<float> forced = play(*hats, {notes::noteOn(0, 1, 42, 1)}, 24000, asFlagship(id, {{"mode", 2}}));  // Open
     CHECK(energy(forced, 4800, 9600) > 100.0 * energy(closed, 4800, 9600));
 }
 
-TEST(the_kit_maps_general_midi_keys_to_its_drums) {
+TEST(the_old_kit_migrates_with_its_general_midi_keys) {
     Engine e(48000);
     std::unique_ptr<ModuleProcessor> kit = make(e, "org.caw.drum.kit");
     if (!kit) return;
+    const auto values = asFlagship("org.caw.drum.kit", {});
     for (uint8_t key : {35, 36, 38, 39, 40, 42, 44, 46}) {
         kit->reset();
-        const std::vector<float> out = play(*kit, {notes::noteOn(0, 1, key, 1)}, 4800);
+        const std::vector<float> out = play(*kit, {notes::noteOn(0, 1, key, 1)}, 4800, values);
         if (!(energy(out, 0, 4800) > 1e-3)) cawtest::fail(__FILE__, __LINE__, "kit key " + std::to_string(key) + " is silent");
     }
     for (uint8_t key : {37, 41, 60}) {
         kit->reset();
-        const std::vector<float> out = play(*kit, {notes::noteOn(0, 1, key, 1)}, 4800);
+        const std::vector<float> out = play(*kit, {notes::noteOn(0, 1, key, 1)}, 4800, values);
         if (energy(out, 0, 4800) != 0.0) cawtest::fail(__FILE__, __LINE__, "kit key " + std::to_string(key) + " sounds");
     }
     // Each drum has its own level.
     kit->reset();
-    const std::vector<float> muted = play(*kit, {notes::noteOn(0, 1, 36, 1)}, 4800, {{"kick", 0.0}});
+    const std::vector<float> muted = play(*kit, {notes::noteOn(0, 1, 36, 1)}, 4800, asFlagship("org.caw.drum.kit", {{"kick", 0.0}}));
     CHECK_EQ(energy(muted, 0, 4800), 0.0);
 }
 
@@ -618,21 +629,23 @@ struct Golden {
 
 std::vector<Golden> goldens() {
     std::vector<Golden> g;
+    // The old drums' projects (kick, snare, hats, kit) play org.caw.drums with their values migrated (one drum
+    // instrument, 2026-11-11): re-recorded then, close to the old renders (the_old_drums_migrate_close_to_how_they_sounded).
     // Kick: four on the floor with a pickup, tuned and driven.
     g.push_back({"kick", track("org.caw.drum.kick", "0 C2 1 1\n4 C2 1 0.8\n8 C2 1 1\n10 C2 1 0.6\n12 C2 1 1\n",
                                {{"tune", 52}, {"drive", 3}, {"click", 0.5}}),
-                 0xc7641cbabbe0e3a3ull});
+                 0x87379a01adc3c23full});
     // Snare: backbeat and a ghost roll.
-    g.push_back({"snare", track("org.caw.drum.snare", "4 D2 1 1\n12 D2 1 1\n14 D2 1 0.4\n15 D2 1 0.6\n"), 0xb0184ce1843bca37ull});
+    g.push_back({"snare", track("org.caw.drum.snare", "4 D2 1 1\n12 D2 1 1\n14 D2 1 0.4\n15 D2 1 0.6\n"), 0xa499b8f5fdb63b13ull});
     // Hats: 16ths, open on the off-beats' last 16th, choked by the next closed one.
     g.push_back({"hats", track("org.caw.drum.hats", "0 F#2 1 0.9\n1 F#2 1 0.5\n2 F#2 1 0.8\n3 F#2 1 0.5\n4 F#2 1 0.9\n"
                                                     "5 F#2 1 0.5\n6 A#2 1 0.8\n7 F#2 1 0.5\n8 F#2 1 0.9\n9 F#2 1 0.5\n"
                                                     "10 F#2 1 0.8\n11 F#2 1 0.5\n12 F#2 1 0.9\n13 F#2 1 0.5\n14 A#2 1 0.8\n15 F#2 1 0.5\n"),
-                 0x7d07c25f99a0806full});
+                 0xeebc21653a34fc9bull});
     // Kit: every drum, and a key it doesn't map.
     g.push_back({"kit", track("org.caw.drum.kit", "0 C2 1 1\n2 F#2 1 0.6\n4 D2 1 1\n4 D#2 1 0.7\n6 A#2 1 0.8\n8 C2 1 1\n"
                                                   "10 C#2 1 1\n11 B1 1 0.7\n12 E2 1 0.9\n14 G#2 1 0.6\n"),
-                 0x15d9886e50243793ull});
+                 0x143dab24766f05d3ull});
     // The retired synths' projects (bass, acid, morph) play Flagship presets with their knobs mapped (one synth,
     // 2026-11-10): re-recorded then, perceptually the same as before (the_presets_sound_like_the_synths_they_replace).
     // Bass: First loop's line, an overlap that glides, a slide.
@@ -933,6 +946,41 @@ TEST(the_built_in_sounds_are_perceptually_what_they_were) {
             continue;
         }
         checkSameSound(g.name, ref->sound, now);
+    }
+}
+
+TEST(the_old_drums_migrate_close_to_how_they_sounded) {
+    // One drum instrument (owner, 2026-11-11): the old drums' tracks play org.caw.drums with their values mapped
+    // onto its layers (builtin_drums_sounds.cpp). Each golden pattern is compared with the old drum's own render
+    // (kOldDrumReferences). Their noise is drawn from other seeds, and a click no longer starts under the body's
+    // 1 ms attack, so the bar is looser than for a faster implementation of one sound: each side's level within
+    // 1 dB, the correlation within 0.05, and the bands within 30 dB of the loudest within 2.5 dB RMS (none off by
+    // more than 4.5 dB).
+    for (const Golden& g : goldens()) {
+        const Reference* was = nullptr;
+        for (const Reference& r : kOldDrumReferences)
+            if (std::strcmp(r.name, g.name) == 0) was = &r;
+        if (!was) continue;
+        const Sound now = measure(g.project, 48000 * 2);
+        auto fail = [&](const char* what, double a, double b) {
+            char buf[200];
+            std::snprintf(buf, sizeof buf, "%s: %s was %.3f, now %.3f", g.name, what, a, b);
+            cawtest::fail(__FILE__, __LINE__, buf);
+        };
+        if (!(std::fabs(was->sound.rmsL - now.rmsL) <= 1.0)) fail("left RMS dB", was->sound.rmsL, now.rmsL);
+        if (!(std::fabs(was->sound.rmsR - now.rmsR) <= 1.0)) fail("right RMS dB", was->sound.rmsR, now.rmsR);
+        if (!(std::fabs(was->sound.correlation - now.correlation) <= 0.05)) fail("correlation", was->sound.correlation, now.correlation);
+        double loudest = -1e9, squares = 0;
+        int bands = 0;
+        for (double b : was->sound.bands) loudest = std::max(loudest, b);
+        for (int b = 0; b < kSoundBands; ++b) {
+            if (loudest - was->sound.bands[b] > 30) continue;
+            const double d = now.bands[b] - was->sound.bands[b];
+            squares += d * d, ++bands;
+            if (!(std::fabs(d) <= 4.5)) fail("band dB", was->sound.bands[b], now.bands[b]);
+        }
+        const double rms = std::sqrt(squares / std::max(1, bands));
+        if (!(rms <= 2.5)) fail("band RMS difference dB", 0.0, rms);
     }
 }
 

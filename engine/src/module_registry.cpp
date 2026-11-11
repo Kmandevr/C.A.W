@@ -654,7 +654,8 @@ std::string moduleDescriptorJson(const ModuleDescriptor& d) {
              "\",\"smoothing_frames\":" + std::to_string(p.smoothingFrames) +
              ",\"automatable\":" + (p.automatable ? "true" : "false") +
              ",\"modulatable\":" + (p.modulatable ? "true" : "false") +
-             ",\"midi_mappable\":" + (p.midiMappable ? "true" : "false") + ",\"choices\":[";
+             ",\"midi_mappable\":" + (p.midiMappable ? "true" : "false") +
+             (p.group.empty() ? std::string() : ",\"group\":" + quoted(p.group)) + ",\"choices\":[";
         for (uint32_t c = 0; c < p.choiceCount; ++c) j += std::string(c ? "," : "") + quoted(p.choices[c]);
         j += "]}";
     }

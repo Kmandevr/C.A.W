@@ -220,12 +220,10 @@ void main() {
       }
       final infos = await e.nativeComponents();
       final names = {for (final c in infos) if (c.isInstrument) c.id: c.name};
-      expect(names, containsPair('org.caw.drum.kick', 'Kick'));
-      expect(names, containsPair('org.caw.drum.hats', 'Hi-hats'));
-      expect(names, containsPair('org.caw.drum.snare', 'Snare'));
-      expect(names, containsPair('org.caw.drum.kit', 'Drum kit'));
+      expect(names, containsPair('org.caw.drums', 'Drums'));
       expect(names, containsPair('org.caw.synth.flagship', 'Flagship'));
-      // One synth (2026-11-10): the bass, acid, morph and basic synths are Flagship presets now.
+      // One synth (2026-11-10): the bass, acid, morph and basic synths are Flagship presets now; one drum instrument
+      // (2026-11-11): the kick, snare, hats and kit are org.caw.drums.
       for (final id in ComponentUseDoc.retiredInstruments) {
         expect(names.containsKey(id), isFalse, reason: id);
       }
@@ -233,6 +231,14 @@ void main() {
       expect(flagship.presets.map((p) => p.name), containsAll(['Init', 'Morph pad', 'Mono bass', 'Acid 303', 'Basic']));
       expect(flagship.presets.firstWhere((p) => p.name == 'Mono bass').params['voice_mode'], 2);
       // The starter's tracks name their presets; resolved, they hold the values the First loop's old synths had.
+      final drums = infos.firstWhere((c) => c.id == 'org.caw.drums');
+      expect(drums.presets.map((p) => p.name), containsAll(['Kit: 808', 'Kit: 909', '808 Kick', 'Crash']));
+      // An old drum migrates: Single mode, its values on pad A1, no preset.
+      final kick = Engine.resolveInstrument({'id': 'org.caw.drum.kick', 'params': {'tune': 60}})!;
+      expect(kick['migrated'], isTrue);
+      expect(kick['id'], 'org.caw.drums');
+      expect(kick['preset'], isNull);
+      expect((kick['params'] as Map)['a1_body_freq'], 60);
       final resolved = s.starterProject()..resolveInstruments(Engine.resolveInstrument);
       final old = {
         'Bass': {'id': 'org.caw.bass', 'params': {'cutoff': 270, 'resonance': 0.45, 'env': 0.6, 'decay': 0.18, 'sustain': 0.2}},

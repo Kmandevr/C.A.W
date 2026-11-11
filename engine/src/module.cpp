@@ -1,9 +1,16 @@
 // Validation for the shared, typed module contract.
 #include "module.h"
 
+#include <algorithm>
 #include <cmath>
+#include <string_view>
+#include <vector>
 
 namespace caw {
+
+namespace {
+constexpr uint32_t kQuadraticLimit = 256;  // up to this many parameters, the plain pairwise duplicate check
+}  // namespace
 
 ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
     if (d.id.empty()) return ModuleValidation::MissingId;
@@ -94,8 +101,20 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
         } else if (p.choices) {
             return ModuleValidation::InvalidParameterChoices;
         }
-        for (uint32_t j = 0; j < i; ++j)
-            if (d.parameters[j].id == p.id) return ModuleValidation::DuplicateParameterId;
+        if (d.parameterCount <= kQuadraticLimit)
+            for (uint32_t j = 0; j < i; ++j)
+                if (d.parameters[j].id == p.id) return ModuleValidation::DuplicateParameterId;
+    }
+    // A large list (org.caw.drums has thousands): sorted, so the check is n log n instead of n^2.
+    if (d.parameterCount > kQuadraticLimit) {
+        try {
+            std::vector<std::string_view> ids(d.parameterCount);
+            for (uint32_t i = 0; i < d.parameterCount; ++i) ids[i] = d.parameters[i].id;
+            std::sort(ids.begin(), ids.end());
+            if (std::adjacent_find(ids.begin(), ids.end()) != ids.end()) return ModuleValidation::DuplicateParameterId;
+        } catch (...) {
+            return ModuleValidation::DuplicateParameterId;  // out of memory: refuse rather than guess
+        }
     }
     if (d.uiControlCount && !d.uiControls) return ModuleValidation::MissingUiControlArray;
     for (uint32_t i = 0; i < d.uiControlCount; ++i) {
@@ -129,6 +148,7 @@ ModuleValidation validateModuleDescriptor(const ModuleDescriptor& d) noexcept {
 }
 
 bool moduleDescriptorsMatch(const ModuleDescriptor& a, const ModuleDescriptor& b) noexcept {
+    if (&a == &b) return validateModuleDescriptor(a) == ModuleValidation::Ok;  // a built-in's own descriptor
     if (validateModuleDescriptor(a) != ModuleValidation::Ok ||
         validateModuleDescriptor(b) != ModuleValidation::Ok)
         return false;
