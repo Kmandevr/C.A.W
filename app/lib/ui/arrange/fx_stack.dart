@@ -7,6 +7,7 @@ import '../../model/app_state.dart';
 import '../../model/arrange_fx.dart';
 import '../../model/cpp_component.dart';
 import '../../model/mixer_fx.dart';
+import '../../model/note_fx.dart';
 import '../../model/project.dart';
 import '../../model/routing_edit.dart';
 import '../../model/device_target.dart';
@@ -22,6 +23,7 @@ import 'arrange_drag.dart';
 import 'track_color.dart';
 import 'knob.dart';
 import 'long_press_menu.dart';
+import 'note_fx_section.dart';
 
 /// Opens the Build tab for a C++ component (nothing without sections: tests).
 void openSource(BuildContext context, BuildTab tab) => SectionController.maybeOf(context)?.openBuild(tab);
@@ -146,6 +148,9 @@ class _FxStackState extends State<FxStack> {
           label: const Text('Instrument'))),
       ],
       const SizedBox(height: 6),
+      // Per-note FX (#127): above the track's effects, as they run (each note, then the whole track).
+      if (!_nativeOnly && layer.instrument != null && layer.noteComponents.isNotEmpty)
+        NoteFxSection(key: const ValueKey('note-fx-section'), state: s, layer: layer),
       if (!_nativeOnly) const _GroupLabel('NATIVE EFFECTS · C++', null, note: 'After the instrument, before volume and pan'),
       if (layer.components.isEmpty) const _GroupLabel('', 'None'),
       if (layer.components.isNotEmpty)
@@ -299,6 +304,9 @@ class _NativeEffectCard extends StatelessWidget {
           if (instrument) const MenuAction('replace', 'Replace…', Icons.swap_horiz),
           if (!instrument && index > 0) const MenuAction('up', 'Move up', Icons.arrow_upward),
           if (!instrument && index < layer.components.length - 1) const MenuAction('down', 'Move down', Icons.arrow_downward),
+          if (!instrument && !layer.isFolder && !isMasterLayer(layer))
+            MenuAction('pernote', 'Run per note', Icons.scatter_plot,
+              enabled: state.perNoteBlocker(layer, use.id) == null, hint: state.perNoteBlocker(layer, use.id)),
           if (info != null && info.parameters.isNotEmpty) const MenuAction('reset', 'Reset knobs', Icons.restart_alt),
           const MenuAction('remove', 'Remove', Icons.delete_outline, danger: true),
         ]);
@@ -313,6 +321,7 @@ class _NativeEffectCard extends StatelessWidget {
         }
         state.commitNativeParams(layer);
       }
+      if (v == 'pernote') state.runPerNote(layer, index);
       if (v == 'remove') _remove();
     }
     final failed = status == NativeEffectState.buildFailed || status == NativeEffectState.loadFailed;

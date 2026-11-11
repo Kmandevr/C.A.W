@@ -4,7 +4,27 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
-const int cawApiVersion = 21;  // must equal CAW_API_VERSION in engine/include/caw.h
+const int cawApiVersion = 22;  // must equal CAW_API_VERSION in engine/include/caw.h
+
+/// CawNoteFxStats (API 22, #127): a layer's per-note FX slots.
+final class CawNoteFxStatsStruct extends Struct {
+  @Uint32()
+  external int structSize;
+  @Uint32()
+  external int voices;
+  @Uint32()
+  external int budget;
+  @Uint32()
+  external int active;
+  @Uint32()
+  external int activeMask;
+  @Uint32()
+  external int overflowing;
+  @Uint32()
+  external int overflowed;
+  @Uint32()
+  external int stolen;
+}
 
 final class CawMetersStruct extends Struct {
   @Float()
@@ -297,6 +317,11 @@ class Bindings {
   late final int Function(Pointer<Void>, int, Pointer<Float>) modulationOffset = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Uint32, Pointer<Float>), int Function(Pointer<Void>, int, Pointer<Float>)>(
       'caw_engine_modulation_offset');
+
+  // Per-note FX (API 22, #127; caw.h).
+  late final int Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>) noteFxStats = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>),
+      int Function(Pointer<Void>, Pointer<Utf8>, Pointer<CawNoteFxStatsStruct>)>('caw_engine_note_fx_stats');
 
   static Bindings get instance => _instance ??= Bindings._(DynamicLibrary.open(engineLibraryPath()));
 

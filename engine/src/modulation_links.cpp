@@ -22,7 +22,7 @@ constexpr uint32_t kValueScratch = 8192;   // parameters of the largest componen
 constexpr uint32_t kSampleScratch = 32;    // modulated parameters with per-frame values, per component and block
 constexpr int64_t kNever = std::numeric_limits<int64_t>::min();
 
-const char* const kTargetTypes[] = {"component", "instrument", "volume", "pan", "send", "modulator"};
+const char* const kTargetTypes[] = {"component", "instrument", "volume", "pan", "send", "modulator", "noteComponent"};
 
 bool targetHasLayer(const std::string& type) { return type != "modulator"; }
 
@@ -145,10 +145,12 @@ bool parseModulation(const Json& root, const ComponentEntryParser& entry, Projec
             l.id = static_cast<uint32_t>(id);
             const std::string who = "modulation link " + std::to_string(l.id);
             l.source = j.string("source");
-            const bool known = std::any_of(out.modulators.begin(), out.modulators.end(),
-                                           [&](const ModulatorSpec& m) { return m.id == l.source; });
+            NoteSource noteSource;
+            const bool perNote = noteSourceNamed(l.source, noteSource);  // #127: the slot's own note
+            const bool known = perNote || std::any_of(out.modulators.begin(), out.modulators.end(),
+                                                      [&](const ModulatorSpec& m) { return m.id == l.source; });
             if (!known) {
-                error = who + ": source '" + l.source + "' is not a modulator in the project";
+                error = who + ": source '" + l.source + "' is not a modulator in the project or a note source";
                 return false;
             }
             const double output = j.number("output", 0);
@@ -169,15 +171,23 @@ bool parseModulation(const Json& root, const ComponentEntryParser& entry, Projec
             l.target.index = index >= 0 && index < 1e6 && index == std::floor(index) ? static_cast<int>(index) : -1;
             const std::string& type = l.target.type;
             if (std::none_of(std::begin(kTargetTypes), std::end(kTargetTypes), [&](const char* x) { return type == x; })) {
-                error = who + ": target type must be component, instrument, volume, pan, send or modulator";
+                error = who + ": target type must be component, instrument, noteComponent, volume, pan, send or modulator";
                 return false;
             }
-            const bool needsParam = type == "component" || type == "instrument" || type == "modulator";
+            if (perNote && type != "noteComponent") {
+                error = who + ": a note source ('" + l.source + "') moves only a per-note component (target type noteComponent)";
+                return false;
+            }
+            if (perNote && l.output != 0) {
+                error = who + ": a note source has one output (0)";
+                return false;
+            }
+            const bool needsParam = type == "component" || type == "instrument" || type == "modulator" || type == "noteComponent";
             if (needsParam && l.target.param.empty()) {
                 error = who + ": its target needs a param";
                 return false;
             }
-            if ((type == "component" || type == "send") && l.target.index < 0) {
+            if ((type == "component" || type == "send" || type == "noteComponent") && l.target.index < 0) {
                 error = who + ": its target needs an index";
                 return false;
             }
@@ -284,6 +294,74 @@ bool modulationEdges(const ProjectSpec& p, const std::map<std::string, size_t>& 
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Per-note sources (#127 step 5).
+
+bool noteSourceNamed(const std::string& source, NoteSource& out) noexcept {
+    static const struct {
+        const char* name;
+        NoteSource source;
+    } kNames[] = {{"note.pitch", NoteSource::Pitch},       {"note.velocity", NoteSource::Velocity},
+                  {"note.pressure", NoteSource::Pressure}, {"note.timbre", NoteSource::Timbre},
+                  {"note.gate", NoteSource::Gate},         {"note.age", NoteSource::Age}};
+    for (const auto& n : kNames)
+        if (source == n.name) {
+            out = n.source;
+            return true;
+        }
+    return false;
+}
+
+double noteSourceValue(NoteSource source, const NoteSourceState& s, double sampleRate) noexcept {
+    double v = 0.0;
+    switch (source) {
+        case NoteSource::Pitch: v = s.pitch / 127.0; break;
+        case NoteSource::Velocity: v = s.velocity; break;
+        case NoteSource::Pressure: v = s.pressure; break;
+        case NoteSource::Timbre: v = s.timbre; break;
+        case NoteSource::Gate: v = s.gate ? 1.0 : 0.0; break;
+        case NoteSource::Age: v = static_cast<double>(s.age) / (kNoteAgeSeconds * sampleRate); break;
+    }
+    return std::isfinite(v) ? std::clamp(v, 0.0, 1.0) : 0.0;
+}
+
+std::vector<NoteLink> noteLinksFor(const ProjectSpec& p, const std::string& layer, const ComponentChain& slot,
+                                   std::vector<std::string>& warnings) {
+    std::vector<NoteLink> out;
+    for (const ModLinkSpec& l : p.modulation) {
+        NoteSource source;
+        if (l.target.type != "noteComponent" || l.target.layer != layer || !noteSourceNamed(l.source, source)) continue;
+        const int param = l.target.index >= 0 ? slot.parameterIndexOf(static_cast<size_t>(l.target.index), l.target.param) : -1;
+        const ModuleDescriptor* d = l.target.index >= 0 ? slot.descriptorOf(static_cast<size_t>(l.target.index)) : nullptr;
+        if (param < 0 || !d) {
+            warnings.push_back("modulation link " + std::to_string(l.id) + ": '" + layer + "' has no per-note component " +
+                               std::to_string(l.target.index) + " with a parameter '" + l.target.param + "'");
+            continue;
+        }
+        if (!d->parameters[param].modulatable) continue;
+        NoteLink n;
+        n.id = l.id;
+        n.source = source;
+        n.entry = static_cast<uint32_t>(l.target.index);
+        n.param = static_cast<uint32_t>(param);
+        n.amount = l.amount;
+        n.bipolar = l.bipolar;
+        n.curve = l.curve;
+        out.push_back(n);
+    }
+    // Grouped by target, in id order within each (links into one target add up in id order).
+    std::stable_sort(out.begin(), out.end(), [](const NoteLink& a, const NoteLink& b) {
+        if (a.entry != b.entry) return a.entry < b.entry;
+        if (a.param != b.param) return a.param < b.param;
+        return a.id < b.id;
+    });
+    if (out.size() > static_cast<size_t>(kMaxNoteLinks)) {
+        warnings.push_back("'" + layer + "': per-note FX take at most " + std::to_string(kMaxNoteLinks) + " note-source links");
+        out.resize(static_cast<size_t>(kMaxNoteLinks));
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // The volume fader's taper (app/lib/ui/volume_fader.dart VolumeTaper): dB = 20 k log10(p / 0.75), +12 dB at p = 1.
 
 namespace {
@@ -363,8 +441,8 @@ struct ModulationPlan {
         int send = -1;
         uint32_t first = 0, count = 0;  // its links
         // Audio thread.
-        const ComponentChain* cache[2] = {nullptr, nullptr};
-        int cacheParam[2] = {-1, -1};
+        const ComponentChain* cache[3] = {nullptr, nullptr, nullptr};
+        int cacheParam[3] = {-1, -1, -1};
         float offset[ComponentChain::kMaxFrames] = {};
     };
     std::vector<Dest> dests;
@@ -372,8 +450,8 @@ struct ModulationPlan {
     std::vector<std::vector<uint32_t>> modDests;         // per modulator (evaluation order)
     std::vector<uint32_t> linkDest;                      // per link
     std::unique_ptr<std::atomic<float>[]> destPublished;
-    std::vector<ChainModulation::Binding> bindings[2];
-    ChainModulation cm[2];
+    std::vector<ChainModulation::Binding> bindings[3];  // [2]: a layer's per-note FX (#127), read inside its instrument
+    ChainModulation cm[3];
     std::vector<ParameterValue> values;
     std::vector<double> samples;
     float aL[kModGridFrames] = {}, aR[kModGridFrames] = {};
@@ -450,7 +528,7 @@ std::string ModulationHost::update(const ModuleRegistry& registry, const Project
     std::shared_ptr<ModulationRuntime> rt;
     if (ctl_ && ctl_->rt && ctl_->rt->key == key) {
         rt = ctl_->rt;  // the same modulators: they keep running and take the new values
-        rt->chain->setValues(specs);
+        if (rt->chain) rt->chain->setValues(specs);  // none when the project has links but no modulators
     } else {
         rt = std::make_shared<ModulationRuntime>();
         rt->key = key;
@@ -533,13 +611,16 @@ std::string ModulationHost::update(const ModuleRegistry& registry, const Project
                 continue;
             }
             d.slot = master ? -1 : li.slot;
-            if (type == "component" || type == "instrument") {
-                d.kind = type == "instrument" ? ModChainKind::Instrument : master ? ModChainKind::Master : ModChainKind::Inserts;
+            if (type == "component" || type == "instrument" || type == "noteComponent") {
+                const bool note = type == "noteComponent";  // #127: every slot of the layer's per-note FX
+                d.kind = type == "instrument" ? ModChainKind::Instrument : note ? ModChainKind::NoteFx
+                       : master ? ModChainKind::Master : ModChainKind::Inserts;
                 d.entry = type == "instrument" ? 0u : static_cast<uint32_t>(l.target.index);
-                const ComponentChain* c = type == "instrument" ? li.instrument : li.inserts;
+                const ComponentChain* c = type == "instrument" ? li.instrument : note ? li.noteFx : li.inserts;
                 if (!c || c->parameterIndexOf(d.entry, l.target.param) < 0) {
                     warnings.push_back(who + ": " + (master ? std::string("the master") : "'" + l.target.layer + "'") +
-                                       " has no " + (type == "instrument" ? "instrument" : "component " + std::to_string(d.entry)) +
+                                       " has no " + (type == "instrument" ? "instrument"
+                                                     : (note ? "per-note component " : "component ") + std::to_string(d.entry)) +
                                        " with a parameter '" + l.target.param + "'");
                     continue;
                 }
@@ -591,7 +672,7 @@ std::string ModulationHost::update(const ModuleRegistry& registry, const Project
     for (auto& b : plan->bindings) b.resize(std::max<size_t>(1, plan->dests.size()));
     plan->values.resize(kValueScratch);
     plan->samples.resize(static_cast<size_t>(kSampleScratch) * ComponentChain::kMaxFrames);
-    for (int w = 0; w < 2; ++w) {
+    for (int w = 0; w < 3; ++w) {
         ChainModulation& cm = plan->cm[w];
         cm.bindings = plan->bindings[w].data();
         cm.values = plan->values.data();
@@ -774,7 +855,7 @@ void ModulationHost::beginChunk(uint32_t m, int64_t songSample, double stepLengt
 }
 
 const ChainModulation* ModulationHost::forChain(int slot, ModChainKind kind, const ComponentChain* chain, int which) noexcept {
-    if (!cur_ || !chain || which < 0 || which > 1 || cur_->chainDests.empty()) return nullptr;
+    if (!cur_ || !chain || which < 0 || which > 2 || cur_->chainDests.empty()) return nullptr;
     ModulationPlan& p = *cur_;
     ChainModulation& cm = p.cm[which];
     cm.count = 0;

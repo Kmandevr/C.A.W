@@ -380,6 +380,17 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
             if (spec.id.empty()) continue;
             const std::string layerName = "layer '" + spec.id + "'";
             if (!componentList(l.get("components"), layerName + " components", spec.components, error)) return false;
+            if (!componentList(l.get("noteComponents"), layerName + " noteComponents", spec.noteComponents, error)) return false;
+            for (const ComponentSpec& c : spec.noteComponents)
+                if (c.hasKey) {
+                    error = layerName + " noteComponents: component '" + c.id + "' can't take a sidechain key per note";
+                    return false;
+                }
+            if (const Json* v = l.get("noteVoices"); v && v->type != Json::Type::Null &&
+                                                      !wholeIn(l.number("noteVoices", 8), 1, 16, spec.noteVoices)) {
+                error = layerName + ": noteVoices must be a whole number from 1 to 16";
+                return false;
+            }
             if (const Json* inst = l.get("instrument"); inst && inst->type != Json::Type::Null) {
                 if (inst->type != Json::Type::String && inst->type != Json::Type::Object) {
                     error = layerName + " instrument must be a component id or {\"id\": ...}";
@@ -487,7 +498,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 lane.moduleId = laneJson.string("layer");
                 lane.component = 0;
                 if (lane.moduleId.empty()) continue;
-            } else if (lane.targetType == "component") {
+            } else if (lane.targetType == "component" || lane.targetType == "noteComponent") {
                 // {"target_type":"component","layer":id (absent: the master),"component":index,"target":param}
                 lane.moduleId = laneJson.string("layer");
                 const double index = laneJson.number("component", -1);
@@ -495,7 +506,7 @@ bool parseProject(std::string_view text, ProjectSpec& out, std::string& error) {
                 lane.component = static_cast<int>(index);
             }
             if ((lane.targetType != "param" && lane.targetType != "global" && lane.targetType != "component" &&
-                 lane.targetType != "instrument") ||
+                 lane.targetType != "instrument" && lane.targetType != "noteComponent") ||
                 lane.target.empty() || (lane.targetType == "param" && lane.moduleId.empty())) continue;
             if (!pointStepsOk(laneJson.get("points"), error, "")) return false;
             if (const Json* points = laneJson.get("points"); points && points->type == Json::Type::Array) {

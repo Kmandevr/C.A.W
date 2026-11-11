@@ -244,6 +244,10 @@ typedef struct CawTransport {
 #define CAW_LANE_ASSIGNED 1u /* host: the lane is in use for note_id */
 #define CAW_LANE_WRITTEN 2u  /* instrument: a voice rendered into the lane in this block */
 #define CAW_LANE_ENDED 4u    /* instrument: no voice plays note_id at the end of this block */
+/* host (3.1, #127 step 4): the overflow lane. Every voice whose note has no lane of its own renders here (note_id
+ * is 0); the host runs its shared per-note chain over them. An instrument that doesn't know this bit sees a lane
+ * no voice matches and renders those voices into its mix, as before. Never ENDED. */
+#define CAW_LANE_REST 8u
 typedef struct CawVoiceLane {
     uint32_t struct_size;
     uint32_t note_id;       /* the host note id (CawEvent.note_id) */

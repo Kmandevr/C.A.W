@@ -118,5 +118,5 @@ NativeComponentInfo flagshipFixture() {
         ComponentPortInfo(id: 'notes', type: 'event', input: true, layout: 'none', channels: 0),
         ComponentPortInfo(id: 'out', type: 'audio', input: false, layout: 'stereo', channels: 2),
       ],
-      parameters: ps);
+      parameters: ps, domains: const ['whole', 'per_note'], cpuClass: 'heavy');
 }

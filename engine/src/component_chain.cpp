@@ -79,6 +79,38 @@ bool ComponentChain::isInstrument(const ModuleDescriptor& d) noexcept {
     return events && out;
 }
 
+bool ComponentChain::runsPerNote(const ModuleDescriptor& d, std::string* why) noexcept {
+    uint32_t in = 0, out = 0, events = 0;
+    for (uint32_t k = 0; d.ports && k < d.portCount; ++k) {
+        const PortDescriptor& p = d.ports[k];
+        if (stereoAudio(p) && p.input) ++in;
+        else if (stereoAudio(p) && !p.input) ++out;
+        else if (p.type == PortType::Event && p.input) ++events;
+        else in = 99;
+    }
+    if (in != 1 || out != 1 || events > 1 || isKeyedEffect(d)) {
+        if (why) *why = "only an effect with one stereo input and one stereo output runs per note";
+        return false;
+    }
+    if (!(d.domains & (kDomainPerNote | kDomainPerVoice))) {
+        if (why) *why = "it doesn't say it can run per note (its descriptor's domains)";
+        return false;
+    }
+    return true;
+}
+
+std::unique_ptr<ComponentChain> ComponentChain::buildNoteEffects(const ModuleRegistry& registry,
+                                                                 const std::vector<ComponentSpec>& specs,
+                                                                 double sampleRate, std::string& error) {
+    return make(registry, specs, sampleRate, Kind::NoteEffects, error);
+}
+
+bool ComponentChain::quiet() const noexcept {
+    for (const auto& e : entries_)
+        if (!(e->asleep || (e->mix == 0.0 && e->bypass.load(std::memory_order_relaxed)))) return false;
+    return true;
+}
+
 std::unique_ptr<ComponentChain> ComponentChain::buildInstrument(const ModuleRegistry& registry, const ComponentSpec& spec,
                                                                 double sampleRate, std::string& error) {
     return make(registry, {spec}, sampleRate, Kind::Instrument, error);
@@ -164,6 +196,7 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
     const bool instrument = kind == Kind::Instrument;
     std::unique_ptr<ComponentChain> chain(new ComponentChain());
     chain->modulators_ = kind == Kind::Modulators;
+    chain->noteFx_ = kind == Kind::NoteEffects;
     chain->sampleRate_ = sampleRate;
     if (instrument) chain->notes_ = std::make_unique<NoteEvents>();
     chain->entries_.reserve(specs.size());
@@ -193,6 +226,13 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             error = "native component " + quoted(spec.id) + " is an instrument: choose it as the track's instrument";
             return nullptr;
         }
+        if (kind == Kind::NoteEffects) {
+            std::string why;
+            if (!runsPerNote(*d, &why)) {
+                error = "native component " + quoted(spec.id) + " can't run per note: " + why;
+                return nullptr;
+            }
+        }
         const bool keyed = kind == Kind::Effects && isKeyedEffect(*d);
         if (kind == Kind::Effects && !isStereoEffect(*d) && !keyed) {
             error = "native component " + quoted(spec.id) +
@@ -207,6 +247,9 @@ std::unique_ptr<ComponentChain> ComponentChain::make(const ModuleRegistry& regis
             for (uint32_t k = 0; k < d->portCount; ++k)
                 e->keyEvents = e->keyEvents || (d->ports[k].type == PortType::Event && d->ports[k].input);
         }
+        if (kind == Kind::NoteEffects)
+            for (uint32_t k = 0; k < d->portCount; ++k)
+                e->noteEvents = e->noteEvents || (d->ports[k].type == PortType::Event && d->ports[k].input);
         e->processor = registry.create(spec.id);
         if (!e->processor) {
             error = "native component " + quoted(spec.id) + " could not create a processor instance";
@@ -417,7 +460,7 @@ std::unique_ptr<ComponentAutomation> ComponentChain::automationFor(
     table->lanes = lanes;
     table->byParam.resize(entries_.size());
     bool any = false;
-    const char* targetType = instrument() ? "instrument" : "component";
+    const char* targetType = instrument() ? "instrument" : noteFx_ ? "noteComponent" : "component";
     for (std::size_t i = 0; i < entries_.size(); ++i) {
         const ModuleDescriptor& d = entries_[i]->processor->descriptor();
         table->byParam[i].assign(d.parameterCount, nullptr);
@@ -621,7 +664,7 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         const bool on = e.mix == 1.0 && target == 1.0;
         // A keyed effect hears its key only in the chunk the sources wrote it (else silence and no notes).
         const KeyInput* key = e.key && time && time->chunk >= 0 && e.key->chunk == time->chunk ? e.key.get() : nullptr;
-        const bool events = (notes_ && notes_->count() > 0) || (key && key->count > 0);
+        const bool events = (notes_ && notes_->count() > 0) || (key && key->count > 0) || (e.noteEvents && noteEventCount_ > 0);
         if (e.asleep && on && !events && (notes_ || (peakAbs(left, m) == 0.0f && peakAbs(right, m) == 0.0f))) continue;
         e.asleep = false;
         std::copy_n(left, m, stageL_.data());
@@ -669,7 +712,25 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
             ports.parameters = block.parameters;
             ports.parameterCount = block.parameterCount;
             ports.transport = block.transport;
+            ports.voices = voices_;  // per-note FX lanes (#127), or null
             processed = e.processor->usesProcessPorts() && e.processor->processPorts(ports);
+        } else if (e.noteEvents) {  // a per-note effect with an event input: its note's events (#127)
+            const ConstChannelBufferView audioIn{in, 2, m};
+            const ChannelBufferView audioOut{out, 2, m};
+            const EventInput events{noteEvents_, noteEventCount_};
+            ProcessBlock ports;
+            ports.frames = m;
+            ports.sampleRate = sampleRate;
+            ports.audioIn = &audioIn;
+            ports.audioInCount = 1;
+            ports.audioOut = &audioOut;
+            ports.audioOutCount = 1;
+            ports.eventIn = &events;
+            ports.eventInCount = 1;
+            ports.parameters = block.parameters;
+            ports.parameterCount = block.parameterCount;
+            ports.transport = block.transport;
+            processed = e.processor->usesProcessPorts() ? e.processor->processPorts(ports) : e.processor->process(block);
         } else {
             processed = e.processor->process(block);
         }
@@ -693,6 +754,8 @@ void ComponentChain::process(float* left, float* right, uint32_t m, double sampl
         }
     }
     if (notes_) notes_->clearEvents();  // delivered (or dropped while bypassed): the next block starts empty
+    noteEvents_ = nullptr;  // per-note FX: set again before each call
+    noteEventCount_ = 0;
 }
 
 bool ComponentChain::monitorsStopped() const noexcept {

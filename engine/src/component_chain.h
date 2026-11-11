@@ -85,6 +85,25 @@ public:
                                                            double sampleRate, std::string& error);
     // Whether a descriptor has an instrument's ports (one event input, one stereo audio output).
     static bool isInstrument(const ModuleDescriptor& d) noexcept;
+    // One slot of a layer's per-note FX (#127, note_fx_host.h): effects as build() takes them (keyed ones excepted),
+    // each of which may also have one event input (its note's events, setEvents) and must declare kDomainPerNote
+    // (or kDomainPerVoice, run per note). Automation lanes are the "noteComponent" ones.
+    static std::unique_ptr<ComponentChain> buildNoteEffects(const ModuleRegistry& registry,
+                                                            const std::vector<ComponentSpec>& specs, double sampleRate,
+                                                            std::string& error);
+    // Whether a descriptor can run per note: an effect's ports (one stereo audio input and output, at most one event
+    // input) and the per-note (or per-voice) domain. `why` says what is missing when it can't.
+    static bool runsPerNote(const ModuleDescriptor& d, std::string* why = nullptr) noexcept;
+    // Audio thread, an instrument: the voice bus its next process() hands the component (null: none).
+    void setVoices(const VoiceBus* voices) noexcept { voices_ = voices; }
+    // Audio thread, per-note FX: the events its next process() hands components that have an event input (frames
+    // within that call).
+    void setEvents(const Event* events, uint32_t count) noexcept {
+        noteEvents_ = events;
+        noteEventCount_ = events ? count : 0;
+    }
+    // Audio thread: every component is asleep (said quiet() and has heard nothing since) or bypassed.
+    bool quiet() const noexcept;
     // A modulator (#161): 1..kMaxModulatorOutputs modulation outputs, at most one event input and at most one audio
     // input (mono or stereo), no other ports. Chains of tracks refuse it; the project's modulators hold it.
     static constexpr uint32_t kMaxModulatorOutputs = 8;
@@ -230,6 +249,7 @@ private:
         std::unordered_map<std::string_view, int> index;  // parameter id to index (ids live in the descriptor)
         std::unique_ptr<KeyInput> key;  // a keyed effect's sidechain (null: not keyed)
         bool keyEvents = false;         // ... and it takes the key's notes
+        bool noteEvents = false;        // per-note FX: it has an event input (its note's events)
     };
     ComponentChain() = default;
     int parameterIndex(const Entry& e, const std::string& id) const noexcept { return parameterIndex(e, std::string_view(id)); }
@@ -239,7 +259,7 @@ private:
     // Audio thread: e.values with project modulation applied (time->modulation), or e.values itself.
     const ParameterValue* modulated(const Entry& e, std::size_t index, uint32_t m, const ChainTime* time) noexcept;
 
-    enum class Kind : uint8_t { Effects, Instrument, Modulators };
+    enum class Kind : uint8_t { Effects, Instrument, Modulators, NoteEffects };
     static std::unique_ptr<ComponentChain> make(const ModuleRegistry& registry, const std::vector<ComponentSpec>& specs,
                                                 double sampleRate, Kind kind, std::string& error);
 
@@ -250,6 +270,10 @@ private:
     uint64_t playEpoch_ = ~0ull;
     bool modulators_ = false;   // built by buildModulators
     bool modNewPlay_ = false;   // audio thread: beginModulators saw a new Play
+    bool noteFx_ = false;       // built by buildNoteEffects
+    const VoiceBus* voices_ = nullptr;   // audio thread: an instrument's voice bus for the next process()
+    const Event* noteEvents_ = nullptr;  // audio thread: per-note FX events for the next process()
+    uint32_t noteEventCount_ = 0;
     std::array<float, kMaxFrames> stageL_{}, stageR_{};
     std::array<double, kMaxFrames> lane_{};
 };

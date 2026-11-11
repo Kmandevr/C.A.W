@@ -1632,13 +1632,14 @@ private:
             }
             // A hit whose note has a lane: the same sums into laneL/R, then into the lane (summed back into its
             // output below, after the host's per-note FX). Its room send stays dry.
-            VoiceLane* lane = lanes_.any() ? lanes_.laneFor(v.noteId) : nullptr;
+            // The overflow lane (kLaneRest) takes only hits on the main output: one lane can't sum into two.
+            VoiceLane* lane = lanes_.any() ? lanes_.laneFor(v.noteId, out == 0) : nullptr;
             double* dl = busL[out];
             double* dr = busR[out];
             if (lane) {
                 for (uint32_t k = 0; k < n; ++k) laneL[k] = laneR[k] = 0.0;
                 dl = laneL, dr = laneR;
-                laneOut(v.noteId, out);
+                if (!(lane->flags & kLaneRest)) laneOut(v.noteId, out);
             }
             float peak = padLevel_[pad];
             const bool toRoom = roomOn_ && v.roomSend > 0.0;

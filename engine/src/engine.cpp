@@ -1029,6 +1029,11 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 masterChainBytes += sizeof(NoteEvents) + NoteEvents::kBytes;  // its note list and held notes
                 ++total;
             }
+            if (!l.folder && !l.noteComponents.empty())  // per-note FX (#127): each slot chain and the overflow chain
+                for (int k = 0; k <= noteFxSlots(l.noteVoices); ++k) {
+                    charge(l.noteComponents);
+                    total += l.noteComponents.size();
+                }
         }
         if (p.auditionOnly) {  // the preview's own chain, as a track's
             if (!p.auditionComponents.empty()) {
@@ -1077,6 +1082,9 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                        "\",\"modules\":{}}";
             nextInstruments[l.id] = std::move(instrument);
         }
+        // Per-note FX (#127, note_fx_host.cpp): built here too, so one that can't run refuses the update.
+        if (const std::string why = noteFx_->prepare(nativeModules_, p, sr_); !why.empty())
+            return "{\"ok\":false,\"error\":\"" + jsonEscape(why) + "\",\"modules\":{}}";
         if (p.auditionOnly) {
             const std::string id = "\1audition";
             auto it = layers_.find(id);
@@ -1724,6 +1732,11 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
 
+    // Per-note FX (#127): its own plan, swapped in lock-free at the next chunk, as modulation's.
+    noteFx_->commit(p, [&](const std::string& id) {
+        auto it = layers_.find(id);
+        return it == layers_.end() || it->second.bus ? -1 : it->second.slot;
+    }, ctlAutomation_, warnings["project"]);
     // Project modulation (#161, modulation_links.cpp): its own plan, swapped in lock-free at the next chunk.
     {
         std::vector<std::string>& w = warnings["project"];
@@ -1740,6 +1753,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             info.sends = it->second.userSends;
             info.inserts = it->second.inserts;
             info.instrument = it->second.instrument;
+            info.noteFx = noteFx_->chainFor(id);
             return info;
         }, w);
         if (!modError.empty()) {
@@ -1813,7 +1827,7 @@ bool Engine::updateCompensation(std::map<std::string, std::vector<std::string>>&
         n.id = &id;
         uint64_t frames = 0;
         if (ls.inserts) frames += ls.inserts->latencyFrames();
-        if (ls.instrument && !ls.bus) frames += ls.instrument->latencyFrames();
+        if (ls.instrument && !ls.bus) frames += ls.instrument->latencyFrames() + noteFx_->latencyFrames(id);
         n.own = static_cast<int64_t>(std::min<uint64_t>(frames, 1u << 30));
     }
     auto busAt = [&](int slot) -> Node* {
@@ -1958,6 +1972,8 @@ bool Engine::setSend(const std::string& layerId, uint32_t index, double level, b
 
 bool Engine::setComponentParam(const std::string& layerId, uint32_t index, const std::string& param, double value) {
     std::lock_guard<std::mutex> lock(ctl_);
+    if (index != kInstrumentIndex && (index & kNoteComponentFlag))  // per-note FX (#127): every slot
+        return noteFx_->setParam(layerId, index & ~kNoteComponentFlag, param, value);
     ComponentChain* chain = ctlComponentChain(layerId, index);
     if (!chain) return false;
     const uint64_t before = chain->latencyFrames();
@@ -1971,6 +1987,12 @@ bool Engine::setComponentParam(const std::string& layerId, uint32_t index, const
 
 bool Engine::setComponentBypass(const std::string& layerId, uint32_t index, bool bypass) {
     std::lock_guard<std::mutex> lock(ctl_);
+    if (index != kInstrumentIndex && (index & kNoteComponentFlag)) {  // per-note FX (#127): every slot
+        if (!noteFx_->setBypass(layerId, index & ~kNoteComponentFlag, bypass)) return false;
+        std::map<std::string, std::vector<std::string>> warnings;
+        updateCompensation(warnings);
+        return true;
+    }
     ComponentChain* chain = ctlComponentChain(layerId, index);
     if (!chain || !chain->setBypass(index, bypass)) return false;
     std::map<std::string, std::vector<std::string>> warnings;
@@ -2048,6 +2070,8 @@ int32_t Engine::componentDisplay(const std::string& layerId, uint32_t index, flo
     // its last picture). The chains themselves are read without locks (DisplayBuffer).
     std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);
     if (!lock.owns_lock()) return 0;
+    if (index != kInstrumentIndex && (index & kNoteComponentFlag))  // per-note FX (#127): the newest note's slot
+        return noteFx_->readDisplay(layerId, index & ~kNoteComponentFlag, out, max);
     ComponentChain* chain = ctlComponentChain(layerId, index);
     if (!chain) return -1;
     return chain->readDisplay(index, out, max);
@@ -2065,7 +2089,13 @@ bool Engine::setModulatorBypass(const std::string& modulatorId, bool bypass) {
 
 bool Engine::setModulationAmount(uint32_t linkId, double amount) {
     std::lock_guard<std::mutex> lock(ctl_);
-    return modulation_->setLinkAmount(linkId, amount);
+    const bool perNote = noteFx_->setLinkAmount(linkId, amount);  // a note-source link (#127)
+    return modulation_->setLinkAmount(linkId, amount) || perNote;
+}
+
+bool Engine::noteFxStats(const std::string& layerId, NoteFxStats& out) {
+    std::unique_lock<std::mutex> lock(ctl_, std::try_to_lock);  // a UI polls it: never waits
+    return lock.owns_lock() && noteFx_->stats(layerId, out);
 }
 
 int32_t Engine::modulatorOutputs(const std::string& modulatorId, float* out, int32_t max) {
@@ -3415,6 +3445,7 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
                 c->notes()->forget(false);
                 c->notes()->clearEvents();
             }
+        if (NoteFxHost* fx = noteFx_->forSlot(s.index)) fx->reset();  // per-note FX (#127)
         s.instrumentIdle = false;
     }
     if (s.instrument) {
@@ -3423,7 +3454,19 @@ void Engine::runInstrument(Slot& s, int m) noexcept {
         if (midiPendingCount_ > 0) feedDeviceMidi(s, notes, m);
         instrumentMotion(notes, m);
         if (modulation_->listens(s.index)) modulation_->tapNotes(s.index, notes.events(), notes.count());  // #161
+        // Per-note FX (#127, note_fx_host.cpp): the host places this block's notes in slots and hands the
+        // instrument its voice bus; each lane runs through its slot inside the instrument's block.
+        NoteFxHost* noteFx = noteFx_->forSlot(s.index);
+        if (noteFx) {
+            notes.sort();
+            s.instrument->setVoices(noteFx->begin(notes.events(), notes.count(), static_cast<uint32_t>(m), &time,
+                modulation_->forChain(s.index, ModChainKind::NoteFx, noteFx->modChain(), 2), quality()));
+        }
         s.instrument->process(s.instL, s.instR, static_cast<uint32_t>(m), sr_, &time);
+        if (noteFx) {
+            s.instrument->setVoices(nullptr);
+            noteFx->end(static_cast<uint32_t>(m));
+        }
     } else {
         std::fill_n(s.instL, m, 0.0f);
         std::fill_n(s.instR, m, 0.0f);
@@ -3605,6 +3648,7 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
     // Project modulation (#161): due modulator blocks and every target's offsets, before any target runs.
     modulation_->beginChunk(static_cast<uint32_t>(m), g_, stepLen_, bpm_, static_cast<uint32_t>(beatsPerBar_),
                             playing_ && !previewChunk_, modPlays_, chunkId_);
+    noteFx_->beginChunk();  // per-note FX (#127): a new plan
     // One graph runs the mix: each track's node, each folder bus after its children (and after every send and
     // key into it), then the master stage. Routing changes only between chunks.
     if (routingDirty_) {

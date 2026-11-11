@@ -39,7 +39,36 @@ bool modulationEdges(const ProjectSpec& p, const std::map<std::string, size_t>& 
                      std::vector<std::vector<size_t>>& edges, std::string& error);
 
 // Which chain a parameter link moves.
-enum class ModChainKind : uint8_t { Inserts, Instrument, Master, Modulators };
+enum class ModChainKind : uint8_t { Inserts, Instrument, Master, Modulators, NoteFx };
+
+// Per-note sources (#127 step 5): a link whose "source" is "note.pitch", "note.velocity", "note.pressure",
+// "note.timbre", "note.gate" or "note.age" moves a per-note component (target type "noteComponent") in each slot
+// from that slot's own note (note_fx_host.h). Each reads 0..1: pitch / 127 (with its bend), velocity, poly pressure,
+// timbre (CC74), gate (1 while held), age (0 at the note-on, 1 after kNoteAgeSeconds). A modulator's link into a
+// "noteComponent" moves every slot alike, worked out once per chunk.
+enum class NoteSource : uint8_t { Pitch, Velocity, Pressure, Timbre, Gate, Age };
+constexpr double kNoteAgeSeconds = 2.0;
+constexpr int kMaxNoteLinks = 64;  // note-source links per layer
+bool noteSourceNamed(const std::string& source, NoteSource& out) noexcept;
+struct NoteSourceState {
+    double pitch = 60.0, velocity = 0.0, pressure = 0.0, timbre = 0.0;
+    bool gate = false;
+    int64_t age = 0;  // frames since the note-on
+};
+double noteSourceValue(NoteSource source, const NoteSourceState& s, double sampleRate) noexcept;
+// One note-source link, resolved against the layer's per-note chain.
+struct NoteLink {
+    uint32_t id = 0;
+    NoteSource source = NoteSource::Pitch;
+    uint32_t entry = 0, param = 0;  // the component in the chain and its parameter index
+    double amount = 0.0;
+    bool bipolar = false;
+    double curve = 0.0;
+};
+// The note-source links of `layer`'s per-note components, checked against one of its slot chains, grouped by
+// target and in id order within each. A link to a missing parameter is a warning.
+std::vector<NoteLink> noteLinksFor(const ProjectSpec& p, const std::string& layer, const ComponentChain& slot,
+                                   std::vector<std::string>& warnings);
 
 struct ModulationPlan;
 struct ModulationRuntime;
@@ -62,6 +91,7 @@ public:
         int sends = 0;
         const ComponentChain* inserts = nullptr;
         const ComponentChain* instrument = nullptr;
+        const ComponentChain* noteFx = nullptr;  // one slot of its per-note FX (#127; all are alike)
     };
     using LayerLookup = std::function<LayerInfo(const std::string& layerId)>;  // "" is the master
 
@@ -89,7 +119,8 @@ public:
     void beginChunk(uint32_t m, int64_t songSample, double stepLength, double tempo, uint32_t beatsPerBar,
                     bool playing, uint64_t playEpoch, int64_t chunk) noexcept;
     // The modulation of chain `chain` of `slot` (-1 the master) for this chunk, or null. `which` (0 or 1) picks
-    // the scratch, so a chain and the one it replaces (crossfading) can both be modulated in one chunk.
+    // the scratch, so a chain and the one it replaces (crossfading) can both be modulated in one chunk; 2 is the
+    // per-note FX's (ModChainKind::NoteFx), whose bindings the NoteFxHost copies (it runs inside the instrument).
     const ChainModulation* forChain(int slot, ModChainKind kind, const ComponentChain* chain, int which) noexcept;
     // A layer's volume, pan or send `send` offset per frame this chunk (normalized travel), or null.
     const float* volume(int slot) const noexcept;

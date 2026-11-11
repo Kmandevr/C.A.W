@@ -245,6 +245,7 @@ public:
     void bind(const ProcessBlock& b) noexcept {
         count_ = 0;
         bus_ = nullptr;
+        rest_ = nullptr;
         const VoiceBus* bus = b.voices;
         if (!bus || bus->structSize < sizeof(VoiceBus) || bus->laneStride < sizeof(VoiceLane) || !bus->run ||
             bus->laneCount == 0 || !bus->lanes)
@@ -254,7 +255,10 @@ public:
             if (lane->structSize < sizeof(VoiceLane) || !(lane->flags & kLaneAssigned) || lane->channelCount < 2 ||
                 !lane->channels[0] || !lane->channels[1])
                 continue;
-            lane->flags &= kLaneAssigned;  // the out bits are this block's
+            lane->flags &= kLaneAssigned | kLaneRest;  // the out bits are this block's
+            if (lane->flags & kLaneRest) {
+                if (!rest_) rest_ = lane;  // the overflow lane (one): voices without a lane of their own
+            }
             lanes_[count_++] = lane;
         }
         if (count_) bus_ = bus;
@@ -269,12 +273,13 @@ public:
             if (lanes_[k]->noteId == noteId) return static_cast<int>(k);
         return -1;
     }
-    // The lane a voice playing this note renders into (marked written), or null.
-    VoiceLane* laneFor(uint32_t noteId) noexcept {
+    // The lane a voice playing this note renders into (marked written): its own, else the host's overflow lane
+    // (kLaneRest) unless `rest` is false; null: the voice plays in the mix.
+    VoiceLane* laneFor(uint32_t noteId, bool rest = true) noexcept {
         const int k = indexOf(noteId);
-        if (k < 0) return nullptr;
-        lanes_[k]->flags |= kLaneWritten;
-        return lanes_[k];
+        VoiceLane* lane = k >= 0 ? lanes_[k] : rest ? rest_ : nullptr;
+        if (lane) lane->flags |= kLaneWritten;
+        return lane;
     }
     // Clears the stretch [offset, offset + n) of every lane, before voices render into it.
     void begin(uint32_t offset, uint32_t n) noexcept {
@@ -307,11 +312,12 @@ public:
     template <class Playing>
     void endBlock(Playing&& playing) noexcept {
         for (uint32_t k = 0; k < count_; ++k)
-            if (!playing(lanes_[k]->noteId)) lanes_[k]->flags |= kLaneEnded;
+            if (!(lanes_[k]->flags & kLaneRest) && !playing(lanes_[k]->noteId)) lanes_[k]->flags |= kLaneEnded;
     }
 
 private:
     const VoiceBus* bus_ = nullptr;
+    VoiceLane* rest_ = nullptr;
     VoiceLane* lanes_[kMaxLanes] = {};
     uint32_t count_ = 0;
 };
