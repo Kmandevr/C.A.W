@@ -1,5 +1,7 @@
 // WP-J: the asset store (decoding, resampling, peaks), audio clips on tracks, time-stretch, the sampler, SFZ and input.
 #include <algorithm>
+#include <thread>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -872,6 +874,136 @@ TEST(recovery_finalises_a_take_left_by_a_crash) {
     CHECK(a != nullptr);
     if (a) CHECK_EQ(a->frames, int64_t{1000});
     CHECK(!std::filesystem::exists(part));
+    std::filesystem::remove_all(dir);
+}
+
+TEST(input_is_let_go_after_each_callback_and_read_at_the_devices_own_stride) {
+    std::vector<float> in, l(256), r(256);
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(e.setProjectJson(inputProject("on", false)).find("\"ok\":true") != std::string::npos);
+    for (int k = 0; k < 4; ++k) callback(e, in, 0.25f, 256, l.data(), r.data());
+    CHECK_NEAR(l[200], 0.25 * std::sqrt(0.5), 1e-6);
+    // The device closed: its buffer is gone (here overwritten). A process() without a callback hears silence.
+    std::fill(in.begin(), in.end(), 0.9f);
+    e.process(l.data(), r.data(), 256);
+    CHECK_EQ(l[200], 0.0f);
+    // A device with 34 channels: channel 1 of each frame is at frame * 34 + 1, even though only 32 are used.
+    std::vector<float> wide(256 * 34);
+    for (size_t i = 0; i < wide.size(); ++i) wide[i] = static_cast<float>(i % 34) * 0.01f;
+    for (int k = 0; k < 4; ++k) {
+        e.liveAudio().beginCallback(wide.data(), 34, 256);
+        e.process(l.data(), r.data(), 256);
+        e.liveAudio().afterCallback(l.data(), r.data(), 256);
+    }
+    float worst = 0;
+    for (int i = 100; i < 256; ++i) worst = std::max(worst, std::fabs(l[static_cast<size_t>(i)] - 0.01f * std::sqrt(0.5f)));
+    CHECK(worst < 1e-6f);
+}
+
+TEST(recording_restarts_straight_away_while_the_audio_thread_runs) {
+    // startRecording right after stopRecording reallocates the ring and scratch: never while a callback is in chunk().
+    const std::string dir = tempDir("restart");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProjectJson(inputProject("off", true));
+    e.liveAudio().setDeviceChannels(4);
+    e.play();
+    std::atomic<bool> stop{false};
+    std::thread audio([&] {
+        std::vector<float> in(64 * 4, 0.1f), l(64), r(64);
+        while (!stop.load()) {
+            e.liveAudio().beginCallback(in.data(), 4, 64);
+            e.process(l.data(), r.data(), 64);
+            e.liveAudio().afterCallback(l.data(), r.data(), 64);
+        }
+    });
+    int ok = 0;
+    for (int k = 0; k < 60; ++k) {
+        const int ch = k % 3;  // 1, 2 then 3 channels in use: a new ring size each time
+        const std::string req = "{\"dir\":\"" + jsonEscape(dir) + "\",\"bpm\":120,\"tracks\":[{\"layer\":\"t\",\"channel\":" +
+                                std::to_string(ch) + ",\"channels\":" + std::to_string(ch == 2 ? 2 : 1) + "}]}";
+        ok += e.liveAudio().startRecording(req).find("\"ok\":true") != std::string::npos;
+        e.liveAudio().stopRecording();
+    }
+    stop.store(true);
+    audio.join();
+    CHECK_EQ(ok, 60);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(recording_splits_a_take_before_the_wav_size_limit) {
+    // WAV sizes are 32-bit: a take is continued in a new file before 4 GB (here a small limit stands in for it).
+    const std::string dir = tempDir("split");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProjectJson(inputProject("off", true));
+    e.liveAudio().setDeviceChannels(2);
+    e.liveAudio().setLatencyOverride(0);
+    CHECK(e.liveAudio().startRecording("{\"dir\":\"" + jsonEscape(dir) + "\",\"bpm\":120,\"max_file_bytes\":40000,"
+                                       "\"tracks\":[{\"layer\":\"t\",\"channel\":1}]}").find("\"ok\":true") != std::string::npos);
+    e.play();
+    std::vector<float> in, l(480), r(480);
+    int64_t n = 0;
+    for (int k = 0; k < 50; ++k) {  // 24000 frames, 96000 bytes: three files of at most 10000 frames
+        in.assign(480 * 2, 0.0f);
+        for (int i = 0; i < 480; ++i) in[static_cast<size_t>(i) * 2 + 1] = static_cast<float>(n++);
+        e.liveAudio().beginCallback(in.data(), 2, 480);
+        e.process(l.data(), r.data(), 480);
+    }
+    Json j;
+    std::string error;
+    CHECK(parseJson(e.liveAudio().stopRecording(), j, error));
+    const Json* takes = j.get("takes");
+    CHECK(takes && takes->arr.size() == 3);
+    if (takes && takes->arr.size() == 3) {
+        double next = 0;
+        for (const Json& t : takes->arr) {
+            CHECK_EQ(t.number("start_frame", -1), next);
+            CHECK(t.number("frames", 0) <= 10000.0);
+            int ch = 0;
+            const auto data = readFloatWav(t.string("path"), ch);
+            CHECK_EQ(data.size(), static_cast<size_t>(t.number("frames", 0)));
+            if (!data.empty()) CHECK_EQ(data[0], static_cast<float>(next));
+            next += t.number("frames", 0);
+        }
+        CHECK_EQ(next, 24000.0);
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST(recovery_refuses_while_recording_and_leaves_foreign_part_files_alone) {
+    const std::string dir = tempDir("recover2");
+    // Not C.A.W's header (16-bit PCM): left as it is.
+    const std::string foreign = dir + "/other.wav.part";
+    const std::string pcm = writeWav(foreign, 44100, 2, 100, [](int64_t i, int) { return noiseAt(i, 1); }, false);
+    const auto before = std::filesystem::file_size(foreign);
+    std::ifstream f0(foreign, std::ios::binary);
+    const std::string bytes((std::istreambuf_iterator<char>(f0)), std::istreambuf_iterator<char>());
+    f0.close();
+    char* r = caw_record_recover(dir.c_str());
+    std::string out = r;
+    caw_free(r);
+    CHECK(std::filesystem::exists(foreign));
+    CHECK_EQ(std::filesystem::file_size(foreign), before);
+    std::ifstream f1(foreign, std::ios::binary);
+    CHECK(std::string((std::istreambuf_iterator<char>(f1)), std::istreambuf_iterator<char>()) == bytes);
+    CHECK(out.find("\"takes\":[]") != std::string::npos);
+    // While a session records into the folder, recovery is refused (its .part files are being written).
+    Engine e(48000);
+    e.setProjectJson(inputProject("off", true));
+    e.liveAudio().setDeviceChannels(2);
+    CHECK(e.liveAudio().startRecording("{\"dir\":\"" + jsonEscape(dir) + "\",\"bpm\":120,\"tracks\":[{\"layer\":\"t\",\"channel\":1}]}")
+              .find("\"ok\":true") != std::string::npos);
+    r = caw_record_recover(dir.c_str());
+    out = r;
+    caw_free(r);
+    CHECK(out.find("\"ok\":false") != std::string::npos);
+    e.liveAudio().stopRecording();
+    r = caw_record_recover(dir.c_str());
+    out = r;
+    caw_free(r);
+    CHECK(out.find("\"ok\":true") != std::string::npos);
     std::filesystem::remove_all(dir);
 }
 
