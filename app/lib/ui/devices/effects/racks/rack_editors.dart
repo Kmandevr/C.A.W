@@ -30,7 +30,7 @@ final Map<String, DeviceEditorEntry> rackEditors = {
         DeviceSection('rack', 'RACK', Icons.view_agenda_outlined, (_) => const FxRackPage(), showsSources: true),
         DeviceSection('routes', 'ROUTES', Icons.hub_outlined, (_) => const _RoutesPage()),
       ], family: DeviceFamily.modulation),
-  multibandRackId: singlePage('multiband', 'BANDS', Icons.view_week_outlined, DeviceFamily.eq, () => const MultibandRackPage()),
+  multibandRackId: singlePage('mbrack', 'BANDS', Icons.view_week_outlined, DeviceFamily.eq, () => const MultibandRackPage()),
 };
 
 /// Each band's colour, low to high.
@@ -134,8 +134,9 @@ class _MultibandRackPageState extends State<MultibandRackPage> {
     final t = scope.target;
     final bands = t.value('bands').round().clamp(1, multibandBands);
     final band = _band.clamp(0, bands - 1);
-    return effectPage('multiband', [
-      Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(children: [
+    return effectPage('mbrack', [
+      // A Wrap, so the chips go onto a second line in a narrow inline column instead of overflowing.
+      Padding(padding: const EdgeInsets.only(bottom: 8), child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, runSpacing: 4, children: [
         const Text('BANDS', style: TextStyle(fontSize: 9, letterSpacing: 1.2, fontWeight: FontWeight.w800, color: Neon.dim)),
         const SizedBox(width: 8),
         for (var n = 1; n <= multibandBands; n++)
@@ -433,7 +434,7 @@ class _ModulatorPanel extends StatelessWidget {
     if (source == ModSource.env1 || source == ModSource.env2) {
       final n = source == ModSource.env1 ? 1 : 2;
       final p = 'env${n}_';
-      return ControlGroup(title: 'ENVELOPE $n · FROM THE KEY\'S NOTES', color: c, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      return ControlGroup(title: 'ENVELOPE $n · NOTES', color: c, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         EnvelopeView(prefix: p, height: 90, color: c),
         KnobRow(['${p}attack', '${p}decay', '${p}sustain', '${p}release'], size: 40, color: c,
             labels: {'${p}attack': 'A', '${p}decay': 'D', '${p}sustain': 'S', '${p}release': 'R'}),

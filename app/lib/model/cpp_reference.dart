@@ -443,6 +443,16 @@ const cppBuiltins = <CppBuiltin>[
   CppBuiltin('org.caw.tilt', 'Tilt EQ', false, 'Darker or brighter around a pivot, on stereo, mid or side.', ['tilt', 'freq', 'q', 'channel', 'output']),
   CppBuiltin('org.caw.geq', 'Graphic EQ', false, '31 third-octave bands (g1..g31, ±12 dB) corrected for their overlap.', ['range', 'output']),
   // fx-filters end
+  // fx-racks begin: the containers (engine/src/builtin_fx_racks*.cpp); inner knobs are s<slot>.<param>
+  CppBuiltin('org.caw.rack.fx', 'FX rack', false,
+      'Up to 8 built-in effects in series (s1_fx..s8_fx), with 4 LFOs, 2 followers, 2 note envelopes, random and 8 '
+      'macros routed by 16 mod slots to any inner knob (s<slot>.<param>).',
+      ['lfo1_shape', 'lfo1_sync', 'macro1', 'mix', 'output']),
+  CppBuiltin('org.caw.rack.multiband', 'Multiband rack', false,
+      'Up to 5 Linkwitz-Riley bands that sum flat, each a chain of up to 4 built-in effects, with mute, solo, bypass, '
+      'gain and pan per band.',
+      ['bands', 'mix', 'output']),
+  // fx-racks end
 ];
 
 /// One of C.A.W's own text formats, for the Library's last groups.

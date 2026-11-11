@@ -13,7 +13,10 @@ import 'package:caw/model/mod_matrix.dart';
 import 'package:caw/model/project.dart';
 import 'package:caw/model/racks.dart';
 import 'package:caw/ui/devices/device_registry.dart';
+import 'package:caw/ui/devices/effects/creative/creative_catalog.dart' show creativeCatalog;
+import 'package:caw/ui/devices/effects/dynamics/catalog.dart' show fxDynamicsCatalog;
 import 'package:caw/ui/devices/effects/effect_catalog.dart';
+import 'package:caw/ui/devices/effects/filters/filters_shared.dart' show filtersBrowserEntries;
 import 'package:caw/ui/files/asset_picker.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/devices/visuals/filter_curve.dart' show freqToX;
@@ -134,6 +137,26 @@ void main() {
       }
       expect(EffectCatalog.of(fxRackId)!.category, EffectCategory.racks);
     });
+
+    test('the groups\' catalogs fill the browser: their tab, description and icon, the base keywords kept', () {
+      for (final e in [...fxDynamicsCatalog.map((e) => (e.id, e.category, e.description, e.icon)),
+          ...creativeCatalog.map((e) => (e.id, e.category, e.description, e.icon)),
+          ...filtersBrowserEntries.map((e) => (e.id, e.category, e.description, e.icon))]) {
+        final entry = EffectCatalog.of(e.$1);
+        expect(entry, isNotNull, reason: e.$1);
+        expect(entry!.category, EffectCategory.byLabel(e.$2), reason: e.$1);
+        expect(entry.description, e.$3);
+        expect(entry.icon, e.$4);
+      }
+      expect(EffectCatalog.of('org.caw.multiband')!.category, EffectCategory.dynamics);
+      expect(EffectCatalog.of('org.caw.tapestop')!.category, EffectCategory.pitchTime);
+      expect(EffectCatalog.of('org.caw.bitcrush')!.category, EffectCategory.creative);
+      expect(EffectCatalog.of('org.caw.ladder')!.category, EffectCategory.eqFilter);
+      expect(EffectCatalog.of('org.caw.compressor')!.keywords, contains('glue'));
+      expect(EffectCatalog.of('org.caw.stutter')!.matches('beat repeat', 'Stutter'), isTrue);
+      expect(EffectCategory.byLabel('EQ & Filter'), EffectCategory.eqFilter);
+      expect(EffectCategory.byLabel('Nope'), isNull);
+    });
   });
 
   group('browser', () {
@@ -164,7 +187,7 @@ void main() {
       await openBrowser(tester, s)();
       expect(find.byKey(const ValueKey('fx-browser-tabs')), findsOneWidget);
       expect(find.text('DYNAMICS'), findsOneWidget);
-      expect(find.text('Evens out levels; soft knee, look-ahead and a sidechain'), findsOneWidget);
+      expect(find.text(EffectCatalog.of('org.caw.compressor')!.description), findsOneWidget);
       await tab(tester, 'racks');
       expect(find.text('FX rack'), findsOneWidget);
       expect(find.text('Compressor'), findsNothing);
@@ -182,6 +205,9 @@ void main() {
       expect(find.text('FAVOURITES'), findsOneWidget);
       expect(find.byKey(const ValueKey('fx-browser-Favourites-org.caw.compressor')), findsOneWidget);
       // A pick goes first in Recently used.
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('fx-browser-Dynamics-org.caw.gate')), 120,
+          scrollable: find.byType(Scrollable).last);
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('fx-browser-Dynamics-org.caw.gate')));
       await tester.pumpAndSettle();
       expect(s.effectRecents.ids.first, 'org.caw.gate');
@@ -279,6 +305,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('rack-add-0')));
       await tester.pumpAndSettle();
       expect(find.text('Add to rack'), findsOneWidget);
+      // The groups' catalogs make the list long: search narrows it to the filter.
+      await tester.enterText(find.byKey(const ValueKey('fx-browser-search')), 'filter');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('fx-browser-EQ & Filter-org.caw.filter')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('fx-browser-EQ & Filter-org.caw.filter')));
       await tester.pumpAndSettle();
       expect(rackChildren(t).first.$2, 'org.caw.filter');

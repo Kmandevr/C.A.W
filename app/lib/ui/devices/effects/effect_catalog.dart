@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 
 import '../../../engine/component_info.dart';
 import '../../theme.dart';
+import 'creative/creative_catalog.dart' as fx_creative;  // fx-creative
+import 'dynamics/catalog.dart' as fx_dynamics;  // fx-dynamics
+import 'filters/filters_shared.dart' as fx_filters show filtersBrowserEntries;  // fx-filters
 
 /// The browser's tabs (owner, 2026-11-11), in order.
 enum EffectCategory {
@@ -19,6 +22,14 @@ enum EffectCategory {
   const EffectCategory(this.label, this.icon);
   final String label;
   final IconData icon;
+
+  /// The tab named [label] (a group catalog's category string), or null for a name that is no tab.
+  static EffectCategory? byLabel(String label) {
+    for (final c in values) {
+      if (c.label.toLowerCase() == label.trim().toLowerCase()) return c;
+    }
+    return null;
+  }
 
   /// The tab's colour (the device families' palette).
   Color get color => switch (this) {
@@ -57,7 +68,26 @@ class EffectEntry {
 class EffectCatalog {
   EffectCatalog._();
 
-  static final Map<String, EffectEntry> _byId = {for (final e in _entries) e.id: e};
+  static final Map<String, EffectEntry> _byId = () {
+    final m = {for (final e in _entries) e.id: e};
+    for (final g in _groups) {
+      for (final (id, category, description, icon) in g) {
+        final c = EffectCategory.byLabel(category);
+        assert(c != null, '$id: "$category" is not a browser tab');
+        m[id] = EffectEntry(id, c ?? EffectCategory.utility, description, icon, keywords: m[id]?.keywords ?? const []);
+      }
+    }
+    return m;
+  }();
+
+  /// The groups' own catalogs, each as (id, category label, description, icon). A group's entry replaces the
+  /// description and icon of an effect listed above and keeps its keywords. To plug in a group, add one line in a
+  /// `// fx-<group>` block. docs/ui.md, "The effect browser".
+  static final List<Iterable<(String, String, String, IconData)>> _groups = [
+    [for (final e in fx_dynamics.fxDynamicsCatalog) (e.id, e.category, e.description, e.icon)],  // fx-dynamics
+    [for (final e in fx_creative.creativeCatalog) (e.id, e.category, e.description, e.icon)],  // fx-creative
+    [for (final e in fx_filters.filtersBrowserEntries) (e.id, e.category, e.description, e.icon)],  // fx-filters
+  ];
 
   static const List<EffectEntry> _entries = [
     // The effects suite (#173) and the Library's stereo tools.
