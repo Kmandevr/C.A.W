@@ -15,9 +15,8 @@ Owner (2026-11-10): work through everything discussed toward the open beta, with
 - MIDI file import/export in Dart (`app/lib/model/midi_file.dart`, `app/lib/model/midi_clips.dart`, `app/lib/ui/midi_file_actions.dart`).
 
 ## Open
-- Signing secrets are set (owner, 2026-11-10); a signed APK build was started ~22:59Z: check its log says "Signing with the repository key".
-- Agents for #175 still running in worktrees: `.claude/worktrees/routing` (routing-ducker), `.claude/worktrees/modux` (mod-ux, synth UI first), `.claude/worktrees/polish` (polish-pass). Merged: user presets, flagship-perf.
-- A scheduled wake-up (00:32Z) resumes the work after a usage reset.
+- Signed APK verified (run 42921918821, keystore loaded); link sent to the owner.
+- Agents for #175 stopped at the usage limit and were re-launched 00:33Z from their committed state (briefs in the scratchpad) in worktrees: `.claude/worktrees/routing` (routing-ducker), `.claude/worktrees/modux` (mod-ux, synth UI first), `.claude/worktrees/polish` (polish-pass). Merged: user presets, flagship-perf.
 
 ## Next after merges
 - reaper-flow gaps 5-10 (sends/buses, render parity, actions, MIDI editor flow, mixer parity, templates), #161 modulators/routing, testing-suite and sample-pack screens, mixer label shows instrument name, #133 leftovers, then #160/#159 (.caw removal, .caw project extension).
