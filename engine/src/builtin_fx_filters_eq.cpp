@@ -1,4 +1,4 @@
-// The DJ 3-band EQ ("org.caw.eq3"), the tilt EQ ("org.caw.tilt") and the 31-band graphic EQ ("org.caw.geq") of the EQ & Filter group.
+// The DJ 3-band EQ ("org.caw.eq.dj"), the tilt EQ ("org.caw.tilt") and the 31-band graphic EQ ("org.caw.geq") of the EQ & Filter group.
 #include "builtin_fx_filters.h"
 
 #include <algorithm>
@@ -73,7 +73,7 @@ const ParamTable& eq3Params() {
     return t;
 }
 const ModuleDescriptor& eq3Descriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.eq3", "3-band EQ", eq3Params(), 0, 0);
+    static const ModuleDescriptor d = effectDescriptor("org.caw.eq.dj", "3-band EQ", eq3Params(), 0, 0);
     return d;
 }
 

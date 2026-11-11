@@ -11,7 +11,7 @@
 namespace caw::fx {
 
 // Registers org.caw.ladder, .nlfilter (builtin_fx_filters.cpp), .comb, .resonator (builtin_fx_filters_comb.cpp),
-// .formant, .disperser (builtin_fx_filters_formant.cpp), .eq3, .tilt and .geq (builtin_fx_filters_eq.cpp).
+// .formant, .disperser (builtin_fx_filters_formant.cpp), .eq.dj, .tilt and .geq (builtin_fx_filters_eq.cpp).
 void registerFilters(ModuleRegistry& registry);
 
 void registerLadderAndNonlinear(ModuleRegistry& registry);  // builtin_fx_filters.cpp

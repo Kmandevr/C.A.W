@@ -2,6 +2,9 @@
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+// fx-filters begin
+import '../effects/filters/filters_display.dart' show filtersFamily;
+// fx-filters end
 
 /// The families devices are coloured by (owner, 2026-11-10: "in the theme of the app, but more colorful").
 enum DeviceFamily { eq, dynamics, space, drive, filter, modulation, utility, synth, drums }
@@ -41,7 +44,7 @@ DeviceStyle deviceStyle(DeviceFamily family) => switch (family) {
     };
 
 /// The family of built-in component [id], or null for anything else (a project's own C++ keeps the track colour).
-DeviceFamily? familyOfComponent(String id) => switch (id) {
+DeviceFamily? familyOfComponent(String id) => filtersFamily(id) /* fx-filters */ ?? switch (id) {
       'org.caw.eq' => DeviceFamily.eq,
       'org.caw.compressor' || 'org.caw.limiter' || 'org.caw.gate' || 'org.caw.transient' => DeviceFamily.dynamics,
       'org.caw.reverb.pro' || 'org.caw.delay.pro' || 'org.caw.delay.pingpong' => DeviceFamily.space,

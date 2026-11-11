@@ -54,11 +54,11 @@ const std::vector<BuiltinPreset>& resonator() {
 
 const std::vector<BuiltinPreset>& formant() {
     static const std::vector<BuiltinPreset> p = {
-        {"Ahh", "The open vowel A", {{"vowel_x", 0.6}, {"vowel_y", 1.0}, {"q", 8}}},
-        {"Ooh", "The rounded vowel U", {{"vowel_x", 1.0}, {"vowel_y", 0.0}, {"q", 8}}},
-        {"Eee", "The bright vowel I", {{"vowel_x", 0.0}, {"vowel_y", 0.0}, {"q", 10}}},
-        {"Deep voice", "O with the formants a fifth down: a big, low throat", {{"vowel_x", 0.85}, {"vowel_y", 0.5}, {"shift", -7}, {"q", 7}, {"lows", 0.3}}},
-        {"Small voice", "E with the formants up: a smaller, higher voice", {{"vowel_x", 0.15}, {"vowel_y", 0.5}, {"shift", 6}, {"q", 9}}},
+        {"Ahh", "The open vowel A", {{"vowel_x", 0.5}, {"vowel_y", 0.85}, {"q", 8}}},
+        {"Ooh", "The rounded vowel U", {{"vowel_x", 0.9}, {"vowel_y", 0.1}, {"q", 8}}},
+        {"Eee", "The bright vowel I", {{"vowel_x", 0.1}, {"vowel_y", 0.1}, {"q", 10}}},
+        {"Deep voice", "O with the formants a fifth down: a big, low throat", {{"vowel_x", 0.85}, {"vowel_y", 0.55}, {"shift", -7}, {"q", 7}, {"lows", 0.3}}},
+        {"Small voice", "E with the formants up: a smaller, higher voice", {{"vowel_x", 0.15}, {"vowel_y", 0.55}, {"shift", 6}, {"q", 9}}},
         {"Talk box", "Between the vowels, narrow and with some of the dry highs", {{"vowel_x", 0.5}, {"vowel_y", 0.55}, {"q", 14}, {"highs", 0.2}}},
     };
     return p;
@@ -117,7 +117,7 @@ const std::vector<BuiltinPreset>* filtersPresets(std::string_view id) {
     if (id == "org.caw.resonator") return &resonator();
     if (id == "org.caw.formant") return &formant();
     if (id == "org.caw.disperser") return &disperser();
-    if (id == "org.caw.eq3") return &eq3();
+    if (id == "org.caw.eq.dj") return &eq3();
     if (id == "org.caw.tilt") return &tilt();
     if (id == "org.caw.geq") return &geq();
     return nullptr;

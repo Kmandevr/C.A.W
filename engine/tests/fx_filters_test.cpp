@@ -28,7 +28,7 @@ constexpr double kPiF = 3.14159265358979323846;
 using Values = std::vector<std::pair<std::string, double>>;
 
 const char* const kGroup[] = {"org.caw.ladder", "org.caw.nlfilter", "org.caw.comb",  "org.caw.resonator", "org.caw.formant",
-                              "org.caw.disperser", "org.caw.eq3",  "org.caw.tilt", "org.caw.geq"};
+                              "org.caw.disperser", "org.caw.eq.dj",  "org.caw.tilt", "org.caw.geq"};
 const uint32_t kGroupDisplay[] = {9, 7, 5, 38, 7, 6, 10, 6, 132};
 
 struct Stereo {
@@ -175,7 +175,7 @@ Values busy(const std::string& s) {
     if (s == "org.caw.resonator") return {{"mode", 3}, {"chord", 1}, {"note", 55}, {"decay", 2}, {"brightness", 0.7}, {"spread", 0.6}, {"mix", 0.6}};
     if (s == "org.caw.formant") return {{"vowel_x", 0.3}, {"vowel_y", 0.4}, {"shift", 3}, {"q", 12}, {"lows", 0.3}, {"highs", 0.2}};
     if (s == "org.caw.disperser") return {{"amount", 0.7}, {"freq", 400}, {"pinch", 0.6}, {"spread", 0.3}, {"mix", 0.8}};
-    if (s == "org.caw.eq3") return {{"low", 4}, {"mid", -6}, {"high", 3}, {"kill_low", 1}, {"low_x", 180}, {"high_x", 4000}};
+    if (s == "org.caw.eq.dj") return {{"low", 4}, {"mid", -6}, {"high", 3}, {"kill_low", 1}, {"low_x", 180}, {"high_x", 4000}};
     if (s == "org.caw.tilt") return {{"tilt", 6}, {"freq", 1500}, {"q", 0.9}, {"channel", 1}, {"output", -2}};
     return {{"g3", 6}, {"g10", -5}, {"g18", 4}, {"g25", -3}, {"g30", 6}, {"range", 1.2}, {"output", -1}};
 }
@@ -464,8 +464,8 @@ TEST(the_resonator_rings_at_its_note_for_its_decay) {
 
 TEST(the_formant_filter_lands_on_each_vowel_and_shifts) {
     Engine e(48000);
-    const Values a = {{"vowel_x", 0.6}, {"vowel_y", 1.0}};
-    const Values i = {{"vowel_x", 0.0}, {"vowel_y", 0.0}};
+    const Values a = {{"vowel_x", 0.5}, {"vowel_y", 0.85}};
+    const Values i = {{"vowel_x", 0.1}, {"vowel_y", 0.1}};
     CHECK(gainAt(e, "org.caw.formant", a, 730) - gainAt(e, "org.caw.formant", a, 2290) > 10);
     CHECK(gainAt(e, "org.caw.formant", i, 2290) - gainAt(e, "org.caw.formant", i, 730) > 5);
     CHECK_NEAR(gainAt(e, "org.caw.formant", a, 730), 6.0, 1.0);  // F1 6 dB up
@@ -496,13 +496,13 @@ TEST(the_disperser_keeps_the_level_and_delays_around_its_frequency) {
 
 TEST(the_three_band_eq_sums_flat_and_kills_its_bands) {
     Engine e(48000);
-    for (double hz : {40.0, 250.0, 1000.0, 2500.0, 12000.0}) CHECK_NEAR(gainAt(e, "org.caw.eq3", {}, hz), 0.0, 0.05);
-    CHECK(gainAt(e, "org.caw.eq3", {{"kill_low", 1}}, 50) < -40);
-    CHECK(gainAt(e, "org.caw.eq3", {{"kill_mid", 1}}, 800) < -25);
-    CHECK(gainAt(e, "org.caw.eq3", {{"kill_high", 1}}, 12000) < -40);
-    CHECK_NEAR(gainAt(e, "org.caw.eq3", {{"kill_low", 1}}, 8000), 0.0, 0.1);
-    CHECK_NEAR(gainAt(e, "org.caw.eq3", {{"low", -12}}, 40), -12.0, 0.5);
-    CHECK_NEAR(gainAt(e, "org.caw.eq3", {{"high", 6}}, 15000), 6.0, 0.3);
+    for (double hz : {40.0, 250.0, 1000.0, 2500.0, 12000.0}) CHECK_NEAR(gainAt(e, "org.caw.eq.dj", {}, hz), 0.0, 0.05);
+    CHECK(gainAt(e, "org.caw.eq.dj", {{"kill_low", 1}}, 50) < -40);
+    CHECK(gainAt(e, "org.caw.eq.dj", {{"kill_mid", 1}}, 800) < -25);
+    CHECK(gainAt(e, "org.caw.eq.dj", {{"kill_high", 1}}, 12000) < -40);
+    CHECK_NEAR(gainAt(e, "org.caw.eq.dj", {{"kill_low", 1}}, 8000), 0.0, 0.1);
+    CHECK_NEAR(gainAt(e, "org.caw.eq.dj", {{"low", -12}}, 40), -12.0, 0.5);
+    CHECK_NEAR(gainAt(e, "org.caw.eq.dj", {{"high", 6}}, 15000), 6.0, 0.3);
 }
 
 TEST(the_tilt_eq_tilts_around_its_pivot) {

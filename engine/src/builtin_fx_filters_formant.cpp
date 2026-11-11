@@ -53,9 +53,10 @@ struct SvfState {
 
 enum FormantParam : uint32_t { kFX, kFY, kFShift, kFQ, kFLows, kFHighs, kFMix, kFOutput, kFCount };
 
-// Where the vowels sit on the pad, as on the IPA vowel chart: front to the left, back to the right, closed at the
-// top (y 0), open at the bottom (y 1). In lib::kVowelFormantsHz's order: A, E, I, O, U.
-constexpr double kVowelXY[5][2] = {{0.6, 1.0}, {0.15, 0.5}, {0.0, 0.0}, {0.85, 0.5}, {1.0, 0.0}};
+// Where the vowels sit on the pad, as on the IPA vowel chart turned over: front to the left, back to the right,
+// closed low (y near 0), open high (y near 1), each a little in from the edges so a finger reaches it on a phone.
+// In lib::kVowelFormantsHz's order: A, E, I, O, U.
+constexpr double kVowelXY[5][2] = {{0.5, 0.85}, {0.15, 0.55}, {0.1, 0.1}, {0.85, 0.55}, {0.9, 0.1}};
 // The formants' levels (F2 and F3 are quieter than F1 in speech), F1 6 dB up: three narrow peaks keep only a
 // slice of a broad sound, so a vowel comes out near the level that went in.
 constexpr double kFormantLevel[3] = {2.0, 1.4, 0.9};
@@ -63,8 +64,8 @@ constexpr double kFormantLevel[3] = {2.0, 1.4, 0.9};
 const ParamTable& formantParams() {
     static const ParamTable t = [] {
         ParamTable p;
-        p.num("vowel_x", "Vowel X", 0.6, 0.0, 1.0);
-        p.num("vowel_y", "Vowel Y", 1.0, 0.0, 1.0);
+        p.num("vowel_x", "Vowel X", 0.5, 0.0, 1.0);
+        p.num("vowel_y", "Vowel Y", 0.85, 0.0, 1.0);
         p.num("shift", "Gender / shift", 0.0, -12.0, 12.0, "st");
         p.expo("q", "Q", 8.0, 1.0, 30.0);
         p.num("lows", "Lows", 0.0, 0.0, 1.0);
@@ -164,7 +165,7 @@ protected:
 private:
     SvfCoefs coefs_[3], lowC_, highC_;
     SvfState band_[2][3], low_[2], high_[2];
-    double hz_[3] = {730, 1090, 2440}, x_ = 0.6, y_ = 1.0;
+    double hz_[3] = {730, 1090, 2440}, x_ = 0.5, y_ = 0.85;
     Ramp mix_, out_, lows_, highs_;
 };
 

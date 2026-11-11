@@ -9,6 +9,9 @@ import 'ducker_editor.dart';
 import 'dynamics_editors.dart';
 import 'effect_page.dart';
 import 'eq_editor.dart';
+// fx-filters begin
+import 'filters/filters_editors.dart';
+// fx-filters end
 import 'filter_editor.dart';
 import 'mod_editors.dart';
 import 'space_editors.dart';
@@ -64,5 +67,8 @@ final Map<String, DeviceEditorEntry> _byId = {
   'org.caw.utility': singlePage('utility', 'UTILITY', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.width': singlePage('width', 'WIDTH', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
   'org.caw.stereo.balance': singlePage('balance', 'BALANCE', Icons.tune, DeviceFamily.utility, () => const StereoPage()),
+  // fx-filters begin
+  ...filtersEditors,
+  // fx-filters end
 };
 
