@@ -27,7 +27,7 @@ std::string tempDir(const char* tag) {
         ("caw_stems_" + std::string(tag) + "_" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "_" + std::to_string(++n));
     std::filesystem::create_directories(dir);
-    return dir.string();
+    return dir.generic_string();  // forward slashes: it goes into JSON requests unescaped (Windows' \ would break it)
 }
 
 size_t fileCount(const std::string& dir) {
@@ -488,8 +488,8 @@ TEST(song_renders_run_through_the_c_api_and_the_worker_pool) {
     caw_job_get_status(job, &st);
     CHECK_EQ(st.state, int32_t{CAW_JOB_SUCCEEDED});
     char* result = caw_job_result(job);
-    CHECK(std::string(result).find("Pool.wav") != std::string::npos);
-    caw_free(result);
+    CHECK(result != nullptr && std::string(result).find("Pool.wav") != std::string::npos);
+    if (result) caw_free(result);
     caw_job_release(job);
     const std::string bad = R"({"out_dir":")" + dir + R"(/none"})";
     job = caw_worker_pool_submit_song(pool, project.c_str(), bad.c_str(), CAW_JOB_OFFLINE);
@@ -497,8 +497,8 @@ TEST(song_renders_run_through_the_c_api_and_the_worker_pool) {
     caw_job_get_status(job, &st);
     CHECK_EQ(st.state, int32_t{CAW_JOB_FAILED});
     char* error = caw_job_error(job);
-    CHECK(std::string(error).find("doesn't exist") != std::string::npos);
-    caw_free(error);
+    CHECK(error != nullptr && std::string(error).find("doesn't exist") != std::string::npos);
+    if (error) caw_free(error);
     caw_job_release(job);
     caw_worker_pool_destroy(pool);
     std::filesystem::remove_all(dir);
