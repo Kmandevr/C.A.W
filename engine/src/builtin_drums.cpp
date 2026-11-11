@@ -67,8 +67,11 @@ double fall(double seconds, double sr) noexcept { return seconds > 0.0 ? lib::fa
 struct DrumEnv {
     int stage = 0;  // 0 off, 1 attack, 2 hold, 3 decay
     double level = 0, inc = 1, e = 1, ef = 1, lin = 1, coef = 0, coefFast = 0, linStep = 0, curve = 0;
+    double was[4] = {-1, -1, -1, -1};  // what set() last worked out from
     uint32_t holdLeft = 0, holdFrames = 0;
     void set(double attack, double hold, double decay, double c, double sr) noexcept {
+        if (attack == was[0] && hold == was[1] && decay == was[2] && c == was[3]) return;  // unchanged: no exps
+        was[0] = attack, was[1] = hold, was[2] = decay, was[3] = c;
         inc = attack > 0.0 ? 1.0 / (attack * sr) : 2.0;
         holdFrames = static_cast<uint32_t>(clampd(hold, 0.0, 10.0) * sr);
         coef = fall(decay, sr);
@@ -139,12 +142,18 @@ constexpr MetalSet kMetalSets[kSetCount] = {
     {{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, {1, 0.5, 0.33, 0.25, 0.2, 0.17}},                  // Harmonic
 };
 
+// The half-band filters' design, worked out once (a voice is reset on every hit).
+const lib::HalfBandDesign& halfBand() {
+    static const lib::HalfBandDesign d;
+    return d;
+}
+
 // A drive stage, with its 2x oversampling (Normal and High quality) around the curve.
 struct Drive {
     int type = kDriveOff;
     double amount = 1, norm = 1, q = 1, tubeBias = 0, tubeNorm = 1;
     lib::Saturator sat;
-    lib::Oversampler2x os{lib::HalfBandDesign()}, os2a{lib::HalfBandDesign()}, os2b{lib::HalfBandDesign()};
+    lib::Oversampler2x os{halfBand()}, os2a{halfBand()}, os2b{halfBand()};
     void set(int t, double a) noexcept {
         type = t;
         amount = clampd(a, 1.0, 20.0);
@@ -235,12 +244,36 @@ struct PadSettings {
     double velLevel = 1, velPitch = 0, velDecay = 0, velTone = 0.3, velClick = 0.5, rndPitch = 0, rndDecay = 0,
            rndTone = 0, rndPan = 0, rndLevel = 0;
     bool used = false;  // any layer on and the pad not silent
+    double raw[kPadParams] = {};  // the knobs these were worked out from
+    bool valid = false;
+    bool perFrame = false;          // some knob moved within the block it was read in (a ramp, a lane)
+    uint64_t block = ~0ull;         // the block it was read in
 };
 
 // Reads pad `pad`'s knobs at frame `at` and applies its macros (docs/engine.md, "Drums", Character macros).
-void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s) noexcept {
+// `block` counts the instrument's blocks: knobs that hold one value for the block are read once in it.
+void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s, uint64_t block = ~0ull) noexcept {
+    // The knobs first; when none moved since the last read, the settings stand (most controls of a hit).
+    if (block != ~0ull && s.block == block && !s.perFrame && s.valid) return;
+    s.block = block;
     const Voice& def = defaultVoice(pad);
-    auto v = [&](uint32_t p) noexcept { return parameterAt(b, padParam(pad, p), at, def[p]); };
+    double raw[kPadParams];
+    const uint32_t first = padParam(pad, 0);
+    if (b.parameters && first + kPadParams <= b.parameterCount) {
+        bool perFrame = false;
+        for (uint32_t p = 0; p < kPadParams; ++p) {
+            const ParameterValue& pv = b.parameters[first + p];
+            raw[p] = pv.samples ? pv.samples[at] : pv.value;
+            perFrame = perFrame || pv.samples;
+        }
+        s.perFrame = perFrame;
+    } else {
+        for (uint32_t p = 0; p < kPadParams; ++p) raw[p] = def[p];
+    }
+    if (s.valid && std::memcmp(raw, s.raw, sizeof raw) == 0) return;
+    std::memcpy(s.raw, raw, sizeof raw);
+    s.valid = true;
+    auto v = [&](uint32_t p) noexcept { return raw[p]; };
     auto on = [&](uint32_t p) noexcept { return v(p) >= 0.5; };
     const double punch = clampd(v(kPunch), -1, 1), tone = clampd(v(kTone), -1, 1), snap = clampd(v(kSnap), -1, 1),
                  length = clampd(v(kLength), -1, 1), dirt = clampd(v(kDirt), -1, 1), pitch = clampd(v(kPitch), -1, 1);
@@ -434,7 +467,7 @@ struct DrumVoice {
     // metal
     DrumEnv metalEnv;
     lib::Svf metalBp, metalHp;
-    lib::Oversampler2x metalOs{lib::HalfBandDesign()};
+    lib::Oversampler2x metalOs{halfBand()};
     double mPhase[6] = {}, mDt[6] = {}, mAmp[6] = {}, fmIndex = 0, metalNoise = 0.5, band = 0, bandGain = 1, metalLevel = 1;
     int metalMode = 0;
     // resonator
@@ -542,6 +575,7 @@ public:
 protected:
     void beginBlock(const ProcessBlock& b) noexcept override {
         block_ = &b;
+        ++blockCount_;
         // A new sample: voices still playing the one it replaces stop their sample layer (it is freed later).
         for (uint32_t s = 0; s < kPads; ++s) {
             const SampleBuffer* before = playing_[s];
@@ -678,7 +712,7 @@ private:
     // A hit on `pad`; false (nothing happens) when the pad is unused.
     bool hit(uint32_t pad, const NoteMessage& m, uint32_t at) noexcept {
         PadSettings& s = settings_[pad];
-        readPad(*block_, pad, at, s);
+        readPad(*block_, pad, at, s, blockCount_);
         if (!s.used) return false;
         const double note = m.pitch;
         if (s.track) addHeld(pad, m.noteId, note);
@@ -1227,7 +1261,7 @@ private:
             const uint32_t pad = static_cast<uint32_t>(v.pad);
             const uint64_t bit = 1ull << pad;
             if (!(updated & bit)) {
-                readPad(b, pad, at, settings_[pad]);
+                readPad(b, pad, at, settings_[pad], blockCount_);
                 updated |= bit;
             }
             if (v.res) v.ringing = v.exciteLeft > 0 || v.modal.ringing();
@@ -1451,7 +1485,7 @@ private:
     uint32_t seed_ = 1;
     bool wasPlaying_ = false;
     uint32_t left_ = 0;
-    uint64_t clock_ = 0;
+    uint64_t clock_ = 0, blockCount_ = 0;
     // samples
     SampleHandover slots_[kPads];
     const SampleBuffer* playing_[kPads] = {};

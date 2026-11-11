@@ -322,7 +322,7 @@ std::vector<KitDef> makeKits() {
     k.push_back({"Techno", "Driven kick, trashy hats and a glued, taped bus",
                  row("Techno Kick", "Rim", "909 Snare", "Clap", "Clap Snare", "808 Tom", "Trashy Hat", "Pedal Hat",
                      "909 Open Hat", "China", "Ride"),
-                 {{kGlue, 0.6}, {kGlueThreshold, -18}, {kKitDriveType, 2}, {kKitDrive, 2.5}, {kRoom, 0.1}}});
+                 {{kGlue, 0.6}, {kGlueThreshold, -18}, {kGlueMakeup, 6}, {kKitDriveType, 2}, {kKitDrive, 2.5}, {kRoom, 0.1}}});
     k.push_back({"Lo-fi", "Dusty and crushed: soft kick, fat snare, a small room",
                  row("Sub Kick", "Rim", "Fat Snare", "Snap", "Clap Snare", "Acoustic Tom", "Acoustic Hat", "Pedal Hat",
                      "808 Open Hat", "Splash", "Ride"),
