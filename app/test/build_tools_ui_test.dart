@@ -91,6 +91,20 @@ void main() {
   });
   tearDown(() => Motion.setting = motion);
 
+  /// Presses Run and waits, in real time, until the run has finished: the screen records its verdict only after the
+  /// fake's answer and its own file checks, so a busy machine can't leave the progress bar spinning into
+  /// pumpAndSettle.
+  Future<void> runSuite(WidgetTester tester, CppWorkbench w) async {
+    await tester.runAsync(() async {
+      await tester.tap(find.byKey(const ValueKey('tool-action')));
+      final deadline = DateTime.now().add(const Duration(seconds: 20));
+      while (w.lastTest == null && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    expect(w.lastTest, isNotNull, reason: 'the run did not finish');
+  }
+
   CppWorkbench workbench({bool built = true, bool instrument = false}) {
     final state = AppState(settings: Settings());
     state.project.cppComponents.add(instrument
@@ -122,13 +136,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('signal-TestSignal.impulse')));
       await tester.tap(find.text('CPU per block'));
       await tester.pump();
-      await tester.runAsync(() async {
-        await tester.tap(find.byKey(const ValueKey('tool-action')));
-        for (var i = 0; i < 20 && fake.tests.isEmpty; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
+      await runSuite(tester, w);
       await tester.pumpAndSettle();
       final req = fake.tests.single;
       expect(req['component'], {'id': w.componentId, 'library': '/builds/fuzz.so', 'params': <String, double>{}});
@@ -180,13 +188,7 @@ void main() {
       await tester.ensureVisible(find.byKey(const ValueKey('test-threshold-realtime')));
       await tester.tap(find.byKey(const ValueKey('test-threshold-realtime')));
       await tester.pump();
-      await tester.runAsync(() async {
-        await tester.tap(find.byKey(const ValueKey('tool-action')));
-        for (var i = 0; i < 20 && fake.tests.isEmpty; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
+      await runSuite(tester, w);
       await tester.pumpAndSettle();
       final req = fake.tests.single;
       expect(req['notes'], [for (final p in const [60, 64, 67]) {'pitch': p, 'velocity': 100, 'start': 0, 'length': 1}]);
@@ -215,12 +217,7 @@ void main() {
       await tester.pump();
       expect(find.text('${TestThreshold.realtime.detail} (needs CPU per block)'), findsOneWidget);
       expect(find.byKey(const ValueKey('test-summary')), findsNothing);
-      await tester.runAsync(() async {
-        await tester.tap(find.byKey(const ValueKey('tool-action')));
-        for (var i = 0; i < 20 && fake.tests.isEmpty; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-        }
-      });
+      await runSuite(tester, w);
       await tester.pumpAndSettle();
       expect([for (final c in fake.tests.single['checks'] as List) (c as Map)['path']],
           ['output.channels.0.rms_db', 'output.channels.1.rms_db']);
@@ -237,13 +234,7 @@ void main() {
         final fake = FakeTools();
         final w = workbench();
         await pumpGolden(tester, TestSuiteScreen(workbench: w, backend: fake), goldenSizes[name]!);
-        await tester.runAsync(() async {
-          await tester.tap(find.byKey(const ValueKey('tool-action')));
-          for (var i = 0; i < 20 && fake.tests.isEmpty; i++) {
-            await Future<void>.delayed(const Duration(milliseconds: 20));
-          }
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        });
+        await runSuite(tester, w);
         await tester.pumpAndSettle();
         await expectLater(goldenScreen, matchesGoldenFile('goldens/build_test_suite_$name.png'));
       });
