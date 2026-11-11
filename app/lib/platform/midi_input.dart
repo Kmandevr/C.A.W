@@ -5,8 +5,11 @@ import 'package:flutter/services.dart';
 
 /// One MIDI 1.0 channel message: note on/off, a controller, or pitch bend.
 class MidiMessage {
-  const MidiMessage(this.status, this.data1, this.data2);
+  const MidiMessage(this.status, this.data1, this.data2, [this.source = '']);
   final int status, data1, data2;
+
+  /// The device it came from (its name); '' for the on-screen keys and pads.
+  final String source;
 
   int get kind => status & 0xF0;
   int get channel => status & 0x0F;
@@ -35,9 +38,9 @@ class _AndroidMidiInput implements MidiInput {
   late final Stream<Object?> _raw = _events.receiveBroadcastStream();
 
   @override
-  Stream<MidiMessage> get messages => _raw.where((e) => e is List && e.length == 3).map((e) {
+  Stream<MidiMessage> get messages => _raw.where((e) => e is List && e.length >= 3).map((e) {
         final l = e as List;
-        return MidiMessage(l[0] as int, l[1] as int, l[2] as int);
+        return MidiMessage(l[0] as int, l[1] as int, l[2] as int, l.length > 3 && l[3] is String ? l[3] as String : '');
       });
 
   @override

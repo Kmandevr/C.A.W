@@ -13,7 +13,7 @@ import io.flutter.plugin.common.EventChannel
 
 /**
  * Opens each device's output ports (what the keyboard sends) and posts note on/off, controller and pitch-bend
- * messages as [status, data1, data2] lists; a device change posts {"devices": [names]}. Everything reaches Dart on the
+ * messages as [status, data1, data2, device name] lists (Settings › MIDI picks a device by name); a device change posts {"devices": [names]}. Everything reaches Dart on the
  * main thread. Bluetooth MIDI devices appear here once Android has connected them.
  */
 class MidiInput(context: Context) : EventChannel.StreamHandler {
@@ -63,7 +63,7 @@ class MidiInput(context: Context) : EventChannel.StreamHandler {
             for (p in info.ports) {
                 if (p.type != MidiDeviceInfo.PortInfo.TYPE_OUTPUT) continue
                 val port = device.openOutputPort(p.portNumber) ?: continue
-                port.connect(Parser())
+                port.connect(Parser(name))
                 opened.add(port)
             }
             ports[info.id] = opened
@@ -83,7 +83,7 @@ class MidiInput(context: Context) : EventChannel.StreamHandler {
     }
 
     /** One port's byte stream, with running status; system messages and SysEx are skipped. */
-    private inner class Parser : MidiReceiver() {
+    private inner class Parser(private val source: String) : MidiReceiver() {
         private var status = 0
         private val data = IntArray(2)
         private var have = 0
@@ -105,7 +105,7 @@ class MidiInput(context: Context) : EventChannel.StreamHandler {
                         if (have == needed) {
                             have = 0
                             if (kind == 0x80 || kind == 0x90 || kind == 0xB0 || kind == 0xE0) {
-                                val event = listOf(status, data[0], if (needed == 2) data[1] else 0)
+                                val event = listOf(status, data[0], if (needed == 2) data[1] else 0, source)
                                 main.post { sink?.success(event) }
                             }
                         }

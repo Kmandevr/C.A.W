@@ -127,6 +127,8 @@ The app has three sections, Build, Files and Arrange; the Mixer, Automation, Exp
 
 **Build reads as a code tool:** a mono "Build · C++" title on its start page, a mono breadcrumb row with a status chip that says what the last build did and where the result plays, tabs with an icon and colour per kind, ▶ Build with a spinner, and one-tap Problems, Library and Versions (labelled from 640 dp) ([App](app.md), Build).
 
+**Settings (owner, 2026-11-11: "organize it into sections", a category list, everything shown):** a list of sections, each a glowing icon tile in its own neon colour, the title and a dim line of current values ("System default · 48 kHz · buffer Auto · Normal"); a search bar above it finds any setting by name, description or keyword and lists results under their section; a result opens the page scrolled to the row, which pulses its section's colour once (up quickly, fading over about 1.4 s). Pages are compact rows: title, a dim one-line explanation that says what the current choice does, and a switch, segmented choice, drop-down or slider (double-tap resets a slider); a setting that does not apply now is shown greyed with why, never hidden. From 900 dp wide the list stays on the left and the page opens on the right ([app](app.md), Settings).
+
 The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 
 ## Device editors
@@ -148,7 +150,7 @@ The track header is the quick-control surface (mute, solo, generator, folder and
 4. **Motion shows state, cheaply:** ping-pong balls, sweeping notches, ripples and particles run only with full motion (Minimal and reduced motion stop them) and redraw at 30 Hz, the display data's rate; levels scroll as history.
 5. **Feedback on every touch:** a light haptic on grab, detent, tap and release through one hook (`DeviceFeel.hook`), which plays the frame's haptics (grab, tick, tap, drop); mode tiles and toggles dip and glow while pressed.
 
-**Palette: each family its own pair of neon accents** (from theme slots, so a user theme recolours every device): EQ blue → mint; dynamics orange → yellow; space (reverb, delay) violet → blue; drive red → pink; filter mint → green; modulation (phaser, flanger, chorus) pink → violet; utility yellow → green; synth green → blue; drums orange → pink. Side-by-side things (EQ bands, drum pads) cycle through all eight hues. The header's badge, stripe and the hero's tint use the pair; a project's own C++ keeps its track colour.
+**Palette: each family its own pair of neon accents** (from theme slots, so a user theme recolours every device): EQ blue → mint; dynamics orange → yellow; space (reverb, delay) violet → blue; drive red → pink; filter mint → green; modulation (phaser, flanger, chorus) pink → violet; utility yellow → green; synth green → blue; drums orange → pink; creative (the Creative and Pitch & Time effects) yellow → pink. Side-by-side things (EQ bands, drum pads) cycle through all eight hues. The header's badge, stripe and the hero's tint use the pair; a project's own C++ keeps its track colour.
 
 **The kit** (`app/lib/ui/devices/kit/`): the faceplate header (family badge, name and track, the preset button with a save icon while an edited user preset is loaded, A/B compare, bypass), `HeroCanvas`, `GrabGesture` (drag, pinch, tap, double-tap, long-press, wheel), `DevicePhase` (motion), `HistoryRecorder` (level history), `ModeTiles` (drawn icons), `DeviceToggle`, `XYPad`, `LevelMeter` and `MeterStack`, `KnobRow`, `DeviceFold` (MORE) and `ParamGrid`, on the existing `DeviceKnob`, `DeviceChoice` and `DeviceCard`.
 
@@ -223,7 +225,7 @@ The broader UI specification below records design intent as well as current beha
 - **Shortcuts like Reaper's where they overlap:** Space for play/pause (owner, 2026-11-05: Space pauses, and Shift+Space stops), Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
 - **Workspace shortcuts:** Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
 - **Shortcut overlay:** `?` shows every shortcut for the current screen.
-- **Customisable, like Reaper** (owner, 2026-10-28): every command is an action with keys you can change per area, plus macros and your own toolbars. The keys are changed in the key bindings editor (Settings → Key bindings, built 2026-11-05); details in [actions](actions.md).
+- **Customisable, like Reaper** (owner, 2026-10-28): every command is an action with keys you can change per area, plus macros and your own toolbars. The keys are changed in the key bindings editor (Settings › Keys and shortcuts › Key bindings, built 2026-11-05); details in [actions](actions.md).
 - **Vim-style** (owner, 2026-10-28): with a keyboard, the whole app works modally: modes, counts, `:` commands, `.` and recorded macros. The code editor has optional Vim editing. See [actions](actions.md#vim-style-control).
 
 ## Light on CPU and RAM

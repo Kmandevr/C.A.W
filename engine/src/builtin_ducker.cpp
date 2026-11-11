@@ -6,6 +6,7 @@
 #include <new>
 #include <vector>
 
+#include "caw/detmath.hpp"
 #include "caw/library/dynamics.hpp"
 #include "caw/library/filter.hpp"
 #include "component_chain.h"
@@ -33,11 +34,15 @@ constexpr double kRateBeats[] = {0.25, 1.0 / 3.0, 0.5, 0.75, 2.0 / 3.0, 1.0, 1.5
 constexpr double kFollowRangeDb = 12.0;  // Follow: the duck reaches full depth this far over the threshold
 constexpr double kRearmDb = 4.0;          // Trigger: the key must fall this far under the threshold to trigger again
 constexpr double kTensionSteepness = 6.0;
+constexpr double kFadeSeconds = 0.005;    // a live change of look-ahead, mode or Bands crossfades over this
 
 const ParamTable& duckParams() {
     static const ParamTable t = [] {
         ParamTable p;
-        p.pick("mode", "Trigger", 2.0, kModes);
+        // Mode and Look-ahead set the reported latency (latencyFor, from the held values): no lane or modulation
+        // may move them, or the compensation would no longer match the delay.
+        auto fixed = [](ParameterDescriptor& d) { d.automatable = d.modulatable = false; };
+        fixed(p.pick("mode", "Trigger", 2.0, kModes));
         p.num("depth", "Depth", 0.9, 0.0, 1.0);
         p.expo("attack", "Attack", 1.0, 0.1, 500.0, "ms");
         p.num("hold", "Hold", 10.0, 0.0, 1000.0, "ms");
@@ -50,10 +55,10 @@ const ParamTable& duckParams() {
         p.pick("response", "Response", 0.0, kResponses);
         p.expo("key_hpf", "Key high-pass", 20.0, 20.0, 2000.0, "Hz");
         p.expo("key_lpf", "Key low-pass", 20000.0, 200.0, 20000.0, "Hz");
-        p.pick("lookahead", "Look-ahead", 0.0, kLookaheads);
+        fixed(p.pick("lookahead", "Look-ahead", 0.0, kLookaheads));
         p.pick("bands", "Bands", 0.0, kBandModes);
         p.expo("crossover", "Crossover", 150.0, 40.0, 2000.0, "Hz");
-        p.num("link", "Stereo link", 1.0, 0.0, 1.0);
+        p.num("link", "Stereo link", 1.0, 0.0, 1.0);  // Follow only: Trigger plays one shape for both sides
         p.num("velocity", "Velocity", 0.0, 0.0, 1.0);
         p.pick("listen", "Key listen", 0.0, kOffOn);
         return p;
@@ -101,11 +106,16 @@ protected:
         }
         follow_[0].setCoefficients(lib::timeCoefficient(0.00005, sampleRate), lib::timeCoefficient(0.03, sampleRate));
         follow_[1].setCoefficients(lib::timeCoefficient(0.00005, sampleRate), lib::timeCoefficient(0.03, sampleRate));
+        fadeFrames_ = std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(kFadeSeconds * sampleRate)));
         return true;
     }
     void clearState() noexcept override {
         for (auto& line : delay_) std::fill(line.begin(), line.end(), 0.0f);
         pos_ = 0;
+        tapNow_ = kFresh;
+        tapFade_ = 0;
+        bandsNow_ = -1;
+        bandsFade_ = 0;
         for (int c = 0; c < 2; ++c) {
             hpf_[c].clear();
             lpf_[c].clear();
@@ -118,7 +128,8 @@ protected:
         from_ = duck_ = 0.0;
         armed_ = true;
         lastPeriod_ = INT64_MIN;
-        scale_ = 1.0;
+        scale_ = scaleTarget_ = 1.0;
+        scaleStep_ = 0.0;
         grMax_ = keyMax_ = 0.0;
         triggers_ = 0;
     }
@@ -166,13 +177,21 @@ protected:
         const EventInput& notes = keyNotes();
         const uint32_t first = runStart();
         const size_t size = delay_[0].size();
+        // Filters fed silence decay through denormal numbers (slow on many CPUs): settle them at 0 instead.
+        for (int c = 0; c < 2; ++c) {
+            hpf_[c].flushDenormals();
+            lpf_[c].flushDenormals();
+            for (auto& f : split_[c]) f.flushDenormals();
+        }
         for (uint32_t i = 0; i < n; ++i) {
-            // The key, filtered (Audio mode reads it; Listen plays it).
-            double k[2] = {keyL ? keyL[i] : 0.0, keyR ? keyR[i] : 0.0};
+            // The key, filtered (Audio mode reads it; Listen plays it). A NaN or Inf in it reads as 0, before the
+            // filters (whose state it would stay in) and after them.
+            double k[2] = {keyL ? finiteOr0(keyL[i]) : 0.0, keyR ? finiteOr0(keyR[i]) : 0.0};
             if (mode_ == 0 || listen_)
                 for (int c = 0; c < 2; ++c) {
                     if (useHpf_) k[c] = hpf_[c].highpass(k[c]);
                     if (useLpf_) k[c] = lpf_[c].lowpass(k[c]);
+                    k[c] = finiteOr0(k[c]);
                 }
             double g[2] = {1.0, 1.0};
             if (mode_ == 0) {
@@ -194,7 +213,7 @@ protected:
                         } else {
                             amount_[c] = target + (amount_[c] - target) * followRelease_;
                         }
-                        if (amount_[c] < 1e-9) amount_[c] = 0.0;
+                        if (!(amount_[c] >= 1e-9 && amount_[c] <= 1.0)) amount_[c] = 0.0;  // settled, or not finite
                         g[c] = 1.0 - depth_ * mix_ * bend(amount_[c], -tension_ * 0.5);
                     }
                     duck_ = std::max(amount_[0], amount_[1]);
@@ -225,35 +244,61 @@ protected:
                     const double phase = beat / periodBeats_ - offset_;
                     const int64_t period = static_cast<int64_t>(std::floor(phase + 1e-9));
                     if (period != lastPeriod_) {
+                        // The first frame after Play (or a wake): it ducks only on the grid, within a frame of a
+                        // division's start; from half a beat in, the next division is the first duck.
+                        const double oneFrame = tempo() / (60.0 * rate() * periodBeats_);
+                        const bool started = lastPeriod_ == INT64_MIN;
                         lastPeriod_ = period;
-                        trigger(1.0);
+                        if (!started || phase - static_cast<double>(period) < oneFrame) trigger(1.0);
                     }
                     phase_ = phase - std::floor(phase);
                 } else {
-                    lastPeriod_ = INT64_MIN;  // stopped: the next Play ducks on its first beat
+                    lastPeriod_ = INT64_MIN;  // stopped: the next Play ducks on the next division it reaches
                     phase_ = -1.0;
                 }
             }
             if (mode_ != 0 || !followMode_) {
+                if (scale_ != scaleTarget_) {  // a retrigger's new depth, gliding in over the attack
+                    scale_ += scaleStep_;
+                    if ((scaleStep_ > 0.0) == (scale_ >= scaleTarget_)) scale_ = scaleTarget_;
+                }
                 duck_ = shape();
                 const double gain = 1.0 - depth_ * scale_ * mix_ * duck_;
                 g[0] = g[1] = gain;
             }
-            // The main signal, through the look-ahead line (Audio mode with look-ahead: the duck leads by it).
+            // The main signal, through the look-ahead line (Audio mode with look-ahead: the duck leads by it). A
+            // changed look-ahead (or a mode without it) crossfades from the old read point to the new one.
             delay_[0][pos_] = inL[i];
             delay_[1][pos_] = inR[i];
-            const size_t read = (pos_ + size - lookahead_) % size;
-            const double x[2] = {delay_[0][read], delay_[1][read]};
+            if (tapNow_ == kFresh) tapNow_ = lookahead_;  // after a reset the line is silent: nothing to fade
+            if (tapFade_ == 0 && tapNow_ != lookahead_) {
+                tapOld_ = tapNow_;
+                tapNow_ = lookahead_;
+                tapFade_ = fadeFrames_;
+            }
+            const size_t read = (pos_ + size - tapNow_) % size;
+            double x[2] = {delay_[0][read], delay_[1][read]};
+            if (tapFade_ > 0) {
+                const size_t old = (pos_ + size - tapOld_) % size;
+                const double w = fadeWeight(tapFade_--);
+                for (int c = 0; c < 2; ++c) x[c] = delay_[c][old] + (x[c] - delay_[c][old]) * w;
+            }
             pos_ = pos_ + 1 == size ? 0 : pos_ + 1;
+            // The band split runs always (its state stays current), and a change of Bands crossfades the paths.
+            if (bandsNow_ < 0) bandsNow_ = bands_;
+            if (bandsFade_ == 0 && bandsNow_ != bands_) {
+                bandsOld_ = bandsNow_;
+                bandsNow_ = bands_;
+                bandsFade_ = fadeFrames_;
+            }
+            const double w = bandsFade_ > 0 ? fadeWeight(bandsFade_--) : 1.0;
             double y[2];
             for (int c = 0; c < 2; ++c) {
-                if (bands_ == 0) {
-                    y[c] = x[c] * g[c];
-                } else {
-                    const double low = split_[c][1].lowpass(split_[c][0].lowpass(x[c]));
-                    const double high = split_[c][3].highpass(split_[c][2].highpass(x[c]));
-                    y[c] = bands_ == 1 ? low * g[c] + high : low + high * g[c];
-                }
+                const double low = split_[c][1].lowpass(split_[c][0].lowpass(x[c]));
+                const double high = split_[c][3].highpass(split_[c][2].highpass(x[c]));
+                auto path = [&](int b) { return b == 0 ? x[c] * g[c] : b == 1 ? low * g[c] + high : low + high * g[c]; };
+                const double now = path(bandsNow_);
+                y[c] = w < 1.0 ? path(bandsOld_) + (now - path(bandsOld_)) * w : now;
             }
             const double gr = std::min(g[0], g[1]);
             grMax_ = std::min(grMax_, lib::gainToDb(gr, -120.0));
@@ -294,12 +339,24 @@ protected:
     }
 
 private:
+    static constexpr uint32_t kFresh = UINT32_MAX;
+    // A crossfade's weight for the new side with `left` frames to go (fadeFrames_ down to 1).
+    double fadeWeight(uint32_t left) const noexcept {
+        return static_cast<double>(fadeFrames_ - left + 1) / static_cast<double>(fadeFrames_ + 1);
+    }
     // The shape starts again (a kick, a note, a beat): the attack runs from wherever the duck is now, so a duck
-    // retriggered before it has recovered doesn't jump.
+    // retriggered before it has recovered doesn't jump. A new depth (Velocity: a softer or harder note) jumps only
+    // while nothing is ducked; during a duck it glides in over the attack, so the gain stays continuous.
     void trigger(double velocity) noexcept {
         from_ = duck_;
         at_ = 0;
-        scale_ = 1.0 - velocity_ * (1.0 - std::clamp(velocity, 0.0, 1.0));
+        scaleTarget_ = 1.0 - velocity_ * (1.0 - std::clamp(velocity, 0.0, 1.0));
+        if (duck_ <= 0.0) {
+            scale_ = scaleTarget_;
+            scaleStep_ = 0.0;
+        } else {
+            scaleStep_ = (scaleTarget_ - scale_) / std::max(1.0, attack_);
+        }
         ++triggers_;
     }
     // The duck now (0 none, 1 full) and one sample on: attack (from where it was to full), hold, release (its
@@ -333,10 +390,13 @@ private:
     double depth_ = 0.9, attack_ = 48, hold_ = 480, release_ = 10560, tension_ = 0.35, mix_ = 1;
     double periodBeats_ = 1, offset_ = 0, threshold_ = -24, link_ = 1, velocity_ = 0;
     double phase_ = -1;
-    uint32_t lookahead_ = 0;
+    uint32_t lookahead_ = 0;            // the look-ahead the knobs ask for (and the latency reported)
+    uint32_t tapNow_ = kFresh, tapOld_ = 0, tapFade_ = 0;  // the read point in use, and a crossfade from the old one
+    int bandsNow_ = -1, bandsOld_ = 0;  // the Bands path in use (-1: fresh), and a crossfade from the old one
+    uint32_t bandsFade_ = 0, fadeFrames_ = 240;
     bool useHpf_ = false, useLpf_ = false, followMode_ = false, listen_ = false, armed_ = true;
     int64_t at_ = -1, lastPeriod_ = INT64_MIN;
-    double from_ = 0, duck_ = 0, scale_ = 1;
+    double from_ = 0, duck_ = 0, scale_ = 1, scaleTarget_ = 1, scaleStep_ = 0;
     double grMax_ = 0, grNow_ = 0, keyMax_ = 0;
     uint32_t triggers_ = 0;
 };

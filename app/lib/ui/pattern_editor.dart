@@ -200,6 +200,12 @@ class _PatternEditorState extends State<PatternEditor> with TickerProviderStateM
   @override
   void initState() {
     super.initState();
+    // Settings › Editing: the grid, snapping, tool and note length the roll opens with.
+    final ed = s.settings;
+    _res = ed.rollGrid;
+    _snap = ed.rollSnap;
+    _tool = ed.rollTool == StartTool.select ? PatternTool.select : PatternTool.draw;
+    if (ed.rollNoteSteps > 0) _lastLen = Steps.fromDouble(ed.rollNoteSteps);
     s.settings.addListener(_settingsChanged);
     _load();
   }

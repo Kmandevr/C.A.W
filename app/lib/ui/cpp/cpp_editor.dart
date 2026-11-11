@@ -15,6 +15,7 @@ import '../feedback.dart';
 import '../frame/sections.dart';
 import '../glass.dart';
 import '../haptics.dart';
+import '../code_prefs.dart';
 import '../theme.dart';
 import 'code_style.dart';
 import 'cpp_library.dart';
@@ -27,7 +28,7 @@ class CppFileView {
   CppFileView(String text) {
     controller = CodeLineEditingController(
       codeLines: CodeLines.fromText(text),
-      options: const CodeLineOptions(indentSize: 4),
+      options: CodeLineOptions(indentSize: CodePrefs.tabWidth), // Settings › Code editor, when the file opens
       spanBuilder: ({required context, required index, required codeLine, required textSpan, required style}) {
         final m = marks[index];
         return m == null ? textSpan : decorateSpan(textSpan, m);
@@ -430,7 +431,9 @@ class CppEditorState extends State<CppEditor> {
 
   void _mirrorIndicator() => _paragraphs.value = _boundIndicator?.value;
 
-  double get _gutterWidth => 14 + 7.6 * math.max(3, view.controller.lineCount.toString().length);
+  // Line numbers off (Settings › Code editor): only the problem marks' strip.
+  double get _gutterWidth =>
+      CodePrefs.lineNumbers ? 14 + 7.6 * math.max(3, view.controller.lineCount.toString().length) : 8;
 
   Widget _editor() {
     final v = view;
@@ -449,13 +452,13 @@ class CppEditorState extends State<CppEditor> {
             controller: v.controller,
             scrollController: _scroll,
             focusNode: _focus,
-            wordWrap: false,
+            wordWrap: CodePrefs.wrap,
             autofocus: false, // the keyboard opens when the code is tapped, not when a tab opens
             chunkAnalyzer: const NonCodeChunkAnalyzer(),
             padding: const EdgeInsets.fromLTRB(6, 6, 24, 48),
             style: CodeEditorStyle(
               fontFamily: 'JetBrainsMono',
-              fontSize: 12.5,
+              fontSize: CodePrefs.cppFontSize,
               fontHeight: 1.45,
               textColor: Neon.text,
               backgroundColor: Colors.transparent,
@@ -963,6 +966,7 @@ class _GutterPainter extends CustomPainter {
           Paint()..color = error ? Neon.pink : Neon.yellow,
         );
       }
+      if (!CodePrefs.lineNumbers) continue;
       final tp = TextPainter(
         text: TextSpan(
           text: '${p.index + 1}',

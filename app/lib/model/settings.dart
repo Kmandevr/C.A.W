@@ -1,10 +1,12 @@
-// App-wide settings (theme, density, motion, live coding) saved as settings.json, plus custom theme files in themes/
+// App-wide settings (audio, MIDI, recording, editing, look, projects, export) saved as settings.json, plus themes/
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../ui/code_prefs.dart';
 import '../ui/glass.dart';
 import '../ui/haptics.dart';
 import '../ui/motion.dart';
@@ -158,6 +160,65 @@ enum SoundQuality { eco, normal, high }
 /// recording (fewer wake-ups, less battery), Low latency always the smallest, Battery always the larger.
 enum AudioBuffer { auto, lowLatency, battery }
 
+/// The metronome's click, in the engine's order (CAW_CLICK_*).
+enum ClickSound {
+  classic('Classic'),
+  wood('Wood'),
+  tick('Tick');
+
+  const ClickSound(this.label);
+  final String label;
+}
+
+/// How a MIDI keyboard's velocity becomes a note's: as played, softer touches louder (Soft), harder needed (Hard),
+/// or always [Settings.midiFixedVelocity].
+enum VelocityCurve {
+  linear('Linear'),
+  soft('Soft'),
+  hard('Hard'),
+  fixed('Fixed');
+
+  const VelocityCurve(this.label);
+  final String label;
+
+  /// [v] (0..1) through the curve.
+  double apply(double v, double fixed) => switch (this) {
+        VelocityCurve.linear => v,
+        VelocityCurve.soft => math.sqrt(v.clamp(0.0, 1.0)),
+        VelocityCurve.hard => v * v,
+        VelocityCurve.fixed => fixed,
+      };
+}
+
+/// What New project starts from: an empty project, or the First loop template.
+enum NewProjectStart {
+  blank('Blank'),
+  firstLoop('First loop');
+
+  const NewProjectStart(this.label);
+  final String label;
+}
+
+/// How the exporter names a file: project, tempo and length (the default), the project alone, or the project and
+/// the date and time.
+enum ExportNaming {
+  detailed('Project, tempo, length'),
+  project('Project only'),
+  dated('Project, date and time');
+
+  const ExportNaming(this.label);
+  final String label;
+}
+
+/// The piano roll's tool when it opens.
+enum StartTool {
+  draw('Draw'),
+  select('Select');
+
+  const StartTool(this.label);
+  final String label;
+}
+
 class Settings extends ChangeNotifier {
   /// Settings kept in [dir] (settings.json and themes/); with no folder they live in memory only.
   Settings({this.dir}) {
@@ -192,6 +253,10 @@ class Settings extends ChangeNotifier {
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
     PeakMeter.fallDbPerSecond = meterFall;
+    CodePrefs.fontSize = codeFontSize;
+    CodePrefs.tabWidth = codeTabWidth;
+    CodePrefs.lineNumbers = codeLineNumbers;
+    CodePrefs.wrap = codeWrap;
   }
 
   /// Motion (owner, 2026-11-04): Full, Reduced (fades only) or Off. Minimal and the system setting lower it further.
@@ -257,6 +322,76 @@ class Settings extends ChangeNotifier {
   /// Sound quality and the device buffer (owner, 2026-11-10).
   SoundQuality soundQuality = SoundQuality.normal;
   AudioBuffer audioBuffer = AudioBuffer.auto;
+
+  /// Settings › Audio: the playback device by the backend's id (two identical interfaces share a name) and by name,
+  /// which opens it when the id has changed (a driver reinstall) ('' both: the system default), the engine's sample
+  /// rate (fixed when the engine is made, so a change applies at the next start), a callback size in frames (0: the
+  /// buffer mode chooses) and exclusive mode where the backend takes it (WASAPI, AAudio).
+  String audioDevice = '';
+  String audioDeviceId = '';
+  int sampleRate = 48000;
+  static const sampleRates = [44100, 48000, 88200, 96000];
+  int bufferFrames = 0;
+  static const bufferSizes = [0, 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096, 8192];
+  bool exclusiveAudio = false;
+
+  /// Settings › MIDI and input: the keyboard read ('' every connected one), its channel (0 every channel, else 1-16),
+  /// the velocity curve (and the Fixed value), and whether notes play the selected track outside a recording.
+  String midiDevice = '';
+  int midiChannel = 0;
+  VelocityCurve velocityCurve = VelocityCurve.linear;
+  double midiFixedVelocity = 0.8;
+  bool midiThru = true;
+
+  /// The on-screen keys: velocity from where a key is touched (0), else this fixed velocity; the octave they open on.
+  double keysVelocity = 0;
+  int keysOctave = 3;
+
+  /// The metronome's click: its sound and volume (0..1).
+  ClickSound clickSound = ClickSound.classic;
+  double clickVolume = 1;
+
+  /// Recording: bars played before the record point when Record starts from a stop (not recorded), and how much
+  /// earlier than heard (ms) a played note is written, for the output's delay.
+  int preRollBars = 0;
+  double recordOffsetMs = 0;
+  static const maxRecordOffsetMs = 250.0;
+
+  /// Settings › Editing: the piano roll opens with this grid (1/n note), snapping, tool and note length (steps; 0
+  /// follows the grid); the arrangement follows the playhead; the mouse wheel zooms without Ctrl; deleting a track asks.
+  int rollGrid = 16;
+  static const rollGrids = [4, 8, 16, 32, 64];
+  bool rollSnap = true;
+  StartTool rollTool = StartTool.draw;
+  double rollNoteSteps = 0;
+  static const rollNoteLengths = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0];
+  bool followPlayhead = true;
+  bool wheelZooms = false;
+  bool confirmDelete = false;
+
+  /// Settings › Code editor: the code font size (the C++ editor's is scaled from it), tab width, line numbers and
+  /// soft wrap (the C++ editor; the .caw editor always wraps).
+  double codeFontSize = 15;
+  static const minCodeFontSize = 10.0, maxCodeFontSize = 24.0;
+  int codeTabWidth = 4;
+  bool codeLineNumbers = true;
+  bool codeWrap = false;
+
+  /// Settings › Projects and files: how long after the last edit the project is saved, how many restore points each
+  /// project keeps, and what New project starts with.
+  int autosaveMs = 500;
+  static const autosaveDelays = [500, 2000, 5000, 15000, 30000];
+  int restorePointsKept = 20;
+  double newProjectBpm = 140; // ProjectDoc's own default
+  int newProjectBeatsPerBar = 4;
+  NewProjectStart newProjectStart = NewProjectStart.blank;
+
+  /// Settings › Export: what the exporter opens with.
+  String exportKind = 'loop';
+  int exportSampleRate = 48000;
+  bool exportFloat32 = false;
+  double exportSeconds = 8;
+  ExportNaming exportNaming = ExportNaming.detailed;
 
   /// The piano roll's sizes, look and touch choices.
   RollLook roll = const RollLook();
@@ -338,7 +473,52 @@ class Settings extends ChangeNotifier {
         'automation_mode': automationMode,
         'sound_quality': soundQuality.name,
         'audio_buffer': audioBuffer.name,
+        'settings_version': version,
+        'audio_device': audioDevice,
+        'audio_device_id': audioDeviceId,
+        'sample_rate': sampleRate,
+        'buffer_frames': bufferFrames,
+        'exclusive_audio': exclusiveAudio,
+        'midi_device': midiDevice,
+        'midi_channel': midiChannel,
+        'velocity_curve': velocityCurve.name,
+        'midi_fixed_velocity': midiFixedVelocity,
+        'midi_thru': midiThru,
+        'keys_velocity': keysVelocity,
+        'keys_octave': keysOctave,
+        'click_sound': clickSound.name,
+        'click_volume': clickVolume,
+        'pre_roll_bars': preRollBars,
+        'record_offset_ms': recordOffsetMs,
+        'roll_grid': rollGrid,
+        'roll_snap': rollSnap,
+        'roll_tool': rollTool.name,
+        'roll_note_steps': rollNoteSteps,
+        'follow_playhead': followPlayhead,
+        'wheel_zooms': wheelZooms,
+        'confirm_delete': confirmDelete,
+        'code_font_size': codeFontSize,
+        'code_tab_width': codeTabWidth,
+        'code_line_numbers': codeLineNumbers,
+        'code_wrap': codeWrap,
+        'autosave_ms': autosaveMs,
+        'restore_points_kept': restorePointsKept,
+        'new_project_bpm': newProjectBpm,
+        'new_project_beats_per_bar': newProjectBeatsPerBar,
+        'new_project_start': newProjectStart.name,
+        'export_kind': exportKind,
+        'export_sample_rate': exportSampleRate,
+        'export_float32': exportFloat32,
+        'export_seconds': exportSeconds,
+        'export_naming': exportNaming.name,
       };
+
+  /// The settings file's layout: 1 (no `settings_version`) had no Audio, MIDI, Editing, Projects or Export pages; 2
+  /// adds them. Every version-1 key keeps its name and meaning, so an older build still reads a newer file.
+  static const version = 2;
+
+  /// The file's version when it was read (1 for a file from before `settings_version`).
+  int loadedVersion = version;
 
   void fromJson(Map<String, dynamic> j) {
     T pick<T extends Enum>(List<T> values, Object? v, T fallback) =>
@@ -393,6 +573,66 @@ class Settings extends ChangeNotifier {
     if (r is Map<String, dynamic>) roll = RollLook.fromJson(r);
     final e = j['editor'];
     if (e is Map<String, dynamic>) editor = EditorLook.fromJson(e);
+    _fromJsonV2(j, pick);
+  }
+
+  void _fromJsonV2(Map<String, dynamic> j, T Function<T extends Enum>(List<T>, Object?, T) pick) {
+    double? num_(String k, double min, double max) {
+      final v = j[k];
+      return v is num && v.isFinite ? v.toDouble().clamp(min, max) : null;
+    }
+    String? text(String k, int max) => j[k] is String ? _settingText(j[k], max) : null;
+    bool? flag(String k) => j[k] is bool ? j[k] as bool : null;
+    final v = j['settings_version'];
+    loadedVersion = v is num ? v.toInt() : 1;
+    // Version 1 files: the old exporter opened at 48 kHz, 24-bit, 8 s and the loop, as the version-2 defaults do;
+    // "Low latency" chose the smallest buffer, which version 2's 0 frames (the mode chooses) still means.
+    audioDevice = text('audio_device', 255) ?? audioDevice;
+    audioDeviceId = text('audio_device_id', 511) ?? audioDeviceId;
+    final rate = j['sample_rate'];
+    if (rate is num && sampleRates.contains(rate.toInt())) sampleRate = rate.toInt();
+    final frames = j['buffer_frames'];
+    if (frames is num && bufferSizes.contains(frames.toInt())) bufferFrames = frames.toInt();
+    exclusiveAudio = flag('exclusive_audio') ?? exclusiveAudio;
+    midiDevice = text('midi_device', 255) ?? midiDevice;
+    midiChannel = num_('midi_channel', 0, 16)?.round() ?? midiChannel;
+    velocityCurve = pick(VelocityCurve.values, j['velocity_curve'], velocityCurve);
+    midiFixedVelocity = num_('midi_fixed_velocity', 0.05, 1) ?? midiFixedVelocity;
+    midiThru = flag('midi_thru') ?? midiThru;
+    keysVelocity = num_('keys_velocity', 0, 1) ?? keysVelocity;
+    keysOctave = num_('keys_octave', 1, 6)?.round() ?? keysOctave;
+    clickSound = pick(ClickSound.values, j['click_sound'], clickSound);
+    clickVolume = num_('click_volume', 0, 1) ?? clickVolume;
+    preRollBars = num_('pre_roll_bars', 0, 4)?.round() ?? preRollBars;
+    recordOffsetMs = num_('record_offset_ms', 0, maxRecordOffsetMs) ?? recordOffsetMs;
+    final grid = j['roll_grid'];
+    if (grid is num && rollGrids.contains(grid.toInt())) rollGrid = grid.toInt();
+    rollSnap = flag('roll_snap') ?? rollSnap;
+    rollTool = pick(StartTool.values, j['roll_tool'], rollTool);
+    final len = j['roll_note_steps'];
+    if (len is num && rollNoteLengths.contains(len.toDouble())) rollNoteSteps = len.toDouble();
+    followPlayhead = flag('follow_playhead') ?? followPlayhead;
+    wheelZooms = flag('wheel_zooms') ?? wheelZooms;
+    confirmDelete = flag('confirm_delete') ?? confirmDelete;
+    codeFontSize = num_('code_font_size', minCodeFontSize, maxCodeFontSize) ?? codeFontSize;
+    final tab = j['code_tab_width'];
+    if (tab is num && const [2, 4, 8].contains(tab.toInt())) codeTabWidth = tab.toInt();
+    codeLineNumbers = flag('code_line_numbers') ?? codeLineNumbers;
+    codeWrap = flag('code_wrap') ?? codeWrap;
+    final save = j['autosave_ms'];
+    if (save is num && autosaveDelays.contains(save.toInt())) autosaveMs = save.toInt();
+    restorePointsKept = num_('restore_points_kept', 1, 100)?.round() ?? restorePointsKept;
+    newProjectBpm = num_('new_project_bpm', 20, 400) ?? newProjectBpm;
+    newProjectBeatsPerBar = num_('new_project_beats_per_bar', 1, 16)?.round() ?? newProjectBeatsPerBar;
+    newProjectStart = pick(NewProjectStart.values, j['new_project_start'], newProjectStart);
+    if (const {'loop', 'free', 'oneShot', 'wavetable', 'midi'}.contains(j['export_kind'])) {
+      exportKind = j['export_kind'] as String;
+    }
+    final er = j['export_sample_rate'];
+    if (er is num && (er == 44100 || er == 48000)) exportSampleRate = er.toInt();
+    exportFloat32 = flag('export_float32') ?? exportFloat32;
+    exportSeconds = num_('export_seconds', 1, 120) ?? exportSeconds;
+    exportNaming = pick(ExportNaming.values, j['export_naming'], exportNaming);
   }
 
   Future<void> _load() async {
@@ -419,8 +659,12 @@ class Settings extends ChangeNotifier {
     }
     Neon.active = activeTheme;
     _applyPerformanceMode();
-    _shownLook = activeTheme.toFile();
+    _shownLook = _lookKey;
   }
+
+  /// What a look change compares: the theme and the code editor's font, tabs, numbers and wrap (they are read when
+  /// an editor builds, so a change rebuilds the screens once on leaving Settings, as a theme change does).
+  String get _lookKey => '${activeTheme.toFile()}|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap';
 
   Future<bool> saveExportProfile(ExportProfile profile) async {
     final name = profile.name.trim();
@@ -511,7 +755,7 @@ class Settings extends ChangeNotifier {
 
   /// After leaving the settings: if the look changed, rebuild every screen once so fixed colours repaint too.
   void commitLook() {
-    final now = activeTheme.toFile();
+    final now = _lookKey;
     if (now == _shownLook) return;
     _shownLook = now;
     lookRevision++;

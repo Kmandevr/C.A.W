@@ -79,16 +79,54 @@ class AppState extends ChangeNotifier {
   final Settings settings;
 
   SoundQuality? _quality;
+  String? _fallbackNote;  // the audioError a fallback set, cleared when the choice opens again
+  Future<void> _audioConfigured = Future.value();
+
+  /// Completes when the last device choice has reached the engine (tests).
+  @visibleForTesting
+  Future<void> get audioConfigured => _audioConfigured;
   AudioBuffer? _buffer;
   bool? _bufferRecording;
+  String? _deviceChoice, _clickChoice;
 
-  /// Sends the sound quality and the buffer mode to the engine when they (or whether a recording runs) changed.
+  /// Sends the sound quality, the device's choice (device, callback size, exclusive mode), the click's sound and the
+  /// buffer mode to the engine when they (or whether a recording runs) changed. A device choice reopens a running
+  /// device on a background isolate (the engine's device lock; never in the callback or on the UI isolate); when the
+  /// choice doesn't open, the system default plays instead and [audioError] says so.
   void applyAudioSettings({bool? recording}) {
     final e = engine;
     if (e == null) return;
     if (_quality != settings.soundQuality) {
       _quality = settings.soundQuality;
       e.setQuality(settings.soundQuality.index);
+    }
+    final device =
+        '${settings.audioDeviceId}|${settings.audioDevice}|${settings.bufferFrames}|${settings.exclusiveAudio}';
+    if (_deviceChoice != device) {
+      _deviceChoice = device;
+      final name = settings.audioDevice;
+      _audioConfigured = e
+          .configureAudio(
+              deviceId: settings.audioDeviceId,
+              device: name,
+              periodFrames: settings.bufferFrames,
+              exclusive: settings.exclusiveAudio)
+          .then((result) {
+        if (_disposed || _deviceChoice != device) return;  // a newer choice will report for itself
+        final before = audioError;
+        audioError = switch (result) {
+          AudioConfigured.ok => audioError == _fallbackNote ? null : audioError,
+          AudioConfigured.fallback => _fallbackNote = 'Couldn\'t open ${name.isEmpty ? 'the chosen size or mode' : name}; '
+              'using the default',
+          AudioConfigured.closed => 'The audio device did not reopen with the new settings',
+        };
+        if (audioError != before) notifyListeners();
+      }, onError: (Object _) {});
+    }
+    final click = '${settings.clickVolume}|${settings.clickSound.index}';
+    if (_clickChoice != click) {
+      _clickChoice = click;
+      e.setMetronomeSound(settings.clickVolume, settings.clickSound.index);
     }
     final rec = recording ?? _bufferRecording ?? false;
     if (_buffer != settings.audioBuffer || _bufferRecording != rec) {
@@ -208,8 +246,28 @@ class AppState extends ChangeNotifier {
       poll: _poll,
       interval: const Duration(milliseconds: 33),
       onIdle: () {
-    if (!meters.playing && _heldPreviews.isEmpty) engine?.stopAudio();
+    if (!meters.playing && _heldPreviews.isEmpty && !(engine?.testToneSounding ?? false)) engine?.stopAudio();
   });
+
+  /// Settings › Audio's test tone: opens the device if it is closed and plays 440 Hz for [seconds]; returns an error
+  /// message when the device can't open.
+  String? playTestTone({double seconds = 1.5}) {
+    final e = engine;
+    if (e == null) return engineError ?? 'The sound engine did not load';
+    if (useAudioDevice && !e.audioOn) {
+      final error = _openAudio(e);
+      if (error != null) {
+        notifyListeners();
+        return error;
+      }
+    }
+    e.testTone(seconds);
+    _poller.wake();
+    return null;
+  }
+
+  /// The audio device as it runs now (null without an engine).
+  AudioStatus? get audioStatus => engine?.audioStatus();
 
   Future<void> init() async {
     _resourcePressureSubscription = ResourceSignals.changes.listen(
@@ -218,12 +276,13 @@ class AppState extends ChangeNotifier {
     );
     EngineExecutionPolicy.updateRuntimeSignals(pressure: await ResourceSignals.read());
     try {
-      engine = Engine.create();
-      applyAudioSettings();  // before the device opens, so it opens at the chosen size
+      engine = Engine.create(sampleRate: settings.sampleRate);
+      applyAudioSettings();  // before the device opens, so it opens on the chosen device at the chosen size
       hardwareProfile = EngineExecutionPolicy.hardwareProfile;
       auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
       templates = Engine.templates();
-      audioError = engine!.startAudio();
+      await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
+      _openAudio(engine!);
     } catch (e) {
       engineError = 'The sound engine did not load: $e';
     }
@@ -273,7 +332,10 @@ class AppState extends ChangeNotifier {
   }
 
   /// An empty project: no modules and no layers.
-  ProjectDoc blankProject() => ProjectDoc(id: newId('p'), name: 'New project');
+  /// Settings › Projects and files sets its tempo and time signature.
+  ProjectDoc blankProject() => ProjectDoc(id: newId('p'), name: 'New project')
+    ..bpm = settings.newProjectBpm
+    ..beatsPerBar = settings.newProjectBeatsPerBar;
 
   @override
   void dispose() {
@@ -422,7 +484,7 @@ class AppState extends ChangeNotifier {
   void previewOn(String layerId, int id, double pitch, double velocity) {
     final e = engine;
     if (e == null) return;
-    if (!e.audioOn) audioError = e.startAudio();
+    if (!e.audioOn) _openAudio(e);
     e.noteOn(layerId, id, pitch, velocity);
     _heldPreviews.add(id);
     _poller.wake();
@@ -579,7 +641,7 @@ class AppState extends ChangeNotifier {
     _docGen++;
     _recordHistory();
     _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 500), flush);
+    _saveTimer = Timer(Duration(milliseconds: settings.autosaveMs), flush);
   }
 
   // ---------- undo and redo (the whole project) ----------
@@ -696,7 +758,7 @@ class AppState extends ChangeNotifier {
     final storage = _storage;
     if (storage == null || starting) return false;
     await flush();
-    await storage.createRestorePoint(project);
+    await storage.createRestorePoint(project, keep: settings.restorePointsKept);
     return true;
   }
 
@@ -708,7 +770,7 @@ class AppState extends ChangeNotifier {
     if (storage == null || starting) return false;
     final snapshot = await storage.loadRestorePoint(project.id, restorePointId);
     if (snapshot == null) return false;
-    await storage.createRestorePoint(project);
+    await storage.createRestorePoint(project, keep: settings.restorePointsKept);
     await _switchTo(snapshot);
     return true;
   }
@@ -770,8 +832,7 @@ class AppState extends ChangeNotifier {
       _transportOn = false;
     } else {
       if (useAudioDevice && !e.audioOn) {
-        audioError = e.startAudio();
-        if (audioError != null) return notifyListeners(); // no sound card: the pause stays where it was
+        if (_openAudio(e) != null) return notifyListeners(); // no sound card: the pause stays where it was
       }
       final from = pausedStep;
       if (countInBeats > 0) {
@@ -837,9 +898,25 @@ class AppState extends ChangeNotifier {
       flush();
       if (!meters.playing) e.stopAudio();
     } else if (!e.audioOn) {
-      audioError = e.startAudio();
+      _openAudio(e);
       notifyListeners();
     }
+  }
+
+  /// Opens the device: null when it runs, else why not ([audioError] either way). It may run on the system default
+  /// because the chosen device didn't open: it plays, and [audioError] says so.
+  String? _openAudio(Engine e) {
+    final error = e.startAudio();
+    if (error != null) return audioError = error;
+    final st = e.audioStatus();
+    if (st.fallback) {
+      final name = settings.audioDevice;
+      audioError = _fallbackNote =
+          'Couldn\'t open ${name.isEmpty ? 'the chosen size or mode' : name}; using the default';
+    } else {
+      audioError = null;
+    }
+    return null;
   }
 
   // ---------- modules (Builder) ----------
@@ -1755,7 +1832,9 @@ class AppState extends ChangeNotifier {
     if (status.loaded.isNotEmpty) await _syncNow();
   }
 
-  Future<void> newProject() => _switchTo(blankProject());
+  /// New project: blank (with Settings' tempo and time signature) or the First loop template, as Settings says.
+  Future<void> newProject() => _switchTo(
+      settings.newProjectStart == NewProjectStart.firstLoop ? starterProject() : blankProject());
 
   Future<void> newProjectFromTemplate() => _switchTo(starterProject());
 

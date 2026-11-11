@@ -1,8 +1,15 @@
 // Audio output through miniaudio (AAudio on Android, WASAPI on Windows, Core Audio, ALSA/PulseAudio), with load metering.
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <vector>
+#include <algorithm>
+
+#if defined(__ANDROID__)
+#include <dlfcn.h>
+#endif
 
 #include "caw.h"
 #include "capi_internal.h"
@@ -22,9 +29,20 @@ CawEngine* gActive = nullptr;
 void stopLocked(CawEngine* e);
 
 struct Audio {
+    ma_context context;
     ma_device device;
     CawEngine* owner = nullptr;
-    bool large = false;  // opened with the larger buffer
+    ma_uint32 frames = 0;     // the callback size asked for (0: the device's smallest)
+    // Exclusive and low latency: on AAudio what the stream reported at open (AAudio may grant less than asked,
+    // and a later reroute may change it); on WASAPI exclusive is what opened (it fails rather than share);
+    // elsewhere what was asked.
+    bool exclusive = false;
+    bool lowLatency = false;
+    bool modesReadBack = false;  // AAudio: the two above were read from the stream
+    // The chosen device, size or exclusive mode did not open, so the system default did (shared, its own size).
+    bool fallback = false;
+    std::string fallbackReason;
+    std::string deviceId;        // the backend's id of the device that opened ("" for the default)
     float l[kChunk], r[kChunk];
 };
 
@@ -35,6 +53,111 @@ constexpr ma_uint32 kLargeBufferFrames = 1024;
 bool wantsLarge(const CawEngine* e) {
     return e->bufferMode == CAW_BUFFER_BATTERY || (e->bufferMode == CAW_BUFFER_AUTO && !e->recording);
 }
+
+// The callback size to ask for: the one chosen (caw_audio_configure), else the buffer mode's (0: the smallest).
+ma_uint32 wantedFrames(const CawEngine* e) {
+    if (e->periodFrames > 0) return static_cast<ma_uint32>(e->periodFrames);
+    return wantsLarge(e) ? kLargeBufferFrames : 0;
+}
+
+std::string quoted(const char* s) {
+    std::string out = "\"";
+    for (const char* p = s; p && *p; ++p) {
+        if (*p == '"' || *p == '\\') out += '\\';
+        if (static_cast<unsigned char>(*p) >= 0x20) out += *p;
+    }
+    return out + "\"";
+}
+
+char* dup(const std::string& s) {
+    char* p = static_cast<char*>(std::malloc(s.size() + 1));
+    if (p) std::memcpy(p, s.c_str(), s.size() + 1);
+    return p;
+}
+
+// Exclusive mode is a request miniaudio passes on for WASAPI (AUDCLNT_SHAREMODE_EXCLUSIVE) and AAudio
+// (AAUDIO_SHARING_MODE_EXCLUSIVE) (miniaudio 0.11.25: ma_device_init__wasapi, ma_create_and_configure_
+// AAudioStreamBuilder__aaudio); other backends here are left in shared mode.
+bool takesExclusive(ma_backend b) { return b == ma_backend_wasapi || b == ma_backend_aaudio; }
+
+std::string bounded(const char* s, size_t n) {
+    size_t len = 0;
+    while (len < n && s[len]) ++len;
+    return std::string(s, len);
+}
+
+// A device's id as text, to keep in settings. WASAPI's is its endpoint ID string, which identifies each of two
+// identical interfaces that share a name and survives restarts and replugging (not a driver reinstall)
+// ([Fact] Microsoft Learn, "Endpoint ID Strings", read 2026-11-11); the string backends' ids are device names
+// or paths. "" where the backend has no id worth keeping (AAudio, JACK and the null backend use small integers).
+std::string deviceIdText(ma_backend b, const ma_device_id& id) {
+    switch (b) {
+        case ma_backend_wasapi: {
+            std::string out;  // UTF-16 to UTF-8
+            for (size_t i = 0; i < 64 && id.wasapi[i]; ++i) {
+                uint32_t c = static_cast<uint16_t>(id.wasapi[i]);
+                if (c >= 0xD800 && c < 0xDC00 && i + 1 < 64) {
+                    const uint32_t lo = static_cast<uint16_t>(id.wasapi[i + 1]);
+                    if (lo >= 0xDC00 && lo < 0xE000) {
+                        c = 0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00);
+                        ++i;
+                    }
+                }
+                if (c < 0x80) {
+                    out += static_cast<char>(c);
+                } else if (c < 0x800) {
+                    out += static_cast<char>(0xC0 | (c >> 6));
+                    out += static_cast<char>(0x80 | (c & 0x3F));
+                } else if (c < 0x10000) {
+                    out += static_cast<char>(0xE0 | (c >> 12));
+                    out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+                    out += static_cast<char>(0x80 | (c & 0x3F));
+                } else {
+                    out += static_cast<char>(0xF0 | (c >> 18));
+                    out += static_cast<char>(0x80 | ((c >> 12) & 0x3F));
+                    out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+                    out += static_cast<char>(0x80 | (c & 0x3F));
+                }
+            }
+            return out;
+        }
+        case ma_backend_dsound: {
+            static const char* hex = "0123456789abcdef";
+            std::string out;
+            for (const ma_uint8 v : id.dsound) {
+                out += hex[v >> 4];
+                out += hex[v & 15];
+            }
+            return out;
+        }
+        case ma_backend_winmm: return "winmm:" + std::to_string(id.winmm);
+        case ma_backend_alsa: return bounded(id.alsa, sizeof id.alsa);
+        case ma_backend_pulseaudio: return bounded(id.pulse, sizeof id.pulse);
+        case ma_backend_coreaudio: return bounded(id.coreaudio, sizeof id.coreaudio);
+        case ma_backend_sndio: return bounded(id.sndio, sizeof id.sndio);
+        case ma_backend_audio4: return bounded(id.audio4, sizeof id.audio4);
+        case ma_backend_oss: return bounded(id.oss, sizeof id.oss);
+        default: return std::string();
+    }
+}
+
+#if defined(__ANDROID__)
+// AAudio's sharing and performance modes as the stream has them (NDK API 26; miniaudio 0.11.25 loads neither
+// getter, so they are looked up in the libaaudio.so it opened). Read once at open, before the stream starts and on
+// the opening thread, so no reroute can replace the stream meanwhile.
+void readAAudioModes(Audio* a) {
+    if (a->context.backend != ma_backend_aaudio || !a->context.aaudio.hAAudio || !a->device.aaudio.pStreamPlayback) return;
+    using Getter = int32_t (*)(void*);
+    auto sharing = reinterpret_cast<Getter>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getSharingMode"));
+    auto performance = reinterpret_cast<Getter>(dlsym(a->context.aaudio.hAAudio, "AAudioStream_getPerformanceMode"));
+    if (!sharing || !performance) return;
+    a->exclusive = sharing(a->device.aaudio.pStreamPlayback) == 0;         // AAUDIO_SHARING_MODE_EXCLUSIVE
+    a->lowLatency = performance(a->device.aaudio.pStreamPlayback) == 12;   // AAUDIO_PERFORMANCE_MODE_LOW_LATENCY
+    a->modesReadBack = true;
+}
+#else
+void readAAudioModes(Audio*) {}
+#endif
 
 void callback(ma_device* dev, void* output, const void*, ma_uint32 frames) {
     auto* a = static_cast<Audio*>(dev->pUserData);
@@ -52,7 +175,7 @@ void callback(ma_device* dev, void* output, const void*, ma_uint32 frames) {
     }
     const double used = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     const double budget = static_cast<double>(frames) / static_cast<double>(dev->sampleRate);
-    a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0);
+    a->owner->engine->reportLoad(budget > 0 ? used / budget : 0.0, static_cast<int>(frames));
 }
 
 void setError(const std::string& msg, char* error, int32_t len) {
@@ -64,10 +187,61 @@ void setError(const std::string& msg, char* error, int32_t len) {
 void stopLocked(CawEngine* e) {
     if (!e || !e->audio) return;
     auto* a = static_cast<Audio*>(e->audio);
-    ma_device_uninit(&a->device);
+    ma_device_uninit(&a->device);  // the callback has stopped once this returns
+    ma_context_uninit(&a->context);
     delete a;
     e->audio = nullptr;
+    e->engine->resetTestTone();  // a tone cut off here would otherwise say it sounds until the device reopens
     if (gActive == e) gActive = nullptr;
+}
+
+// Opens and starts the device on [a]'s context: [id] (null: the default), [frames] a callback (0: the device's
+// own), exclusive mode when asked and the backend takes it (shared if refused). MA_SUCCESS or why not.
+ma_result openDevice(Audio* a, const CawEngine* e, const ma_device_id* id, ma_uint32 frames, bool exclusive,
+                     std::string& why) {
+    ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
+    cfg.playback.format = ma_format_f32;
+    cfg.playback.channels = 2;
+    cfg.playback.pDeviceID = id;
+    cfg.sampleRate = static_cast<ma_uint32>(e->engine->sampleRate());
+    // Low latency asks AAudio for AAUDIO_PERFORMANCE_MODE_LOW_LATENCY (its fast, MMAP path, where the callback runs
+    // on a high-priority thread); the conservative profile asks for PERFORMANCE_MODE_NONE, the power-saving
+    // legacy path (miniaudio 0.11.25, ma_open_stream__aaudio). Battery also leaves the fast path.
+    // A callback size goes to setBufferCapacityInFrames/setFramesPerDataCallback only with
+    // aaudio.allowSetBufferCapacity and, while miniaudio's compatibility workarounds are on (the default), only on
+    // Android 12 and later (`ma_android_sdk_version() > 30`, ma_create_and_configure_AAudioStreamBuilder__aaudio):
+    // on Android 11 and older the chosen size is ignored and the device picks its own; the status shows what it gave.
+    a->lowLatency = e->bufferMode != CAW_BUFFER_BATTERY;
+    cfg.performanceProfile = a->lowLatency ? ma_performance_profile_low_latency : ma_performance_profile_conservative;
+    a->frames = frames;
+    if (frames > 0) {
+        cfg.periodSizeInFrames = frames;
+        cfg.aaudio.allowSetBufferCapacity = MA_TRUE;
+    }
+    cfg.dataCallback = callback;
+    cfg.pUserData = a;
+    a->exclusive = exclusive && takesExclusive(a->context.backend);
+    cfg.playback.shareMode = a->exclusive ? ma_share_mode_exclusive : ma_share_mode_shared;
+    ma_result r = ma_device_init(&a->context, &cfg, &a->device);
+    if (r != MA_SUCCESS && a->exclusive) {
+        // The device refused exclusive mode (another app holds it, or no native format fits): shared instead.
+        a->exclusive = false;
+        cfg.playback.shareMode = ma_share_mode_shared;
+        r = ma_device_init(&a->context, &cfg, &a->device);
+    }
+    if (r != MA_SUCCESS) {
+        why = std::string("can't open the audio device: ") + ma_result_description(r);
+        return r;
+    }
+    readAAudioModes(a);
+    e->engine->resetTestTone();  // a request made while closed is stale (the callback is not running yet)
+    r = ma_device_start(&a->device);
+    if (r != MA_SUCCESS) {
+        why = std::string("can't start the audio device: ") + ma_result_description(r);
+        ma_device_uninit(&a->device);
+        return r;
+    }
+    return MA_SUCCESS;
 }
 
 int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
@@ -75,40 +249,70 @@ int32_t startLocked(CawEngine* e, char* error, int32_t error_len) {
     if (gActive && gActive != e) stopLocked(gActive);  // an orphaned engine from an earlier copy of the app
     auto* a = new Audio();
     a->owner = e;
-    a->large = wantsLarge(e);
-    ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
-    cfg.playback.format = ma_format_f32;
-    cfg.playback.channels = 2;
-    cfg.sampleRate = static_cast<ma_uint32>(e->engine->sampleRate());
-    // Low latency asks AAudio for AAUDIO_PERFORMANCE_MODE_LOW_LATENCY (its fast, MMAP path, where the callback runs
-    // on a high-priority thread); the conservative profile asks for PERFORMANCE_MODE_NONE, the power-saving
-    // legacy path (miniaudio 0.11.25, ma_open_stream__aaudio). The larger buffer sets the callback size: with
-    // aaudio.allowSetBufferCapacity, miniaudio passes it to setBufferCapacityInFrames/setFramesPerDataCallback.
-    // Auto keeps the fast path and only lengthens the callback; Battery also leaves the fast path.
-    cfg.performanceProfile = e->bufferMode == CAW_BUFFER_BATTERY ? ma_performance_profile_conservative
-                                                                 : ma_performance_profile_low_latency;
-    if (a->large) {
-        cfg.periodSizeInFrames = kLargeBufferFrames;
-        cfg.aaudio.allowSetBufferCapacity = MA_TRUE;
-    }
-    cfg.dataCallback = callback;
-    cfg.pUserData = a;
-    ma_result r = ma_device_init(nullptr, &cfg, &a->device);
+    ma_result r = ma_context_init(nullptr, 0, nullptr, &a->context);
     if (r != MA_SUCCESS) {
-        setError(std::string("can't open the audio device: ") + ma_result_description(r), error, error_len);
+        setError(std::string("can't open the audio system: ") + ma_result_description(r), error, error_len);
         delete a;
         return 1;
     }
-    r = ma_device_start(&a->device);
+    // A device chosen by id (two identical interfaces share a name), else by name, found in the backend's list;
+    // else the default (it was unplugged, say). No list for the default, nor on AAudio, which lists only the
+    // default (miniaudio 0.11.25, ma_context_enumerate_devices__aaudio) and where Android routes the output.
+    ma_device_id chosen;
+    bool found = false;
+    if ((!e->deviceId.empty() || !e->deviceName.empty()) && a->context.backend != ma_backend_aaudio) {
+        ma_device_info* playback = nullptr;
+        ma_uint32 count = 0;
+        if (ma_context_get_devices(&a->context, &playback, &count, nullptr, nullptr) == MA_SUCCESS) {
+            for (ma_uint32 i = 0; i < count && !found && !e->deviceId.empty(); ++i) {
+                if (e->deviceId == deviceIdText(a->context.backend, playback[i].id)) {
+                    chosen = playback[i].id;
+                    found = true;
+                }
+            }
+            for (ma_uint32 i = 0; i < count && !found && !e->deviceName.empty(); ++i) {
+                if (e->deviceName == playback[i].name) {
+                    chosen = playback[i].id;
+                    found = true;
+                }
+            }
+        }
+    }
+    const ma_uint32 frames = wantedFrames(e);
+    const bool exclusive = (e->audioFlags & CAW_AUDIO_EXCLUSIVE) != 0;
+    std::string why;
+    r = openDevice(a, e, found ? &chosen : nullptr, frames, exclusive, why);
+    if (r != MA_SUCCESS && (found || frames > 0 || exclusive)) {
+        // The choice did not open (the interface is busy or refuses the size): the system default, shared, at its
+        // own size, so Play is never silent; the status says so (fallback) and why.
+        std::string again;
+        if (openDevice(a, e, nullptr, 0, false, again) == MA_SUCCESS) {
+            a->fallback = true;
+            a->fallbackReason = why;
+            r = MA_SUCCESS;
+        }
+    } else if (r == MA_SUCCESS && found) {
+        a->deviceId = deviceIdText(a->context.backend, chosen);
+    }
     if (r != MA_SUCCESS) {
-        setError(std::string("can't start the audio device: ") + ma_result_description(r), error, error_len);
-        ma_device_uninit(&a->device);
+        setError(why, error, error_len);
+        ma_context_uninit(&a->context);
         delete a;
         return 1;
     }
     e->audio = a;
     gActive = e;
     return 0;
+}
+
+// Reopens a running device after its choice changed: 0 when it runs again as chosen (or was not running), 2 when
+// it runs on the system default because the choice did not open, 1 when nothing opened (the device is closed).
+int32_t reopenLocked(CawEngine* e) {
+    if (!e->audio) return 0;
+    stopLocked(e);
+    char error[256];
+    if (startLocked(e, error, sizeof error) != 0) return 1;
+    return static_cast<const Audio*>(e->audio)->fallback ? 2 : 0;
 }
 
 }  // namespace
@@ -128,16 +332,16 @@ void caw_audio_stop(CawEngine* e) {
 }
 
 void caw_audio_set_buffer_mode(CawEngine* e, int32_t mode, int32_t recording) {
-    if (!e) return;
+    if (!e) return;  // a reopen that fails leaves the device closed: caw_audio_status says so
     std::lock_guard<std::mutex> lock(gDeviceLock);
+    const bool wasLowLatency = e->bufferMode != CAW_BUFFER_BATTERY;
     e->bufferMode = mode == CAW_BUFFER_LOW_LATENCY || mode == CAW_BUFFER_BATTERY ? mode : CAW_BUFFER_AUTO;
     e->recording = recording != 0;
     auto* a = static_cast<Audio*>(e->audio);
-    if (!a || a->large == wantsLarge(e)) return;
-    // Reopen at the new size: a short gap, at a recording's start or end, or a settings change.
-    stopLocked(e);
-    char error[256];
-    startLocked(e, error, sizeof error);
+    if (!a) return;
+    // Reopen at the new size or profile: a short gap, at a recording's start or end, or a settings change.
+    if (a->frames == wantedFrames(e) && wasLowLatency == (e->bufferMode != CAW_BUFFER_BATTERY)) return;
+    reopenLocked(e);
 }
 
 int32_t caw_audio_buffer_frames(CawEngine* e) {
@@ -145,6 +349,83 @@ int32_t caw_audio_buffer_frames(CawEngine* e) {
     std::lock_guard<std::mutex> lock(gDeviceLock);
     const auto* a = static_cast<const Audio*>(e->audio);
     return a ? static_cast<int32_t>(a->device.playback.internalPeriodSizeInFrames) : 0;
+}
+
+char* caw_audio_devices(void) {
+    ma_context context;
+    if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS) {
+        return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}");
+    }
+    std::string out = "{\"backend\":" + quoted(ma_get_backend_name(context.backend)) +
+                      ",\"exclusive\":" + (takesExclusive(context.backend) ? "true" : "false") + ",\"devices\":[";
+    ma_device_info* playback = nullptr;
+    ma_uint32 count = 0;
+    if (ma_context_get_devices(&context, &playback, &count, nullptr, nullptr) == MA_SUCCESS) {
+        for (ma_uint32 i = 0; i < count; ++i) {
+            if (i) out += ",";
+            out += "{\"name\":" + quoted(playback[i].name) +
+                   ",\"id\":" + quoted(deviceIdText(context.backend, playback[i].id).c_str()) +
+                   ",\"default\":" + (playback[i].isDefault ? "true" : "false");
+            ma_device_info info;
+            std::string rates, exclusiveRates;
+            if (ma_context_get_device_info(&context, ma_device_type_playback, &playback[i].id, &info) == MA_SUCCESS) {
+                std::vector<ma_uint32> shared, exclusive;
+                for (ma_uint32 f = 0; f < info.nativeDataFormatCount; ++f) {
+                    const ma_uint32 rate = info.nativeDataFormats[f].sampleRate;
+                    auto& list = (info.nativeDataFormats[f].flags & MA_DATA_FORMAT_FLAG_EXCLUSIVE_MODE) ? exclusive : shared;
+                    if (std::find(list.begin(), list.end(), rate) == list.end()) list.push_back(rate);
+                }
+                std::sort(shared.begin(), shared.end());
+                std::sort(exclusive.begin(), exclusive.end());
+                for (const ma_uint32 v : shared) rates += (rates.empty() ? "" : ",") + std::to_string(v);
+                for (const ma_uint32 v : exclusive) exclusiveRates += (exclusiveRates.empty() ? "" : ",") + std::to_string(v);
+            }
+            out += ",\"rates\":[" + rates + "],\"exclusive_rates\":[" + exclusiveRates + "]}";
+        }
+    }
+    ma_context_uninit(&context);
+    return dup(out + "]}");
+}
+
+int32_t caw_audio_configure(CawEngine* e, const char* device_id, const char* device_name, int32_t period_frames,
+                            int32_t flags) {
+    if (!e) return 1;
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    std::string id = device_id ? std::string(device_id).substr(0, 511) : std::string();
+    std::string name = device_name ? std::string(device_name).substr(0, MA_MAX_DEVICE_NAME_LENGTH) : std::string();
+    const int frames = period_frames <= 0 ? 0 : period_frames < 16 ? 16 : period_frames > 8192 ? 8192 : period_frames;
+    const int f = flags & CAW_AUDIO_EXCLUSIVE;
+    if (id == e->deviceId && name == e->deviceName && frames == e->periodFrames && f == e->audioFlags) {
+        const auto* a = static_cast<const Audio*>(e->audio);
+        return a && a->fallback ? 2 : 0;
+    }
+    e->deviceId = std::move(id);
+    e->deviceName = std::move(name);
+    e->periodFrames = frames;
+    e->audioFlags = f;
+    return reopenLocked(e);
+}
+
+char* caw_audio_status(CawEngine* e) {
+    if (!e) return dup("{\"running\":false}");
+    std::lock_guard<std::mutex> lock(gDeviceLock);
+    const std::string request = ",\"requested_device\":" + quoted(e->deviceName.c_str()) +
+                                ",\"requested_device_id\":" + quoted(e->deviceId.c_str()) +
+                                ",\"requested_frames\":" + std::to_string(e->periodFrames) +
+                                ",\"exclusive_requested\":" + ((e->audioFlags & CAW_AUDIO_EXCLUSIVE) ? "true" : "false");
+    const auto* a = static_cast<const Audio*>(e->audio);
+    if (!a) return dup("{\"running\":false" + request + "}");
+    const auto& p = a->device.playback;
+    return dup("{\"running\":true,\"backend\":" + quoted(ma_get_backend_name(a->context.backend)) +
+               ",\"device\":" + quoted(p.name) + ",\"device_id\":" + quoted(a->deviceId.c_str()) +
+               ",\"sample_rate\":" + std::to_string(p.internalSampleRate) +
+               ",\"period_frames\":" + std::to_string(p.internalPeriodSizeInFrames) +
+               ",\"periods\":" + std::to_string(p.internalPeriods) +
+               ",\"exclusive\":" + (a->exclusive ? "true" : "false") +
+               ",\"low_latency\":" + (a->lowLatency ? "true" : "false") +
+               ",\"modes_read_back\":" + (a->modesReadBack ? "true" : "false") +
+               ",\"fallback\":" + (a->fallback ? "true" : "false") +
+               ",\"fallback_reason\":" + quoted(a->fallbackReason.c_str()) + request + "}");
 }
 
 }  // extern "C"

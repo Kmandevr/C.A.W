@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../engine/engine.dart';
 import '../model/app_state.dart';
+import '../model/project.dart' show LayerDoc;
 import 'motion.dart';
 import 'theme.dart';
 import 'glass.dart';
@@ -663,4 +664,26 @@ class ResetOnDoubleTap extends StatelessWidget {
             onReset!();
           },
           child: child);
+}
+
+/// Settings › Editing › Ask before deleting a track: a dialog when it is on (true at once when off; undo takes a
+/// delete back either way).
+Future<bool> confirmTrackDelete(BuildContext context, AppState state, LayerDoc layer) async {
+  if (!state.settings.confirmDelete) return true;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Delete "${layer.name}"?'),
+      content: Text(layer.isFolder ? 'The folder and the tracks in it go.' : 'Its clips and effects go with it.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        TextButton(
+          key: const ValueKey('confirm-delete'),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Delete', style: TextStyle(color: Neon.pink)),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
 }

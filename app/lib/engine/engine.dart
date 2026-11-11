@@ -286,17 +286,123 @@ class RenderRequest {
   final double seconds;
 }
 
+/// One playback device the audio backend lists ([Engine.audioDevices]).
+class AudioDeviceInfo {
+  const AudioDeviceInfo(
+      {required this.name, this.id = '', this.isDefault = false, this.rates = const [], this.exclusiveRates = const []});
+  final String name;
+
+  /// The backend's id ('' where it has none worth keeping): two identical interfaces share a name, not an id.
+  final String id;
+  final bool isDefault;
+
+  /// Native sample rates in shared and exclusive mode (0: any rate).
+  final List<int> rates, exclusiveRates;
+}
+
+/// The playback devices, the backend's name and whether it takes an exclusive-mode request (WASAPI, AAudio).
+class AudioDeviceList {
+  const AudioDeviceList({this.backend = 'none', this.exclusive = false, this.devices = const []});
+  final String backend;
+  final bool exclusive;
+  final List<AudioDeviceInfo> devices;
+
+  static AudioDeviceList fromJson(Map<String, dynamic> j) => AudioDeviceList(
+        backend: j['backend'] as String? ?? 'none',
+        exclusive: j['exclusive'] == true,
+        devices: [
+          for (final d in (j['devices'] as List? ?? const []))
+            if (d is Map && d['name'] is String)
+              AudioDeviceInfo(
+                name: d['name'] as String,
+                id: d['id'] as String? ?? '',
+                isDefault: d['default'] == true,
+                rates: [for (final r in (d['rates'] as List? ?? const [])) if (r is num) r.toInt()],
+                exclusiveRates: [for (final r in (d['exclusive_rates'] as List? ?? const [])) if (r is num) r.toInt()],
+              ),
+        ],
+      );
+}
+
+/// The device as it runs (caw_audio_status). The rate, period and periods are what the device gave, which can differ
+/// from what was asked. [exclusive] and [lowLatency] are read from the stream at open on AAudio ([modesReadBack]; a
+/// later reroute may change them); on WASAPI [exclusive] is what opened (it refuses rather than share); elsewhere
+/// both are what was asked.
+class AudioStatus {
+  const AudioStatus({
+    this.running = false,
+    this.backend = '',
+    this.device = '',
+    this.deviceId = '',
+    this.modesReadBack = false,
+    this.fallback = false,
+    this.fallbackReason = '',
+    this.requestedDeviceId = '',
+    this.sampleRate = 0,
+    this.periodFrames = 0,
+    this.periods = 0,
+    this.exclusive = false,
+    this.lowLatency = false,
+    this.requestedDevice = '',
+    this.requestedFrames = 0,
+    this.exclusiveRequested = false,
+  });
+  final bool running, exclusive, lowLatency, modesReadBack;
+  final String backend, device, deviceId;
+  final int sampleRate, periodFrames, periods;
+
+  /// The chosen device, size or exclusive mode did not open, so the system default runs (shared, its own size).
+  final bool fallback;
+  final String fallbackReason;
+
+  /// What was asked for (caw_audio_configure), running or not.
+  final String requestedDevice, requestedDeviceId;
+  final int requestedFrames;
+  final bool exclusiveRequested;
+
+  /// The output buffer's length in ms (every period queued), the delay a played note adds before the speaker; the
+  /// converter and the speaker add a little more.
+  double get bufferMs => sampleRate <= 0 ? 0 : periodFrames * (periods <= 0 ? 1 : periods) * 1000 / sampleRate;
+
+  static AudioStatus fromJson(Map<String, dynamic> j) => AudioStatus(
+        running: j['running'] == true,
+        backend: j['backend'] as String? ?? '',
+        device: j['device'] as String? ?? '',
+        deviceId: j['device_id'] as String? ?? '',
+        modesReadBack: j['modes_read_back'] == true,
+        fallback: j['fallback'] == true,
+        fallbackReason: j['fallback_reason'] as String? ?? '',
+        requestedDeviceId: j['requested_device_id'] as String? ?? '',
+        sampleRate: (j['sample_rate'] as num?)?.toInt() ?? 0,
+        periodFrames: (j['period_frames'] as num?)?.toInt() ?? 0,
+        periods: (j['periods'] as num?)?.toInt() ?? 0,
+        exclusive: j['exclusive'] == true,
+        lowLatency: j['low_latency'] == true,
+        requestedDevice: j['requested_device'] as String? ?? '',
+        requestedFrames: (j['requested_frames'] as num?)?.toInt() ?? 0,
+        exclusiveRequested: j['exclusive_requested'] == true,
+      );
+}
+
+/// How [Engine.configureAudio] left the device: running as chosen (or not running), running on the system default
+/// because the choice did not open, or closed because nothing opened.
+enum AudioConfigured { ok, fallback, closed }
+
 /// Live engine plus its audio device. One per app.
 class Engine {
-  Engine._(this._b, this._handle);
+  Engine._(this._b, this._handle, this.sampleRate);
 
-  static const int sampleRate = 48000;
+  /// The rate the engine runs at unless Settings › Audio chose another (it is fixed when the engine is made).
+  static const int defaultSampleRate = 48000;
+  static const sampleRates = [44100, 48000, 88200, 96000];
+  final int sampleRate;
   static const int auditionIndex = -2;  // CAW_SCOPE_AUDITION: the audition's slot moves when the engine grows
   static const int masterIndex = -1;    // CAW_SCOPE_MASTER
 
   final Bindings _b;
   final Pointer<Void> _handle;
   Future<void> _queue = Future.value();
+  Future<void> _audioQueue = Future.value();  // device reopens, in order
   final Pointer<CawMetersStruct> _meters = calloc<CawMetersStruct>();
   final Pointer<CawLayerMeterStruct> _layer = calloc<CawLayerMeterStruct>();
   final Pointer<Float> _layerSides = calloc<Float>(2);
@@ -311,15 +417,70 @@ class Engine {
   bool _nativeDestroyed = false;
   List<String> lastProjectWarnings = const [];
 
-  static Engine create() {
+  static Engine create({int sampleRate = defaultSampleRate}) {
     final b = Bindings.instance;
     if (b.apiVersion() != cawApiVersion) {
       throw StateError('engine library is API ${b.apiVersion()}, the app needs $cawApiVersion');
     }
-    final h = b.create(sampleRate);
+    final rate = sampleRates.contains(sampleRate) ? sampleRate : defaultSampleRate;
+    final h = b.create(rate);
     if (h == nullptr) throw StateError('could not create the engine');
-    return Engine._(b, h);
+    return Engine._(b, h, rate);
   }
+
+  /// The playback devices, read on a background isolate (opening the backend can take tens of milliseconds).
+  static Future<AudioDeviceList> audioDevices() => Isolate.run(() {
+        final b = Bindings.instance;
+        final r = b.audioDevices();
+        if (r == nullptr) return const AudioDeviceList();
+        final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+        b.free(r);
+        return AudioDeviceList.fromJson(j);
+      });
+
+  /// How the device opens: [deviceId] (the backend's id), else [device] by name (both '': the default), a callback
+  /// of [periodFrames] (0: the buffer mode's) and [exclusive] mode where the backend takes it. A running device
+  /// reopens, which stops and opens it under the engine's device lock, so it runs on a background isolate, one call
+  /// at a time in order. [audioOn] follows the device afterwards.
+  Future<AudioConfigured> configureAudio(
+      {String deviceId = '', String device = '', int periodFrames = 0, bool exclusive = false}) {
+    if (_disposed) return Future.value(AudioConfigured.closed);
+    _pendingNativeOps++;
+    final done = Completer<AudioConfigured>();
+    final address = _handle.address;
+    _audioQueue = _audioQueue.then((_) async {
+      try {
+        final r = await _configureAudioOffThread(address, deviceId, device, periodFrames, exclusive);
+        if (!_nativeDestroyed) _audioOn = _deviceRunning();
+        done.complete(switch (r) { 0 => AudioConfigured.ok, 2 => AudioConfigured.fallback, _ => AudioConfigured.closed });
+      } catch (error, stack) {
+        done.completeError(error, stack);
+      } finally {
+        _pendingNativeOps--;
+        if (_destroyRequested && _pendingNativeOps == 0) _destroyNative();
+      }
+    });
+    return done.future;
+  }
+
+  /// Whether the native device runs now (a reopen that failed has closed it, whatever was asked).
+  bool _deviceRunning() => audioStatus().running;
+
+  /// The device as it runs now.
+  AudioStatus audioStatus() {
+    final r = _b.audioStatus(_handle);
+    if (r == nullptr) return const AudioStatus();
+    final j = jsonDecode(r.toDartString()) as Map<String, dynamic>;
+    _b.free(r);
+    return AudioStatus.fromJson(j);
+  }
+
+  /// The metronome's click: [volume] 0..1 and its sound (CAW_CLICK_*: 0 Classic, 1 Wood, 2 Tick).
+  void setMetronomeSound(double volume, int sound) => _b.setMetronomeSound(_handle, volume, sound);
+
+  /// [seconds] of a 440 Hz test tone at -12 dBFS, playing or not; 0 ends it.
+  void testTone(double seconds) => _b.testTone(_handle, seconds);
+  bool get testToneSounding => _b.testToneSounding(_handle) != 0;
 
   /// Sends a whole project. Calls run one at a time on the native worker pool, off the UI isolate.
   Future<Map<String, ModuleInfo>> setProject(String json) {
@@ -552,7 +713,10 @@ class Engine {
 
   /// The device buffer (CAW_BUFFER_*: 0 Auto, 1 Low latency, 2 Battery) and whether a recording is running (Auto
   /// uses the small buffer only then). A running device reopens when the size changes.
-  void setBufferMode(int mode, {required bool recording}) => _b.audioSetBufferMode(_handle, mode, recording ? 1 : 0);
+  void setBufferMode(int mode, {required bool recording}) {
+    _b.audioSetBufferMode(_handle, mode, recording ? 1 : 0);
+    if (_audioOn) _audioOn = _deviceRunning();  // a failed reopen leaves it closed, so the next play opens it again
+  }
 
   /// The device's callback size in frames while it plays (0 when stopped).
   int get bufferFrames => _b.audioBufferFrames(_handle);
@@ -574,15 +738,16 @@ class Engine {
   /// Ends every knob touch, so automation lanes rule again without a restart (Touch mode letting go).
   void releaseTouches() => _b.releaseTouches(_handle);
 
-  /// Runs [frames] of audio with no device, discarding it: for tests, which play the transport without a sound card.
-  /// Never call it while the device is on.
-  void pullForTest(int frames) {
+  /// Runs [frames] of audio with no device and returns the left channel: for tests, which play the transport without
+  /// a sound card. Never call it while the device is on.
+  Float32List pullForTest(int frames) {
     final l = calloc<Float>(frames), r = calloc<Float>(frames);
     try {
       for (var i = 0; i < frames; i += 512) {
         final n = frames - i < 512 ? frames - i : 512;
         _b.process(_handle, l + i, r + i, n);
       }
+      return Float32List.fromList(l.asTypedList(frames));
     } finally {
       calloc.free(l);
       calloc.free(r);
@@ -626,9 +791,10 @@ class Engine {
     out.setRange(0, n, _scope.asTypedList(n));
   }
 
-  /// Opens the audio device; returns an error message, or null when sound is running.
+  /// Opens the audio device; returns an error message, or null when sound is running (perhaps on the default
+  /// device instead of the chosen one: [AudioStatus.fallback]).
   String? startAudio() {
-    if (_audioOn) return null;
+    if (_audioOn && _deviceRunning()) return null;
     final err = calloc<Uint8>(256).cast<Utf8>();
     final r = _b.audioStart(_handle, err, 256);
     final msg = r == 0 ? null : err.toDartString();
@@ -637,8 +803,10 @@ class Engine {
     return msg;
   }
 
+  /// Closes the device. Always asks the native side (a no-op when closed), so a device reopened behind a stale
+  /// [audioOn] still closes.
   void stopAudio() {
-    if (!_audioOn) return;
+    if (_nativeDestroyed) return;
     _b.audioStop(_handle);
     _audioOn = false;
   }
@@ -785,5 +953,17 @@ Future<String> _componentsOffThread(int engineAddress) => Isolate.run(() {
         return result.toDartString();
       } finally {
         bindings.free(result);
+      }
+    });
+
+Future<int> _configureAudioOffThread(int engineAddress, String deviceId, String device, int periodFrames, bool exclusive) =>
+    Isolate.run(() {
+      final b = Bindings.instance;
+      final id = deviceId.toNativeUtf8(), name = device.toNativeUtf8();
+      try {
+        return b.audioConfigure(Pointer<Void>.fromAddress(engineAddress), id, name, periodFrames, exclusive ? 1 : 0);
+      } finally {
+        calloc.free(id);
+        calloc.free(name);
       }
     });

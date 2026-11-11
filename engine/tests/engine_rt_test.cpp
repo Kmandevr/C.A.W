@@ -101,6 +101,47 @@ TEST(engine_grow_never_allocates_or_frees_on_the_audio_thread) {
     CHECK_EQ(e.routingRejections(), 0u);
 }
 
+TEST(export_table_swaps_and_slot_list_changes_never_allocate_on_the_audio_thread) {
+    // #133: a playing exporter whose chain exports more gets a larger export table (SetExports; the old
+    // one is retired), and layers added and removed join and leave the in-use slot list.
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.modules.push_back({"src", "---\nmode: float\n---\nexport let level = 0.25\nsine(220) * level", {}, "src"});
+    p.modules.push_back({"reader", "---\nmode: float\n---\nsine(330) * src.level", {}, "reader"});
+    p.layers = {layer("a", {"src"}), layer("b", {"reader"})};
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    std::vector<float> l(192), r(192);
+    for (int k = 0; k < 50; ++k) e.process(l.data(), r.data(), 192);
+    p.modules[0].source = "---\nmode: float\n---\nexport let level = 0.25\nexport let x = 1\nexport let y = 2\nsine(220) * level";
+    for (int i = 0; i < 8; ++i) p.layers.push_back(layer("c" + std::to_string(i), {"reader"}));
+    e.setProject(p);
+    std::size_t operations = 0;
+    float peak = 0.0f;
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 100; ++k) {
+            e.process(l.data(), r.data(), 192);
+            for (float v : l) peak = v > peak ? v : peak;
+        }
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    p.layers.resize(2);  // the eight readers fade out and leave the slot list
+    e.setProject(p);
+    {
+        cawtest::AllocationScope scope;
+        for (int k = 0; k < 100; ++k) e.process(l.data(), r.data(), 192);
+        operations = scope.count();
+    }
+    CHECK_EQ(operations, 0u);
+    CHECK(peak > 0.01f);
+    CHECK(e.slotsScannedPerChunk() <= 3);
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
 TEST(parameter_resolver_never_allocates_on_the_audio_thread) {
     ParameterDescriptor p;
     p.id = "cutoff";

@@ -231,6 +231,16 @@ void caw_engine_set_metronome(CawEngine* e, int32_t on) {
     if (e) e->engine->setMetronome(on != 0);
 }
 
+void caw_engine_set_metronome_sound(CawEngine* e, double volume, int32_t sound) {
+    if (e) e->engine->setMetronomeSound(volume, sound);
+}
+
+void caw_engine_test_tone(CawEngine* e, double seconds) {
+    if (e) e->engine->testTone(seconds);
+}
+
+int32_t caw_engine_test_tone_sounding(CawEngine* e) { return e && e->engine->testToneSounding() ? 1 : 0; }
+
 void caw_engine_release_touches(CawEngine* e) {
     if (e) e->engine->releaseTouches();
 }

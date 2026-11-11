@@ -36,8 +36,11 @@ List<int> scalePads(ProjectDoc p, int octave) {
   return [for (var i = 0; i < 16; i++) 12 * (octave + 1) + root + 12 * (i ~/ 7) + steps[i % 7]];
 }
 
-/// Velocity from where a key is touched: soft at the top, full at the bottom (where a finger presses hardest).
-double velocityAt(double y, double height) => height <= 0 ? 0.8 : (0.3 + 0.7 * (y / height)).clamp(0.3, 1.0);
+/// Velocity from where a key is touched: soft at the top, full at the bottom (where a finger presses hardest); a
+/// [fixed] velocity (Settings › MIDI and input, above 0) instead.
+double velocityAt(double y, double height, {double fixed = 0}) => fixed > 0
+    ? fixed.clamp(0.05, 1.0).toDouble()
+    : height <= 0 ? 0.8 : (0.3 + 0.7 * (y / height)).clamp(0.3, 1.0);
 
 class LiveKeysPanel extends StatefulWidget {
   const LiveKeysPanel({super.key, required this.midi, required this.state, this.compact = false});
@@ -55,9 +58,9 @@ class _LiveKeysPanelState extends State<LiveKeysPanel> {
   bool _pads = false;
   bool? _padsChosen; // the user's switch; else pads open by themselves on a drum track
 
-  /// The leftmost white key (C1 is 0), and the pads' octave.
-  double _offset = 14; // C3
-  int _padOctave = 3;
+  /// The leftmost white key (C1 is 0), and the pads' octave: both open on Settings' octave (C3 by default).
+  late double _offset = 7.0 * (widget.state.settings.keysOctave - 1).clamp(0, 6);
+  late int _padOctave = widget.state.settings.keysOctave;
 
   LiveMidi get m => widget.midi;
 
@@ -218,7 +221,7 @@ mixin _Fingers<T extends StatefulWidget> on State<T> {
     final n = noteAt(e.localPosition, size);
     if (n == null) return;
     _fingers[e.pointer] = n;
-    midi.keyDown(n, velocityAt(e.localPosition.dy, size.height));
+    midi.keyDown(n, velocityAt(e.localPosition.dy, size.height, fixed: midi.state.settings.keysVelocity));
     setState(() {});
   }
 
@@ -229,7 +232,7 @@ mixin _Fingers<T extends StatefulWidget> on State<T> {
     if (n == null || n == was) return;
     midi.keyUp(was);
     _fingers[e.pointer] = n;
-    midi.keyDown(n, velocityAt(e.localPosition.dy, size.height));
+    midi.keyDown(n, velocityAt(e.localPosition.dy, size.height, fixed: midi.state.settings.keysVelocity));
     setState(() {});
   }
 
@@ -373,7 +376,7 @@ class _PadGridState extends State<_PadGrid> with _Fingers {
     if (n == null) return;
     final cellH = size.height / 4;
     _fingers[e.pointer] = n;
-    midi.keyDown(n, velocityAt(e.localPosition.dy % cellH, cellH));
+    midi.keyDown(n, velocityAt(e.localPosition.dy % cellH, cellH, fixed: midi.state.settings.keysVelocity));
     setState(() {});
   }
 

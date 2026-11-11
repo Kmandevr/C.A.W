@@ -626,7 +626,7 @@ TEST(overload_mutes_the_newest_layer) {
     e.setProject(p);
     e.play();
     run(e, 1000);
-    for (int i = 0; i < 40; ++i) e.reportLoad(1.5);
+    for (int i = 0; i < 40; ++i) e.reportLoad(1.5, 512);
     std::vector<float> out = run(e, 5000);
     const Meters m = e.meters();
     CHECK_EQ(m.overloaded, 1);
@@ -638,6 +638,73 @@ TEST(overload_mutes_the_newest_layer) {
     out = run(e, 5000);
     CHECK_EQ(e.meters().overloaded, 0);
     CHECK_NEAR(out[4999], 0.75 * std::cos(kPi / 4.0), 1e-5);
+}
+
+TEST(the_test_tone_goes_through_the_safety_limiter) {
+    // A song already at the limiter's ceiling: the tone on top must not push the output past it (it used to be
+    // added after the limiter and hard-clipped at 1).
+    ProjectSpec p = project({{"loud", std::string(kFloat) + "sine(220)"}});
+    p.master = 3.0;  // +9.5 dB: well into the limiter
+    Engine e(48000);
+    e.setProject(p);
+    e.play();
+    run(e, 4800);
+    e.testTone(0.5);
+    std::vector<float> right;
+    const std::vector<float> left = run(e, 9600, 64, &right);
+    float peak = 0;
+    for (size_t i = 0; i < left.size(); ++i) peak = std::max({peak, std::fabs(left[i]), std::fabs(right[i])});
+    CHECK(peak <= 0.9771f);
+    CHECK(peak > 0.9f);
+    // The tone carries on through the stop's fade and after it, at its own level.
+    e.stop();
+    const std::vector<float> after = run(e, 4800);
+    float tail = 0;
+    for (size_t i = 2400; i < after.size(); ++i) tail = std::max(tail, std::fabs(after[i]));
+    CHECK(std::fabs(tail - 0.25f) < 0.02f);
+}
+
+TEST(overload_shedding_goes_by_time_not_callbacks) {
+    // The shedding was tuned at 512-frame callbacks: about 0.21 s over budget sheds a layer, then 1.07 s of rest.
+    // Counting callbacks made 16-frame periods shed on a 7 ms hiccup and 8192-frame ones take 3.4 s.
+    ProjectSpec p = project({{"a", std::string(kFloat) + "0.25"}, {"b", std::string(kFloat) + "0.5"}});
+    auto overloadedAfter = [&](int frames, double seconds) {
+        Engine e(48000);
+        e.setProject(p);
+        e.play();
+        run(e, 1000);
+        const int calls = static_cast<int>(seconds * 48000 / frames + 0.5);
+        for (int i = 0; i < calls; ++i) e.reportLoad(1.5, frames);
+        run(e, 64);
+        return e.meters().overloaded;
+    };
+    CHECK_EQ(overloadedAfter(16, 0.0083), 0);  // 25 tiny callbacks: a hiccup
+    CHECK_EQ(overloadedAfter(16, 0.1), 0);
+    CHECK_EQ(overloadedAfter(16, 0.35), 1);
+    CHECK_EQ(overloadedAfter(512, 0.1), 0);
+    CHECK_EQ(overloadedAfter(512, 0.35), 1);
+    CHECK_EQ(overloadedAfter(8192, 0.35), 1);   // two callbacks, not twenty
+    // The meter's average is weighted by time as well: one long callback at 1.5 reads far over budget.
+    Engine e(48000);
+    e.reportLoad(1.5, 8192);
+    CHECK(e.meters().cpu > 1.0f);
+    Engine f(48000);
+    for (int i = 0; i < 32; ++i) f.reportLoad(1.5, 16);  // 10.7 ms: one 512-frame callback's worth
+    CHECK_NEAR(f.meters().cpu, 0.15, 0.01);
+    // The cooldown is time too: still overloaded after shedding, the next layer goes about 1.07 s later.
+    Engine g(48000);
+    g.setProject(p);
+    g.play();
+    run(g, 1000);
+    for (int i = 0; i < 300; ++i) g.reportLoad(1.5, 64);  // 0.4 s: the first layer
+    run(g, 64);
+    CHECK_EQ(g.meters().overloaded, 1);
+    for (int i = 0; i < 600; ++i) g.reportLoad(1.5, 64);  // 0.8 s more: still cooling down
+    run(g, 64);
+    CHECK_EQ(g.meters().overloaded, 1);
+    for (int i = 0; i < 600; ++i) g.reportLoad(1.5, 64);
+    run(g, 64);
+    CHECK_EQ(g.meters().overloaded, 2);
 }
 
 TEST(stop_fades_to_silence_and_layers_can_be_removed) {
@@ -1869,6 +1936,89 @@ TEST(engine_play_with_more_than_640_layers_retires_every_chain_without_stalling)
         e.meters();  // drains the retired queue, so the overflow moves across
     }
     CHECK_NEAR(l[63], 700 * 0.00003 * std::cos(kPi / 4.0), 1e-5);  // the pending code took over at Play
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
+TEST(engine_export_pointer_tables_follow_each_chains_real_export_need) {
+    // #133 item 3: a slot's export pointer table was sized from the budget share (exportBuffersPerLayer()
+    // pointers for every slot once anything exported), which also capped maxLayers() near 2,145 at 4 GiB.
+    // It now holds what the slot's chain exports, and grows when a later chain exports more.
+    EngineResourceBudget budget;
+    budget.graphWorkingBytes = 4ull << 30;
+    budget.projectStateBytes = 64ull << 20;
+    budget.compileWorkingBytes = 64ull << 20;
+    budget.retirementBytes = 64ull << 20;
+    budget.totalBytes = budget.graphWorkingBytes + budget.projectStateBytes + budget.compileWorkingBytes +
+                        budget.retirementBytes;
+    Engine e(48000, budget);
+    e.setMasterBypass(true);
+    CHECK(e.exportBuffersPerLayer() > 30000);
+    CHECK(e.maxLayers() > 2145);
+    const size_t perBuffer = kBlock * sizeof(double) + 2 * sizeof(void*);  // buffer, its owner and one table entry
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"src", "---\nmode: float\n---\nexport let level = 0.25\n0", {}, "src"});
+    p.modules.push_back({"reader", "---\nmode: float\n---\nsrc.level", {}, "reader"});
+    LayerSpec a;
+    a.id = "a";
+    a.chain = {"src"};
+    a.volume = 1.0;
+    LayerSpec b = a;
+    b.id = "b";
+    b.chain = {"reader"};
+    p.layers = {a, b};
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    CHECK_EQ(e.exportBytes(), perBuffer);
+    e.play();
+    CHECK_NEAR(run(e, 960).back(), 0.25 * std::cos(kPi / 4.0), 1e-6);
+    // The playing exporter's chain grows to three exports: its table is replaced while it plays.
+    p.modules[0].source = "---\nmode: float\n---\nexport let level = 0.5\nexport let x = 1\nexport let y = 2\n0";
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    CHECK_EQ(e.exportBytes(), 3 * perBuffer + sizeof(void*));  // the old one-entry table is still the audio thread's
+    CHECK_NEAR(run(e, 4800).back(), 0.5 * std::cos(kPi / 4.0), 1e-6);
+    e.meters();  // the replaced table comes back from the audio thread and is freed
+    CHECK_EQ(e.exportBytes(), 3 * perBuffer);
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
+TEST(engine_per_chunk_work_follows_the_layers_in_use_not_the_capacity) {
+    // #133 item 2: capacity never shrinks, so after a 700-layer project the per-chunk loops
+    // (planning, solo, export clearing, routing) must visit only the slots in use, and sound the same.
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 1024;
+    Engine e(48000, makeEngineResourceBudget(hardware));
+    Engine fresh(48000, makeEngineResourceBudget(hardware));
+    e.setMasterBypass(true);
+    fresh.setMasterBypass(true);
+    std::vector<float> l(64), r(64);
+    auto apply = [&](Engine& to, const ProjectSpec& p) {
+        std::atomic<bool> done{false};
+        std::string result;
+        std::thread control([&] {
+            result = to.setProject(p);
+            done.store(true);
+        });
+        while (!done.load()) to.process(l.data(), r.data(), 0);
+        control.join();
+        to.process(l.data(), r.data(), 0);
+        return result;
+    };
+    const std::string tone = std::string(kFloat) + "sine(220) * 0.01";
+    CHECK(apply(e, layersOf(700, tone, 0.0)).find("\"ok\":true") != std::string::npos);  // silent: removed at once
+    CHECK(e.layerCapacity() >= 700);
+    CHECK(apply(e, layersOf(4, tone)).find("\"ok\":true") != std::string::npos);
+    CHECK(apply(fresh, layersOf(4, tone)).find("\"ok\":true") != std::string::npos);
+    e.play();
+    fresh.play();
+    std::vector<float> er, fr;
+    const auto el = run(e, 4800, 64, &er);
+    const auto fl = run(fresh, 4800, 64, &fr);
+    CHECK(el == fl);
+    CHECK(er == fr);
+    CHECK(e.slotsScannedPerChunk() <= 5);  // the 4 layers (and at most the audition)
+    CHECK_EQ(e.slotsScannedPerChunk(), fresh.slotsScannedPerChunk());
     CHECK_EQ(e.routingRejections(), 0u);
 }
 

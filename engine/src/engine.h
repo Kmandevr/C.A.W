@@ -74,6 +74,10 @@ public:
     // of the graph-working budget, so growing past 64 layers spreads it rather than multiplying it).
     size_t exportBuffersPerLayer() const noexcept { return exportPerSlot_; }
     size_t exportBufferBudget() const noexcept { return exportPerSlot_ * static_cast<size_t>(kExportBudgetSlots); }
+    // Control thread: bytes the export buffers and the slots' export pointer tables hold now (a table a
+    // larger one replaced counts until the audio thread hands it back); setProject keeps it within
+    // exportBufferBudget() buffers' worth.
+    size_t exportBytes() const noexcept;
 
     // Control thread. Each returns quickly; compiling happens here, never on the audio thread.
     std::string setProject(const ProjectSpec& p);  // live: commands are applied by the audio callback
@@ -134,6 +138,18 @@ public:
     // The metronome: a short built-in click on every beat while playing (accented on the bar), mixed before the
     // safety limiter. Off by default; renders and exports never click.
     void setMetronome(bool on);
+    // The click's volume (0..1) and sound (caw.h CAW_CLICK_*), read by the audio thread at each click.
+    void setMetronomeSound(double volume, int sound) noexcept;
+    // A test tone: [seconds] (0..10) of a 440 Hz sine at -12 dBFS, playing or not, added after the master's gain
+    // and transport fades and before the safety limiter; 0 ends it.
+    void testTone(double seconds) noexcept;
+    // Whether a tone is asked for or still plays: a request the audio thread has not taken yet, or the state it
+    // published at its last callback (so a request ended before any callback, or too short to be a sample, is not).
+    bool testToneSounding() const noexcept {
+        return toneRequest_.load(std::memory_order_acquire) > 0 || toneActive_.load(std::memory_order_acquire);
+    }
+    // Drops any request and the tone in progress. Only while no process() runs (the device is closed).
+    void resetTestTone() noexcept;
     // Sound quality (caw.h CAW_QUALITY_*): the built-ins read it while they play (quality.h). Normal by default.
     void setQuality(int quality) noexcept;
     int quality() const noexcept { return quality_.load(std::memory_order_relaxed); }
@@ -149,12 +165,16 @@ public:
     uint32_t routingRejections() const noexcept { return routingRejections_.load(std::memory_order_relaxed); }
     // Tests only, between process() calls: graph nodes the last chunk ran.
     uint32_t mixGraphNodesRun() const noexcept;
+    // Tests only, between process() calls: slots the per-chunk loops (planning, solo, exports) visit.
+    int slotsScannedPerChunk() const noexcept;
     // Tests only: skip the master DC blocker and limiter so layer output can be checked exactly.
     void setMasterBypass(bool on) { bypass_.store(on, std::memory_order_relaxed); }
 
     // Audio thread: no allocation, locks or I/O.
     void process(float* left, float* right, int frames) noexcept;
-    void reportLoad(double load) noexcept;  // fraction of the callback's time budget used
+    // One callback's share of its time budget used, for [frames] frames at the engine's rate. The average, the time
+    // over budget before a layer is shed and the rest after it go by time, so any callback size behaves alike.
+    void reportLoad(double load, int frames) noexcept;
 
     struct Chain;
 
@@ -166,6 +186,8 @@ private:
     struct Retired;
     struct AutomationData;
     struct ExportPool;
+    struct ExportTable;
+    void dropExportTable(ExportTable* t) noexcept;  // control thread
     struct MixGraph;  // the graph that routes slots, folder buses and master (engine.cpp)
     struct SlotTable;  // the slots, their mix graph and order list at one capacity (engine.cpp)
     struct DelayLine;  // a track's latency-compensation delay (engine.cpp)
@@ -181,6 +203,7 @@ private:
                 SlotTable* table = nullptr, ComponentChain* components = nullptr) noexcept;
     void retireEntry(const Retired& r) noexcept;  // audio thread: to the control thread, to be freed
     void bindTable() noexcept;  // audio thread: cache the current table's slots, graph and sizes
+    void markLive(int slot) noexcept;  // audio thread: the slot joins the in-use list the per-chunk loops visit
     int processChunk(float* l, float* r, int maxFrames) noexcept;  // returns the frames it ran
     int planChunk(int maxFrames) noexcept;
     void planTrack(Slot& s, int& m) noexcept;
@@ -195,7 +218,7 @@ private:
     // A slot's sends and keys: pre taps after its effects, post taps after volume and pan (before its delay).
     uint32_t keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept;
     void runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
-                   bool silenced, double keyPostL, double keyPostR) noexcept;
+                   bool silenced, bool bus) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
     double slotTarget(const Slot& s) const noexcept;
@@ -237,8 +260,8 @@ private:
     const double sr_;
     double trackGainCoef_ = -1.0;  // audio thread: the track gain glide's per-sample factor, worked out on first use
     const EngineResourceBudget resourceBudget_;
-    // Export buffers each slot may hold: fixed at construction from the budget (as the first export
-    // pool sized it at 64 layers), so every slot added by a grow gets the same.
+    // Export buffers one layer may hold: fixed at construction from the budget (a 65-slot share), so
+    // every slot added by a grow gets the same. Each slot's pointer table holds only what its chain exports.
     const size_t exportPerSlot_;
     int maxLayers_ = kInitialLayerCapacity;  // set once in the constructor
     int pendingMax_ = 0;                     // pending_ entries; set once in the constructor
@@ -252,6 +275,8 @@ private:
     Slot** slots_ = nullptr;      // table_'s slots
     MixGraph* mixGraph_ = nullptr;  // table_'s graph, routed on the audio thread
     int* processOrder_ = nullptr;   // table_'s order list: slots in dependency order (exporters before readers)
+    int* live_ = nullptr;           // table_'s in-use list: liveCount_ slots, ascending (markLive)
+    int liveCount_ = 0;
     int capacity_ = 0;      // layer slots; the audition slot follows them
     int auditionSlot_ = 0;  // == capacity_
     int slotCount_ = 0;     // capacity_ + 1 (layers and the audition)
@@ -276,6 +301,17 @@ private:
     uint32_t countInTouchStamp_ = 0;
     int clickLeft_ = 0, clickLen_ = 0;
     double clickPhase_ = 0, clickInc_ = 0, clickAmp_ = 0;
+    std::atomic<float> clickVolume_{1.0f};
+    std::atomic<int> clickSound_{0};
+    // The test tone: a request in samples from the control thread (-1: none, 0: end it), then the audio thread's
+    // own state, which it alone publishes in toneActive_ (whether frames are left after its last callback).
+    std::atomic<int64_t> toneRequest_{-1};
+    std::atomic<bool> toneActive_{false};
+    int64_t toneLeft_ = 0, toneLen_ = 0;
+    double tonePhase_ = 0;
+    void takeToneRequest() noexcept;                       // once per callback, before any sample
+    double nextTone() noexcept;                            // the tone's next sample (only while toneLeft_ > 0)
+    void mixToneOnly(float* left, float* right, int frames) noexcept;  // frames the master stage did not run
     void startPlay(double fromStep, uint64_t playCount, uint32_t touchStamp) noexcept;
     void startClick(bool accent) noexcept;
     double nextClick() noexcept;  // the click's next sample (0 when none sounds)
@@ -299,7 +335,8 @@ private:
     int64_t loopLen_ = 0; // samples per project loop
     double dcL_[2] = {0, 0}, dcR_[2] = {0, 0}, limEnv_ = 0;
     double loadAvg_ = 0;
-    int overCount_ = 0, overCooldown_ = 0;
+    double overSeconds_ = 0, coolSeconds_ = 0;  // time over budget so far, time left before another layer is shed
+    double loadDt_ = 0, loadKeep_ = 0;          // the last callback's length and the average's weight for it
     bool overloadPending_ = false;
     int processCount_ = 0;
     int64_t chunkId_ = 0;

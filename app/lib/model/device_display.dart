@@ -8,6 +8,9 @@ import '../engine/engine.dart';
 import 'arrange_fx.dart';
 import 'device_target.dart';
 import 'project.dart';
+// fx-filters begin
+import '../ui/devices/effects/filters/filters_display.dart' show decodeFiltersDisplay;
+// fx-filters end
 
 /// One frame of what a device shows besides its parameters, read from the engine at the meter rate.
 class DeviceDisplayFrame {
@@ -118,6 +121,9 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
   double at(int i) => i < n ? f[i] : 0;
   Map<String, double> named(List<String> names, int from) =>
       {for (var i = 0; i < names.length && from + i < n; ++i) names[i]: f[from + i]};
+  // fx-filters begin
+  if (decodeFiltersDisplay(componentId, f, n) case final frame?) return frame;
+  // fx-filters end
   switch (componentId) {
     case 'org.caw.eq':
       final bins = at(0).toInt();
@@ -166,6 +172,51 @@ DeviceDisplayFrame decodeDisplay(String componentId, List<double> f, int n) {
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['lfo_l', 'lfo_r', 'delay_l_ms', 'delay_r_ms'], 2));
     case 'org.caw.utility':
       return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['correlation', 'gain_db', 'width', 'pan'], 2));
+    // fx-dynamics begin
+    case 'org.caw.dynamics':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['gain_db', 'boost_db', 'cut_db', 'level_db',
+        'low_threshold', 'low_ratio', 'high_threshold', 'high_ratio', 'knee', 'range', 'in_gain_db', 'out_gain_db'], 2));
+    case 'org.caw.multiband':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: {
+        ...named(['ott', 'xover_low_hz', 'xover_high_hz'], 2),
+        for (var b = 1; b <= 3; ++b)
+          ...named([for (final k in ['level_db', 'gr_db', 'boost_db', 'cut_db', 'down_db', 'up_db', 'makeup_db']) 'b${b}_$k'],
+              5 + 7 * (b - 1)),
+      });
+    case 'org.caw.deesser':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), gainReductionDb: -at(2),
+          values: named(['gr', 'gr_max', 'level_db', 'threshold', 'freq', 'range', 'wideband'], 2));
+    case 'org.caw.clipper':
+      final points = at(9).toInt();
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: {
+        ...named(['mode', 'drive_db', 'ceiling_db', 'softness', 'oversample', 'over_db', 'master'], 2),
+        for (var k = 0; k < points && 10 + k < n; ++k) 'curve$k': f[10 + k],
+      });
+    case 'org.caw.phasedist':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
+          values: named(['drive', 'normalize', 'bias', 'spread', 'mod_l', 'mod_r', 'delay_l_ms', 'delay_r_ms'], 2));
+    // fx-dynamics end
+    // fx-creative begin: the Creative and Pitch & Time effects (docs/engine.md, Display data)
+    case 'org.caw.tapestop':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
+          values: named(['speed', 'state', 'lag_ms', 'progress', 'stop_s', 'start_s'], 2));
+    case 'org.caw.reverser':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['chunk_ms', 'position', 'crossfade', 'grain'], 2));
+    case 'org.caw.stutter':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
+          values: named(['active', 'repeat', 'progress', 'slice_ms', 'triggers', 'length_ms'], 2));
+    case 'org.caw.pitchshift':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['semitones_now', 'grain_ms', 'latency_ms', 'phase'], 2));
+    case 'org.caw.freqshift':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['shift_l', 'shift_r', 'direction', 'feedback', 'phase'], 2));
+    case 'org.caw.trancegate':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['step', 'env', 'steps'], 2));
+    case 'org.caw.bitcrush':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1), values: named(['bits', 'rate_hz', 'adc_hz', 'dac_hz', 'holds'], 2));
+    case 'org.caw.ringmod':
+      return DeviceDisplayFrame(inputDb: at(0), outputDb: at(1),
+          values: named(['source', 'freq_l', 'freq_r', 'carrier_phase', 'carrier_peak', 'oversample'], 2));
+    // fx-creative end
     default:
       return DeviceDisplayFrame(values: {for (var i = 0; i < n && i < 64; ++i) '$i': f[i]});
   }

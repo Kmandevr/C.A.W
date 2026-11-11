@@ -150,6 +150,29 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   void didUpdateWidget(covariant ArrangerScreen old) {
     super.didUpdateWidget(old);
     _headersRev++;
+    if (!identical(old.state, widget.state)) {
+      old.state.tick.removeListener(_followPlayhead);
+      widget.state.tick.addListener(_followPlayhead);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.tick.addListener(_followPlayhead);
+  }
+
+  /// Settings › Editing › Follow the playhead: while playing, when the playhead leaves the view the timeline pages on
+  /// so it shows near the left edge (REAPER's continuous-scroll-off follow). Not while a finger or a drag is on it.
+  void _followPlayhead() {
+    final s = widget.state;
+    if (!s.settings.followPlayhead || !s.meters.playing || !_hScroll.hasClients) return;
+    if (_touches.isNotEmpty || _drag.active) return;
+    final p = _hScroll.positions.last;
+    final x = s.playheadStep * _stepW;
+    final view = p.viewportDimension;
+    if (view <= 0 || (x >= p.pixels && x <= p.pixels + view - 24)) return;
+    p.jumpTo((x - view * 0.1).clamp(0.0, p.maxScrollExtent).toDouble());
   }
 
   @override
@@ -244,6 +267,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   @override
   void dispose() {
+    widget.state.tick.removeListener(_followPlayhead);
     _router?.unregister(Area.arranger, _keys);
     _keys.dispose();
     _marquee.dispose();
@@ -337,9 +361,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   }
 
   /// Ctrl + wheel zooms time around the mouse; Ctrl + Shift + wheel changes the track height. Registered before the
-  /// scroll views see the wheel, so they don't also scroll.
+  /// scroll views see the wheel, so they don't also scroll. Settings › Editing › Wheel zooms swaps them: the wheel
+  /// alone zooms and Ctrl + wheel scrolls.
   void _wheel(PointerSignalEvent e, double? focal) {
-    if (e is! PointerScrollEvent || !HardwareKeyboard.instance.isControlPressed) return;
+    final zooms = HardwareKeyboard.instance.isControlPressed != widget.state.settings.wheelZooms;
+    if (e is! PointerScrollEvent || !zooms) return;
     GestureBinding.instance.pointerSignalResolver.register(e, (event) {
       final d = (event as PointerScrollEvent).scrollDelta;
       final amount = d.dy != 0 ? d.dy : d.dx;
@@ -470,7 +496,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (v == 'remove-automation-volume') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'volume'));
     if (v == 'remove-automation-pan') s.removeAutomationLane(layer, layer.automation.firstWhere((a) => a.target == 'pan'));
     if (v == 'spacer') s.setSpaceBelow(layer, layer.spaceBelow > 0 ? 0 : _SpacerHeader.initial);
-    if (v == 'delete') {
+    if (v == 'delete' && mounted && await confirmTrackDelete(context, s, layer) && mounted) {
       if (_focusId == layer.id) _focus(null);
       s.removeLayer(layer);
     }

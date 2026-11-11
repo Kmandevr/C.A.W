@@ -174,8 +174,15 @@ class LiveMidi extends ChangeNotifier {
     taken.clear();
     lastTake.value = null;
     final from = state.playheadStep; // where play starts (a pause resumes there)
+    var start = from;
     _applyMetronome();
     if (!state.transportOn) {
+      // Pre-roll (Settings › Metronome and recording): play starts that many bars earlier, recording at [from].
+      final preRoll = state.settings.preRollBars * state.project.stepsPerBar;
+      if (preRoll > 0 && from > 0) {
+        start = math.max(0.0, from - preRoll);
+        state.pausedStep = start; // not seekTo: its notification would end this recording as a Stop does
+      }
       countInBeats = state.settings.countInBars * state.project.beatsPerBar;
       state.togglePlay(countInBeats: countInBeats);
       countInEnds = countInBeats > 0 && state.transportOn
@@ -184,8 +191,8 @@ class LiveMidi extends ChangeNotifier {
     }
     _wraps = 0;
     _pass = 0;
-    _lastStep = from;
-    _lastNow = from;
+    _lastStep = start;
+    _lastNow = start;
     _recordFrom = from;
     notifyListeners();
   }
@@ -204,15 +211,28 @@ class LiveMidi extends ChangeNotifier {
   }
 
 
+  /// Whether Settings › MIDI lets [m] through: a keyboard other than the chosen one, or a channel other than the
+  /// chosen one, is ignored (the on-screen keys always pass).
+  bool accepts(MidiMessage m) {
+    final s = state.settings;
+    if (m.source.isEmpty) return true;
+    if (s.midiDevice.isNotEmpty && m.source != s.midiDevice) return false;
+    return s.midiChannel == 0 || m.channel == s.midiChannel - 1;
+  }
+
   void handle(MidiMessage m) {
-    final layer = targetLayerId;
+    if (!accepts(m)) return;
+    // MIDI thru off: notes sound only on a track being recorded.
+    final layer = recording || state.settings.midiThru ? targetLayerId : null;
     if (layer == null) return;
     final now = _now();
     if (m.isNoteOn) {
       _sustained.remove(m.data1); // pressed again: it is held by the key now, not the pedal
       _release(m.data1, now); // a repeated key ends its earlier note
       final id = state.nextPreviewId();
-      final vel = m.data2 / 127;
+      // A keyboard's velocity goes through the curve; the on-screen keys have their own (Settings › MIDI).
+      final played = m.data2 / 127;
+      final vel = m.source.isEmpty ? played : state.settings.velocityCurve.apply(played, state.settings.midiFixedVelocity);
       state.previewOn(layer, id, m.data1 + _bend * 2, vel);
       _held[m.data1] = (id, now, vel, _pass);
     } else if (m.isNoteOff) {
@@ -239,8 +259,17 @@ class LiveMidi extends ChangeNotifier {
     final h = _held.remove(note);
     if (h == null) return;
     state.previewOff(h.$1);
-    if (recording && _recordFrom != null) taken.add(TakenNote(h.$2, math.max(0.25, now - h.$2), note.toDouble(), h.$3, h.$4));
+    final from = _recordFrom;
+    if (!recording || from == null) return;
+    // Notes begun in the pre-roll (before the record point, on the first pass) are heard, not recorded.
+    if (h.$4 == 0 && h.$2 < from - 1e-9) return;
+    // Written earlier by the recording offset, for the delay between a note and hearing it (Settings › Recording).
+    final early = recordOffsetSteps;
+    taken.add(TakenNote(h.$2 - early, math.max(0.25, now - h.$2), note.toDouble(), h.$3, h.$4));
   }
+
+  /// Settings › Metronome and recording's offset in sixteenth steps at the project's tempo.
+  double get recordOffsetSteps => state.settings.recordOffsetMs / 1000 * state.project.bpm / 15;
 
   void _releaseAll() {
     final now = _lastNow;

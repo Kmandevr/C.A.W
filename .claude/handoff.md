@@ -1,10 +1,11 @@
 # Handoff
 
-Commit: 655839e
+Commit: fcf4ef3
 
 Branch: ccr-56285e11-0xrj3h (PR #167 open, subscribed, CI green at aa1ee28)
 
 ## Goal
+Owner (2026-11-11, latest): "Don't stop until everything in the roadmap is completely done. I want you continuously working. Restart when your limit goes out." After the roadmap: optimize everything (fast, quick, runs extremely well), then a user-friendliness pass that does NOT change the layout or things in the app, only makes everything fit well in the UI. Wake-up scheduled 2026-11-11T17:31Z (owner's 10:31 pm).
 Owner (2026-11-10): work through everything discussed toward the open beta, without the owner's input except where a call is genuinely theirs; don't message them unless something is on fire.
 
 ## Done and verified (on this branch, pushed)
@@ -15,13 +16,14 @@ Owner (2026-11-10): work through everything discussed toward the open beta, with
 - MIDI file import/export in Dart (`app/lib/model/midi_file.dart`, `app/lib/model/midi_clips.dart`, `app/lib/ui/midi_file_actions.dart`).
 
 ## Open
-- #175 agents all merged (polish-pass, mod-ux, routing-ducker); app 815 tests and engine ctest pass at 655839e. APK at c8a9bef sent to the owner.
-- Running: `settings-redesign` (worktree `.claude/worktrees/settings`; owner chose a category list + search, every setting, full audio device/buffer control, nothing hidden; new C API goes in as API 10), `engine-133` (worktree `.claude/worktrees/e133`, #133), and an audio review of the routing/ducker engine code.
-- Owner choices from the agents to batch at the end: Build start page vs last tab, Try-it replaces an instrument without confirm, sheets under 600 dp, Files toggle vs slider; new-route amount 25 %, bipolar defaults, Flagship tabs, EQ double-tap = reset; routing defaults (decisions.md 2026-11-11).
+- Owner (2026-11-11): "make sure everything in the roadmap is done, including the routing and the hard stuff"; beta scope in decisions.md 2026-11-11 (audio clips, recording, sampler, per-note FX all IN). Audit with work packages WP-A..WP-O: scratchpad `roadmap_audit_v1.md` (summary: order A,H,I,K,L,M now; B then C; D (#160); E (#159), F (#161, reuse fx-racks modulator model), G (#127+#120 after drums merges module.hpp); J (audio clips/recording/sampler, after drums' sample API); N docs; O release).
+- Running agents (worktrees under .claude/worktrees/): drums (engine first; then a UI agent), fx-creative, fx-filters, fx-space, fx-dynamics, fx-racks (racks + browser), adfix (audio-device review fixes), parity (WP-A), engine-leftovers (WP-L). API numbers: 10 = settings (merged), drums takes 11, leftovers next free; reconcile on merge.
+- Closing done issues on GitHub was blocked by the auto-mode classifier: ask the owner to allow it or close them (#7 #21 #24 #36 #38 #40 #76 #123 #128 #137 #168 #170 #172 #175; superseded #32 #54). Draft comments in the audit §6.
+- Owner choices to batch at the end: agents' "to confirm" items in decisions.md (Build start page, Try-it, sheets <600 dp, Files toggle, mod amount 25 %, bipolar, Flagship tabs, EQ double-tap, routing defaults, settings sections/defaults).
 
-## Next after merges
-- reaper-flow gaps 5-10 (sends/buses, render parity, actions, MIDI editor flow, mixer parity, templates), #161 modulators/routing, testing-suite and sample-pack screens, mixer label shows instrument name, #133 leftovers, then #160/#159 (.caw removal, .caw project extension).
-- Then build an APK (Run workflow on this branch) and send it to the owner.
+## Next
+- Merge each agent as it reports (registries and API numbers conflict: keep all entries), audio-review engine merges, build an APK and send it with what's new.
+- Then the next waves from the audit: WP-H MIDI devices, WP-I stems/render parity, WP-K screens; then WP-B/C/D (#160), WP-E (#159), WP-F (#161), WP-G (#127), WP-J (audio clips/recording/sampler); WP-N docs; WP-O release.
 
 ## Owner's calls pending
 - Confirm MIDI storage (pattern text + SMF exchange); Android developer verification (2027, see vision.md).

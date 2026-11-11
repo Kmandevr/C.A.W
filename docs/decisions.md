@@ -32,6 +32,106 @@ updated: 2026-11-11
 - **Extras, all four:** randomize and mutate; per-hit variation (velocity layers and round-robin-style subtle changes); choke groups and per-pad outputs; pad and kit effects.
 - **Later the same day:** 16 pads × 4 banks (A..D) = 64 pads, like an MPC; pads not used cost nothing and only sounding voices run. Pitch: "Both, switchable": a pitch tracking switch per sound (off a fixed pitch; on chromatic from the note, with a mono option and glide between overlapping notes, for 808 basslines), on Kit pads too. Samples: the user's files and a small built-in pack of one-shots the engine renders from presets (nothing to license), listed and loaded through the app. Outputs: "Each one will be routed to a specific note so you only really need one track to work it, but it should also allow an automatic create-per-track workflow. And have support for native pads and stuff like that, like hardware pads that use MIDI natively": one track by default with an editable note map per pad, an "explode to tracks" workflow, per-pad note learn, a channel option (e.g. 10), velocity, and polyphonic pressure as a modulation source (to choke or damp a cymbal by squeezing). The old kick, snare, hats and kit migrate to it.
 
+## 2026-11-11: Drums: deep settings and real quality, every genre (owner)
+
+**Owner's words:** "The drum instrument needs to have an in-depth set of settings and effects to make all the sounds extremely versatile and be actual good quality. Research how different kicks, snares, hats etc. are made and make sure it has all of the settings. You should be able to make a kick a legitimate dubstep kick, an 808 kick, or just a normal-sounding kick. Make it so it can even sound acoustic even though it's generated."
+
+**What this requires of `org.caw.drums`:**
+1. **Research per drum type, with sources.** Every control needed to build each sound must exist.
+   - **Kicks:** dubstep/riddim (punch + sub + distorted mid, clipped, short click), 808 (long tuned boom with glide and saturation), techno rumble, trap, hardstyle, house/909, acoustic (beater, shell resonance, port, room).
+   - **Snares:** 808/909; acoustic (head modes + wires, rimshot, ghost notes); claps; trap and dubstep layered snares.
+   - **Hats:** closed, open and pedal; the 808 square bank; modal cymbals with choke and openness.
+   - **Toms, cymbals (crash, ride, bell, china) and percussion.**
+2. **Real acoustic realism:**
+   - modal/physical layers with enough modes;
+   - strike position and damping;
+   - velocity changing the spectrum, not just the level;
+   - per-hit micro-variation;
+   - a room/body stage.
+3. **Effects deep enough for these genres:**
+   - multi-type distortion with pre/post filter;
+   - a clipper, EQ, compressor and transient shaper;
+   - a pitch-envelope shape editor;
+   - a layered sub with its own envelope;
+   - width that keeps the sub mono;
+   - a room send.
+4. **Quality checked numerically** against research targets (spectrum, pitch curve, decay, crest factor), with genre-accurate factory presets ("Dubstep kick", "808 kick" long and short, "Acoustic kick", "Acoustic snare", "Ride", "Crash", …).
+
+## 2026-11-11: Finish the whole roadmap, then optimize, then a fit-and-finish pass (owner)
+
+**Owner's words:** "Don't stop until everything in the roadmap is completely done. I want you continuously working… once everything in the roadmap is done, go and optimize everything so it's fast, it's quick and that it runs extremely well. Then make sure everything is user friendly. Don't change the layout or things in the app, just make sure it fits well in the UI."
+
+**The order:**
+1. Every roadmap item (beta scope above).
+2. A performance pass across the engine and the app.
+3. A user-friendliness pass that keeps the layout and features as they are and only fixes fit, spacing, overflow, labels and feedback.
+
+## 2026-11-11: The beta's scope: the whole roadmap, plus drums, effects and audio (owner)
+
+**The owner's words:** "Make sure everything in the roadmap is done. Including the routing and the hard stuff too."
+
+**Owner's answers:**
+- **Audio in the beta:** audio clips on tracks, audio recording, and a sampler instrument all ship in v1.0.0-beta.1. Before this, the roadmap put Stages 3, 4 and 7 after Release 1.
+- **Per-note effects:** built for the beta (#127). Instruments expose per-voice audio, and effects can run per note.
+- **New screens:** the modulator routing canvas, the testing suite, the sample-pack maker, CLAP export, the export sheet with stems, templates, and master FX slots. Each is designed in the existing device-kit style, and the owner reviews it in the APK; changes come after.
+- **MIDI storage (#158), locked in:** clips are stored as pattern text in the project; standard MIDI files (.mid, including MPE) are used for import and export.
+
+**Also decided today:**
+- **Effects:** every Kilohearts-style effect is built in. That includes the multiband rack and the FX rack with modulators, and a browser with category tabs, search, favourites and recently used.
+- **Drums:** one drum instrument (`org.caw.drums`) replaces Kick, Snare, Hats and Kit. Its structure:
+  - two modes: a 16-pad × 4-bank kit, or a single sound per track;
+  - layers: synthesis plus a sample layer;
+  - pitch tracking per sound, switchable, with glide;
+  - each pad on its own MIDI note, with an "explode to tracks" workflow;
+  - hardware MIDI pads supported.
+
+**Still the roadmap's call:** Stages 8–10 stay after Release 1: Faust, plug-in hosting, and iOS/macOS/Linux builds.
+
+## 2026-11-11: Dynamics and Drive effects (fx-dynamics; choices to confirm)
+
+**Decision (owner, 2026-11-11):** "any effect you would reasonably want is already there", Kilohearts-style; all four groups equally important. The Dynamics and Drive group added Dynamics, Multiband dynamics with an OTT mode, a De-esser, a Clipper and Phase distortion, and five curves, spread and dynamics to the saturator (see [engine reference](engine.md#dynamics-and-drive-research-and-technique-fx-dynamics-2026-11-11)). **Choices made on the owner's behalf, to confirm:**
+- **Extend, don't duplicate:** the new distortion types are saturator modes (appended, so saved projects keep their mode), not a second distortion effect; expansion and upward compression live in Dynamics, not in the gate or compressor.
+- **Multiband opens in OTT mode at 50 % depth.** OTT's per-band numbers are the commonly quoted ones for Ableton's OTT preset, not confirmed ([Assumption]).
+- **Upward lift never spikes:** an instant-attack detector limits the lift, so the attack knob shapes only the downward side and expansion.
+- **Clipper overshoot:** with oversampling and without Clip to 0 dB the output can pass the ceiling by a few dB (the IIR half-bands' phase); clipping again would bring the aliases back. Clip to 0 dB guarantees full scale. A linear-phase half-band would reduce the overshoot at the cost of latency (a follow-up if wanted).
+- **Phase distortion's latency** is a fixed 48 frames (1 ms at 48 kHz), declared, so the swing is ±46 frames whatever the sample rate.
+- **Not built:** an envelope follower as a modulation source (projects don't route modulation outputs yet); Bitcrush's ADC/DAC quality and dither, Faturator's color and stereo turbo, and Shaper's drawn curve as their own controls.
+
+## 2026-11-11: Creative and Pitch & Time effects (fx-creative, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** eight new built-ins (tape stop, reverser, stutter, pitch shifter, frequency shifter, trance gate, bitcrush, ring mod; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency.
+- **A ninth device family, Creative** (yellow → pink), for both browser tabs, so these read apart from the modulation family's pink → violet.
+- **Tape stop's trigger is a knob** (`stop`, at or above 0.5 stops), so a lane or an LFO can trigger it, plus a hold-to-stop pad; Kilohearts has a Play switch. A start spins up from the tape under the head now (not where it stopped), and once at speed crossfades back to the live input over 12 ms, so the tape stop adds no lasting delay.
+- **Reverser's longest chunk is 2 s** (a half note at 60 BPM), to keep its buffer modest on a phone (4 MB at 48 kHz, as the tape stop's 8 s; the stutter's 3 s slice takes 1.2 MB).
+- **Pitch shifter: no formant-preserve mode.** It would need an FFT shifter with a spectral-envelope correction, or PSOLA with pitch detection: more latency and CPU. Its grain size sets its latency (half a grain), so the grain is not automatable or modulatable, as the ducker's look-ahead.
+- **Frequency shifter's "Both"** puts the upper sideband on the left and the lower on the right (a stereo effect), rather than summing both (which is ring modulation, already the ring mod).
+- **Trance gate:** one pattern (32 step levels saved with the device), not Kilohearts' eight pattern slots; Tie as a switch (a step after a sounding one doesn't retrigger) rather than per-step ties drawn by dragging.
+- **Stutter** is not a Kilohearts snapin; built as a seeded beat repeat (Ableton's Beat Repeat is the model), with a hold pad for live use.
+- **Ring mod** with a key: giving it a key turns its carrier to Sidechain, and removing the key turns it back to Sine. The sidechain key is the existing keyed-effect port (as the ducker's).
+- **Bitcrush stays separate from the saturator's Crush mode**: it models a converter pair (anti-alias and anti-image filters, jitter, dither, fractional bits); the saturator's mode is unchanged.
+
+## 2026-11-11: EQ & Filter effects (fx-filters, choices to confirm)
+
+**Decision (Claude, for the owner to confirm):** nine new built-ins for the browser's EQ & Filter tab (ladder, nonlinear filter, comb, resonator, formant, disperser, 3-band EQ, tilt EQ, graphic EQ; [engine](engine.md#c-api-engineincludecawh)) with plugin UIs ([app](app.md)). No new dependency, no C API change.
+- **Slice EQ is the existing parametric EQ, extended:** `org.caw.eq` already had mid/side per band and an analyser, so Low cut 96 and High cut 96 (eight Butterworth stages) were appended to its types (saved projects keep their type numbers) instead of a second parametric EQ.
+- **The 3-band EQ's id is `org.caw.eq.dj`**, beside the parametric EQ, with DJ kill switches Kilohearts' 3-Band EQ lacks.
+- **The graphic EQ** stands in for Carve EQ (whose page lists only "a 31 band graphic EQ"): 31 third-octave bells corrected for their overlap, so the drawn curve is what you hear.
+- **The tilt EQ** has no Kilohearts counterpart; it is the parametric EQ's Tilt band as its own small device, with mid/side.
+- **The comb adds feedback** (positive and negative, with damping) to Kilohearts' feed-forward comb, and tunes to a note or Hz.
+- **Not built:** Filter Table (a wavetable-driven filter; it needs a table editor and its own design) and the ladder's diode topology (its coupled stages need their own derivation). The resonator's modal ratios come from beam theory, not checked against a published table ([Assumption]).
+
+## 2026-11-11: Settings as a category list, every setting real (choices to confirm)
+
+**Decision (owner):** Settings opens on a list of sections with icons; a search finds any setting and jumps to it, highlighted; new Audio and MIDI, Editing, Projects and files and Export settings; full control of the audio device and buffer; nothing hidden. **Choices made on the owner's behalf, to confirm:**
+- **Twelve sections** in this order: Audio, MIDI and input, Metronome and recording, Editing, Code editor, Look, Feel, Performance, Projects and files, Export, Keys and shortcuts, About and beta. Long-press menus moved to Feel, the Automate write mode to Metronome and recording, and the piano roll's look into Editing.
+- **The sample rate** applies at the next start: the engine is made at one rate, and remaking it while running was judged too risky for this change.
+- **Buffer sizes** offered: Auto (the buffer mode) or 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096 and 8192 frames. miniaudio gives no list of the sizes a device allows, so the page shows what the device actually granted (Device now).
+- **Exclusive mode** off by default; it is offered only on WASAPI and AAudio and falls back to shared when refused.
+- **New project** defaults to Blank at 140 BPM, 4/4 (the earlier blank project's values); the menu item is now "New project" and says what it opens.
+- **Defaults that keep today's behaviour:** autosave 0.5 s after an edit, 20 restore points, MIDI thru on, every keyboard and channel, velocity Linear, on-screen keys by touch at C3, click Classic at 100%, no pre-roll, a 0 ms recording offset, the roll at 1/16 with snap and Draw, the arrangement following the playhead (new: it pages when the playhead leaves the view), the wheel zooming only with Ctrl, deleting a track without asking.
+- **Clear caches** empties the app's temporary folder (renders waiting for the save picker); nothing else is a cache today.
+- **Not built (no engine or app path yet):** an audio input device and input monitoring (the engine has no audio input), keeping audio running in the background as a setting (background playback is not implemented, `.claude/rules/app.md`), normalize and tail length for exports (the renderer has neither).
+
 ## 2026-11-11: Routing and the ducker (#175, choices made for the owner)
 
 **Decision (Claude, for the owner to confirm):**

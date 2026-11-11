@@ -20,6 +20,7 @@ import 'glass.dart';
 import 'key_bindings.dart';
 import 'theme.dart';
 import 'volume_fader.dart';
+import 'widgets.dart' show confirmTrackDelete;
 import 'touch_quick_actions.dart';
 
 /// Whether a focused text editor, rather than the global action router, should receive this key.
@@ -337,7 +338,11 @@ class KeyRouterState extends State<KeyRouter> {
         s.addLayer();
       case 'arranger.layer.delete':
         if (layer == null) return false;
-        s.removeLayer(layer);
+        if (s.settings.confirmDelete) {
+          unawaited(confirmTrackDelete(context, s, layer).then((ok) { if (ok) s.removeLayer(layer); }));
+        } else {
+          s.removeLayer(layer);
+        }
       case 'arranger.layer.moveUp' || 'arranger.layer.moveDown':
         if (layer == null) return false;
         final to = (_layer + (id.endsWith('Up') ? -1 : 1)).clamp(0, layers.length - 1);
