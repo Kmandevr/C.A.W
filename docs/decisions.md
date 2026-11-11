@@ -39,6 +39,7 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Issues:** agents may close, label and comment on issues in this repository when the work they track is done or superseded.
 - **Deleting branches** needs the owner's express direction or approval every time, so those commands always ask.
 - **Where it lives:** `.claude/settings.json`, in `permissions` and in the `autoMode` allow notes.
+- **Main is protected** (owner, GitHub rules, 2026-11-11): changes reach Main only through a pull request, and Main cannot be deleted. Work goes on the session branch and into Main by pull request.
 
 ## 2026-11-11: Desktop plays to desktop strengths (owner)
 
