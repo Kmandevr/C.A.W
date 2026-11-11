@@ -18,8 +18,8 @@ The owner's requirement (2026-10-28): run as light as possible, down to low-end 
 - **`caw_bench`** (`engine/bench/caw_bench.cpp`, built with the engine tools) plays scenarios through `Engine::process` in 192-frame callbacks at 48 kHz, a common Android low-latency burst. The budget is 4,000 µs per callback. For each scenario it reports:
   - the mean, p99 and maximum time per callback, and the load (mean time ÷ budget)
   - the time `setProject` takes
-  - the compile time per template, the time to re-send an unchanged project, the speed of a loop export, and memory (RSS)
-- **Instruction counts** are the reliable before/after numbers: `valgrind --tool=callgrind ./caw_bench 2 N` runs scenario N for 2 s. Timings on a shared cloud server vary by ±30% from run to run, and instruction counts don't vary at all.
+  - the cost of a pattern edit every 0.25 s while 16 tracks play, the time to re-send an unchanged project, the speed of a loop export, and memory (RSS)
+- **Instruction counts** are the reliable before/after numbers: `valgrind --tool=callgrind ./caw_bench 2 N` runs scenario N (1-5: one track, First loop, 16 and 64 tracks, First loop with a delay and a reverb on each track) for 2 s; `caw_bench S 100 K` plays only First loop's case K (0 is the whole song; the rest each track and each built-in alone). Timings on a shared cloud server vary by ±30% from run to run, and instruction counts don't vary at all.
 - **Graph executor scenarios** (`caw_bench SECONDS -1`, also run at the end of a full run): 8-node chains through `GraphExecutor`, reported in nanoseconds: a stereo chain of legacy stereo-only processors through the stereo wrapper, and planar chains at 1, 2, 6 and 8 channels. On 2026-11-03 (F3, callgrind, 192-frame callbacks) the stereo-wrapper chain cost 4,640 instructions per callback on the old left/right executor (`9b2f059`) and 5,086 on the planar executor (+9.6%, about 56 per node, from the generic-to-stereo adapter). Since F4.3 the live mixer itself is a graph; the playback scenarios above measure it. Callgrind against the old mixer (192-frame callbacks): 1 layer 153,259 vs 152,343 instructions, 4 layers 590,041 vs 589,495, 16 layers 2,071,648 vs 2,072,626. The first F4.3 version ran all 65 slot nodes every chunk and cost +55,000 instructions per callback; leaving idle slots out of the routing order removed that. F4.4 (each track module its own node), 2026-11-04, before → after: 1 layer 152,390 → 132,831; 4 layers 589,489 → 577,970; 16 layers 2,072,610 → 2,070,932 (it no longer zeroes 65 slot buffers per chunk); 4 layers each with delay and reverb 974,775 → 999,238 (+2.5%: about 1,900 instructions per extra module node per 64-frame chunk, mostly float lane conversion). A playing track's loop restart or code-swap point also ends the chunk for every track, so each such point costs one extra pass over the routed nodes' fixed per-chunk work (bounded: about two per playing track per block). F5.1 (typed ports, per-port executor tables), before → after: 1 layer 132,861 → 132,983; 4 layers 577,972 → 578,344; 16 layers 2,070,985 → 2,072,078; `caw_bench SECONDS -1` graph scenarios +0.8%. F5.2 (event ports), before → after: 1 layer 132,966 → 132,990; 4 layers 578,287 → 578,302; 16 layers 2,071,925 → 2,071,941; graph scenarios +0.06% (nodes without event ports skip the event work). F6.1 (parameter resolver) added no audio-path work; F6.2 resolves parameters per node per block (one constant when nothing varies) and polls the parameter queue once per block; before → after: 1 layer 133,016 → 133,081; 4 layers 578,317 → 578,526; 16 layers 2,071,967 → 2,072,482; graph scenarios +0.5% (the per-node check, for nodes with no parameters). F6.3 (modulation links) is within noise: 1 layer 133,095 → 133,091, 16 layers 2,072,478 → 2,072,466, graph scenarios −0.05%. F6.4 (automation lanes) is within noise for graphs without lanes: 1 layer 133,094 → 133,104; 4 layers each with delay and reverb 1,000,087 → 1,000,078; graph scenarios +0.02%. F6.6 (the Engine's .caw params through the resolver), 1 layer 133,083 → 133,463 (+0.29%), 4 layers each with delay and reverb 1,000,169 → 1,002,141 (+0.20%), graph scenarios unchanged; a first version that resolved every param every chunk cost +0.64%, and the pass-through for params with no lane and an exact held value removed most of it. F6.5 (MIDI CC mappings) is within noise without mappings: 1 layer 133,115 → 133,152; 4 layers each with delay and reverb 1,000,094 → 1,000,074; graph scenarios +0.02%.
 - **Scenarios:**
   1. 1 bytebeat layer
@@ -36,73 +36,19 @@ The owner's requirement (2026-10-28): run as light as possible, down to low-end 
   - startup time on the device
   - Check those on the S22+ with Android Studio's profiler or Perfetto from a release APK (see [Next steps](#remaining-bottlenecks-and-next-steps)).
 
-## Engine audit (2026-10-28)
+## Engine without the language (2026-11-11, #160)
 
-### Baseline (release, before fixes)
+The .caw VM, whose costs the 2026-10-28 engine audit measured (integer conversion, dispatch, per-lane setup), is gone: a track is its instrument and inserts, run as one mix-graph node (two graph nodes per slot instead of 34).
 
-| Scenario | Mean / callback | p99 | Load |
-| --- | --- | --- | --- |
-| Stopped | 0.0 µs | 0.0 µs | 0% |
-| 1 layer | 13.9 µs | 32 µs | 0.35% |
-| Starter (4 layers) | 72.2 µs | 141 µs | 1.8% |
-| 16 layers | 280 µs | 456 µs | 7.0% |
-| 64 layers | 1,382 µs | 2,502 µs | 34.6% |
-| Pattern layers | 66.6 µs | 138 µs | 1.7% |
-| Starter + delay + reverb | 101 µs | 178 µs | 2.5% |
-| 16 layers with a code edit every 0.25 s | 377 µs | 790 µs | 9.4% |
-
-- **Other baseline numbers:**
-  - Compiling a template takes about 0.3 ms; a pattern 0.005 ms. Re-sending an unchanged 16-layer project takes 0.07 ms.
-  - A loop export of 16 layers runs 13× faster than real time.
-  - RSS is about 14 MB, and setting up 64 small layers adds under 1 MB.
-
-### Bottlenecks, ranked by measured share (callgrind, whole benchmark)
-
-1. **The VM's integer conversion and `%`:** about 25% of all instructions, inside `Instance::process`.
-   - `toUint32` (used by every bitwise operator) always ran `trunc`, plus `fmod` for negative values.
-   - `%` always called `fmod`, even for whole numbers like `step % 4`.
-   - Bytebeat code is mostly these operators.
-2. **The VM's own dispatch:** about 20% (`vm.cpp`), plus 6% in the operators (`ops.h`). This is the interpreter's real work.
-3. **The per-chain setup in `prepareLane`:** about 7–9%. It works out `step`, `beat`, `bar`, `pos` and `t` for every sample of every layer.
-4. **Filter and envelope maths:** `detTan` 4–5%, `ad` 4–6%, `detExp` 2–3%. This is mostly modulated filter cutoffs. It's the sound itself, and it must stay bit-exact for determinism.
-5. **`slotTarget`:** 1.5%, growing with the square of the layer count (the slot capacity is a runtime value since F7.3, whose parts A and B measured 1 layer −1.1%, 16 layers −0.3% and the graph −0.9% per callback together; process startup grew by about 24M instructions once, in the static table build). Every layer, every block, it scanned all 64 slots to see whether anything was soloed.
-
-### Fixes (all bit-identical: golden hashes unchanged)
-
-These fixes kept the golden hashes of their time. On 2026-11-03 Foundation F4.2 changed 10 template hashes on purpose (float routing, owner-approved, at most 1 LSB of a 24-bit WAV).
-
-1. **`toUint32` fast path:** a value inside the int32 range is truncated straight to an integer, which gives the same bits as the full JavaScript rule.
-2. **`%` fast path:** whole numbers use integer remainder, which gives exactly what `fmod` does, including the sign of a zero result.
-3. **Solo checked once per callback,** and again whenever a layer's starting gain is set, instead of per layer per block.
-
-Instructions for 2 s of playback, before → after:
-
-| Scenario | Before | After | Change |
-| --- | --- | --- | --- |
-| Starter (4 layers) | 333.6 M | 280.2 M | −16% |
-| 16 layers | 1,164.7 M | 944.6 M | −19% |
-| 64 layers | 4,599.1 M | 3,673.4 M | −20% |
-| Pattern layers | 266.4 M | 265.6 M | ±0 |
-| Starter + delay + reverb | 549.2 M | 495.7 M | −10% |
-
-Timed release run after the fixes (same server, a single run, so noisy):
-- 64 layers: mean 769 µs, p99 1,193 µs, 19% load (was 34.6%)
-- starter: 47 µs, 1.2% load
-- code edits during 16 layers: 192 µs, 4.8% load
+- **[Fact, callgrind 3.22, x86-64 Release, 2026-11-11]** `caw_bench 1 100 K` (one second of playback, instructions inside `Engine::process`), before and after the collapse: First loop (K 0) 260.5 M → 257.8 M; Kick alone (1) 100.6 M → 100.0 M; an idle instrument track (7) 55.3 M → 54.7 M; a busy kick (8) 103.6 M → 103.1 M; a busy bass (12) 66.5 M → 65.9 M; Morph and chorus (18) 93.8 M → 93.3 M. The built-ins' own DSP is nearly all of it; the engine's share fell by about 0.6 M a second per track.
+- **[Fact, 2026-11-11]** The mix graph holds two nodes per slot, so `maxLayers()` (the layers a memory budget allows) is now 1,038 at 128 MiB, 3,634 at 1 GiB and 7,716 at 4 GiB.
 
 ### Checked and fine
 
 - **Stopped:** the callback just writes silence; costs about 0 µs.
-- **Offline WAV exports:** run on their own `Engine` instance through the native bounded worker pool, so they never touch live playback state. They compete for CPU only; Android callback-thread priority still requires physical-device verification.
-- **MIDI files:** a `.mid` import is read and converted on another isolate (the Dart converter, `lib/ui/midi_file_actions.dart`); exports are built in Dart, and the engine's MIDI 2.0 clip converter runs in `Isolate.run`.
-- **Live code edits:**
-  - A swap compiles on the control thread, about 0.4–0.5 ms for 16 layers.
-  - For 20 ms the audio thread runs both the old and the new code to crossfade.
-  - Carrying state over copies at most 2 MB per swap.
-- **Memory:**
-  - Layer state is allocated when a chain is built, never in the callback.
-  - Big effect buffers are cleared lazily ([engine](engine.md#built-ins-and-libraries)).
-  - The project memory budget is 64 MB.
+- **Offline WAV exports:** run on their own `Engine` instance through the native bounded worker pool, so they never touch live playback state. They compete for CPU only.
+- **Chain changes:** a new instrument or effect list is built and activated on the control thread; for 20 ms the audio thread runs the old and the new one to crossfade.
+- **Memory:** component state is allocated when a chain is built, never in the callback; each instrument also holds a note list of about 370 KB.
 
 ### Hardware limits used by the scheduler
 
@@ -124,7 +70,7 @@ Timed release run after the fixes (same server, a single run, so noisy):
    - So even when stopped with nothing moving, the UI thread woke up every frame. It read the meters over FFI 30 times a second and redrew every meter and scope.
    - This is from the code and Flutter's `Ticker` behaviour. Battery wasn't measured on a device here.
 3. **The audio device stayed open while stopped.** It ran a callback writing silence for as long as the app was in the foreground.
-4. **Historical baseline (superseded 2026-10-31):** each project update started a worker isolate, about 1.8 ms in the test VM. Project compilation, async source checks and offline WAV renders now use the native bounded worker pool; this is no longer the current execution path. Release-device latency still needs measurement.
+4. **Historical baseline (superseded 2026-10-31):** each project update started a worker isolate, about 1.8 ms in the test VM. Project updates and offline WAV renders now use the native bounded worker pool; this is no longer the current execution path. Release-device latency still needs measurement.
 
 ### Fixes
 
@@ -338,9 +284,6 @@ The owner's evening round (#174): "optimize everything". Each hot path has a ben
 - **Measure on the phone.** Build a release APK, then:
   - play the starter project and 16 layers for 5 minutes each, with the screen on and off
   - record CPU, the audio thread's time per callback (`caw_engine_meters` already reports the load), dropouts, frame times, battery and temperature
-- **Compiling, about 0.3 ms per module.** Each compile re-reads and re-checks the three built-in libraries. Caching their parsed functions would cut this to almost nothing. It only matters for auto-update while typing.
-- **Per-layer setup in `prepareLane`.** `step`, `beat` and `bar` are worked out with a division for every sample of every layer. They could be counted up incrementally, but only if the results stay bit-identical at step boundaries; that needs a careful proof and the golden tests.
-- **The VM's dispatch.** Fusing common operator pairs, or compiling to a tighter form, is the next big win. It's a larger change, so measure on the phone first.
-- **Measure native project-job latency on the phone.** Project compilation now uses the shared native worker pool rather than starting a Dart worker isolate per update. Measure queue wait, compile duration, UI responsiveness and audio callback impact in a release build.
+- **Measure native project-job latency on the phone.** Project updates use the shared native worker pool rather than starting a Dart worker isolate per update. Measure queue wait, update duration, UI responsiveness and audio callback impact in a release build.
 - **The shell's `IndexedStack`** retains all eight workspace destinations and may rebuild/layout them on structural project changes. Measure this on device before changing it; preserving editor state is a constraint.
 - **Scopes** read 512 samples over FFI and redraw a path about 30 times a second while playing. That's fine on the server; check the frame time on the phone.

@@ -97,7 +97,7 @@ Planned capabilities:
 - Stereo-native sources, filters, effects and routing.
 - Custom modules in effect slots and composite instruments.
 
-The implemented synth patch currently supports three wavetable oscillator slots, sub/noise, unison up to 16, two serial/parallel filters, three ADSR envelopes, four tempo-synced LFOs (built-in shapes plus four-point curve parameters; a graphical curve editor is not implemented), four macros and a modulation matrix. A single bounded phase-distortion warp parameter is implemented; additional warp modes, custom table authoring, built-in chorus and EQ are not. Voice and resource limits are explicit (voices 1–32, subject to project cap); see [Synth](synth.md).
+The synth is the C++ Flagship (`org.caw.synth.flagship`, [engine](engine.md)); the .caw synth patch compiler was removed with the language (#160).
 
 ## 6. MIDI and expression
 
@@ -233,7 +233,7 @@ The working branch now has the first local/offline C++ component path: project-o
 
 This blueprint does not supersede built v1 or other CAW decisions. Preserve bytebeat/bitwise language, deterministic math, compiler/VM, code-first editing, plain-text files external coding tools can edit, local/offline rendering, WAV export, preview/loop/pattern/hot-swap capabilities while keeping sound design and content creation primary and adding useful lightweight DAW capabilities where they help, current synth patch format/translator, fractional pitches and note-expression curves, shared effects after voices where appropriate, touch-first phone controls and desktop keyboard support, customizable actions/macros, custom themes, Light mode, existing starter modules under examples/, local/offline project assets, no in-app AI integration, and future plugin work only after a real native host/SDK and release checks, permissive licensing, local/offline C++ builds on the user's device, and GitHub Actions as repository CI only.
 
-See [vision](vision.md), [architecture](architecture.md), [synth](synth.md), [performance](performance.md), [decisions](decisions.md) and [roadmap](roadmap.md). Where those notes conflict with this clarified product focus and capability boundary or adaptive-engine direction, reconcile them as implementation proceeds.
+See [vision](vision.md), [architecture](architecture.md), [performance](performance.md), [decisions](decisions.md) and [roadmap](roadmap.md). Where those notes conflict with this clarified product focus and capability boundary or adaptive-engine direction, reconcile them as implementation proceeds.
 
 
 ## 15. Unified parameters, modulation, automation and mathematical modules
