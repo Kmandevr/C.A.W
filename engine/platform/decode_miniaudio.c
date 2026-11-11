@@ -10,6 +10,8 @@
 #define MA_NO_RESOURCE_MANAGER
 #define MA_NO_NODE_GRAPH
 #define MA_NO_ENGINE
+// The one global miniaudio defines without MA_API, renamed so it cannot meet the device copy's.
+#define ma_atomic_global_lock caw_decode_ma_atomic_global_lock
 #define MINIAUDIO_IMPLEMENTATION
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
