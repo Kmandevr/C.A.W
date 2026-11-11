@@ -253,7 +253,7 @@ double arrangementBytes(const std::vector<ClipSpec>& clips,
         const auto found = sources.find(clip.pattern);
         if (found == sources.end() || !found->second || found->second->notes.empty()) continue;
         const Pattern& src = *found->second;
-        const double sourceLength = std::max(1, src.steps(beatsPerBar));
+        const double sourceLength = clip.loopSteps > 0 ? clip.loopSteps : std::max(1, src.steps(beatsPerBar));
         const double passes = clip.loop ? 2.0 + std::floor(clip.lengthSteps / sourceLength) : 1.0;
         double ratchets = 0;
         for (const PatternNote& note : src.notes) ratchets += std::max(1, static_cast<int>(note.ratchet));
@@ -277,7 +277,9 @@ std::shared_ptr<const Pattern> compileArrangement(
         if (found == sources.end() || !found->second) continue;
         const Pattern& src = *found->second;
         if (src.notes.empty()) continue;  // nothing to place, however often the clip repeats it
-        const int sourceLength = std::max(1, src.steps(beatsPerBar));
+        // The clip's own loop point (0: the pattern's length): notes past it never play, and a loop past the
+        // pattern's end plays silence up to it before repeating.
+        const int sourceLength = clip.loopSteps > 0 ? clip.loopSteps : std::max(1, src.steps(beatsPerBar));
         double sourcePos = static_cast<double>(clip.sourceOffsetSteps);
         int consumed = 0;
         int timeline = clip.startSteps;
@@ -1258,7 +1260,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
             for (const ClipSpec& clip : w.clips) {
                 pl.arrangementSig += clip.id + "|" + clip.pattern + "|" + std::to_string(clip.startSteps) + "|" +
                     std::to_string(clip.lengthSteps) + "|" + std::to_string(clip.sourceOffsetSteps) + "|" +
-                    (clip.loop ? "1" : "0") + (clip.mute ? "m" : "") + "|";
+                    std::to_string(clip.loopSteps) + "|" + (clip.loop ? "1" : "0") + (clip.mute ? "m" : "") + "|";
                 auto source = modules_.find(clip.pattern);
                 if (source != modules_.end()) pl.arrangementSig += source->second.source;
                 pl.arrangementSig += "\x1e";
