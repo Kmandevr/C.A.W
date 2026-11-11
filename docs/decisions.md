@@ -6,6 +6,17 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Touch editing in Arrange and the piano roll (owner)
+
+**Decision (owner, 2026-11-11, answers to Claude's questions):**
+- **Clips:** a long press on a clip picks it up whole (no stretching) and drags it in time and onto any track, snapping to the grid (Shift or a resting second finger frees it, as elsewhere). It can't go before the project start. A **double tap** on a clip opens the menu the long press used to open.
+- **Tracks:** a long press on a track header picks the track up for reordering. Following REAPER, a plain up and down drag only reorders. Dropping with the finger in the right-most third of a track nests the dragged track under it: any track can be a parent, and the routing follows (the child feeds its parent). A double tap on a header opens the track menu.
+- **Piano roll paste** lands right after the end of the copied selection, and the pasted copy becomes the selection, so repeated pastes chain end to end.
+- **Selection box:** a long press on empty grid (about 0.35 s, with a haptic tick), then a drag, draws a box that **adds** to the selection. A double tap on empty grid clears the selection, so a stray tap can't. Undo can take back a selection the box just made. The select tool stays as it is.
+- **Tremolo and ratchet tools:** a ratchet count per note (2–8 even repeats with a velocity ramp), a **ratchet brush** (drag over notes to set their count), tremolo as a volume wobble, a **vibrato** tool (pitch), and curve handles on pitch bends.
+- **Advanced menus** (the note menu, the piano roll's ⋯, the Arrange menus): grouped into sections with the most-used items first. Numbers get a big slider, a type-in field and a reset.
+- **Build** can open anything text-based, but its focus is C++. It opens on C++, and it should be clear that C++ is what it is for.
+
 ## 2026-11-11: Audio assets, clips, sampler and input (WP-J; choices to confirm)
 
 **Decision (Claude, for the owner to confirm; the owner put all three in the beta, see below; [engine](engine.md#audio-assets-clips-the-sampler-and-audio-input-api-18)):**
