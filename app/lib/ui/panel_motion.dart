@@ -26,16 +26,7 @@ Route<T> panelRoute<T>(BuildContext context, WidgetBuilder builder) {
     pageBuilder: (context, _, _) => builder(context),
     transitionDuration: d ?? Duration.zero,
     reverseTransitionDuration: d == null ? Duration.zero : Motion.paced(pageTransition),
-    transitionsBuilder: (context, anim, _, child) {
-      final reduced = level != MotionLevel.full;
-      // Coming in, the entrance kind; going out (the route's animation running back), the exit kind.
-      final leaving = anim.status == AnimationStatus.reverse;
-      return EditMotion.transition(anim, child, enter: !leaving, fadeOnly: reduced,
-          standard: (a, c) => SlideTransition(
-              position: Tween(begin: const Offset(0.12, 0), end: Offset.zero)
-                  .animate(CurvedAnimation(parent: a, curve: EditMotion.curveOr(Curves.easeOutCubic), reverseCurve: EditMotion.exitCurve)),
-              child: FadeTransition(opacity: CurvedAnimation(parent: a, curve: Curves.easeOut), child: c)));
-    },
+    transitionsBuilder: (context, anim, _, child) => _PanelTransition(animation: anim, reduced: level != MotionLevel.full, child: child),
   );
 }
 
@@ -49,4 +40,68 @@ AnimationStyle? sheetAnimation(BuildContext context) {
   if (EditMotion.feel == MotionFeel.subtle) return null;
   return AnimationStyle(
       duration: d, reverseDuration: Motion.paced(sheetExit), curve: EditMotion.curveOr(Curves.easeOutCubic));
+}
+
+/// The transition for a window or menu over the page (a device's floating window, a long-press menu): in with the
+/// theme's entrance kind, out with its exit kind (a fade with Reduced motion); its route's duration decides Off.
+Widget popupTransition(BuildContext context, Animation<double> animation, Widget child) =>
+    _PanelTransition(animation: animation, reduced: Motion.of(context) != MotionLevel.full, popup: true, child: child);
+
+/// A pushed page coming in with the theme's entrance kind and going out (Back, Esc, the mouse's Back button) with
+/// its exit kind: it follows the route's animation status, so the exit runs whichever way the page is closed.
+class _PanelTransition extends StatefulWidget {
+  const _PanelTransition({required this.animation, required this.reduced, required this.child, this.popup = false});
+  final Animation<double> animation;
+  final bool reduced;
+  final Widget child;
+
+  /// A window or menu over the page (Standard: a small scale and fade) rather than a page (Standard: a slide).
+  final bool popup;
+
+  @override
+  State<_PanelTransition> createState() => _PanelTransitionState();
+}
+
+class _PanelTransitionState extends State<_PanelTransition> {
+  late bool _leaving = widget.animation.status == AnimationStatus.reverse;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.animation.addStatusListener(_status);
+  }
+
+  @override
+  void didUpdateWidget(_PanelTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.animation != widget.animation) {
+      oldWidget.animation.removeStatusListener(_status);
+      widget.animation.addStatusListener(_status);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.animation.removeStatusListener(_status);
+    super.dispose();
+  }
+
+  void _status(AnimationStatus s) {
+    final leaving = s == AnimationStatus.reverse;
+    if (leaving != _leaving && mounted) setState(() => _leaving = leaving);
+  }
+
+  @override
+  Widget build(BuildContext context) => EditMotion.transition(widget.animation, widget.child,
+      enter: !_leaving,
+      fadeOnly: widget.reduced,
+      standard: widget.popup
+          ? (a, c) => FadeTransition(opacity: a, child: ScaleTransition(
+              scale: Tween(begin: widget.reduced ? 1.0 : 0.95, end: 1.0)
+                  .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic, reverseCurve: EditMotion.exitCurve)),
+              child: c))
+          : (a, c) => SlideTransition(
+          position: Tween(begin: const Offset(0.12, 0), end: Offset.zero)
+              .animate(CurvedAnimation(parent: a, curve: EditMotion.curveOr(Curves.easeOutCubic), reverseCurve: EditMotion.exitCurve)),
+          child: FadeTransition(opacity: CurvedAnimation(parent: a, curve: Curves.easeOut), child: c)));
 }

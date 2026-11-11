@@ -2,6 +2,7 @@
 // remove keys and reset to the defaults. Changes save to keys.txt through the key router.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'panel_motion.dart';
 import 'package:flutter/services.dart';
 
 import '../actions/actions.dart';
@@ -54,6 +55,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
     final kept = <String>[];
     await showModalBottomSheet<void>(
       context: context,
+      sheetAnimationStyle: sheetAnimation(context), // in and out at the theme's pace
       backgroundColor: Neon.panel,
       isScrollControlled: true,
       builder: (context) => StatefulBuilder(builder: (context, setSheet) {

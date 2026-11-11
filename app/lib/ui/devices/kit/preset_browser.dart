@@ -1,6 +1,7 @@
 // The device header's preset button (name, "*" when changed, quick save, Ctrl+S) and the preset browser: My presets
 // and Factory with search, favourites and tags; rename, duplicate, export and delete on long-press; track presets.
 import 'package:flutter/material.dart';
+import '../../panel_motion.dart';
 import 'package:flutter/services.dart';
 
 import '../../../model/app_state.dart';
@@ -105,6 +106,7 @@ class _DevicePresetChipState extends State<DevicePresetChip> {
 Future<void> showPresetBrowser(BuildContext context, DeviceTarget target, Color color) {
   return showModalBottomSheet<void>(
     context: context,
+    sheetAnimationStyle: sheetAnimation(context), // in and out at the theme's pace
     showDragHandle: true,
     isScrollControlled: true,
     backgroundColor: Neon.panel,
@@ -376,6 +378,7 @@ Future<void> presetMenu(BuildContext context, UserPresetStore store, UserPreset 
 /// The track presets: a tap loads one onto [layer] (one undo step); Save keeps the track's chain as one.
 Future<void> showTrackPresets(BuildContext context, AppState state, LayerDoc layer) => showModalBottomSheet<void>(
       context: context,
+      sheetAnimationStyle: sheetAnimation(context), // in and out at the theme's pace
       showDragHandle: true,
       isScrollControlled: true,
       backgroundColor: Neon.panel,

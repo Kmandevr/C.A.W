@@ -15,6 +15,7 @@ import '../theme.dart';
 import '../key_router.dart';
 import '../keyboard/key_area.dart';
 import '../../actions/actions.dart';
+import '../../actions/macro.dart' show ActionRef;
 import '../widgets.dart' show LiveIsland;
 import 'live_keys.dart';
 import 'record_tools.dart';
@@ -328,6 +329,7 @@ class _BottomTransportState extends State<BottomTransport> {
           ...widget.extras,
           if (writer != null) AutomateButton(writer: writer, state: s, size: 34),
           if (midi != null) KeysButton(midi: midi, constraints: narrow),
+          BackToStartButton(state: s, iconSize: 21, constraints: narrow),
           Pressable(child: IconButton(
             key: const ValueKey('transport-stop'),
             tooltip: 'Stop, back to the start (Shift+Space)',
@@ -383,6 +385,65 @@ class _BottomTransportState extends State<BottomTransport> {
     final step = s.playheadStep.floor().clamp(0, p.engineLoopSteps - 1);
     final text = '${step ~/ p.stepsPerBar + 1}.${(step % p.stepsPerBar) ~/ 4 + 1}';
     return m.playing ? text : s.pausedStep != null ? '$text ‖' : text;
+  }
+}
+
+/// The transport's ⏮ (owner, 2026-11-11): one tap goes back to the loop start when a loop is on, else the project
+/// start, at once; a second tap soon after goes on to the project start ([ClickCounter]), and the views follow
+/// ([AppState.revealStartRequests]). Playing, play goes on from there; stopped, it only moves. Home and Ctrl+Home do
+/// the same from the keyboard, and the tooltip names the keys in force.
+class BackToStartButton extends StatefulWidget {
+  const BackToStartButton({super.key, required this.state, this.iconSize = 22, this.constraints});
+  final AppState state;
+  final double iconSize;
+  final BoxConstraints? constraints;
+
+  @override
+  State<BackToStartButton> createState() => _BackToStartButtonState();
+}
+
+class _BackToStartButtonState extends State<BackToStartButton> {
+  final _clicks = ClickCounter();
+  bool _pointer = false; // a press by finger or mouse acts on its down; the button's own press is the keyboard's
+
+  String _keys(String id, String fallback) {
+    final r = KeyRouter.of(context) ?? KeyRouterState.active.value;
+    final keys = r?.keymap.keysFor(Area.global, ActionRef.action(id)) ?? const [];
+    return keys.isEmpty ? fallback : keys.first.format();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.state;
+    final loop = s.project.loopsRange;
+    final tip = '${loop ? 'Back to the loop start' : 'Back to the start'} (${_keys('transport.toStart', 'Home')}) · '
+        'double tap: the project start (${_keys('transport.toProjectStart', 'Ctrl+Home')})';
+    return Listener(
+      onPointerDown: (e) {
+        _pointer = true;
+        _clicks.down(e, target: this);
+        Haptics.tap();
+        // The first tap acts at once; the second adds the jump to the project start.
+        s.backToStart(projectStart: _clicks.twice);
+      },
+      onPointerUp: _clicks.up,
+      child: Pressable(child: IconButton(
+        key: const ValueKey('transport-start'),
+        tooltip: tip,
+        iconSize: widget.iconSize,
+        visualDensity: VisualDensity.compact,
+        constraints: widget.constraints ?? const BoxConstraints(minWidth: 40, minHeight: 44),
+        color: Neon.green,
+        icon: const Icon(Icons.skip_previous),
+        onPressed: () {
+          if (_pointer) {
+            _pointer = false;
+            return;
+          }
+          s.backToStart();
+        },
+      )),
+    );
   }
 }
 

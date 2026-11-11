@@ -21,7 +21,7 @@ import '../model/settings.dart';
 import 'glass.dart';
 import 'keyboard/key_area.dart';
 import 'key_bindings.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'pointer_input.dart';
 import 'theme.dart';
 import 'volume_fader.dart';
@@ -557,9 +557,8 @@ class KeyRouterState extends State<KeyRouter> implements KeyAreaHost {
   }
 
   /// The key bindings editor (Settings, the action list, or the "Key bindings" action). Each change saves keys.txt.
-  Future<void> showKeyBindings(BuildContext context) => Navigator.of(context).push(MaterialPageRoute<void>(
-        settings: closablePage,
-        builder: (_) => GlassPage(child: KeyBindingsPage(
+  Future<void> showKeyBindings(BuildContext context) => Navigator.of(context).push(panelRoute<void>(context,
+        (_) => GlassPage(child: KeyBindingsPage(
           registry: registry,
           keymap: () => vim.keymap,
           defaults: _defaults,

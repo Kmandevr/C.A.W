@@ -6,15 +6,15 @@ import 'package:flutter/material.dart';
 import '../feedback.dart';
 import '../glass.dart';
 import '../haptics.dart';
-import '../page_closer.dart';
+import '../../actions/actions.dart';
+import '../keyboard/key_area.dart';
+import '../panel_motion.dart';
 import '../theme.dart';
 
-/// Opens a Build tool full screen (it slides in over the editor like a device editor); Esc and the mouse's Back
-/// button close it.
-Future<void> openToolPage(BuildContext context, Widget page) => Navigator.of(context).push(MaterialPageRoute<void>(
-      settings: closablePage,
-      builder: (_) => GlassPage(child: page),
-    ));
+/// Opens a Build tool full screen, coming in and going out as the theme's pages do ([panelRoute]); Esc and the
+/// mouse's Back button close it.
+Future<void> openToolPage(BuildContext context, Widget page) =>
+    Navigator.of(context).push(panelRoute<void>(context, (_) => GlassPage(child: page)));
 
 /// A Build tool's page: the back arrow, a glowing badge, the title and what it works on, then [children] in a
 /// centred column (560 dp wide at most, so desktop reads like the phone), and an optional [bottom] action bar.
@@ -50,16 +50,18 @@ class ToolPage extends StatelessWidget {
           ])),
         ]),
       ),
-      Expanded(child: SingleChildScrollView(
+      // The page's steps and cards, in reading order for the keyboard (arrows or WASD, Space or Enter presses).
+      Expanded(child: KeyArea(area: Area.page, label: title, autofocus: true, child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 560),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children))),
-      )),
+      ))),
       if (bottom != null)
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
           decoration: BoxDecoration(border: Border(top: BorderSide(color: Neon.line))),
-          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 560), child: bottom)),
+          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 560),
+              child: KeyArea(area: Area.page, label: '$title actions', child: bottom!))),
         ),
     ])),
   );

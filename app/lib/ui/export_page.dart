@@ -17,7 +17,7 @@ import '../model/arrange_fx.dart';
 import 'export_sheet.dart';
 import 'glass.dart';
 import 'haptics.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -45,9 +45,8 @@ class _QueuedExport {
 }
 
 /// Opens the Export page over the frame (it was the Export workspace, folded into the project menu with #139).
-Future<void> showExportPage(BuildContext context, AppState state) => Navigator.of(context).push(MaterialPageRoute<void>(
-      settings: closablePage,
-      builder: (_) => GlassPage(
+Future<void> showExportPage(BuildContext context, AppState state) => Navigator.of(context).push(panelRoute<void>(context,
+      (_) => GlassPage(
         child: Scaffold(
           backgroundColor: Glass.active ? Colors.transparent : null,
           appBar: AppBar(title: const Text('Export'), backgroundColor: Colors.transparent),

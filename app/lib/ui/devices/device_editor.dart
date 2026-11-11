@@ -21,6 +21,7 @@ import 'kit/device_style.dart';
 import 'kit/feel.dart';
 import 'kit/preset_browser.dart';
 import '../page_closer.dart';
+import '../panel_motion.dart';
 import 'kit/presets.dart';
 import 'visuals/mod_routing.dart';
 import 'visuals/mod_sheet.dart';
@@ -44,26 +45,16 @@ Future<void> openDeviceEditor(BuildContext context, AppState state, LayerDoc lay
       barrierLabel: 'Close the device',
       barrierColor: Colors.black.withValues(alpha: 0.25),
       transitionDuration: Motion.fade(Motion.standard, level),
-      transitionBuilder: (context, a, _, child) => FadeTransition(opacity: a, child: ScaleTransition(
-        scale: Tween(begin: level == MotionLevel.full ? 0.97 : 1.0, end: 1.0).animate(
-          CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
-        child: child)),
+      // In and out with the theme's entrance and exit kinds (Esc, a tap outside and × all run the exit).
+      transitionBuilder: (context, a, _, child) => popupTransition(context, a, child),
       pageBuilder: (context, _, _) => _DeviceWindow(target: target),
     );
   }
-  return Navigator.of(context).push(PageRouteBuilder<void>(
-    settings: closablePage,
-    transitionDuration: Motion.fade(Motion.panel, level),
-    reverseTransitionDuration: Motion.fade(Motion.standard, level),
-    pageBuilder: (context, _, _) => GlassPage(child: Scaffold(
+  // A page that comes in and goes out as the theme's pages do (panelRoute), whether closed by Back, Esc or ←.
+  return Navigator.of(context).push(panelRoute<void>(context, (context) => GlassPage(child: Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(child: DeviceEditor(target: target, onClose: () => Navigator.of(context).maybePop())),
-    )),
-    transitionsBuilder: (context, a, _, child) => FadeTransition(opacity: a, child: SlideTransition(
-      position: Tween(begin: Offset(0, level == MotionLevel.full ? 0.04 : 0), end: Offset.zero)
-          .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
-      child: child)),
-  ));
+    ))));
 }
 
 /// The floating window on wide screens: drag its header to move it.

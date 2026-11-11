@@ -18,7 +18,7 @@ import 'files/files_tree.dart';
 import 'files/library_manager.dart';
 import 'files/project_file_actions.dart';
 import 'glass.dart';
-import 'page_closer.dart';
+import 'panel_motion.dart';
 import 'audio_file_actions.dart';
 import 'midi_file_actions.dart';
 import 'theme.dart';
@@ -224,8 +224,8 @@ class _FileManagerScreenState extends State<FileManagerScreen> {
       case 'history':
         await showProjectRestorePoints(context, state);
       case 'library':
-        await Navigator.of(context).push(MaterialPageRoute<void>(settings: closablePage,
-            builder: (_) => LibraryManagerPage(state: state, onOpenBuilder: widget.onOpenBuilder)));
+        await Navigator.of(context).push(panelRoute<void>(context,
+            (_) => LibraryManagerPage(state: state, onOpenBuilder: widget.onOpenBuilder)));
     }
   }
 

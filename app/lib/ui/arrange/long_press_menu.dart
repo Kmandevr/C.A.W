@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../model/settings.dart';
 import '../glass.dart';
 import '../motion.dart';
+import '../panel_motion.dart';
 import '../theme.dart';
 
 /// One entry of a long-press menu: an icon and a short name, optionally ticked, disabled or destructive. Entries
@@ -81,10 +82,8 @@ Future<T?> showLongPressMenu<T>(BuildContext context,
     pageBuilder: (context, _, _) => style == LongPressMenuStyle.ring
         ? _RingMenu<T>(at: at, actions: actions, title: title)
         : _ListMenu<T>(at: at, actions: actions, title: title),
-    transitionBuilder: (context, animation, _, child) => FadeTransition(
-      opacity: animation,
-      child: ScaleTransition(scale: Tween(begin: 0.94, end: 1.0).animate(animation), child: child),
-    ),
+    // In and out with the theme's entrance and exit kinds; a tap outside or Esc runs the exit too.
+    transitionBuilder: (context, animation, _, child) => popupTransition(context, animation, child),
   );
 }
 

@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'panel_motion.dart';
 import '../model/settings.dart';
 import 'haptics.dart';
 import 'motion.dart';
@@ -175,6 +176,7 @@ class _ThemeEditorState extends State<ThemeEditor> {
   Future<void> _startFrom() async {
     final from = await showModalBottomSheet<CawTheme>(
       context: context,
+      sheetAnimationStyle: sheetAnimation(context), // in and out at the theme's pace
       showDragHandle: true,
       builder: (c) => SafeArea(
         child: ListView(
