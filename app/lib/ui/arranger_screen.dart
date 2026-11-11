@@ -38,6 +38,7 @@ import 'arrange/long_press_menu.dart';
 import 'arrange/mixer_card.dart';
 import 'follow_gate.dart';
 import 'frame/sections.dart';
+import 'view_glide.dart';
 import 'feedback.dart' show GrabFeedback, GripMark, Pressable;
 import 'haptics.dart';
 import 'motion.dart';
@@ -66,16 +67,26 @@ enum FocusLayout { pinned, side }
 FocusLayout focusLayoutFor(Size screen) =>
     screen.width < 900 && screen.height >= screen.width ? FocusLayout.pinned : FocusLayout.side;
 
+/// What the shell can ask of the arranger's view (owner, 2026-11-11): [revealStart] glides it to the project's start
+/// (⏮'s double tap). Calls before the arranger is built do nothing.
+class ArrangerController {
+  VoidCallback? _revealStart;
+
+  /// Glides the timeline back to the project's start.
+  void revealStart() => _revealStart?.call();
+}
+
 class ArrangerScreen extends StatefulWidget {
-  const ArrangerScreen({super.key, required this.state, this.onOpenPattern, this.onOpenModule});
+  const ArrangerScreen({super.key, required this.state, this.onOpenPattern, this.onOpenModule, this.controller});
   final AppState state;
   final VoidCallback? onOpenPattern;
   final ValueChanged<String>? onOpenModule;
+  final ArrangerController? controller;
   @override
   State<ArrangerScreen> createState() => _ArrangerScreenState();
 }
 
-class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProviderStateMixin {
+class _ArrangerScreenState extends State<ArrangerScreen> with TickerProviderStateMixin {
   bool settings = false, cardsView = false, mixerCard = false, zoomBar = false;
   final _headerTaps = ClickCounter();
 
@@ -88,7 +99,45 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   /// Time zoom: pixels per 16th step (× 0.85 at compact density).
   double zoom = 18.0;
-  static const minZoom = 3.0, maxZoom = 64.0;
+  /// Zoomed all the way out a multi-hour song fits a phone (owner, 2026-11-11: REAPER zooms out "a metric ton").
+  static const minZoom = 0.002, maxZoom = 64.0;
+
+  /// Moves the view makes on its own glide (owner, 2026-11-11); a touch stops them.
+  late final ViewGlide _glide = ViewGlide(this);
+
+  /// The view reached this far right (steps): the timeline keeps going a few screens past it, past the last clip
+  /// and the playhead, so scrolling right never meets a wall (owner, 2026-11-11). Scrolling doesn't change the song.
+  double _reachSteps = 0;
+
+  void _onHScroll() {
+    if (!_hScroll.hasClients) return;
+    final p = _hScroll.positions.last;
+    if (!p.hasContentDimensions || p.pixels + p.viewportDimension * 2 < p.maxScrollExtent) return;
+    final reach = (p.pixels + p.viewportDimension) / _stepW;
+    if (reach > _reachSteps + 1) setState(() => _reachSteps = reach);
+  }
+
+  /// Glides the view so [step] shows, a tenth in, when it is off screen (a jump to a marker).
+  void _reveal(double step) {
+    if (!_hScroll.hasClients) return;
+    final p = _hScroll.positions.last;
+    final x = step * _stepW;
+    if (x >= p.pixels && x <= p.pixels + p.viewportDimension - 24) return;
+    _glide.to(_hScroll, x - p.viewportDimension * 0.1, level: Motion.of(context));
+  }
+
+  /// Glides the view back to the project's start.
+  void _revealStart() => _glide.to(_hScroll, 0, level: Motion.of(context));
+
+  /// Zoom to fit: the whole song in the view, from its start.
+  void _zoomToFit() {
+    if (!_hScroll.hasClients) return;
+    final p = _hScroll.positions.last;
+    final end = math.max(widget.state.project.stepsPerBar, widget.state.project.engineLoopSteps);
+    final scale = Neon.compact(context) ? 0.85 : 1.0;
+    final z = (p.viewportDimension * 0.95 / end / scale).clamp(minZoom, maxZoom).toDouble();
+    _animateZoom(z, panToStep: 0);
+  }
 
   // The zoom buttons glide to their new zoom ([Motion.standard]); a pinch, slider or Ctrl + wheel follows at once.
   late final AnimationController _zoomAnim = AnimationController(vsync: this, duration: Motion.standard)
@@ -240,6 +289,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   void didUpdateWidget(covariant ArrangerScreen old) {
     super.didUpdateWidget(old);
     _headersRev++;
+    if (old.controller != widget.controller) {
+      old.controller?._revealStart = null;
+      widget.controller?._revealStart = _revealStart;
+    }
     if (!identical(old.state, widget.state)) {
       old.state.tick.removeListener(_followPlayhead);
       widget.state.tick.addListener(_followPlayhead);
@@ -250,6 +303,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   void initState() {
     super.initState();
     widget.state.tick.addListener(_followPlayhead);
+    _hScroll.addListener(_onHScroll);
+    widget.controller?._revealStart = _revealStart;
   }
 
   /// Settings › Editing › Follow the playhead: while playing, the view keeps the playhead in sight, paging on when it
@@ -278,12 +333,15 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     if (view <= 0) return;
     if (s.settings.followSmooth) {
       // The tracks glide under a still playhead: the scroll moves painted layers, nothing is built again.
+      _glide.stop();
       final to = (x - view / 3).clamp(0.0, p.maxScrollExtent).toDouble();
       if ((to - p.pixels).abs() >= 0.5) p.jumpTo(to);
       return;
     }
+    // A page step glides (owner, 2026-11-11); while it runs the playhead is already on its way into view.
+    if (_glide.active) return;
     if (x >= p.pixels && x <= p.pixels + view - 24) return;
-    p.jumpTo((x - view * 0.1).clamp(0.0, p.maxScrollExtent).toDouble());
+    _glide.to(_hScroll, x - view * 0.1, level: Motion.of(context));
   }
 
   @override
@@ -349,8 +407,13 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         } else {
           _router?.toast('Make a time selection or a loop range first');
         }
+      case 'arranger.zoom.fit':
+        _zoomToFit();
+      case 'arranger.view.start':
+        _revealStart();
       case 'arranger.marker.next' || 'arranger.marker.prev':
         if (!s.jumpToMarker(next: id.endsWith('next'))) _router?.toast('No marker that way');
+        _reveal(s.playheadStep);
       case 'arranger.take.next' || 'arranger.take.prev':
         final withTakes = [for (final c in s.selectedClips) if (c.clip.takes.length > 1) c];
         if (withTakes.isEmpty) _router?.toast('Select a clip with takes (a loop recording)');
@@ -362,6 +425,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       case final go when go.startsWith('arranger.marker.go'):
         final n = int.tryParse(go.substring('arranger.marker.go'.length)) ?? 0;
         if (!s.jumpToMarkerNumber(n)) _router?.toast('No marker $n');
+        _reveal(s.playheadStep);
       default:
         return false;
     }
@@ -413,6 +477,9 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     _keys.dispose();
     _marquee.dispose();
     _zoomAnim.dispose();
+    _glide.dispose();
+    _hScroll.removeListener(_onHScroll);
+    if (widget.controller?._revealStart == _revealStart) widget.controller?._revealStart = null;
     _trackGhost?.remove();
     _trackGhostAt.dispose();
     _drag.dispose();
@@ -422,26 +489,32 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
 
   /// Sets the time zoom, keeping the timeline point under [focal] (pixels from the lanes' left edge; the middle of
   /// the view by default) where it is.
-  void _setZoom(double z, {double? focal}) {
+  /// With [leftStep], that step goes to the view's left edge instead.
+  void _setZoom(double z, {double? focal, double? leftStep}) {
     z = z.clamp(minZoom, maxZoom).toDouble();
-    if (z == zoom) return;
+    if (z == zoom && leftStep == null) return;
     final pos = _hScroll.hasClients ? _hScroll.positions.last : null;
-    final f = focal ?? (pos?.viewportDimension ?? 0) / 2;
-    final anchor = pos == null ? null : (pos.pixels + f) / zoom;
+    final f = leftStep != null ? 0.0 : focal ?? (pos?.viewportDimension ?? 0) / 2;
+    final anchor = leftStep ?? (pos == null ? null : (pos.pixels + f) / _stepW);
     super.setState(() => zoom = z); // the zoom alone: the headers stay as built
     if (anchor == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_hScroll.hasClients) return;
       final p = _hScroll.positions.last;
-      p.jumpTo((anchor * zoom - f).clamp(0.0, p.maxScrollExtent).toDouble());
+      p.jumpTo((anchor * _stepW - f).clamp(0.0, p.maxScrollExtent).toDouble());
     });
   }
 
   /// The zoom buttons: a short glide to [z] (at once when motion is off).
-  void _animateZoom(double z) {
+  /// With [panToStep], the view's left edge glides to that step as it zooms (zoom to fit), both together.
+  void _animateZoom(double z, {double? panToStep}) {
     _zoomTarget = z.clamp(minZoom, maxZoom).toDouble();
+    _glide.stop();
+    final pos = _hScroll.hasClients ? _hScroll.positions.last : null;
+    _panFromStep = pos == null ? null : pos.pixels / _stepW;
+    _panToStep = panToStep;
     if (Motion.of(context) != MotionLevel.full) {
-      _setZoom(_zoomTarget);
+      _setZoom(_zoomTarget, leftStep: panToStep);
       return;
     }
     _zoomFrom = zoom;
@@ -449,9 +522,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     _zoomAnim.forward(from: 0);
   }
 
+  double? _panFromStep, _panToStep;
+
   void _zoomFrame() {
-    final t = Curves.easeOutCubic.transform(_zoomAnim.value);
-    _setZoom(_zoomFrom + (_zoomTarget - _zoomFrom) * t, focal: _zoomFocal);
+    final t = EditMotion.curveOr(Curves.easeOutCubic).transform(_zoomAnim.value);
+    // On a log scale, so a zoom across the whole range moves evenly.
+    final z = math.exp(math.log(_zoomFrom) + (math.log(_zoomTarget) - math.log(_zoomFrom)) * t);
+    final to = _panToStep, from = _panFromStep;
+    _setZoom(z, focal: _zoomFocal, leftStep: to == null || from == null ? null : from + (to - from) * t);
   }
 
   /// The mouse pointer panning the view (middle-drag or Space+drag), if any.
@@ -1237,6 +1315,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         value: (math.log(zoom / minZoom) / ratio).clamp(0.0, 1.0).toDouble(),
         onChanged: (v) { _zoomAnim.stop(); _setZoom(minZoom * math.exp(v * ratio)); }))),
       icon(Icons.add, 'Zoom in', () => _animateZoom(_zoomAnim.isAnimating ? _zoomTarget * 1.4 : zoom * 1.4)),
+      IconButton(key: const ValueKey('arrange-zoom-fit'), onPressed: _zoomToFit, tooltip: 'Zoom to fit the song',
+        visualDensity: VisualDensity.compact, iconSize: 18, icon: const Icon(Icons.fit_screen, color: Neon.dim)),
       const SizedBox(width: 6),
       const Tooltip(message: 'Track height', child: Icon(Icons.swap_vert, size: 16, color: Neon.dim)),
       Expanded(flex: 2, child: ResetOnDoubleTap(onReset: () {
@@ -1292,7 +1372,12 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     // The song ends at its last clip or automation point (or the shortest length) and playback loops back there,
     // as in Reaper. The timeline always reaches 64 bars past it, so a clip can go anywhere and the song grows with it.
     final end = p.engineLoopSteps;
-    final width = math.max(560.0, math.min(p.maxArrangementSteps, math.max(p.timelineSteps, end + 64 * p.stepsPerBar)) * stepW);
+    // A few screens past the furthest of the song's end, the playhead and where the view has been: it never meets a
+    // wall on the right (owner, 2026-11-11).
+    final screens = 3 * MediaQuery.sizeOf(context).width / stepW;
+    final reach = math.max(math.max(p.timelineSteps.toDouble(), end + 64.0 * p.stepsPerBar),
+        math.max(s.playheadStep, _reachSteps) + screens);
+    final width = math.max(560.0, math.min(p.maxArrangementSteps.toDouble(), reach) * stepW);
     // The ruler holds the bar numbers and loop range over the markers and regions: taller on a phone, for a finger.
     final ruler = pinned ? 20.0 : (_phone ? 44.0 : 36.0);
     final focusId = _focusId;
@@ -1338,6 +1423,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
       child: Listener(
       onPointerDown: (e) {
         _follow.hold();
+        _glide.stop();
         _touchDown(e, headW);
       },
       onPointerMove: (e) => _touchMove(e, headW),
@@ -1349,8 +1435,14 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         _follow.release();
         _touchUp(e);
       },
-      onPointerSignal: (_) => _follow.touch(),
-      onPointerPanZoomStart: (_) => _follow.hold(),
+      onPointerSignal: (_) {
+        _follow.touch();
+        _glide.stop();
+      },
+      onPointerPanZoomStart: (_) {
+        _follow.hold();
+        _glide.stop();
+      },
       onPointerPanZoomEnd: (_) => _follow.release(),
       child: LayoutBuilder(builder: (context, view) {
         // A pixel short of the view, so a few tracks still don't scroll (the lanes' column fills the view anyway).
@@ -2047,6 +2139,7 @@ class _TimelineLaneState extends State<_TimelineLane> {
     final trackHeight = widget.trackHeight, stepW = widget.stepW;
     final height = trackHeight;
     final thin = widget.thin;
+    final blocks = stepW * 16 < 4;
     final color = trackColor(state, layer);
     final leaving = EditMotion.of(context, EditMotionKind.clips);
     final appearing = _clipChanges(leaving);
@@ -2106,18 +2199,19 @@ class _TimelineLaneState extends State<_TimelineLane> {
           width: math.max(1.0, (state.timeSelectionEnd! - state.timeSelectionStart!).abs() * stepW), height: height,
           child: IgnorePointer(child: Container(color: Neon.blue.withValues(alpha: .09)))),
 
-      // A thin row (owner, 2026-11-11): each clip is a bar in its colour; the track's header opens it out again.
-      if (thin) ...[
-        for (final clip in layer.clips)
-          Positioned(left: clip.startSteps * stepW, top: 1, height: trackHeight - 2,
-            width: math.max(2.0, clip.lengthSteps * stepW - 1), child: IgnorePointer(child: ColoredBox(
-              key: ValueKey('thin-clip-${clip.id}'),
-              color: (clip.color == null ? color : Neon.layer(clip.color!)).withValues(alpha: clip.mute ? 0.3 : 0.8)))),
-        for (final clip in layer.audioClips)
-          Positioned(left: clip.startSteps * stepW, top: 1, height: trackHeight - 2,
-            width: math.max(2.0, clip.lengthAt(state.project.bpm) * stepW - 1), child: IgnorePointer(child: ColoredBox(
-              key: ValueKey('thin-clip-${clip.id}'),
-              color: audioClipColor(state, layer, clip).withValues(alpha: clip.mute ? 0.3 : 0.8)))),
+      // A thin row (owner, 2026-11-11): each clip is a bar in its colour; the track's header opens it out again. Far
+      // out (a bar under 4 px) the clips are blocks too, merged per pixel column, so nothing is built per clip.
+      if (thin || blocks) ...[
+        Positioned.fill(child: IgnorePointer(child: RepaintBoundary(child: CustomPaint(
+          key: ValueKey('clip-blocks-${layer.id}'),
+          painter: _ClipBlocksPainter([
+            for (final clip in layer.clips) (clip.startSteps.toDouble(), clip.lengthSteps.toDouble(),
+                (clip.color == null ? color : Neon.layer(clip.color!)).withValues(alpha: clip.mute ? 0.3 : 0.8)),
+            for (final clip in layer.audioClips) (clip.startSteps.toDouble(), clip.lengthAt(state.project.bpm),
+                audioClipColor(state, layer, clip).withValues(alpha: clip.mute ? 0.3 : 0.8)),
+          ], stepW, inset: thin ? 1 : _clipInset(trackHeight)))))),
+        if (thin) for (final clip in layer.clips) Positioned(left: clip.startSteps * stepW, top: 0, width: 1, height: 1,
+            child: SizedBox(key: ValueKey('thin-clip-${clip.id}'))),
       ] else ...[
       for (final clip in layer.clips) () {
         final rect = Rect.fromLTWH(clip.startSteps * stepW, _clipInset(trackHeight),
@@ -2216,6 +2310,56 @@ class _SpacerHeader extends StatelessWidget {
   return (from, (position.pixels + position.viewportDimension).clamp(from, size.width).toDouble());
 }
 
+/// A lane's clips as plain blocks (a thin row, or zoomed far out): one rectangle per pixel column at most, so a long
+/// song's thousands of clips cost a few hundred rectangles.
+class _ClipBlocksPainter extends CustomPainter {
+  _ClipBlocksPainter(this.clips, this.stepW, {required this.inset});
+  final List<(double start, double length, Color color)> clips;
+  final double stepW, inset;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    final top = inset, h = math.max(1.0, size.height - 2 * inset);
+    // Clips that start in the same pixel column as the block before, in the same colour, extend it.
+    var left = -1.0, right = -1.0;
+    Color? c;
+    void flush() {
+      if (c != null) canvas.drawRect(Rect.fromLTRB(left, top, math.max(left + 1, right), top + h), paint..color = c);
+    }
+    final sorted = [...clips]..sort((a, b) => a.$1.compareTo(b.$1));
+    for (final (start, length, color) in sorted) {
+      final l = start * stepW, r = (start + length) * stepW;
+      if (c != null && color == c && l <= right + 1) {
+        right = math.max(right, r);
+        continue;
+      }
+      flush();
+      left = l.floorToDouble();
+      right = r;
+      c = color;
+    }
+    flush();
+  }
+
+  @override
+  bool shouldRepaint(covariant _ClipBlocksPainter old) =>
+      old.stepW != stepW || old.inset != inset || old.clips.length != clips.length ||
+      [for (var i = 0; i < clips.length; i++) old.clips[i] != clips[i]].any((d) => d);
+}
+
+/// The arrangement grid's step, in 16th steps: 1, a beat, a bar, or 4, 16, 64… bars, whichever keeps its lines at
+/// least 5 px apart at [stepW] pixels a step.
+int arrangeGridEvery(double stepW, int barSteps) {
+  if (stepW >= 5) return 1;
+  if (stepW * 4 >= 5) return 4;
+  var every = barSteps;
+  while (every * stepW < 5 && every < (1 << 40)) {
+    every *= 4;
+  }
+  return every;
+}
+
 class _ArrangementGrid extends CustomPainter {
   _ArrangementGrid(this.stepW, this.barSteps, this.scroll) : super(repaint: scroll);
   final double stepW;
@@ -2226,8 +2370,9 @@ class _ArrangementGrid extends CustomPainter {
     final minor = Paint()..color = Neon.line.withValues(alpha: .55)..strokeWidth = .6;
     final major = Paint()..color = Neon.dim.withValues(alpha: .35)..strokeWidth = 1;
     final (from, to) = visibleSpan(scroll, size);
-    // Zoomed out, the minor lines thin to beats, then to bars only, so they stay at least 5 px apart.
-    final every = stepW >= 5 ? 1 : stepW * 4 >= 5 ? 4 : barSteps;
+    // Zoomed out, the minor lines thin to beats, then to bars, then every 4, 16, 64… bars, so they stay at least
+    // 5 px apart and nothing is drawn per bar however far out (owner, 2026-11-11).
+    final every = arrangeGridEvery(stepW, barSteps);
     for (var n = (from / stepW / every).floor() * every; n * stepW <= to; n += every) {
       final x = n * stepW;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), n % barSteps == 0 ? major : minor);
@@ -2247,10 +2392,10 @@ class _BarRuler extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final barW = barSteps * stepW;
     final (from, to) = visibleSpan(scroll, size);
-    // A label every bar, or every 2, 4, 8… bars when bars are narrower than a label.
+    // A label every bar, or every 4, 16, 64… bars when bars are narrower than a label.
     var every = 1;
-    while (every * barW < 28 && every < 1 << 16) {
-      every *= 2;
+    while (every * barW < 28 && every < 1 << 30) {
+      every *= 4;
     }
     for (var b = (from / barW / every).floor() * every; b * barW <= to; b += every) {
       final label = TextPainter(text: TextSpan(text: '${b + 1}', style: Neon.code(size: 10, color: Neon.dim)),

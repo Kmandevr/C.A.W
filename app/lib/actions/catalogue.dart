@@ -263,6 +263,10 @@ const List<ActionDef> standardActions = [
   ActionDef('arranger.marker.add', 'Add marker at the playhead', _r, defaultKeys: ['Shift+M'], isChange: true),
   ActionDef('arranger.region.add', 'Add region', _r, description: 'Over the time selection, else the loop range',
       defaultKeys: ['Shift+R'], isChange: true),
+  ActionDef('arranger.zoom.fit', 'Zoom to fit the song', _r, description: 'The whole song in the view, from its start',
+      toast: false),
+  ActionDef('arranger.view.start', 'Show the start', _r, description: 'The view glides back to the song\'s start',
+      toast: false),
   ActionDef('arranger.marker.next', 'Go to next marker', _r, defaultKeys: ['Ctrl+]'], toast: false),
   ActionDef('arranger.marker.prev', 'Go to previous marker', _r, defaultKeys: ['Ctrl+['], toast: false),
   // REAPER's 1–0: the first ten markers, in time order. Bound digits run their action instead of starting a count.

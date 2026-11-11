@@ -13,6 +13,7 @@ import 'package:caw/ui/arranger_screen.dart';
 import 'package:caw/ui/follow_gate.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/motion.dart';
+import 'package:caw/ui/view_glide.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -344,6 +345,7 @@ void main() {
       await tester.pump();
       play(600);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400)); // the page step glides
       expect(hScroll(tester).pixels, greaterThan(0), reason: 'it follows');
       final at = hScroll(tester).pixels;
       // A time selection: paused for the delay.
@@ -354,6 +356,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 2600));
       play(1201);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400)); // the page step glides
       expect(hScroll(tester).pixels, greaterThan(at), reason: 'resumed after 2.5 s');
       // A finger down: never while it is there.
       final now = hScroll(tester).pixels;
@@ -366,6 +369,7 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
       play(2401);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400)); // the page step glides
       expect(hScroll(tester).pixels, greaterThan(now));
     });
 
@@ -420,11 +424,106 @@ void main() {
       await tester.pump(const Duration(milliseconds: 3000));
       play(1201);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400)); // the page step glides
       expect(hScroll(tester).pixels, 0, reason: 'not yet after 3 s');
       await tester.pump(const Duration(milliseconds: 2100));
       play(1202);
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400)); // the page step glides
       expect(hScroll(tester).pixels, greaterThan(0));
+    });
+  });
+
+  group('the view', () {
+    ScrollPosition hScroll(WidgetTester tester) => tester.stateList<ScrollableState>(find.byType(Scrollable))
+        .where((st) => st.axisDirection == AxisDirection.right)
+        .map((st) => st.position)
+        .reduce((a, b) => a.maxScrollExtent >= b.maxScrollExtent ? a : b);
+
+    testWidgets('scrolling right never meets a wall; revealStart glides back to the start', (tester) async {
+      final controller = ArrangerController();
+      tester.view.physicalSize = const Size(800, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: ListenableBuilder(listenable: s,
+          builder: (_, _) => ArrangerScreen(state: s, controller: controller)))));
+      await tester.pump();
+      final loop = s.project.engineLoopSteps;
+      for (var i = 0; i < 12; i++) {
+        final p = hScroll(tester);
+        p.jumpTo(p.maxScrollExtent);
+        await tester.pump();
+      }
+      final p = hScroll(tester);
+      expect(p.pixels, greaterThan(loop * 18.0 * 3), reason: 'far past the song\'s end');
+      expect(p.maxScrollExtent - p.pixels, greaterThan(p.viewportDimension), reason: 'and still more to the right');
+      expect(s.project.engineLoopSteps, loop, reason: 'scrolling doesn\'t change the song');
+      controller.revealStart();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(hScroll(tester).pixels, greaterThan(0), reason: 'it glides');
+      await tester.pumpAndSettle();
+      expect(hScroll(tester).pixels, 0);
+    });
+
+    testWidgets('a page step glides: half way at half its time, and a touch stops it', (tester) async {
+      s.project.loopBars = 400;
+      await pump(tester, size: const Size(800, 600));
+      void play(double step) {
+        final loop = s.project.engineLoopSteps;
+        s.meters = EngineMeters(playing: true, position: (step / loop * 100000).round(), loopLength: 100000);
+        s.tick.value++;
+      }
+      play(1);
+      await tester.pump();
+      play(400);
+      await tester.pump();
+      final p = hScroll(tester);
+      final view = p.viewportDimension;
+      final to = 400 * 18.0 - view * 0.1;
+      final d = ViewGlide.durationFor(to, view);
+      await tester.pump(d ~/ 2);
+      expect(p.pixels, greaterThan(to * 0.2));
+      expect(p.pixels, lessThan(to * 0.98));
+      final g = await tester.startGesture(const Offset(400, 300));
+      final stopped = p.pixels;
+      await tester.pump(d);
+      expect(p.pixels, stopped, reason: 'a touch stops the glide');
+      await g.up();
+      await settle(tester);
+    });
+
+    testWidgets('zoomed all the way out a 2,000-bar song fits; the clips are blocks and a frame stays cheap',
+        (tester) async {
+      final tracks = [
+        for (var t = 0; t < 8; t++) LayerDoc(id: 't$t', name: 'T$t', color: t, clips: [
+          for (var c = 0; c < 50; c++) ClipDoc(id: 't$t-c$c', patternId: 'pat', startSteps: c * 640, lengthSteps: 64),
+        ]),
+      ];
+      s.project = ProjectDoc(id: 'long', name: 'Long', modules: _project().modules, layers: tracks)..loopBars = 2000;
+      await pump(tester, size: const Size(412, 900));
+      await tester.tap(find.byKey(const ValueKey('arrange-zoom')));
+      await settle(tester);
+      // The slider's left end is the furthest zoom out.
+      await tester.drag(find.byKey(const ValueKey('arrange-zoom-time')), const Offset(-600, 0));
+      await settle(tester);
+      final p = hScroll(tester);
+      expect((p.maxScrollExtent + p.viewportDimension) / (2000 * 16), lessThan(0.1), reason: 'well under 0.1 px a step');
+      await tester.tap(find.byKey(const ValueKey('arrange-zoom-fit')));
+      await settle(tester);
+      expect(hScroll(tester).pixels, 0);
+      expect(find.byKey(const ValueKey('clip-slot-t0-c0')), findsNothing, reason: 'no widget per clip far out');
+      expect(find.byKey(const ValueKey('clip-blocks-t0')), findsOneWidget);
+      // The grid and ruler step by 4, 16, 64… bars: never a line per bar.
+      expect(arrangeGridEvery(0.002, 16) * 0.002, greaterThanOrEqualTo(5));
+      final watch = Stopwatch()..start();
+      for (var i = 0; i < 20; i++) {
+        final q = hScroll(tester);
+        q.jumpTo((q.pixels + 3).clamp(0.0, q.maxScrollExtent));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(watch.elapsedMilliseconds / 20, lessThan(60), reason: 'a frame far out stays cheap');
+      expect(tester.takeException(), isNull);
     });
   });
 }
