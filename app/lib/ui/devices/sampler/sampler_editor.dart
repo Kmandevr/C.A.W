@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -150,14 +151,14 @@ class _SamplerZonesPageState extends State<SamplerZonesPage> {
     final accent = scope.accent;
     return ListView(key: const ValueKey('sampler-zones'), padding: const EdgeInsets.fromLTRB(8, 8, 8, 32), children: [
       Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        ActionChip(key: const ValueKey('sampler-add'), avatar: const Icon(Icons.library_add_outlined, size: 16),
+        ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-add'), avatar: const Icon(Icons.library_add_outlined, size: 16),
             label: const Text('Add samples'), onPressed: _busy ? null : () => _addSamples(z)),
-        ActionChip(key: const ValueKey('sampler-import-sfz'), avatar: const Icon(Icons.file_open_outlined, size: 16),
+        ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-import-sfz'), avatar: const Icon(Icons.file_open_outlined, size: 16),
             label: const Text('Import SFZ'), onPressed: _busy ? null : () => _importSfz(z)),
-        ActionChip(key: const ValueKey('sampler-export-sfz'), avatar: const Icon(Icons.file_upload_outlined, size: 16),
+        ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-export-sfz'), avatar: const Icon(Icons.file_upload_outlined, size: 16),
             label: const Text('Export SFZ'), onPressed: _busy || s.zones.isEmpty ? null : () => _exportSfz(z)),
         if (_selected.length > 1)
-          ActionChip(key: const ValueKey('sampler-round-robin'), avatar: const Icon(Icons.repeat, size: 16),
+          ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-round-robin'), avatar: const Icon(Icons.repeat, size: 16),
               label: Text('Round robin (${_selected.length})'), onPressed: () {
                 final next = z.saved..roundRobin(_selected.toList()..sort());
                 z.save(next);
@@ -165,7 +166,7 @@ class _SamplerZonesPageState extends State<SamplerZonesPage> {
                 _say('${_selected.length} zones take turns on each hit');
               }),
         if (_selected.isNotEmpty)
-          ActionChip(key: const ValueKey('sampler-delete'), avatar: const Icon(Icons.delete_outline, size: 16, color: Neon.pink),
+          ActionChip(visualDensity: VisualDensity.compact, key: const ValueKey('sampler-delete'), avatar: const Icon(Icons.delete_outline, size: 16, color: Neon.pink),
               label: Text(_selected.length == 1 ? 'Delete zone' : 'Delete ${_selected.length}'), onPressed: () {
                 final next = z.saved;
                 for (final i in _selected.toList()..sort((a, b) => b.compareTo(a))) {
@@ -297,12 +298,22 @@ class _ZoneMapState extends State<ZoneMap> {
     final size = Size(box.maxWidth, widget.height);
     final (a, b) = _span;
     final kw = size.width / (b - a + 1);
-    return GestureDetector(
+    // A zone moves from the first few pixels (a key is narrow on a phone), before the page's scroll takes the drag.
+    final mq = MediaQuery.of(context);
+    return MediaQuery(data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 3)),
+        child: GestureDetector(
       behavior: HitTestBehavior.opaque,
+      // Where the finger went down picks the zone and its edge, not where the drag was recognised.
+      dragStartBehavior: DragStartBehavior.down,
       onTapUp: (d) => widget.onSelect(_hit(d.localPosition, size), additive: widget.selected.length > 1 ||
           HardwareKeyboard.instance.isControlPressed),
+      // A long-press adds a zone to the selection: of stacked zones, the first not chosen yet (layers, round robins).
       onLongPressStart: (d) {
-        final i = _hit(d.localPosition, size);
+        final under = [
+          for (var i = widget.zones.zones.length - 1; i >= 0; i--)
+            if (_rect(widget.zones.zones[i], size).inflate(4).contains(d.localPosition)) i,
+        ];
+        final i = under.where((i) => !widget.selected.contains(i)).firstOrNull ?? under.firstOrNull;
         if (i != null) widget.onSelect(i, additive: true);
       },
       onPanStart: (d) {
@@ -310,8 +321,10 @@ class _ZoneMapState extends State<ZoneMap> {
         if (i == null) return;
         final r = _rect(widget.zones.zones[i], size);
         final p = d.localPosition;
-        _edge = (p.dx - r.left).abs() < 10 ? _Edge.left : (p.dx - r.right).abs() < 10 ? _Edge.right
-            : (p.dy - r.top).abs() < 8 ? _Edge.top : (p.dy - r.bottom).abs() < 8 ? _Edge.bottom : _Edge.body;
+        // The edges are 10 px wide (8 px high), less on a narrow zone so its middle still moves it.
+        final ex = math.min(10.0, r.width / 4), ey = math.min(8.0, r.height / 4);
+        _edge = (p.dx - r.left).abs() < ex ? _Edge.left : (p.dx - r.right).abs() < ex ? _Edge.right
+            : (p.dy - r.top).abs() < ey ? _Edge.top : (p.dy - r.bottom).abs() < ey ? _Edge.bottom : _Edge.body;
         _zone = i;
         _start = widget.zones.zones[i].copy();
         _from = p;
@@ -356,7 +369,7 @@ class _ZoneMapState extends State<ZoneMap> {
         widget.onDragEnd();
       },
       child: CustomPaint(size: size, painter: _ZoneMapPainter(widget.zones, widget.selected, widget.accent, a, b, _rect)),
-    );
+    ));
   }));
 }
 
@@ -399,14 +412,14 @@ class _ZoneMapPainter extends CustomPainter {
       }
       if (r.width > 34 && r.height > 14) {
         final tp = TextPainter(text: TextSpan(text: z.seqLength > 1 ? '${z.name} · ${z.seqPosition}/${z.seqLength}' : z.name,
-            style: const TextStyle(fontSize: 9, color: Colors.white)), textDirection: TextDirection.ltr, maxLines: 1,
+            style: Neon.code(size: 9, color: Colors.white)), textDirection: TextDirection.ltr, maxLines: 1,
             ellipsis: '…')
           ..layout(maxWidth: r.width - 6);
         tp.paint(canvas, Offset(r.left + 3, r.top + 2));
       }
     }
     final tp = TextPainter(text: TextSpan(text: '${noteName(lo)} · velocity ↑',
-        style: const TextStyle(fontSize: 9, color: Neon.dim)), textDirection: TextDirection.ltr)..layout();
+        style: Neon.code(size: 9, color: Neon.dim)), textDirection: TextDirection.ltr)..layout();
     tp.paint(canvas, Offset(4, size.height - tp.height - 2));
   }
 
@@ -562,9 +575,11 @@ class _ZoneWaveformState extends State<ZoneWaveform> {
           Positioned(left: x(z.loopStart), width: math.max(1, x(z.loopEnd) - x(z.loopStart)), top: 0, bottom: 0,
               child: IgnorePointer(child: ColoredBox(color: Neon.yellow.withValues(alpha: 0.10)))),
         for (final (name, frame, color) in markers)
-          Positioned(left: x(frame) - 12, top: 0, bottom: 0, width: 24, child: GestureDetector(
+          // Kept inside the waveform, so a marker at either end can still be grabbed; its line stays on its frame.
+          Positioned(left: (x(frame) - 12).clamp(0.0, math.max(0.0, w - 24)), top: 0, bottom: 0, width: 24, child: GestureDetector(
             key: ValueKey('sampler-marker-$name'),
             behavior: HitTestBehavior.opaque,
+            dragStartBehavior: DragStartBehavior.down,
             onHorizontalDragStart: (_) {
               _marker = name;
               _drag = widget.zone.copy();
@@ -600,7 +615,8 @@ class _ZoneWaveformState extends State<ZoneWaveform> {
               if (dz != null) widget.onChanged(dz);
               Haptics.drop();
             },
-            child: Center(child: Container(width: 2, color: color)))),
+            child: Align(alignment: Alignment((x(frame) - (x(frame) - 12).clamp(0.0, math.max(0.0, w - 24)) - 12) / 12, 0),
+                child: Container(width: 2, color: color)))),
         Positioned(left: 6, top: 4, child: Text(info == null ? '${z.name} · loading…'
             : '${z.name} · ${info.seconds.toStringAsFixed(2)} s', style: const TextStyle(fontSize: 10, color: Neon.dim))),
       ]);
@@ -619,12 +635,13 @@ class ZoneInspector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget stepper(String key, String label, String value, VoidCallback down, VoidCallback up) => SizedBox(
-          width: 150,
+          width: 172,
           child: Row(children: [
             SizedBox(width: 54, child: Text(label, style: const TextStyle(fontSize: 11, color: Neon.dim))),
             IconButton(key: ValueKey('zone-$key-down'), visualDensity: VisualDensity.compact, iconSize: 16,
                 icon: const Icon(Icons.remove), onPressed: () { Haptics.tick(); down(); }),
-            Expanded(child: Text(value, textAlign: TextAlign.center, style: Neon.code(size: 11, color: Neon.text))),
+            Expanded(child: FittedBox(fit: BoxFit.scaleDown, child: Text(value, maxLines: 1, softWrap: false,
+                style: Neon.code(size: 11, color: Neon.text)))),
             IconButton(key: ValueKey('zone-$key-up'), visualDensity: VisualDensity.compact, iconSize: 16,
                 icon: const Icon(Icons.add), onPressed: () { Haptics.tick(); up(); }),
           ]));
