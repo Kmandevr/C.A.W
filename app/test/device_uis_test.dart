@@ -87,6 +87,27 @@ void main() {
     }
   });
 
+  // Step 5 of #175: every device on a phone held sideways (844 × 390) and narrow portrait (360 × 740), every tab,
+  // lays out without overflow; the tab content scrolls instead of being cut.
+  group('every built-in fits a phone, portrait and landscape, every tab', () {
+    for (final id in [...builtinEffects, ...builtinInstruments]) {
+      for (final size in const [Size(844, 390), Size(360, 740)]) {
+        testWidgets('$id at ${size.width.round()} × ${size.height.round()}', (tester) async {
+          await open(tester, id, size: size, live: false);
+          expect(tester.takeException(), isNull);
+          final tabs = find.byWidgetPredicate((w) => w.key is ValueKey<String> &&
+            (w.key! as ValueKey<String>).value.startsWith('device-tab-'));
+          for (var i = 0; i < tabs.evaluate().length; i++) {
+            await tester.tap(tabs.at(i));
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull, reason: 'tab $i');
+          }
+          await close(tester);
+        });
+      }
+    }
+  });
+
   group('goldens, phone', () {
     for (final id in [...builtinEffects, ...builtinInstruments]) {
       testWidgets(id, (tester) async {
