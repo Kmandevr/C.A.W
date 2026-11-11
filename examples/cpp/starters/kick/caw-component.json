@@ -1,0 +1,11 @@
+{
+  "format": "caw.component",
+  "version": 1,
+  "component": {
+    "id": "org.caw.starter.kick",
+    "name": "Kick"
+  },
+  "sources": [
+    "src/kick.cpp"
+  ]
+}

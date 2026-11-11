@@ -1,0 +1,11 @@
+{
+  "format": "caw.component",
+  "version": 1,
+  "component": {
+    "id": "org.caw.starter.glitch-fx",
+    "name": "Glitch"
+  },
+  "sources": [
+    "src/glitch_fx.cpp"
+  ]
+}
