@@ -33,13 +33,20 @@ struct Engine::AutomationData {
     std::vector<AutomationPointSpec> pan;
 };
 
-// Export buffers, allocated on the control thread and never moved. Each slot points at its own
-// slice of a pointer segment: one segment for every slot when the pool is first made, then one per
-// grow for the slots it adds, so a grow never moves a slice the audio thread reads.
+// A slot's export pointer table: exactly as many entries as the largest chain it has held exports
+// (#133). Never resized: a chain that exports more gets a new table by command (SetExports), and the
+// audio thread hands the old one back to be freed.
+struct Engine::ExportTable {
+    size_t capacity = 0;
+    std::unique_ptr<std::array<double, kBlock>*[]> entries;
+};
+
+// Export buffers and the slots' pointer tables, allocated on the control thread; a buffer never
+// moves or is freed while the Engine lives (a slot keeps its buffers for its next layer).
 struct Engine::ExportPool {
-    size_t capacityPerSlot = 0;
-    std::vector<std::unique_ptr<std::array<double, kBlock>*[]>> segments;
     std::vector<std::unique_ptr<std::array<double, kBlock>>> buffers;
+    std::vector<std::unique_ptr<ExportTable>> tables;  // every table sent and not yet handed back
+    size_t entries = 0;  // the entries of those tables
 };
 
 // Per-layer audio and meter state. Fields above `vol` belong to the audio thread.
@@ -48,6 +55,7 @@ struct Engine::Slot {
     // last) gets the new last index from the audio thread when a Grow swaps in a larger table.
     int index = -1;
     bool active = false;
+    bool listed = false;     // in Engine::live_, the slots the per-chunk loops visit (audio thread)
     bool removing = false;
     bool fresh = true;       // the chain has not played yet since it was installed or play started
     bool contiguous = false; // the previous sample was processed, so a seam can crossfade
@@ -106,15 +114,14 @@ struct Engine::Slot {
 
     bool ctlBusy = false;  // control thread only: a layer holds this slot, or it is still fading out
 
-    // Stable slice in Engine::ExportPool. Atomic (#133): the control thread sets both when the pool is
-    // first made, on slots the audio thread is already playing; elements a chain reads are written
-    // before the chain is installed (the command queue orders that).
-    std::atomic<std::array<double, kBlock>**> exportBuf{nullptr};
-    std::atomic<size_t> exportCapacity{0};
-    bool hasExports() const noexcept { return exportBuf.load(std::memory_order_relaxed) != nullptr; }
+    // The slot's export pointer table (in Engine::ExportPool). `exports` is the audio thread's, set only by
+    // a SetExports command; `ctlExports` is the control thread's, the newest table it sent. The control
+    // thread fills a table's entries before it sends it, so the two threads never share a field (#133).
+    ExportTable* exports = nullptr;
+    ExportTable* ctlExports = nullptr;
+    bool hasExports() const noexcept { return exports != nullptr; }
     std::array<double, kBlock>* exportAt(size_t b) const noexcept {
-        std::array<double, kBlock>** table = exportBuf.load(std::memory_order_relaxed);
-        return table && b < exportCapacity.load(std::memory_order_relaxed) ? table[b] : nullptr;
+        return exports && b < exports->capacity ? exports->entries[b] : nullptr;
     }
     size_t exportCount = 0;  // grows to the largest active chain export count; audio-thread owned
 
@@ -292,12 +299,13 @@ struct Engine::SendTable {
 static_assert(ComponentChain::kMaxFrames == static_cast<uint32_t>(kBlock), "component chains run Engine blocks");
 
 struct Engine::Cmd {
-    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches } type = Play;
+    enum Type { Install, SetSteps, SetPattern, Remove, Transport, SetMaster, SetMasterChain, SetInserts, SetInstrument, SetComponentAutomation, SetDelay, SetSends, SetSendLevel, Play, Stop, AuditionOnly, ClearOverload, SetOrder, SetRouting, ConfigureBus, SetAutomation, Grow, Preview, Metronome, ReleaseTouches, SetExports } type = Play;
     std::shared_ptr<const Pattern>* pattern = nullptr;
     // SetOrder: slots in dependency order; SetPattern: for each note of the old pattern, the new note that carries it
     // on, or -1 (matchPatternNotes). Owned; retired by the audio thread.
     std::vector<int>* orderList = nullptr;
     SlotTable* table = nullptr;  // Grow: the larger slot table (owned; the one it replaces is retired)
+    ExportTable* exportTable = nullptr;  // SetExports: the slot's new export table (owned by ExportPool)
     int slot = 0;
     Chain* chain = nullptr;
     ComponentChain* masterChain = nullptr;  // SetMasterChain: the master's; SetInserts/SetInstrument: the slot's (owned)
@@ -337,6 +345,7 @@ struct Engine::Retired {
     ComponentAutomation* componentAutomation = nullptr;  // a component chain's automation table replaced
     DelayLine* delay = nullptr;  // a latency-compensation delay replaced or freed
     SendTable* sends = nullptr;  // a route table replaced or freed
+    ExportTable* exportTable = nullptr;  // an export table SetExports replaced (ExportPool frees it)
 };
 
 namespace {
@@ -357,7 +366,7 @@ constexpr double kLimitCeiling = 0.977;  // about -0.2 dBFS
 constexpr int kPendingSlack = 126;
 constexpr size_t kMaxProjectComponents = 256;  // native component instances in one project (tracks and master)
 constexpr int64_t kMaxCompensationFrames = 1 << 15;  // latency compensation up to about 0.7 s at 48 kHz
-// What one slot's export segment reserves per buffer: the pointer, the owner, and the buffer.
+// What one export buffer costs against exportBufferBudget(): the buffer, its owner, and one table entry.
 constexpr uint64_t kExportBufferBytes = static_cast<uint64_t>(kBlock) * sizeof(double);
 constexpr uint64_t kExportSlotBytes =
     kExportBufferBytes + sizeof(std::array<double, kBlock>*) + sizeof(std::unique_ptr<std::array<double, kBlock>>);
@@ -654,7 +663,7 @@ struct Engine::MixGraph {
           target(static_cast<size_t>(slots), 0), routable(static_cast<size_t>(slots), 0),
           modules(static_cast<size_t>(slots), 0), pending(static_cast<size_t>(slots) + 1, 0),
           deferred(static_cast<size_t>(slots) + 1, 0), emitted(static_cast<size_t>(slots) + 1, 0),
-          slotOrder(static_cast<size_t>(slots), 0), stack(static_cast<size_t>(slots) + 1, 0), position(static_cast<size_t>(slots) + 1, 0),
+          slotOrder(static_cast<size_t>(slots), 0), stack(static_cast<size_t>(slots) + 1, 0), position(static_cast<size_t>(slots) + 1, UINT32_MAX),
           order(static_cast<size_t>(nodeCount()), 0), edges(static_cast<size_t>(maxEdges()), GraphConnection{}) {
         const int kNodes = nodeCount();
         ids.reserve(kNodes);
@@ -714,16 +723,55 @@ struct Engine::SlotTable {
     int capacity = 0;                // layer slots; slots[capacity] is the audition
     std::unique_ptr<Slot*[]> slots;  // capacity + 1, pointing into Engine::slotStore_
     std::unique_ptr<int[]> processOrder;  // capacity + 1 entries
+    // capacity + 1 entries: the slots in use, ascending (audio thread; Engine::live_). The per-chunk loops
+    // visit only these, so their cost follows the layers in use, not the capacity (#133).
+    std::unique_ptr<int[]> live;
     std::unique_ptr<MixGraph> graph;
 };
 
 uint32_t Engine::mixGraphNodesRun() const noexcept { return mixGraph_->executor.runCount(); }
+int Engine::slotsScannedPerChunk() const noexcept { return liveCount_; }
+
+size_t Engine::exportBytes() const noexcept {
+    if (!exportPool_) return 0;
+    return exportPool_->buffers.size() * (kExportBufferBytes + sizeof(std::unique_ptr<std::array<double, kBlock>>)) +
+           exportPool_->entries * sizeof(std::array<double, kBlock>*);
+}
+
+// Control thread: forget a table the audio thread handed back (or never received) and free it.
+void Engine::dropExportTable(ExportTable* t) noexcept {
+    if (!t || !exportPool_) return;
+    auto& tables = exportPool_->tables;
+    for (size_t i = 0; i < tables.size(); ++i)
+        if (tables[i].get() == t) {
+            exportPool_->entries -= t->capacity;
+            tables[i] = std::move(tables.back());
+            tables.pop_back();
+            return;
+        }
+}
+
+// Audio thread: slot i joins the in-use list (kept ascending, so loops over it run in index order as
+// the full scans did). It leaves in processChunk once nothing is left for a loop to do there.
+void Engine::markLive(int i) noexcept {
+    Slot& s = slotAt(i);
+    if (s.listed) return;
+    s.listed = true;
+    int k = liveCount_;
+    while (k > 0 && live_[k - 1] > i) {
+        live_[k] = live_[k - 1];
+        --k;
+    }
+    live_[k] = i;
+    ++liveCount_;
+}
 
 void Engine::bindTable() noexcept {
     SlotTable& t = *table_;
     slots_ = t.slots.get();
     mixGraph_ = t.graph.get();
     processOrder_ = t.processOrder.get();
+    live_ = t.live.get();
     capacity_ = t.capacity;
     auditionSlot_ = t.capacity;
     slotCount_ = t.capacity + 1;
@@ -750,6 +798,7 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
     first->capacity = initial;
     first->slots.reset(new Slot*[static_cast<size_t>(initial + 1)]);
     first->processOrder.reset(new int[static_cast<size_t>(initial + 1)]());
+    first->live.reset(new int[static_cast<size_t>(initial + 1)]());
     slotStore_.reserve(static_cast<size_t>(initial + 1));
     for (int s = 0; s <= initial; ++s) {
         slotStore_.push_back(std::make_unique<Slot>());
@@ -774,9 +823,10 @@ Engine::Engine(double sampleRate, EngineResourceBudget resourceBudget)
         const double q = ((g64 - g2) - 62.0 * d) / 3906.0;  // (64^2 - 2^2) - 62 * (2^2 - 1^2)
         const double b = d - 3.0 * q;
         const double a = g1 - b - q;
+        // A slot's export table header; its entries are charged to exportBufferBudget() with the buffers (#133).
         const double perSlot = static_cast<double>(sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) +
-                                                   sizeof(int) + 2 * sizeof(Retired)) +
-            static_cast<double>(exportPerSlot_) * static_cast<double>(kExportSlotBytes - kExportBufferBytes);
+                                                   2 * sizeof(int) + 2 * sizeof(Retired) + sizeof(ExportTable) +
+                                                   sizeof(std::unique_ptr<ExportTable>));
         const double budget = static_cast<double>(resourceBudget_.graphWorkingBytes);
         auto fits = [&](int c) {
             const double cap = c;
@@ -880,6 +930,7 @@ void Engine::drainRetired() {
         delete r.componentAutomation;
         delete r.delay;
         delete r.sends;
+        dropExportTable(r.exportTable);
         if (r.freed) r.freed->ctlBusy = false;
     }
 }
@@ -922,7 +973,7 @@ int Engine::freeSlot() {
 
 // Control thread, under ctl_: a table of `capacity` layer slots that keeps every existing Slot
 // (layer slots at their indices, the audition moved to the new last one), a mix graph sized for
-// it, and export segments for the new slots; sent to the audio thread as one Grow command.
+// it; sent to the audio thread as one Grow command. New slots have no export table until a chain exports.
 std::string Engine::grow(int capacity) {
     SlotTable& old = *ctlTable_;
     if (capacity <= old.capacity) return {};
@@ -930,16 +981,15 @@ std::string Engine::grow(int capacity) {
         return "the project needs " + std::to_string(capacity) + " layer slots; this device's memory budget allows at most " +
                std::to_string(maxLayers_);
     const size_t storeBefore = slotStore_.size();
-    const size_t segmentsBefore = exportPool_ ? exportPool_->segments.size() : 0;
     auto rollBack = [&] {  // nothing new reached the audio thread: drop it again
         slotStore_.resize(storeBefore);
-        if (exportPool_) exportPool_->segments.resize(segmentsBefore);
     };
     auto t = std::make_unique<SlotTable>();
     try {
         t->capacity = capacity;
         t->slots.reset(new Slot*[static_cast<size_t>(capacity + 1)]);
         t->processOrder.reset(new int[static_cast<size_t>(capacity + 1)]());
+        t->live.reset(new int[static_cast<size_t>(capacity + 1)]());
         for (int s = 0; s < old.capacity; ++s) t->slots[s] = old.slots[s];
         t->slots[capacity] = old.slots[old.capacity];  // the audition; the audio thread sets its index
         slotStore_.reserve(storeBefore + static_cast<size_t>(capacity - old.capacity));
@@ -952,8 +1002,8 @@ std::string Engine::grow(int capacity) {
         }
         t->graph.reset(new MixGraph(*this, capacity, sr_, resourceBudget_));
         // The budget holds the old graph and the new one at once (maxLayers() allows for that).
-        const uint64_t perSlot = sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) + sizeof(int) +
-                                 2 * sizeof(Retired) + exportPerSlot_ * (kExportSlotBytes - kExportBufferBytes);
+        const uint64_t perSlot = sizeof(Slot) + sizeof(std::unique_ptr<Slot>) + sizeof(Slot*) + 2 * sizeof(int) +
+                                 2 * sizeof(Retired) + sizeof(ExportTable) + sizeof(std::unique_ptr<ExportTable>);
         const uint64_t peak = static_cast<uint64_t>(old.graph->bytes()) + t->graph->bytes() +
                               perSlot * static_cast<uint64_t>(capacity + 1);
         if (peak > resourceBudget_.graphWorkingBytes) {
@@ -961,17 +1011,6 @@ std::string Engine::grow(int capacity) {
             return "growing to " + std::to_string(capacity) + " layer slots needs " + std::to_string(peak) +
                    " bytes of graph working memory; this device's budget is " +
                    std::to_string(resourceBudget_.graphWorkingBytes);
-        }
-        if (exportPool_) {
-            // New slots get their own segment; existing slices (which the audio thread reads) stay put.
-            const size_t added = static_cast<size_t>(capacity - old.capacity);
-            const size_t per = exportPool_->capacityPerSlot;
-            exportPool_->segments.push_back(std::make_unique<std::array<double, kBlock>*[]>(per * added));
-            exportPool_->buffers.reserve(per * static_cast<size_t>(capacity + 1));
-            for (int s = old.capacity; s < capacity; ++s) {
-                t->slots[s]->exportBuf = exportPool_->segments.back().get() + static_cast<size_t>(s - old.capacity) * per;
-                t->slots[s]->exportCapacity = per;
-            }
         }
     } catch (const std::bad_alloc&) {
         rollBack();
@@ -1534,15 +1573,18 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
     };
     std::vector<Planned> plan;
     std::map<std::string, LayerState> nextLayers;
-    // Export buffers (#133): charged per layer here, while a layer that doesn't fit can still be
-    // skipped like one without a free slot, so nothing later refuses a project after slots were
-    // claimed or commands sent. Buffers once made stay with their slot and are reused.
-    size_t exportBuffersPlanned = exportPool_ ? exportPool_->buffers.size() : 0;
+    // Export memory (#133): buffers and the slots' pointer-table entries, charged per layer here in
+    // bytes against exportBufferBudget() (each buffer with one entry), while a layer that doesn't fit
+    // can still be skipped like one without a free slot, so nothing later refuses a project after
+    // slots were claimed or commands sent. Buffers once made stay with their slot and are reused.
+    constexpr size_t kBufferBytes = kExportBufferBytes + sizeof(std::unique_ptr<std::array<double, kBlock>>);
+    constexpr size_t kEntryBytes = sizeof(std::array<double, kBlock>*);
+    const size_t exportBudgetBytes = exportBufferBudget() * kExportSlotBytes;
+    size_t exportBytesPlanned = exportBytes();
     auto exportBuffersIn = [&](int slot) {
-        std::array<double, kBlock>** table = ctlSlot(slot).exportBuf.load(std::memory_order_relaxed);
-        const size_t capacity = ctlSlot(slot).exportCapacity.load(std::memory_order_relaxed);
+        const ExportTable* table = ctlSlot(slot).ctlExports;
         size_t made = 0;  // made from index 0 up, so the first empty entry ends them
-        while (table && made < capacity && table[made]) ++made;
+        while (table && made < table->capacity && table->entries[made]) ++made;
         return made;
     };
     std::map<std::string, std::vector<std::string>> warnings;
@@ -1761,11 +1803,15 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 if (module != modules_.end() && module->second.program) exports += module->second.program->exports.size();
             }
             const size_t made = exportBuffersIn(pl.ls.slot);
-            const size_t adds = exports > made ? exports - made : 0;
+            const ExportTable* table = ctlSlot(pl.ls.slot).ctlExports;
+            const size_t entries = table ? table->capacity : 0;
+            // A larger table replaces the slot's old one, which stays charged until the audio thread lets it go.
+            const size_t adds = (exports > made ? exports - made : 0) * kBufferBytes +
+                                (exports > entries ? exports : 0) * kEntryBytes;
             const char* why = nullptr;
             if (exports > exportPerSlot_)
                 why = "its chain exports more values than one layer may hold within this device's memory budget";
-            else if (exportBuffersPlanned + adds > exportBufferBudget())
+            else if (exportBytesPlanned + adds > exportBudgetBytes)
                 why = "the project's exports would exceed this device's export buffer budget (if another song is "
                       "still fading out, try again when it has)";
             if (why) {
@@ -1792,7 +1838,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
                 }
                 continue;
             }
-            exportBuffersPlanned += adds;
+            exportBytesPlanned += adds;
         }
         plan.push_back(std::move(pl));
     }
@@ -1865,58 +1911,62 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         }
     }
 
-    // Reserve a stable pointer table from the graph-working budget. Individual buffers are
-    // allocated only when a project needs them; their addresses never move during Engine life.
-    std::vector<size_t> requiredExportsPerSlot(static_cast<size_t>(slotCount), 0);
-    size_t maxExportsPerSlot = 0;
+    // Export tables and buffers for what each planned layer exports (charged above). A slot whose
+    // table is too small gets a new one, exactly its chain's size, with the old entries copied and the
+    // new buffers made, sent before the chain that reads it (SetExports; the audio thread retires the
+    // old table). A buffer's address never changes, so readers wired to it stay valid.
+    if (!exportPool_) {
+        try {
+            exportPool_ = std::make_unique<ExportPool>();
+        } catch (const std::bad_alloc&) {
+            return R"({"ok":false,"error":"unable to allocate the export pool within the hardware-derived memory budget"})";
+        }
+    }
     for (const Planned& pl : plan) {
         if (pl.ls.slot < 0 || pl.ls.slot >= slotCount || pl.ids.empty()) continue;
-        size_t count = 0;
+        size_t required = 0;
         for (const std::string& id : pl.ids) {
             auto module = modules_.find(id);
-            if (module != modules_.end() && module->second.program)
-                count += module->second.program->exports.size();
+            if (module != modules_.end() && module->second.program) required += module->second.program->exports.size();
         }
-        requiredExportsPerSlot[static_cast<size_t>(pl.ls.slot)] = count;
-        maxExportsPerSlot = std::max(maxExportsPerSlot, count);
-    }
-    if (maxExportsPerSlot > 0) {
-        // Every slot may hold exportPerSlot_ buffers (fixed from the budget at construction); the
-        // pointer segment for all current slots is made the first time a project exports.
-        const size_t budgetCapacity = exportPerSlot_;
-        if (!exportPool_) {
-            if (budgetCapacity < maxExportsPerSlot)
-                return R"({"ok":false,"error":"project exports exceed the hardware-derived graph working-memory budget"})";
-            try {
-                auto pool = std::make_unique<ExportPool>();
-                pool->capacityPerSlot = budgetCapacity;
-                pool->segments.push_back(std::make_unique<std::array<double, kBlock>*[]>(budgetCapacity * static_cast<size_t>(slotCount)));
-                pool->buffers.reserve(budgetCapacity * static_cast<size_t>(slotCount));
-                for (int slot = 0; slot < slotCount; ++slot) {
-                    ctlSlot(slot).exportBuf = pool->segments.back().get() + static_cast<size_t>(slot) * budgetCapacity;
-                    ctlSlot(slot).exportCapacity = budgetCapacity;
-                }
-                exportPool_ = std::move(pool);
-            } catch (const std::bad_alloc&) {
-                return R"({"ok":false,"error":"unable to allocate the export pointer table within the hardware-derived memory budget"})";
-            }
-        } else if (maxExportsPerSlot > exportPool_->capacityPerSlot) {
-            return R"({"ok":false,"error":"project requires more exports per layer than the hardware-derived stable export pool supports"})";
-        }
+        if (required == 0) continue;
+        Slot& slot = ctlSlot(pl.ls.slot);
+        ExportTable* table = slot.ctlExports;
+        ExportTable* made = nullptr;  // a new table, not yet sent
         try {
-            for (int slot = 0; slot < slotCount; ++slot) {
-                const size_t required = requiredExportsPerSlot[static_cast<size_t>(slot)];
-                for (size_t index = 0; index < required; ++index) {
-                    if (ctlSlot(slot).exportBuf.load(std::memory_order_relaxed)[index]) continue;
-                    auto buffer = std::make_unique<std::array<double, kBlock>>();
-                    buffer->fill(0.0);
-                    auto* stable = buffer.get();
-                    exportPool_->buffers.push_back(std::move(buffer));
-                    ctlSlot(slot).exportBuf.load(std::memory_order_relaxed)[index] = stable;
-                }
+            if (!table || table->capacity < required) {
+                auto fresh = std::make_unique<ExportTable>();
+                fresh->capacity = required;
+                fresh->entries = std::make_unique<std::array<double, kBlock>*[]>(required);  // null entries
+                if (table) std::copy_n(table->entries.get(), table->capacity, fresh->entries.get());
+                ExportTable* added = fresh.get();
+                exportPool_->tables.push_back(std::move(fresh));  // on bad_alloc `fresh` still frees it
+                exportPool_->entries += required;
+                made = table = added;
+            }
+            // Only entries no chain on this slot has exported yet: the audio thread never reads them.
+            for (size_t index = 0; index < required; ++index) {
+                if (table->entries[index]) continue;
+                auto buffer = std::make_unique<std::array<double, kBlock>>();
+                buffer->fill(0.0);
+                auto* stable = buffer.get();
+                exportPool_->buffers.push_back(std::move(buffer));
+                table->entries[index] = stable;
             }
         } catch (const std::bad_alloc&) {
+            dropExportTable(made);
             return R"({"ok":false,"error":"unable to allocate the required export buffers within the hardware-derived memory budget"})";
+        }
+        if (made) {
+            Cmd c;
+            c.type = Cmd::SetExports;
+            c.slot = pl.ls.slot;
+            c.exportTable = made;
+            if (!send(c)) {
+                dropExportTable(made);
+                return R"({"ok":false,"error":"audio command queue is not accepting project updates"})";
+            }
+            slot.ctlExports = made;
         }
     }
 
@@ -1933,7 +1983,7 @@ std::string Engine::setProjectImpl(const ProjectSpec& p, bool offline) {
         for (size_t k = 0; k < pl.ids.size(); ++k) {
             const ModuleState& m = modules_.at(pl.ids[k]);
             for (const ExportDef& e : m.program->exports) {
-                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, ctlSlot(pl.ls.slot).exportBuf.load(std::memory_order_relaxed)[buf]->data()});
+                sources.emplace(m.ref + "." + e.name, Source{pl.ls.slot, k, ctlSlot(pl.ls.slot).ctlExports->entries[buf]->data()});
                 ++buf;
             }
         }
@@ -3072,6 +3122,7 @@ void Engine::applyCommands() noexcept {
             case Cmd::SetPattern:
             case Cmd::Remove:
             case Cmd::SetOrder:
+            case Cmd::SetExports:
             case Cmd::Grow: retirementNeed = 1; break;
             case Cmd::ConfigureBus: retirementNeed = c.flag ? 9 : 8; break;
             // Every slot may retire its current and old chain. The pending overflow holds that at
@@ -3097,6 +3148,7 @@ void Engine::applyCommands() noexcept {
                     s.peakL.store(0, std::memory_order_relaxed);  // a reused slot doesn't show its last owner's level
                     s.peakR.store(0, std::memory_order_relaxed);
                     s.active = true;
+                    markLive(c.slot);
                     s.removing = false;
                     s.fresh = true;
                     s.contiguous = false;
@@ -3176,6 +3228,7 @@ void Engine::applyCommands() noexcept {
                 s.peakL.store(0, std::memory_order_relaxed);
                 s.peakR.store(0, std::memory_order_relaxed);
                 s.active = true;
+                markLive(c.slot);
                 s.removing = false;
                 s.bus = true;
                 if (c.flag) {
@@ -3434,10 +3487,23 @@ void Engine::applyCommands() noexcept {
                 SlotTable& t = *c.table;
                 for (int k = 0; k < processCount_; ++k)
                     t.processOrder[k] = processOrder_[k] == auditionSlot_ ? t.capacity : processOrder_[k];
+                for (int k = 0; k < liveCount_; ++k)  // the audition stays last: still ascending
+                    t.live[k] = live_[k] == auditionSlot_ ? t.capacity : live_[k];
                 t.slots[t.capacity]->index = t.capacity;
                 retire(nullptr, nullptr, nullptr, nullptr, nullptr, table_.release());  // freed on the control thread
                 table_.reset(c.table);  // table_ held nothing after release(): no delete here
                 bindTable();
+                break;
+            }
+            case Cmd::SetExports: {
+                // A larger export table, with the old one's entries: chains keep reading the same buffers.
+                Slot& s = slotAt(c.slot);
+                if (s.exports) {
+                    Retired r;
+                    r.exportTable = s.exports;
+                    retireEntry(r);
+                }
+                s.exports = c.exportTable;
                 break;
             }
             case Cmd::ClearOverload:
@@ -3462,8 +3528,11 @@ double Engine::slotTarget(const Slot& s) const noexcept {
 
 void Engine::updateSolo() noexcept {
     bool any = false;
-    for (int i = 0; i < capacity_ && !any; ++i)
+    for (int k = 0; k < liveCount_ && !any; ++k) {
+        const int i = live_[k];
+        if (i >= capacity_) break;  // the audition, always last
         any = slotAt(i).active && !slotAt(i).removing && slotAt(i).solo.load(std::memory_order_relaxed);
+    }
     anySolo_ = any;
 }
 
@@ -3761,8 +3830,8 @@ void Engine::previewCommand(const Cmd& c) noexcept {
 // slot doesn't run, so its previews end at once. Only previewing slots are looked at: no cost when none was played.
 void Engine::updatePreviewing(int frames) noexcept {
     bool any = false;
-    for (int i = 0; i < slotCount_; ++i) {
-        Slot& s = slotAt(i);
+    for (int k = 0; k < liveCount_; ++k) {
+        Slot& s = slotAt(live_[k]);
         if (!s.previewing) continue;
         const bool silent = !s.active || (slotTarget(s) == 0.0 && s.gain == 0.0);
         bool voices = false;
@@ -4396,8 +4465,8 @@ int Engine::planChunk(int maxFrames) noexcept {
     if (previewChunk_) {
         // Stopped, with previews: only the previewing tracks run, with no pattern events and no transport, through
         // their effects, mix, folder buses and master. Swaps and removals wait for playback, as they do while stopped.
-        for (int i = 0; i < slotCount_; ++i) {
-            Slot& s = slotAt(i);
+        for (int k = 0; k < liveCount_; ++k) {
+            Slot& s = slotAt(live_[k]);
             if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
             if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
             s.target = slotTarget(s);
@@ -4429,8 +4498,8 @@ int Engine::planChunk(int maxFrames) noexcept {
         }
         return m;
     }
-    for (int i = 0; i < slotCount_; ++i) {
-        Slot& s = slotAt(i);
+    for (int k = 0; k < liveCount_; ++k) {
+        Slot& s = slotAt(live_[k]);
         if (!s.active || (!s.bus && !s.cur)) { s.mode = Slot::Mode::Idle; continue; }
         if (s.bus) { s.mode = Slot::Mode::Bus; continue; }
         s.target = slotTarget(s);
@@ -4488,7 +4557,12 @@ int Engine::planChunk(int maxFrames) noexcept {
 }
 
 int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
-    for (int i = 0; i < slotCount_; ++i) {
+    // Only slots in use are visited (#133). A slot leaves the list once no loop has anything left to do
+    // for it: inactive, exports cleared, not previewing and planned Idle (the scans it skips would only
+    // set Idle again). Its routing scratch is reset, as updateRouting would have left it.
+    int kept = 0;
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         Slot& slot = slotAt(i);
         if (slot.hasExports() && slot.exportCount > 0 &&
             (!slot.active || !slot.cur || (slotTarget(slot) == 0.0 && slot.gain == 0.0))) {
@@ -4496,12 +4570,25 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
                 if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), maxFrames, 0.0);
             if (!slot.active || (!slot.cur && !slot.pending)) slot.exportCount = 0;
         }
+        if (!slot.active && slot.exportCount == 0 && !slot.previewing && slot.mode == Slot::Mode::Idle) {
+            slot.listed = false;
+            MixGraph& g = *mixGraph_;
+            g.routable[i] = 0;
+            g.modules[i] = 0;
+            g.target[i] = -1;
+            g.pending[i] = 0;
+            g.deferred[i] = g.emitted[i] = 0;
+            g.position[i] = UINT32_MAX;
+            continue;
+        }
+        live_[kept++] = i;
     }
+    liveCount_ = kept;
     const int m = planChunk(maxFrames);
     if (previewChunk_)
         // Stopped, a track that isn't previewing exports silence, not the last block it played.
-        for (int i = 0; i < slotCount_; ++i) {
-            Slot& slot = slotAt(i);
+        for (int k = 0; k < liveCount_; ++k) {
+            Slot& slot = slotAt(live_[k]);
             if (slot.mode == Slot::Mode::Play || !slot.hasExports()) continue;
             for (size_t b = 0; b < slot.exportCount; ++b)
                 if (slot.exportAt(b)) std::fill_n(slot.exportAt(b)->data(), m, 0.0);
@@ -4534,7 +4621,10 @@ int Engine::processChunk(float* l, float* r, int maxFrames) noexcept {
 void Engine::updateRouting() noexcept {
     MixGraph& g = *mixGraph_;
     const int master = g.master;
-    for (int i = 0; i < slotCount_; ++i) {
+    // Only slots in use (live_, ascending); the rest are not routable, and processChunk reset their
+    // scratch when they left the list (#133).
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         const Slot& s = slotAt(i);
         int to = -1, modules = 0;
         bool routable = s.active && (s.bus || s.cur);
@@ -4569,8 +4659,13 @@ void Engine::updateRouting() noexcept {
         if (r.key < 0 ? !d.bus : !d.inserts) return -1;
         return r.dest;
     };
-    for (int n = 0; n <= slotCount_; ++n) { g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false; }
-    for (int i = 0; i < slotCount_; ++i) {
+    for (int k = 0; k < liveCount_; ++k) {
+        const int n = live_[k];
+        g.pending[n] = 0; g.deferred[n] = false; g.emitted[n] = false;
+    }
+    g.pending[master] = 0; g.deferred[master] = false; g.emitted[master] = false;
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         if (!g.routable[i]) continue;
         if (g.target[i] >= 0 && g.target[i] != master) ++g.pending[g.target[i]];
         const Slot& s = slotAt(i);
@@ -4604,15 +4699,17 @@ void Engine::updateRouting() noexcept {
         emit(x);
     };
     for (int k = 0; k < processCount_; ++k) visit(processOrder_[k]);
-    for (int k = 0; k < slotCount_; ++k) visit(k);
+    for (int k = 0; k < liveCount_; ++k) visit(live_[k]);
     // A routing cycle is never sent by the control thread; if one appears, keep everything ordered
     // and drop the edges and routes that would point backwards.
-    for (int k = 0; k < slotCount_; ++k)
-        if (g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.slotOrder[count++] = k; }
-    for (int n = 0; n <= slotCount_; ++n) g.position[n] = UINT32_MAX;  // not run this chunk
+    for (int j = 0; j < liveCount_; ++j)
+        if (const int k = live_[j]; g.routable[k] && !g.emitted[k]) { g.emitted[k] = true; g.slotOrder[count++] = k; }
+    for (int j = 0; j < liveCount_; ++j) g.position[live_[j]] = UINT32_MAX;  // not run this chunk
+    g.position[master] = UINT32_MAX;
     for (int k = 0; k < count; ++k) g.position[g.slotOrder[k]] = static_cast<uint32_t>(k);
     g.position[master] = static_cast<uint32_t>(count);
-    for (int i = 0; i < slotCount_; ++i) {
+    for (int j = 0; j < liveCount_; ++j) {
+        const int i = live_[j];
         Slot& s = slotAt(i);
         if (!s.sends) continue;
         for (int k = 0; k < s.sends->count; ++k) {
@@ -5319,7 +5416,8 @@ void Engine::runMasterNode(const float* inL, const float* inR, float* outL, floa
 
 void Engine::pickOverloadVictim() noexcept {
     int best = -1;
-    for (int i = 0; i < slotCount_; ++i) {
+    for (int k = 0; k < liveCount_; ++k) {
+        const int i = live_[k];
         const Slot& s = slotAt(i);
         if (!s.active || s.overloaded || slotTarget(s) == 0.0) continue;
         if (best < 0 || s.order > slotAt(best).order) best = i;

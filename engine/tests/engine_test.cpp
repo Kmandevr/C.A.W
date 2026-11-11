@@ -1872,6 +1872,89 @@ TEST(engine_play_with_more_than_640_layers_retires_every_chain_without_stalling)
     CHECK_EQ(e.routingRejections(), 0u);
 }
 
+TEST(engine_export_pointer_tables_follow_each_chains_real_export_need) {
+    // #133 item 3: a slot's export pointer table was sized from the budget share (exportBuffersPerLayer()
+    // pointers for every slot once anything exported), which also capped maxLayers() near 2,145 at 4 GiB.
+    // It now holds what the slot's chain exports, and grows when a later chain exports more.
+    EngineResourceBudget budget;
+    budget.graphWorkingBytes = 4ull << 30;
+    budget.projectStateBytes = 64ull << 20;
+    budget.compileWorkingBytes = 64ull << 20;
+    budget.retirementBytes = 64ull << 20;
+    budget.totalBytes = budget.graphWorkingBytes + budget.projectStateBytes + budget.compileWorkingBytes +
+                        budget.retirementBytes;
+    Engine e(48000, budget);
+    e.setMasterBypass(true);
+    CHECK(e.exportBuffersPerLayer() > 30000);
+    CHECK(e.maxLayers() > 2145);
+    const size_t perBuffer = kBlock * sizeof(double) + 2 * sizeof(void*);  // buffer, its owner and one table entry
+    ProjectSpec p;
+    p.bpm = 120;
+    p.loopBars = 1;
+    p.master = 1.0;
+    p.modules.push_back({"src", "---\nmode: float\n---\nexport let level = 0.25\n0", {}, "src"});
+    p.modules.push_back({"reader", "---\nmode: float\n---\nsrc.level", {}, "reader"});
+    LayerSpec a;
+    a.id = "a";
+    a.chain = {"src"};
+    a.volume = 1.0;
+    LayerSpec b = a;
+    b.id = "b";
+    b.chain = {"reader"};
+    p.layers = {a, b};
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    CHECK_EQ(e.exportBytes(), perBuffer);
+    e.play();
+    CHECK_NEAR(run(e, 960).back(), 0.25 * std::cos(kPi / 4.0), 1e-6);
+    // The playing exporter's chain grows to three exports: its table is replaced while it plays.
+    p.modules[0].source = "---\nmode: float\n---\nexport let level = 0.5\nexport let x = 1\nexport let y = 2\n0";
+    CHECK(e.setProject(p).find("\"ok\":true") != std::string::npos);
+    CHECK_EQ(e.exportBytes(), 3 * perBuffer + sizeof(void*));  // the old one-entry table is still the audio thread's
+    CHECK_NEAR(run(e, 4800).back(), 0.5 * std::cos(kPi / 4.0), 1e-6);
+    e.meters();  // the replaced table comes back from the audio thread and is freed
+    CHECK_EQ(e.exportBytes(), 3 * perBuffer);
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
+TEST(engine_per_chunk_work_follows_the_layers_in_use_not_the_capacity) {
+    // #133 item 2: capacity never shrinks, so after a 700-layer project the per-chunk loops
+    // (planning, solo, export clearing, routing) must visit only the slots in use, and sound the same.
+    HardwareProfile hardware;
+    hardware.memoryBudgetMiB = 1024;
+    Engine e(48000, makeEngineResourceBudget(hardware));
+    Engine fresh(48000, makeEngineResourceBudget(hardware));
+    e.setMasterBypass(true);
+    fresh.setMasterBypass(true);
+    std::vector<float> l(64), r(64);
+    auto apply = [&](Engine& to, const ProjectSpec& p) {
+        std::atomic<bool> done{false};
+        std::string result;
+        std::thread control([&] {
+            result = to.setProject(p);
+            done.store(true);
+        });
+        while (!done.load()) to.process(l.data(), r.data(), 0);
+        control.join();
+        to.process(l.data(), r.data(), 0);
+        return result;
+    };
+    const std::string tone = std::string(kFloat) + "sine(220) * 0.01";
+    CHECK(apply(e, layersOf(700, tone, 0.0)).find("\"ok\":true") != std::string::npos);  // silent: removed at once
+    CHECK(e.layerCapacity() >= 700);
+    CHECK(apply(e, layersOf(4, tone)).find("\"ok\":true") != std::string::npos);
+    CHECK(apply(fresh, layersOf(4, tone)).find("\"ok\":true") != std::string::npos);
+    e.play();
+    fresh.play();
+    std::vector<float> er, fr;
+    const auto el = run(e, 4800, 64, &er);
+    const auto fl = run(fresh, 4800, 64, &fr);
+    CHECK(el == fl);
+    CHECK(er == fr);
+    CHECK(e.slotsScannedPerChunk() <= 5);  // the 4 layers (and at most the audition)
+    CHECK_EQ(e.slotsScannedPerChunk(), fresh.slotsScannedPerChunk());
+    CHECK_EQ(e.routingRejections(), 0u);
+}
+
 TEST(engine_export_buffers_stay_valid_across_a_grow) {
     ProjectSpec p;
     p.bpm = 120;
