@@ -1,4 +1,5 @@
 // Runs every registered test; `caw_tests --update-golden` rewrites engine/tests/golden.txt.
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -37,6 +38,9 @@ unsigned int shardFor(const char* name, unsigned int count) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Unbuffered, so a crash still shows the last test that finished (Windows buffers a piped stdout fully).
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
     const char* only = nullptr;
     unsigned int shardIndex = 0;
     unsigned int shardCount = 1;
