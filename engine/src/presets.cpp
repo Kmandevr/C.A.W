@@ -6,6 +6,7 @@
 #include <deque>
 
 #include "builtin_flagship.h"
+#include "builtin_fx_racks.h"  // fx-racks
 #include "json.h"
 
 namespace caw {
@@ -251,6 +252,9 @@ std::string number(double v) {
 const std::vector<BuiltinPreset>& builtinPresets(std::string_view componentId) {
     if (componentId == kFlagship) return flagshipPresets();
     if (componentId == "org.caw.ducker") return duckerPresets();
+    // fx-racks begin
+    if (isRackId(componentId)) return rackPresets(componentId);
+    // fx-racks end
     return kNone;
 }
 
