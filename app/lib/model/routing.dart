@@ -54,7 +54,7 @@ class ComponentKeyDoc {
 
 /// The built-ins with a sidechain input (their descriptors declare a "sidechain" port; this list is for before the
 /// descriptors arrive).
-const keyedBuiltins = {'org.caw.ducker', 'org.caw.compressor', 'org.caw.gate'};
+const keyedBuiltins = {'org.caw.ducker', 'org.caw.compressor', 'org.caw.gate', 'org.caw.ringmod' /* fx-creative */};
 
 /// Which sends and keys of a project play. The engine refuses a whole project whose routing makes a loop (a bus
 /// sending into a bus that feeds it, a ducker keyed by its own folder), so the app gives it only routes that keep

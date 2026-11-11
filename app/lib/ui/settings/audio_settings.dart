@@ -50,15 +50,26 @@ class _AudioSettingsState extends State<AudioSettings> {
   /// The rate the engine runs at now (fixed at its start), else the chosen one.
   int get _runningRate => widget.deps.state?.engine?.sampleRate ?? s.sampleRate;
 
+  String _rateLabel(int r) => r % 1000 == 0 ? '${r ~/ 1000}' : (r / 1000).toStringAsFixed(1);
+
   String _ms(int frames, int rate) => (frames * 1000 / rate).toStringAsFixed(frames * 1000 / rate < 10 ? 1 : 0);
 
   @override
   Widget build(BuildContext context) {
     final st = _status;
     final devices = _devices;
-    final names = [for (final d in devices?.devices ?? const <AudioDeviceInfo>[]) d.name];
-    final chosen = devices?.devices.where((d) => d.name == s.audioDevice).firstOrNull ??
-        devices?.devices.where((d) => d.isDefault).firstOrNull;
+    final list = devices?.devices ?? const <AudioDeviceInfo>[];
+    // Each device by its id where it has one (two identical interfaces share a name), else by name; a saved choice
+    // is found by id, then by name.
+    String key(AudioDeviceInfo d) => d.id.isNotEmpty ? 'id:${d.id}' : 'name:${d.name}';
+    final saved = (s.audioDeviceId.isNotEmpty ? list.where((d) => d.id == s.audioDeviceId).firstOrNull : null) ??
+        (s.audioDevice.isNotEmpty ? list.where((d) => d.name == s.audioDevice).firstOrNull : null);
+    final current = saved != null
+        ? key(saved)
+        : s.audioDevice.isEmpty && s.audioDeviceId.isEmpty
+            ? ''
+            : 'gone';
+    final chosen = saved ?? list.where((d) => d.isDefault).firstOrNull;
     final nativeRates = [...?chosen?.rates.where((r) => r > 0)];
     final exclusiveOffered = devices?.exclusive ?? true;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -71,17 +82,33 @@ class _AudioSettingsState extends State<AudioSettings> {
                   ? 'Closed: it opens when something plays${widget.deps.state?.audioError == null ? '' : ' (${widget.deps.state!.audioError})'}'
                   : '${st.backend} · ${st.device} · ${(st.sampleRate / 1000).toStringAsFixed(1)} kHz · '
                       '${st.periodFrames} frames × ${st.periods} = ${st.bufferMs.toStringAsFixed(1)} ms'
-                      '${st.exclusive ? ' · exclusive' : ''}${st.lowLatency ? ' · low-latency path' : ''}'),
+                      // AAudio reports the modes it granted; elsewhere they are what was asked.
+                      '${st.exclusive ? ' · exclusive' : ''}${st.lowLatency ? ' · low-latency path' : ''}'
+                      '${st.exclusive || st.lowLatency ? (st.modesReadBack ? '' : ' (asked)') : ''}'
+                      '${st.fallback ? ' · the choice did not open, so the default plays' : ''}'),
       settingDropdown<String>(
         'audio.device',
-        s.audioDevice,
+        current,
         [
           ('', 'System default'),
-          for (final n in names)
-            if (n.isNotEmpty) (n, n.length > 28 ? '${n.substring(0, 27)}…' : n),
-          if (s.audioDevice.isNotEmpty && !names.contains(s.audioDevice)) (s.audioDevice, '${s.audioDevice} (not found)'),
+          for (final (i, d) in list.indexed)
+            if (d.name.isNotEmpty)
+              (
+                key(d),
+                // Same-named interfaces get a number, in the backend's order.
+                '${d.name.length > 25 ? '${d.name.substring(0, 24)}…' : d.name}'
+                    '${list.where((o) => o.name == d.name).length > 1 ? ' (${list.take(i + 1).where((o) => o.name == d.name).length})' : ''}'
+              ),
+          if (current == 'gone') ('gone', '${s.audioDevice.isEmpty ? 'The saved device' : s.audioDevice} (not found)'),
         ],
-        (v) => s.update((x) => x.audioDevice = v),
+        (v) {
+          if (v == 'gone') return;
+          final d = list.where((d) => key(d) == v).firstOrNull;
+          s.update((x) {
+            x.audioDevice = d?.name ?? '';
+            x.audioDeviceId = d?.id ?? '';
+          });
+        },
         icon: Icons.speaker,
         subtitle: devices == null
             ? 'Where the sound plays'
@@ -96,9 +123,13 @@ class _AudioSettingsState extends State<AudioSettings> {
         (v) => s.update((x) => x.sampleRate = v),
         icon: Icons.waves,
         subtitle: [
-          if (s.sampleRate != _runningRate) 'Applies the next time C.A.W starts (now ${_runningRate ~/ 1000} kHz)'
+          if (s.sampleRate != _runningRate) 'Restart C.A.W to use it: it runs at ${_rateLabel(_runningRate)} kHz until then'
           else 'The rate the engine runs at; set when C.A.W starts',
           if (nativeRates.isNotEmpty) 'the device\'s own: ${nativeRates.map((r) => '${r / 1000}').join(', ')} kHz',
+          if (nativeRates.isNotEmpty && !nativeRates.contains(s.sampleRate))
+            devices?.backend == 'AAudio'
+                ? 'another rate is converted and may leave Android\'s low-latency path'
+                : 'another rate is converted',
         ].join('; '),
       ),
       settingDropdown<int>(
@@ -112,7 +143,12 @@ class _AudioSettingsState extends State<AudioSettings> {
         icon: Icons.timer_outlined,
         subtitle: s.bufferFrames == 0
             ? 'Chosen by Buffer mode below; Device now shows what the device gave'
-            : 'Asked for ${s.bufferFrames} frames (${_ms(s.bufferFrames, _runningRate)} ms); the device may round it',
+            : st != null && st.running && st.periodFrames > 0 && st.periodFrames != s.bufferFrames
+                ? 'Asked for ${s.bufferFrames}, the device gave ${st.periodFrames} frames '
+                    '(${_ms(st.periodFrames, st.sampleRate > 0 ? st.sampleRate : _runningRate)} ms)'
+                    '${devices?.backend == 'AAudio' ? '; Android 11 and older keep their own size' : ''}'
+                : 'Asked for ${s.bufferFrames} frames (${_ms(s.bufferFrames, _runningRate)} ms); the device may round it'
+                    '${devices?.backend == 'AAudio' ? ' or, on Android 11 and older, keep its own' : ''}',
       ),
       settingChoice<AudioBuffer>(
         'audio.mode',

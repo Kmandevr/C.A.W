@@ -1,5 +1,5 @@
 // The drive family's plugin UI (saturator and distortion): the transfer curve with the input riding it, the harmonics it adds,
-// and the modes as drawn-curve tiles.
+// and the modes as drawn-curve tiles (two rows for the saturator's eleven).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -14,10 +14,16 @@ import '../kit/hero.dart';
 import 'effect_page.dart';
 
 /// The curve families the drive devices offer.
-enum DriveShape { tape, tube, soft, hard, fold, crush }
+enum DriveShape { tape, tube, soft, hard, fold, crush, fuzz, rectify, triFold, bitShape, fat }
 
 DriveShape driveShapeOf(String label) {
   final l = label.toLowerCase();
+  // fx-dynamics: the saturator's newer curves first ("Tri fold" before "Fold", "Bit shape" before "Crush").
+  if (l.contains('fuzz')) return DriveShape.fuzz;
+  if (l.contains('rect')) return DriveShape.rectify;
+  if (l.contains('tri')) return DriveShape.triFold;
+  if (l.contains('bit shape')) return DriveShape.bitShape;
+  if (l.contains('fat')) return DriveShape.fat;
   if (l.contains('tube')) return DriveShape.tube;
   if (l.contains('soft')) return DriveShape.soft;
   if (l.contains('hard') || l.contains('clip')) return DriveShape.hard;
@@ -41,10 +47,21 @@ double driveCurve(DriveShape shape, double x, double gain, {double bias = 0, dou
         DriveShape.soft => u.abs() >= 1 ? u.sign : 1.5 * u - 0.5 * u * u * u,
         DriveShape.hard => u.clamp(-1.0, 1.0),
         DriveShape.fold => math.sin(u * math.pi / 2),
-        DriveShape.crush => () {
+        DriveShape.crush || DriveShape.bitShape => () {
             final q = math.pow(2, bits.clamp(1, 16) - 1).toDouble();
             return ((u.clamp(-1.0, 1.0)) * q).roundToDouble() / q;
           }(),
+        DriveShape.fuzz => () {
+            final v = u + u * u * u;
+            return u >= 0 ? _tanh(v) : 0.7 * _tanh(v / 0.7);
+          }(),
+        DriveShape.rectify => _tanh(u.abs()),
+        DriveShape.triFold => () {
+            final t = (u + 1) * 0.25;
+            final f = t - t.floorToDouble();
+            return 1 - 4 * (f - 0.5).abs();
+          }(),
+        DriveShape.fat => _tanh(u) + 0.5 * _tanh(u) * _tanh(u),
       };
   final b = bias * 0.5;
   return f(gain * x + b) - f(b);
@@ -83,7 +100,7 @@ class DrivePage extends StatelessWidget {
     final p = t.param(mode);
     final shape = p == null ? DriveShape.tape : driveShapeOf(formatParamValue(p, t.value(mode)));
     return effectPage('drive', [
-      Padding(padding: const EdgeInsets.only(bottom: 8), child: ModeTiles(mode, height: 56, icon: (canvas, r, i, c) {
+      Padding(padding: const EdgeInsets.only(bottom: 8), child: ModeTiles(mode, height: 56, perRow: 6, icon: (canvas, r, i, c) {
         final label = p == null || i >= p.choices.length ? '' : p.choices[i];
         iconCurve(canvas, r.deflate(2), c, (x) => driveCurve(driveShapeOf(label), x, 2.6, bits: 3) * 0.95);
       })),
@@ -95,7 +112,9 @@ class DrivePage extends StatelessWidget {
         readout: Text('${shortParamLabel(t.param('drive'), 'Drive')} ${formatParamValue(t.param('drive'), t.value('drive'))}'),
         child: const _DriveHero(),
       )),
-      KnobRow(['drive', 'bias', 'tone', if (shape == DriveShape.crush) ...['bits', 'rate'], 'output', 'mix'], size: 50),
+      KnobRow(['drive', 'bias', 'tone', if (shape == DriveShape.crush) ...['bits', 'rate'], if (shape == DriveShape.bitShape) 'bits',
+        'output', 'mix'], size: 50),
+      const KnobRow(['spread', 'dynamics'], size: 42),
       Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, runSpacing: 6, children: const [
         DeviceToggle('oversample', label: '2× oversample', icon: Icons.high_quality_outlined),
         DeviceToggle('auto_gain', label: 'Auto gain', icon: Icons.auto_fix_high),

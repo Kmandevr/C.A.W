@@ -1,0 +1,18 @@
+// Golden hashes of the Creative and Pitch & Time effects (fx_creative_test.cpp, fx_creative_effects_match_their_golden_renders): id, busy settings, hash.
+// Recorded 2026-11-11 on the first version; change one only for an intended sound change.
+    {"org.caw.tapestop", false, 0xbbe598a3ede122e8ull},
+    {"org.caw.tapestop", true, 0xce789a0844da8df7ull},
+    {"org.caw.reverser", false, 0xe3c98dac3242e53eull},
+    {"org.caw.reverser", true, 0xd44b882cf1c077d5ull},
+    {"org.caw.stutter", false, 0xbbe598a3ede122e8ull},
+    {"org.caw.stutter", true, 0x7343e690cff17b8eull},
+    {"org.caw.pitchshift", false, 0x1d07c630102f5112ull},
+    {"org.caw.pitchshift", true, 0x5c0ed3f7204e12f5ull},
+    {"org.caw.freqshift", false, 0xc29323ed370315d5ull},
+    {"org.caw.freqshift", true, 0x86303d93073debfeull},
+    {"org.caw.trancegate", false, 0x266918ab48480314ull},
+    {"org.caw.trancegate", true, 0x4afdc7cd088f4b1eull},
+    {"org.caw.bitcrush", false, 0xf5a324ae3b9fc803ull},
+    {"org.caw.bitcrush", true, 0x856d94b78f9b34a5ull},
+    {"org.caw.ringmod", false, 0x13f508eab7f00b1dull},
+    {"org.caw.ringmod", true, 0x4a1f2a2962714f50ull},

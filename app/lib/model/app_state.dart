@@ -79,13 +79,20 @@ class AppState extends ChangeNotifier {
   final Settings settings;
 
   SoundQuality? _quality;
+  String? _fallbackNote;  // the audioError a fallback set, cleared when the choice opens again
+  Future<void> _audioConfigured = Future.value();
+
+  /// Completes when the last device choice has reached the engine (tests).
+  @visibleForTesting
+  Future<void> get audioConfigured => _audioConfigured;
   AudioBuffer? _buffer;
   bool? _bufferRecording;
   String? _deviceChoice, _clickChoice;
 
   /// Sends the sound quality, the device's choice (device, callback size, exclusive mode), the click's sound and the
-  /// buffer mode to the engine when they (or whether a recording runs) changed. A running device reopens off the
-  /// audio thread (the engine's device lock; never in the callback).
+  /// buffer mode to the engine when they (or whether a recording runs) changed. A device choice reopens a running
+  /// device on a background isolate (the engine's device lock; never in the callback or on the UI isolate); when the
+  /// choice doesn't open, the system default plays instead and [audioError] says so.
   void applyAudioSettings({bool? recording}) {
     final e = engine;
     if (e == null) return;
@@ -93,13 +100,28 @@ class AppState extends ChangeNotifier {
       _quality = settings.soundQuality;
       e.setQuality(settings.soundQuality.index);
     }
-    final device = '${settings.audioDevice}|${settings.bufferFrames}|${settings.exclusiveAudio}';
+    final device =
+        '${settings.audioDeviceId}|${settings.audioDevice}|${settings.bufferFrames}|${settings.exclusiveAudio}';
     if (_deviceChoice != device) {
       _deviceChoice = device;
-      if (!e.configureAudio(
-          device: settings.audioDevice, periodFrames: settings.bufferFrames, exclusive: settings.exclusiveAudio)) {
-        audioError = 'The audio device did not reopen with the new settings';
-      }
+      final name = settings.audioDevice;
+      _audioConfigured = e
+          .configureAudio(
+              deviceId: settings.audioDeviceId,
+              device: name,
+              periodFrames: settings.bufferFrames,
+              exclusive: settings.exclusiveAudio)
+          .then((result) {
+        if (_disposed || _deviceChoice != device) return;  // a newer choice will report for itself
+        final before = audioError;
+        audioError = switch (result) {
+          AudioConfigured.ok => audioError == _fallbackNote ? null : audioError,
+          AudioConfigured.fallback => _fallbackNote = 'Couldn\'t open ${name.isEmpty ? 'the chosen size or mode' : name}; '
+              'using the default',
+          AudioConfigured.closed => 'The audio device did not reopen with the new settings',
+        };
+        if (audioError != before) notifyListeners();
+      }, onError: (Object _) {});
     }
     final click = '${settings.clickVolume}|${settings.clickSound.index}';
     if (_clickChoice != click) {
@@ -233,10 +255,10 @@ class AppState extends ChangeNotifier {
     final e = engine;
     if (e == null) return engineError ?? 'The sound engine did not load';
     if (useAudioDevice && !e.audioOn) {
-      audioError = e.startAudio();
-      if (audioError != null) {
+      final error = _openAudio(e);
+      if (error != null) {
         notifyListeners();
-        return audioError;
+        return error;
       }
     }
     e.testTone(seconds);
@@ -259,7 +281,8 @@ class AppState extends ChangeNotifier {
       hardwareProfile = EngineExecutionPolicy.hardwareProfile;
       auditionPlan = EngineExecutionPolicy.plan(workload: EngineWorkload.interactiveAudition);
       templates = Engine.templates();
-      audioError = engine!.startAudio();
+      await _audioConfigured;  // the choice is in the engine before the device opens (no reopen right after)
+      _openAudio(engine!);
     } catch (e) {
       engineError = 'The sound engine did not load: $e';
     }
@@ -460,7 +483,7 @@ class AppState extends ChangeNotifier {
   void previewOn(String layerId, int id, double pitch, double velocity) {
     final e = engine;
     if (e == null) return;
-    if (!e.audioOn) audioError = e.startAudio();
+    if (!e.audioOn) _openAudio(e);
     e.noteOn(layerId, id, pitch, velocity);
     _heldPreviews.add(id);
     _poller.wake();
@@ -808,8 +831,7 @@ class AppState extends ChangeNotifier {
       _transportOn = false;
     } else {
       if (useAudioDevice && !e.audioOn) {
-        audioError = e.startAudio();
-        if (audioError != null) return notifyListeners(); // no sound card: the pause stays where it was
+        if (_openAudio(e) != null) return notifyListeners(); // no sound card: the pause stays where it was
       }
       final from = pausedStep;
       if (countInBeats > 0) {
@@ -875,9 +897,25 @@ class AppState extends ChangeNotifier {
       flush();
       if (!meters.playing) e.stopAudio();
     } else if (!e.audioOn) {
-      audioError = e.startAudio();
+      _openAudio(e);
       notifyListeners();
     }
+  }
+
+  /// Opens the device: null when it runs, else why not ([audioError] either way). It may run on the system default
+  /// because the chosen device didn't open: it plays, and [audioError] says so.
+  String? _openAudio(Engine e) {
+    final error = e.startAudio();
+    if (error != null) return audioError = error;
+    final st = e.audioStatus();
+    if (st.fallback) {
+      final name = settings.audioDevice;
+      audioError = _fallbackNote =
+          'Couldn\'t open ${name.isEmpty ? 'the chosen size or mode' : name}; using the default';
+    } else {
+      audioError = null;
+    }
+    return null;
   }
 
   // ---------- modules (Builder) ----------
