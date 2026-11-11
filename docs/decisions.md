@@ -6,6 +6,18 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Theme profiles and edit animations (owner)
+
+**Decision (owner, 2026-11-11, answers to Claude's questions):**
+- **A theme is a full profile:**
+  - **look:** colours, fonts and size, corner roundness, glass, glow and density;
+  - **layout:** track height and header width, panel sizes, the dock layout, and the toolbar buttons' order and visibility;
+  - **behaviour:** gestures, menu style, haptics, motion and snap defaults.
+
+  Switching theme switches all of it. Profiles can be saved, duplicated, imported and exported, as colour themes are today.
+- **Edit animations:** anything an edit adds, deletes, moves or resizes animates. That covers notes, clips and tracks, lengths and sizes, and panels. The style is the user's choice, Subtle (the default) or Playful.
+- **Turning animations off:** one switch turns off every animation except the ones that help use the app (drag ghosts, snapping, press feedback). Each kind of edit animation also has its own switch (`EditMotion` in `app/lib/ui/motion.dart`).
+
 ## 2026-11-11: Touch editing in Arrange and the piano roll (owner)
 
 **Decision (owner, 2026-11-11, answers to Claude's questions):**
