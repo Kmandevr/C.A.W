@@ -321,7 +321,6 @@ bool placeMidiFile(AppState s, MidiFileDoc f, LayerDoc layer, {int? atStep}) {
   final at = first.startSteps;
   var below = s.project.layers.indexOf(layer);
   for (final mod in parts.skip(1)) {
-    if (s.project.layers.length >= 64) break;
     s.addLayer();
     final l = s.project.layers.last;
     s.editLayer(l, (l) {

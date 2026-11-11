@@ -354,10 +354,7 @@ extension ArrangeFx on AppState {
   /// there and the original stays. All of it is one undo step. Returns the clip that was placed.
   ClipDoc? moveClipTo(LayerDoc from, ClipDoc clip, LayerDoc? to, int startSteps, {bool copy = false}) {
     final name = project.module(clip.patternId)?.name;
-    // At the 64-track limit a drop below the tracks stays on the clip's own track.
-    final target = to == null
-        ? (project.layers.length >= 64 ? from : addEmptyTrack(name: name))
-        : dropTrackFor(to, newName: name);
+    final target = to == null ? addEmptyTrack(name: name) : dropTrackFor(to, newName: name);
     final start = startSteps.clamp(0, project.maxArrangementSteps - clip.lengthSteps).toInt();
     if (!copy) {
       if (identical(target, from)) {
@@ -391,7 +388,6 @@ extension ArrangeFx on AppState {
   /// Puts [asset] on a new track at the end, named after it (REAPER: an FX, instrument or file dropped on the empty
   /// area below the last track). Returns the track, or null (and no track) when the asset couldn't go on one.
   LayerDoc? dropOnNewTrack(AssetDrag asset, {int? atStep}) {
-    if (project.layers.length >= 64) return null;
     final track = addEmptyTrack(name: asset.name);
     if (dropAsset(track, asset, atStep: atStep)) return track;
     removeLayer(track);

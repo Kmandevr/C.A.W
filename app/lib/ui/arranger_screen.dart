@@ -815,10 +815,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         final narrow = constraints.maxWidth < 760;
         final controls = <Widget>[
           if (narrow)
-            IconButton(onPressed: p.layers.length >= 64 ? null : s.addLayer,
+            IconButton(onPressed: s.addLayer,
               icon: const Icon(Icons.add), color: Neon.green, tooltip: 'Add track')
           else
-            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addLayer,
+            TextButton.icon(onPressed: s.addLayer,
               icon: const Icon(Icons.add, size: 17), label: const Text('Track')),
           IconButton(key: const ValueKey('arrange-browse'), onPressed: () => setState(() => _browser = !_browser),
             color: _browser ? Neon.blue : Neon.dim, icon: const Icon(Icons.folder_open),
@@ -855,10 +855,10 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
             items: [for (final v in [1, 2, 4, 8, 16]) DropdownMenuItem(value: v, child: Text('1/${v == 1 ? 16 : 16 ~/ v}'))],
             onChanged: (v) { if (v != null) setState(() => s.arrangementSnapSteps = v); })),
           if (narrow)
-            IconButton(onPressed: p.layers.length >= 64 ? null : s.addFolder,
+            IconButton(onPressed: s.addFolder,
               icon: const Icon(Icons.create_new_folder_outlined), color: Neon.green, tooltip: 'Add folder')
           else
-            TextButton.icon(onPressed: p.layers.length >= 64 ? null : s.addFolder,
+            TextButton.icon(onPressed: s.addFolder,
               icon: const Icon(Icons.create_new_folder_outlined, size: 17), label: const Text('Folder')),
           // A phone opens the mixer as a card over the tracks; a wide screen docks it under them.
           IconButton(onPressed: () => setState(() => narrow ? mixerCard = !mixerCard : mixer = !mixer),

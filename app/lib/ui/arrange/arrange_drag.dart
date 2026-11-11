@@ -209,9 +209,8 @@ class NewTrackZone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final full = state.project.layers.length >= 64;
     return DragTarget<AssetDrag>(
-      onWillAcceptWithDetails: (_) => !full,
+      onWillAcceptWithDetails: (_) => true,
       onAcceptWithDetails: (d) {
         final box = context.findRenderObject() as RenderBox?;
         final x = box == null || stepW == null ? 0.0 : box.globalToLocal(d.offset).dx;
@@ -220,10 +219,10 @@ class NewTrackZone extends StatelessWidget {
       builder: (context, assets, _) => ValueListenableBuilder<DragSpot?>(
         valueListenable: drag.hover,
         builder: (context, spot, _) {
-          final on = !full && (assets.isNotEmpty || (spot?.newTrack ?? false));
+          final on = (assets.isNotEmpty || (spot?.newTrack ?? false));
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onDoubleTap: header && !full ? () => state.addEmptyTrack() : null,
+            onDoubleTap: header ? () => state.addEmptyTrack() : null,
             child: SizedBox(height: height, child: Padding(
               padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
               child: Align(alignment: Alignment.topLeft, child: AnimatedOpacity(
