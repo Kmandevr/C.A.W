@@ -48,8 +48,10 @@ int32_t caw_audio_buffer_frames(CawEngine*) { return 0; }
 
 char* caw_audio_devices(void) { return dup("{\"backend\":\"none\",\"exclusive\":false,\"devices\":[]}"); }
 
-int32_t caw_audio_configure(CawEngine* e, const char* device_name, int32_t period_frames, int32_t flags) {
+int32_t caw_audio_configure(CawEngine* e, const char* device_id, const char* device_name, int32_t period_frames,
+                            int32_t flags) {
     if (!e) return 1;
+    e->deviceId = device_id ? std::string(device_id).substr(0, 511) : std::string();
     e->deviceName = device_name ? std::string(device_name).substr(0, 255) : std::string();
     e->periodFrames = period_frames <= 0 ? 0 : period_frames < 16 ? 16 : period_frames > 8192 ? 8192 : period_frames;
     e->audioFlags = flags & CAW_AUDIO_EXCLUSIVE;
@@ -59,7 +61,7 @@ int32_t caw_audio_configure(CawEngine* e, const char* device_name, int32_t perio
 char* caw_audio_status(CawEngine* e) {
     if (!e) return dup("{\"running\":false}");
     return dup("{\"running\":false,\"backend\":\"none\",\"requested_device\":" + quoted(e->deviceName) +
-               ",\"requested_frames\":" + std::to_string(e->periodFrames) +
+               ",\"requested_device_id\":" + quoted(e->deviceId) + ",\"requested_frames\":" + std::to_string(e->periodFrames) +
                ",\"exclusive_requested\":" + ((e->audioFlags & CAW_AUDIO_EXCLUSIVE) ? "true" : "false") + "}");
 }
 
