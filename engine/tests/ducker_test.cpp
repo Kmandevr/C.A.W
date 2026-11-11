@@ -123,6 +123,41 @@ TEST(the_ducker_keeps_its_gain_continuous_when_a_softer_note_retriggers_it) {
     CHECK_NEAR(d.outL[3000], 0.5 * (1.0 - 0.9 * 0.1), 1e-3);  // then the soft note's depth
 }
 
+TEST(the_ducker_crossfades_when_its_look_ahead_or_mode_changes_while_playing) {
+    // Audio review fix 3: the look-ahead's read point moved by up to 10 ms in one sample. It now crossfades.
+    for (int change = 0; change < 3; ++change) {
+        Duck d({{"mode", 0.0}, {"lookahead", change == 0 ? 0.0 : change == 1 ? 4.0 : 3.0}});
+        d.sized(24000);
+        fillSine(d.inL, 170.0, 0.5);  // not a whole number of periods in 3 or 10 ms
+        fillSine(d.inR, 170.0, 0.5);
+        d.before = [&](int64_t at) {
+            if (at != 6464) return;  // where the old and new read points are far apart
+            if (change == 0) d.set("lookahead", 4.0);  // on
+            if (change == 1) d.set("lookahead", 0.0);  // off
+            if (change == 2) d.set("mode", 2.0);       // Tempo: no look-ahead (stopped: no duck either)
+        };
+        d.run();
+        // A 170 Hz sine at 0.5 moves at most 0.011 a sample; a crossfade of two of them adds a little.
+        CHECK(maxStep(d.outL, 100, 24000) < 0.03);
+    }
+}
+
+TEST(the_ducker_switches_bands_without_a_click) {
+    // Audio review fix 10: Full to Lows ran the split filters from stale state and changed path in one sample.
+    for (int to : {1, 2}) {
+        Duck d({{"mode", 0.0}});
+        d.sized(24000);
+        fillSine(d.inL, 300.0, 0.5);
+        fillSine(d.inR, 300.0, 0.5);
+        d.before = [&](int64_t at) {
+            if (at == 6400) d.set("bands", static_cast<double>(to));
+            if (at == 16000) d.set("bands", 0.0);
+        };
+        d.run();
+        CHECK(maxStep(d.outL, 100, 24000) < 0.03);  // the sine's own slope is 0.0196
+    }
+}
+
 TEST(the_ducker_survives_a_nan_or_infinite_key_in_follow_mode) {
     // Audio review fix 8: a NaN in the key stuck in the follower (and the key filters) and the output went NaN.
     for (double hpf : {20.0, 100.0}) {
