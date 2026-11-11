@@ -6,6 +6,18 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Settings as a category list, every setting real (choices to confirm)
+
+**Decision (owner):** Settings opens on a list of sections with icons; a search finds any setting and jumps to it, highlighted; new Audio and MIDI, Editing, Projects and files and Export settings; full control of the audio device and buffer; nothing hidden. **Choices made on the owner's behalf, to confirm:**
+- **Twelve sections** in this order: Audio, MIDI and input, Metronome and recording, Editing, Code editor, Look, Feel, Performance, Projects and files, Export, Keys and shortcuts, About and beta. Long-press menus moved to Feel, the Automate write mode to Metronome and recording, and the piano roll's look into Editing.
+- **The sample rate** applies at the next start: the engine is made at one rate, and remaking it while running was judged too risky for this change.
+- **Buffer sizes** offered: Auto (the buffer mode) or 16, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 2048, 4096 and 8192 frames. miniaudio gives no list of the sizes a device allows, so the page shows what the device actually granted (Device now).
+- **Exclusive mode** off by default; it is offered only on WASAPI and AAudio and falls back to shared when refused.
+- **New project** defaults to Blank at 140 BPM, 4/4 (the earlier blank project's values); the menu item is now "New project" and says what it opens.
+- **Defaults that keep today's behaviour:** autosave 0.5 s after an edit, 20 restore points, MIDI thru on, every keyboard and channel, velocity Linear, on-screen keys by touch at C3, click Classic at 100%, no pre-roll, a 0 ms recording offset, the roll at 1/16 with snap and Draw, the arrangement following the playhead (new: it pages when the playhead leaves the view), the wheel zooming only with Ctrl, deleting a track without asking.
+- **Clear caches** empties the app's temporary folder (renders waiting for the save picker); nothing else is a cache today.
+- **Not built (no engine or app path yet):** an audio input device and input monitoring (the engine has no audio input), keeping audio running in the background as a setting (background playback is not implemented, `.claude/rules/app.md`), normalize and tail length for exports (the renderer has neither).
+
 ## 2026-11-11: Routing and the ducker (#175, choices made for the owner)
 
 **Decision (Claude, for the owner to confirm):**
