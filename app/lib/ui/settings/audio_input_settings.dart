@@ -172,3 +172,19 @@ class _AudioInputSettingsState extends State<AudioInputSettings> {
     ]);
   });
 }
+
+/// The same rows, unavailable: shown where no recorder runs (no sound engine), so search still finds them.
+class AudioInputSettingsOff extends StatelessWidget {
+  const AudioInputSettingsOff({super.key});
+
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        settingHeading('Input and recording'),
+        for (final (id, icon) in const [
+          ('audio.input', Icons.mic_none), ('audio.inputDevice', Icons.settings_input_component),
+          ('audio.inputChannels', Icons.surround_sound_outlined), ('audio.latency', Icons.av_timer),
+          ('audio.latencyOffset', Icons.tune), ('audio.punch', Icons.content_cut), ('audio.recordFormat', Icons.save_alt),
+        ])
+          settingAction(id, icon: icon, iconColor: Neon.dim, subtitle: 'Needs the sound engine, which is not running here'),
+      ]);
+}

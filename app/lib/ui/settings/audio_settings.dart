@@ -203,7 +203,7 @@ class _AudioSettingsState extends State<AudioSettings> {
           child: const Text('Play'),
         ),
       ),
-      if (AudioRecorder.current case final rec?) AudioInputSettings(recorder: rec),
+      if (AudioRecorder.current case final rec?) AudioInputSettings(recorder: rec) else const AudioInputSettingsOff(),
     ]);
   }
 }
