@@ -131,13 +131,15 @@ class _PackageChecklistState extends State<PackageChecklist> {
     final on = always || _ticked.contains(d.key);
     final status = always
         ? 'in the project'
+        : d.outside
+            ? 'outside this project: not packaged'
         : d.kind == DependencyKind.plugin
             ? 'licence unknown: listed as needed'
             : d.found
                 ? 'found'
                 : 'missing';
     final users = d.usedBy.isEmpty ? '' : 'used by ${d.usedBy.take(3).join(', ')}${d.usedBy.length > 3 ? '…' : ''} · ';
-    final missing = !d.found && !always;
+    final missing = !d.found && !always && !d.outside;
     return CheckboxListTile(
       key: ValueKey('package-${d.key}'),
       dense: true,

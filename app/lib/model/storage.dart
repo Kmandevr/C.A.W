@@ -212,6 +212,9 @@ class ProjectStorage {
   Directory audioDirectory(String projectId) => Directory(
     '${_root.path}${Platform.pathSeparator}audio${Platform.pathSeparator}${_validatedProjectId(projectId)}');
 
+  /// The drum pads' own WAVs the user picked (`DrumSampleImport`), app-wide beside the projects folder.
+  Directory get drumSamplesDirectory => Directory('${_root.parent.path}${Platform.pathSeparator}drum_samples');
+
   /// Built C++ libraries that came in a project package (they load only once the user trusts each one).
   Directory nativeImportsDirectory(String projectId) => Directory(
     '${_root.path}${Platform.pathSeparator}native-imports${Platform.pathSeparator}${_validatedProjectId(projectId)}');

@@ -25,6 +25,7 @@ class ProjectDependency {
     this.embedded = false,
     this.componentId,
     this.presetId,
+    this.outside = false,
   }) : usedBy = usedBy ?? [];
 
   /// Unique within one scan (`audio:<path>`, `source:<component>`...).
@@ -44,12 +45,85 @@ class ProjectDependency {
   final bool embedded;
   final String? componentId, presetId;
 
+  /// A reference to a file outside this project's own folders (another project, the app's settings, anywhere the
+  /// project names): never read, hashed or packaged.
+  final bool outside;
+
   /// Whether the export can put it in the package: a file found here. Plug-ins have an unknown licence, so they
   /// are listed as needed and never packaged (no plug-in hosting is built either).
-  bool get packageable => found && !embedded && kind != DependencyKind.plugin;
+  bool get packageable => found && !embedded && !outside && kind != DependencyKind.plugin;
 
   /// A file the project plays that is not on this device: the banner offers Locate… and Replace….
-  bool get isMissingFile => !found && path != null && (kind == DependencyKind.audio || kind == DependencyKind.sample);
+  bool get isMissingFile =>
+      !found && !outside && path != null && (kind == DependencyKind.audio || kind == DependencyKind.sample);
+}
+
+/// A plain local absolute path, safe to look at: `/…` or `C:\…`, without `.`/`..` parts, control characters or a
+/// second colon. Refused: UNC and device paths (`\\host\share`, `//host`, `\\?\`, `\\.\`; on Windows looking at
+/// one sends the user's credentials to that host), URLs and other schemes, and relative paths. A project's paths
+/// are untrusted: every file-system call on one goes through this first.
+bool isSafeLocalPath(String path) {
+  if (path.isEmpty || path.length > 4096) return false;
+  for (final c in path.codeUnits) {
+    if (c < 0x20 || c == 0x7f) return false;
+  }
+  final s = path.replaceAll('\\', '/');
+  if (s.startsWith('//')) return false;
+  final drive = RegExp(r'^[A-Za-z]:/').hasMatch(s);
+  if (!drive && !s.startsWith('/')) return false;
+  if (s.substring(drive ? 2 : 0).contains(':')) return false;
+  for (final part in s.split('/')) {
+    if (part == '.' || part == '..') return false;
+  }
+  return true;
+}
+
+/// Replaces every path in [p] that [isSafeLocalPath] refuses with one in [missingDir] of the same file name, so it
+/// shows as missing (Locate… finds it by name) and nothing ever looks at the original. [moved] hears each change.
+/// Returns how many paths moved.
+int quarantineUnsafePaths(ProjectDoc p, String missingDir, {void Function(String from, String to)? moved}) {
+  final unsafe = <String>{};
+  for (final a in p.assets) {
+    if (!isSafeLocalPath(a.path)) unsafe.add(a.path);
+  }
+  for (final (_, use) in projectComponentUses(p)) {
+    for (final s in use.samples) {
+      if (s.path case final path? when !isSafeLocalPath(path)) unsafe.add(path);
+    }
+    if (use.id == samplerComponentId) {
+      for (final z in SamplerState.fromBase64(use.state).zones) {
+        if (!isSafeLocalPath(z.path)) unsafe.add(z.path);
+      }
+    }
+  }
+  final taken = <String>{};
+  for (final from in unsafe) {
+    var name = _baseName(from).replaceAll(RegExp(r'[^A-Za-z0-9 ._()+#-]'), '_');
+    if (name.isEmpty || name.startsWith('.')) name = 'file$name';
+    var to = '$missingDir${Platform.pathSeparator}$name';
+    for (var n = 2; !taken.add(to.toLowerCase()); n++) {
+      to = '$missingDir${Platform.pathSeparator}${name.replaceFirst(RegExp(r'(\.[^.]*)?$'), ' $n\$1')}';
+    }
+    relinkProjectPath(p, from, to);
+    moved?.call(from, to);
+  }
+  return unsafe.length;
+}
+
+/// Whether [path] is inside one of [roots] (folders; compared without case where the system ignores it).
+bool isInsideFolders(String path, List<String> roots) {
+  if (!isSafeLocalPath(path)) return false;
+  final fold = Platform.pathSeparator == '\\';
+  String norm(String x) {
+    final n = x.replaceAll('\\', '/');
+    return fold ? n.toLowerCase() : n;
+  }
+  final p = norm(path);
+  for (final r in roots) {
+    final root = norm(r).endsWith('/') ? norm(r) : '${norm(r)}/';
+    if (p.startsWith(root)) return true;
+  }
+  return false;
 }
 
 /// The ids of the built-in convolver (its impulse response is the component's saved state) and the sampler.
@@ -91,6 +165,7 @@ Map<String, List<String>> projectComponentUsers(ProjectDoc p) {
 String _baseName(String path) => path.split(RegExp(r'[/\\]')).last;
 
 int _fileSize(String path) {
+  if (!isSafeLocalPath(path)) return -1;
   try {
     final f = File(path);
     return f.existsSync() ? f.lengthSync() : -1;
@@ -102,9 +177,11 @@ int _fileSize(String path) {
 /// Lists [p]'s dependencies. [builtBinary] names the built library of a C++ component on this device (null: none);
 /// [presets] are the user's presets (those for a device the project uses are offered); [theme] is the theme in
 /// force when it is the user's own (a starter theme ships with the app); [isKnownComponent] says an id is one the
-/// engine has (a built-in), so it is not taken for a plug-in.
+/// engine has (a built-in), so it is not taken for a plug-in. [isProjectFile] says a file belongs to the project
+/// (its audio folder, the user's own picks); any other is listed as outside it, never looked at or packaged.
 List<ProjectDependency> scanProjectDependencies(
   ProjectDoc p, {
+  bool Function(String path)? isProjectFile,
   String? Function(CppComponentDoc component)? builtBinary,
   List<UserPreset> presets = const [],
   CawTheme? theme,
@@ -114,6 +191,9 @@ List<ProjectDependency> scanProjectDependencies(
   ProjectDependency file(DependencyKind kind, String path, String owner, {String? name}) {
     final key = 'file:$path';
     final dep = out.putIfAbsent(key, () {
+      if (isProjectFile != null && !isProjectFile(path)) {
+        return ProjectDependency(key: key, kind: kind, name: name ?? _baseName(path), path: path, outside: true);
+      }
       final size = _fileSize(path);
       return ProjectDependency(key: key, kind: kind, name: name ?? _baseName(path), path: path,
           size: size < 0 ? 0 : size, found: size >= 0);
@@ -227,9 +307,11 @@ Future<List<ProjectDependency>> findMissingFiles(ProjectDoc p) async {
   final missing = <ProjectDependency>[];
   for (final e in paths.entries) {
     var there = false;
-    try {
-      there = await File(e.key).exists();
-    } catch (_) {}
+    if (isSafeLocalPath(e.key)) {
+      try {
+        there = await File(e.key).exists();
+      } catch (_) {}
+    }
     if (!there) {
       missing.add(ProjectDependency(key: 'file:${e.key}', kind: e.value.$1, name: _baseName(e.key), path: e.key,
           usedBy: e.value.$2));

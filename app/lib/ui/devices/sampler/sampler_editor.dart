@@ -14,6 +14,7 @@ import '../../../model/app_state.dart';
 import '../../../model/audio_clips.dart';
 import '../../../model/audio_edit.dart';
 import '../../../model/project.dart';
+import '../../../model/project_package.dart';
 import '../../../model/sampler.dart';
 import '../../arrange/audio_waveform.dart';
 import '../../frame/sections.dart';
@@ -123,7 +124,10 @@ class _SamplerZonesPageState extends State<SamplerZonesPage> {
         if (path == null) return;
         final r = await z.state.audioIo.sfzImport(path);
         if (!r.ok || r.state == null) throw r.error.isEmpty ? 'the file could not be read' : r.error;
-        z.save(SamplerState.fromJson(r.state!));
+        final zones = SamplerState.fromJson(r.state!);
+        // The SFZ's samples are the user's pick: an export may package them (ProjectPackaging.isProjectFile).
+        z.state.userPickedFiles.addAll(zones.zones.map((x) => x.path));
+        z.save(zones);
         setState(_selected.clear);
         Haptics.drop();
         _say('Imported ${r.zones} zone${r.zones == 1 ? '' : 's'}'

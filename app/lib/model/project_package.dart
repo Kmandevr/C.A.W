@@ -6,6 +6,8 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../engine/engine.dart';
 import '../ui/theme.dart';
 import '../version.dart';
@@ -144,7 +146,7 @@ String _text(Object? v, int max) => v is String && v.length <= max ? v : '';
 
 /// Opens [path] (any .caw, .cawproj or JSON project) off the UI isolate. A package's files go into [audioDir] and
 /// [binaryDir] under names made here (never the archive's own), each checked against its manifest hash.
-Future<_Unpacked> _unpack(String path, String audioDir, String binaryDir, String abi) => Isolate.run(() {
+Future<_Unpacked> _unpack(String path, String audioDir, String binaryDir, String abi, int maxBytes) => Isolate.run(() {
   final head = File(path).openSync();
   final List<int> magic;
   try {
@@ -175,6 +177,12 @@ Future<_Unpacked> _unpack(String path, String audioDir, String binaryDir, String
       throw FormatException('This package uses a newer format (v$version); this app reads v$packageVersion.');
     }
     final projectJson = utf8.decode(zip.readBytes(projectEntry, maxBytes: PackageLimits.projectBytes));
+    // What has been unpacked or read so far, against [maxBytes]: the archive's own total only counts each entry once.
+    var unpackedBytes = manifestEntry.size + projectEntry.size;
+    void spend(ZipEntry e) {
+      unpackedBytes += e.size;
+      if (unpackedBytes > maxBytes) throw const FormatException('The package unpacks to more than this app takes.');
+    }
     final files = <(String, String, String)>[];
     final binaries = <(String, String, String, String, String)>[];
     final presets = <String>[];
@@ -193,8 +201,24 @@ Future<_Unpacked> _unpack(String path, String audioDir, String binaryDir, String
       return candidate;
     }
 
-    final list = manifest['dependencies'];
-    for (final raw in (list is List ? list : const []).take(PackageLimits.entries)) {
+    final raw0 = manifest['dependencies'];
+    final list = raw0 is List ? raw0 : const [];
+    // Each archive file may be listed once: listing one many times would unpack it many times.
+    final listedPaths = <String>{};
+    var packagedCount = 0;
+    for (final raw in list) {
+      if (raw is Map && raw['packaged'] == true) {
+        packagedCount++;
+        final path = _text(raw['path'], 240).toLowerCase();
+        if (path.isNotEmpty && !listedPaths.add(path)) {
+          throw FormatException('The package lists $path more than once.');
+        }
+      }
+    }
+    if (list.length > PackageLimits.entries || packagedCount > zip.entries.length) {
+      throw const FormatException('The package\'s manifest lists more files than it holds.');
+    }
+    for (final raw in list) {
       if (raw is! Map) continue;
       final kind = _text(raw['kind'], 16), name = _text(raw['name'], 256), reference = _text(raw['reference'], 4096);
       final sha = _text(raw['sha256'], 64);
@@ -216,6 +240,7 @@ Future<_Unpacked> _unpack(String path, String audioDir, String binaryDir, String
         notes.add('Skipped ${name.isEmpty ? archivePath : name} (not where a package keeps it).');
         continue;
       }
+      spend(entry);
       try {
         switch (kind) {
           case 'audio' || 'sample':
@@ -284,7 +309,25 @@ Future<String> _hashOffThread(String path) => Isolate.run(() => sha256OfFileSync
 
 final Expando<Map<String, String>> _knownHashes = Expando('hashes of files a package listed');
 
+final Expando<Set<String>> _picked = Expando('files the user picked this session');
+
 extension ProjectPackaging on AppState {
+  /// Files the user picked from outside the app's folders this session (an SFZ's samples): a project's own.
+  Set<String> get userPickedFiles => _picked[this] ??= {};
+
+  /// Whether [path] belongs to the open project, so an export may read, hash and package it: inside its audio or
+  /// sample-pack folder or the drum samples the user picked, or picked this session. Anything else a project names
+  /// (another project's files, the app's own) is outside it.
+  bool isProjectFile(String path) {
+    if (!isSafeLocalPath(path)) return false;
+    if (userPickedFiles.contains(path)) return true;
+    final s = storage;
+    return isInsideFolders(path, [
+      audioDirectory.path,
+      if (s != null) ...[s.samplePacksDirectory(project.id).path, s.drumSamplesDirectory.path],
+    ]);
+  }
+
   /// The sha256 a package recorded for a file it listed but didn't carry, by its reference in the project.
   Map<String, String> get knownFileHashes => _knownHashes[this] ??= {};
 
@@ -304,7 +347,7 @@ extension ProjectPackaging on AppState {
     } catch (_) {}
     final s = settings;
     final theme = s.isStarter(s.themeName) ? null : s.theme.copyWith(profile: {...s.theme.profile, ...s.captureProfile()});
-    return scanProjectDependencies(project, builtBinary: (c) => built[c.id] ?? nativeComponents?.artifactOf(c.componentId),
+    return scanProjectDependencies(project, isProjectFile: isProjectFile, builtBinary: (c) => built[c.id] ?? nativeComponents?.artifactOf(c.componentId),
         presets: presets, theme: theme, isKnownComponent: (id) => componentInfo(id) != null);
   }
 
@@ -346,7 +389,9 @@ extension ProjectPackaging on AppState {
           final path = d.path!;
           if (!picked) {
             entry['reference'] = path;
-            if (d.found) {
+            if (d.outside) {
+              listed.add({...entry, 'packaged': false, 'outside': true});
+            } else if (d.found) {
               hashOnly.add((path, entry));
             } else {
               listed.add({...entry, 'packaged': false});
@@ -393,14 +438,15 @@ extension ProjectPackaging on AppState {
   /// one (false: nothing changes and null is returned).
   Future<ProjectImportResult?> importProjectFile(String path,
       {Future<bool> Function(ProjectDoc project)? confirm,
-      Future<NativeComponentTrust?> Function(ImportedBinary binary)? askBinaryTrust}) async {
+      Future<NativeComponentTrust?> Function(ImportedBinary binary)? askBinaryTrust,
+      @visibleForTesting int maxUnpackBytes = PackageLimits.totalBytes}) async {
     final result = ProjectImportResult();
     final id = newId('p');
     final audioDir = storage?.audioDirectory(id).path ??
         '${Directory.systemTemp.path}${Platform.pathSeparator}caw-audio${Platform.pathSeparator}$id';
     final binaryDir = storage?.nativeImportsDirectory(id).path ??
         '${Directory.systemTemp.path}${Platform.pathSeparator}caw-native-imports${Platform.pathSeparator}$id';
-    final unpacked = await _unpack(path, audioDir, binaryDir, deviceAbi);
+    final unpacked = await _unpack(path, audioDir, binaryDir, deviceAbi, maxUnpackBytes);
     Future<void> discard() async {
       for (final (_, file, _) in unpacked.files) {
         try {
@@ -471,6 +517,10 @@ extension ProjectPackaging on AppState {
       for (final (reference, file, _) in unpacked.files) {
         relinkProjectPath(copy, reference, file);
       }
+      // Network, device and URL paths become missing files before anything looks at them (a hash goes along).
+      quarantineUnsafePaths(copy, '$audioDir${Platform.pathSeparator}missing', moved: (from, to) {
+        if (knownFileHashes.remove(from) case final sha?) knownFileHashes[to] = sha;
+      });
     });
     result.filesUnpacked = unpacked.files.length;
     return result;
@@ -482,10 +532,6 @@ extension ProjectPackaging on AppState {
     final from = missing.path;
     if (from == null) return;
     final expected = knownFileHashes[from];
-    if (verify && expected != null) {
-      final got = await _hashOffThread(source);
-      if (got != expected) throw FormatException('${source.split(RegExp(r'[/\\]')).last} is not the file this project used.');
-    }
     final dir = audioDirectory;
     await dir.create(recursive: true);
     final base = safeAudioName(source.split(RegExp(r'[/\\]')).last);
@@ -496,6 +542,11 @@ extension ProjectPackaging on AppState {
     final size = await File(source).length();
     if (size > PackageLimits.audioBytes) throw const FormatException('The file is over 1 GB.');
     await File(source).copy(out.path);
+    // The copy is what gets checked (the source could change between a check and a copy).
+    if (verify && expected != null && await _hashOffThread(out.path) != expected) {
+      await out.delete();
+      throw FormatException('${source.split(RegExp(r'[/\\]')).last} is not the file this project used.');
+    }
     editProject((p) => relinkProjectPath(p, from, out.path));
     knownFileHashes.remove(from);
     await checkMissingFiles();
