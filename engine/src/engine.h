@@ -195,7 +195,7 @@ private:
     // A slot's sends and keys: pre taps after its effects, post taps after volume and pan (before its delay).
     uint32_t keyNotes(const Slot& s, int m, Event* out, uint32_t max) const noexcept;
     void runRoutes(Slot& s, const float* preL, const float* preR, const float* postL, const float* postR, int m,
-                   bool silenced, double keyPostL, double keyPostR) noexcept;
+                   bool silenced, bool bus) noexcept;
     void runMasterNode(const float* inL, const float* inR, float* outL, float* outR, int m) noexcept;
     void updateRouting() noexcept;
     double slotTarget(const Slot& s) const noexcept;

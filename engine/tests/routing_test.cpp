@@ -451,3 +451,113 @@ TEST(the_ducker_ducks_only_the_lows_or_only_the_highs) {
     CHECK(std::fabs(lows[6000]) < 1e-3);
     CHECK_NEAR(highs[6000], kQuarterOut, 1e-3);
 }
+
+namespace {
+
+double maxStep(const std::vector<float>& x, size_t from, size_t to) {
+    double m = 0;
+    for (size_t i = std::max<size_t>(from, 1); i < std::min(to, x.size()); ++i)
+        m = std::max(m, std::fabs(static_cast<double>(x[i]) - x[i - 1]));
+    return m;
+}
+
+}  // namespace
+
+TEST(a_send_switched_between_pre_and_post_fader_glides_instead_of_clicking) {
+    // Audio review fix 2: the switch changed taps in one sample (here 0.5 pre against 0.09 post).
+    ProjectSpec p = twoTracksAndABus();
+    p.layers[0].volume = 0.25;
+    p.layers[0].sends = {{"fx", 1.0, false, false}};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    std::vector<float> out = run(e, 4800);
+    CHECK(e.setSend("a", 0, 1.0, true, false));
+    const std::vector<float> pre = run(e, 4800);
+    CHECK(e.setSend("a", 0, 1.0, false, false));
+    const std::vector<float> post = run(e, 4800);
+    out.insert(out.end(), pre.begin(), pre.end());
+    out.insert(out.end(), post.begin(), post.end());
+    CHECK(maxStep(out, 2400, out.size()) < 0.01);
+    const double a = 0.5 * 0.25 * kCentre, bb = 0.25 * kCentre;
+    CHECK_NEAR(out[9000], a + bb + 0.5, 1e-5);  // pre: the track before its fader
+    CHECK_NEAR(out[14000], a + bb + a, 1e-5);   // post again
+}
+
+TEST(a_send_pointed_at_another_bus_brings_none_of_the_old_bus_audio) {
+    // Audio review fix 4: a re-pointed route's new delay line took over the old route's recent input, so the
+    // old send's audio played into the new bus at once, at full level. a sends pre-fader to "fx" (left only),
+    // then to "fx2" (right only); both buses hold a 240-frame effect, so a's sends are delayed to meet it.
+    ProjectSpec p = twoTracksAndABus();
+    p.layers.erase(p.layers.begin() + 1);  // a, fx
+    p.layers.push_back(bus("fx2"));
+    p.modules.push_back({"none", std::string(kFloat) + "0", {}});
+    for (const char* parent : {"fx", "fx2"}) {
+        LayerSpec c = track(std::string("in_") + parent, "none");
+        c.parentId = parent;
+        c.components = {transparentCompressor()};
+        p.layers.push_back(c);
+    }
+    ComponentSpec left, right;
+    left.id = right.id = "org.caw.stereo.balance";
+    left.params = {{"pan", -1.0}};
+    right.params = {{"pan", 1.0}};
+    p.layers[1].components = {left};
+    p.layers[2].components = {right};
+    p.layers[0].pan = -1.0;  // a's own sound is on the left only
+    p.layers[0].sends = {{"fx", 1.0, true, false}};
+    Engine e(48000);
+    e.setMasterBypass(true);
+    CHECK(ok(e.setProject(p)));
+    e.play();
+    std::vector<float> right1;
+    run(e, 9600, 64, &right1);
+    CHECK(std::fabs(right1[9000]) < 1e-6);  // fx is left only
+    p.layers[0].sends[0].to = "fx2";
+    CHECK(ok(e.setProject(p)));
+    std::vector<float> right2;
+    run(e, 9600, 64, &right2);
+    // The new route starts from silence and fades in: nothing of the old line comes out first.
+    double early = 0;
+    for (size_t i = 0; i < 200; ++i) early = std::max(early, std::fabs(static_cast<double>(right2[i])));
+    CHECK(early < 0.05);
+    CHECK(maxStep(right2, 0, right2.size()) < 0.01);
+    CHECK_NEAR(right2[9000], 0.5, 1e-4);
+}
+
+TEST(a_post_fader_key_is_the_same_whether_its_track_is_muted_or_not) {
+    // Audio review fix 5: a muted key track keyed with its static volume and pan (not the automated ones), and on
+    // unmute the key switched to the post tap while the fader was still rising from 0. A post key is now the pre
+    // tap times the fader's own (automated) volume and pan, whatever the mute does.
+    auto project = [](bool muted) {
+        ProjectSpec p = duckedB({{"mode", 0.0}, {"response", 1.0}, {"threshold", -24.0}, {"depth", 1.0},
+                                 {"attack", 5.0}, {"release", 50.0}}, true);
+        p.layers[1].components[0].key.pre = false;  // post-fader
+        p.layers[0].mute = muted;
+        p.layers[0].automation.push_back({"volume", {{0, 0.25}, {64, 0.25}}});
+        p.layers[0].automation.push_back({"pan", {{0, -1.0}, {64, -1.0}}});  // a: left only
+        p.layers[1].pan = 1.0;                                                // b: right only
+        return p;
+    };
+    Engine on(48000), off(48000);
+    on.setMasterBypass(true);
+    off.setMasterBypass(true);
+    CHECK(ok(on.setProject(project(false))));
+    CHECK(ok(off.setProject(project(true))));
+    on.play();
+    off.play();
+    std::vector<float> a, b;
+    run(on, 9600, 64, &a);
+    run(off, 9600, 64, &b);
+    CHECK(off.setProject(project(false)).find("\"ok\":true") != std::string::npos);  // unmuted while playing
+    std::vector<float> a2, b2;
+    run(on, 9600, 64, &a2);
+    run(off, 9600, 64, &b2);
+    a.insert(a.end(), a2.begin(), a2.end());
+    b.insert(b.end(), b2.begin(), b2.end());
+    double most = 0;
+    for (size_t i = 0; i < a.size(); ++i) most = std::max(most, std::fabs(static_cast<double>(a[i]) - b[i]));
+    CHECK(most < 1e-6);
+    CHECK(a[9000] < 0.25f * 0.9f && a[9000] > 0.0f);  // the key, 0.125 (-18 dB), is 6 dB over: half ducked
+}
