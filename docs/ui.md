@@ -1,7 +1,7 @@
 ---
 title: UI design
 summary: Arrangement-first creative UI across eight shared-state workspaces, with touch-first phone layouts and keyboard/mouse desktop access.
-updated: 2026-11-10
+updated: 2026-11-11
 covers: [app/lib/ui/, app/lib/actions/]
 ---
 
@@ -122,6 +122,10 @@ The app has three sections, Build, Files and Arrange; the Mixer, Automation, Exp
 **Desktop, tablets, and a phone set to Desktop:** the rail, the transport bar and docking panels, which can also float in windows. Settings › Layout is Auto, Phone or Desktop (owner, 2026-11-10 evening: "Setting + auto on big screen"); Auto picks the desktop frame by the window's size in logical pixels (DeX, an external display, a freeform window), not by the device. A mouse and keys work there as on a PC (hover, right-click, shortcuts).
 
 **Feel (owner, 2026-11-10 evening: "anytime you touch or drag or do anything there should be feedback"):** every touch and drag is seen and felt, subtly and snappily, following the Motion setting. Buttons dip and glow while pressed (a glow only with Reduced motion); grips, dividers and edges grow and light when grabbed, a drag that lands somewhere previews where (the focus panel's ghost, the dock's drop zones); haptics mark grab, step or snap, threshold and drop through one helper with a Strength setting (`lib/ui/haptics.dart`, `lib/ui/feedback.dart`; [app](app.md), Motion and feel). The landscape focus panel takes two thirds of the width by default and its edge resizes it (owner: "Resizable, default 2/3"). Files is a Unity-style tree, grid and inspector here; on a phone the tree is a drawer.
+
+**Guidance and reach (polish round, #175, 2026-11-11):** every empty place says what to do next and offers the button that does it (no tracks, no lanes, no clip, no saved export profile, Build with no tab open); controls that are only icons have tooltips. On a phone (below 600 dp), choices that used to be centred dialogs open as glass bottom sheets in thumb reach (`showDialogOrSheet` in `lib/ui/adaptive_sheet.dart`: the tap-tempo pad, the piano roll's generators, restore points, a Build version); wide screens keep dialogs. A row of tools that scrolls on a phone (the Arrange toolbar, the piano roll's tools, Files' filters) fades at an edge with a chevron while there is more past it (`ScrollFade` in `lib/ui/frame/frame_widgets.dart`), and the piano roll keeps ⋮ More pinned outside the scroll.
+
+**Build reads as a code tool:** a mono "Build · C++" title on its start page, a mono breadcrumb row with a status chip that says what the last build did and where the result plays, tabs with an icon and colour per kind, ▶ Build with a spinner, and one-tap Problems, Library and Versions (labelled from 640 dp) ([App](app.md), Build).
 
 The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
 
