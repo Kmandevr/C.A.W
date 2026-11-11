@@ -38,8 +38,10 @@ extern "C" {
    loops are refused; latency compensation covers buses and sends.
    10 (2026-11-11): the audio device's choice and state (caw_audio_devices, caw_audio_configure,
    caw_audio_status), the metronome's sound and volume (caw_engine_set_metronome_sound) and a test tone
-   (caw_engine_test_tone). Nothing else changes. */
-#define CAW_API_VERSION 10
+   (caw_engine_test_tone). Nothing else changes.
+   12 (2026-11-11, roadmap 2.6): live loudness and correlation meters (caw_engine_loudness,
+   caw_engine_loudness_reset, caw_engine_layer_correlation). Nothing else changes. (11 is another branch's.) */
+#define CAW_API_VERSION 12
 /* The component index that names a layer's native instrument rather than one of its "components". */
 #define CAW_INSTRUMENT_INDEX 0xFFFFFFFFu
 
@@ -362,6 +364,34 @@ CAW_API void caw_engine_set_metronome_sound(CawEngine* e, double volume, int32_t
    plays, with 10 ms fades; 0 ends one early. caw_engine_test_tone_sounding says whether one still sounds. */
 CAW_API void caw_engine_test_tone(CawEngine* e, double seconds);
 CAW_API int32_t caw_engine_test_tone_sounding(CawEngine* e);
+
+/* Live loudness and correlation meters (API version 12, roadmap 2.6), read from the UI at 10 Hz or more. The
+   master's loudness is measured on what the device plays (after the master chain and the safety limiter; the test
+   tone and nothing else is left out) per ITU-R BS.1770-5 (11/2023) and EBU Tech 3341 V4 (11/2023): K-weighted,
+   left and right weighted 1. Momentary is the last 400 ms, short-term the last 3 s (both ungated), integrated the
+   gated loudness (400 ms blocks every 100 ms, the -70 LUFS absolute gate and the relative gate 10 LU below) since
+   the last Play or caw_engine_loudness_reset. True peak is 4x oversampled with BS.1770-5 Annex 2's interpolating
+   filter (2x at 96 kHz, none from 192 kHz). A value with no reading yet, or of silence, is CAW_METER_NONE. */
+#define CAW_METER_NONE (-200.0f)
+typedef struct CawLoudness {
+    float momentary_lufs;
+    float short_term_lufs;
+    float integrated_lufs;
+    float momentary_max_lufs;   /* the loudest since the last reset (EBU Mode's maxima) */
+    float short_term_max_lufs;
+    float true_peak_l_dbtp;     /* each side's true peak since the last read */
+    float true_peak_r_dbtp;
+    float true_peak_max_dbtp;   /* the louder side's, since the last reset */
+    float correlation;          /* the master's stereo correlation: 1 mono, 0 unrelated or silent, -1 opposite */
+    float integrated_seconds;   /* audio the integrated loudness has measured */
+} CawLoudness;
+CAW_API void caw_engine_loudness(CawEngine* e, CawLoudness* out);
+/* Starts the integrated loudness, the maxima and the true-peak maximum again (Play does this too). */
+CAW_API void caw_engine_loudness_reset(CawEngine* e);
+/* A project layer's stereo correlation (a track or a folder bus, of what it sends on after volume and pan),
+   over about 300 ms: 1 identical sides, 0 unrelated or silent, -1 opposite. 1 on success, 0 if layer_index is not a
+   project layer. */
+CAW_API int32_t caw_engine_layer_correlation(CawEngine* e, int32_t layer_index, float* out);
 
 #ifdef __cplusplus
 }

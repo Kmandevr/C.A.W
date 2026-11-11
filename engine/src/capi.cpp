@@ -280,6 +280,33 @@ int32_t caw_engine_layer_meter(CawEngine* e, int32_t index, CawLayerMeter* out) 
     return caw_engine_layer_meter_stereo(e, index, out, nullptr, nullptr);
 }
 
+void caw_engine_loudness(CawEngine* e, CawLoudness* out) {
+    if (!out) return;
+    *out = CawLoudness{CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE,
+                       CAW_METER_NONE, CAW_METER_NONE, CAW_METER_NONE, 0.0f, 0.0f};
+    if (!e) return;
+    const caw::LoudnessMeter::Reading r = e->engine->loudness();
+    out->momentary_lufs = r.momentary;
+    out->short_term_lufs = r.shortTerm;
+    out->integrated_lufs = r.integrated;
+    out->momentary_max_lufs = r.momentaryMax;
+    out->short_term_max_lufs = r.shortTermMax;
+    out->true_peak_l_dbtp = r.truePeakL;
+    out->true_peak_r_dbtp = r.truePeakR;
+    out->true_peak_max_dbtp = r.truePeakMax;
+    out->correlation = e->engine->masterCorrelation();
+    out->integrated_seconds = static_cast<float>(r.integratedSeconds);
+}
+
+void caw_engine_loudness_reset(CawEngine* e) {
+    if (e) e->engine->resetLoudness();
+}
+
+int32_t caw_engine_layer_correlation(CawEngine* e, int32_t index, float* out) {
+    if (!e || !out) return 0;
+    return e->engine->layerCorrelation(index, *out) ? 1 : 0;
+}
+
 int32_t caw_engine_scope(CawEngine* e, int32_t index, float* out, int32_t n) {
     if (!e || !out || n <= 0) return 0;
     return e->engine->scope(index, out, n);

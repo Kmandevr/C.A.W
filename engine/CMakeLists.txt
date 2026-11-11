@@ -171,6 +171,7 @@ set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILIT
 # The component testing suite (#163): offline measurements of C++ effects.
 target_sources(caw_core PRIVATE src/analysis.cpp src/component_test.cpp)
 target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#164)
+target_sources(caw_core PRIVATE src/meters.cpp)  # live loudness, true peak and correlation meters (roadmap 2.6)
 
 
 # The library the app loads through dart:ffi.
@@ -216,6 +217,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/routing_test.cpp)  # sends, buses, keys and routing loops (#175)
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
   target_sources(caw_tests PRIVATE tests/stereo_path_test.cpp)  # stereo end to end: buses and WAV export (#17, #121)
+  target_sources(caw_tests PRIVATE tests/meters_test.cpp)  # loudness (BS.1770-5, EBU Tech 3341), true peak, correlation
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
