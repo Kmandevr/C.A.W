@@ -53,7 +53,7 @@ The repository currently includes:
 - Plugin Builder for validating and packaging .caw source modules.
 
 Important boundaries:
-- USB/Bluetooth MIDI device discovery, connection and live Engine voice routing are not implemented.
+- USB, Bluetooth and UMP MIDI devices (Android) and WinMM ports (Windows) play instruments at the frame they were played; not yet tested on the owner's hardware. MIDI clock and output are not implemented.
 - Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
 - Sends to bus folders, sidechain keys (the ducker, compressor and gate) and bus effects are built (2026-11-11, #175); receives, parallel paths inside a track and a routing matrix are not. Native effect chains on tracks, buses and the master are built (engine).
 - Module/global parameter automation and stems export remain approved v2 work.

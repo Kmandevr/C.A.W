@@ -49,7 +49,7 @@ An overview by area, checked against the repository on 2026-11-03. The stage tab
 | Arrangement | MIDI clip timeline, linked/independent clips, nested folders, stereo folder buses, track/folder volume-pan automation, module-parameter and project-global automation | Audio clips, clip automation, tempo map, markers/sections and consolidation |
 | Mixer | Track volume/pan/mute/solo, generator/effect chains, folder buses and master output | Sends, general sidechain routing, parallel paths, master effect chain and integrated visual track/routing inspector |
 | Sound/synth | Code generators/effects, house synth patch compiler/playback, built-in wavetable morph/phase warp, LFOs and modulation matrix | Custom/imported wavetable authoring, drawn LFO curves and additional warp modes |
-| MIDI | MIDI pattern import/export and MIDI 2.0 UMP decoder/input-queue primitive | USB/Bluetooth device I/O, controller learn, clock and live Engine voice routing |
+| MIDI | MIDI pattern import/export; USB, Bluetooth, UMP (Android) and WinMM (Windows) devices into instruments at their frame; controller learn | MIDI clock, MIDI-CI, MIDI output |
 | Export | WAV loop/free-length/one-shot/wavetable, MIDI, profiles/history and bounded in-memory queue | SFZ multisample workflow, stems, persistent queue and broader batch delivery |
 | Audio assets | Generated audio and module/effect processing | Audio import, non-destructive audio clips, sample editor and multisample mapping |
 | Recording | No audio or live MIDI recording workflow | MIDI/audio recording, monitoring, latency compensation, punch, loop recording, takes and comping |
@@ -192,8 +192,8 @@ Built on the graph from the Foundation stage. Do not keep a second mixer or crea
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 5.1 | USB and Bluetooth MIDI device discovery, connection, status and reconnect | Planned | both | F5 | A MIDI 2.0 UMP decoder and input-queue primitive exist; no device I/O |
-| 5.2 | Note/CC routing, controller learn and editable mappings | Planned | both | 5.1, F6 | Not built |
+| 5.1 | USB and Bluetooth MIDI device discovery, connection, status and reconnect | Built, untested on hardware | both | F5 | Android USB, Bluetooth LE (in-app scan) and UMP devices, Windows WinMM ports; a device list with activity lights and on/off; frame-accurate engine input (API 13). Windows MIDI Services not used ([app](app.md)) |
+| 5.2 | Note/CC routing, controller learn and editable mappings | Built, untested on hardware | both | 5.1, F6 | Learn MIDI CC on any knob's long-press sheet; mappings in the project, listed and removable in Settings › MIDI; MPE and bend range ([app](app.md)) |
 | 5.3 | MIDI clock in/out and sync | Planned | engine | 5.1 | Not built |
 | 5.4 | Control surfaces with assignable controls and feedback | Planned | both | 5.2 | Not built |
 | 5.5 | On-screen performance keys, metronome and count-in | Built | both | — | Slide-up keys and 4×4 pads, the engine's click and a count-in ([app](app.md), Frame: Record; 2026-11-10) |
@@ -221,7 +221,7 @@ Recording is part of the product direction and the last stage before Release 1. 
 
 | # | Item | Status | Where | Depends on | What's missing |
 |---|---|---|---|---|---|
-| 7.1 | MIDI recording from devices and on-screen controls | Partial | both | 5.1, 5.5 | Record writes a take from a USB MIDI keyboard (Android) or the on-screen keys and pads, with loop passes as takes and a Keep take? toast ([app](app.md)); no record modes (overdub, replace) |
+| 7.1 | MIDI recording from devices and on-screen controls | Partial | both | 5.1, 5.5 | Record writes a take from a MIDI device (placed at its timestamps) or the on-screen keys and pads, with loop passes as takes and a Keep take? toast ([app](app.md)); no record modes (overdub, replace) |
 | 7.2 | Audio input selection, channel configuration and input monitoring | Planned | both | 5.6 | No audio input path exists |
 | 7.3 | Multitrack audio recording to arrangement tracks | Planned | both | 3.2, 7.2 | Not built |
 | 7.4 | Input latency measurement and compensation | Planned | engine | 7.2 | Not built |
