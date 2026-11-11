@@ -10,8 +10,10 @@
 #define MA_NO_RESOURCE_MANAGER
 #define MA_NO_NODE_GRAPH
 #define MA_NO_ENGINE
-// The one global miniaudio defines without MA_API, renamed so it cannot meet the device copy's.
+// The globals miniaudio defines without MA_API, renamed so they cannot meet the device copy's
+// (ma_android_sdk_version is defined on Android only; the Android link failed on it as a duplicate).
 #define ma_atomic_global_lock caw_decode_ma_atomic_global_lock
+#define ma_android_sdk_version caw_decode_ma_android_sdk_version
 #define MINIAUDIO_IMPLEMENTATION
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
