@@ -15,7 +15,6 @@ void main() {
   test('60 live pattern steps on 16 tracks', () async {
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = bigProject(s);
     s.starting = false;
     s.useAudioDevice = false;

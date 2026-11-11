@@ -18,12 +18,11 @@ void main() {
       ]);
     s.selectedModuleId = 'pat';
     final pv = s.preview!;
-    expect(pv.chain, isEmpty);
     expect(pv.pattern, 'pat');
     expect(pv.instrument, same(synth));
     expect(pv.components, [width]);
     final json = jsonDecode(s.project.toEngineJson(
-        audition: pv.chain, auditionPattern: pv.pattern, auditionInstrument: pv.instrument,
+        auditionPattern: pv.pattern, auditionInstrument: pv.instrument,
         auditionComponents: pv.components, auditionOnly: true)) as Map<String, dynamic>;
     expect((json['audition'] as Map)['instrument'], synth.toJson());
     expect(json['audition_only'], true);

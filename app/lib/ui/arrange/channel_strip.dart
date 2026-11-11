@@ -1,165 +1,24 @@
-// Mixer: Reaper-style channel strips (chain slots, pan, fader, meter, M and S), the master's FX slots, effects dragged
-// between strips, and the shared module inspector.
-// All edits flow through AppState; this screen does not own a second mix or processing model.
-import 'dart:math' as math;
-
+// Arrange's mixer strips: Reaper-style channel strips (chain slots, pan, fader, meter, M and S), the master strip
+// with its FX slots, and effects dragged between strips. The mixer card and the focus view's Mixer tab show them.
+// All edits flow through AppState; nothing here owns a second mix or processing model.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../model/app_state.dart';
-import '../model/arrange_fx.dart';
-import '../model/mixer_fx.dart';
-import '../model/project.dart';
-import '../model/routing_edit.dart';
-import 'param_control.dart';
-import 'routing_view.dart';
-import 'theme.dart';
-import 'volume_fader.dart';
-import 'arrange/fx_stack.dart' show FxStack, addEffectTo;
-import 'arrange/track_color.dart';
-import 'devices/device_editor.dart' show openDeviceEditor;
-import 'glass.dart';
-import 'haptics.dart';
-import 'widgets.dart';
+import '../../model/app_state.dart';
+import '../../model/arrange_fx.dart';
+import '../../model/mixer_fx.dart';
+import '../../model/project.dart';
+import '../../model/routing_edit.dart';
+import '../routing_view.dart';
+import '../theme.dart';
+import '../volume_fader.dart';
+import 'fx_stack.dart' show FxStack, addEffectTo;
+import 'track_color.dart';
+import '../devices/device_editor.dart' show openDeviceEditor;
+import '../glass.dart';
+import '../haptics.dart';
+import '../widgets.dart';
 
-/// Below this the strips keep their height and the panel scrolls up and down instead.
-const _minStripHeight = 500.0;
 const _stripWidth = 100.0;
-
-class MixerScreen extends StatefulWidget {
-  const MixerScreen({super.key, required this.state, required this.onOpenBuilder});
-  final AppState state;
-  final VoidCallback onOpenBuilder;
-
-  @override
-  State<MixerScreen> createState() => _MixerScreenState();
-}
-
-class _MixerScreenState extends State<MixerScreen> {
-  double _inspectorFraction = 0.34;
-  final FocusNode _dividerFocusNode = FocusNode(debugLabel: 'Mixer inspector width');
-
-  @override
-  void dispose() {
-    _dividerFocusNode.dispose();
-    super.dispose();
-  }
-
-  void _adjustInspector(double delta) {
-    setState(() {
-      _inspectorFraction = (_inspectorFraction + delta).clamp(0.24, 0.52).toDouble();
-    });
-  }
-
-  // A chain slot was tapped: its parameters show in the inspector beside the strips, or in a sheet on narrow panels.
-  void _openSlot(LayerDoc layer, String id, {required bool wide}) {
-    final s = widget.state;
-    s.selectLayer(layer); // this selects its instrument, or its first effect
-    if (s.selectedModuleId != id) s.selectModule(id);
-    if (wide) return;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Neon.panel,
-      builder: (context) => SafeArea(child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.8),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(12),
-          child: ListenableBuilder(listenable: s,
-            builder: (context, _) => _ModuleInspector(state: s, onOpenBuilder: widget.onOpenBuilder)),
-        ),
-      )),
-    );
-  }
-
-  Widget _strips(double height, {required bool wide}) {
-    final s = widget.state;
-    final layers = s.project.layers;
-    return SizedBox(height: height, child: ListView(
-      key: const ValueKey('mixer-strips'),
-      scrollDirection: Axis.horizontal,
-      children: [
-        _MasterStrip(state: s),
-        const SizedBox(width: 8),
-        if (layers.isEmpty)
-          const SizedBox(width: 180, child: Center(child: Text('Add a track to mix it.',
-            style: TextStyle(color: Neon.dim)))),
-        for (var i = 0; i < layers.length; i++)
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: ChannelStrip(state: s, layer: layers[i], index: i, onSlot: (id) => _openSlot(layers[i], id, wide: wide)),
-          ),
-      ],
-    ));
-  }
-
-  Widget _divider(double available, double height) => Focus(
-    focusNode: _dividerFocusNode,
-    onFocusChange: (_) => setState(() {}),
-    onKeyEvent: (node, event) {
-      if (event is! KeyDownEvent) return KeyEventResult.ignored;
-      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        _adjustInspector(0.02);
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        _adjustInspector(-0.02);
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    },
-    child: Semantics(
-      container: true,
-      focused: _dividerFocusNode.hasFocus,
-      label: 'Mixer inspector width',
-      value: '${(_inspectorFraction * 100).round()} percent',
-      increasedValue: '${((_inspectorFraction + 0.02).clamp(0.24, 0.52) * 100).round()} percent',
-      decreasedValue: '${((_inspectorFraction - 0.02).clamp(0.24, 0.52) * 100).round()} percent',
-      onIncrease: () => _adjustInspector(0.02),
-      onDecrease: () => _adjustInspector(-0.02),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.resizeColumn,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragUpdate: (details) => _adjustInspector(-details.delta.dx / available),
-          child: SizedBox(width: 12, height: height,
-            child: Center(child: Container(width: 2, height: 72,
-              decoration: BoxDecoration(color: Neon.blue, borderRadius: BorderRadius.circular(2)))),
-          ),
-        ),
-      ),
-    ),
-  );
-
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(builder: (context, constraints) {
-    final wide = constraints.maxWidth >= 1200;
-    const pad = 12.0;
-    final height = constraints.maxHeight.isFinite
-        ? math.max(_minStripHeight, constraints.maxHeight - 2 * pad) : _minStripHeight;
-    final s = widget.state;
-    return ListView(padding: const EdgeInsets.all(pad), children: [
-      Align(alignment: Alignment.centerRight, child: TextButton.icon(
-        key: const ValueKey('mixer-routing'),
-        onPressed: () => showRoutingView(context, s),
-        icon: const Icon(Icons.account_tree_outlined, size: 16),
-        label: const Text('Routing'))),
-      if (!wide)
-        _strips(height, wide: false)
-      else
-        LayoutBuilder(builder: (context, inner) {
-          final available = inner.maxWidth - 12;
-          final inspectorWidth = available * _inspectorFraction;
-          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SizedBox(width: available - inspectorWidth, child: _strips(height, wide: true)),
-            _divider(available, height),
-            SizedBox(width: inspectorWidth, height: height, child: SingleChildScrollView(
-              child: _ModuleInspector(state: s, onOpenBuilder: widget.onOpenBuilder))),
-          ]);
-        }),
-    ]);
-  });
-}
-
 
 /// "C" or "0" is centre, "30L" or "-30" is 30% left, "30R" or "30" is 30% right; null when it isn't a pan.
 double? _parsePan(String text) {
@@ -206,8 +65,10 @@ class _Fader extends StatelessWidget {
       VolumeFader(value: value, color: color, label: label, onChanged: onChanged, defaultGain: defaultGain);
 }
 
-class _MasterStrip extends StatelessWidget {
-  const _MasterStrip({required this.state});
+/// The master's strip: its FX slots (tap one for its UI, + to add, the chain button for the whole chain), fader,
+/// meter and peaks.
+class MasterStrip extends StatelessWidget {
+  const MasterStrip({super.key, required this.state});
   final AppState state;
 
   @override
@@ -275,23 +136,22 @@ Future<void> showMasterFx(BuildContext context, AppState s) => showGlassSheet<vo
 );
 
 /// One effect in a strip's slots: tap for its UI; long-press and drag it onto another strip to copy it there (Alt or
-/// Shift held while dropping moves it, as REAPER's Alt-drag). [index] is in the chain's C++ effects, or with [caw]
-/// in its .caw effects.
+/// Shift held while dropping moves it, as REAPER's Alt-drag). [index] is in the chain's C++ effects.
 class FxSlot extends StatelessWidget {
   const FxSlot({super.key, required this.state, required this.layer, required this.index, required this.onTap,
-    this.caw = false, this.selected = false});
+    this.selected = false});
   final AppState state;
   final LayerDoc layer;
   final int index;
-  final bool caw, selected;
+  final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final use = caw ? null : layer.components[index];
-    final name = caw ? state.project.module(layer.effectIds[index])?.name ?? 'Missing module' : state.componentLabel(use!.id);
-    final color = caw ? Neon.pink : (isBuiltinComponent(use!.id) ? Neon.blue : Neon.green);
-    final bypassed = use?.bypass ?? false;
+    final use = layer.components[index];
+    final name = state.componentLabel(use.id);
+    final color = isBuiltinComponent(use.id) ? Neon.blue : Neon.green;
+    final bypassed = use.bypass;
     final slot = Semantics(button: true, selected: selected, label: '${layer.name} effect $name${bypassed ? ', bypassed' : ''}',
       excludeSemantics: true, child: Padding(
       padding: const EdgeInsets.only(bottom: 3),
@@ -316,7 +176,7 @@ class FxSlot extends StatelessWidget {
       ),
     ));
     return LongPressDraggable<FxSlotDrag>(
-      data: FxSlotDrag(layer.id, caw ? 'caw' : 'native', index),
+      data: FxSlotDrag(layer.id, index),
       onDragStarted: Haptics.grab,
       feedback: Material(color: Colors.transparent, child: Container(
         width: 96, height: 40,
@@ -346,9 +206,7 @@ class FxDropTarget extends StatelessWidget {
       final keys = HardwareKeyboard.instance;
       final move = keys.isAltPressed || keys.isShiftPressed;
       final from = state.chainLayer(d.data.layerId);
-      final name = d.data.native
-          ? state.componentLabel(from!.components[d.data.index].id)
-          : state.project.module(from!.effectIds[d.data.index])?.name ?? 'effect';
+      final name = state.componentLabel(from!.components[d.data.index].id);
       final toId = layer.id, fromName = from.name;
       state.endUndoStep();
       if (!state.dropFx(d.data, layer, move: move)) return;
@@ -375,45 +233,16 @@ class FxDropTarget extends StatelessWidget {
 }
 
 /// One track's or folder's strip, top to bottom: name, chain slots (or the folder's bus switch), route, pan, fader
-/// and meter, level and peak, M and S. The Mixer, Arrange's mixer card and the focus view's Mixer tab share it.
+/// and meter, level and peak, M and S. Arrange's mixer card and the focus view's Mixer tab share it.
 class ChannelStrip extends StatelessWidget {
-  const ChannelStrip({super.key, required this.state, required this.layer, required this.index, required this.onSlot});
+  const ChannelStrip({super.key, required this.state, required this.layer, required this.index});
   final AppState state;
   final LayerDoc layer;
   final int index;
-  final ValueChanged<String> onSlot;
 
   String? get _instrumentName {
     final id = layer.instrument?.id;
     return id == null ? null : state.componentLabel(id);
-  }
-
-  Widget _slot(String id, Color color) {
-    final selected = state.selectedLayerId == layer.id && state.selectedModuleId == id;
-    final name = state.project.module(id)?.name ?? 'Missing module';
-    final role = id == layer.generatorId ? 'instrument' : 'effect';
-    return Semantics(button: true, selected: selected, label: '${layer.name} $role $name', excludeSemantics: true,
-      child: Padding(
-      padding: const EdgeInsets.only(bottom: 3),
-      child: Material(
-        color: selected ? color.withValues(alpha: 0.28) : Neon.panelHi,
-        borderRadius: BorderRadius.circular(4),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(4),
-          onTap: () => onSlot(id),
-          child: Container(
-            height: 40,
-            padding: const EdgeInsets.symmetric(horizontal: 5),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              border: Border(left: BorderSide(color: color, width: 3)),
-            ),
-            alignment: Alignment.centerLeft,
-            child: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10)),
-          ),
-        ),
-      ),
-    ));
   }
 
   /// A C++ instrument heads the slots: tap for its UI (it stays on its track, so it doesn't drag).
@@ -474,20 +303,15 @@ class ChannelStrip extends StatelessWidget {
                     for (var i = 0; i < layer.components.length; i++) _nativeSlot(context, i),
                   ]))),
               ])
-            : layer.chain.isEmpty && layer.components.isEmpty
-              // A C++ instrument (no .caw chain): its name, else there is none.
+            : layer.components.isEmpty
+              // A C++ instrument alone: its name, else there is none.
               ? Center(child: Text(_instrumentName ?? 'No instrument', maxLines: 2, overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
                   style: TextStyle(color: _instrumentName == null ? Neon.dim : Neon.green, fontSize: 10)))
               // A chain is a handful of slots: all built, scrolling inside the strip when there are more than three.
               : SingleChildScrollView(child: Column(children: [
-                  if (layer.instrument == null && layer.generatorId != null) _slot(layer.generatorId!, Neon.green)
-                  else if (layer.instrument != null) _instrumentSlot(context),
-                  // The effects after it: .caw ones, then C++ ones, each draggable onto another strip.
-                  for (var i = 0; i < layer.effectIds.length; i++)
-                    FxSlot(state: state, layer: layer, index: i, caw: true,
-                      selected: state.selectedLayerId == layer.id && state.selectedModuleId == layer.effectIds[i],
-                      onTap: () => onSlot(layer.effectIds[i])),
+                  if (layer.instrument != null) _instrumentSlot(context),
+                  // The effects after it, each draggable onto another strip.
                   for (var i = 0; i < layer.components.length; i++) _nativeSlot(context, i),
                 ]))),
           if (!layer.isFolder)
@@ -545,49 +369,5 @@ class ChannelStrip extends StatelessWidget {
         ]),
       ),
     )));
-  }
-}
-
-class _ModuleInspector extends StatelessWidget {
-  const _ModuleInspector({required this.state, required this.onOpenBuilder});
-  final AppState state;
-  final VoidCallback onOpenBuilder;
-
-  @override
-  Widget build(BuildContext context) {
-    final layer = state.project.layers.where((l) => l.id == state.selectedLayerId).firstOrNull;
-    final id = state.project.module(state.selectedModuleId) != null
-      ? state.selectedModuleId : layer?.generatorId ?? layer?.effectIds.firstOrNull;
-    final module = state.project.module(id);
-    final info = id == null ? null : state.info[id];
-    return NeonPanel(color: Neon.blue, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        const Expanded(child: Text('MODULE INSPECTOR', style: TextStyle(color: Neon.blue, fontWeight: FontWeight.w800))),
-        TextButton.icon(onPressed: module == null ? null : onOpenBuilder,
-          icon: const Icon(Icons.open_in_new, size: 16), label: const Text('Open in Builder')),
-      ]),
-      if (module == null)
-        const Text('Tap a chain slot to inspect its parameters.')
-      else ...[
-        Text(module.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-        Text(info?.summary.isNotEmpty == true ? info!.summary : state.kindOf(module.id),
-          style: const TextStyle(color: Neon.dim)),
-        const SizedBox(height: 8),
-        if (info == null || !info.ok)
-          Text(info?.error ?? 'Module has not compiled. Run it in Builder to expose engine parameters.',
-            style: const TextStyle(color: Neon.pink))
-        else if (info.params.isEmpty)
-          const Text('This module exposes no parameters.', style: TextStyle(color: Neon.dim))
-        else
-          ValueListenableBuilder<int>(valueListenable: state.moduleValueTick(module.id), builder: (context, _, _) => ParamGroups(
-            params: info.params, valueOf: (p) => module.params[p.name] ?? p.defaultValue,
-            color: state.isEffect(module.id) ? Neon.pink : Neon.green,
-            onChanged: (p, v) => state.setParam(module.id, p.name, v))),
-        if (module.edited)
-          const Padding(padding: EdgeInsets.only(top: 8), child: Text(
-            'Source has unrun edits. Run in Builder before expecting them in playback.',
-            style: TextStyle(color: Neon.yellow, fontSize: 12))),
-      ],
-    ]));
   }
 }

@@ -10,7 +10,6 @@ import 'package:caw/model/device_target.dart';
 import 'package:caw/model/effect_recents.dart';
 import 'package:caw/model/files_catalog.dart';
 import 'package:caw/model/mod_matrix.dart';
-import 'package:caw/model/project.dart';
 import 'package:caw/model/racks.dart';
 import 'package:caw/ui/devices/device_registry.dart';
 import 'package:caw/ui/devices/effects/creative/creative_catalog.dart' show creativeCatalog;
@@ -342,8 +341,7 @@ void main() {
     final s = state(fxRackId, {'s1_fx': h('org.caw.filter'), 's1.cutoff': 900, 's2_fx': h('org.caw.utility')});
     final t = rack(s);
     ModMatrix(t).add(ModSource.lfo1, 's1.cutoff');
-    s.project.modules.add(ModuleDoc(id: 'm', name: 'Tone', source: 'sin(2*pi*220*t)'));
-    s.project.layers.first.generatorId = 'm';
+    s.project.layers.first.setInstrument('org.caw.synth.flagship');
     await e.setProject(s.project.toEngineJson());
     expect(e.lastProjectWarnings.where((w) => w.contains('rack') || w.contains('native component')), isEmpty);
     // A child's live display is read through the rack's index (nothing published before it plays: 0).

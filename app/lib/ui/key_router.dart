@@ -48,12 +48,17 @@ typedef ActionTarget = bool Function(String id, int count, String? arg);
 
 class KeyRouter extends StatefulWidget {
   const KeyRouter(
-      {super.key, required this.state, required this.screenArea, required this.onView, required this.child});
+      {super.key, required this.state, required this.screenArea, required this.onView, this.onExport, required this.child});
   final AppState state;
 
-  /// The area of the screen showing (Builder, Arranger, Exporter) when no editor inside it has focus.
+  /// The area of the screen showing (Build, Arrange) when no editor inside it has focus.
   final Area screenArea;
+
+  /// Shows a section: 0 Build, 1 Arrange, 2 Files.
   final ValueChanged<int> onView;
+
+  /// Opens the Export page (the project menu's Export…); null leaves `view.exporter` unhandled.
+  final VoidCallback? onExport;
   final Widget child;
 
   static KeyRouterState? of(BuildContext context) => context.findAncestorStateOfType<KeyRouterState>();
@@ -270,17 +275,10 @@ class KeyRouterState extends State<KeyRouter> {
       case 'view.arranger':
         widget.onView(1);
       case 'view.exporter':
-        widget.onView(5);
-      case 'view.mixer':
-        widget.onView(2);
-      case 'view.engineLab':
-        widget.onView(3);
-      case 'view.automation':
-        widget.onView(4);
+        if (widget.onExport == null) return false;
+        widget.onExport!();
       case 'view.files':
-        widget.onView(6);
-      case 'view.pluginBuilder':
-        widget.onView(7);
+        widget.onView(2);
       case 'transport.tempoUp':
         bpm(1);
       case 'transport.tempoDown':

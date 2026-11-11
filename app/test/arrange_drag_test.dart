@@ -22,13 +22,15 @@ const synth = NativeComponentInfo(id: 'org.caw.synth.basic', name: 'Basic synth'
       ComponentPortInfo(id: 'out', type: 'audio', input: false, layout: 'stereo', channels: 2),
     ],
     parameters: [ComponentParameterInfo(id: 'cutoff', name: 'Cutoff', defaultValue: 2400, min: 20, max: 20000)]);
+const saw = NativeComponentInfo(id: 'org.caw.synth.saw', name: 'Saw', role: 'instrument', builtin: true, ports: [
+  ComponentPortInfo(id: 'notes', type: 'event', input: true, layout: 'none', channels: 0),
+  ComponentPortInfo(id: 'out', type: 'audio', input: false, layout: 'stereo', channels: 2),
+]);
 const width = NativeComponentInfo(id: 'org.caw.stereo.width', name: 'Width', role: 'effect', builtin: true,
     parameters: [ComponentParameterInfo(id: 'width', name: 'Width', defaultValue: 1, min: 0, max: 2)]);
 
 ProjectDoc project() => ProjectDoc(id: 'p', name: 'Drag test', modules: [
       ModuleDoc(id: 'pat', name: 'Beat', source: '---\nkind: pattern\nlength: 16\n---\n0 C2 1 1\n'),
-      ModuleDoc(id: 'gen', name: 'Saw', source: '---\nkind: generator\n---\n'),
-      ModuleDoc(id: 'fx1', name: 'Echo', source: '---\nkind: effect\n---\n'),
     ], layers: [
       LayerDoc(id: 'a', name: 'Drums', color: 0, clips: [ClipDoc(id: 'c1', patternId: 'pat', startSteps: 16, lengthSteps: 16)]),
       LayerDoc(id: 'f', name: 'Group', color: 1, isFolder: true),
@@ -41,8 +43,8 @@ void main() {
   setUp(() {
     s = AppState(settings: Settings());
     s.project = project();
-    s.componentCatalog.set(const [synth, width]);
-    s.nativeCatalog = const [synth, width];
+    s.componentCatalog.set(const [synth, saw, width]);
+    s.nativeCatalog = const [synth, saw, width];
   });
   tearDown(() => s.dispose());
 
@@ -109,14 +111,10 @@ void main() {
           instrument: true))!;
       expect(inst.instrument?.id, 'org.caw.synth.basic');
       expect(inst.name, 'Basic synth');
-      final gen = s.dropOnNewTrack(const AssetDrag(AssetKind.cawModule, 'gen', 'Saw', instrument: true))!;
-      expect(gen.generatorId, 'gen');
       final fx = s.dropOnNewTrack(const AssetDrag(AssetKind.nativeEffect, 'org.caw.stereo.width', 'Width'))!;
       expect(fx.components.single.id, 'org.caw.stereo.width');
       expect(fx.instrument, isNull);
-      final caw = s.dropOnNewTrack(const AssetDrag(AssetKind.cawModule, 'fx1', 'Echo'))!;
-      expect(caw.effectIds, ['fx1']);
-      expect(s.project.layers, hasLength(10));
+      expect(s.project.layers, hasLength(8));
     });
 
     test('something that cannot go on a track leaves no track', () {
@@ -133,12 +131,11 @@ void main() {
       s.dropAsset(a, drag);
       expect(s.instrumentName(a), 'Basic synth');
       expect(s.replacesInstrument(a, drag), isFalse, reason: 'the same instrument');
-      const saw = AssetDrag(AssetKind.cawModule, 'gen', 'Saw');
-      expect(s.replacesInstrument(a, saw), isTrue);
-      s.dropAsset(a, saw);
-      expect(a.instrument, isNull);
-      expect(a.generatorId, 'gen');
-      expect(s.replacesInstrument(a, const AssetDrag(AssetKind.cawModule, 'fx1', 'Echo')), isFalse,
+      const other = AssetDrag(AssetKind.nativeEffect, 'org.caw.synth.saw', 'Saw', instrument: true);
+      expect(s.replacesInstrument(a, other), isTrue);
+      s.dropAsset(a, other);
+      expect(a.instrument?.id, 'org.caw.synth.saw');
+      expect(s.replacesInstrument(a, const AssetDrag(AssetKind.nativeEffect, 'org.caw.stereo.width', 'Width')), isFalse,
           reason: 'an effect joins the chain');
     });
   });
@@ -295,9 +292,7 @@ void main() {
       AssetDrag(AssetKind.pattern, 'pat', 'Beat'),
       AssetDrag(AssetKind.midiFile, 'mf', 'Song.mid'),
       AssetDrag(AssetKind.nativeEffect, 'org.caw.synth.basic', 'Basic synth', instrument: true),
-      AssetDrag(AssetKind.cawModule, 'gen', 'Saw', instrument: true),
       AssetDrag(AssetKind.nativeEffect, 'org.caw.stereo.width', 'Width'),
-      AssetDrag(AssetKind.cawModule, 'fx1', 'Echo'),
     ];
     for (final kind in kinds) {
       testWidgets('${kind.name} (${kind.kind.name}) dropped below the last track makes a track with it', (tester) async {
@@ -323,12 +318,6 @@ void main() {
               expect(made.instrument?.id, kind.id);
             } else {
               expect(made.components.single.id, kind.id);
-            }
-          case AssetKind.cawModule:
-            if (kind.instrument) {
-              expect(made.generatorId, kind.id);
-            } else {
-              expect(made.effectIds, [kind.id]);
             }
           case AssetKind.devicePreset || AssetKind.trackPreset:
             fail('presets are tested in user_presets_test.dart');
@@ -418,16 +407,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(l.instrument?.id, 'org.caw.synth.basic');
       expect(find.text('INSTRUMENT · C++'), findsOneWidget);
-      s.addCawEffect(l, 'fx1');
-      await tester.pump();
       final inst = tester.getTopLeft(find.byKey(const ValueKey('fx-instrument-title'))).dy;
-      expect(inst, lessThan(tester.getTopLeft(find.text('CODE EFFECTS · .caw')).dy), reason: 'first in the chain');
+      expect(inst, lessThan(tester.getTopLeft(find.text('NATIVE EFFECTS · C++')).dy), reason: 'first in the chain');
       expect(find.byKey(const ValueKey('fx-instrument-bypass')), findsOneWidget);
       expect(find.byKey(const ValueKey('fx-instrument-replace')), findsOneWidget);
       await tester.pump(const Duration(seconds: 1));
     });
 
-    testWidgets('+ lists instruments beside effects, and a .caw instrument sits in the same slot', (tester) async {
+    testWidgets('+ lists instruments beside effects, and a picked instrument takes the slot', (tester) async {
       final l = layer('c');
       await pumpStack(tester, l);
       await tester.tap(find.byTooltip('Add FX or instrument'));
@@ -437,9 +424,8 @@ void main() {
       expect(find.text('Width'), findsOneWidget);
       await tester.tap(find.text('Saw'));
       await tester.pumpAndSettle();
-      expect(l.generatorId, 'gen');
-      expect(find.text('INSTRUMENT · .caw'), findsOneWidget);
-      expect(find.text('.caw instrument'), findsOneWidget);
+      expect(l.instrument?.id, 'org.caw.synth.saw');
+      expect(find.text('INSTRUMENT · C++'), findsOneWidget);
       await tester.pump(const Duration(seconds: 1));
     });
 

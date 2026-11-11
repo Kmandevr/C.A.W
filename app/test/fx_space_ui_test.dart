@@ -150,8 +150,8 @@ void main() {
     final s = AppState(settings: Settings());
     final e = Engine.create();
     s.engine = e;
-    s.project = ProjectDoc(id: 'p', name: 'IR', bpm: 120, modules: [ModuleDoc(id: 'm', name: 'Tone', source: 'sin(2*pi*220*t)')],
-        layers: [LayerDoc(id: 'a', name: 'A', color: 1)..generatorId = 'm']);
+    s.project = ProjectDoc(id: 'p', name: 'IR', bpm: 120,
+        layers: [LayerDoc(id: 'a', name: 'A', color: 1, instrument: ComponentUseDoc('org.caw.synth.flagship'))]);
     final layer = s.project.layers.first;
     layer.components.add(ComponentUseDoc('org.caw.utility'));
     layer.components.add(ComponentUseDoc('org.caw.convolver', {'source': 9.0, 'mix': 1.0}));

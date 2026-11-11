@@ -13,18 +13,13 @@ void main() {
   final lib = Platform.environment['CAW_LIB'];
   final skip = lib == null || lib.isEmpty;
 
-  testWidgets('track cards open a panel, and Edit opens the sound', (tester) async {
+  testWidgets('track cards open a panel with the instrument and the mix', (tester) async {
     tester.view.physicalSize = const Size(412, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
-    // The First loop plays C++ instruments; this test is about a .caw generator, so a .caw kick track leads.
-    final cawKick = s.moduleFromTemplate(s.template('kick.caw')!);
-    s.project.modules.insert(0, cawKick);
-    s.project.layers.insert(0, LayerDoc(id: 'caw-kick', name: 'Kick', color: 0, generatorId: cawKick.id, lengthSteps: 16));
     s.selectedModuleId = s.project.modules.last.id;
     s.ready = true;
     s.starting = false;
@@ -50,13 +45,9 @@ void main() {
 
     await tester.tap(find.text(kick.name).first);
     await tester.pumpAndSettle();
-    expect(find.text('SOUND'), findsOneWidget);
+    expect(find.text('INSTRUMENT'), findsOneWidget);
     expect(find.text('MIX'), findsOneWidget);
-
-    await tester.tap(find.text('Edit').first);
-    await tester.pumpAndSettle();
-    expect(s.selectedModuleId, kick.generatorId);
-    expect(find.text('Controls'), findsOneWidget);
+    expect(find.text('Change'), findsOneWidget, reason: 'the instrument opens the browser');
     s.dispose();
   }, skip: skip);
 
@@ -66,7 +57,6 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     final pattern = s.project.modules.firstWhere((m) => s.isPattern(m.id));
     s.project.layers.first.clips.add(ClipDoc(id: 'far', patternId: pattern.id,
@@ -91,7 +81,6 @@ void main() {
     addTearDown(tester.view.reset);
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject()..beatsPerBar = 12;
     s.ready = true;
     s.starting = false;

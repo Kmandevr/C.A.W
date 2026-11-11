@@ -7,7 +7,7 @@ updated: 2026-11-11
 
 # How it works
 
-The map for an agent new to the repo. It shows how the parts connect; the details live in [engine](engine.md) (language, playback, C API), [app](app.md) (screens) and [agent guide](agent-guide.md) (writing modules). Every source file starts with a one-line comment saying what it is for, and `.claude/tools/tree.sh <dir>` lists them. The app's areas are called Sounds, Tracks and Export on screen, and `builder`, `arranger` and `exporter` in code (`app/lib/ui/builder_screen.dart`, `arranger_screen.dart`, `exporter_screen.dart`).
+The map for an agent new to the repo. It shows how the parts connect; the details live in [engine](engine.md) (language, playback, C API), [app](app.md) (screens) and [agent guide](agent-guide.md) (writing modules). Every source file starts with a one-line comment saying what it is for, and `.claude/tools/tree.sh <dir>` lists them. The app has three sections, Build, Files and Arrange (`app/lib/ui/cpp/build_section.dart`, `file_manager_screen.dart`, `arranger_screen.dart`): Build edits C++ components and patterns (a pattern's tab is `pattern_screen.dart`), and Export is a page from the project menu (`export_page.dart`). The app no longer edits or plays .caw sound modules (#160): the steps below that compile .caw text are the engine's, until #160 deletes them.
 
 ## From a keystroke to sound
 

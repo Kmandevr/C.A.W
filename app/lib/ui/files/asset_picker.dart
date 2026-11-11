@@ -13,8 +13,8 @@ import '../tokens.dart';
 import 'asset_actions.dart';
 import 'asset_views.dart';
 
-/// Slides up a half sheet listing [kinds] of assets (instruments: built-in, the project's C++ ones and .caw ones;
-/// effects: built-in, the project's C++ effects, .caw effect modules) and returns the one tapped, or null when
+/// Slides up a half sheet listing [kinds] of assets (instruments: built-in and the project's C++ ones; effects:
+/// built-in and the project's C++ effects; patterns) and returns the one tapped, or null when
 /// dismissed. [instruments] and [effects] leave either group out; [rackChild] lists only what a rack's slot can hold
 /// (built-in effects, no racks).
 Future<AssetDrag?> showAssetPicker(BuildContext context, AppState state, {required Set<AssetKind> kinds,
@@ -103,15 +103,13 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
       if (widget.instruments) ('Instruments', [
         if (native) ...state.builtinAssets.where((a) => a.drag != null && a.isInstrument),
         if (native) ...state.cppAssets.where((a) => a.drag != null && a.isInstrument),
-        if (k.contains(AssetKind.cawModule)) ...modules.where((a) => a.type == FileAssetType.cawGenerator),
       ]),
       for (final c in EffectCategory.values) (c.label, [for (final a in builtins) if (_category(a) == c) a]),
       if (widget.effects && !widget.rackChild) ('My effects', [
         if (native) ...state.cppAssets.where((a) => a.drag != null && !a.isInstrument),
-        if (k.contains(AssetKind.cawModule)) ...modules.where((a) => a.type == FileAssetType.cawEffect),
       ]),
       if (k.contains(AssetKind.pattern) && !widget.rackChild)
-        ('Patterns', modules.where((a) => a.type == FileAssetType.pattern).toList()),
+        ('Patterns', modules),
       // Packs: the app has no packs yet, so there is no group.
     ];
     return [for (final (name, list) in groups) if (list.where(_match).isNotEmpty) (name, list.where(_match).toList())];
@@ -289,7 +287,7 @@ class _AssetPickerSheetState extends State<AssetPickerSheet> {
               style: const TextStyle(fontSize: TypeScale.label))),
           if (status != null)
             Padding(padding: const EdgeInsets.only(right: Space.xs), child: TypeBadge(status, color: Neon.yellow)),
-          TypeBadge(a.isInstrument && a.type != FileAssetType.cawGenerator ? 'INST' : a.type.badge,
+          TypeBadge(a.isInstrument ? 'INST' : a.type.badge,
               color: assetColor(a.type)),
           if (a.previewable)
             IconButton(

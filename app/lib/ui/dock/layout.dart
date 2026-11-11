@@ -8,15 +8,12 @@ class Panels {
   Panels._();
   static const arrangement = 'arrangement';
   static const builder = 'builder';
-  static const mixer = 'mixer';
-  static const engineLab = 'engineLab';
-  static const automation = 'automation';
-  static const exporter = 'exporter';
   static const files = 'files';
-  static const pluginBuilder = 'pluginBuilder';
 
-  /// Every panel, in the order a preset lists the ones it doesn't place on purpose.
-  static const all = [arrangement, builder, mixer, automation, exporter, files, engineLab, pluginBuilder];
+  /// Every panel, in the order a preset lists the ones it doesn't place on purpose: the three main sections (owner,
+  /// 2026-11-09). The older workspaces (mixer, automation, export, engine lab, plugins) are gone; a saved layout that
+  /// names one drops it.
+  static const all = [arrangement, builder, files];
 
   static bool known(String id) => all.contains(id);
 
@@ -36,8 +33,9 @@ enum DockEdge { center, left, right, top, bottom }
 /// The screen shapes that keep their own saved layout.
 enum FormFactor { phonePortrait, phoneLandscape, desktop }
 
-/// The starting layouts (UI plan: "a few presets: Arrange, Mix, Code").
-enum DockPreset { arrange, mix, code }
+/// The starting layouts: Arrange or Code in front (the Mix preset went with the Mixer panel; Arrange's mixer
+/// button shows the strips).
+enum DockPreset { arrange, code }
 
 sealed class DockNode {
   const DockNode();
@@ -148,7 +146,6 @@ class DockLayout {
   static DockLayout preset(FormFactor form, [DockPreset preset = DockPreset.arrange]) {
     final main = switch (preset) {
       DockPreset.arrange => const [Panels.arrangement],
-      DockPreset.mix => const [Panels.mixer],
       DockPreset.code => const [Panels.builder],
     };
     final rest = [for (final p in Panels.all) if (!main.contains(p)) p];

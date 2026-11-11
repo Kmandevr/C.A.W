@@ -1,6 +1,6 @@
 ---
 title: UI design
-summary: Arrangement-first creative UI across eight shared-state workspaces, with touch-first phone layouts and keyboard/mouse desktop access.
+summary: Arrangement-first creative UI across three shared-state sections (Build, Files, Arrange), with touch-first phone layouts and keyboard/mouse desktop access.
 updated: 2026-11-11
 covers: [app/lib/ui/, app/lib/actions/]
 ---
@@ -105,19 +105,19 @@ The Arranger is the main composition view. It is a horizontal song timeline (any
 
 ## Layout
 
-The app has three sections, Build, Files and Arrange; the Mixer, Automation, Export, Engine Lab and Plugin Builder are pages from More on a phone and docking panels on desktop ([app](app.md), Frame). Build holds the C++ Builder and the .caw module Builder as tabs, laid out like VS Code: the Files browser as an explorer (a drawer on a phone, a resizable sidebar when wide), one 36 dp row of open tabs with + New (Pattern, Instrument, Effect, Text file), and the editor in the rest. Arrange exposes adjustable track heights, the focus view, and a playhead overlay that repaints independently of clip layout. Mixer shows Reaper-style upright channel strips (chain slots, pan, fader, meter, M and S) in a row that scrolls sideways; a tapped slot's parameters open beside the strips on wide panels (with a draggable split) and in a sheet otherwise. Files is the Unity-style browser; its ⋯ menu imports and exports portable `.cawproj` and `.caw` files. Export saves a finished file where the user picks, copied in chunks. Plugin Builder still validates and packages the constrained `.caw` modules; it goes with the .caw language (#160). External CLAP/VST3 hosting is not built.
+The app has three sections, Build, Files and Arrange, and nothing else (#139 step 4): the Mixer and Automation are part of Arrange (the mixer card, the focus view's Automation tab and the lanes), Export is a page from the project menu, Engine diagnostics are in Settings › About and beta, and the .caw Builder and Plugin Builder are gone with the .caw language ([app](app.md), Frame). Build holds C++ components and patterns as tabs, laid out like VS Code: the Files browser as an explorer (a drawer on a phone, a resizable sidebar when wide), one 36 dp row of open tabs with + New (Pattern, Instrument, Effect, Text file), and the editor in the rest. Arrange exposes adjustable track heights, the focus view, and a playhead overlay that repaints independently of clip layout. Arrange's mixer card shows the master and Reaper-style upright channel strips (chain slots, pan, fader, meter, M and S) in a row that scrolls sideways; a tapped slot opens its device UI. Files is the Unity-style browser; its ⋯ menu imports and exports portable `.cawproj` files. Export saves a finished file where the user picks, copied in chunks. A C++ component exports as a CLAP plug-in project from Build; external CLAP/VST3 hosting is not built.
 
 **Docking (desktop and tablets):** each screen shape keeps its own saved layout. The Arrange preset puts the arrangement in one group and the other panels as tabs in a second. Tap a tab to show it. Long-press a tab and drag it onto another group to join it or split it, drag a divider to resize, maximise a panel to fill the view, or float it in a window over the layout. The layout button in the transport offers the Arrange, Mix and Code presets and shows any panel. Each screen lays out for its panel's size.
 
 **Glass (on by default):** a soft ambient background behind see-through panels, cards, track headers and the transport; bottom sheets slide up as frosted glass; sliders, level bars, switches, buttons, M/S toggles and clips have a light fill and a solid outline ([App](app.md), Look).
 
-**The frame (owner, 2026-11-09):** three sections, Build, Files and Arrange; the other workspaces fold into them or open from ⋮ More ([app](app.md), Frame).
+**The frame (owner, 2026-11-09):** three sections, Build, Files and Arrange; the other workspaces folded into them (#139 step 4, 2026-11-11), so there is no ⋮ More ([app](app.md), Frame).
 
-**Phone (portrait):** a slim status row (project, tempo, CPU, More) on top; the section; then the transport in thumb reach (undo, redo, position, Automate, ♪ keys, stop, play, record; drag sideways to scrub) and the section bar. The on-screen keys and pads slide up above the transport, so the section stays in view while playing them ([app](app.md), Frame). Both hide while the keyboard is open, and a downward swipe on the section bar brings the status row within reach.
+**Phone (portrait):** a slim status row (project, tempo, CPU) on top; the section; then the transport in thumb reach (undo, redo, position, Automate, ♪ keys, stop, play, record; drag sideways to scrub) and the section bar. The on-screen keys and pads slide up above the transport, so the section stays in view while playing them ([app](app.md), Frame). Both hide while the keyboard is open, and a downward swipe on the section bar brings the status row within reach.
 
 **Recording and automation in the transport (owner, 2026-11-10; REAPER flow gaps 3 and 4):** the choices are kept compact, REAPER's depth behind a long-press. Automate is a small lane icon: grey off, a red outline with T, L, W or R when on, filled red while writing; its long-press lists Touch, Latch, Write and Read. Record's long-press holds the metronome and count-in. The keys panel is one glass strip: Keys | Pads, the track it plays, ‹ octave ›, a miniature range strip to drag, and ✕. After a recording a toast offers Undo instead of REAPER's keep-or-delete dialog, and loop takes are picked from the clip's long-press menu.
 
-**Phone (landscape):** compact (owner, 2026-11-10): a narrow icon rail on the left (with the project and More), the section, the transport at the bottom with the tempo and CPU; edge to edge under the camera cutout, controls kept clear of it. In both orientations the top bars hide only on a deliberate pull of their grip, never on a scroll (owner, 2026-11-10 evening: "Hide only on a deliberate pull"); the bars follow the finger and fade, a hint and a haptic tick mark the threshold, and a slim tab brings them back ([app](app.md), Frame).
+**Phone (landscape):** compact (owner, 2026-11-10): a narrow icon rail on the left (with the project), the section, the transport at the bottom with the tempo and CPU; edge to edge under the camera cutout, controls kept clear of it. In both orientations the top bars hide only on a deliberate pull of their grip, never on a scroll (owner, 2026-11-10 evening: "Hide only on a deliberate pull"); the bars follow the finger and fade, a hint and a haptic tick mark the threshold, and a slim tab brings them back ([app](app.md), Frame).
 
 **Desktop, tablets, and a phone set to Desktop:** the rail, the transport bar and docking panels, which can also float in windows. Settings › Layout is Auto, Phone or Desktop (owner, 2026-11-10 evening: "Setting + auto on big screen"); Auto picks the desktop frame by the window's size in logical pixels (DeX, an external display, a freeform window), not by the device. A mouse and keys work there as on a PC (hover, right-click, shortcuts).
 
@@ -129,7 +129,7 @@ The app has three sections, Build, Files and Arrange; the Mixer, Automation, Exp
 
 **Settings (owner, 2026-11-11: "organize it into sections", a category list, everything shown):** a list of sections, each a glowing icon tile in its own neon colour, the title and a dim line of current values ("System default · 48 kHz · buffer Auto · Normal"); a search bar above it finds any setting by name, description or keyword and lists results under their section; a result opens the page scrolled to the row, which pulses its section's colour once (up quickly, fading over about 1.4 s). Pages are compact rows: title, a dim one-line explanation that says what the current choice does, and a switch, segmented choice, drop-down or slider (double-tap resets a slider); a setting that does not apply now is shown greyed with why, never hidden. From 900 dp wide the list stays on the left and the page opens on the right ([app](app.md), Settings).
 
-The track header is the quick-control surface (mute, solo, generator, folder and clip actions). The Mixer edits the same volume and pan values. Project settings and global controls stay behind the settings control to preserve timeline space.
+The track header is the quick-control surface (mute, solo, instrument, folder and clip actions). The mixer card edits the same volume and pan values. Project settings stay behind the settings control to preserve timeline space.
 
 ## Device editors
 
@@ -241,7 +241,7 @@ The broader UI specification below records design intent as well as current beha
   - Enter opens or plays. The Menu key or Shift+F10 opens the same options as a long-press.
   - Every control can be adjusted from the keyboard: arrows for steps, Shift+arrows for fine steps, typing a number to set it.
 - **Shortcuts like Reaper's where they overlap:** Space for play/pause (owner, 2026-11-05: Space pauses, and Shift+Space stops), Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
-- **Workspace shortcuts:** Ctrl+1 Builder, Ctrl+2 Arranger, Ctrl+3 Exporter, Ctrl+4 Mixer, Ctrl+5 Engine Lab, Ctrl+6 Automation, Ctrl+7 Files and Ctrl+8 Plugin Builder.
+- **Section shortcuts:** Ctrl+1 Build, Ctrl+2 Arrange, Ctrl+7 Files; Ctrl+3 opens the Export page.
 - **Shortcut overlay:** `?` shows every shortcut for the current screen.
 - **Customisable, like Reaper** (owner, 2026-10-28): every command is an action with keys you can change per area, plus macros and your own toolbars. The keys are changed in the key bindings editor (Settings › Keys and shortcuts › Key bindings, built 2026-11-05); details in [actions](actions.md).
 - **Vim-style** (owner, 2026-10-28): with a keyboard, the whole app works modally: modes, counts, `:` commands, `.` and recorded macros. The code editor has optional Vim editing. See [actions](actions.md#vim-style-control).
@@ -260,7 +260,7 @@ The broader UI specification below records design intent as well as current beha
 - **Keys:** a key press is a lookup in a per-area table. Search and completion run only while the action list or `:` is open.
 - **Auto-update:** compiles off the UI thread after the pause you set. A change that doesn't compile costs nothing on the audio side.
 - **The audio never depends on the UI.** The C++ engine runs on its own thread ([engine](engine.md)), so a slow frame can't cause a dropout.
-- **Repaint only what moves:** meters, the playhead and scopes use bounded repaint regions. Engine Lab's master scope and spectrum read from the native scope buffer; polling stops when stopped or hidden ([performance](performance.md)). Each peak meter falls on its own ticker only while it shows something, then stops.
+- **Repaint only what moves:** meters, the playhead and scopes use bounded repaint regions. Engine diagnostics' master scope and spectrum read from the native scope buffer; polling stops when stopped or hidden ([performance](performance.md)). Each peak meter falls on its own ticker only while it shows something, then stops.
 - **Draw grids, not widgets:** use painters for dense grids and lists built lazily; do not create a widget for every note or cell.
 - **No heavy assets:** system fonts, built-in icons and restrained short animations; the only images are the small crow logo (`assets/logo/`) and the launcher icons.
 - **Compact data:** patterns are flat arrays of note events in the engine. A layer's memory is fixed when it is set up, never while playing.

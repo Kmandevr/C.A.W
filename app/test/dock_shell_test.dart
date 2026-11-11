@@ -14,7 +14,9 @@ import 'package:caw/ui/dock/layout.dart';
 import 'package:caw/ui/frame/frame_widgets.dart';
 import 'package:caw/ui/frame/sections.dart';
 import 'package:caw/ui/haptics.dart';
-import 'package:caw/ui/mixer_screen.dart';
+import 'package:caw/ui/arrange/channel_strip.dart';
+import 'package:caw/ui/arrange/mixer_card.dart';
+import 'package:caw/ui/export_page.dart';
 import 'package:caw/ui/shell.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -36,11 +38,11 @@ void main() {
         expect(c.layout.toJson(), DockLayout.preset(f).toJson());
       }
       c.form = FormFactor.desktop;
-      c.reveal(Panels.mixer);
+      c.reveal(Panels.files);
       c.form = FormFactor.phonePortrait;
-      expect(c.layout.visible, isNot(contains(Panels.mixer)));
+      expect(c.layout.visible, isNot(contains(Panels.files)));
       c.form = FormFactor.desktop;
-      expect(c.layout.visible, contains(Panels.mixer));
+      expect(c.layout.visible, contains(Panels.files));
       c.dispose();
     });
 
@@ -65,7 +67,7 @@ void main() {
     test('a new controller on the same settings sees a change not yet written to disk (the theme remount)', () {
       final s = Settings();
       final old = DockController(s)..form = FormFactor.desktop;
-      old.reveal(Panels.mixer);
+      old.reveal(Panels.files);
       final fresh = DockController(s)..form = FormFactor.desktop;
       expect(fresh.layout.toJson(), old.layout.toJson());
       old.dispose();
@@ -77,7 +79,7 @@ void main() {
       expect(c.keyPanel, Panels.arrangement);
       c.touch(Panels.builder);
       expect(c.keyPanel, Panels.builder);
-      c.set(c.layout.activate(Panels.mixer));
+      c.set(c.layout.activate(Panels.files));
       expect(c.keyPanel, Panels.arrangement, reason: 'the builder tab is hidden now');
       c.reveal(Panels.files);
       expect(c.keyPanel, Panels.files);
@@ -87,22 +89,22 @@ void main() {
     test('a panel floats out of the layout, moves, is saved, and docks back', () async {
       final s = await Settings.open(base: dir);
       final c = DockController(s)..form = FormFactor.desktop;
-      c.float(Panels.mixer);
-      expect(c.isFloating(Panels.mixer), isTrue);
-      expect(c.layout.contains(Panels.mixer), isFalse);
-      c.placeFloating(Panels.mixer, const Rect.fromLTWH(5, -3, 0.01, 2));
+      c.float(Panels.files);
+      expect(c.isFloating(Panels.files), isTrue);
+      expect(c.layout.contains(Panels.files), isFalse);
+      c.placeFloating(Panels.files, const Rect.fromLTWH(5, -3, 0.01, 2));
       final r = c.floating.single.rect;
       expect(r.top, 0.0, reason: 'the title bar stays on screen');
       expect(r.width, closeTo(0.2, 1e-9), reason: 'at least a fifth of the area');
       expect(r.height, closeTo(1.0, 1e-9));
-      c.reveal(Panels.mixer);
-      expect(c.isFloating(Panels.mixer), isTrue, reason: 'showing a floating panel raises its window');
+      c.reveal(Panels.files);
+      expect(c.isFloating(Panels.files), isTrue, reason: 'showing a floating panel raises its window');
       await c.flush();
       final back = DockController(await Settings.open(base: dir))..form = FormFactor.desktop;
-      expect(back.floating.single.id, Panels.mixer);
-      expect(back.layout.contains(Panels.mixer), isFalse);
-      back.unfloat(Panels.mixer);
-      expect(back.layout.visible, contains(Panels.mixer));
+      expect(back.floating.single.id, Panels.files);
+      expect(back.layout.contains(Panels.files), isFalse);
+      back.unfloat(Panels.files);
+      expect(back.layout.visible, contains(Panels.files));
       expect(back.floating, isEmpty);
       for (final c in [c, back]) {
         await c.flush();
@@ -130,7 +132,6 @@ void main() {
   Future<AppState> startState(WidgetTester tester) async {
     final s = AppState();
     s.engine = Engine.create();
-    s.templates = Engine.templates();
     s.project = s.starterProject();
     s.selectedModuleId = s.project.modules.first.id;
     s.ready = true;
@@ -154,21 +155,23 @@ void main() {
           expect(dock.layout.visible, contains(id));
         }
       } else {
-        // A phone shows one section at a time and the other workspaces as pages from More.
+        // A phone shows one section at a time, and the Export page from the project menu.
         for (final section in Section.values) {
           await tester.tap(find.byKey(ValueKey('section-${section.name}')));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull, reason: '${section.name} at ${size.key}');
         }
-        for (final title in const ['Mixer', 'Automation']) {
-          await tester.tap(find.byKey(const ValueKey('more-tools')));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text(title).last);
-          await tester.pumpAndSettle();
-          expect(tester.takeException(), isNull, reason: '$title at ${size.key}');
-          await tester.pageBack();
-          await tester.pumpAndSettle();
-        }
+        expect(find.byKey(const ValueKey('more-tools')), findsNothing, reason: 'no other workspaces are left');
+        await tester.tap(find.byKey(const ValueKey('project-menu')).first);
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(find.byKey(const ValueKey('project-export')), 60,
+            scrollable: find.byType(Scrollable).last);
+        await tester.tap(find.byKey(const ValueKey('project-export')));
+        await tester.pumpAndSettle();
+        expect(find.byType(ExportPage), findsOneWidget);
+        expect(tester.takeException(), isNull, reason: 'Export at ${size.key}');
+        await tester.pageBack();
+        await tester.pumpAndSettle();
       }
       s.dispose();
     }, skip: skip);
@@ -320,11 +323,13 @@ void main() {
     s.dispose();
   }, skip: skip);
 
-  testWidgets('the Mix preset on a desktop: mixer strips, meters and toggles', (tester) async {
+  testWidgets('the mixer on a desktop: Arrange\'s mixer card with the master and the strips', (tester) async {
     final s = await startState(tester);
     await pumpGolden(tester, Shell(state: s), goldenSizes['desktop']!);
-    DockController.of(tester.element(find.byType(Scaffold).first)).usePreset(DockPreset.mix);
+    await tester.tap(find.byKey(const ValueKey('arrange-mixer')));
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mixer-card')), findsOneWidget);
+    expect(find.byType(MasterStrip), findsOneWidget);
     expect(tester.takeException(), isNull);
     await expectLater(goldenScreen, matchesGoldenFile('goldens/shell_desktop_mix.png'));
     s.dispose();
@@ -465,7 +470,7 @@ void main() {
   testWidgets('at launch the arrangement comes to the front, whatever the saved layout showed', (tester) async {
     final s = await startState(tester);
     s.settings.dockLayouts = {
-      FormFactor.desktop.name: DockLayout.preset(FormFactor.desktop, DockPreset.mix).reveal(Panels.files).toJson(),
+      FormFactor.desktop.name: DockLayout.preset(FormFactor.desktop, DockPreset.code).reveal(Panels.files).toJson(),
     };
     await pumpGolden(tester, Shell(state: s), goldenSizes['desktop']!);
     final dock = DockController.of(tester.element(find.byType(Scaffold).first));
@@ -473,9 +478,9 @@ void main() {
     s.dispose();
   }, skip: skip);
 
-  testWidgets('the mixer on a phone: upright strips with chain slots, pan, fader, meter, M and S', (tester) async {
+  testWidgets('the mixer card on a phone: the master strip and narrow track strips', (tester) async {
     final s = await startState(tester);
-    await pumpGolden(tester, Scaffold(body: MixerScreen(state: s, onOpenBuilder: () {})), goldenSizes['phone']!);
+    await pumpGolden(tester, Scaffold(body: MixerCard(state: s, onClose: () {})), goldenSizes['phone']!);
     expect(tester.takeException(), isNull);
     await expectLater(goldenScreen, matchesGoldenFile('goldens/mixer_phone.png'));
     s.dispose();

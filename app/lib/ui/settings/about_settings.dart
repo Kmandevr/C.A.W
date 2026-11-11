@@ -1,10 +1,12 @@
-// Settings › About and beta: the version, Report a problem (a report copied to paste into an issue) and licences.
+// Settings › About and beta: the version, Report a problem (a report copied to paste into an issue), Engine
+// diagnostics and licences.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../model/problem_log.dart';
 import '../../version.dart';
 import '../theme.dart';
+import 'engine_diagnostics.dart';
 import 'settings_deps.dart';
 import 'settings_widgets.dart';
 
@@ -37,6 +39,14 @@ class AboutSettings extends StatelessWidget {
             },
           ),
         ),
+        // Without the app (Settings opened alone: goldens, tests) the row shows but opens nothing.
+        settingAction('about.diagnostics',
+            icon: Icons.account_tree_outlined, iconColor: Neon.blue,
+            subtitle: 'CPU, peaks, overloads, the master scope and spectrum, and each track\'s signal path',
+            onTap: switch (deps.state) {
+              final state? => () => showEngineDiagnostics(context, state),
+              null => null,
+            }),
         settingAction('about.licences',
             icon: Icons.description_outlined, iconColor: Neon.dim,
             subtitle: 'Including JetBrains Mono (SIL Open Font License 1.1)',

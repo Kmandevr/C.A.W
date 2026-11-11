@@ -1,4 +1,5 @@
-// Arrange's mixer card (phone, owner 2026-11-09): a glass card over the tracks with narrow strips; tap one to widen it.
+// Arrange's mixer card (owner 2026-11-09): a glass card over the tracks with the master strip and narrow track strips;
+// tap one to widen it.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,7 +7,7 @@ import 'package:flutter/material.dart';
 import '../../model/app_state.dart';
 import '../../model/project.dart';
 import '../glass.dart';
-import '../mixer_screen.dart';
+import 'channel_strip.dart';
 import '../routing_view.dart';
 import '../theme.dart';
 import '../volume_fader.dart';
@@ -14,12 +15,9 @@ import 'track_color.dart';
 import '../widgets.dart';
 
 class MixerCard extends StatefulWidget {
-  const MixerCard({super.key, required this.state, required this.onClose, this.onSlot});
+  const MixerCard({super.key, required this.state, required this.onClose});
   final AppState state;
   final VoidCallback onClose;
-
-  /// A chain slot of a widened strip was tapped (Arrange opens that track's FX).
-  final void Function(LayerDoc layer, String moduleId)? onSlot;
 
   @override
   State<MixerCard> createState() => _MixerCardState();
@@ -49,20 +47,21 @@ class _MixerCardState extends State<MixerCard> {
         ])),
         Expanded(child: LayoutBuilder(builder: (context, box) {
           final h = math.max(_stripHeight, box.maxHeight);
-          return SingleChildScrollView(child: SizedBox(height: h, child: layers.isEmpty
-            ? const Center(child: Text('Add a track to mix it.', style: TextStyle(color: Neon.dim)))
-            : ListView(
+          return SingleChildScrollView(child: SizedBox(height: h, child: ListView(
                 key: const ValueKey('mixer-card-strips'),
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                 children: [
+                  Padding(padding: const EdgeInsets.only(right: 6), child: MasterStrip(state: s)),
+                  if (layers.isEmpty)
+                    const SizedBox(width: 180, child: Center(child: Text('Add a track to mix it.',
+                        style: TextStyle(color: Neon.dim)))),
                   for (final l in layers)
                     Padding(padding: const EdgeInsets.only(right: 4), child: AnimatedSize(
                       duration: const Duration(milliseconds: 160),
                       child: _wide == l.id
                           ? ChannelStrip(key: ValueKey('wide-${l.id}'), state: s, layer: l,
-                              index: s.project.layers.indexOf(l),
-                              onSlot: (id) => widget.onSlot?.call(l, id))
+                              index: s.project.layers.indexOf(l))
                           : _NarrowStrip(state: s, layer: l, index: s.project.layers.indexOf(l),
                               onTap: () => setState(() => _wide = l.id)),
                     )),

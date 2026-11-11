@@ -435,7 +435,6 @@ extension UserPresets on AppState {
       if (instrument != null) {
         project.automation.removeWhere((a) => a.targetType == 'instrument' && a.layerId == layer.id);
         layer.instrument = instrument.toUse();
-        layer.generatorId = null;
       }
       layer.components
         ..clear()
@@ -457,7 +456,6 @@ extension UserPresets on AppState {
           project.automation.removeWhere((a) => a.targetType == 'instrument' && a.layerId == layer.id);
         }
         layer.instrument = d.toUse()..preset = null;
-        layer.generatorId = null;
       });
       return true;
     }

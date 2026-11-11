@@ -23,7 +23,7 @@ void main() {
 
   test('tracks and folders are added past 64', () {
     for (var i = 0; i < 70; i++) {
-      s.addLayer(empty: true);
+      s.addLayer();
     }
     s.addFolder();
     s.addEmptyTrack();
@@ -32,7 +32,7 @@ void main() {
 
   test('a clip dropped below the last track gets a new track past 64', () {
     for (var i = 0; i < 64; i++) {
-      s.addLayer(empty: true);
+      s.addLayer();
     }
     final from = s.project.layers.first;
     final placed = s.moveClipTo(from, from.clips.single, null, 0);
@@ -44,7 +44,7 @@ void main() {
     final e = Engine.create();
     addTearDown(e.dispose);
     for (var i = 0; i < 79; i++) {
-      s.addLayer(empty: true);
+      s.addLayer();
     }
     final info = await e.setProject(s.project.toEngineJson());
     expect(info, isNotNull);

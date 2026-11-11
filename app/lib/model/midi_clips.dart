@@ -429,11 +429,7 @@ List<MidiControl> automationControls(ProjectDoc p, LayerDoc layer, ClipDoc clip,
         lane(a.points, 10, (x) => (63.5 + 63.5 * x.clamp(-1.0, 1.0)).round());
     }
   }
-  final modules = {?layer.generatorId, ...layer.effectIds};
-  final mine = [
-    for (final a in p.automation)
-      if (a.layerId == layer.id || (a.targetType == 'param' && modules.contains(a.moduleId))) a
-  ];
+  final mine = [for (final a in p.automation) if (a.layerId == layer.id) a];
   for (final (i, a) in mine.take(kAutomationCcs.length).indexed) {
     if (a.points.isEmpty) continue;
     final values = a.points.map((x) => x.value);

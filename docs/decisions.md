@@ -17,6 +17,15 @@ updated: 2026-11-11
 - **Takes:** WAV float by default, one file per armed track per take, a new take at each loop wrap, placed by the round-trip latency (override, then the last good ping, then the device's buffer estimate, an [Assumption] until measured on the S22+).
 - **Open (owner):** the default fade on clip edges (none today; REAPER-style 1 ms is an app default to choose); whether a musical clip's default stretch is WSOLA; where recordings are kept (the app passes the folder).
 
+## 2026-11-11: the app stops using .caw (WP-C; choices made for the owner, to confirm)
+
+- **Engine Lab moves to Settings › About and beta as "Engine diagnostics"** (to confirm with the owner; #139 says "Settings or a debug view"). It keeps the meters, the master scope and spectrum and each track's signal path; the .caw module report went with the language.
+- **Mixer, Automation and Exporter are retired as workspaces** (#139 step 4). The mixer is Arrange's mixer card on every screen size, now with the master strip (master FX, level, meters) at its start; on desktop it replaces the docked volume/pan strip and the Mix layout preset. Track automation is the focus view's Automation tab and the lanes under tracks; the .caw module-parameter and global lanes are gone. Export is a page from the project menu (Export…, Ctrl+3) holding the Export song sheet and the loop, length, one-shot, wavetable and MIDI exports, profiles, history and queue; the wavetable export sweeps a track's C++ instrument (engine API 17). The phone's ⋮ More button went, having nothing left to list.
+- **Old projects:** a project with .caw sound modules loads with them, their tracks' .caw chains, the globals and their lanes dropped, and a one-line yellow banner names them (owner, 2026-11-10: old projects are dropped; the app must not crash). Patterns stay (#158).
+- **Settings › Code editor** drops the rows that only served the .caw editor (completion chips, the Library button, compact controls); their stored values stay in `settings.json` until WP-D.
+- **Templates:** the C++ starters replace the .caw templates in Files (New from a starter…) and the track cards' Add track; the two pattern templates (acid line, chords) are bundled in Dart so the engine's `caw_templates` is no longer called.
+
+
 ## 2026-11-11: MIDI devices (WP-H; choices made for the owner)
 
 - **The engine path:** device MIDI reaches a track's instrument through a new C API (API 15) into `Midi2InputQueue`, placed at the frame it was played from the device's timestamp, one callback late so the spacing is kept (Android's MIDI timestamps are `System.nanoTime`, the engine's `steady_clock` on Android). On-screen keys keep note previews. MIDI 1.0 is converted to MIDI 2.0 at the edge (`midi_device.cpp`, the UMP specification's min-centre-max upscaling written from the published algorithm, [Assumption] not re-read against the PDF).

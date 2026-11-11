@@ -18,9 +18,9 @@ import 'project.dart';
 /// playing, then falls back to Read; Read only plays the lanes.
 enum AutomationMode { touch, latch, write, read }
 
-/// One automatable control: a track's `volume` or `pan` ([kind] `track`), a .caw module parameter (`param`), a
-/// project `global`, a native effect's parameter (`component`, [component] its index in the track's chain) or a
-/// native instrument's (`instrument`). [key] names its lane ([automationKey]).
+/// One automatable control: a track's `volume` or `pan` ([kind] `track`), a native effect's parameter
+/// (`component`, [component] its index in the track's chain) or a native instrument's (`instrument`). [key] names its
+/// lane ([automationKey]).
 class AutomationTarget {
   const AutomationTarget(this.kind, this.name, {this.layerId, this.moduleId, this.component});
   final String kind, name;
@@ -286,8 +286,6 @@ class AutomationWriter extends ChangeNotifier {
   LayerDoc? _layer(String? id) => state.project.layers.where((l) => l.id == id).firstOrNull;
 
   bool _canAutomate(AutomationTarget t) {
-    if (t.kind == 'param') return t.moduleId != null && state.project.module(t.moduleId) != null;
-    if (t.kind == 'global') return true;
     final l = _layer(t.layerId);
     if (l == null) return false;
     return switch (t.kind) {
@@ -345,12 +343,8 @@ class AutomationWriter extends ChangeNotifier {
         final use = l?.instrument;
         if (use == null) return 0;
         return use.params[t.name] ?? _componentParam(use.id, t.name)?.defaultValue ?? 0;
-      case 'param':
-        return state.project.module(t.moduleId)?.params[t.name] ??
-            state.info[t.moduleId]?.params.where((p) => p.name == t.name).firstOrNull?.defaultValue ?? 0;
       default:
-        return state.project.globals[t.name] ??
-            state.globalDefs.where((p) => p.name == t.name).firstOrNull?.defaultValue ?? 0;
+        return 0;
     }
   }
 
@@ -369,12 +363,8 @@ class AutomationWriter extends ChangeNotifier {
             t.component! < l.components.length ? l.components[t.component!].id : null);
         final p = id == null ? null : _componentParam(id, t.name);
         if (p != null) (lo, hi) = (p.min, p.max);
-      case 'param':
-        final p = state.info[t.moduleId]?.params.where((p) => p.name == t.name).firstOrNull;
-        if (p != null) (lo, hi) = (p.min, p.max);
       default:
-        final p = state.globalDefs.where((p) => p.name == t.name).firstOrNull;
-        if (p != null) (lo, hi) = (p.min, p.max);
+        break;
     }
     if (lo != null && hi != null && hi > lo) return hi - lo;
     final values = [seg.original, for (final s in seg.samples) s.$2];
