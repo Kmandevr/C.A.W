@@ -18,6 +18,15 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Bug fixed on the way:** a track's instrument installed while nothing sounds counted as still ringing at the first Play, which mixed in 5 ms of a phantom tail (a free-running source started at twice its level); a new instrument now starts idle.
 - **Open, for the owner:** an instrument track keeps running after a Stop until its output is quiet (or 30 s), and a never-quiet effect there now ends at that cap without the 20 ms fade buses get; a bus whose capped tail has faded comes back while a child track still rings out. The app still sends `voices`, `swap`, `seam_crossfade` and the key (Settings' light-mode voice cap and swap timing now change nothing): removing those settings is UI work.
 
+## 2026-11-11: MIDI clip loops, clip automation and project packaging (owner)
+
+**Decision (owner, 2026-11-11, answers to Claude's questions):**
+- **MIDI loops as in REAPER.** In REAPER, a looped item repeats at its source's length ([Fact] cockos.com/wiki "Loop Source", read 2026-11-11). Here each **clip** has its own loop point, a bar dragged in the piano roll. A clip longer than its loop repeats from that bar, so a pattern can be written at any length and looped at any point. Clips that share a pattern can loop at different points.
+- **Clip automation** belongs to the clip. It loops with the clip's MIDI and moves and extends with it, so it never needs redrawing after the clip is lengthened or moved. Track automation along the timeline stays for song-wide moves. Lanes drawn on a clip are clip automation by default, and a menu moves a lane between the clip and the track.
+- **Project packaging.** The `.caw` project file (#159) always carries the project's C++ source. On export, the user can also package samples and audio (clips, sampler and drum samples, impulse responses), built C++ binaries for this device, third-party plug-ins (only where their licence allows; otherwise they are listed as needed), user presets, and the theme profile.
+- **Export shows a checklist** of every dependency: its type, what uses it, its size, and whether it was found. Each has a package box, and Package everything sits at the top.
+- **A project opened with something missing** opens with a banner naming it, offering Locate… and Replace…. The parts that need it stay silent until they are fixed.
+
 ## 2026-11-11: Theme profiles and edit animations (owner)
 
 **Decision (owner, 2026-11-11, answers to Claude's questions):**
