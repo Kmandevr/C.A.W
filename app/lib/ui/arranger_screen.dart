@@ -142,13 +142,7 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
   String? _rowDragId;
   double _rowDragRaw = 0;
 
-  /// Where a dragged height lands: thin below halfway to compact, compact below halfway to the shortest normal row,
-  /// else a normal row of that height.
-  static (TrackCollapse, double) rowSnap(double raw) {
-    if (raw < (LayerDoc.thinHeight + LayerDoc.compactHeight) / 2) return (TrackCollapse.thin, LayerDoc.thinHeight);
-    if (raw < (LayerDoc.compactHeight + LayerDoc.minHeight) / 2) return (TrackCollapse.compact, LayerDoc.compactHeight);
-    return (TrackCollapse.normal, raw.clamp(LayerDoc.minHeight, LayerDoc.maxHeight).toDouble());
-  }
+  static (TrackCollapse, double) rowSnap(double raw) => trackRowSnap(raw);
 
   /// [l]'s row height: its own or the default, compact or thin (thin inside a collapsed folder).
   double _rowHeight(LayerDoc l) {
@@ -1311,9 +1305,19 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
     // the finger at once.
     final rowGlide = pinned || _dragTrackH != null || _rowDragId != null || EditMotion.fadeOnly(context) ? Duration.zero
         : EditMotion.of(context, EditMotionKind.lengths) ?? Duration.zero;
-    Widget glideRow(LayerDoc l, Widget Function(double h) build) => TweenAnimationBuilder<double>(
-        tween: Tween(end: rowH(l)), duration: rowGlide, curve: EditMotion.curve, onEnd: _rowsSettled,
-        builder: (context, h, _) => build(h));
+    // While it glides the row is laid out at the larger of its old and new heights and clipped to the height shown,
+    // so a header's controls never squeeze.
+    Widget glideRow(LayerDoc l, Widget Function(double h) build) {
+      final target = rowH(l);
+      return TweenAnimationBuilder<double>(
+        tween: Tween(end: target), duration: rowGlide, curve: EditMotion.curve, onEnd: _rowsSettled,
+        builder: (context, h, _) {
+          if ((h - target).abs() < 0.01) return build(target);
+          final room = math.max(h, target);
+          return SizedBox(height: math.max(0.0, h), child: ClipRect(child: OverflowBox(alignment: Alignment.topCenter,
+            minHeight: room, maxHeight: room, child: build(room))));
+        });
+    }
     // A thin row keeps its automation lanes closed.
     bool lanesOpen(LayerDoc l) => !pinned && l.showLanes && canHaveLanes(l) && _rowCollapse(l) != TrackCollapse.thin;
     final rows = layers.fold<double>(0, (h, l) => h + rowH(l) + (pinned ? 0 : (lanesOpen(l) ? lanesHeight(s, l) : 0) + l.spaceBelow) + gap);
@@ -1422,7 +1426,8 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
                 : ArrangeRuler(state: s, stepW: stepW, width: width, height: ruler, scroll: _hScroll)),
             for (final layer in layers) row('l', layer, [
               glideRow(layer, (h) => _TimelineLane(key: drag?.laneKey(layer.id), state: s, layer: layer, width: width,
-                stepW: stepW, trackHeight: h, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag)),
+                stepW: stepW, trackHeight: h, selectedIds: s.selectedClipIds, callbacks: callbacks, drag: drag,
+                thin: !pinned && _rowCollapse(layer) == TrackCollapse.thin)),
               if (lanesOpen(layer))
                 TrackLaneRows(state: s, layer: layer, stepW: stepW, width: width),
               // A spacer and the gap leave the timeline empty too, so lanes stay level with their headers.
@@ -1560,7 +1565,7 @@ class _TimelineHeader extends StatelessWidget {
     final Widget box;
     if (collapse == TrackCollapse.thin) {
       // A sliver in the track's colour, indented like the track's header; still tapped, held and dragged.
-      box = Container(key: ValueKey('thin-track-${layer.id}'), height: trackHeight,
+      box = Container(key: ValueKey('thin-track-${layer.id}'), height: trackHeight, width: double.infinity,
         padding: EdgeInsets.only(left: folderIndent(depth)),
         decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Neon.bg))),
         child: ColoredBox(color: color.withValues(alpha: selected ? 0.95 : 0.55)));
@@ -1658,7 +1663,8 @@ class _TimelineHeader extends StatelessWidget {
               tooltip: layer.collapsed ? 'Open folder' : 'Collapse folder',
               icon: Icon(layer.collapsed ? Icons.chevron_right : Icons.expand_more, color: color, size: 18),
               onPressed: () => state.setFolderCollapsed(layer, !layer.collapsed)));
-        final name = Expanded(child: Tooltip(
+        // The name's tooltip shows on hover only: a finger's hold on it opens the track menu.
+        final name = Expanded(child: Tooltip(triggerMode: TooltipTriggerMode.manual,
             message: layer.isFolder
                 ? (layer.busEnabled ? 'Folder with a group bus' : 'Folder')
                 : layer.isAudio ? 'Audio track · ${layer.input?.label ?? 'no input'} · hold for more'
@@ -1668,6 +1674,8 @@ class _TimelineHeader extends StatelessWidget {
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
                 color: Color.lerp(Neon.text, color, selected ? 0.35 : 0.15)))));
         // The upright meter and the sideways one cross-fade as the header crosses the width.
+        // M and S beside the name need their chips, the folder's chevron and a little of the name.
+        final msRoom = (layer.isFolder ? 27 : 3) + 2 * chip + 2 + 14;
         Widget withMeter(Widget content) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: content), pop('upright', standUp, upright)]);
         if (compact) {
@@ -1677,7 +1685,7 @@ class _TimelineHeader extends StatelessWidget {
             ?chevron,
             const SizedBox(width: 3),
             name,
-            pop('ms', ms && w >= 64, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
+            pop('ms', ms && w >= msRoom, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
           ])));
         }
         final top = SizedBox(height: low ? 24 : 28, child: Row(children: [
@@ -1685,7 +1693,7 @@ class _TimelineHeader extends StatelessWidget {
           const SizedBox(width: 3),
           name,
           // A deep folder's header can get narrow: M and S move to their own row's place, the icons go first.
-          if (oneRow) pop('ms', w >= 72, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
+          if (oneRow) pop('ms', w >= msRoom, Row(mainAxisSize: MainAxisSize.min, children: [mute, const SizedBox(width: 2), solo])),
           // Arm sits by the name when the header has room for both; a phone's one-row header puts it by the meter.
           if (layer.isAudio && !oneRow) _button(AudioArmButton(state: state, layer: layer, size: chip)),
           // A folder's icon only says what it is: a narrow header gives its room to the name.
@@ -1816,6 +1824,14 @@ bool _onHeaderButton = false;
 double _gainDb(double g) => g <= 0.001 ? -60 : (20 * math.log(g) / math.ln10).clamp(-60.0, 12.0).toDouble();
 double _dbGain(double db) => db <= -60 ? 0 : math.pow(10, db / 20).toDouble();
 
+/// Where a dragged track height lands: thin below halfway to compact, compact below halfway to the shortest normal
+/// row, else a normal row of that height.
+(TrackCollapse, double) trackRowSnap(double raw) {
+  if (raw < (LayerDoc.thinHeight + LayerDoc.compactHeight) / 2) return (TrackCollapse.thin, LayerDoc.thinHeight);
+  if (raw < (LayerDoc.compactHeight + LayerDoc.minHeight) / 2) return (TrackCollapse.compact, LayerDoc.compactHeight);
+  return (TrackCollapse.normal, raw.clamp(LayerDoc.minHeight, LayerDoc.maxHeight).toDouble());
+}
+
 /// A header control that drops ([show] false) or comes back as the header narrows or shortens: it fades and scales
 /// out and in, in the lengths edit-motion kind (a fade alone with Reduced motion, at once with motion Off).
 class _HeaderPop extends StatelessWidget {
@@ -1872,7 +1888,9 @@ class _ResizeGripState extends State<_ResizeGrip> with GrabFeedback {
     void start() => grab();
     void update(double d) => widget.onDrag(d);
     void end() { release(); widget.onEnd(); }
+    // The tooltip shows on hover only: a finger's hold belongs to what is under the grip (a thin track's menu).
     return Semantics(label: widget.label, child: Tooltip(message: widget.label, waitDuration: const Duration(milliseconds: 600),
+      triggerMode: TooltipTriggerMode.manual,
       child: MouseRegion(
         cursor: sideways ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
         onEnter: (_) => hover(true),
@@ -1896,10 +1914,14 @@ double _clipInset(double trackHeight) => trackHeight < 60 ? 3 : 8;
 
 class _TimelineLane extends StatefulWidget {
   const _TimelineLane({super.key, required this.state, required this.layer, required this.width,
-    required this.stepW, required this.trackHeight, required this.selectedIds, required this.callbacks, this.drag});
+    required this.stepW, required this.trackHeight, required this.selectedIds, required this.callbacks, this.drag,
+    this.thin = false});
   final AppState state;
   final LayerDoc layer;
   final double width, stepW, trackHeight;
+
+  /// A thin row: its clips are bars (also while it glides there).
+  final bool thin;
   final Set<String> selectedIds;
   final _TrackCallbacks callbacks;
 
@@ -2024,7 +2046,7 @@ class _TimelineLaneState extends State<_TimelineLane> {
   Widget build(BuildContext context) {
     final trackHeight = widget.trackHeight, stepW = widget.stepW;
     final height = trackHeight;
-    final thin = trackHeight <= LayerDoc.thinHeight;
+    final thin = widget.thin;
     final color = trackColor(state, layer);
     final leaving = EditMotion.of(context, EditMotionKind.clips);
     final appearing = _clipChanges(leaving);
@@ -2630,11 +2652,12 @@ class _TimelineClipState extends State<_TimelineClip> {
               border: Border.all(
                 color: Glass.active || widget.selected ? widget.color : widget.color.withValues(alpha: .7),
                 width: widget.selected ? 1.6 : 1)),
-            padding: const EdgeInsets.fromLTRB(13, 4, 13, 3),
+            // A compact row's clip has room for its name only.
+            padding: widget.height < 26 ? const EdgeInsets.fromLTRB(13, 1, 13, 0) : const EdgeInsets.fromLTRB(13, 4, 13, 3),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: widget.color, fontSize: 10, fontWeight: FontWeight.w800)),
-              Expanded(child: Align(alignment: Alignment.bottomLeft,
+              if (widget.height >= 26) Expanded(child: Align(alignment: Alignment.bottomLeft,
                 child: Row(children: [
                   if (c.lock) Icon(Icons.lock, key: ValueKey('clip-locked-${c.id}'), size: 9, color: widget.color),
                   if (c.mute) Icon(Icons.volume_off, key: ValueKey('clip-muted-${c.id}'), size: 9, color: widget.color),
