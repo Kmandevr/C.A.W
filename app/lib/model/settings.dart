@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../ui/arrange/clip_look.dart';
 import '../ui/code_prefs.dart';
 import '../ui/glass.dart';
 import '../ui/haptics.dart';
@@ -289,7 +290,10 @@ class Settings extends ChangeNotifier {
     Glass.enabled = glass && !activeTheme.flat; // the Flat family never shows glass, whatever the switch says
     Glass.blurEnabled = glassBlur;
     Motion.minimalProfile = performanceMode == PerformanceMode.minimal;
-    EditMotion.style = editMotionStyle;
+    EditMotion.feel = motionFeel;
+    Haptics.feel = {...hapticFeel};
+    ClipLook.corner = clipCorner;
+    ClipLook.fill = clipFill;
     EditMotion.kinds = {...editMotionKinds};
     Radii.scale = roundness;
     Neon.glowStrength = glowStrength;
@@ -305,7 +309,21 @@ class Settings extends ChangeNotifier {
   MotionLevel motion = MotionLevel.full;
 
   /// Edit animations (owner, 2026-11-11): their style, and the kinds turned on ([EditMotion]).
-  EditMotionStyle editMotionStyle = EditMotionStyle.subtle;
+  EditMotionStyle get editMotionStyle =>
+      motionFeel.curve == MotionCurve.bouncy ? EditMotionStyle.playful : EditMotionStyle.subtle;
+  set editMotionStyle(EditMotionStyle v) =>
+      motionFeel = v == EditMotionStyle.playful ? MotionFeel.playful : MotionFeel.subtle;
+
+  /// The theme's animation style (owner, 2026-11-11): pace, curve, entrance and exit ([EditMotion.feel]). Subtle and
+  /// Playful ([editMotionStyle]) are two of its looks.
+  MotionFeel motionFeel = MotionFeel.subtle;
+
+  /// Each haptic kind's feel, Light, Firm or Off ([Haptics.feel]); a kind left out is Light.
+  Map<HapticKind, HapticFeel> hapticFeel = {};
+
+  /// Arrange's clips: corner shape and fill ([ClipLook]).
+  ClipCorner clipCorner = ClipCorner.rounded;
+  ClipFill clipFill = ClipFill.standard;
   Set<EditMotionKind> editMotionKinds = {...EditMotionKind.values};
 
   /// A theme's look besides its colours: the UI font, the text size (times the system's), the corners' roundness
@@ -523,6 +541,10 @@ class Settings extends ChangeNotifier {
         'vim_code': vimCode,
         'motion': motion.name,
         'edit_motion_style': editMotionStyle.name,
+        'motion_feel': motionFeel.encode(),
+        'haptic_feel': Haptics.encodeFeel(hapticFeel),
+        'clip_corner': clipCorner.name,
+        'clip_fill': clipFill.name,
         'edit_motion_kinds': EditMotion.kindNames(editMotionKinds),
         'ui_font': uiFont.name,
         'text_scale': textScale,
@@ -624,6 +646,10 @@ class Settings extends ChangeNotifier {
     vimCode = (j['vim_code'] as bool?) ?? vimCode;
     motion = pick(MotionLevel.values, j['motion'], motion);
     editMotionStyle = pick(EditMotionStyle.values, j['edit_motion_style'], editMotionStyle);
+    motionFeel = MotionFeel.decode(j['motion_feel'] as String?) ?? motionFeel;
+    if (j['haptic_feel'] is String) hapticFeel = Haptics.decodeFeel(j['haptic_feel'] as String);
+    clipCorner = pick(ClipCorner.values, j['clip_corner'], clipCorner);
+    clipFill = pick(ClipFill.values, j['clip_fill'], clipFill);
     final kinds = j['edit_motion_kinds'];
     if (kinds is List) editMotionKinds = EditMotion.parseKinds(kinds);
     uiFont = pick(UiFont.values, j['ui_font'], uiFont);
@@ -783,7 +809,7 @@ class Settings extends ChangeNotifier {
   /// the code editor's font, tabs, numbers and wrap (read when an editor builds). A change rebuilds the screens once
   /// on leaving Settings. A profile value saved into the theme (a track height, say) doesn't count by itself.
   String get _lookKey => '${activeTheme.copyWith(profile: const {}).toFile()}|${activeTheme.light}|$roundness|$glowStrength|'
-      '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap';
+      '$_profileRevision|$codeFontSize|$codeTabWidth|$codeLineNumbers|$codeWrap|$clipCorner|$clipFill';
 
   /// Bumped each time a theme's profile is put in force, so the screens (and the dock) are made again from it.
   int _profileRevision = 0;
@@ -936,6 +962,10 @@ class Settings extends ChangeNotifier {
       'behaviour.haptic_strength': n(hapticStrength),
       'behaviour.motion': motion.name,
       'behaviour.edit_style': editMotionStyle.name,
+      'behaviour.motion_feel': motionFeel.encode(),
+      'behaviour.haptic_feel': Haptics.encodeFeel(hapticFeel),
+      'look.clip_corner': clipCorner.name,
+      'look.clip_fill': clipFill.name,
       'behaviour.edit_kinds': EditMotion.kindNames(editMotionKinds).join(','),
       'behaviour.snap': on(rollSnap),
       'behaviour.grid': '$rollGrid',
@@ -988,6 +1018,11 @@ class Settings extends ChangeNotifier {
     hapticStrength = number('behaviour.haptic_strength', 0, 1) ?? hapticStrength;
     motion = pick(MotionLevel.values, 'behaviour.motion') ?? motion;
     editMotionStyle = pick(EditMotionStyle.values, 'behaviour.edit_style') ?? editMotionStyle;
+    motionFeel = MotionFeel.decode(profile['behaviour.motion_feel']) ?? motionFeel;
+    final feel = profile['behaviour.haptic_feel'];
+    if (feel != null) hapticFeel = Haptics.decodeFeel(feel);
+    clipCorner = pick(ClipCorner.values, 'look.clip_corner') ?? clipCorner;
+    clipFill = pick(ClipFill.values, 'look.clip_fill') ?? clipFill;
     final kinds = profile['behaviour.edit_kinds'];
     if (kinds != null) editMotionKinds = EditMotion.parseKinds(kinds.split(',').map((k) => k.trim()));
     rollSnap = flag('behaviour.snap') ?? rollSnap;

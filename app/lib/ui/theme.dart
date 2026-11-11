@@ -444,6 +444,11 @@ class Neon {
     final t = look ?? active;
     final g = glass ?? Glass.active;
     double r(double v) => v * roundness;
+    // Buttons follow the corner roundness too (Material's own stadium shape at 1).
+    final shape = roundness == 1
+        ? null
+        : WidgetStatePropertyAll<OutlinedBorder>(RoundedRectangleBorder(borderRadius: BorderRadius.circular(r(20))));
+    final shaped = shape == null ? null : ButtonStyle(shape: shape);
     final bg = t['bg'], panel = t['panel'], panelHi = t['panelHi'], line = t['line'], text = t['text'];
     final green = t['green'], pink = t['pink'], blue = t['blue'];
     final scheme = t.light
@@ -510,9 +515,15 @@ class Neon {
                     WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.disabled) ? t['dim'] : green),
                 side: WidgetStateProperty.resolveWith(
                     (s) => BorderSide(color: s.contains(WidgetState.disabled) ? line : green, width: 1.5)),
+                shape: shape,
               ),
             )
-          : null,
+          : shaped == null
+              ? null
+              : FilledButtonThemeData(style: shaped),
+      outlinedButtonTheme: shaped == null ? null : OutlinedButtonThemeData(style: shaped),
+      textButtonTheme: shaped == null ? null : TextButtonThemeData(style: shaped),
+      elevatedButtonTheme: shaped == null ? null : ElevatedButtonThemeData(style: shaped),
       segmentedButtonTheme: g
           ? SegmentedButtonThemeData(
               style: ButtonStyle(
@@ -520,9 +531,12 @@ class Neon {
                     (s) => s.contains(WidgetState.selected) ? pink.withValues(alpha: 0.2) : Colors.transparent),
                 foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? pink : text),
                 side: WidgetStateProperty.all(BorderSide(color: pink.withValues(alpha: 0.7), width: 1.2)),
+                shape: shape,
               ),
             )
-          : null,
+          : shaped == null
+              ? null
+              : SegmentedButtonThemeData(style: shaped),
       switchTheme: g
           ? SwitchThemeData(
               thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? green : t['dim']),

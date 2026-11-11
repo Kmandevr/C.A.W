@@ -30,7 +30,8 @@ class Motion {
   /// True while the Minimal performance profile is on: it turns motion off.
   static bool minimalProfile = false;
 
-  /// Small feedback (press, a handle growing), standard changes (toolbar parts, selection, lanes) and panels/sheets.
+  /// Small feedback (press, a handle growing), standard changes (toolbar parts, selection, lanes) and panels/sheets,
+  /// as designed; [move] and [fade] scale them by the theme's pace ([EditMotion.feel]).
   static const small = Duration(milliseconds: 80);
   static const standard = Duration(milliseconds: 160);
   static const panel = Duration(milliseconds: 240);
@@ -70,10 +71,13 @@ class Motion {
   static MotionLevel usabilityOf(BuildContext context) => usability(of(context));
 
   /// A movement's duration at [level]: zero unless motion is full (Reduced and Off don't move things).
-  static Duration move(Duration d, MotionLevel level) => level == MotionLevel.full ? d : Duration.zero;
+  static Duration move(Duration d, MotionLevel level) => level == MotionLevel.full ? paced(d) : Duration.zero;
 
   /// A fade's duration at [level]: fades stay in Reduced, and Off has none.
-  static Duration fade(Duration d, MotionLevel level) => level == MotionLevel.off ? Duration.zero : d;
+  static Duration fade(Duration d, MotionLevel level) => level == MotionLevel.off ? Duration.zero : paced(d);
+
+  /// [d] at the theme's pace (Quick, Normal or Relaxed; [EditMotion.feel]).
+  static Duration paced(Duration d) => EditMotion.feel.pace == MotionPace.normal ? d : d * EditMotion.feel.pace.scale;
 
   /// The curve a settle over [distancePx] uses at [level].
   static Curve settleCurve(double distancePx, MotionLevel level) =>
@@ -143,7 +147,8 @@ enum EditMotionKind {
   final String label;
 }
 
-/// How edit animations feel (owner, 2026-11-11: the user's choice, Subtle by default).
+/// How edit animations feel (owner, 2026-11-11: the user's choice, Subtle by default). Since the theme's motion
+/// tokens ([MotionFeel]) these are two of its looks: Subtle is [MotionFeel.subtle], Playful [MotionFeel.playful].
 enum EditMotionStyle {
   subtle('Subtle'),
   playful('Playful');
@@ -152,13 +157,108 @@ enum EditMotionStyle {
   final String label;
 }
 
+/// How long the theme's animations run (owner, 2026-11-11: the animation style is a theme property).
+enum MotionPace {
+  quick('Quick', 0.7),
+  normal('Normal', 1),
+  relaxed('Relaxed', 1.5);
+
+  const MotionPace(this.label, this.scale);
+  final String label;
+  final double scale;
+}
+
+/// The theme's curve family: Smooth (an ease-out), Snappy (fast out, slow in), Bouncy (a small overshoot) or Linear.
+enum MotionCurve {
+  smooth('Smooth'),
+  snappy('Snappy'),
+  bouncy('Bouncy'),
+  linear('Linear');
+
+  const MotionCurve(this.label);
+  final String label;
+}
+
+/// How pages, panels and things added come in and go out. Standard keeps each one's own (Material's page
+/// transition, the sheet's rise, an edit's own grow or slide).
+enum MotionTransition {
+  standard('Standard'),
+  fade('Fade'),
+  scale('Scale'),
+  slide('Slide'),
+  fadeScale('Fade + scale');
+
+  const MotionTransition(this.label);
+  final String label;
+}
+
+/// The theme's animation style: pace, curve, and how things enter and exit. Reduced motion still means fades only,
+/// and Off keeps only the motion that helps use the app, whatever these say.
+class MotionFeel {
+  const MotionFeel(
+      {this.pace = MotionPace.normal,
+      this.curve = MotionCurve.smooth,
+      this.enter = MotionTransition.standard,
+      this.exit = MotionTransition.standard});
+
+  final MotionPace pace;
+  final MotionCurve curve;
+  final MotionTransition enter, exit;
+
+  /// The app's own look, as before the tokens (and Subtle).
+  static const subtle = MotionFeel();
+
+  /// Playful: longer, with a small overshoot, pages sliding in.
+  static const playful = MotionFeel(pace: MotionPace.relaxed, curve: MotionCurve.bouncy, enter: MotionTransition.slide);
+
+  /// The presets (owner, 2026-11-11): Calm, Snappy, Bouncy, Minimal.
+  static const presets = {
+    'Calm': MotionFeel(pace: MotionPace.relaxed, curve: MotionCurve.smooth, enter: MotionTransition.fade, exit: MotionTransition.fade),
+    'Snappy': MotionFeel(pace: MotionPace.quick, curve: MotionCurve.snappy, enter: MotionTransition.fadeScale, exit: MotionTransition.fade),
+    'Bouncy': MotionFeel(pace: MotionPace.normal, curve: MotionCurve.bouncy, enter: MotionTransition.scale, exit: MotionTransition.fadeScale),
+    'Minimal': MotionFeel(pace: MotionPace.quick, curve: MotionCurve.linear, enter: MotionTransition.fade, exit: MotionTransition.fade),
+  };
+
+  /// The preset this is, if any.
+  String? get presetName => presets.entries.where((e) => e.value == this).firstOrNull?.key;
+
+  MotionFeel copyWith({MotionPace? pace, MotionCurve? curve, MotionTransition? enter, MotionTransition? exit}) =>
+      MotionFeel(pace: pace ?? this.pace, curve: curve ?? this.curve, enter: enter ?? this.enter, exit: exit ?? this.exit);
+
+  /// As a profile value: `pace,curve,enter,exit` by name.
+  String encode() => '${pace.name},${curve.name},${enter.name},${exit.name}';
+
+  /// Reads [encode]'s text; null when it doesn't read.
+  static MotionFeel? decode(String? text) {
+    final p = (text ?? '').split(',').map((e) => e.trim()).toList();
+    if (p.length != 4) return null;
+    T? pick<T extends Enum>(List<T> values, String name) => values.where((v) => v.name == name).firstOrNull;
+    final pace = pick(MotionPace.values, p[0]), curve = pick(MotionCurve.values, p[1]);
+    final enter = pick(MotionTransition.values, p[2]), exit = pick(MotionTransition.values, p[3]);
+    if (pace == null || curve == null || enter == null || exit == null) return null;
+    return MotionFeel(pace: pace, curve: curve, enter: enter, exit: exit);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is MotionFeel && other.pace == pace && other.curve == curve && other.enter == enter && other.exit == exit;
+
+  @override
+  int get hashCode => Object.hash(pace, curve, enter, exit);
+}
+
 /// Edit animations: what appears, disappears, moves or resizes because of an edit. Separate from the motion that
 /// helps use the app (drag ghosts, snapping, press feedback: [Motion.usability], kept even when motion is Off).
 /// Settings sets the statics.
 class EditMotion {
   EditMotion._();
 
-  static EditMotionStyle style = EditMotionStyle.subtle;
+  /// The theme's animation style (pace, curve, entrance and exit); Settings sets it.
+  static MotionFeel feel = MotionFeel.subtle;
+
+  /// Subtle or Playful, read from [feel] (Playful is any bouncy feel); setting one sets [feel] to it.
+  static EditMotionStyle get style => feel.curve == MotionCurve.bouncy ? EditMotionStyle.playful : EditMotionStyle.subtle;
+  static set style(EditMotionStyle s) => feel = s == EditMotionStyle.playful ? MotionFeel.playful : MotionFeel.subtle;
 
   /// The kinds turned on (all by default).
   static Set<EditMotionKind> kinds = {...EditMotionKind.values};
@@ -170,10 +270,7 @@ class EditMotion {
 
   static Duration? durationFor(MotionLevel level, EditMotionKind kind) {
     if (level == MotionLevel.off || !kinds.contains(kind)) return null;
-    return switch (style) {
-      EditMotionStyle.subtle => const Duration(milliseconds: 160),
-      EditMotionStyle.playful => const Duration(milliseconds: 260),
-    };
+    return feel == MotionFeel.playful ? const Duration(milliseconds: 260) : Motion.paced(const Duration(milliseconds: 160));
   }
 
   /// True when only a fade may run (Reduced motion): no scaling, sliding or springs.
@@ -185,11 +282,17 @@ class EditMotion {
   static const playfulScale = 1.5;
   static Duration? scaled(MotionLevel level, EditMotionKind kind, Duration subtle) {
     if (level == MotionLevel.off || !kinds.contains(kind)) return null;
-    return style == EditMotionStyle.playful ? subtle * playfulScale : subtle;
+    return Motion.paced(subtle); // Relaxed is Playful's [playfulScale]
   }
 
-  /// [subtle] for Subtle; Playful's small overshoot otherwise (for motion that had its own curve before styles).
-  static Curve curveOr(Curve subtle) => style == EditMotionStyle.playful ? playfulCurve : subtle;
+  /// The curve for motion that had its own before styles: [subtle] itself with Smooth, Playful's small overshoot
+  /// with Bouncy, fast-out-slow-in with Snappy, linear with Linear.
+  static Curve curveOr(Curve subtle) => switch (feel.curve) {
+        MotionCurve.smooth => subtle,
+        MotionCurve.bouncy => playfulCurve,
+        MotionCurve.snappy => Curves.fastOutSlowIn,
+        MotionCurve.linear => Curves.linear,
+      };
 
   /// Playful's ease-out with a small overshoot: a gentler back curve than [Curves.easeOutBack], so a sheet or page
   /// passing its place by a few pixels doesn't uncover the edge behind it for long.
@@ -201,9 +304,33 @@ class EditMotion {
   static Set<EditMotionKind> parseKinds(Iterable<Object?> names) =>
       {for (final k in EditMotionKind.values) if (names.contains(k.name)) k};
 
-  /// The curve for things appearing or moving: an ease-out for Subtle, a small overshoot for Playful.
-  static Curve get curve => style == EditMotionStyle.playful ? Curves.easeOutBack : Curves.easeOutCubic;
+  /// The curve for things appearing or moving, by the theme's curve family.
+  static Curve get curve => switch (feel.curve) {
+        MotionCurve.smooth => Curves.easeOutCubic,
+        MotionCurve.bouncy => Curves.easeOutBack,
+        MotionCurve.snappy => Curves.fastOutSlowIn,
+        MotionCurve.linear => Curves.linear,
+      };
 
   /// The curve for things going away.
-  static const Curve exitCurve = Curves.easeInCubic;
+  static Curve get exitCurve => feel.curve == MotionCurve.linear ? Curves.linear : Curves.easeInCubic;
+
+  /// [child] coming in ([enter]) or going out as [animation] runs from 0 to 1 (1 is fully shown), in the theme's
+  /// [MotionFeel.enter] or [MotionFeel.exit] kind. With [fadeOnly] (Reduced motion) always a fade; Standard falls
+  /// back to [standard] (the caller's own transition) or a fade.
+  static Widget transition(Animation<double> animation, Widget child,
+      {bool enter = true, bool fadeOnly = false, Widget Function(Animation<double>, Widget)? standard}) {
+    final kind = fadeOnly ? MotionTransition.fade : (enter ? feel.enter : feel.exit);
+    final t = CurvedAnimation(parent: animation, curve: curveOr(Curves.easeOutCubic), reverseCurve: exitCurve);
+    Widget fade(Widget c) => FadeTransition(opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut), child: c);
+    Widget scale(Widget c) => ScaleTransition(scale: Tween(begin: 0.92, end: 1.0).animate(t), child: c);
+    return switch (kind) {
+      MotionTransition.standard => standard?.call(animation, child) ?? fade(child),
+      MotionTransition.fade => fade(child),
+      MotionTransition.scale => scale(child),
+      MotionTransition.slide =>
+        SlideTransition(position: Tween(begin: const Offset(0.12, 0), end: Offset.zero).animate(t), child: fade(child)),
+      MotionTransition.fadeScale => fade(scale(child)),
+    };
+  }
 }

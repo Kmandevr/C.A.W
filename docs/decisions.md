@@ -113,6 +113,13 @@ Still open: custom labels, layouts inside project packages, and one file for eve
 
   The aim is a workspace that feels like home.
 
+**How it is built (Claude, 2026-11-11; choices for the owner to confirm):**
+- **Meter colours** get no slots of their own: meters draw in their track's colour, the warning accent and the danger accent (`pink`, kept red to magenta by the builder) at 0 dB, so the builder's track ramp and accents colour them. New slots would need every old theme file to fall back.
+- **Header style** is a preset of the existing header width and track height (Compact 112 px × 48 px, Roomy 200 px × 88 px), not a second header layout.
+- **One radius token:** the corner roundness also squares off device knob caps below 100% and sets clip corners (Rounded = 5 px × roundness; Square and Round are the other clip shapes). Arrange's audio clips and many fixed corners don't follow it yet.
+- **Haptic style** is Light (as designed), Firm (1.6×) or Off per kind, on top of the strength.
+- **Animation style** (owner's follow-up of 2026-11-11): pace, curve, entrance and exit as theme tokens; Subtle and Playful became two of its looks, Standard keeps the app exactly as it was, and Reduced and Off keep their rules.
+
 ## 2026-11-11: Light and dark for every built-in theme (owner)
 
 **Decision (owner, 2026-11-11).** The built-in themes become four families, each with a light and a dark version:

@@ -62,7 +62,9 @@ class _ClipSlotState extends State<ClipSlot> with SingleTickerProviderStateMixin
   Widget build(BuildContext context) {
     var child = widget.child;
     final appear = _in;
-    if (appear != null) {
+    if (appear != null && EditMotion.feel.enter != MotionTransition.standard) {
+      child = EditMotion.transition(appear, child, fadeOnly: EditMotion.fadeOnly(context)); // the theme's entrance
+    } else if (appear != null) {
       final t = CurvedAnimation(parent: appear, curve: EditMotion.curve);
       child = FadeTransition(opacity: CurvedAnimation(parent: appear, curve: Curves.easeOut), child: EditMotion.fadeOnly(context)
           ? child
@@ -106,6 +108,12 @@ class _LeavingClipState extends State<LeavingClip> with SingleTickerProviderStat
       alignment: Alignment.topLeft,
       child: Text(widget.name, maxLines: 1, overflow: TextOverflow.clip,
         style: TextStyle(color: widget.color, fontSize: 10, fontWeight: FontWeight.w800)));
+    if (EditMotion.feel.exit != MotionTransition.standard) {
+      // The theme's exit kind, run backwards from shown to gone.
+      return Positioned.fromRect(rect: widget.rect, child: IgnorePointer(child: KeyedSubtree(
+          key: const ValueKey('clip-leaving'),
+          child: EditMotion.transition(ReverseAnimation(_c), box, enter: false, fadeOnly: EditMotion.fadeOnly(context)))));
+    }
     return Positioned.fromRect(rect: widget.rect, child: IgnorePointer(child: FadeTransition(
       key: const ValueKey('clip-leaving'),
       opacity: Tween(begin: 1.0, end: 0.0).animate(t),

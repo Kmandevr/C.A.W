@@ -27,6 +27,7 @@ import 'arrange/region_list.dart';
 import 'arrange/take_chip.dart';
 import 'arrange/templates_ui.dart';
 import 'arrange/clip_bar.dart';
+import 'arrange/clip_look.dart';
 import 'arrange/clip_preview.dart';
 import 'arrange/ruler.dart';
 import 'arrange/focus_panel.dart';
@@ -2289,8 +2290,8 @@ class _TimelineClipState extends State<_TimelineClip> {
       child: Transform.translate(offset: Offset(shown + (start - c.startSteps) * widget.stepW, 0),
       child: Transform.scale(scaleX: length / c.lengthSteps,
         alignment: Alignment.centerLeft,
-        child: Material(color: Glass.active ? Colors.transparent : widget.color.withValues(alpha: widget.selected ? .42 : .23),
-          borderRadius: BorderRadius.circular(5),
+        child: Material(color: ClipLook.under(widget.color, widget.selected), // the theme's clip fill and corners
+          borderRadius: BorderRadius.circular(ClipLook.radius(widget.height)),
           child: Stack(children: [
         Positioned.fill(child: MediaQuery(
           data: mq.copyWith(gestureSettings: const DeviceGestureSettings(touchSlop: kTouchSlop / 2)),
@@ -2335,13 +2336,8 @@ class _TimelineClipState extends State<_TimelineClip> {
           child: Container(
             // Glass: a faint fill that is lighter at the top, and a solid outline in the track's colour; the
             // selected clip glows in that colour, brighter.
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(5),
-              gradient: Glass.active
-                  ? LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [
-                      widget.color.withValues(alpha: widget.selected ? .40 : .26),
-                      widget.color.withValues(alpha: widget.selected ? .24 : .12),
-                    ])
-                  : null,
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(ClipLook.radius(widget.height)),
+              gradient: ClipLook.gradient(widget.color, widget.selected),
               boxShadow: widget.selected ? [BoxShadow(color: widget.color.withValues(alpha: .35), blurRadius: 8)] : null,
               border: Border.all(
                 color: Glass.active || widget.selected ? widget.color : widget.color.withValues(alpha: .7),

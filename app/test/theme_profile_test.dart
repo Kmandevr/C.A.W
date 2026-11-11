@@ -234,14 +234,14 @@ void main() {
     });
   });
 
-  testWidgets('the theme editor groups Colours, Look, Layout and Behaviour, and a starter offers a duplicate',
+  testWidgets('the theme editor groups the builder, Feel, Layout, Behaviour and Advanced, and a starter offers a duplicate',
       (tester) async {
     tester.view.physicalSize = const Size(800, 6000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final s = Settings();
     await tester.pumpWidget(MaterialApp(home: ThemeEditor(settings: s)));
-    for (final h in ['COLOURS', 'LOOK', 'LAYOUT', 'BEHAVIOUR']) {
+    for (final h in ['PALETTE BUILDER', 'FEEL', 'LAYOUT', 'BEHAVIOUR', 'Advanced: every colour']) {
       expect(find.text(h), findsOneWidget, reason: h);
     }
     expect(find.byKey(const ValueKey('theme-offer-duplicate')), findsNothing);

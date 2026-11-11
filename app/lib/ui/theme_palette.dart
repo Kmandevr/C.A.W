@@ -1,5 +1,5 @@
 // Light and dark palettes: WCAG contrast, and the generator that makes a theme's light palette from its dark one
-// (and back), the same for the built-in families and for custom themes.
+// (and back), the same for the built-in families and for custom themes, and the palette builder (seeds, harmony).
 import 'dart:math' as math;
 
 import 'package:flutter/painting.dart';
@@ -138,3 +138,107 @@ Map<String, Color> withSafeContrast(Map<String, Color> palette) {
 /// The other mode's palette of [palette]: a light one from a dark one, a dark one from a light one.
 Map<String, Color> otherPalette(Map<String, Color> palette) =>
     isLightPalette(palette) ? darkFrom(palette) : lightFrom(palette);
+
+/// How the palette builder spreads its accents around the seed hue (owner, 2026-11-11: "a theme editor that builds
+/// the theme for you").
+enum Harmony {
+  analogous('Analogous'),
+  complementary('Complementary'),
+  triadic('Triadic'),
+  monochrome('Monochrome');
+
+  const Harmony(this.label);
+  final String label;
+}
+
+/// What the palette builder makes a theme from: one or two seed colours, a harmony and a variation number
+/// ([buildPalettes]; Shuffle picks another [variation]). The same recipe always makes the same palettes.
+class PaletteRecipe {
+  const PaletteRecipe({required this.seed, this.second, this.harmony = Harmony.analogous, this.variation = 0});
+  final Color seed;
+  final Color? second;
+  final Harmony harmony;
+  final int variation;
+
+  PaletteRecipe copyWith({Color? seed, Color? second, bool clearSecond = false, Harmony? harmony, int? variation}) =>
+      PaletteRecipe(
+          seed: seed ?? this.seed,
+          second: clearSecond ? null : (second ?? this.second),
+          harmony: harmony ?? this.harmony,
+          variation: variation ?? this.variation);
+}
+
+/// A named starting point for the builder.
+class PaletteMood {
+  const PaletteMood(this.name, this.recipe);
+  final String name;
+  final PaletteRecipe recipe;
+}
+
+/// The builder's mood presets.
+const paletteMoods = [
+  PaletteMood('Ocean', PaletteRecipe(seed: Color(0xFF1E9BD7), harmony: Harmony.analogous)),
+  PaletteMood('Forest', PaletteRecipe(seed: Color(0xFF3FAE5A), harmony: Harmony.analogous)),
+  PaletteMood('Sunset', PaletteRecipe(seed: Color(0xFFFF7A45), second: Color(0xFFB44CD9), harmony: Harmony.complementary)),
+  PaletteMood('Synthwave', PaletteRecipe(seed: Color(0xFFFF3CAC), second: Color(0xFF2DE2E6), harmony: Harmony.complementary)),
+  PaletteMood('Candy', PaletteRecipe(seed: Color(0xFFFF6FB5), harmony: Harmony.triadic)),
+  PaletteMood('Studio', PaletteRecipe(seed: Color(0xFF6E8BA8), harmony: Harmony.monochrome)),
+];
+
+/// The builder's seed swatches.
+const seedSwatches = [
+  Color(0xFFFF4D5E), Color(0xFFFF8A1F), Color(0xFFFFC21F), Color(0xFF39D353), Color(0xFF2BD9C0),
+  Color(0xFF1FA8FF), Color(0xFF6C7BFF), Color(0xFFB46CFF), Color(0xFFFF2BD6), Color(0xFF8C95A3),
+];
+
+double _wrap(double h) => (h % 360 + 360) % 360;
+
+/// The dark and light palettes for [r]: surfaces tinted by the seed, text and dim text, the five accents at the
+/// harmony's hues (the danger accent, `pink`, which also marks a clipping meter, kept in the red to magenta range),
+/// and eight track colours in a ramp around the wheel from the seed. Every colour then passes AA in both modes
+/// ([withSafeContrast], [lightFrom]). Deterministic: the same recipe gives the same palettes.
+({Map<String, Color> dark, Map<String, Color> light}) buildPalettes(PaletteRecipe r) {
+  final rnd = math.Random(r.variation * 7919 + r.harmony.index * 31 + r.seed.toARGB32() % 1000003);
+  double jitter(double span) => r.variation == 0 ? 0 : (rnd.nextDouble() * 2 - 1) * span;
+  final s1 = HSLColor.fromColor(r.seed);
+  final h1 = s1.hue;
+  final h2 = r.second == null ? null : HSLColor.fromColor(r.second!).hue;
+  final sat = ((s1.saturation < 0.12 ? 0.45 : s1.saturation) + jitter(0.08)).clamp(0.45, 0.95);
+  // Five accent hues for green (the main accent), pink, yellow, blue and violet.
+  final List<double> hues = switch (r.harmony) {
+    Harmony.analogous => [h1, h2 ?? h1 + 150, h1 + 40, h1 - 35, h1 + 75],
+    Harmony.complementary => [h1, h2 ?? h1 + 180, h1 + 30, (h2 ?? h1 + 180) + 30, h1 - 40],
+    Harmony.triadic => [h1, h2 ?? h1 + 120, h1 + 240, h1 + 60, h1 + 180],
+    Harmony.monochrome => [h1, h2 ?? h1, h1 + 12, h1 - 12, h1 + 24],
+  };
+  // Shuffle: a different order for the four supporting hues and a small turn of the wheel.
+  final support = hues.sublist(1);
+  if (r.variation != 0) support.shuffle(rnd);
+  final turn = jitter(12);
+  final accents = [hues[0], ...support].map((h) => _wrap(h + turn)).toList();
+  // The danger accent stays recognisably red to magenta (errors, record, a clipping meter).
+  final danger = accents[1];
+  final inRed = danger >= 320 || danger <= 15;
+  if (!inRed) accents[1] = _wrap(r.harmony == Harmony.monochrome ? 350 : (danger < 167 ? 5 : 335));
+  final mono = r.harmony == Harmony.monochrome;
+  final dark = <String, Color>{};
+  final surfSat = ((mono ? 0.18 : 0.22) + jitter(0.06)).clamp(0.0, 1.0);
+  dark['bg'] = HSLColor.fromAHSL(1, h1, surfSat, 0.045).toColor();
+  dark['panel'] = HSLColor.fromAHSL(1, h1, surfSat, 0.075).toColor();
+  dark['panelHi'] = HSLColor.fromAHSL(1, h1, surfSat, 0.11).toColor();
+  dark['line'] = HSLColor.fromAHSL(1, h1, surfSat, 0.2).toColor();
+  dark['text'] = HSLColor.fromAHSL(1, h1, 0.12, 0.92).toColor();
+  dark['dim'] = HSLColor.fromAHSL(1, h1, 0.1, 0.62).toColor();
+  for (final (i, slot) in accentSlots.indexed) {
+    final l = mono ? 0.55 + 0.06 * i : 0.6;
+    dark[slot] = HSLColor.fromAHSL(1, accents[i], mono && i > 1 ? sat * 0.7 : sat, l.clamp(0.0, 0.85)).toColor();
+  }
+  // Eight track colours: around the wheel from the seed (monochrome: a narrow band, stepped in lightness).
+  for (final (i, slot) in layerSlots.indexed) {
+    final h = mono ? h1 + (i - 3.5) * 9 : h1 + i * 45 + turn;
+    final l = mono ? 0.5 + 0.035 * i : 0.6;
+    dark[slot] = HSLColor.fromAHSL(1, _wrap(h), sat, l).toColor();
+  }
+  final safe = withSafeContrast(dark);
+  return (dark: safe, light: lightFrom(safe));
+}
