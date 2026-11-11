@@ -6,6 +6,15 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: Finish the whole roadmap, then optimize, then a fit-and-finish pass (owner)
+
+**Owner's words:** "Don't stop until everything in the roadmap is completely done. I want you continuously working… once everything in the roadmap is done, go and optimize everything so it's fast, it's quick and that it runs extremely well. Then make sure everything is user friendly. Don't change the layout or things in the app, just make sure it fits well in the UI."
+
+**The order:**
+1. Every roadmap item (beta scope above).
+2. A performance pass across the engine and the app.
+3. A user-friendliness pass that keeps the layout and features as they are and only fixes fit, spacing, overflow, labels and feedback.
+
 ## 2026-11-11: The beta's scope: the whole roadmap, plus drums, effects and audio (owner)
 
 **The owner's words:** "Make sure everything in the roadmap is done. Including the routing and the hard stuff too."
