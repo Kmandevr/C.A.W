@@ -51,12 +51,16 @@ struct ModuleRegistration {
     ModuleDestroy destroy = nullptr;
     std::shared_ptr<NativeLibrary> library;
     std::shared_ptr<const LoadedComponent> component;  // set for dynamically loaded components
+    bool internal = false;  // addInternal: never listed
 };
 
 class ModuleRegistry {
 public:
     // Static registrations use host-side delete. Dynamic components must export their own destroy function.
     bool add(const ModuleDescriptor& descriptor, ModuleFactory factory, ModuleDestroy destroy = nullptr);
+    // An engine-internal built-in (the test signal, org.caw.test.osc): found and created by id like any other,
+    // but left out of builtinComponents(), so hosts never list it in a browser or the Library.
+    bool addInternal(const ModuleDescriptor& descriptor, ModuleFactory factory);
 
     // Trust is mandatory. Blocked never opens the library; Isolated is rejected until a real process sandbox exists.
     // The library must export caw_get_component_v3 (caw_component.h); its descriptor is copied into
@@ -72,7 +76,8 @@ public:
     const ModuleDescriptor* find(std::string_view id) const noexcept;
     // Descriptors of the dynamically loaded components, in load order.
     std::vector<const ModuleDescriptor*> loadedComponents() const;
-    // Descriptors of the statically registered (built-in) components, in registration order.
+    // Descriptors of the statically registered (built-in) components, in registration order; internal ones
+    // (addInternal) are left out.
     std::vector<const ModuleDescriptor*> builtinComponents() const;
     // A new instance. A loaded component's instance is not yet activated: the host calls
     // activate(sampleRate, maxFrames) before processing and destroys it off the audio thread.
