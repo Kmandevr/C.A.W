@@ -252,7 +252,7 @@ The broader UI specification below records design intent as well as current beha
   - Enter opens or plays. The Menu key or Shift+F10 opens the same options as a long-press.
   - Every control can be adjusted from the keyboard: arrows for steps, Shift+arrows for fine steps, typing a number to set it.
 - **Shortcuts like Reaper's where they overlap:** Space for play/pause (owner, 2026-11-05: Space pauses, and Shift+Space stops), Ctrl+Z for undo, and Ctrl+S for save. **[Assumption]** Reaper's default keymap must be checked against its current action list before the shortcuts are fixed.
-- **Section shortcuts:** Ctrl+1 Build, Ctrl+2 Arrange, Ctrl+7 Files; Ctrl+3 opens the Export page.
+- **Section shortcuts:** Ctrl+1 Build, Ctrl+2 Files, Ctrl+3 Arrange, in the rail's order; the Export page has no default key ([actions](actions.md)).
 - **Shortcut overlay:** `?` shows every shortcut for the current screen.
 - **Customisable, like Reaper** (owner, 2026-10-28): every command is an action with keys you can change per area, plus macros and your own toolbars. The keys are changed in the key bindings editor (Settings › Keys and shortcuts › Key bindings, built 2026-11-05); details in [actions](actions.md).
 - **Vim-style** (owner, 2026-10-28): with a keyboard, the whole app works modally: modes, counts, `:` commands, `.` and recorded macros. The code editor has optional Vim editing. See [actions](actions.md#vim-style-control).
