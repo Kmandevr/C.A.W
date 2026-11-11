@@ -262,7 +262,8 @@ TEST(a_whole_rack_saves_and_loads_as_one_set_of_values_and_state) {
     CHECK(l == l2 && r == r2);
     // Every value came back, the children's included.
     bool cutoff = false;
-    for (const auto& [k, v] : b->currentSpecs()[0].params)
+    const std::vector<ComponentSpec> back = b->currentSpecs();  // kept: a temporary's member dies before the loop
+    for (const auto& [k, v] : back[0].params)
         if (k == "s1.cutoff") cutoff = std::fabs(v - 700.0) < 1e-9;
     CHECK(cutoff);
     // The state (the children's states inside the rack's) loads back.
