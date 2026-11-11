@@ -1,7 +1,7 @@
 ---
 title: Vision and principles
 summary: Owner-approved product direction, actual platform support, current product boundaries and unresolved owner decisions.
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Vision and principles
@@ -55,7 +55,7 @@ The repository currently includes:
 Important boundaries:
 - USB/Bluetooth MIDI device discovery, connection and live Engine voice routing are not implemented.
 - Audio-file import, audio clips, sample editing and WAV/SFZ multisample authoring are not implemented.
-- Sends, general sidechain routing and parallel mixer paths are not complete. Native effect chains on tracks and the master are built (engine).
+- Sends to bus folders, sidechain keys (the ducker, compressor and gate) and bus effects are built (2026-11-11, #175); receives, parallel paths inside a track and a routing matrix are not. Native effect chains on tracks, buses and the master are built (engine).
 - Module/global parameter automation and stems export remain approved v2 work.
 - Audio/MIDI recording, input monitoring, recording latency compensation, take lanes and comping are not implemented; they are planned later in the permanent roadmap. (Plugin delay compensation for native effects is built.)
 - The modular graph executor and native module registry are foundations, not the active playback/mixer path. External CLAP/VST3 binary hosting is not implemented. Dynamic loading of C.A.W. native components, under the user's explicit trust choice, is built in the engine; no screen uses it yet.

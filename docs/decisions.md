@@ -1,10 +1,20 @@
 ---
 title: Decisions
 summary: Dated record of what was chosen and why, newest first.
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # Decisions
+
+## 2026-11-11: Routing and the ducker (#175, choices made for the owner)
+
+**Decision (Claude, for the owner to confirm):**
+- **Sends go to bus folders only.** A send's destination is a folder with its bus on; there is no separate "aux" track type. "New reverb bus" makes such a folder at the end of the track list, running the reverb fully wet, with the send at −6 dB. Why: one bus model (REAPER's folders) instead of two, and a bus already has volume, pan, mute, solo and now effects.
+- **Routing loops are refused by the engine and never sent by the app.** The engine refuses the whole update naming the loop; the app leaves loop-making sends and keys out of the engine's copy (in track order, routes to parent buses first) and shows them faded, so moving a bus can't silence the project. The project keeps them.
+- **Keys come from any track or bus, pre-fader by default, and keep their source running while it is muted.** A muted kick can drive a ducker, which is how sidechain ducking is usually set up. Keys are not delayed for latency compensation (they arrive early); the ducker's look-ahead covers a late one.
+- **The ducker's three triggers in one device**, Tempo by default (it sounds with no setup); giving it a key switches it to Audio. Audio's default response is Trigger (the whole drawn shape per hit, re-arming 4 dB under the threshold), with Follow (classic envelope ducking) as the other choice. Look-ahead (up to 10 ms) adds latency only while it is on. A lows-only or highs-only duck through a Linkwitz-Riley crossover.
+- **Mute and solo go to the engine as a project update** (40 ms debounce) instead of the one-layer live call, so solo and mute reach through folders, buses and sends correctly.
+- **The master FX chain** already exists in the engine (`master_components`); strip slots for it are left for the master-chain step of gap 9.
 
 ## 2026-11-10: Polish round, night (owner)
 
@@ -95,7 +105,7 @@ updated: 2026-11-10
 **Decision (made during #173's engine work; the owner has not confirmed it):**
 - **Display data:** components publish a float block about 60 times a second through a lock-free two-slot seqlock (`caw/display.hpp`), read with `caw_engine_component_display` (API version 6), which never waits (it skips a busy control thread). Expensive display work (the EQ's FFT) runs only while a UI reads.
 - **Look-ahead latency:** a descriptor declares one latency, so the compressor and limiter always delay by 240 frames (5 ms at 48 kHz) and their look-ahead knob moves the detector within that delay, instead of changing the latency the engine compensates.
-- **External sidechain:** not built. A track's chain takes components with one stereo input; a compressor keyed by another track needs a second input port and routing, a follow-up (the [proposal](vision.md#open-owner-decisions) for sends and sidechains stands).
+- **External sidechain:** built 2026-11-11 (#175): the compressor and gate take a key from another track (Sidechain: External), as does the ducker.
 - **References, all maths, no code or dependency taken:** the soft-knee curve (Giannoulis, Massberg and Reiss, "Digital Dynamic Range Compressor Design", JAES 2012); the polyphase IIR half-band design (Valenzuela and Constantinides, IEE Proc. G, 1983); trapezoidal SVF EQ bands as `eq.hpp` already used. Nothing from Airwindows, Vital, Surge or any GPL source.
 
 ## 2026-11-10: A complete built-in suite with visual device UIs (owner)
