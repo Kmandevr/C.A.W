@@ -368,6 +368,8 @@ class LayerDoc {
     List<ClipDoc>? clips,
     List<AutomationLaneDoc>? automation,
     List<ComponentUseDoc>? components,
+    List<ComponentUseDoc>? noteComponents,
+    this.noteVoices = defaultNoteVoices,
     List<SendDoc>? sends,
     this.instrument,
     this.parentId,
@@ -378,7 +380,11 @@ class LayerDoc {
     this.ownColor = false,
     this.showLanes = false,
   }) : clips = clips ?? [], automation = automation ?? [], components = components ?? [],
-        sends = sends ?? [];
+        noteComponents = noteComponents ?? [], sends = sends ?? [];
+
+  /// Per-note FX voices (#127): slots a track's per-note effects run in, 1..[maxNoteVoices].
+  static const defaultNoteVoices = 8;
+  static const maxNoteVoices = 16;
 
   /// The tallest visual spacer under a track, in logical pixels.
   static const maxSpaceBelow = 160.0;
@@ -403,6 +409,13 @@ class LayerDoc {
   List<ClipDoc> clips;
   List<AutomationLaneDoc> automation;
   List<ComponentUseDoc> components; // native C++ effects after the instrument, before volume and pan (a bus folder's too)
+
+  /// Per-note FX (#127): effects run once per note, between the instrument's voices and its own effects, before
+  /// [components]. Only an instrument with a voice bus (its descriptor's per-note domain) can run them.
+  List<ComponentUseDoc> noteComponents;
+
+  /// How many notes get their own per-note slot (1..16, default 8); more share one overflow chain.
+  int noteVoices;
 
   /// Copies of the track's sound into bus folders (a reverb bus, a delay bus), beside its route to its folder's bus
   /// or the master; at most [SendDoc.maxSends].
@@ -444,6 +457,8 @@ class LayerDoc {
         'clips': [for (final c in clips) c.toJson()],
         'automation': [for (final a in automation) a.toJson()],
         if (components.isNotEmpty) 'components': [for (final c in components) c.toJson()],
+        if (noteComponents.isNotEmpty) 'noteComponents': [for (final c in noteComponents) c.toJson()],
+        if (noteVoices != defaultNoteVoices) 'noteVoices': noteVoices,
         if (sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
         if (instrument != null) 'instrument': instrument!.toJson(),
         'parent': parentId, 'folder': isFolder, 'bus': busEnabled, 'collapsed': collapsed,
@@ -465,6 +480,11 @@ class LayerDoc {
         clips: ((j['clips'] as List?) ?? const []).map((c) => ClipDoc.fromJson(c as Map<String, dynamic>)).toList(),
         automation: ((j['automation'] as List?) ?? const []).map((a) => AutomationLaneDoc.fromJson(a as Map<String, dynamic>)).toList(),
         components: ComponentUseDoc.listFromJson(j['components']),
+        noteComponents: j['folder'] == true ? null : ComponentUseDoc.listFromJson(j['noteComponents']),
+        noteVoices: switch (j['noteVoices']) {
+          final num v when v.isFinite => v.round().clamp(1, maxNoteVoices),
+          _ => defaultNoteVoices,
+        },
         sends: SendDoc.listFromJson(j['sends']),
         instrument: j['folder'] == true ? null : ComponentUseDoc.fromJson(j['instrument']),
         parentId: j['parent'] as String?, isFolder: j['folder'] == true,
@@ -718,6 +738,11 @@ class ProjectDoc {
               if (routing.sendsOf(l) case final sends when sends.isNotEmpty) 'sends': [for (final s in sends) s.toJson()],
               // A C++ instrument not loaded yet (awaiting trust, building) is left out: the track is silent until it is.
               if (instrumentPlays(l)) 'instrument': l.instrument!.toJson(),
+              // Per-note FX (#127) run inside the instrument, so only with it.
+              if (instrumentPlays(l) && playable(l.noteComponents).isNotEmpty) ...{
+                'noteComponents': [for (final c in playable(l.noteComponents)) c.toJson()],
+                'noteVoices': l.noteVoices,
+              },
               'parent': l.parentId, 'folder': l.isFolder, 'bus': l.busEnabled,
               'automation': [
                 for (final a in l.automation)
