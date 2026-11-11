@@ -1,5 +1,5 @@
 // The Android host: thermal and battery-saver signals for the resource adapter, the C++ compiler channel, MIDI
-// devices and the Bluetooth MIDI scan, saving exports, haptics and the microphone permission.
+// devices and the Bluetooth MIDI scan, saving exports, the music video's encoder, haptics and the microphone permission.
 package com.kmandevr.caw
 
 import android.content.BroadcastReceiver
@@ -97,6 +97,9 @@ class MainActivity : FlutterActivity() {
                     result.error("unavailable", e.message, null)
                 }
             }
+
+        // The music video's MP4 encoder: H.264 + AAC with MediaCodec and MediaMuxer (VideoEncoder.kt).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caw/video").setMethodCallHandler(VideoEncoder())
 
         // Touch feedback with the vibrator's fine primitives (Haptics.kt).
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, HAPTICS_METHOD_CHANNEL).setMethodCallHandler(Haptics(this))

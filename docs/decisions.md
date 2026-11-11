@@ -48,10 +48,13 @@ Carries out the owner's decision of 2026-11-10 ("C++ replaces the .caw language"
 - **Any aspect ratio and any resolution,** with presets for 9:16, 16:9 and 1:1.
 - **Preview:** a quick unrendered preview before recording.
 
-**[Proposal]** It renders offline:
-- the frames come from the same widgets drawn off screen at the chosen size, in step with the offline audio render;
-- they are encoded with the platform's own encoders (Android MediaCodec/MediaMuxer, Windows Media Foundation), so no GPL dependency;
-- the output is an MP4 with H.264 and AAC.
+**Built (Claude, 2026-11-11; choices to confirm; [App](app.md) "Music video" has the behaviour):**
+- **Offline and deterministic.** Frames come from one painter drawn off screen at the chosen size, at song time N / fps (never wall time), in step with the engine's offline song render of the range; meters come from per-frame peak and RMS of the rendered mix and track stems. The same project, setup and seed give the same frames (a test compares frame hashes).
+- **Shots are drawn by dedicated painters**, not by the editing screens: the flythrough, mixer, piano roll and device views are drawn from the project in the theme's colours. Why: the editing widgets read the live transport, meters and gestures and couldn't be driven by a render clock without changing screens other work owns; one painter also makes the preview and the render the same picture. Open (owner): whether the shots should look closer to the real screens.
+- **The director is seeded and uses note energy, not rendered loudness,** to choose mixer shots, so the preview (before any audio is rendered) cuts exactly as the render.
+- **Format:** MP4, H.264 video at about 0.1 bit per pixel per frame (2–80 Mbit/s) with a key frame a second (Android), AAC-LC at 160 kbit/s, 48 kHz stereo.
+- **Encoders: the platforms' own, no new package.** [Fact] Android MediaCodec, MediaMuxer and MediaCodecList are Android SDK APIs (developer.android.com reference pages, read 2026-11-11); Windows' H.264 encoder (Mfh264enc.dll, input I420, IYUV, NV12, YUY2 or YV12) and AAC encoder (Mfaacenc.dll, 16-bit PCM at 44.1 or 48 kHz, 1, 2 or 6 channels, 12,000 to 24,000 bytes a second) are Media Foundation transforms that ship with Windows 7 and later (Microsoft Learn "H.264 Video Encoder" and "AAC Encoder", read 2026-11-11). Both are called through the SDKs the app already builds with; C.A.W adds and redistributes no codec library, so no licence enters the project. [Assumption] the largest Windows frame is 4096 × 2304 until an encoder reports less; the Android limit is the first H.264 encoder's reported widths and heights, and the encoder chosen must take the exact size. Open (owner): codec patent terms for distributing the videos are the platform vendors' and the user's, not checked here.
+- **Linux and tests** write a list of frame hashes instead of a video; no MP4 encoder there yet.
 
 ## 2026-11-11: A REAPER-style layout file (owner; design, questions open)
 

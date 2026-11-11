@@ -21,7 +21,7 @@ Implemented UI/workflow foundations include:
 - Arrangement timeline (no 64-bar limit since F7.2; the engine takes more than 64 layers since F7.3, within its layer and export-buffer budgets, but the add buttons still stop at 64: F7.3 part C) with reusable MIDI clips, clip editing, nested folders and stereo folder buses.
 - Mixer controls for tracks and master output, plus a read-only Engine Lab scope/spectrum and diagnostics.
 - Track/folder volume-pan automation.
-- Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue; saving copies the finished file to the picked place in chunks.
+- Export of WAV loop/free-length/one-shot/wavetable outputs and MIDI patterns, with profiles, history and an in-memory queue; saving copies the finished file to the picked place in chunks. The Music video sheet (Export page and project menu) renders the arrangement as an MP4 ([app](app.md)).
 - Files: a Unity-style tree, grid and inspector over built-in effects, C++ components, patterns, audio and MIDI files, with drag and the effect picker; project (.caw) import and export, library folders, tags, saved searches and restore points stay in its ⋯ menu.
 - Plugin Builder for validating and packaging native .caw source modules.
 - Motion rules and the Motion, Haptics and Glow settings (`lib/ui/motion.dart`), the Glass setting and the glass look across the app (`lib/ui/glass.dart`: ambient background, see-through panels and tracks, frosted sheets, outlined controls), and golden tests with real fonts (`test/golden_util.dart`). No screen animates with them yet.
