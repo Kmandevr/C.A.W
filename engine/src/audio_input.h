@@ -85,6 +85,8 @@ public:
     std::string startRecording(std::string_view requestJson);
     std::string stopRecording();
     std::string recordingStatus();
+    // Tests: the writer stops draining the ring while held (a stalled disk), so a fast loop fills it.
+    void holdWriter(bool hold) noexcept { holdWriter_.store(hold, std::memory_order_release); }
     // Finalises takes left behind by a crash (".wav.part" files in dir whose header is the recorder's own) and
     // lists them. Refused while a recording in this process writes into the folder.
     static std::string recover(const std::string& dir);
@@ -97,7 +99,8 @@ private:
     struct Header {
         int64_t songPos = 0;
         int32_t frames = 0;
-        int32_t gapBefore = 0;  // frames dropped (a full ring) just before this chunk
+        int32_t gapBefore = 0;  // frames dropped (full rings) just before this chunk, their song positions unknown
+        bool silent = false;    // the sample ring was full: no samples were pushed, the writer writes silence here
     };
     struct Session;
     void writerLoop();
@@ -122,6 +125,7 @@ private:
     std::thread writer_;
     void waitForChunk() const noexcept;  // control thread, once disarmed: until no chunk() can still use the ring
     std::atomic<bool> stopWriter_{false};
+    std::atomic<bool> holdWriter_{false};
     std::mutex ctl_;
     // ping (0 idle, 1 asked, 2 playing and capturing, 3 captured, 4 being worked out)
     std::atomic<int> pingState_{0};

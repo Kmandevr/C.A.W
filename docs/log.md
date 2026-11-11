@@ -6,6 +6,7 @@ updated: 2026-11-11
 
 # Log
 
+- 2026-11-11: Windows CI saw `recording_loops_into_takes_and_punches_in_and_out` record an 11,520-frame take: the test outruns real time, the ring filled, and the writer placed the dropped frames' silence as if they ran on in time, which across a loop wrap split the take. A dropped chunk now keeps its song position in a sample-less header (`engine/src/audio_input.cpp`); a test holds the writer to fill the ring on purpose.
 - 2026-11-11: the .caw language deleted from the engine, WP-D (#160, branch `delete-caw`): tests moved onto the test signal (mixer goldens re-recorded), the compiler, VM, libraries, docs generator, templates and their tests deleted, the CLI and C API trimmed (API 21), `Engine::Chain` collapsed to a track's instrument and inserts (one graph node per track; ends #78, #133's export budget), the app's bindings and .caw leftovers removed, and the docs rewritten ([decisions](decisions.md)).
 - 2026-11-11: a project the engine refused on opening played the previous project's audio; the app now clears the engine for it (`test/project_isolation_test.dart`).
 - 2026-11-11: First loop opened with "native component chains exceed this Engine's project-state memory budget" on the owner's phone: the hardware probe budgeted from free pages, which Android keeps low; it now reads `MemAvailable` (`engine/src/hardware.cpp`). Build's start page says it is the C++ workspace.

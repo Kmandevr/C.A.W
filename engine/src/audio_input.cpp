@@ -332,8 +332,16 @@ void LiveAudio::chunk(int at, int frames, int64_t songPos, bool playing) noexcep
     } done{inChunk_};
     if (!armed_.load() || !headers_ || frames <= 0 || frames > 512) return;
     const size_t need = static_cast<size_t>(frames) * static_cast<size_t>(ringChannels_);
-    if (samples_.writable() < need || headers_->writable() == 0) {
+    if (headers_->writable() == 0) {  // not even a header fits: the frames go, counted in the next header's gap
         gap_ += frames;
+        dropped_.fetch_add(frames, std::memory_order_relaxed);
+        return;
+    }
+    if (samples_.writable() < need) {
+        // A header with no samples still carries this chunk's song position, so the writer puts silence exactly
+        // where the frames belonged: a take neither splits nor shifts at a loop wrap or punch while the disk lags.
+        headers_->push({songPos, frames, gap_, true});
+        gap_ = 0;
         dropped_.fetch_add(frames, std::memory_order_relaxed);
         return;
     }
@@ -453,14 +461,18 @@ void LiveAudio::writerLoop() {
         const bool stopping = stopWriter_.load(std::memory_order_acquire);
         Header h;
         bool any = false;
-        while (headers_->pop(h)) {
+        while ((stopping || !holdWriter_.load(std::memory_order_acquire)) && headers_->pop(h)) {
             any = true;
-            if (h.gapBefore > 0) {  // frames the ring had no room for: silence in their place, so the take stays in time
+            if (h.gapBefore > 0) {  // frames no header had room for: silence just before, assuming they ran on in time
                 block.assign(static_cast<size_t>(h.gapBefore) * ringChannels_, 0.0f);
                 s.chunk(h.songPos - h.gapBefore, h.gapBefore, block.data(), ringChannels_);
             }
-            block.resize(static_cast<size_t>(h.frames) * ringChannels_);
-            samples_.pop(block.data(), block.size());
+            if (h.silent) {
+                block.assign(static_cast<size_t>(h.frames) * ringChannels_, 0.0f);
+            } else {
+                block.resize(static_cast<size_t>(h.frames) * ringChannels_);
+                samples_.pop(block.data(), block.size());
+            }
             s.chunk(h.songPos, h.frames, block.data(), ringChannels_);
         }
         if (stopping && !any) break;

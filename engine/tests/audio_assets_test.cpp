@@ -885,6 +885,43 @@ TEST(recording_loops_into_takes_and_punches_in_and_out) {
     std::filesystem::remove_all(dir);
 }
 
+TEST(a_full_ring_across_loop_wraps_keeps_each_take_whole_and_in_place) {
+    // The disk lags (the writer held) while a looped bar records: the 2 s ring fills and later chunks are dropped,
+    // across two loop wraps. Each dropped chunk's header keeps its song position, so silence fills the drop where
+    // it belonged and the takes neither split nor shift. (CI once saw a 11520-frame take: the drop's positions were
+    // guessed as running on in time, which is wrong across a wrap.)
+    const std::string dir = tempDir("fullring");
+    Engine e(48000);
+    e.setMasterBypass(true);
+    e.setProjectJson(inputProject("off", true));
+    e.liveAudio().setDeviceChannels(2);
+    e.liveAudio().setLatencyOverride(0);
+    CHECK(e.liveAudio().startRecording("{\"dir\":\"" + jsonEscape(dir) +
+                                       "\",\"bpm\":120,\"punch_in_steps\":4,\"punch_out_steps\":8,\"tracks\":[{\"layer\":\"t\",\"channel\":0,\"channels\":2}]}")
+              .find("\"ok\":true") != std::string::npos);
+    e.liveAudio().holdWriter(true);
+    e.play();
+    std::vector<float> in(512 * 2, 0.1f), l(512), r(512);
+    for (int k = 0; k < 96000 * 3 / 512 + 1; ++k) {
+        e.liveAudio().beginCallback(in.data(), 2, 512);
+        e.process(l.data(), r.data(), 512);
+    }
+    e.liveAudio().holdWriter(false);
+    const std::string done = e.liveAudio().stopRecording();
+    Json j;
+    std::string error;
+    CHECK(parseJson(done, j, error));
+    CHECK(j.number("dropped_frames", 0) > 0.0);
+    const Json* takes = j.get("takes");
+    CHECK(takes && takes->arr.size() == 3);
+    if (takes)
+        for (const Json& t : takes->arr) {
+            CHECK_EQ(t.number("start_frame", 0), 24000.0);
+            CHECK_EQ(t.number("frames", 0), 24000.0);
+        }
+    std::filesystem::remove_all(dir);
+}
+
 TEST(recovery_finalises_a_take_left_by_a_crash) {
     const std::string dir = tempDir("recover");
     // A take as the writer leaves it mid-recording: a header that counts nothing yet, and frames after it.
