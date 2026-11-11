@@ -1,5 +1,6 @@
 // Arrange's loop range, markers and regions on AppState (docs/reaper-flow.md, gap 2): drawn and dragged on the ruler,
-// stored in the project; the loop range goes to the engine, which loops playback over it. Each edit is one undo step.
+// regions moved or copied with their clips, stored in the project; the loop range goes to the engine, which loops
+// playback over it. Each edit is one undo step.
 import 'dart:math' as math;
 
 import 'app_state.dart';
@@ -76,6 +77,63 @@ extension ArrangeMarkers on AppState {
     endUndoStep();
     editProject((p) => p.markers.remove(marker));
     endUndoStep();
+  }
+
+  /// The clips that start inside region [region], on every track (REAPER's region contents).
+  List<PlacedClip> clipsInRegion(MarkerDoc region) => [
+        if (region.isRegion)
+          for (final l in project.layers)
+            if (!l.isFolder)
+              for (final c in l.clips)
+                if (c.startSteps >= region.startSteps && c.startSteps < region.endSteps!) (layer: l, clip: c),
+      ];
+
+  /// Moves [region] to start at [step] with the clips that start inside it, by the same time (locked clips stay);
+  /// with [copy] the region stays and a copy of it ("… copy") goes there, with copies of its clips, each with its own
+  /// notes. The move is kept inside the song, so no clip goes before its start. One undo step; returns the region
+  /// that is at [step] now, or null when nothing moved.
+  MarkerDoc? moveRegionWithClips(MarkerDoc region, int step, {bool copy = false}) {
+    if (!region.isRegion) return null;
+    final inside = [for (final c in clipsInRegion(region)) if (copy || !c.clip.lock) c];
+    final len = region.endSteps! - region.startSteps;
+    var lo = region.startSteps, hi = region.endSteps!;
+    for (final c in inside) {
+      lo = math.min(lo, c.clip.startSteps);
+      hi = math.max(hi, c.clip.startSteps + c.clip.lengthSteps);
+    }
+    final shift = (step - region.startSteps).clamp(-lo, project.maxArrangementSteps - hi).toInt();
+    if (shift == 0) return copy ? null : region;
+    final at = region.startSteps + shift;
+    MarkerDoc result = region;
+    endUndoStep();
+    editProject((p) {
+      if (copy) {
+        result = MarkerDoc(id: newId('k'), name: '${region.name} copy'.substring(0, math.min(64, region.name.length + 5)),
+            startSteps: at, endSteps: at + len, color: region.color);
+        p.markers.add(result);
+        for (final c in inside) {
+          final made = copyClipAt(c.clip, c.clip.startSteps + shift);
+          if (made != null) c.layer.clips.add(made);
+        }
+      } else {
+        region.startSteps = at;
+        region.endSteps = at + len;
+        for (final c in inside) {
+          c.clip.startSteps += shift;
+        }
+      }
+    });
+    endUndoStep();
+    return result;
+  }
+
+  /// REAPER's 1–0 keys: moves the playhead to marker [n] (1-based; markers only, in time order). False when there
+  /// is no such marker.
+  bool jumpToMarkerNumber(int n) {
+    final markers = [for (final m in project.markers) if (!m.isRegion) m]..sort((a, b) => a.startSteps.compareTo(b.startSteps));
+    if (n < 1 || n > markers.length) return false;
+    seekTo(markers[n - 1].startSteps.toDouble());
+    return true;
   }
 
   /// The markers' and regions' starts, sorted, without repeats.

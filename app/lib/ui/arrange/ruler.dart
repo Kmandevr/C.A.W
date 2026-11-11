@@ -1,6 +1,6 @@
 // Arrange's ruler (docs/reaper-flow.md, gap 2): bar numbers, the loop range (drag along the ruler to draw it, drag
-// its handles to adjust it, as in REAPER), and markers and regions (a long press adds one; tap jumps, drag moves,
-// long press for rename, colour, loop and delete).
+// its handles to adjust it, as in REAPER), and markers and regions (a long press adds one; tap jumps, drag moves, a
+// region dragged with Alt takes its clips and with Ctrl or a second finger copies them; long press for the menu).
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -10,9 +10,11 @@ import 'package:flutter/services.dart';
 import '../../model/app_state.dart';
 import '../../model/arrange_markers.dart';
 import '../../model/project.dart';
+import '../haptics.dart';
 import '../motion.dart';
 import '../theme.dart';
 import 'long_press_menu.dart';
+import 'region_list.dart';
 
 /// The ruler over the lanes, [width] wide at [stepW] pixels a step; [scroll] is the lanes' horizontal scroll, so
 /// only the visible bars are painted.
@@ -38,6 +40,17 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
   MarkerDoc? _moving;
   int _movingAt = 0;
   double _movingDx = 0;
+
+  /// Fingers on the ruler: a second one while a region is dragged copies it with its clips.
+  final Set<int> _pointers = {};
+  bool _secondFinger = false;
+
+  /// How a region drag ends, by the keys held (or a second finger): the region alone, with its clips, or a copy.
+  ({bool clips, bool copy}) get _regionMode {
+    final keys = HardwareKeyboard.instance;
+    final copy = _secondFinger || keys.isControlPressed || keys.isMetaPressed;
+    return (clips: copy || keys.isAltPressed, copy: copy);
+  }
 
   AppState get s => widget.state;
   ProjectDoc get p => s.project;
@@ -95,8 +108,10 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
       style: s.settings.longPressMenu, actions: const [
         MenuAction('marker', 'Add marker', Icons.flag_outlined),
         MenuAction('region', 'Add region', Icons.space_bar),
+        MenuAction('list', 'Markers and regions…', Icons.list),
       ]);
     if (v == null || !mounted) return;
+    if (v == 'list') await showMarkerList(context, s);
     if (v == 'marker') s.addMarker(step);
     if (v == 'region') {
       // The time selection when it is under the finger, else four bars from the bar pressed.
@@ -110,32 +125,7 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
     }
   }
 
-  Future<void> _markerMenu(MarkerDoc m, Offset global) async {
-    final v = await showLongPressMenu<String>(context, at: global, title: m.name,
-      style: s.settings.longPressMenu, actions: [
-        const MenuAction('rename', 'Rename', Icons.edit_outlined),
-        const MenuAction('color', 'Colour', Icons.palette_outlined),
-        if (m.isRegion) const MenuAction('loop', 'Loop this region', Icons.repeat),
-        const MenuAction('delete', 'Delete', Icons.delete_outline, danger: true),
-      ]);
-    if (v == null || !mounted) return;
-    if (v == 'color') s.editMarker(m, color: m.color + 1);
-    if (v == 'loop') s.setLoopRange(m.startSteps, m.endSteps!);
-    if (v == 'delete') s.removeMarker(m);
-    if (v == 'rename') {
-      final c = TextEditingController(text: m.name);
-      final name = await showDialog<String>(context: context, builder: (context) => AlertDialog(
-        title: Text(m.isRegion ? 'Rename region' : 'Rename marker'),
-        content: TextField(key: const ValueKey('marker-name'), controller: c, autofocus: true,
-          onSubmitted: (v) => Navigator.of(context).pop(v)),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(c.text), child: const Text('Rename')),
-        ]));
-      c.dispose();
-      if (name != null) s.editMarker(m, name: name);
-    }
-  }
+  Future<void> _markerMenu(MarkerDoc m, Offset global) => markerMenu(context, s, m, global);
 
   Widget _marker(MarkerDoc m) {
     final w = widget.stepW, h = widget.height;
@@ -152,14 +142,27 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
         onTap: () => s.seekTo(m.startSteps.toDouble()),
         onLongPressStart: (d) => _markerMenu(m, d.globalPosition),
         onSecondaryTapUp: (d) => _markerMenu(m, d.globalPosition),
-        onHorizontalDragStart: (_) => setState(() { _moving = m; _movingAt = m.startSteps; _movingDx = 0; }),
+        onHorizontalDragStart: (_) => setState(() {
+          _moving = m;
+          _movingAt = m.startSteps;
+          _movingDx = 0;
+          _secondFinger = false;
+        }),
         onHorizontalDragUpdate: (d) => setState(() {
           _movingDx += d.delta.dx;
           _movingAt = _snapped(m.startSteps * w + _movingDx);
         }),
         onHorizontalDragEnd: (_) {
           final at = _movingAt;
-          setState(() => _moving = null);
+          final mode = _regionMode;
+          setState(() {
+            _moving = null;
+            _secondFinger = false;
+          });
+          if (m.isRegion && mode.clips) {
+            if (s.moveRegionWithClips(m, at, copy: mode.copy) != null) Haptics.drop();
+            return;
+          }
           s.endUndoStep();
           s.moveMarker(m, at);
           s.endUndoStep();
@@ -169,7 +172,10 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
                 decoration: BoxDecoration(color: color.withValues(alpha: moving ? 0.45 : 0.28),
                   borderRadius: BorderRadius.circular(3), border: Border.all(color: color.withValues(alpha: 0.9))),
                 alignment: Alignment.centerLeft,
-                child: Text(m.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                // While dragged, it says what the drop will do.
+                child: Text(moving && _regionMode.copy ? '${m.name} · copy with clips'
+                    : moving && _regionMode.clips ? '${m.name} · with clips' : m.name,
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)))
             : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Container(width: 2, color: color),
@@ -196,7 +202,17 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
     final band = h * 0.5;
     // Regions first, so a marker on top of one stays reachable.
     final marks = [...p.markers]..sort((a, b) => (a.isRegion ? 0 : 1).compareTo(b.isRegion ? 0 : 1));
-    return SizedBox(key: const ValueKey('arrange-ruler'), width: widget.width, height: h, child: Stack(children: [
+    return Listener(
+      onPointerDown: (e) {
+        _pointers.add(e.pointer);
+        if (_pointers.length > 1 && _moving != null && _moving!.isRegion && !_secondFinger) {
+          Haptics.threshold();
+          setState(() => _secondFinger = true);
+        }
+      },
+      onPointerUp: (e) => _pointers.remove(e.pointer),
+      onPointerCancel: (e) => _pointers.remove(e.pointer),
+      child: SizedBox(key: const ValueKey('arrange-ruler'), width: widget.width, height: h, child: Stack(children: [
       Positioned.fill(child: Semantics(
         label: 'Ruler: drag to set the loop range, tap to move the playhead, long-press to add a marker or region',
         child: MouseRegion(cursor: SystemMouseCursors.text, child: GestureDetector(
@@ -222,7 +238,7 @@ class _ArrangeRulerState extends State<ArrangeRuler> {
             decoration: BoxDecoration(color: on ? Neon.blue : Neon.dim, borderRadius: BorderRadius.circular(2))))),
       ],
       for (final m in marks) _marker(m),
-    ]));
+    ])));
   }
 }
 

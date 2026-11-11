@@ -14,6 +14,7 @@ import '../model/live_midi.dart';
 import '../model/project.dart';
 import '../model/settings.dart';
 import 'arrange/arrange_drag.dart';
+import 'arrange/region_list.dart';
 import 'arrange/templates_ui.dart';
 import 'arrange/clip_bar.dart';
 import 'arrange/clip_preview.dart';
@@ -222,6 +223,11 @@ class _ArrangerScreenState extends State<ArrangerScreen> with SingleTickerProvid
         }
       case 'arranger.marker.next' || 'arranger.marker.prev':
         if (!s.jumpToMarker(next: id.endsWith('next'))) _router?.toast('No marker that way');
+      case 'arranger.marker.list':
+        showMarkerList(context, s);
+      case final go when go.startsWith('arranger.marker.go'):
+        final n = int.tryParse(go.substring('arranger.marker.go'.length)) ?? 0;
+        if (!s.jumpToMarkerNumber(n)) _router?.toast('No marker $n');
       default:
         return false;
     }

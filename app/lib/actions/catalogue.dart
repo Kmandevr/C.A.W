@@ -246,6 +246,19 @@ const List<ActionDef> standardActions = [
       defaultKeys: ['Shift+R'], isChange: true),
   ActionDef('arranger.marker.next', 'Go to next marker', _r, defaultKeys: ['Ctrl+]'], toast: false),
   ActionDef('arranger.marker.prev', 'Go to previous marker', _r, defaultKeys: ['Ctrl+['], toast: false),
+  // REAPER's 1–0: the first ten markers, in time order. Bound digits run their action instead of starting a count.
+  ActionDef('arranger.marker.go1', 'Go to marker 1', _r, defaultKeys: ['1'], toast: false),
+  ActionDef('arranger.marker.go2', 'Go to marker 2', _r, defaultKeys: ['2'], toast: false),
+  ActionDef('arranger.marker.go3', 'Go to marker 3', _r, defaultKeys: ['3'], toast: false),
+  ActionDef('arranger.marker.go4', 'Go to marker 4', _r, defaultKeys: ['4'], toast: false),
+  ActionDef('arranger.marker.go5', 'Go to marker 5', _r, defaultKeys: ['5'], toast: false),
+  ActionDef('arranger.marker.go6', 'Go to marker 6', _r, defaultKeys: ['6'], toast: false),
+  ActionDef('arranger.marker.go7', 'Go to marker 7', _r, defaultKeys: ['7'], toast: false),
+  ActionDef('arranger.marker.go8', 'Go to marker 8', _r, defaultKeys: ['8'], toast: false),
+  ActionDef('arranger.marker.go9', 'Go to marker 9', _r, defaultKeys: ['9'], toast: false),
+  ActionDef('arranger.marker.go10', 'Go to marker 10', _r, defaultKeys: ['0'], toast: false),
+  ActionDef('arranger.marker.list', 'Markers and regions', _r,
+      description: 'Every marker and region: jump, rename, loop, duplicate with clips', toast: false),
 
   // Exporter.
   ActionDef('export.now', 'Export', _e,
