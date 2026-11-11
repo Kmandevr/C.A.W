@@ -6,6 +6,13 @@ updated: 2026-11-11
 
 # Decisions
 
+## 2026-11-11: the master loudness meter measures only while read (Claude, performance pass)
+
+The live master loudness meter (BS.1770-5 K-weighting and the 4x true-peak filter, every sample) cost about 6 % of a three-track project's audio work, and nothing in the app reads it (`caw_engine_loudness` has no caller in `app/lib`; [performance](performance.md#song-scenarios-2026-11-11)).
+
+- **Decision (Claude, a small assumption for the app; the owner may reverse it):** the Engine's master meter measures from the start until 30 s pass with no read, then stops; the next read starts it over as a reset does (`LoudnessMeter::sleepWhenUnread`, `engine/src/meters.*`). Its momentary and short-term values are then those of the last 30 s it measured, and the integrated value counts only the time something was reading. Export loudness uses its own meter and is unchanged; a `LoudnessMeter` made outside the Engine measures always.
+- **No sound changed:** every other speed-up of the pass gives the same bits (no golden render was re-recorded), so it needs no perceptual check.
+
 ## 2026-11-11: the .caw project file and its package format (#159; Claude, choices to confirm)
 
 Carries out the owner's packaging bullets of "MIDI clip loops, clip automation and project packaging" (below); [App](app.md) has the flows.
