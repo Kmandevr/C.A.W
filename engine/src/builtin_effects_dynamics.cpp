@@ -213,7 +213,8 @@ const ParamTable& limParams() {
     return t;
 }
 const ModuleDescriptor& limDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.limiter", "Limiter", limParams(), kLookaheadFrames, 0);
+    static const ModuleDescriptor d = withDomains(effectDescriptor("org.caw.limiter", "Limiter", limParams(), kLookaheadFrames, 0),
+                                              kDomainWhole);  // the ceiling is the whole signal's
     return d;
 }
 

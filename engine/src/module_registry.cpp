@@ -122,7 +122,7 @@ const Info* element(const void* base, uint32_t stride, uint32_t index) noexcept 
 // Copies a component's C descriptor into engine-owned storage. False (with a message) when its
 // sizes or pointers are unusable; field values are left to validateModuleDescriptor.
 bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::string& error) {
-    if (c.struct_size < sizeof(CawComponentDescriptor) || c.abi_version != CAW_COMPONENT_ABI_VERSION) {
+    if (c.struct_size < CAW_COMPONENT_DESCRIPTOR_SIZE_3_0 || c.abi_version != CAW_COMPONENT_ABI_VERSION) {
         error = "The component descriptor is from another C interface version.";
         return false;
     }
@@ -213,6 +213,13 @@ bool copyDescriptor(const CawComponentDescriptor& c, LoadedComponent& out, std::
     d.latencyFrames = c.latency_frames;
     d.tailFrames = c.tail_frames;
     d.maxStateBytes = c.max_state_bytes;
+    // 3.1 (#120): read only when the component's struct has them; an older build runs whole-only. Out-of-range
+    // values are kept (validation refuses them) rather than truncated into valid ones.
+    if (c.struct_size >= offsetof(CawComponentDescriptor, cpu_class) + sizeof(c.cpu_class)) {
+        d.domains = c.domains == 0 ? kDomainWhole : c.domains;
+        d.capabilities = c.capabilities;
+        d.cpuClass = enumFrom<CpuClass>(c.cpu_class);
+    }
     if (!textOk) {
         error = "A component string is longer than the host accepts.";
         return false;
@@ -344,6 +351,8 @@ public:
         c.event_in_count = block.eventInCount;
         c.event_out = eventOut_.data();
         c.event_out_count = block.eventOutCount;
+        // The voice bus has the same layout on both sides (caw/module.hpp); a 3.0 component never reads it.
+        c.voices = reinterpret_cast<const CawVoiceBus*>(block.voices);
         bool ok = component_->table->process(instance_, &c) == 1;
         // The EventOutput rule (caw/module.hpp): at most capacity, frames in order and inside the
         // block; anything else fails the block (and reports no events).
@@ -461,7 +470,7 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
             if (!candidate) break;
             listsAny = true;
             if (candidate->struct_size < sizeof(CawComponentV3) || candidate->abi_version != CAW_COMPONENT_ABI_VERSION ||
-                !candidate->descriptor || candidate->descriptor->struct_size < sizeof(CawComponentDescriptor) ||
+                !candidate->descriptor || candidate->descriptor->struct_size < CAW_COMPONENT_DESCRIPTOR_SIZE_3_0 ||
                 candidate->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION) {
                 skippedIncompatible = true;
                 continue;
@@ -495,7 +504,7 @@ ModuleLoadResult ModuleRegistry::loadSharedLibrary(
         if (!copyDescriptor(*table->descriptor, *component, copyError))
             return {false,
                     table->descriptor->abi_version != CAW_COMPONENT_ABI_VERSION ||
-                            table->descriptor->struct_size < sizeof(CawComponentDescriptor)
+                            table->descriptor->struct_size < CAW_COMPONENT_DESCRIPTOR_SIZE_3_0
                         ? ModuleLoadError::IncompatibleAbi
                         : ModuleLoadError::InvalidDescriptor,
                     std::string(expectedId), std::move(copyError)};
@@ -594,6 +603,29 @@ const char* roleName(ModuleRole role) noexcept {
     }
     return "unspecified";
 }
+const char* cpuClassName(CpuClass c) noexcept {
+    switch (c) {
+        case CpuClass::Unspecified: return "unspecified";
+        case CpuClass::Light: return "light";
+        case CpuClass::Medium: return "medium";
+        case CpuClass::Heavy: return "heavy";
+    }
+    return "unspecified";
+}
+// Bit names in bit order, as JSON strings.
+std::string bitNames(uint32_t bits, const char* const* names, uint32_t count) {
+    std::string j = "[";
+    bool first = true;
+    for (uint32_t b = 0; b < count; ++b)
+        if (bits & (1u << b)) {
+            j += std::string(first ? "\"" : ",\"") + names[b] + "\"";
+            first = false;
+        }
+    return j + "]";
+}
+constexpr const char* kDomainNames[] = {"whole", "per_channel", "per_voice", "per_note"};
+constexpr const char* kCapabilityNames[] = {"notes_in", "midi_in", "events_out", "sample_assets", "needs_transport",
+                                            "export_clap"};
 const char* uiKindName(UiControlKind kind) noexcept {
     switch (kind) {
         case UiControlKind::Slider: return "slider";
@@ -644,7 +676,9 @@ std::string moduleDescriptorJson(const ModuleDescriptor& d) {
                     "\",\"latency_frames\":" + std::to_string(d.latencyFrames) +
                     ",\"tail_frames\":" + (d.tailFrames == kInfiniteTail ? std::string("null") : std::to_string(d.tailFrames)) +
                     ",\"max_state_bytes\":" + std::to_string(d.maxStateBytes) + ",\"custom_ui_id\":" + quoted(d.customUiId) +
-                    ",\"ports\":[";
+                    ",\"domains\":" + bitNames(d.domains, kDomainNames, 4) +
+                    ",\"capabilities\":" + bitNames(d.capabilities, kCapabilityNames, 6) + ",\"cpu_class\":\"" +
+                    cpuClassName(d.cpuClass) + "\",\"ports\":[";
     for (uint32_t i = 0; i < d.portCount; ++i) {
         const PortDescriptor& p = d.ports[i];
         j += std::string(i ? "," : "") + "{\"id\":" + quoted(p.id) + ",\"type\":\"" + portTypeName(p.type) +

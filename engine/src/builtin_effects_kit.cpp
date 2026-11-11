@@ -448,7 +448,7 @@ const ParamTable& utilityParams() {
     return t;
 }
 const ModuleDescriptor& utilityDescriptor() {
-    static const ModuleDescriptor d = effectDescriptor("org.caw.utility", "Utility", utilityParams(), 0, 0);
+    static const ModuleDescriptor d = withCpu(effectDescriptor("org.caw.utility", "Utility", utilityParams(), 0, 0), CpuClass::Light);
     return d;
 }
 

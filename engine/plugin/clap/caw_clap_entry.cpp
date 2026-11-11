@@ -96,7 +96,7 @@ bool tableUsable(const CawComponentV3* t) {
         !t->load_state)
         return false;
     const CawComponentDescriptor* d = t->descriptor;
-    if (!d || d->struct_size < sizeof(CawComponentDescriptor) || d->abi_version != CAW_COMPONENT_ABI_VERSION) return false;
+    if (!d || d->struct_size < CAW_COMPONENT_DESCRIPTOR_SIZE_3_0 || d->abi_version != CAW_COMPONENT_ABI_VERSION) return false;
     if (!d->id || !d->id[0] || d->port_count > kMaxPorts || d->parameter_count > kMaxParameters) return false;
     if (d->port_count && (!d->ports || d->port_info_size < sizeof(CawPortInfo))) return false;
     if (d->parameter_count && (!d->parameters || d->parameter_info_size < sizeof(CawParameterInfo))) return false;
