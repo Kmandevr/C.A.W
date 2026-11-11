@@ -171,6 +171,10 @@ add_library(caw_core STATIC
   # fx-filters end
   src/render.cpp src/synth.cpp src/tables.cpp src/vm.cpp src/wav.cpp
   "${CAW_TEMPLATES_CPP}" "${CAW_STDLIB_CPP}")
+# fx-racks begin
+target_sources(caw_core PRIVATE src/builtin_fx_racks.cpp src/builtin_fx_racks_fx.cpp src/builtin_fx_racks_multiband.cpp
+  src/builtin_fx_racks_presets.cpp)
+# fx-racks end
 target_include_directories(caw_core PRIVATE src)
 target_compile_options(caw_core PRIVATE ${CAW_FLAGS})
 find_package(Threads REQUIRED)
@@ -234,6 +238,7 @@ target_include_directories(caw_cli PRIVATE src)
   # fx-filters begin
   target_sources(caw_tests PRIVATE tests/fx_filters_test.cpp)  # the EQ & Filter group
   # fx-filters end
+  target_sources(caw_tests PRIVATE tests/fx_racks_test.cpp)  # fx-racks: the FX and multiband racks
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
@@ -274,6 +279,7 @@ target_include_directories(caw_cli PRIVATE src)
   # allocations, which would turn off AddressSanitizer's new/delete mismatch checks in caw_tests.
   add_executable(caw_rt_tests tests/test_main.cpp tests/graph_channels_test.cpp tests/engine_rt_test.cpp
                               tests/alloc_counter.cpp)
+  target_sources(caw_rt_tests PRIVATE tests/fx_racks_rt_test.cpp)  # fx-racks
   target_compile_options(caw_rt_tests PRIVATE ${CAW_FLAGS})
   target_include_directories(caw_rt_tests PRIVATE src)
   add_dependencies(caw_rt_tests caw_test_component)
