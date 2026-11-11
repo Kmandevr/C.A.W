@@ -23,6 +23,8 @@ public:
 private:
     double ll_ = 0, rr_ = 0, lr_ = 0;
     double perFrame_ = 0;  // -1 / (window x rate): the decay is exp(perFrame_ x frames)
+    int keepFrames_ = -1;  // the block size keep_ was worked out for
+    double keep_ = 1;
     std::atomic<float> value_{0.0f};
 };
 

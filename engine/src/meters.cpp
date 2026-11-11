@@ -48,6 +48,7 @@ void storeMax(std::atomic<float>& a, float v) noexcept {
 
 void CorrelationMeter::prepare(double sampleRate) noexcept {
     perFrame_ = -1.0 / (kCorrelationSeconds * (sampleRate > 0 ? sampleRate : 48000.0));
+    keepFrames_ = -1;  // a new rate: the decay again
     clear();
 }
 
@@ -66,7 +67,8 @@ void CorrelationMeter::process(const float* left, const float* right, int frames
         lr += l * r;
     }
     // One decay a block (block-sized steps of the window: a meter's reading, not audio).
-    const double keep = std::exp(perFrame_ * frames);
+    if (frames != keepFrames_) keepFrames_ = frames, keep_ = std::exp(perFrame_ * frames);  // the usual 64: once
+    const double keep = keep_;
     ll_ = finite(ll_ * keep + ll);
     rr_ = finite(rr_ * keep + rr);
     lr_ = finite(lr_ * keep + lr);
