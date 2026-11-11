@@ -486,8 +486,8 @@ void main() {
       e.dispose();
       final info = Engine.drumsInfo()!;
       final layout = DrumsLayout.of(drums);
-      expect([for (final l in layout.layers) (l.id, l.name, l.suffixes)],
-          [for (final l in info['layers'] as List) (l['id'], l['name'], [...(l['params'] as List)])]);
+      expect([for (final l in layout.layers) '${l.id}|${l.name}|${l.suffixes.join(',')}'],
+          [for (final l in info['layers'] as List) '${l['id']}|${l['name']}|${(l['params'] as List).join(',')}']);
       expect([for (final g in layout.kitGroups.values) ...g], info['globals']);
       expect(info['display']['floats'], DrumsDisplayFrame.floats);
       expect(info['display']['version'], DrumsDisplayFrame.version);
@@ -509,7 +509,6 @@ void main() {
         e.dispose();
       });
       final s = PreviewState();
-      states.add(s);
       s.project = ProjectDoc(id: 'p', name: 'Old', bpm: 120, modules: [], layers: [
         LayerDoc(id: 'a', name: 'Kit', color: 2, instrument: ComponentUseDoc('org.caw.drum.kit', {'kick_tune': 60}))]);
       s.componentCatalog.set(infos);
