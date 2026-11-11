@@ -171,6 +171,9 @@ set_target_properties(caw_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILIT
 # The component testing suite (#163): offline measurements of C++ effects.
 target_sources(caw_core PRIVATE src/analysis.cpp src/component_test.cpp)
 target_sources(caw_core PRIVATE src/sample_pack.cpp)  # the sample-pack maker (#164)
+# fx-dynamics begin: the Dynamics and Drive effects
+target_sources(caw_core PRIVATE src/builtin_fx_dynamics.cpp src/builtin_fx_drive.cpp src/builtin_fx_dynamics_presets.cpp)
+# fx-dynamics end
 
 
 # The library the app loads through dart:ffi.
@@ -215,6 +218,7 @@ target_include_directories(caw_cli PRIVATE src)
   target_sources(caw_tests PRIVATE tests/effects_test.cpp)  # the built-in effects suite (#173)
   target_sources(caw_tests PRIVATE tests/routing_test.cpp)  # sends, buses, keys and routing loops (#175)
   target_sources(caw_tests PRIVATE tests/ducker_test.cpp)  # the ducker driven directly (#175 audio review)
+  target_sources(caw_tests PRIVATE tests/fx_dynamics_test.cpp)  # fx-dynamics: the Dynamics and Drive effects
   add_library(caw_test_component MODULE tests/native_component_fixture.cpp)
   target_link_libraries(caw_test_component PRIVATE CAW::SDK)
   target_compile_options(caw_test_component PRIVATE ${CAW_FLAGS})
