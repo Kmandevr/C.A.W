@@ -228,13 +228,13 @@ const char* kBusy =
 
 }  // namespace
 
-TEST(drums_descriptor_has_64_pads_of_119_grouped_parameters) {
+TEST(drums_descriptor_has_64_pads_of_162_grouped_parameters) {
     std::unique_ptr<ModuleProcessor> p = makeDrums();
     if (!p) return;
     const ModuleDescriptor& d = p->descriptor();
     CHECK_EQ(d.id, std::string_view("org.caw.drums"));
     CHECK_EQ(d.name, std::string_view("Drums"));
-    CHECK_EQ(d.parameterCount, kGlobalCount + 64u * 119u);
+    CHECK_EQ(d.parameterCount, kGlobalCount + 64u * 162u);
     CHECK(validateModuleDescriptor(d) == ModuleValidation::Ok);
     CHECK_EQ(d.parameters[0].id, std::string_view("mode"));
     CHECK_EQ(d.parameters[padParam(0, kBodyFreq)].id, std::string_view("a1_body_freq"));
@@ -480,6 +480,10 @@ TEST(drums_presets_sound_like_their_names) {
     };
     const Expect expects[] = {
         {"808 Kick", 42, 62, 0.4, 1.6, 0, 250},        {"909 Kick", 45, 80, 0.15, 0.6, 0, 600},
+        {"808 Kick Long", 42, 60, 1.5, 4.0, 0, 250},   {"808 Kick Short", 45, 65, 0.12, 0.5, 0, 350},
+        {"Dubstep Kick", 45, 68, 0.2, 0.8, 0, 2500},   {"House Kick", 45, 65, 0.15, 0.6, 0, 700},
+        {"Acoustic Kick", 50, 85, 0.08, 0.6, 0, 1500}, {"Acoustic Snare", 0, 0, 0.1, 0.6, 700, 7000},
+        {"Trap Snare", 0, 0, 0.05, 0.4, 1200, 9000},   {"Dubstep Snare", 0, 0, 0.12, 0.7, 600, 7000},
         {"Punchy Kick", 50, 90, 0.08, 0.4, 0, 900},     {"Techno Kick", 42, 70, 0.2, 0.8, 0, 500},
         {"Hardstyle Kick", 0, 0, 0.2, 0.8, 0, 3000}, {"Distorted Kick", 42, 120, 0.15, 0.7, 0, 1500},
         {"Sub Kick", 38, 50, 0.4, 1.4, 0, 150},          {"Trap Kick", 40, 60, 0.6, 2.2, 0, 400},
@@ -547,11 +551,13 @@ TEST(drums_golden_renders) {
         uint64_t hash;
     };
     const G goldens[] = {
-        {"kit 808", "Kit: 808", kBusy, 0xaabb9c09b185a307ull},
-        {"kit acoustic", "Kit: Acoustic", kBusy, 0x86daa7901eefef7aull},
-        {"kit lo-fi", "Kit: Lo-fi", kBusy, 0xca970ac7d2289e68ull},
+        {"kit 808", "Kit: 808", kBusy, 0xf154afeb89d861afull},
+        {"kit acoustic", "Kit: Acoustic", kBusy, 0x4277419323395489ull},
+        {"kit lo-fi", "Kit: Lo-fi", kBusy, 0x27b61f64433d6d81ull},
         {"808 bass", "808 Bass", "0 C2 2 1\n1 G2 2 1\n4 C2 1 0.8\n8 A#1 4 1\n10 C3 2 1\n", 0xbb79edb4713f220bull},
         {"crash", "Crash", "0 C4 1 1\n", 0x42e1e2855c257f67ull},
+        {"dubstep kick", "Dubstep Kick", "0 C4 1 1\n4 C4 1 0.6\n8 C4 1 1\n", 0xda20ca6ca2c5410full},
+        {"acoustic snare", "Acoustic Snare", "0 C4 1 1\n4 C4 1 0.4\n6 C4 1 0.7\n8 C4 1 1\n", 0xda2aed96ff37d89bull},
     };
     for (const G& g : goldens) {
         Values values;
@@ -620,10 +626,10 @@ TEST(drums_info_and_explode) {
     CHECK(parseJson(info, j, err));
     caw_free(info);
     CHECK_EQ(j.number("pads", 0), 64.0);
-    CHECK_EQ(j.number("pad_parameters", 0), 119.0);
+    CHECK_EQ(j.number("pad_parameters", 0), 162.0);
     CHECK(j.get("sounds") && j.get("sounds")->arr.size() >= 40);
     CHECK(j.get("kits") && j.get("kits")->arr.size() == 6);
-    CHECK(j.get("layers") && j.get("layers")->arr.size() == 10);
+    CHECK(j.get("layers") && j.get("layers")->arr.size() == 17);
     CHECK(j.get("gm") && j.get("gm")->arr.front().number("note", 0) == 35.0);
     // The default kit explodes into its 16 bank-A pads, each a Single-mode Drums with that pad's sound on A1.
     char* x = caw_drums_explode(R"({"id":"org.caw.drums","params":{"a3_note":3,"a5_level":-60},"samples":[{"slot":2,"builtin":"Clap"}]})");
@@ -790,7 +796,7 @@ TEST(drums_display_shows_the_last_hit_its_pitch_curve_and_the_pads) {
     float d[1024] = {};
     const uint32_t n = p->readDisplay(d, 1024);
     CHECK_EQ(n, 656u);
-    CHECK_EQ(d[0], 1.0f);                 // layout version
+    CHECK_EQ(d[0], 2.0f);                 // layout version
     CHECK_EQ(d[1], 0.0f);                 // Kit
     CHECK_EQ(d[6], 256.0f);               // waveform bins
     CHECK_EQ(d[7], 64.0f);                // pitch points
@@ -807,4 +813,214 @@ TEST(drums_display_shows_the_last_hit_its_pitch_curve_and_the_pads) {
     const double fEnd = findSound("808 Kick")->voice[kBodyFreq];
     CHECK(d[592] > d[592 + 63]);
     CHECK_NEAR(d[592 + 63], fEnd, fEnd * 0.05);
+}
+
+namespace {
+
+// The frequency from the zero crossings of x[from, to) (rising ones), Hz.
+double crossingHz(const std::vector<float>& x, size_t from, size_t to, double sr = 48000) {
+    double first = -1, last = -1;
+    int n = 0;
+    for (size_t i = from + 1; i < to && i < x.size(); ++i)
+        if (x[i - 1] < 0.0f && x[i] >= 0.0f) {
+            const double t = static_cast<double>(i - 1) + x[i - 1] / (x[i - 1] - x[i]);
+            if (first < 0) first = t;
+            else ++n;
+            last = t;
+        }
+    return n > 0 ? n * sr / (last - first) : 0.0;
+}
+// A swept body's opening pitch: the time to its first fall through zero is half its first cycle.
+double firstHalfCycleHz(const std::vector<float>& x, double sr = 48000) {
+    size_t i = 1;
+    while (i < x.size() && x[i] <= 0.0f) ++i;  // the wave's first rise
+    for (; i + 1 < x.size(); ++i)
+        if (x[i] > 0.0f && x[i + 1] <= 0.0f) return sr / (2.0 * (static_cast<double>(i) + x[i] / (x[i] - x[i + 1])));
+    return 0.0;
+}
+double rmsOf(const std::vector<float>& x, size_t from, size_t to) {
+    return std::sqrt(energy(x, from, to) / static_cast<double>(std::max<size_t>(1, to - from)));
+}
+// Energy below `hz` (an 8192-point spectrum of x[from, from + len)).
+double lowEnergy(const std::vector<float>& x, size_t from, size_t len, double hz, double sr = 48000) {
+    constexpr size_t kN = 8192;
+    std::vector<std::complex<double>> d(kN);
+    for (size_t i = 0; i < len && i < kN && from + i < x.size(); ++i) d[i] = x[from + i];
+    analysis::fft(d, false);
+    double s = 0;
+    for (size_t k = 1; k < kN / 2 && k * sr / kN < hz; ++k) s += std::norm(d[k]);
+    return s;
+}
+
+}  // namespace
+
+TEST(drums_pitch_shape_points_draw_the_drop) {
+    // Dubstep Kick: Points mode, 38 st (about 500 Hz) down to 14 st in 6 ms, 3 st by 31 ms, the 55 Hz body by 91 ms.
+    std::unique_ptr<ModuleProcessor> p = makeDrums();
+    if (!p) return;
+    const Values body = soundValues("Dubstep Kick", {{"a1_click_on", 0}, {"a1_sub_on", 0}, {"a1_drive_type", 0},
+                                                     {"a1_clip", 0}, {"a1_comp", 0}, {"a1_eq_mid", 0}, {"a1_tr_attack", 0}});
+    const std::vector<float> x = play(*p, {notes::noteOn(0, 1, 60, 1)}, 24000, body);
+    const double early = firstHalfCycleHz(x), mid = crossingHz(x, 720, 2400), late = crossingHz(x, 4800, 9600);
+    if (std::getenv("CAW_PRINT_DRUMS")) std::printf("pitch shape: %.1f %.1f %.1f Hz\n", early, mid, late);
+    CHECK(early > 180.0);                  // the first half cycle, mostly in the first segment's fast drop
+    CHECK(mid > 60.0 && mid < early);      // falling
+    CHECK_NEAR(late, 55.0, 3.0);           // settled on the body's pitch
+    // The display draws the same shape: Points mode, the curve falling to 55 Hz.
+    play(*p, {}, 1600, body);
+    float d[1024] = {};
+    p->readDisplay(d, 1024);
+    CHECK_EQ(d[15], 1.0f);
+    CHECK(d[592] > 400.0f);
+    CHECK_NEAR(d[592 + 63], 55.0f, 1.0f);
+    // A softer hit drops less far (velocity to pitch drop).
+    p->reset();
+    const std::vector<float> soft = play(*p, {notes::noteOn(0, 1, 60, 0.3)}, 2400, soundValues("Dubstep Kick", {{"a1_vel_punch", 1}}));
+    p->reset();
+    const std::vector<float> hard = play(*p, {notes::noteOn(0, 1, 60, 1.0)}, 2400, soundValues("Dubstep Kick", {{"a1_vel_punch", 1}}));
+    CHECK(firstHalfCycleHz(soft) < firstHalfCycleHz(hard));
+}
+
+TEST(drums_genre_kicks_meet_their_targets) {
+    // Research targets (docs/engine.md, "Drums", Research): an 808's long and short versions differ in decay, not
+    // pitch; a dubstep kick is dense (clipped: a low crest factor) with its sub at 50..60 Hz; every kick's pitch falls.
+    std::vector<float> longKick, shortKick, dub, acoustic;
+    const Hit l = renderSound("808 Kick Long", &longKick), s = renderSound("808 Kick Short", &shortKick);
+    const Hit db = renderSound("Dubstep Kick", &dub), ac = renderSound("Acoustic Kick", &acoustic);
+    CHECK(l.decay > 4.0 * s.decay);
+    CHECK_NEAR(l.f0, s.f0, 6.0);
+    auto crest = [](const std::vector<float>& x) { return 20.0 * std::log10(peakOf(x) / rmsOf(x, 0, 14400)); };
+    const double crestDub = crest(dub), crest808 = crest(shortKick);
+    if (std::getenv("CAW_PRINT_DRUMS"))
+        std::printf("crest: dubstep %.1f dB, 808 short %.1f dB, acoustic %.1f dB\n", crestDub, crest808, crest(acoustic));
+    CHECK(crestDub < 9.0);
+    CHECK(crestDub < crest808);
+    CHECK(db.f0 >= 50.0 && db.f0 <= 60.0);
+    for (const std::vector<float>* x : {&longKick, &shortKick, &dub, &acoustic}) {
+        if (std::getenv("CAW_PRINT_DRUMS")) std::printf("drop: %.1f -> %.1f Hz\n", firstHalfCycleHz(*x), crossingHz(*x, 9600, 19200));
+        CHECK(firstHalfCycleHz(*x) > 1.2 * crossingHz(*x, 9600, 19200));
+    }
+}
+
+TEST(drums_velocity_changes_the_spectrum_and_strike_varies) {
+    // Acoustic Snare: a hard hit is brighter than a soft one, not only louder.
+    std::unique_ptr<ModuleProcessor> p = makeDrums();
+    if (!p) return;
+    const Values v = soundValues("Acoustic Snare", {{"a1_rnd_pitch", 0}, {"a1_rnd_tone", 0}, {"a1_rnd_decay", 0}, {"a1_rnd_pos", 0}});
+    const Hit hard = measureHit(play(*p, {notes::noteOn(0, 1, 60, 1.0)}, 24000, v));
+    p->reset();
+    const Hit soft = measureHit(play(*p, {notes::noteOn(0, 1, 60, 0.35)}, 24000, v));
+    CHECK(hard.centroid > 1.15 * soft.centroid);
+    // Strike-position variation changes each hit's modes; with it off two hits are the same.
+    p->reset();
+    const Values vary = soundValues("Acoustic Snare", {{"a1_rnd_pitch", 0}, {"a1_rnd_tone", 0}, {"a1_rnd_decay", 0},
+                                                       {"a1_rnd_pos", 1}, {"a1_noise_on", 0}, {"a1_click_on", 0}});
+    const std::vector<float> two = play(*p, {notes::noteOn(0, 1, 60, 1.0), notes::noteOn(24000, 2, 60, 1.0)}, 48000, vary);
+    double diff = 0;
+    for (size_t i = 0; i < 4800; ++i) diff += std::fabs(two[i] - two[24000 + i]);
+    CHECK(diff > 1.0);
+}
+
+TEST(drums_sub_stays_mono_and_width_widens_the_rest) {
+    std::unique_ptr<ModuleProcessor> p = makeDrums();
+    if (!p) return;
+    std::vector<float> right;
+    const std::vector<float> left = play(*p, {notes::noteOn(0, 1, 60, 1)}, 24000,
+                                         soundValues("Dubstep Kick", {{"a1_width", 1}, {"a1_width_hz", 150}}), &right);
+    std::vector<float> side(left.size()), mid(left.size());
+    for (size_t i = 0; i < left.size(); ++i) side[i] = 0.5f * (left[i] - right[i]), mid[i] = 0.5f * (left[i] + right[i]);
+    CHECK(energy(side, 0, 24000) > 1e-4);                                  // it is wide
+    CHECK(lowEnergy(side, 0, 8192, 100) < 0.01 * lowEnergy(mid, 0, 8192, 100));  // but not below 100 Hz
+    // Width 0: the voice is mono (centre pan).
+    p->reset();
+    const std::vector<float> l0 = play(*p, {notes::noteOn(0, 1, 60, 1)}, 4800, soundValues("Dubstep Kick"), &right);
+    double d = 0;
+    for (size_t i = 0; i < l0.size(); ++i) d += std::fabs(l0[i] - right[i]);
+    CHECK(d < 1e-6);
+    // The sub alone: its own envelope (decay 0.42 s) with the body off.
+    p->reset();
+    const Hit sub = measureHit(play(*p, {notes::noteOn(0, 1, 60, 1)}, 48000,
+                                    soundValues("Dubstep Kick", {{"a1_body_on", 0}, {"a1_click_on", 0}, {"a1_clip", 0}})));
+    CHECK_NEAR(sub.f0, 55.0, 2.0);
+    CHECK(sub.decay > 0.2 && sub.decay < 0.6);
+}
+
+TEST(drums_drive_types_clipper_and_kit_effects) {
+    std::unique_ptr<ModuleProcessor> p = makeDrums();
+    if (!p) return;
+    // Every drive type sounds, stays finite and differs from the others.
+    std::vector<std::vector<float>> outs;
+    for (int t = 0; t <= kDriveAsym; ++t) {
+        p->reset();
+        outs.push_back(play(*p, {notes::noteOn(0, 1, 60, 1)}, 9600,
+                            soundValues("808 Kick Short", {{"a1_drive_type", t}, {"a1_drive", 8}, {"a1_drive_lo", 60},
+                                                           {"a1_drive_hi", 8000}, {"a1_drive_mix", 0.8}})));
+        bool finite = true;
+        for (float x : outs.back()) finite = finite && std::isfinite(x);
+        CHECK(finite);
+        CHECK(peakOf(outs.back()) > 0.05f);
+    }
+    for (size_t a = 0; a < outs.size(); ++a)
+        for (size_t b = a + 1; b < outs.size(); ++b) {
+            double d = 0;
+            for (size_t i = 0; i < 9600; ++i) d += std::fabs(outs[a][i] - outs[b][i]);
+            if (!(d > 0.1)) cawtest::fail(__FILE__, __LINE__, "drive types " + std::to_string(a) + " and " + std::to_string(b) + " match");
+        }
+    // The clipper holds the voice at full scale (level 0 dB, centre pan): +24 dB into it never passes 1.
+    for (int c : {kClipSoft, kClipHard}) {
+        p->reset();
+        const std::vector<float> x = play(*p, {notes::noteOn(0, 1, 60, 1)}, 9600,
+                                          soundValues("808 Kick Short", {{"a1_level", 0}, {"a1_body_level", 12}, {"a1_clip", c},
+                                                                         {"a1_clip_gain", 24}}));
+        CHECK(peakOf(x) <= 1.0001f);
+        CHECK(peakOf(x) > 0.9f);
+    }
+    // The kit clipper and the kit EQ.
+    p->reset();
+    const std::vector<float> loud = play(*p, {notes::noteOn(0, 1, 60, 1)}, 9600,
+                                         soundValues("808 Kick Short", {{"a1_level", 12}, {"kit_clip", kClipHard}, {"kit_clip_gain", 12}}));
+    CHECK(peakOf(loud) <= 1.0001f);
+    p->reset();
+    const std::vector<float> flat = play(*p, {notes::noteOn(0, 1, 60, 1)}, 9600, soundValues("808 Kick Short"));
+    p->reset();
+    const std::vector<float> boosted = play(*p, {notes::noteOn(0, 1, 60, 1)}, 9600, soundValues("808 Kick Short", {{"kit_low", 9}}));
+    CHECK(energy(boosted, 0, 9600) > 2.0 * energy(flat, 0, 9600));
+}
+
+TEST(drums_room_is_a_send_and_pressure_modulates) {
+    std::unique_ptr<ModuleProcessor> p = makeDrums();
+    if (!p) return;
+    const Values room = {{"room", 0.6}, {"room_decay", 1.5}};
+    Values dry = room, wet = room;
+    dry.push_back({"a1_room_send", 0});
+    wet.push_back({"a1_room_send", 1});
+    const std::vector<float> a = play(*p, {notes::noteOn(0, 1, 60, 1)}, 48000, soundValues("Rim", dry));
+    p->reset();
+    const std::vector<float> b = play(*p, {notes::noteOn(0, 1, 60, 1)}, 48000, soundValues("Rim", wet));
+    CHECK(energy(a, 12000, 48000) < 1e-8);           // the rim is long gone and sent nowhere
+    CHECK(energy(b, 12000, 48000) > 1e-5);           // its room tail rings on
+    // Pressure to pitch: a held note pressed raises a tracking-off pad's pitch by press_pitch semitones.
+    p->reset();
+    const Values sine = soundValues("Sub Kick", {{"a1_body_decay", 3}, {"a1_body_pitch", 0}, {"a1_press_pitch", 12}, {"a1_flt", 0}});
+    const std::vector<float> x = play(*p, {notes::noteOn(0, 1, 60, 1), notes::notePressure(12000, 1, 60, 1.0)}, 36000, sine);
+    CHECK_NEAR(crossingHz(x, 4800, 9600), 42.0, 2.0);
+    CHECK_NEAR(crossingHz(x, 24000, 34000), 84.0, 4.0);
+    // Pressure to choke: past half pressure the voice fades out.
+    p->reset();
+    const std::vector<float> c = play(*p, {notes::noteOn(0, 1, 60, 1), notes::notePressure(4800, 1, 60, 0.8)}, 24000,
+                                      soundValues("Sub Kick", {{"a1_press_choke", 1}}));
+    CHECK(energy(c, 9600, 24000) < 1e-8);
+}
+
+TEST(drums_display_reports_the_last_note_for_note_learn) {
+    std::unique_ptr<ModuleProcessor> p = makeDrums();
+    if (!p) return;
+    Event on = notes::noteOn(0, 1, 77, 0.5);  // no pad answers 77 in the default kit: learn still sees it
+    play(*p, {on}, 1600);
+    float d[1024] = {};
+    p->readDisplay(d, 1024);
+    CHECK_EQ(d[11], 77.0f);
+    CHECK_EQ(d[12], 1.0f);
+    CHECK_NEAR(d[13], 0.5f, 1e-3f);
+    CHECK_EQ(d[14], 1.0f);
 }

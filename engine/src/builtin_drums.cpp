@@ -149,9 +149,12 @@ const lib::HalfBandDesign& halfBand() {
 }
 
 // A drive stage, with its 2x oversampling (Normal and High quality) around the curve.
+constexpr int kDriveClipSoft = 100;  // the clipper's soft curve (tanh, not level-matched: the ceiling is full scale)
+
 struct Drive {
     int type = kDriveOff;
-    double amount = 1, norm = 1, q = 1, tubeBias = 0, tubeNorm = 1;
+    double amount = 1, norm = 1, q = 1, tubeBias = 0, tubeNorm = 1, dcX = 0, dcY = 0, held = 0;
+    uint32_t holdFrames = 1, holdLeft = 0;
     lib::Saturator sat;
     lib::Oversampler2x os{halfBand()}, os2a{halfBand()}, os2b{halfBand()};
     void set(int t, double a) noexcept {
@@ -166,6 +169,8 @@ struct Drive {
             tubeBias = lib::fastTanh(0.3);
             tubeNorm = 1.0 / (1.0 + tubeBias);
         }
+        if (type == kDriveDecimate) holdFrames = static_cast<uint32_t>(amount + 0.5);  // hold every n-th sample
+        if (type == kDriveRectify || type == kDriveAsym) norm = 1.0 / lib::fastTanh(amount);
     }
     double curveAt(double x) const noexcept {
         switch (type) {
@@ -173,6 +178,15 @@ struct Drive {
             case kDriveHard: return lib::hardClip(x, amount);
             case kDriveFold: return lib::fastSinCycles(x * amount * 0.25);
             case kDriveTube: return (lib::fastTanh(amount * x + 0.3) - tubeBias) * tubeNorm;
+            case kDriveRectify: {  // half the wave folded up: an octave of grit over the original
+                const double t = lib::fastTanh(amount * x) * norm;
+                return (0.5 * t + (t < 0.0 ? -t : t)) * (2.0 / 3.0);
+            }
+            case kDriveAsym: {  // positive half driven harder than the negative: even harmonics
+                const double y = amount * x;
+                return (y > 0.0 ? lib::fastTanh(y) : lib::fastTanh(0.5 * y)) * norm;
+            }
+            case kDriveClipSoft: return lib::fastTanh(amount * x);
             default: return x;
         }
     }
@@ -180,7 +194,25 @@ struct Drive {
     double process(double x, int factor) noexcept {
         if (type == kDriveOff) return x;
         if (type == kDriveCrush) return std::floor(x * q + 0.5) / q;
+        if (type == kDriveDecimate) {
+            if (holdLeft == 0) {
+                held = x;
+                holdLeft = holdFrames;
+            }
+            --holdLeft;
+            return held;
+        }
+        if (type == kDriveRectify || type == kDriveAsym) return dcBlock(factor <= 1 ? curveAt(x) : over(x, factor));
         if (factor <= 1) return curveAt(x);
+        return over(x, factor);
+    }
+    // A 7 Hz DC blocker after the curves that bend one side more (their offset would thump).
+    double dcBlock(double x) noexcept {
+        dcY = x - dcX + 0.9991 * dcY;
+        dcX = x;
+        return dcY;
+    }
+    double over(double x, int factor) noexcept {
         double up[2];
         os.up(x, up);
         if (factor == 2) {
@@ -200,20 +232,33 @@ struct Drive {
         os.clear();
         os2a.clear();
         os2b.clear();
+        dcX = dcY = held = 0.0;
+        holdLeft = 0;
     }
 };
 
 // ---------- A pad's settings, worked out from its knobs and macros ----------
 
 struct PadSettings {
-    double gain = 1, pan = 0, tune = 0, root = 60, glide = 0.08, release = 0.1, pressAmt = 0;
-    int type = kTypePerc, poly = 2, choke = 0, out = 0, pressDest = 0;
+    double gain = 1, pan = 0, tune = 0, root = 60, glide = 0.08, release = 0.1;
+    int type = kTypePerc, poly = 2, choke = 0, out = 0;
     bool track = false, mono = false, gate = false;
+    // pressure (polyphonic aftertouch) amounts
+    double pressDamp = 0, pressTone = 0, pressPitch = 0, pressLevel = 0, pressDrive = 0;
+    bool pressChoke = false;
     // body
     bool bodyOn = false;
-    int wave = 0, subDiv = 2;
+    int wave = 0;
     double shape = 0, shapeNorm = 1, fold = 0, freq = 55, pitchSt = 24, ptime = 0.05, pcurve = 0, attack = 0.0005,
-           hold = 0, decay = 0.4, dcurve = 0, p2ratio = 1.5, p2level = 0, sub = 0, phase = 0, bodyLevel = 1;
+           hold = 0, decay = 0.4, dcurve = 0, p2ratio = 1.5, p2level = 0, phase = 0, bodyLevel = 1;
+    // pitch shape (breakpoints)
+    bool points = false;
+    double pt[4] = {}, pp[4] = {}, pc[4] = {};
+    // sub
+    bool subOn = false, subClean = true;
+    int subWave = 0;
+    double subMul = 0.5, subFollow = 0, subAttack = 0.005, subHold = 0, subDecay = 0.6, subCurve = 0, subDrive = 0,
+           subLp = 2000, subLevel = 0.5;
     // click
     bool clickOn = false;
     int clickType = 0;
@@ -238,11 +283,14 @@ struct PadSettings {
     // effects
     int driveType = 0, flt = 0;
     bool drivePost = false;
-    double drive = 2, cutoff = 12000, fltQ = 0.707, fltEnv = 0, fltDecay = 0.2, eqLow = 0, eqMid = 0, eqFreq = 1000,
-           eqHigh = 0, trA = 0, trS = 0, comp = 0;
+    double drive = 2, driveLo = 20, driveHi = 20000, driveMix = 1, cutoff = 12000, fltQ = 0.707, fltEnv = 0,
+           fltDecay = 0.2, eqLow = 0, eqLowFreq = 120, eqMid = 0, eqFreq = 1000, eqQ = 1, eqHigh = 0, eqHighFreq = 6000,
+           trA = 0, trS = 0, comp = 0, compAttack = 0.002, compRelease = 0.06, clipGain = 1, width = 0, widthHz = 200,
+           roomSend = 1;
+    int clip = 0;
     // variation
-    double velLevel = 1, velPitch = 0, velDecay = 0, velTone = 0.3, velClick = 0.5, rndPitch = 0, rndDecay = 0,
-           rndTone = 0, rndPan = 0, rndLevel = 0;
+    double velLevel = 1, velPitch = 0, velDecay = 0, velTone = 0.3, velClick = 0.5, velPunch = 0, rndPitch = 0,
+           rndDecay = 0, rndTone = 0, rndPan = 0, rndLevel = 0, rndPos = 0;
     bool used = false;  // any layer on and the pad not silent
     double raw[kPadParams] = {};  // the knobs these were worked out from
     bool valid = false;
@@ -290,8 +338,12 @@ void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s, u
     s.poly = clampi(v(kPoly), 1, 4);
     s.choke = clampi(v(kChoke), 0, 8);
     s.out = clampi(v(kOut), 0, static_cast<int>(kOutputs) - 1);
-    s.pressDest = clampi(v(kPressDest), 0, kPressPitch);
-    s.pressAmt = clampd(v(kPressAmt), -1, 1);
+    s.pressDamp = clampd(v(kPressDamp), 0, 1);
+    s.pressChoke = on(kPressChoke);
+    s.pressTone = clampd(v(kPressTone), -1, 1);
+    s.pressPitch = clampd(v(kPressPitch), -12, 12);
+    s.pressLevel = clampd(v(kPressLevel), -1, 1);
+    s.pressDrive = clampd(v(kPressDrive), 0, 1);
     s.type = clampi(v(kType), 0, kTypeCount - 1);
 
     s.bodyOn = on(kBodyOn);
@@ -310,10 +362,32 @@ void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s, u
         s.dcurve = clampd(v(kBodyDCurve), -1, 1);
         s.p2ratio = clampd(v(kBodyP2Ratio), 0.5, 8);
         s.p2level = clampd(v(kBodyP2Level), 0, 1);
-        s.sub = clampd(v(kBodySub), 0, 1);
-        s.subDiv = clampi(v(kBodySubOct), 0, 1) ? 4 : 2;
         s.phase = clampd(v(kBodyPhase), 0, 1);
         s.bodyLevel = dbGain(v(kBodyLevel));
+        s.points = clampi(v(kPenvMode), 0, 1) == kPenvPoints;
+        if (s.points) {
+            const double timeMul = exp2d(-0.7 * punch);
+            for (int k = 0; k < 4; ++k) {
+                s.pt[k] = clampd(v(kPenvT1 + 3 * k) * timeMul, 0.0005, 2);
+                s.pp[k] = clampd(v(kPenvP1 + 3 * k), -24, 96);
+                s.pc[k] = clampd(v(kPenvC1 + 3 * k), -1, 1);
+            }
+        }
+    }
+    if (!s.bodyOn) s.freq = clampd(v(kBodyFreq), 20, 2000);  // the sub's pitch
+    s.subOn = on(kSubOn);
+    if (s.subOn) {
+        s.subWave = clampi(v(kSubWave), 0, kSubWarm);
+        s.subMul = exp2d(-clampi(v(kSubOct), 0, 2) + clampd(v(kSubFine), -12, 12) / 12.0);
+        s.subFollow = clampd(v(kSubFollow), 0, 1);
+        s.subAttack = clampd(v(kSubAttack), 0.0001, 0.5);
+        s.subHold = clampd(v(kSubHold) * exp2d(length), 0, 2);
+        s.subDecay = clampd(v(kSubDecay) * lengthMul, 0.005, 40);
+        s.subCurve = clampd(v(kSubDCurve), -1, 1);
+        s.subDrive = clampd(v(kSubDrive), 0, 1);
+        s.subLp = clampd(v(kSubLp), 40, 2000);
+        s.subClean = clampi(v(kSubRoute), 0, 1) == kSubClean;
+        s.subLevel = dbGain(v(kSubLevel));
     }
     s.clickOn = on(kClickOn);
     if (s.clickOn) {
@@ -386,7 +460,7 @@ void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s, u
         s.smpDecay = clampd(v(kSmpDecay) * lengthMul, 0.01, 60);
         s.smpLevel = dbGain(v(kSmpLevel));
     }
-    s.driveType = clampi(v(kDriveType), 0, kDriveTube);
+    s.driveType = clampi(v(kDriveType), 0, kDriveAsym);
     s.drive = clampd(v(kDrive), 1, 20);
     if (dirt > 0.0) {
         if (s.driveType == kDriveOff) {
@@ -399,35 +473,50 @@ void readPad(const ProcessBlock& b, uint32_t pad, uint32_t at, PadSettings& s, u
         s.drive = clampd(1.0 + (s.drive - 1.0) * (1.0 + dirt), 1, 20);
     }
     s.drivePost = on(kDrivePos);
+    s.driveLo = clampd(v(kDriveLo), 20, 2000);
+    s.driveHi = clampd(v(kDriveHi), 500, 20000);
+    s.driveMix = clampd(v(kDriveMix), 0, 1);
     s.flt = clampi(v(kFlt), 0, kVfBp);
     s.cutoff = clampd(v(kCutoff) * exp2d(2.0 * tone), 20, 20000);
     s.fltQ = lib::resonanceQ(clampd(v(kFltRes), 0, 1));
     s.fltEnv = clampd(v(kFltEnv), -6, 6);
     s.fltDecay = clampd(v(kFltDecay) * exp2d(length), 0.005, 10);
     s.eqLow = clampd(v(kEqLow), -18, 18);
+    s.eqLowFreq = clampd(v(kEqLowFreq), 30, 600);
     s.eqMid = clampd(v(kEqMid), -18, 18);
     s.eqFreq = clampd(v(kEqFreq), 80, 12000);
+    s.eqQ = clampd(v(kEqQ), 0.3, 8);
     s.eqHigh = clampd(v(kEqHigh) + 6.0 * tone, -24, 24);
+    s.eqHighFreq = clampd(v(kEqHighFreq), 1000, 16000);
     s.trA = clampd(v(kTrAttack) + 0.5 * punch + 0.4 * snap, -1, 1);
     s.trS = clampd(v(kTrSustain), -1, 1);
     s.comp = clampd(v(kComp) + (dirt > 0.0 ? 0.3 * dirt : 0.0), 0, 1);
+    s.compAttack = clampd(v(kCompAttack), 0.1, 100) * 0.001;
+    s.compRelease = clampd(v(kCompRelease), 10, 1000) * 0.001;
+    s.clip = clampi(v(kClip), 0, kClipHard);
+    s.clipGain = lib::dbToGain(clampd(v(kClipGain), 0, 24));
+    s.width = clampd(v(kWidth), 0, 1);
+    s.widthHz = clampd(v(kWidthHz), 40, 1000);
+    s.roomSend = clampd(v(kRoomSend), 0, 1);
     s.velLevel = clampd(v(kVelLevel), 0, 1);
     s.velPitch = clampd(v(kVelPitch), 0, 24);
     s.velDecay = clampd(v(kVelDecay), -1, 1);
     s.velTone = clampd(v(kVelTone), -1, 1);
     s.velClick = clampd(v(kVelClick), 0, 1);
+    s.velPunch = clampd(v(kVelPunch), 0, 1);
+    s.rndPos = clampd(v(kRndPos), 0, 1);
     s.rndPitch = clampd(v(kRndPitch), 0, 100);
     s.rndDecay = clampd(v(kRndDecay), 0, 1);
     s.rndTone = clampd(v(kRndTone), 0, 1);
     s.rndPan = clampd(v(kRndPan), 0, 1);
     s.rndLevel = clampd(v(kRndLevel), 0, 1);
-    s.used = (s.bodyOn || s.clickOn || s.noiseOn || s.metalOn || s.resOn || s.smpOn) && s.gain > 0.0;
+    s.used = (s.bodyOn || s.subOn || s.clickOn || s.noiseOn || s.metalOn || s.resOn || s.smpOn) && s.gain > 0.0;
 }
 
 // ---------- A voice ----------
 
 struct Variation {
-    double gain = 1, pitch = 0, decayMul = 1, toneOct = 0, click = 1, pan = 0;
+    double gain = 1, pitch = 0, decayMul = 1, toneOct = 0, click = 1, pan = 0, punch = 1, pos = 0;
 };
 
 struct DrumVoice {
@@ -447,9 +536,21 @@ struct DrumVoice {
     int quality = kQualityNormal;
     // body
     DrumEnv bodyEnv, pitchEnv;
-    double phase = 0, phase2 = 0, phaseSub = 0, fEnd = 55, fStart = 220, invSr = 1.0 / 48000, p2ratio = 1.5, p2level = 0,
-           sub = 0, subDt = 0, shapeAmt = 0, shapeNorm = 1, fold = 0, bodyLevel = 1;
+    double phase = 0, phase2 = 0, fEnd = 55, fStart = 220, invSr = 1.0 / 48000, p2ratio = 1.5, p2level = 0,
+           shapeAmt = 0, shapeNorm = 1, fold = 0, bodyLevel = 1, bodyRatio = 1;
     int wave = 0;
+    // pitch shape: four segments in semitones over the settled pitch
+    bool points = false;
+    int pSeg = 0;
+    uint32_t pPos = 0, pLen[4] = {1, 1, 1, 1};
+    double pFrom[4] = {}, pTo[4] = {}, pK[4] = {1, 1, 1, 1}, pSign[4] = {};
+    // sub
+    bool sub = false, subClean = true;
+    int subWave = 0;
+    DrumEnv subEnv;
+    lib::OnePole subLpf;
+    double subPhase = 0, subDt = 0, subFollow = 0, subDrive = 0, subNorm = 1, subLevel = 0.5, subOut = 0;
+    bool subFilter = false;
     // click
     DrumEnv clickEnv;
     lib::OnePole clickHp;
@@ -483,8 +584,18 @@ struct DrumVoice {
     bool reverse = false, smpPlaying = false;
     DrumEnv smpEnv;
     // effects
-    Drive drive;
-    bool drivePost = false;
+    Drive drive, clipper;
+    bool drivePost = false, driveLoOn = false, driveHiOn = false;
+    double driveMix = 1;
+    lib::OnePole driveLo;
+    lib::Svf driveHi;
+    double compA = -1, compR = -1;
+    // width: a short-delayed, high-passed copy as the side signal
+    bool wide = false;
+    float widthBuf[128] = {};
+    uint32_t widthAt = 0, widthDelay = 20;
+    lib::Svf widthHp, widthHp2;
+    double width = 0, side = 0, roomSend = 1, gainMid = 1;
     int flt = 0;
     lib::OnePole lp6;
     lib::Svf svf;
@@ -499,8 +610,8 @@ struct DrumVoice {
     bool capture = false;
 
     bool sounding() const noexcept {
-        return bodyEnv.active() || clickEnv.active() || noiseEnv.active() || tailEnv.active() || clapCount < clapEnd() ||
-               metalEnv.active() || ringing || smpPlaying;
+        return bodyEnv.active() || subEnv.active() || clickEnv.active() || noiseEnv.active() || tailEnv.active() ||
+               clapCount < clapEnd() || metalEnv.active() || ringing || smpPlaying;
     }
     uint32_t clapEnd() const noexcept { return noiseMode == kNoiseClap && noise ? clapBursts * clapPeriod : 0; }
 };
@@ -544,8 +655,19 @@ public:
         glueGain_ = 1.0;
         kitDriveL_.clear();
         kitDriveR_.clear();
+        kitClipL_.clear();
+        kitClipR_.clear();
+        kitLowL_.clear();
+        kitLowR_.clear();
+        kitHighL_.clear();
+        kitHighR_.clear();
+        kitLowDb_ = kitHighDb_ = 1e9;
         room_.clear();
         roomQuiet_ = 0;
+        lastKey_ = -1;
+        lastChannel_ = 0;
+        lastVelocity_ = 0;
+        notesSeen_ = 0;
         roomOn_ = false;
         settled_ = true;
         left_ = 0;
@@ -637,6 +759,10 @@ private:
 
     void noteOn(const NoteMessage& m, uint32_t at) noexcept {
         const ProcessBlock& b = *block_;
+        lastKey_ = m.key;
+        lastChannel_ = m.channel + 1;
+        lastVelocity_ = static_cast<float>(clampd(m.velocity, 0, 1));
+        ++notesSeen_;
         if (mode_ == kModeSingle) {
             if (channel_ == 0 || channel_ == m.channel + 1) hit(0, m, at);
             return;
@@ -776,6 +902,8 @@ private:
         v.var.toneOct = 2.0 * s.velTone * x + s.rndTone * random(pad, 3);
         v.var.click = 1.0 + s.velClick * x;
         v.var.pan = clampd(s.pan + s.rndPan * random(pad, 4), -1, 1);
+        v.var.punch = 1.0 + s.velPunch * x;  // a softer hit drops less far
+        v.var.pos = s.rndPos * 0.3 * random(pad, 6);
         ++hits_[pad];
         v.glideSt = v.glideTarget = s.track ? note - s.root : 0.0;
         start(v, s);
@@ -827,7 +955,12 @@ private:
             v.pitchEnv.start();
             v.phase = s.phase;
             v.phase2 = s.phase;
-            v.phaseSub = 0.0;
+            v.pSeg = 0;
+            v.pPos = 0;
+        }
+        if (v.sub) {
+            v.subEnv.trigger();
+            v.subPhase = 0.0;
         }
         if (v.click) {
             v.clickEnv.set(0.0001, 0.0, s.clickLength, 0.0, sr_);
@@ -848,7 +981,8 @@ private:
         if (v.res) {
             v.modal.clear();
             v.exciteAt = 0;
-            const double width = 0.0005 + (1.0 - s.bright) * 0.002;  // a softer mallet strikes longer
+            // A softer mallet (or a softer hit: velocity to tone) strikes longer, so it excites fewer high modes.
+            const double width = (0.0005 + (1.0 - s.bright) * 0.002) * exp2d(-0.5 * v.var.toneOct);
             v.exciteLength = s.exciter == kExciteNoise ? static_cast<uint32_t>(0.008 * sr_)
                                                        : std::max<uint32_t>(2, static_cast<uint32_t>(width * sr_));
             v.exciteLeft = s.exciter == kExciteLayers ? 0 : v.exciteLength;
@@ -876,15 +1010,18 @@ private:
         if (!first) v.glideSt += (v.glideTarget - v.glideSt) * (1.0 - lib::fastExp(-3.0 * kControlFrames / (s.glide * sr)));
         double st = s.tune + v.var.pitch + v.glideSt;
         double toneOct = v.var.toneOct;
-        const double p = v.pressure * s.pressAmt;
-        if (s.pressDest == kPressPitch) st += 12.0 * p;
-        if (s.pressDest == kPressTone) toneOct -= 4.0 * p;
-        if (s.pressDest == kPressChoke && v.pressure * std::fabs(s.pressAmt) > 0.5) fade(v);
-        v.dampCoef = s.pressDest == kPressDamp && p > 0.0 ? fall(0.03 / p, sr) : 1.0;
+        // Pressure (polyphonic aftertouch) as a modulation source: one amount per destination.
+        const double p = v.pressure;
+        st += s.pressPitch * p;
+        toneOct += 4.0 * s.pressTone * p;
+        if (s.pressChoke && p > 0.5) fade(v);
+        const double damp = s.pressDamp * p;
+        v.dampCoef = damp > 0.0 ? fall(0.03 / damp, sr) : 1.0;
         const double mul = exp2d(st / 12.0);
         const double decayMul = v.var.decayMul;
         if (first) {
             v.body = s.bodyOn;
+            v.sub = s.subOn;
             v.click = s.clickOn;
             v.noise = s.noiseOn;
             v.metal = s.metalOn;
@@ -894,25 +1031,50 @@ private:
         if (v.body) {
             v.wave = s.wave;
             v.fEnd = s.freq * mul;
-            v.fStart = v.fEnd * exp2d(s.pitchSt / 12.0);
-            v.pitchEnv.set(0.0, 0.0, s.ptime, s.pcurve, sr);
+            v.fStart = v.fEnd * exp2d(s.pitchSt * v.var.punch / 12.0);
+            v.points = s.points;
+            if (s.points) {  // segment k runs from point k-1 (point 0: the pitch envelope's depth) to point k
+                double from = s.pitchSt;
+                for (int k = 0; k < 4; ++k) {
+                    v.pLen[k] = std::max<uint32_t>(1, static_cast<uint32_t>(s.pt[k] * sr));
+                    v.pFrom[k] = from * v.var.punch;
+                    v.pTo[k] = s.pp[k] * v.var.punch;
+                    v.pK[k] = 1.0 + 7.0 * std::fabs(s.pc[k]);
+                    v.pSign[k] = s.pc[k] > 0.0 ? 1.0 : (s.pc[k] < 0.0 ? -1.0 : 0.0);
+                    from = s.pp[k];
+                }
+            } else {
+                v.pitchEnv.set(0.0, 0.0, s.ptime, s.pcurve, sr);
+            }
             v.bodyEnv.set(s.attack, s.hold, s.decay * decayMul, s.dcurve, sr);
             v.p2ratio = s.p2ratio;
             v.p2level = s.p2level;
-            v.sub = s.sub;
-            v.subDt = v.fEnd / s.subDiv * v.invSr;
             v.shapeAmt = s.shape > 0.0 ? 1.0 + 9.0 * s.shape : 0.0;
             v.shapeNorm = s.shapeNorm;
             v.fold = s.fold > 0.0 ? 1.0 + 5.0 * s.fold : 0.0;
             v.bodyLevel = s.bodyLevel;
         }
+        if (v.sub) {
+            v.subDt = s.freq * mul * s.subMul * v.invSr;
+            v.subWave = s.subWave;
+            v.subFollow = v.body ? s.subFollow : 0.0;
+            v.subEnv.set(s.subAttack, s.subHold, s.subDecay * decayMul, s.subCurve, sr);
+            v.subDrive = s.subDrive > 0.0 ? 1.0 + 9.0 * s.subDrive : 0.0;
+            v.subNorm = v.subDrive > 0.0 ? 1.0 / lib::fastTanh(v.subDrive) : 1.0;
+            v.subFilter = s.subLp < 1999.0;
+            if (v.subFilter) v.subLpf.set(s.subLp, sr);
+            v.subClean = s.subClean;
+            v.subLevel = s.subLevel;
+        }
         if (v.click) {
             v.clickType = s.clickType;
-            v.clickTone = s.clickTone * mul;
+            // Velocity to tone moves the click too: a harder beater or stick is brighter.
+            const double tone = clampd(s.clickTone * exp2d(0.5 * toneOct), 50, 0.45 * sr);
+            v.clickTone = tone * mul;
             v.clickLevel = s.clickLevel * v.var.click;
-            if (s.clickType == kClickNoise) v.clickHp.set(s.clickTone, sr);
-            else if (s.clickType == kClickImpulse) v.clickHp.set(s.clickTone, sr);
-            else if (s.clickType == kClickPop) v.clickBp.set(s.clickTone, 3.0, sr);
+            if (s.clickType == kClickNoise) v.clickHp.set(tone, sr);
+            else if (s.clickType == kClickImpulse) v.clickHp.set(tone, sr);
+            else if (s.clickType == kClickPop) v.clickBp.set(tone, 3.0, sr);
         }
         if (v.noise) {
             v.noiseMode = s.noiseMode;
@@ -958,7 +1120,7 @@ private:
             m.damping = s.damp;
             m.brightness = clampd(s.bright + 0.15 * toneOct, 0, 1);
             m.inharmonicity = s.inharm;
-            m.position = s.pos;
+            m.position = clampd(s.pos + v.var.pos, 0, 1);
             m.modes = v.quality == kQualityEco ? 8 : (v.quality == kQualityHigh ? 32 : 16);
             if (first || m.model != v.modalSet.model || m.frequency != v.modalSet.frequency || m.decay != v.modalSet.decay ||
                 m.damping != v.modalSet.damping || m.brightness != v.modalSet.brightness ||
@@ -977,8 +1139,15 @@ private:
             v.smpEnv.coefFast = v.smpEnv.coef;
         }
         // Effects.
-        v.drive.set(s.driveType, s.drive);
+        v.drive.set(s.driveType, s.driveType != kDriveOff && s.pressDrive > 0.0 ? s.drive * exp2d(3.0 * s.pressDrive * p)
+                                                                                 : s.drive);
         v.drivePost = s.drivePost;
+        v.driveMix = s.driveMix;
+        v.driveLoOn = s.driveType != kDriveOff && s.driveLo > 20.5;
+        v.driveHiOn = s.driveType != kDriveOff && s.driveHi < 19999.0;
+        if (v.driveLoOn) v.driveLo.set(s.driveLo, sr);
+        if (v.driveHiOn) v.driveHi.set(clampd(s.driveHi, 20, 0.45 * sr), 0.70710678118654752, sr);
+        v.clipper.set(s.clip == kClipSoft ? kDriveClipSoft : (s.clip == kClipHard ? kDriveHard : kDriveOff), s.clipGain);
         v.flt = s.flt;
         if (first) v.fltEnvCoef = lib::fastExp(-kSixtyDb * kControlFrames / (s.fltDecay * sr));
         const double fc = clampd(s.cutoff * exp2d(s.fltEnv * v.fltEnvLevel + toneOct), 20, 0.45 * sr);
@@ -990,9 +1159,9 @@ private:
         else if (s.flt != kVfOff) v.svf.set(fc, s.fltQ, sr);
         v.eq = s.eqLow != 0.0 || s.eqMid != 0.0 || s.eqHigh != 0.0;
         if (v.eq) {
-            v.eqLow.set(lib::EqBand::Kind::LowShelf, 120.0, s.eqLow, 0.70710678118654752, sr);
-            v.eqMid.set(lib::EqBand::Kind::Bell, s.eqFreq, s.eqMid, 1.0, sr);
-            v.eqHigh.set(lib::EqBand::Kind::HighShelf, 6000.0, s.eqHigh, 0.70710678118654752, sr);
+            v.eqLow.set(lib::EqBand::Kind::LowShelf, s.eqLowFreq, s.eqLow, 0.70710678118654752, sr);
+            v.eqMid.set(lib::EqBand::Kind::Bell, s.eqFreq, s.eqMid, s.eqQ, sr);
+            v.eqHigh.set(lib::EqBand::Kind::HighShelf, std::min(s.eqHighFreq, 0.4 * sr), s.eqHigh, 0.70710678118654752, sr);
         }
         v.shaper = s.trA != 0.0 || s.trS != 0.0;
         v.trA = s.trA;
@@ -1000,7 +1169,11 @@ private:
         if (first) {
             v.fast.setCoefficients(lib::timeCoefficient(0.0005, sr), lib::timeCoefficient(0.015, sr));
             v.slow.setCoefficients(lib::timeCoefficient(0.015, sr), lib::timeCoefficient(0.15, sr));
-            v.compEnv.setCoefficients(lib::timeCoefficient(0.002, sr), lib::timeCoefficient(0.06, sr));
+        }
+        if (s.compAttack != v.compA || s.compRelease != v.compR) {
+            v.compA = s.compAttack;
+            v.compR = s.compRelease;
+            v.compEnv.setCoefficients(lib::timeCoefficient(s.compAttack, sr), lib::timeCoefficient(s.compRelease, sr));
         }
         v.comp = s.comp > 0.0;
         v.compThr = -6.0 - 24.0 * s.comp;
@@ -1008,7 +1181,17 @@ private:
         v.compMakeup = lib::dbToGain(-0.35 * v.compThr * (1.0 - 1.0 / v.compRatio));
         // Level and pan: a balance with the centre at full level on both sides (a mono drum stays as loud as it was);
         // toward a side, the other falls along a quarter cosine.
-        const double g = s.gain * v.var.gain, pan = v.var.pan;
+        const double g = s.gain * v.var.gain * (s.pressLevel != 0.0 ? exp2d(2.0 * s.pressLevel * p) : 1.0),
+                     pan = v.var.pan;
+        v.gainMid = g;
+        v.roomSend = s.roomSend;
+        v.wide = s.width > 0.0;
+        v.width = s.width * g;
+        if (v.wide) {
+            v.widthDelay = std::min<uint32_t>(127, std::max<uint32_t>(1, static_cast<uint32_t>(0.0004 * sr)));
+            v.widthHp.set(s.widthHz, 0.5412, sr);  // two 2-pole stages: a 4th-order Butterworth high-pass
+            v.widthHp2.set(s.widthHz, 1.3066, sr);
+        }
         v.gainL = g * (pan <= 0.0 ? 1.0 : lib::fastSinCycles(0.25 + 0.25 * pan));
         v.gainR = g * (pan >= 0.0 ? 1.0 : lib::fastSinCycles(0.25 - 0.25 * pan));
         (void)eco;
@@ -1016,9 +1199,34 @@ private:
 
     // ---------- Per sample ----------
 
+    // The pitch shape's semitones over the settled pitch now (Points mode), then a step on.
+    static double shapeSemitones(DrumVoice& v) noexcept {
+        if (v.pSeg >= 4) return v.pTo[3];
+        const int k = v.pSeg;
+        const double u = static_cast<double>(v.pPos) / static_cast<double>(v.pLen[k]);
+        double shaped = u;
+        if (v.pSign[k] > 0.0) {  // fast first, then slow (an exponential-like drop)
+            const double r = 1.0 - u;
+            shaped = 1.0 - (r > 1e-9 ? lib::fastExp(v.pK[k] * lib::fastLog(r)) : 0.0);
+        } else if (v.pSign[k] < 0.0) {  // slow first, then fast
+            shaped = u > 1e-9 ? lib::fastExp(v.pK[k] * lib::fastLog(u)) : 0.0;
+        }
+        if (++v.pPos >= v.pLen[k]) {
+            v.pPos = 0;
+            ++v.pSeg;
+        }
+        return v.pFrom[k] + (v.pTo[k] - v.pFrom[k]) * shaped;
+    }
+
     static double bodySample(DrumVoice& v) noexcept {
-        const double pe = v.pitchEnv.next();
-        const double f = v.fEnd + (v.fStart - v.fEnd) * pe;
+        double f;
+        if (v.points) {
+            f = v.fEnd * exp2d(shapeSemitones(v) * (1.0 / 12.0));
+        } else {
+            const double pe = v.pitchEnv.next();
+            f = v.fEnd + (v.fStart - v.fEnd) * pe;
+        }
+        v.bodyRatio = f / v.fEnd;
         const double dt = f * v.invSr;
         double y;
         switch (v.wave) {
@@ -1036,12 +1244,27 @@ private:
         }
         if (v.shapeAmt > 0.0) y = lib::fastTanh(y * v.shapeAmt) * v.shapeNorm;
         if (v.fold > 0.0) y = lib::fastSinCycles(y * v.fold * 0.25);
-        if (v.sub > 0.0) {
-            y += v.sub * lib::fastSinCycles(v.phaseSub);
-            v.phaseSub += v.subDt;
-            v.phaseSub -= std::floor(v.phaseSub);
-        }
         return y * v.bodyEnv.next();
+    }
+
+    // The sub: a sine, triangle or warm (saturated) sine at the settled pitch's octave, with its own envelope;
+    // `sub_follow` lets it ride the body's pitch shape (ratio^follow).
+    static double subSample(DrumVoice& v) noexcept {
+        const double env = v.subEnv.next();
+        if (env == 0.0) return 0.0;
+        double dt = v.subDt;
+        if (v.subFollow > 0.0 && v.bodyRatio != 1.0) dt *= lib::fastExp(v.subFollow * lib::fastLog(v.bodyRatio));
+        double y;
+        switch (v.subWave) {
+            case kSubTriangle: y = lib::triangleWave(v.subPhase); break;
+            case kSubWarm: y = lib::fastTanh(2.0 * lib::fastSinCycles(v.subPhase)) * 1.0373; break;
+            default: y = lib::fastSinCycles(v.subPhase); break;
+        }
+        v.subPhase += dt;
+        v.subPhase -= std::floor(v.subPhase);
+        if (v.subDrive > 0.0) y = lib::fastTanh(y * v.subDrive) * v.subNorm;
+        if (v.subFilter) y = v.subLpf.low(y);
+        return y * env * v.subLevel;
     }
 
     static double clickSample(DrumVoice& v) noexcept {
@@ -1200,6 +1423,11 @@ private:
         if (v.noise) layers += noiseSample(v, bodyRaw);
         if (v.metal) layers += metalSample(v);
         if (v.smp) layers += sampleSample(v);
+        double subY = 0.0;
+        if (v.sub) {
+            subY = subSample(v);
+            if (!v.subClean) layers += subY, subY = 0.0;
+        }
         double y = layers;
         if (v.res) {
             double excite = 0.0;
@@ -1216,7 +1444,7 @@ private:
         }
         // Effects.
         const int os = v.quality == kQualityEco ? 1 : (v.quality == kQualityHigh ? 4 : 2);
-        if (!v.drivePost) y = v.drive.process(y, os);
+        if (!v.drivePost) y = driveStage(v, y, os);
         switch (v.flt) {
             case kVfLp6: y = v.lp6.low(y); break;
             case kVfLp12: y = v.svf.lowpass(y); break;
@@ -1224,7 +1452,7 @@ private:
             case kVfBp: y = v.svf.bandpass(y); break;
             default: break;
         }
-        if (v.drivePost) y = v.drive.process(y, os);
+        if (v.drivePost) y = driveStage(v, y, os);
         if (v.eq) y = v.eqHigh.process(v.eqMid.process(v.eqLow.process(y)));
         if (v.shaper) {
             const double a = y < 0.0 ? -y : y;
@@ -1239,16 +1467,44 @@ private:
             v.gr = lib::compressorGainDb(level, v.compThr, v.compRatio, 6.0);
             y *= lib::dbToGain(v.gr) * v.compMakeup;
         }
+        if (v.clipper.type != kDriveOff) {  // the clipper: last in the chain, the ceiling at full scale
+            // A clean sub joins the clipper's input (it clips the whole kick, as a mix engineer's clipper would); the
+            // width's high-pass keeps it mono all the same.
+            y = ceiling(v.clipper.process(y + subY, os));
+            subY = 0.0;
+        }
+        double fade = 1.0;
         if (v.fading) {
             v.fadeGain *= v.fadeCoef;
-            y *= v.fadeGain;
+            fade *= v.fadeGain;
         }
         if (v.releasing) {
             v.relGain *= v.relCoef;
-            y *= v.relGain;
+            fade *= v.relGain;
         }
         if (v.dampCoef < 1.0) v.dampGain *= v.dampCoef;
-        return y * v.dampGain;
+        fade *= v.dampGain;
+        v.subOut = subY * fade;
+        y *= fade;
+        if (v.wide) {  // the side: the voice 0.4 ms later, its low end taken out, so the sum to mono cancels it
+            const float delayed = v.widthBuf[(v.widthAt - v.widthDelay) & 127u];
+            v.widthBuf[v.widthAt & 127u] = static_cast<float>(y);
+            ++v.widthAt;
+            v.side = v.widthHp2.highpass(v.widthHp.highpass(delayed)) * v.width;  // 24 dB an octave
+        }
+        return y;
+    }
+
+    // The clippers' last word: the oversampled curve's ripple (a few per cent) never passes full scale.
+    static double ceiling(double x) noexcept { return x > 1.0 ? 1.0 : (x < -1.0 ? -1.0 : x); }
+
+    // Drive with its high-pass before, low-pass after, and dry/wet mix.
+    static double driveStage(DrumVoice& v, double x, int os) noexcept {
+        if (v.drive.type == kDriveOff) return x;
+        double w = v.driveLoOn ? v.driveLo.high(x) : x;
+        w = v.drive.process(w, os);
+        if (v.driveHiOn) w = v.driveHi.lowpass(w);
+        return v.driveMix >= 1.0 ? w : x + (w - x) * v.driveMix;
     }
 
     // ---------- The control grid and the block ----------
@@ -1297,10 +1553,12 @@ private:
             r.size = clampd(parameterAt(b, kRoomSize, at, 0.35), 0, 1);
             r.decay = clampd(parameterAt(b, kRoomDecay, at, 0.8), 0.1, 10);
             r.damping = clampd(parameterAt(b, kRoomDamping, at, 0.5), 0, 1);
-            r.mix = room;
+            r.mix = 1.0;  // wet only: it is a send's return
             r.width = 1.0;
+            r.preDelay = clampd(parameterAt(b, kRoomPredelay, at, 0), 0, 100) * 0.001;
             const lib::ReverbSettings& was = room_.settings();
-            if (!roomOn_ || r.size != was.size || r.decay != was.decay || r.damping != was.damping || r.mix != was.mix)
+            if (!roomOn_ || r.size != was.size || r.decay != was.decay || r.damping != was.damping ||
+                r.preDelay != was.preDelay)
                 room_.set(r);
             room_.setLight(qualityNow(quality_) == kQualityEco);
             roomOn_ = true;
@@ -1319,12 +1577,29 @@ private:
             settled_ = true;
         }
         volume_ = dbGain(parameterAt(b, kVolume, at, 0));
+        const double low = clampd(parameterAt(b, kKitLow, at, 0), -12, 12), high = clampd(parameterAt(b, kKitHigh, at, 0), -12, 12);
+        kitEq_ = low != 0.0 || high != 0.0;
+        if (kitEq_ && (low != kitLowDb_ || high != kitHighDb_)) {
+            kitLowDb_ = low;
+            kitHighDb_ = high;
+            kitLowL_.set(lib::EqBand::Kind::LowShelf, 100.0, low, 0.70710678118654752, sr_);
+            kitLowR_.set(lib::EqBand::Kind::LowShelf, 100.0, low, 0.70710678118654752, sr_);
+            kitHighL_.set(lib::EqBand::Kind::HighShelf, std::min(8000.0, 0.4 * sr_), high, 0.70710678118654752, sr_);
+            kitHighR_.set(lib::EqBand::Kind::HighShelf, std::min(8000.0, 0.4 * sr_), high, 0.70710678118654752, sr_);
+        }
+        kitClip_ = clampi(parameterAt(b, kKitClip, at, 0), 0, kClipHard);
+        if (kitClip_ != 0) {
+            const double g = lib::dbToGain(clampd(parameterAt(b, kKitClipGain, at, 0), 0, 24));
+            const int type = kitClip_ == kClipSoft ? kDriveClipSoft : kDriveHard;
+            kitClipL_.set(type, g);
+            kitClipR_.set(type, g);
+        }
     }
 
     void renderChunk(float* left, float* right, uint32_t n) noexcept {
-        double busL[kOutputs][kControlFrames], busR[kOutputs][kControlFrames];
+        double busL[kOutputs][kControlFrames], busR[kOutputs][kControlFrames], send[kControlFrames];
         uint32_t used = 1;  // buses 0..used-1 written
-        for (uint32_t i = 0; i < n; ++i) busL[0][i] = busR[0][i] = 0.0;
+        for (uint32_t i = 0; i < n; ++i) busL[0][i] = busR[0][i] = send[i] = 0.0;
         for (uint32_t i = 0; i < live_; ++i) {
             DrumVoice& v = voices_[list_[i]];
             if (!v.active) continue;
@@ -1335,13 +1610,18 @@ private:
                 ++used;
             }
             float peak = padLevel_[pad];
+            const bool toRoom = roomOn_ && v.roomSend > 0.0;
             for (uint32_t k = 0; k < n; ++k) {
                 const double y = voiceSample(v);
-                busL[out][k] += y * v.gainL;
-                busR[out][k] += y * v.gainR;
-                const float a = static_cast<float>(y < 0.0 ? -y : y);
+                // Pan the voice; a clean sub goes to both sides whole (mono), the side signal opposite ways.
+                const double c = v.subOut * v.gainMid, w = v.wide ? v.side : 0.0;
+                busL[out][k] += y * v.gainL + c + w;
+                busR[out][k] += y * v.gainR + c - w;
+                if (toRoom) send[k] += y * v.gainMid * v.roomSend;  // the room hears the voice, not its sub
+                const double all = y + v.subOut;
+                const float a = static_cast<float>(all < 0.0 ? -all : all);
                 if (a > peak) peak = a;
-                if (v.capture) captureSample(pad, static_cast<float>(y));
+                if (v.capture) captureSample(pad, static_cast<float>(all));
             }
             padLevel_[pad] = peak;
         }
@@ -1363,11 +1643,24 @@ private:
                 l += (kitDriveL_.process(l, os) - l) * kitDriveMix_;
                 r += (kitDriveR_.process(r, os) - r) * kitDriveMix_;
             }
-            float fl = static_cast<float>(l), fr = static_cast<float>(r);
-            if (roomOn_) {
-                room_.process(fl, fr);
-                if (live_ == 0) roomQuiet_ = std::fabs(fl) + std::fabs(fr) < 1e-5f ? roomQuiet_ + 1 : 0;
+            if (kitEq_) {
+                l = kitHighL_.process(kitLowL_.process(l));
+                r = kitHighR_.process(kitLowR_.process(r));
             }
+            if (roomOn_) {  // the room: a send bus (each pad's room_send), its wet return added at `room`
+                float wl = static_cast<float>(send[k]), wr = wl;
+                room_.process(wl, wr);
+                l += wl * roomMix_;
+                r += wr * roomMix_;
+                if (live_ == 0) roomQuiet_ = std::fabs(wl) + std::fabs(wr) < 1e-5f ? roomQuiet_ + 1 : 0;
+            }
+            if (kitClip_ != 0) {
+                const int q = qualityNow(quality_);
+                const int os = q == kQualityEco ? 1 : (q == kQualityHigh ? 4 : 2);
+                l = ceiling(kitClipL_.process(l, os));
+                r = ceiling(kitClipR_.process(r, os));
+            }
+            const float fl = static_cast<float>(l), fr = static_cast<float>(r);
             double outL = fl, outR = fr;
             for (uint32_t o = 1; o < used; ++o) {  // the other outputs: past the kit effects, into the one output
                 outL += busL[o][k];
@@ -1414,7 +1707,7 @@ private:
         const int pad = view > 0 ? view - 1 : (lastPad_ >= 0 ? lastPad_ : 0);
         float* d = frame_;
         for (uint32_t i = 0; i < 16; ++i) d[i] = 0.0f;
-        d[0] = 1.0f;  // layout version
+        d[0] = 2.0f;  // layout version
         d[1] = static_cast<float>(mode_);
         d[2] = static_cast<float>(pad);
         d[3] = static_cast<float>(-glueGr_);
@@ -1432,6 +1725,10 @@ private:
         d[7] = kPitchPoints;
         d[9] = static_cast<float>(sounding);
         d[10] = static_cast<float>(lastPad_);
+        d[11] = static_cast<float>(lastKey_);  // note learn: the last note in (-1: none), its channel 1..16, velocity
+        d[12] = static_cast<float>(lastChannel_);
+        d[13] = lastVelocity_;
+        d[14] = static_cast<float>(notesSeen_ & 0xFFFFFFu);  // counts notes in: a change means a new note
         uint64_t mask = 0;
         for (uint32_t i = 0; i < live_; ++i)
             if (voices_[list_[i]].active) mask |= 1ull << voices_[list_[i]].pad;
@@ -1446,20 +1743,42 @@ private:
         // The body's pitch over the pitch envelope's first three time spans, as a hit at full velocity plays it.
         PadSettings s;
         readPad(b, static_cast<uint32_t>(pad), at, s);
-        const double span = s.bodyOn ? clampd(s.ptime * 3.0, 0.01, 2.0) : 0.0;
+        double span = 0.0;
+        if (s.bodyOn) {
+            if (s.points) span = clampd(1.15 * (s.pt[0] + s.pt[1] + s.pt[2] + s.pt[3]), 0.01, 4.0);
+            else span = clampd(s.ptime * 3.0, 0.01, 2.0);
+        }
         d[8] = static_cast<float>(span);
+        d[15] = s.bodyOn && s.points ? 1.0f : 0.0f;  // the pitch shape's mode
+        float* curve = d + 80 + 2 * kBins;
         if (s.bodyOn) {
             const double mul = exp2d(s.tune / 12.0), fEnd = s.freq * mul, fStart = fEnd * exp2d(s.pitchSt / 12.0);
             const double c = s.pcurve;
             for (uint32_t i = 0; i < kPitchPoints; ++i) {
                 const double t = span * i / (kPitchPoints - 1);
+                if (s.points) {  // the same segments the voice plays
+                    double from = s.pitchSt, at = 0.0, st = s.pp[3];
+                    for (int k = 0; k < 4; ++k) {
+                        if (t < at + s.pt[k]) {
+                            const double u = (t - at) / s.pt[k], kk = 1.0 + 7.0 * std::fabs(s.pc[k]);
+                            const double shaped = s.pc[k] > 0.0 ? 1.0 - std::pow(1.0 - u, kk)
+                                                                : (s.pc[k] < 0.0 ? std::pow(u, kk) : u);
+                            st = from + (s.pp[k] - from) * shaped;
+                            break;
+                        }
+                        at += s.pt[k];
+                        from = s.pp[k];
+                    }
+                    curve[i] = static_cast<float>(fEnd * exp2d(st / 12.0));
+                    continue;
+                }
                 const double e = lib::fastExp(-kSixtyDb * t / s.ptime);
                 const double shaped = c >= 0.0 ? e + c * (lib::fastExp(-kSixtyDb * 6.0 * t / s.ptime) - e)
                                                : e - c * (std::max(0.0, 1.0 - t / s.ptime) - e);
-                d[80 + 2 * kBins + i] = static_cast<float>(fEnd + (fStart - fEnd) * shaped);
+                curve[i] = static_cast<float>(fEnd + (fStart - fEnd) * shaped);
             }
         } else {
-            for (uint32_t i = 0; i < kPitchPoints; ++i) d[80 + 2 * kBins + i] = 0.0f;
+            for (uint32_t i = 0; i < kPitchPoints; ++i) curve[i] = 0.0f;
         }
         display_.publish(d, kDisplayFloats);
     }
@@ -1495,7 +1814,15 @@ private:
     double glueAmount_ = 0, glueThr_ = -12, glueRatio_ = 4, glueMakeup_ = 1, glueGr_ = 0, glueGain_ = 1;
     int kitDriveType_ = 0;
     double kitDriveMix_ = 1;
-    Drive kitDriveL_, kitDriveR_;
+    Drive kitDriveL_, kitDriveR_, kitClipL_, kitClipR_;
+    lib::EqBand kitLowL_, kitLowR_, kitHighL_, kitHighR_;
+    bool kitEq_ = false;
+    int kitClip_ = 0;
+    double kitLowDb_ = 1e9, kitHighDb_ = 1e9;
+    // note learn: the last note received (any note, a pad or not)
+    int lastKey_ = -1, lastChannel_ = 0;
+    float lastVelocity_ = 0;
+    uint32_t notesSeen_ = 0;
     lib::Reverb room_;
     bool roomOn_ = false, settled_ = true;
     double roomMix_ = 0;

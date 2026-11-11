@@ -1,4 +1,4 @@
-// org.caw.drums' parameter table: 19 kit-wide parameters, then 119 per pad for 64 pads, each tagged with its group.
+// org.caw.drums' parameter table: 24 kit-wide parameters, then 162 per pad for 64 pads, each tagged with its group.
 #include "builtin_drums_layout.h"
 
 #include <cmath>
@@ -32,10 +32,13 @@ constexpr std::string_view kTypes[] = {"Kick", "Snare", "Clap", "Closed hat", "O
 static_assert(sizeof(kTypes) / sizeof(kTypes[0]) == kTypeCount);
 constexpr std::string_view kChokes[] = {"Off", "1", "2", "3", "4", "5", "6", "7", "8"};
 constexpr std::string_view kOuts[] = {"Main", "Out 2", "Out 3", "Out 4", "Out 5", "Out 6", "Out 7", "Out 8", "Out 9"};
-constexpr std::string_view kPress[] = {"Off", "Damp", "Choke", "Tone", "Pitch"};
+constexpr std::string_view kPenvModes[] = {"Curve", "Points"};
+constexpr std::string_view kSubWaves[] = {"Sine", "Triangle", "Warm"};
+constexpr std::string_view kSubOcts[] = {"0 oct", "-1 oct", "-2 oct"};
+constexpr std::string_view kSubRoutes[] = {"Clean", "Through effects"};
+constexpr std::string_view kClips[] = {"Off", "Soft", "Hard"};
 constexpr std::string_view kTrigs[] = {"One-shot", "Gate"};
 constexpr std::string_view kWaves[] = {"Sine", "Triangle", "Saw", "Square"};
-constexpr std::string_view kSubOct[] = {"-1 oct", "-2 oct"};
 constexpr std::string_view kClicks[] = {"Noise", "Impulse", "Blip", "Tick", "Chirp", "Pop"};
 constexpr std::string_view kNoiseModes[] = {"Normal", "Snappy", "Clap"};
 constexpr std::string_view kColors[] = {"White", "Pink", "Brown", "Crushed"};
@@ -44,7 +47,7 @@ constexpr std::string_view kMetalModes[] = {"Squares", "FM pairs", "Ring"};
 constexpr std::string_view kSets[] = {"808", "Bright", "Cymbal", "Cowbell", "Gong", "Bell", "Harmonic"};
 constexpr std::string_view kModels[] = {"Membrane", "Plate", "Bar", "Tube", "Bell", "Cymbal"};
 constexpr std::string_view kExciters[] = {"Layers", "Mallet", "Noise"};
-constexpr std::string_view kDrives[] = {"Off", "Soft", "Hard", "Fold", "Crush", "Tube"};
+constexpr std::string_view kDrives[] = {"Off", "Soft", "Hard", "Fold", "Crush", "Tube", "Rectify", "Decimate", "Asymmetric"};
 constexpr std::string_view kDrivePos[] = {"Pre filter", "Post filter"};
 constexpr std::string_view kVoiceFilters[] = {"Off", "LP 6 dB", "LP 12 dB", "High-pass", "Band-pass"};
 constexpr std::string_view kModes[] = {"Kit", "Single"};
@@ -104,8 +107,13 @@ const Spec* padSpecs() {
         {"poly", "Polyphony", "pad", Kind::Whole, 1, 4, 2, {}},
         CHOICE("choke", "Choke group", "pad", 0, kChokes),
         CHOICE("out", "Output", "pad", 0, kOuts),
-        CHOICE("press_dest", "Pressure", "pad", kPressOff, kPress),
-        {"press_amt", "Pressure amount", "pad", Kind::Num, -1, 1, 0.5, {}},
+
+        {"press_damp", "Pressure to damp", "press", Kind::Num, 0, 1, 0, {}},
+        CHOICE("press_choke", "Pressure chokes", "press", 0, kOffOn),
+        {"press_tone", "Pressure to tone", "press", Kind::Num, -1, 1, 0, {}},
+        {"press_pitch", "Pressure to pitch", "press", Kind::Num, -12, 12, 0, "st"},
+        {"press_level", "Pressure to level", "press", Kind::Num, -1, 1, 0, {}},
+        {"press_drive", "Pressure to drive", "press", Kind::Num, 0, 1, 0, {}},
 
         CHOICE("body_on", "Body", "body", 0, kOffOn),
         CHOICE("body_wave", "Body wave", "body", kWaveSine, kWaves),
@@ -121,10 +129,36 @@ const Spec* padSpecs() {
         {"body_dcurve", "Body decay curve", "body", Kind::Num, -1, 1, 0, {}},
         {"body_p2_ratio", "Second partial ratio", "body", Kind::Exp, 0.5, 8, 1.5, {}},
         {"body_p2_level", "Second partial level", "body", Kind::Num, 0, 1, 0, {}},
-        {"body_sub", "Sub level", "body", Kind::Num, 0, 1, 0, {}},
-        CHOICE("body_sub_oct", "Sub octave", "body", 0, kSubOct),
         {"body_phase", "Start phase", "body", Kind::Num, 0, 1, 0, {}},
         {"body_level", "Body level", "body", Kind::Num, -60, 12, 0, "dB"},
+
+        CHOICE("penv_mode", "Pitch shape", "penv", kPenvCurve, kPenvModes),
+        {"penv_t1", "Point 1 time", "penv", Kind::Exp, 0.0005, 2, 0.004, "s"},
+        {"penv_p1", "Point 1 pitch", "penv", Kind::Num, -24, 96, 12, "st"},
+        {"penv_c1", "Segment 1 curve", "penv", Kind::Num, -1, 1, 0.5, {}},
+        {"penv_t2", "Point 2 time", "penv", Kind::Exp, 0.0005, 2, 0.02, "s"},
+        {"penv_p2", "Point 2 pitch", "penv", Kind::Num, -24, 96, 3, "st"},
+        {"penv_c2", "Segment 2 curve", "penv", Kind::Num, -1, 1, 0.5, {}},
+        {"penv_t3", "Point 3 time", "penv", Kind::Exp, 0.0005, 2, 0.08, "s"},
+        {"penv_p3", "Point 3 pitch", "penv", Kind::Num, -24, 96, 0, "st"},
+        {"penv_c3", "Segment 3 curve", "penv", Kind::Num, -1, 1, 0.5, {}},
+        {"penv_t4", "Point 4 time", "penv", Kind::Exp, 0.0005, 2, 0.2, "s"},
+        {"penv_p4", "Point 4 pitch", "penv", Kind::Num, -24, 96, 0, "st"},
+        {"penv_c4", "Segment 4 curve", "penv", Kind::Num, -1, 1, 0, {}},
+
+        CHOICE("sub_on", "Sub", "sub", 0, kOffOn),
+        CHOICE("sub_wave", "Sub wave", "sub", kSubSine, kSubWaves),
+        CHOICE("sub_oct", "Sub octave", "sub", 1, kSubOcts),
+        {"sub_fine", "Sub tune", "sub", Kind::Num, -12, 12, 0, "st"},
+        {"sub_follow", "Sub follows pitch", "sub", Kind::Num, 0, 1, 0, {}},
+        {"sub_attack", "Sub attack", "sub", Kind::Exp, 0.0001, 0.5, 0.005, "s"},
+        {"sub_hold", "Sub hold", "sub", Kind::Num, 0, 2, 0, "s"},
+        {"sub_decay", "Sub decay", "sub", Kind::Exp, 0.01, 10, 0.6, "s"},
+        {"sub_dcurve", "Sub decay curve", "sub", Kind::Num, -1, 1, 0, {}},
+        {"sub_drive", "Sub drive", "sub", Kind::Num, 0, 1, 0, {}},
+        {"sub_lp", "Sub low-pass", "sub", Kind::Exp, 40, 2000, 2000, "Hz"},
+        CHOICE("sub_route", "Sub route", "sub", kSubClean, kSubRoutes),
+        {"sub_level", "Sub level", "sub", Kind::Num, -60, 12, -6, "dB"},
 
         CHOICE("click_on", "Click", "click", 0, kOffOn),
         CHOICE("click_type", "Click type", "click", kClickNoise, kClicks),
@@ -184,21 +218,38 @@ const Spec* padSpecs() {
         {"smp_decay", "Sample decay", "smp", Kind::Exp, 0.01, 30, 30, "s"},
         {"smp_level", "Sample level", "smp", Kind::Num, -60, 12, 0, "dB"},
 
-        CHOICE("drive_type", "Drive type", "fx", kDriveOff, kDrives),
-        {"drive", "Drive", "fx", Kind::Exp, 1, 20, 2, {}},
-        CHOICE("drive_pos", "Drive position", "fx", 0, kDrivePos),
-        CHOICE("flt", "Filter", "fx", kVfOff, kVoiceFilters),
-        {"cutoff", "Cutoff", "fx", Kind::Exp, 20, 20000, 12000, "Hz"},
-        {"flt_res", "Filter resonance", "fx", Kind::Num, 0, 1, 0, {}},
-        {"flt_env", "Filter envelope", "fx", Kind::Num, -6, 6, 0, "oct"},
-        {"flt_decay", "Filter decay", "fx", Kind::Exp, 0.005, 5, 0.2, "s"},
-        {"eq_low", "EQ low", "fx", Kind::Num, -18, 18, 0, "dB"},
-        {"eq_mid", "EQ mid", "fx", Kind::Num, -18, 18, 0, "dB"},
-        {"eq_freq", "EQ mid frequency", "fx", Kind::Exp, 80, 12000, 1000, "Hz"},
-        {"eq_high", "EQ high", "fx", Kind::Num, -18, 18, 0, "dB"},
-        {"tr_attack", "Transient attack", "fx", Kind::Num, -1, 1, 0, {}},
-        {"tr_sustain", "Transient sustain", "fx", Kind::Num, -1, 1, 0, {}},
-        {"comp", "Compressor", "fx", Kind::Num, 0, 1, 0, {}},
+        CHOICE("drive_type", "Drive type", "drive", kDriveOff, kDrives),
+        {"drive", "Drive", "drive", Kind::Exp, 1, 20, 2, {}},
+        CHOICE("drive_pos", "Drive position", "drive", 0, kDrivePos),
+        {"drive_lo", "Drive low cut", "drive", Kind::Exp, 20, 2000, 20, "Hz"},
+        {"drive_hi", "Drive high cut", "drive", Kind::Exp, 500, 20000, 20000, "Hz"},
+        {"drive_mix", "Drive mix", "drive", Kind::Num, 0, 1, 1, {}},
+
+        CHOICE("flt", "Filter", "filter", kVfOff, kVoiceFilters),
+        {"cutoff", "Cutoff", "filter", Kind::Exp, 20, 20000, 12000, "Hz"},
+        {"flt_res", "Filter resonance", "filter", Kind::Num, 0, 1, 0, {}},
+        {"flt_env", "Filter envelope", "filter", Kind::Num, -6, 6, 0, "oct"},
+        {"flt_decay", "Filter decay", "filter", Kind::Exp, 0.005, 5, 0.2, "s"},
+
+        {"eq_low", "EQ low", "eq", Kind::Num, -18, 18, 0, "dB"},
+        {"eq_low_freq", "EQ low frequency", "eq", Kind::Exp, 30, 600, 120, "Hz"},
+        {"eq_mid", "EQ mid", "eq", Kind::Num, -18, 18, 0, "dB"},
+        {"eq_freq", "EQ mid frequency", "eq", Kind::Exp, 80, 12000, 1000, "Hz"},
+        {"eq_q", "EQ mid Q", "eq", Kind::Exp, 0.3, 8, 1, {}},
+        {"eq_high", "EQ high", "eq", Kind::Num, -18, 18, 0, "dB"},
+        {"eq_high_freq", "EQ high frequency", "eq", Kind::Exp, 1000, 16000, 6000, "Hz"},
+
+        {"tr_attack", "Transient attack", "dyn", Kind::Num, -1, 1, 0, {}},
+        {"tr_sustain", "Transient sustain", "dyn", Kind::Num, -1, 1, 0, {}},
+        {"comp", "Compressor", "dyn", Kind::Num, 0, 1, 0, {}},
+        {"comp_attack", "Compressor attack", "dyn", Kind::Exp, 0.1, 100, 2, "ms"},
+        {"comp_release", "Compressor release", "dyn", Kind::Exp, 10, 1000, 60, "ms"},
+        CHOICE("clip", "Clipper", "dyn", kClipOff, kClips),
+        {"clip_gain", "Clipper drive", "dyn", Kind::Num, 0, 24, 0, "dB"},
+
+        {"width", "Width", "space", Kind::Num, 0, 1, 0, {}},
+        {"width_hz", "Mono below", "space", Kind::Exp, 40, 1000, 200, "Hz"},
+        {"room_send", "Room send", "space", Kind::Num, 0, 1, 1, {}},
 
         {"punch", "Punch", "macro", Kind::Num, -1, 1, 0, {}},
         {"tone", "Tone", "macro", Kind::Num, -1, 1, 0, {}},
@@ -212,11 +263,13 @@ const Spec* padSpecs() {
         {"vel_decay", "Velocity to decay", "var", Kind::Num, -1, 1, 0, {}},
         {"vel_tone", "Velocity to tone", "var", Kind::Num, -1, 1, 0.3, {}},
         {"vel_click", "Velocity to click", "var", Kind::Num, 0, 1, 0.5, {}},
+        {"vel_punch", "Velocity to pitch drop", "var", Kind::Num, 0, 1, 0, {}},
         {"rnd_pitch", "Random pitch", "var", Kind::Num, 0, 100, 0, "ct"},
         {"rnd_decay", "Random decay", "var", Kind::Num, 0, 1, 0, {}},
         {"rnd_tone", "Random tone", "var", Kind::Num, 0, 1, 0, {}},
         {"rnd_pan", "Random pan", "var", Kind::Num, 0, 1, 0, {}},
         {"rnd_level", "Random level", "var", Kind::Num, 0, 1, 0, {}},
+        {"rnd_pos", "Random strike position", "var", Kind::Num, 0, 1, 0, {}},
     };
     return specs;
 }
@@ -242,6 +295,11 @@ const Spec* globalSpecs() {
         {"room_size", "Room size", "room", Kind::Num, 0, 1, 0.35, {}},
         {"room_decay", "Room decay", "room", Kind::Exp, 0.1, 10, 0.8, "s"},
         {"room_damping", "Room damping", "room", Kind::Num, 0, 1, 0.5, {}},
+        {"room_predelay", "Room pre-delay", "room", Kind::Num, 0, 100, 0, "ms"},
+        {"kit_low", "Kit low shelf", "eq", Kind::Num, -12, 12, 0, "dB"},
+        {"kit_high", "Kit high shelf", "eq", Kind::Num, -12, 12, 0, "dB"},
+        CHOICE("kit_clip", "Kit clipper", "clip", kClipOff, kClips),
+        {"kit_clip_gain", "Kit clipper drive", "clip", Kind::Num, 0, 24, 0, "dB"},
     };
     return specs;
 }

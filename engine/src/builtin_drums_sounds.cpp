@@ -74,6 +74,39 @@ std::vector<Sound> makeSounds() {
         {{kPoly, 1}, {kTrack, 1}, {kRoot, 36}, {kMono, 1}, {kGlide, 0.06}, {kBodyOn, 1}, {kBodyFreq, 65.41},
          {kBodyPitch, 5}, {kBodyPTime, 0.03}, {kBodyDecay, 2.5}, {kBodyDCurve, -0.3}, {kDriveType, kDriveSoft},
          {kDrive, 2.5}, {kFlt, kVfLp6}, {kCutoff, 6000}});
+    add("808 Kick Long", "The 808 boom with its decay up: a held sine that rings for seconds (trap, drill)", kTypeKick,
+        {{kPoly, 1}, {kBodyOn, 1}, {kBodyFreq, 48}, {kBodyPitch, 12}, {kBodyPTime, 0.06}, {kBodyHold, 0.05},
+         {kBodyDecay, 3.0}, {kBodyDCurve, -0.25}, {kClickOn, 1}, {kClickType, kClickImpulse}, {kClickLevel, 0.25},
+         {kClickTone, 1500}, {kClickLength, 0.004}, {kDriveType, kDriveSoft}, {kDrive, 1.6}, {kFlt, kVfLp6},
+         {kCutoff, 4000}, {kVelPunch, 0.3}});
+    add("808 Kick Short", "The 808 kick with its decay down: a tight thump (electro, house)", kTypeKick,
+        {{kPoly, 1}, {kBodyOn, 1}, {kBodyFreq, 52}, {kBodyPitch, 14}, {kBodyPTime, 0.045}, {kBodyDecay, 0.32},
+         {kBodyDCurve, 0.2}, {kClickOn, 1}, {kClickType, kClickImpulse}, {kClickLevel, 0.3}, {kClickTone, 1800},
+         {kClickLength, 0.004}, {kDriveType, kDriveSoft}, {kDrive, 1.4}, {kFlt, kVfLp6}, {kCutoff, 5000},
+         {kVelPunch, 0.3}});
+    add("Dubstep Kick", "Punch over a clean sub: a drawn pitch drop, a driven and clipped mid, a short click", kTypeKick,
+        {{kPoly, 1}, {kBodyOn, 1}, {kBodyFreq, 55}, {kBodyDecay, 0.26}, {kBodyDCurve, 0.35}, {kPenvMode, kPenvPoints},
+         {kBodyPitch, 38}, {kPenvT1, 0.006}, {kPenvP1, 14}, {kPenvC1, 0.6}, {kPenvT2, 0.025}, {kPenvP2, 3},
+         {kPenvC2, 0.5}, {kPenvT3, 0.06}, {kPenvP3, 0}, {kPenvC3, 0.4}, {kPenvT4, 0.1}, {kPenvP4, 0}, {kPenvC4, 0},
+         {kSubOn, 1}, {kSubOct, 0}, {kSubAttack, 0.004}, {kSubDecay, 0.42}, {kSubDCurve, -0.2}, {kSubLevel, -3},
+         {kSubRoute, kSubClean}, {kClickOn, 1}, {kClickType, kClickNoise}, {kClickTone, 5000}, {kClickLevel, 0.45},
+         {kClickLength, 0.003}, {kDriveType, kDriveAsym}, {kDrive, 7}, {kDriveLo, 90}, {kDriveHi, 9000},
+         {kDriveMix, 0.75}, {kEqMid, 4}, {kEqFreq, 2500}, {kEqQ, 0.8}, {kTrAttack, 0.3}, {kComp, 0.35},
+         {kClip, kClipHard}, {kClipGain, 9}, {kVelPunch, 0.2}});
+    add("House Kick", "A round four-on-the-floor kick: a 909-style body, a soft click, a little glue", kTypeKick,
+        {{kPoly, 1}, {kBodyOn, 1}, {kBodyWave, kWaveTriangle}, {kBodyShape, 0.25}, {kBodyFreq, 52}, {kBodyPitch, 24},
+         {kBodyPTime, 0.04}, {kBodyPCurve, 0.25}, {kBodyDecay, 0.4}, {kClickOn, 1}, {kClickType, kClickNoise},
+         {kClickLevel, 0.35}, {kClickTone, 2500}, {kClickLength, 0.005}, {kDriveType, kDriveSoft}, {kDrive, 1.6},
+         {kComp, 0.25}, {kEqLow, 2}, {kEqLowFreq, 70}});
+    add("Acoustic Kick", "A miked bass drum: a felt beater's pop, the batter head's short drop, the shell's membrane "
+        "modes, the boxiness cut, and a little room", kTypeKick,
+        {{kPoly, 2}, {kBodyOn, 1}, {kBodyFreq, 60}, {kBodyPitch, 6}, {kBodyPTime, 0.015}, {kBodyDecay, 0.22},
+         {kBodyDCurve, 0.3}, {kBodyLevel, -3}, {kResOn, 1}, {kResModel, 0}, {kResFreq, 62}, {kResDecay, 0.32},
+         {kResDamp, 0.65}, {kResBright, 0.35}, {kResPos, 0.15}, {kResExciter, kExciteMallet}, {kResInput, 0.15},
+         {kResLevel, 2}, {kClickOn, 1}, {kClickType, kClickPop}, {kClickTone, 3500}, {kClickLevel, 0.5},
+         {kClickLength, 0.003}, {kEqMid, -5}, {kEqFreq, 400}, {kEqQ, 1.2}, {kEqHigh, 3}, {kEqHighFreq, 4000},
+         {kTrAttack, 0.2}, {kComp, 0.2}, {kRoomSend, 0.5}, {kVelTone, 0.6}, {kVelPunch, 0.5}, {kVelDecay, 0.2},
+         {kRndPitch, 8}, {kRndTone, 0.1}, {kRndDecay, 0.1}, {kRndPos, 0.3}});
     // ---- Snares ----
     add("808 Snare", "Two tuned partials and bright noise", kTypeSnare,
         {{kPoly, 1}, {kBodyOn, 1}, {kBodyWave, kWaveTriangle}, {kBodyFreq, 180}, {kBodyPitch, 3}, {kBodyPTime, 0.02},
@@ -105,6 +138,30 @@ std::vector<Sound> makeSounds() {
         {{kPoly, 2}, {kBodyOn, 1}, {kBodyWave, kWaveTriangle}, {kBodyFreq, 200}, {kBodyDecay, 0.1},
          {kBodyP2Ratio, 1.48}, {kBodyP2Level, 0.6}, {kBodyLevel, -5}, {kNoiseOn, 1}, {kNoiseMode, kNoiseClap},
          {kNoiseFilter, kFilterBp}, {kNoiseFreq, 1500}, {kNoiseRes, 0.23}, {kNoiseAttack, 0.004}, {kNoiseDecay, 0.22}});
+    add("Acoustic Snare", "A played snare: the batter head's membrane modes struck off centre, the wires buzzing with "
+        "the head, a stick's tick; harder hits are brighter and ring longer", kTypeSnare,
+        {{kPoly, 3}, {kResOn, 1}, {kResModel, 0}, {kResFreq, 190}, {kResDecay, 0.25}, {kResDamp, 0.55},
+         {kResBright, 0.6}, {kResPos, 0.35}, {kResExciter, kExciteMallet}, {kResInput, 0.1}, {kResLevel, -4},
+         {kBodyOn, 1}, {kBodyFreq, 190}, {kBodyPitch, 3}, {kBodyPTime, 0.008}, {kBodyDecay, 0.08}, {kBodyLevel, -6},
+         {kNoiseOn, 1}, {kNoiseMode, kNoiseSnappy}, {kNoiseColor, kPink}, {kNoiseFilter, kFilterHp},
+         {kNoiseFreq, 1800}, {kNoiseDecay, 0.24}, {kNoiseDCurve, 0.2}, {kNoiseLevel, 2}, {kClickOn, 1},
+         {kClickType, kClickPop}, {kClickTone, 4000}, {kClickLevel, 0.35}, {kClickLength, 0.002}, {kEqMid, 2},
+         {kEqFreq, 200}, {kTrAttack, 0.2}, {kRoomSend, 0.6}, {kVelTone, 0.7}, {kVelDecay, 0.3}, {kRndPitch, 6},
+         {kRndTone, 0.1}, {kRndDecay, 0.1}, {kRndPos, 0.3}});
+    add("Trap Snare", "A tight, bright snare-clap: a short tuned body and a clap's bursts, high-passed", kTypeSnare,
+        {{kPoly, 2}, {kBodyOn, 1}, {kBodyFreq, 230}, {kBodyPitch, 5}, {kBodyPTime, 0.01}, {kBodyDecay, 0.07},
+         {kBodyLevel, -6}, {kNoiseOn, 1}, {kNoiseMode, kNoiseClap}, {kNoiseFilter, kFilterBp}, {kNoiseFreq, 2200},
+         {kNoiseRes, 0.2}, {kNoiseBursts, 3}, {kNoiseSpacing, 0.007}, {kNoiseDecay, 0.16}, {kNoiseLevel, 2},
+         {kFlt, kVfHp}, {kCutoff, 180}, {kEqHigh, 4}, {kClip, kClipSoft}, {kClipGain, 3}});
+    add("Dubstep Snare", "A huge layered snare: a fat body, snappy wires, a clap on top, clipped, in the room",
+        kTypeSnare,
+        {{kPoly, 2}, {kBodyOn, 1}, {kBodyWave, kWaveTriangle}, {kBodyFreq, 185}, {kBodyPitch, 9}, {kBodyPTime, 0.015},
+         {kBodyDecay, 0.16}, {kBodyP2Ratio, 1.5}, {kBodyP2Level, 0.5}, {kBodyLevel, -2}, {kNoiseOn, 1},
+         {kNoiseMode, kNoiseSnappy}, {kNoiseColor, kPink}, {kNoiseFreq, 1200}, {kNoiseDecay, 0.3}, {kNoiseLevel, 0},
+         {kClickOn, 1}, {kClickType, kClickNoise}, {kClickTone, 3500}, {kClickLevel, 0.4}, {kClickLength, 0.006},
+         {kFlt, kVfLp12}, {kCutoff, 8000},
+         {kDriveType, kDriveSoft}, {kDrive, 3}, {kEqLow, 3}, {kEqLowFreq, 200}, {kTrAttack, 0.4}, {kComp, 0.4},
+         {kClip, kClipHard}, {kClipGain, 5}, {kWidth, 0.4}, {kRoomSend, 0.8}});
     // ---- Hats ----
     add("808 Closed Hat", "Six detuned squares through a band and a high-pass, short", kTypeClosedHat,
         {{kPoly, 1}, {kChoke, 1}, {kMetalOn, 1}, {kMetalNoise, 0.25}, {kMetalTone, 7000}, {kMetalColor, 10000},
@@ -159,12 +216,12 @@ std::vector<Sound> makeSounds() {
          {kMetalFm, 4.5}, {kMetalNoise, 0.55}, {kMetalTone, 3500}, {kMetalColor, 7000}, {kMetalBand, 0.3},
          {kMetalAttack, 0.001}, {kMetalDecay, 1.6}, {kResOn, 1}, {kResModel, 5}, {kResFreq, 420}, {kResDecay, 1.8},
          {kResExciter, kExciteNoise}, {kResLevel, -10}, {kNoiseOn, 1}, {kNoiseFreq, 5000}, {kNoiseDecay, 1.4},
-         {kNoiseLevel, -10}, {kPressDest, kPressDamp}, {kPressAmt, 1}});
+         {kNoiseLevel, -10}, {kPressDamp, 1}});
     add("Ride", "A ride's ping and its long shimmer", kTypeRide,
         {{kPoly, 3}, {kMetalOn, 1}, {kMetalSet, kSetCymbal}, {kMetalFreq, 470}, {kMetalNoise, 0.3}, {kMetalTone, 4000},
          {kMetalDecay, 2.2}, {kMetalDCurve, 0.3}, {kResOn, 1}, {kResModel, 5}, {kResFreq, 520}, {kResDecay, 2.5},
          {kResDamp, 0.2}, {kResLevel, -8}, {kClickOn, 1}, {kClickType, kClickTick}, {kClickTone, 4000},
-         {kClickLevel, 0.3}, {kPressDest, kPressDamp}, {kPressAmt, 1}});
+         {kClickLevel, 0.3}, {kPressDamp, 1}});
     add("Ride Bell", "The bell of the ride", kTypeRide,
         {{kPoly, 3}, {kMetalOn, 1}, {kMetalMode, kMetalFmPairs}, {kMetalSet, kSetBell}, {kMetalFm, 1.5},
          {kMetalFreq, 650}, {kMetalNoise, 0.05}, {kMetalTone, 1500}, {kMetalDecay, 1.6}, {kResOn, 1}, {kResModel, 4},
@@ -172,11 +229,11 @@ std::vector<Sound> makeSounds() {
     add("China", "A trashy china: ring-modulated gong metal, clipped", kTypeCymbal,
         {{kPoly, 3}, {kMetalOn, 1}, {kMetalMode, kMetalRing}, {kMetalSet, kSetGong}, {kMetalFreq, 330},
          {kMetalNoise, 0.5}, {kMetalTone, 2500}, {kMetalColor, 4500}, {kMetalBand, 0.5}, {kMetalRes, 0.3},
-         {kMetalDecay, 1.3}, {kDriveType, kDriveHard}, {kDrive, 3}, {kPressDest, kPressDamp}, {kPressAmt, 1}});
+         {kMetalDecay, 1.3}, {kDriveType, kDriveHard}, {kDrive, 3}, {kPressDamp, 1}});
     add("Splash", "A small, quick cymbal", kTypeCymbal,
         {{kPoly, 3}, {kMetalOn, 1}, {kMetalMode, kMetalFmPairs}, {kMetalSet, kSetCymbal}, {kMetalFreq, 520},
          {kMetalFm, 3.5}, {kMetalNoise, 0.6}, {kMetalTone, 5000}, {kMetalDecay, 0.6}, {kNoiseOn, 1}, {kNoiseFreq, 6000},
-         {kNoiseDecay, 0.5}, {kNoiseLevel, -8}, {kPressDest, kPressDamp}, {kPressAmt, 1}});
+         {kNoiseDecay, 0.5}, {kNoiseLevel, -8}, {kPressDamp, 1}});
     // ---- Percussion ----
     add("Rim", "A rimshot: a tick and a short, hard bar", kTypeRim,
         {{kPoly, 2}, {kClickOn, 1}, {kClickType, kClickTick}, {kClickTone, 1700}, {kClickLevel, 0.8},
@@ -217,7 +274,7 @@ std::vector<Sound> makeSounds() {
     add("Triangle", "A struck steel bar, ringing long", kTypePerc,
         {{kPoly, 2}, {kResOn, 1}, {kResModel, 2}, {kResFreq, 1600}, {kResDecay, 2.0}, {kResDamp, 0.1},
          {kResBright, 0.8}, {kResPos, 0.9}, {kResLevel, 3}, {kClickOn, 1}, {kClickType, kClickTick},
-         {kClickTone, 6000}, {kClickLevel, 0.15}, {kPressDest, kPressDamp}, {kPressAmt, 1}});
+         {kClickTone, 6000}, {kClickLevel, 0.15}, {kPressDamp, 1}});
     add("Zap", "A fast, wide pitch dive", kTypeFx,
         {{kBodyOn, 1}, {kBodyFreq, 100}, {kBodyPitch, 60}, {kBodyPTime, 0.12}, {kBodyPCurve, 0.6}, {kBodyDecay, 0.25}});
     add("Laser", "A resonant saw dive", kTypeFx,
@@ -230,6 +287,14 @@ std::vector<Sound> makeSounds() {
     // shakers and cymbals lower, as they sit in a mix): the presets test checks the result.
     const std::pair<std::string_view, double> trims[] = {
         {"808 Kick", -1.0},
+        {"808 Kick Long", -1.0},
+        {"808 Kick Short", -0.8},
+        {"Dubstep Kick", -1.4},
+        {"House Kick", -4.6},
+        {"Acoustic Kick", -7.0},
+        {"Acoustic Snare", -9.4},
+        {"Trap Snare", 0.0},
+        {"Dubstep Snare", -4.6},
         {"909 Kick", -1.7},
         {"Punchy Kick", -10.0},
         {"Techno Kick", -1.0},
@@ -312,7 +377,7 @@ std::vector<KitDef> makeKits() {
                      "909 Open Hat", "Crash", "Ride"),
                  {{kGlue, 0.3}}});
     k.push_back({"Acoustic", "A played kit: beater kick, wired snares, membrane toms, cymbals in a room",
-                 row("Punchy Kick", "Rim Snare", "Tight Snare", "Snap", "Fat Snare", "Acoustic Tom", "Acoustic Hat",
+                 row("Acoustic Kick", "Rim Snare", "Acoustic Snare", "Snap", "Tight Snare", "Acoustic Tom", "Acoustic Hat",
                      "Pedal Hat", "808 Open Hat", "Crash", "Ride"),
                  {{kRoom, 0.2}, {kRoomSize, 0.5}, {kRoomDecay, 1.0}, {kGlue, 0.3}}});
     k.push_back({"Trap", "Long 808s, crisp claps and fast hats",
@@ -390,7 +455,7 @@ std::vector<std::pair<std::string_view, double>> presetValues(const std::vector<
         const Voice& def = defaultVoice(pad);
         const Voice* want = pads[pad];
         if (!want) {  // unused: a default sound there stops answering its note
-            if (def[kBodyOn] + def[kClickOn] + def[kNoiseOn] + def[kMetalOn] + def[kResOn] + def[kSmpOn] > 0.0)
+            if (def[kBodyOn] + def[kSubOn] + def[kClickOn] + def[kNoiseOn] + def[kMetalOn] + def[kResOn] + def[kSmpOn] > 0.0)
                 out.emplace_back(t[padParam(pad, kNote)].id, kNoteOff);
             continue;
         }
@@ -443,9 +508,9 @@ const TypeRule& rule(int type) {
         std::vector<TypeRule> r(kTypeCount);
         const std::vector<Range> common = {{kDrive, 1, 6},     {kEqLow, -6, 6},     {kEqMid, -6, 6},   {kEqHigh, -6, 6},
                                            {kTrAttack, -0.3, 0.6}, {kComp, 0, 0.5}, {kRndPitch, 0, 12}, {kRndDecay, 0, 0.25},
-                                           {kRndTone, 0, 0.25}, {kVelTone, 0, 0.6}};
+                                           {kRndTone, 0, 0.25}, {kVelTone, 0, 0.6}, {kClipGain, 0, 6}};
         const std::vector<std::pair<uint32_t, std::vector<int>>> commonChoices = {
-            {kDriveType, {kDriveOff, kDriveOff, kDriveSoft, kDriveTube}}};
+            {kDriveType, {kDriveOff, kDriveOff, kDriveSoft, kDriveTube, kDriveAsym}}, {kClip, {kClipOff, kClipOff, kClipOff, kClipSoft}}};
         auto set = [&](int t, std::vector<uint32_t> on, std::vector<Range> ranges,
                        std::vector<std::pair<uint32_t, std::vector<int>>> choices = {}) {
             r[t].on = std::move(on);
@@ -462,8 +527,10 @@ const TypeRule& rule(int type) {
         set(kTypeKick, {kBodyOn},
             {{kBodyFreq, 38, 80}, {kBodyPitch, 4, 40}, {kBodyPTime, 0.01, 0.12}, {kBodyPCurve, -0.3, 0.7},
              {kBodyDecay, 0.15, 1.8}, {kBodyDCurve, -0.5, 0.5}, {kBodyShape, 0, 0.6}, {kClickLevel, 0.1, 0.9},
-             {kClickTone, 800, 6000}, {kClickLength, 0.002, 0.02}},
-            {{kBodyWave, {kWaveSine, kWaveSine, kWaveTriangle}}, {kClickType, {0, 1, 2, 3, 4, 5}}});
+             {kClickTone, 800, 6000}, {kClickLength, 0.002, 0.02}, {kSubDecay, 0.2, 1.5}, {kSubLevel, -18, -3},
+             {kVelPunch, 0, 0.5}},
+            {{kBodyWave, {kWaveSine, kWaveSine, kWaveTriangle}}, {kClickType, {0, 1, 2, 3, 4, 5}}, {kSubOn, {0, 0, 1}},
+             {kSubOct, {0, 1}}});
         set(kTypeBass, {kBodyOn},
             {{kBodyPitch, 0, 12}, {kBodyPTime, 0.01, 0.08}, {kBodyDecay, 0.6, 3}, {kBodyShape, 0, 0.5}});
         set(kTypeSnare, {kBodyOn, kNoiseOn},
@@ -482,7 +549,7 @@ const TypeRule& rule(int type) {
         r[kTypeOpenHat].ranges.push_back({kMetalOpen, 0.4, 0.8});
         set(kTypeTom, {kBodyOn},
             {{kBodyFreq, 60, 300}, {kBodyPitch, 2, 12}, {kBodyPTime, 0.02, 0.12}, {kBodyDecay, 0.2, 0.8},
-             {kResDecay, 0.2, 0.6}, {kResDamp, 0.3, 0.7}});
+             {kResDecay, 0.2, 0.6}, {kResDamp, 0.3, 0.7}, {kRndPos, 0, 0.3}});
         const std::vector<Range> cymbal = {{kMetalFreq, 250, 700}, {kMetalTone, 2500, 7000}, {kMetalFm, 1, 7},
                                            {kMetalNoise, 0.2, 0.7}, {kMetalSpread, -0.3, 0.3}};
         const std::vector<std::pair<uint32_t, std::vector<int>>> cymbalChoices = {
@@ -616,10 +683,11 @@ Voice voiceFrom(const Json* params, uint32_t pad, const Voice& base) {
 
 std::string error(const std::string& message) { return "{\"ok\":false,\"error\":\"" + jsonEscape(message) + "\"}"; }
 
-constexpr const char* kLayerNames[][2] = {{"pad", "Pad"},      {"body", "Body"},     {"click", "Click"},
-                                          {"noise", "Noise"},  {"metal", "Metal"},   {"res", "Resonator"},
-                                          {"smp", "Sample"},   {"fx", "Effects"},    {"macro", "Character"},
-                                          {"var", "Variation"}};
+constexpr const char* kLayerNames[][2] = {
+    {"pad", "Pad"},       {"press", "Pressure"}, {"body", "Body"},     {"penv", "Pitch shape"}, {"sub", "Sub"},
+    {"click", "Click"},   {"noise", "Noise"},    {"metal", "Metal"},   {"res", "Resonator"},    {"smp", "Sample"},
+    {"drive", "Drive"},   {"filter", "Filter"},  {"eq", "EQ"},         {"dyn", "Dynamics"},     {"space", "Space"},
+    {"macro", "Character"}, {"var", "Variation"}};
 // The General MIDI percussion names of keys 35..81 (GM 1 Sound Set; docs/engine.md "Drums", MIDI map).
 constexpr const char* kGmNames[] = {
     "Acoustic Bass Drum", "Bass Drum 1", "Side Stick", "Acoustic Snare", "Hand Clap", "Electric Snare", "Low Floor Tom",
@@ -737,7 +805,7 @@ std::string drumsExplodeJson(std::string_view entryJson) {
     for (uint32_t pad = 0; pad < (mode == kModeSingle ? 1u : kPads); ++pad) {
         const Voice v = voiceFrom(params, pad, defaultVoice(pad));
         const int note = static_cast<int>(v[kNote]);
-        const bool used = v[kBodyOn] + v[kClickOn] + v[kNoiseOn] + v[kMetalOn] + v[kResOn] + v[kSmpOn] > 0.0 &&
+        const bool used = v[kBodyOn] + v[kSubOn] + v[kClickOn] + v[kNoiseOn] + v[kMetalOn] + v[kResOn] + v[kSmpOn] > 0.0 &&
                           v[kLevel] > -60.0 && (mode == kModeSingle || note != kNoteOff);
         if (!used) continue;
         Voice single = v;

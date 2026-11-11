@@ -26,6 +26,10 @@ const builtinEffects = [
 ];
 const builtinInstruments = ['org.caw.synth.flagship', 'org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats',
   'org.caw.drum.kit'];
+/// The instruments the engine has now. The old drums (org.caw.drum.*) migrate to org.caw.drums (2026-11-11); their
+/// editors stay, on the fixture's frozen descriptors, until the Drums editor replaces them.
+const engineInstruments = ['org.caw.synth.flagship', 'org.caw.drums'];
+const retiredDrums = ['org.caw.drum.kick', 'org.caw.drum.snare', 'org.caw.drum.hats', 'org.caw.drum.kit'];
 
 List<NativeComponentInfo>? _infos;
 

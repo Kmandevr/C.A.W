@@ -21,7 +21,8 @@ enum GlobalParam : uint32_t {
     kMode, kChannel, kBaseNote, kVolume, kSeed, kViewPad,
     kGlue, kGlueThreshold, kGlueRatio, kGlueAttack, kGlueRelease, kGlueMakeup,
     kKitDriveType, kKitDrive, kKitDriveMix,
-    kRoom, kRoomSize, kRoomDecay, kRoomDamping,
+    kRoom, kRoomSize, kRoomDecay, kRoomDamping, kRoomPredelay,
+    kKitLow, kKitHigh, kKitClip, kKitClipGain,
     kGlobalCount
 };
 
@@ -29,10 +30,16 @@ enum GlobalParam : uint32_t {
 enum PadParam : uint32_t {
     // pad: triggering, pitch, routing
     kNote, kChan, kType, kLevel, kPan, kTune, kTrack, kRoot, kMono, kGlide, kTrig, kRelease, kPoly, kChoke, kOut,
-    kPressDest, kPressAmt,
+    // press: polyphonic aftertouch (a hardware pad's pressure) as a modulation source, one amount per destination
+    kPressDamp, kPressChoke, kPressTone, kPressPitch, kPressLevel, kPressDrive,
     // body: a tuned oscillator with a pitch envelope
     kBodyOn, kBodyWave, kBodyShape, kBodyFold, kBodyFreq, kBodyPitch, kBodyPTime, kBodyPCurve, kBodyAttack, kBodyHold,
-    kBodyDecay, kBodyDCurve, kBodyP2Ratio, kBodyP2Level, kBodySub, kBodySubOct, kBodyPhase, kBodyLevel,
+    kBodyDecay, kBodyDCurve, kBodyP2Ratio, kBodyP2Level, kBodyPhase, kBodyLevel,
+    // penv: the body's pitch envelope drawn as four breakpoints (time, pitch, curve per segment)
+    kPenvMode, kPenvT1, kPenvP1, kPenvC1, kPenvT2, kPenvP2, kPenvC2, kPenvT3, kPenvP3, kPenvC3, kPenvT4, kPenvP4, kPenvC4,
+    // sub: a mono sine-family layer under the body, with its own envelope
+    kSubOn, kSubWave, kSubOct, kSubFine, kSubFollow, kSubAttack, kSubHold, kSubDecay, kSubDCurve, kSubDrive, kSubLp,
+    kSubRoute, kSubLevel,
     // click: the transient
     kClickOn, kClickType, kClickLevel, kClickTone, kClickLength,
     // noise
@@ -45,16 +52,24 @@ enum PadParam : uint32_t {
     kResOn, kResModel, kResFreq, kResDecay, kResDamp, kResBright, kResInharm, kResPos, kResExciter, kResInput, kResLevel,
     // sample
     kSmpOn, kSmpStart, kSmpEnd, kSmpTune, kSmpReverse, kSmpAttack, kSmpDecay, kSmpLevel,
-    // per-pad effects
-    kDriveType, kDrive, kDrivePos, kFlt, kCutoff, kFltRes, kFltEnv, kFltDecay, kEqLow, kEqMid, kEqFreq, kEqHigh,
-    kTrAttack, kTrSustain, kComp,
+    // drive: multi-type distortion with a high-pass before it, a low-pass after it, and a dry/wet mix
+    kDriveType, kDrive, kDrivePos, kDriveLo, kDriveHi, kDriveMix,
+    // filter
+    kFlt, kCutoff, kFltRes, kFltEnv, kFltDecay,
+    // eq: low shelf, a bell, high shelf
+    kEqLow, kEqLowFreq, kEqMid, kEqFreq, kEqQ, kEqHigh, kEqHighFreq,
+    // dyn: transient shaper, compressor, clipper
+    kTrAttack, kTrSustain, kComp, kCompAttack, kCompRelease, kClip, kClipGain,
+    // space: stereo width (the low end stays mono) and the send to the kit's room
+    kWidth, kWidthHz, kRoomSend,
     // character macros
     kPunch, kTone, kSnap, kLength, kDirt, kPitch,
     // variation
-    kVelLevel, kVelPitch, kVelDecay, kVelTone, kVelClick, kRndPitch, kRndDecay, kRndTone, kRndPan, kRndLevel,
+    kVelLevel, kVelPitch, kVelDecay, kVelTone, kVelClick, kVelPunch, kRndPitch, kRndDecay, kRndTone, kRndPan, kRndLevel,
+    kRndPos,
     kPadParams
 };
-static_assert(kPadParams == 119, "the pad layout is documented in docs/engine.md");
+static_assert(kPadParams == 162, "the pad layout is documented in docs/engine.md");
 inline constexpr uint32_t kParamCount = kGlobalCount + kPads * kPadParams;
 
 constexpr uint32_t padParam(uint32_t pad, uint32_t p) noexcept { return kGlobalCount + pad * kPadParams + p; }
@@ -74,9 +89,13 @@ enum FilterKind : int { kFilterOff, kFilterLp, kFilterBp, kFilterHp };
 enum MetalMode : int { kMetalSquare, kMetalFmPairs, kMetalRing };
 enum MetalSet : int { kSet808, kSetBright, kSetCymbal, kSetCowbell, kSetGong, kSetBell, kSetHarmonic, kSetCount };
 enum Exciter : int { kExciteLayers, kExciteMallet, kExciteNoise };
-enum DriveType : int { kDriveOff, kDriveSoft, kDriveHard, kDriveFold, kDriveCrush, kDriveTube };
+enum DriveType : int { kDriveOff, kDriveSoft, kDriveHard, kDriveFold, kDriveCrush, kDriveTube, kDriveRectify, kDriveDecimate,
+                       kDriveAsym };
 enum VoiceFilter : int { kVfOff, kVfLp6, kVfLp12, kVfHp, kVfBp };
-enum PressDest : int { kPressOff, kPressDamp, kPressChoke, kPressTone, kPressPitch };
+enum PenvMode : int { kPenvCurve, kPenvPoints };
+enum SubWave : int { kSubSine, kSubTriangle, kSubWarm };
+enum SubRoute : int { kSubClean, kSubThroughFx };
+enum ClipType : int { kClipOff, kClipSoft, kClipHard };
 enum TrigMode : int { kOneShot, kGate };
 
 // "a1" .. "d16" and "A1" .. "D16".

@@ -379,8 +379,9 @@ class AppState extends ChangeNotifier {
           mute: mute));
     }
 
-    layer('Kick', 'org.caw.drum.kick', kick, 0.9);
-    layer('Hats', 'org.caw.drum.hats', hats, 0.55);
+    // Both drum tracks play the 808 kit (org.caw.drums): the kick's pattern hits C2 (pad A1), the hats' F#2 and A#2.
+    layer('Kick', 'org.caw.drums', kick, 0.9, preset: 'Kit: 808');
+    layer('Hats', 'org.caw.drums', hats, 0.55, preset: 'Kit: 808');
     const flagship = 'org.caw.synth.flagship';
     // The filter envelope's depth: a mod slot's amount is the octaves over the cutoff knob's 9.97-octave travel.
     const cutoffOctaves = 9.965784284662087;

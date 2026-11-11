@@ -434,7 +434,11 @@ TEST(drums_never_allocate_on_the_audio_thread) {
                            {"b1_click_on", 1}, {"b1_noise_on", 1}, {"b1_noise_mode", 1}, {"b1_metal_on", 1},
                            {"b1_metal_mode", 1}, {"b1_res_on", 1}, {"b1_smp_on", 1}, {"b1_drive_type", 1},
                            {"b1_flt", 2}, {"b1_eq_low", 3}, {"b1_tr_attack", 0.5}, {"b1_comp", 0.5}, {"b1_rnd_pitch", 30},
-                           {"b1_poly", 4}, {"b1_level", -6}};
+                           {"b1_poly", 4}, {"b1_level", -6}, {"b1_sub_on", 1}, {"b1_sub_wave", 2}, {"b1_sub_drive", 0.5},
+                           {"b1_sub_lp", 300}, {"b1_sub_follow", 0.5}, {"b1_penv_mode", 1}, {"b1_drive_lo", 100},
+                           {"b1_drive_hi", 6000}, {"b1_drive_mix", 0.6}, {"b1_clip", 2}, {"b1_clip_gain", 6},
+                           {"b1_width", 0.7}, {"b1_room_send", 0.5}, {"b1_press_tone", 0.5}, {"b1_rnd_pos", 0.5},
+                           {"kit_low", 3}, {"kit_high", -2}, {"kit_clip", 1}, {"kit_clip_gain", 4}, {"room_predelay", 20}};
     l.instrument.samples = {{16, "", "Clap"}};
     p.layers.push_back(l);
     Engine e(48000);
@@ -452,6 +456,8 @@ TEST(drums_never_allocate_on_the_audio_thread) {
         e.setComponentParam("drums", Engine::kInstrumentIndex, "a7_metal_open", 0.2 * round);
         e.setComponentParam("drums", Engine::kInstrumentIndex, "a1_punch", round % 2 ? 0.8 : -0.5);
         e.setComponentParam("drums", Engine::kInstrumentIndex, "view_pad", round * 3);
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "b1_drive_type", round + 3);  // fold .. asymmetric
+        e.setComponentParam("drums", Engine::kInstrumentIndex, "b1_penv_p2", 4.0 * round);
         e.noteOn("drums", 300 + round, 52 + round, 1);
         if (round == 3) {  // a sample swap: decoded here, on the control thread; the audio thread only exchanges
             ProjectSpec q = p;
