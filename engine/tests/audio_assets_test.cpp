@@ -1,5 +1,6 @@
 // WP-J: the asset store (decoding, resampling, peaks), audio clips on tracks, time-stretch, the sampler, SFZ and input.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -117,6 +118,36 @@ TEST(assets_decode_wav_resample_and_keep_frequency) {
     CHECK_NEAR(pk[0], -0.5, 0.02);
     CHECK_NEAR(pk[1], 0.5, 0.02);
     std::filesystem::remove_all(dir);
+}
+
+TEST(assets_resample_far_down_in_halfband_stages_quickly_and_cleanly) {
+    // 768 kHz to 48 kHz once cost about 1,070 taps a side per output; staged halfband decimation brings it near the
+    // cost of 96 kHz to 48 kHz. A 1 kHz tone passes; a 30 kHz one (above the new Nyquist) does not fold down.
+    auto signal = [](double rate, int64_t frames) {
+        std::vector<float> x(static_cast<size_t>(frames));
+        for (int64_t i = 0; i < frames; ++i)
+            x[static_cast<size_t>(i)] = static_cast<float>(0.5 * std::sin(2 * 3.14159265358979 * 1000.0 * i / rate) +
+                                                           0.3 * std::sin(2 * 3.14159265358979 * 30000.0 * i / rate));
+        return x;
+    };
+    const auto hi = signal(768000, 768000), lo = signal(96000, 96000);
+    auto time = [](const std::vector<float>& x, double from, std::vector<float>& out) {
+        const auto t0 = std::chrono::steady_clock::now();
+        out = resampleChannel(x.data(), static_cast<int64_t>(x.size()), from, 48000);
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    };
+    std::vector<float> a, b;
+    double ta = 1e9, tb = 1e9;
+    for (int k = 0; k < 3; ++k) {
+        ta = std::min(ta, time(hi, 768000, a));
+        tb = std::min(tb, time(lo, 96000, b));
+    }
+    CHECK(ta < 4 * tb);
+    CHECK_EQ(a.size(), size_t{48000});
+    double err = 0;
+    for (size_t i = 2000; i < 46000; ++i)
+        err = std::max(err, std::fabs(a[i] - 0.5 * std::sin(2 * 3.14159265358979 * 1000.0 * static_cast<double>(i) / 48000.0)));
+    CHECK(err < 1e-4);
 }
 
 TEST(assets_refuse_garbage_truncated_and_missing_files) {

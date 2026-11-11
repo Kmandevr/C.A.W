@@ -40,8 +40,8 @@ struct AudioAsset {
     double seconds() const noexcept { return rate > 0 ? static_cast<double>(frames) / rate : 0; }
 };
 
-// Bandlimited resampling of one channel (Kaiser-windowed sinc, 32 taps per side at the lower rate): the same
-// bits on every device. Control thread.
+// Bandlimited resampling of one channel (Kaiser-windowed sinc, 32 taps per side at the lower rate), after halfband
+// decimation stages while the source is at least 4 x the target: the same bits on every device. Control thread.
 std::vector<float> resampleChannel(const float* in, int64_t frames, double from, double to);
 // Fills asset.peaks from asset.data.
 void computePeaks(AudioAsset& asset);

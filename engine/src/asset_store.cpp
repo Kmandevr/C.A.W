@@ -2,6 +2,7 @@
 #include "asset_store.h"
 
 #include <algorithm>
+#include <array>
 #include "caw/detmath.hpp"
 #include <cmath>
 #include <cstdio>
@@ -32,11 +33,50 @@ double besselI0(double x) {
     return sum;
 }
 
+// One halfband decimation stage: a 31-tap Kaiser-windowed sinc lowpass at a quarter of the rate (passband to 0.12,
+// stopband from 0.38 of the rate, about 120 dB down), keeping every second sample. Every even tap but the centre is
+// zero. Used only while the rate is at least 4 x the target, so the final resampler's own lowpass (at the target's
+// Nyquist) covers everything this stage's transition band lets through.
+std::vector<float> halve(const float* in, int64_t frames) {
+    constexpr int kHalf = 15;  // odd taps 1, 3, .. 15 each side
+    constexpr double kBeta = 11.0;
+    static const auto taps = [] {
+        std::array<double, kHalf + 1> h{};
+        const double i0b = besselI0(kBeta);
+        for (int n = 1; n <= kHalf; n += 2) {
+            const double u = static_cast<double>(n) / (kHalf + 1);
+            const double sign = ((n - 1) / 2) % 2 ? -1.0 : 1.0;  // sin(pi n / 2)
+            h[static_cast<size_t>(n)] = sign / (3.14159265358979323846 * n) * besselI0(kBeta * std::sqrt(1.0 - u * u)) / i0b;
+        }
+        return h;
+    }();
+    const int64_t outFrames = (frames + 1) / 2;
+    std::vector<float> out(static_cast<size_t>(outFrames));
+    auto at = [&](int64_t j) { return j < 0 || j >= frames ? 0.0 : static_cast<double>(in[j]); };
+    for (int64_t k = 0; k < outFrames; ++k) {
+        const int64_t c = 2 * k;
+        double acc = 0.5 * at(c);
+        for (int n = 1; n <= kHalf; n += 2) acc += taps[static_cast<size_t>(n)] * (at(c - n) + at(c + n));
+        out[static_cast<size_t>(k)] = static_cast<float>(acc);
+    }
+    return out;
+}
+
 }  // namespace
 
 std::vector<float> resampleChannel(const float* in, int64_t frames, double from, double to) {
     if (frames <= 0) return {};
     if (from == to) return std::vector<float>(in, in + frames);
+    // The output length and positions follow the original rates; far down, halfband stages bring the input to
+    // below 4 x the target first, so the final kernel is at most about 133 taps a side.
+    const int64_t outFrames = std::max<int64_t>(1, static_cast<int64_t>(std::floor(static_cast<double>(frames) * (to / from))));
+    std::vector<float> staged;
+    while (from >= 4.0 * to) {
+        staged = halve(in, frames);
+        in = staged.data();
+        frames = static_cast<int64_t>(staged.size());
+        from /= 2.0;
+    }
     constexpr int kZeroCrossings = 32;
     constexpr int kPhases = 512;
     constexpr double kBeta = 9.0;
@@ -61,7 +101,6 @@ std::vector<float> resampleChannel(const float* in, int64_t frames, double from,
         const double f = t - k;
         return table[static_cast<size_t>(k)] + (table[static_cast<size_t>(k) + 1] - table[static_cast<size_t>(k)]) * f;
     };
-    const int64_t outFrames = std::max<int64_t>(1, static_cast<int64_t>(std::floor(static_cast<double>(frames) * ratio)));
     std::vector<float> out(static_cast<size_t>(outFrames));
     const int width = static_cast<int>(std::ceil(half));
     for (int64_t i = 0; i < outFrames; ++i) {
