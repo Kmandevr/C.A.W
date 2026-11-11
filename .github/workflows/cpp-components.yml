@@ -85,6 +85,13 @@ jobs:
             --project examples/cpp/poly-synth --sdk "$RUNNER_TEMP/caw-sdk" \
             --build "$RUNNER_TEMP/caw-instrument-build" --config Release
           ctest --test-dir "$RUNNER_TEMP/caw-instrument-build" --build-config Release --output-on-failure
+      - name: Build and test the example modulator for desktop
+        if: ${{ !matrix.android }}
+        run: |
+          node scripts/caw-component-build.js \
+            --project examples/cpp/modulator --sdk "$RUNNER_TEMP/caw-sdk" \
+            --build "$RUNNER_TEMP/caw-modulator-build" --config Release
+          ctest --test-dir "$RUNNER_TEMP/caw-modulator-build" --build-config Release --output-on-failure
       - name: Build and test the C++ starters for desktop
         if: ${{ !matrix.android }}
         run: |

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../engine/component_info.dart';
 import '../../model/mod_matrix.dart';
+import '../../model/modulation.dart';
 import '../arrange/knob.dart' show Taper;
 import '../feedback.dart';
 import '../motion.dart';
@@ -12,6 +13,7 @@ import '../theme.dart';
 import '../widgets.dart' show ResetOnDoubleTap;
 import 'device_scope.dart';
 import 'midi_learn.dart';
+import 'modulators/modulator_devices.dart' show modulatorColor, showModLinkSheet;
 import 'kit/feel.dart';
 import 'kit/hero.dart' show MotionClock, motionRuns;
 import 'visuals/mod_sheet.dart';
@@ -47,6 +49,9 @@ class DeviceKnob extends StatefulWidget {
 class _DeviceKnobState extends State<DeviceKnob> {
   double? _pos; // the travel during a drag
   int? _ringSlot; // the route a ring drag sets
+  int? _ringLink; // ... or the project link (#161)
+  int? _lastLink; // the project link dropped or tapped last here
+  bool _linkHover = false; // a modulator output hovers over the knob
   double _ringAmount = 0;
   int? _lastSlot; // the route dropped or dragged last here
   bool _held = false, _hover = false;
@@ -77,10 +82,24 @@ class _DeviceKnobState extends State<DeviceKnob> {
 
   @override
   Widget build(BuildContext context) {
+    final app = DeviceScope.of(context).target.state;
+    // Project modulation (#161): its links, the output being dragged and assign mode redraw the knob.
+    return ListenableBuilder(
+      listenable: Listenable.merge([app.modulationTick, app.draggingModulation, app.assigningModulation]),
+      builder: (context, _) => _build(context));
+  }
+
+  Widget _build(BuildContext context) {
     final scope = DeviceScope.of(context);
     final t = scope.target;
     final p = t.param(widget.paramId);
     if (p == null) return const SizedBox.shrink();
+    final app = t.state;
+    // Links from the project's modulators (any knob in the project can take them; a choice can't).
+    final modTarget = p.modulatable && !p.isChoice ? ModTarget.ofDevice(t, p.id) : null;
+    final links = modTarget == null ? const <ModLinkDoc>[] : app.project.linksTo(modTarget);
+    final projDrag = modTarget == null ? null : app.draggingModulation.value;
+    final projAssign = modTarget == null ? null : app.assigningModulation.value;
     final color = widget.color ?? scope.accent;
     final taper = Taper(p.min, p.max, exponential: p.exponential);
     final value = t.value(p.id);
@@ -90,7 +109,8 @@ class _DeviceKnobState extends State<DeviceKnob> {
     final routes = canMod ? matrix!.routesTo(p.id) : const <ModRoute>[];
     final text = widget.valueText?.call(value) ?? formatParamValue(p, value);
     final label = widget.label ?? shortParamLabel(p, p.id);
-    _motion.run(routes.isNotEmpty && motionRuns(context));
+    _motion.run((routes.isNotEmpty || links.isNotEmpty) && motionRuns(context));
+    ModLinkDoc? selLink() => links.where((l) => l.id == _lastLink).firstOrNull ?? links.lastOrNull;
 
     void set(double v) {
       final before = t.value(p.id);
@@ -113,9 +133,17 @@ class _DeviceKnobState extends State<DeviceKnob> {
       final centre = Offset(_width / 2, _box / 2);
       final d = (local - centre).distance;
       final sel = _selected(routes, scope);
+      final link = sel == null ? selLink() : null;
       // The amount's own target: the knob's outer edge and its rings (not the labels under it), or two fingers.
-      if (sel != null && (_fingers.length >= 2 || (local.dy <= _box && d >= _track * 0.7))) {
+      final edge = _fingers.length >= 2 || (local.dy <= _box && d >= _track * 0.7);
+      _ringLink = null;
+      if (sel != null && edge) {
         ringMode(sel);
+      } else if (link != null && edge) {
+        _ringSlot = null;
+        _ringLink = link.id;
+        _ringAmount = link.amount;
+        _lastLink = link.id;
       } else {
         _ringSlot = null;
         _pos = pos;
@@ -124,6 +152,13 @@ class _DeviceKnobState extends State<DeviceKnob> {
     }
 
     void update(double dy) {
+      if (_ringLink != null) {
+        final before = _ringAmount;
+        _ringAmount = (_ringAmount - dy / 200 * (_fingers.length >= 2 ? 1.0 : DeviceFingers.fine)).clamp(-1.0, 1.0);
+        if (before != 0 && (before > 0) != (_ringAmount > 0)) DeviceFeel.detent();
+        app.setModLinkAmountLive(_ringLink!, _ringAmount);
+        return;
+      }
       if (_ringSlot != null) {
         final fine = _fingers.length >= 2 ? 1.0 : DeviceFingers.fine;
         final before = _ringAmount;
@@ -140,13 +175,21 @@ class _DeviceKnobState extends State<DeviceKnob> {
       if (!_held) return; // a drag that never started (a tap, a long-press won)
       _pos = null;
       _ringSlot = null;
+      final link = _ringLink;
+      _ringLink = null;
       if (_bubble.isShowing) _bubble.hide();
       setState(() => _held = false);
-      t.commit();
+      if (link != null) {
+        app.commitModulation();
+      } else {
+        t.commit();
+      }
     }
 
     void longPress() {
-      if (canMod) {
+      if (modTarget != null && links.isNotEmpty && routes.isEmpty) {
+        showModLinkSheet(context, app, modTarget, onTypeValue: p.isChoice ? null : () => _typeValue(context, p, t.value(p.id)));
+      } else if (canMod) {
         showModulationSheet(context, p.id, onTypeValue: () => _typeValue(context, p, t.value(p.id)));
       } else if (!p.isChoice) {
         _typeValue(context, p, value);
@@ -157,9 +200,16 @@ class _DeviceKnobState extends State<DeviceKnob> {
       final sel = _selected(routes, scope);
       final assignedHere = assigning != null && routes.any((r) => r.source == assigning);
       final ring = _ringSlot == null ? null : routes.where((r) => r.slot == _ringSlot).firstOrNull;
-      final bubbleText = ring == null ? text : '${ring.source.short} ${ring.amount > 0 ? '+' : ''}${(ring.amount * 100).round()}%';
-      final bubbleColor = ring == null ? color : modSourceColor(ring.source);
+      final ringLink = _ringLink == null ? null : links.where((l) => l.id == _ringLink).firstOrNull;
+      final bubbleText = ringLink != null
+          ? '${app.modSourceLabel(ringLink.ref)} ${ringLink.amount > 0 ? '+' : ''}${(ringLink.amount * 100).round()}%'
+          : ring == null ? text : '${ring.source.short} ${ring.amount > 0 ? '+' : ''}${(ring.amount * 100).round()}%';
+      final bubbleColor = ringLink != null ? modulatorColor(app, ringLink.source)
+          : ring == null ? color : modSourceColor(ring.source);
       final highlight = offering ?? assigning;
+      final projOffer = projDrag ?? projAssign;
+      final projAssigned = projAssign != null && links.any((l) => l.ref == projAssign);
+      final selected = selLink();
       final face = SizedBox(width: _box, height: _box, child: ValueListenableBuilder<double>(
         valueListenable: _motion.seconds,
         builder: (context, seconds, _) => CustomPaint(
@@ -167,10 +217,19 @@ class _DeviceKnobState extends State<DeviceKnob> {
             pos: pos,
             color: color,
             bipolar: p.min < 0 && p.max > 0,
-            rings: [for (final r in routes) (r.span(pos), modSourceColor(r.source), r.slot == sel?.slot)],
-            modulated: routes.isEmpty || !_motion.running ? null : matrix!.modulatedPosition(p.id, pos, seconds),
-            highlight: highlight == null ? null : modSourceColor(highlight),
-            strong: hovering || assignedHere,
+            rings: [
+              for (final r in routes) (r.span(pos), modSourceColor(r.source), r.slot == sel?.slot),
+              for (final l in links) (l.span(pos), modulatorColor(app, l.source), sel == null && l.id == selected?.id),
+            ],
+            modulated: !_motion.running || (routes.isEmpty && links.isEmpty) ? null : () {
+              final inside = routes.isEmpty ? null : matrix!.modulatedPosition(p.id, pos, seconds);
+              final live = links.isEmpty ? null : app.liveModOffset(links.first);  // what the engine applied
+              if (inside == null && live == null) return null;
+              return ((inside ?? pos) + (live ?? 0)).clamp(0.0, 1.0);
+            }(),
+            highlight: highlight != null ? modSourceColor(highlight)
+                : projOffer == null ? null : modulatorColor(app, projOffer.modulatorId),
+            strong: hovering || assignedHere || _linkHover || projAssigned,
             preview: hovering && offering != null ? (ModRoute(slot: 0, source: offering, paramId: p.id, amount: 0.25,
               bipolar: offering.naturallyBipolar).span(pos), modSourceColor(offering)) : null,
           ),
@@ -180,16 +239,16 @@ class _DeviceKnobState extends State<DeviceKnob> {
         label: label,
         value: text,
         slider: true,
-        hint: canMod ? 'Long-press for modulation' : null,
+        hint: canMod || links.isNotEmpty ? 'Long-press for modulation' : null,
         increasedValue: formatParamValue(p, _nudge(p, value, 1)),
         decreasedValue: formatParamValue(p, _nudge(p, value, -1)),
         onIncrease: () => t.set(p.id, _nudge(p, value, 1)),
         onDecrease: () => t.set(p.id, _nudge(p, value, -1)),
         child: Tooltip(
-          message: '${p.label}: $text${routes.isEmpty ? '' : ' · ${routes.length} modulation${routes.length == 1 ? '' : 's'}'}',
+          message: '${p.label}: $text${routes.isEmpty && links.isEmpty ? '' : ' · ${routes.length + links.length} modulation${routes.length + links.length == 1 ? '' : 's'}'}',
           waitDuration: const Duration(milliseconds: 600),
           child: ResetOnDoubleTap(
-            onReset: assigning != null ? null : () => t.set(p.id, p.defaultValue),
+            onReset: assigning != null || projAssign != null ? null : () => t.set(p.id, p.defaultValue),
             child: Listener(
               onPointerDown: (e) {
                 _fingers.add(e.pointer);
@@ -206,7 +265,20 @@ class _DeviceKnobState extends State<DeviceKnob> {
               onPointerCancel: (e) => _fingers.remove(e.pointer),
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: assigning == null || !canMod ? null : () {
+                onTap: projAssign != null && modTarget != null ? () {
+                  final made = app.toggleModLink(projAssign, modTarget);
+                  if (made == null && app.project.linksTo(modTarget).every((l) => l.ref != projAssign)) {
+                    final why = app.whyNoLink(projAssign, modTarget);
+                    if (why != null) {
+                      DeviceFeel.tap();
+                      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(duration: const Duration(seconds: 2),
+                        content: Text(why)));
+                      return;
+                    }
+                  }
+                  DeviceFeel.detent();
+                  if (made != null) _lastLink = made.id;
+                } : assigning == null || !canMod ? null : () {
                   final slot = matrix!.toggle(assigning, p.id);
                   if (slot == null) {
                     DeviceFeel.tap();
@@ -266,12 +338,16 @@ class _DeviceKnobState extends State<DeviceKnob> {
                           scale: (hovering || _held) && Motion.of(context) == MotionLevel.full ? 1.08 : 1,
                           duration: Motion.fade(Motion.small, Motion.of(context)),
                           child: face),
-                        if (routes.isNotEmpty) Positioned(right: -2, top: 0, child: _CountBadge(
-                          key: ValueKey('dknob-badge-${p.id}'), count: routes.length,
-                          color: modSourceColor((sel ?? routes.first).source))),
+                        if (routes.isNotEmpty || links.isNotEmpty) Positioned(right: -2, top: 0, child: _CountBadge(
+                          key: ValueKey('dknob-badge-${p.id}'), count: routes.length + links.length,
+                          color: routes.isNotEmpty ? modSourceColor((sel ?? routes.first).source)
+                              : modulatorColor(app, links.first.source))),
                         if (assigning != null && canMod) Positioned(left: -2, top: 0, child: Icon(
                           assignedHere ? Icons.check_circle : Icons.add_circle_outline, size: 15,
-                          color: modSourceColor(assigning))),
+                          color: modSourceColor(assigning)))
+                        else if (projAssign != null && modTarget != null) Positioned(left: -2, top: 0, child: Icon(
+                          projAssigned ? Icons.check_circle : Icons.add_circle_outline, size: 15,
+                          color: modulatorColor(app, projAssign.modulatorId))),
                       ]),
                       Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 10, color: Neon.dim, height: 1.1)),
@@ -288,7 +364,29 @@ class _DeviceKnobState extends State<DeviceKnob> {
     }
 
     final key = ValueKey('dknob-${p.id}');
-    if (!canMod) return KeyedSubtree(key: key, child: knob());
+    // A modulator output dropped here links it (#161), as a dropped mod source makes a route.
+    Widget takesLinks(Widget child) => modTarget == null ? child : DragTarget<ModSourceRef>(
+      onWillAcceptWithDetails: (d) {
+        if (app.whyNoLink(d.data, modTarget) != null &&
+            app.project.linksTo(modTarget).every((l) => l.ref != d.data)) {
+          return false;
+        }
+        DeviceFeel.detent();
+        setState(() => _linkHover = true);
+        return true;
+      },
+      onLeave: (_) => setState(() => _linkHover = false),
+      onAcceptWithDetails: (d) {
+        _linkHover = false;
+        final link = app.addModLink(d.data, modTarget);
+        if (link != null) {
+          DeviceFeel.detent();
+          setState(() => _lastLink = link.id);
+        }
+      },
+      builder: (context, _, _) => child,
+    );
+    if (!canMod) return KeyedSubtree(key: key, child: takesLinks(knob()));
     final selNotifier = scope.selectedSlot, assigning = scope.assigning;
     Widget listening(Widget Function(ModSource? assigning) b) {
       Widget inner(ModSource? a) => selNotifier == null ? b(a)
@@ -297,7 +395,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
           : ValueListenableBuilder<ModSource?>(valueListenable: assigning, builder: (_, a, _) => inner(a));
     }
 
-    return KeyedSubtree(key: key, child: DragTarget<ModSource>(
+    return KeyedSubtree(key: key, child: takesLinks(DragTarget<ModSource>(
         onWillAcceptWithDetails: (d) {
           if (d.data == ModSource.none) return false;
           DeviceFeel.detent(); // the finger reached a knob that takes it
@@ -325,7 +423,7 @@ class _DeviceKnobState extends State<DeviceKnob> {
             hovering: _hover || hovering.isNotEmpty,
             assigning: a)),
         ),
-    ));
+    )));
   }
 
   Future<void> _typeValue(BuildContext context, ComponentParameterInfo p, double value) async {
